@@ -30,7 +30,7 @@ describe('queue row drop on a card', () => {
     stopAutoScroll.mockReset()
   })
 
-  it('opens the row on click and moves it to a single card target after dwell', () => {
+  it.each(['working', 'waiting'])('opens the row on click and moves it to a card in the %s band after dwell', (phase) => {
     vi.useFakeTimers()
     vi.spyOn(window, 'getComputedStyle').mockReturnValue({
       overflowX: 'visible', overflowY: 'visible',
@@ -45,7 +45,7 @@ describe('queue row drop on a card', () => {
       id: 'work/queued-child', status: 'open', dependsOn: [source.id],
       dependsOnShape: 'scalar', foldedUnder: head.id,
     })
-    const target = card({ id: 'work/in-flight-target', status: 'active', workerState: 'running' })
+    const target = card({ id: 'work/in-flight-target', status: 'active', workerState: 'running', runtimePhase: phase })
     const data = response({
       now: { drafts: [], inFlight: [target], awaitingReview: [head] },
       folded: [source, child],
@@ -75,6 +75,8 @@ describe('queue row drop on a card', () => {
     expect(detail).not.toHaveBeenCalledWith(head)
 
     const targetEl = document.querySelector<HTMLElement>(`[data-fiber-id="${target.id}"]`)!
+    expect(targetEl.closest<HTMLElement>('[data-flight-band]')?.dataset.flightBand)
+      .toBe(phase === 'waiting' ? 'needsYou' : 'working')
     const rect = { x: 120, y: 120, left: 120, top: 120, right: 420, bottom: 320, width: 300, height: 200, toJSON: () => ({}) }
     vi.spyOn(targetEl, 'getBoundingClientRect').mockReturnValue(rect)
     for (let node = targetEl.parentElement; node; node = node.parentElement) {

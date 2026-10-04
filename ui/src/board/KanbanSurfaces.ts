@@ -45,7 +45,7 @@ import type {
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
-import { byCreatedAtDesc, deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { byCreatedAtDesc, deriveCycleLens, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
 import type { PhoneMeeting } from './phoneMeeting'
 import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
@@ -1416,7 +1416,7 @@ export class KanbanSurfaceRenderer {
           : 'Work returns here when its agent hands it back for review.'
       list.append(empty)
     } else {
-      for (const card of cards) {
+      const appendCard = (parent: HTMLElement, card: KanbanCard): void => {
         const hostsMeeting = meeting !== null && card.id === this.meetingHostId
         const el = this.renderCard(card, kind, staleness[card.originId], {
           // A lensed column recedes what the cycle does not claim. The card
@@ -1425,7 +1425,31 @@ export class KanbanSurfaceRenderer {
           dim: !hostsMeeting && lens !== null && !lens.memberIds.has(card.id),
         })
         if (hostsMeeting) this.hostMeeting(el, meeting)
-        list.append(el)
+        parent.append(el)
+      }
+      if (kind === 'inFlight') {
+        // The read model owns order within each band. These captions expose
+        // the one state change that can move a card across the seam.
+        for (const [key, label] of [['needsYou', 'Needs you'], ['working', 'Working']] as const) {
+          const members = cards.filter((card) => inFlightBand(card) === key)
+          if (members.length === 0) continue
+          const band = document.createElement('div')
+          band.className = 'kbn-flight-band'
+          band.dataset.flightBand = key
+          band.setAttribute('role', 'listitem')
+          const caption = document.createElement('h3')
+          caption.className = 'kbn-flight-caption'
+          caption.textContent = label
+          const bandList = document.createElement('div')
+          bandList.className = 'kbn-flight-band-list'
+          bandList.setAttribute('role', 'list')
+          bandList.setAttribute('aria-label', label)
+          for (const card of members) appendCard(bandList, card)
+          band.append(caption, bandList)
+          list.append(band)
+        }
+      } else {
+        for (const card of cards) appendCard(list, card)
       }
       // Ghosts sit AFTER the real cards: they are not on this column, they are
       // being shown as belonging to the chapter you are looking at.
