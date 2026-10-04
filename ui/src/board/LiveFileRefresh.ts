@@ -19,6 +19,7 @@ type FileSubscriber = {
   onContent: (content: string) => void
   onError?: (error: unknown) => void
   active: boolean
+  initializing: boolean
   fingerprint: string | null
 }
 
@@ -37,6 +38,13 @@ type WatchedFile = {
 export type LiveFileSubscription = (() => void) & {
   suspend: () => void
   resume: () => Promise<void>
+  loadOnce: () => Promise<void>
+}
+
+export interface LiveFileWatchOptions {
+  active?: boolean
+  /** An inactive preview may read once without joining periodic polling. */
+  loadOnce?: boolean
 }
 
 export interface LiveFileRefreshOptions {
@@ -77,7 +85,7 @@ export class LiveFileRefresh {
     })
   }
 
-  watch(url: string, onContent: (content: string) => void, onError?: (error: unknown) => void): LiveFileSubscription {
+  watch(url: string, onContent: (content: string) => void, onError?: (error: unknown) => void, options: LiveFileWatchOptions = {}): LiveFileSubscription {
     let file = this.files.get(url)
     if (!file) {
       file = {
@@ -95,10 +103,13 @@ export class LiveFileRefresh {
       this.start()
     }
 
-    const subscriber = { onContent, onError, active: true, fingerprint: null }
+    const subscriber: FileSubscriber = {
+      onContent, onError, active: options.active !== false,
+      initializing: options.active === false && options.loadOnce === true, fingerprint: null,
+    }
     file.subscribers.add(subscriber)
     if (file.content !== null) this.deliverContent(subscriber, file.content)
-    else void this.pollFile(url, file)
+    else if (subscriber.active || subscriber.initializing) void this.pollFile(url, file, false, subscriber.initializing)
 
     let disposed = false
     const stop = (() => {
@@ -111,20 +122,31 @@ export class LiveFileRefresh {
         current.controller?.abort()
         this.files.delete(url)
         if (this.files.size === 0) this.stop()
-      } else if (!this.hasActiveSubscribers(current)) {
+      } else if (!this.hasInterestedSubscribers(current)) {
         current.controller?.abort()
       }
     }) as LiveFileSubscription
     stop.suspend = () => {
-      if (disposed || !subscriber.active) return
+      if (disposed || (!subscriber.active && !subscriber.initializing)) return
       subscriber.active = false
-      if (!this.hasActiveSubscribers(file)) file.controller?.abort()
+      subscriber.initializing = false
+      if (!this.hasInterestedSubscribers(file)) file.controller?.abort()
     }
     stop.resume = () => {
       if (disposed || subscriber.active) return Promise.resolve()
       subscriber.active = true
+      subscriber.initializing = false
       if (file.content !== null) this.deliverContent(subscriber, file.content)
       return this.refresh(url)
+    }
+    stop.loadOnce = () => {
+      if (disposed || subscriber.active || subscriber.initializing) return Promise.resolve()
+      subscriber.initializing = true
+      if (file.content !== null) {
+        this.deliverContent(subscriber, file.content)
+        return Promise.resolve()
+      }
+      return this.pollFile(url, file, false, true)
     }
     return stop
   }
@@ -175,15 +197,21 @@ export class LiveFileRefresh {
     this.stopListening = null
   }
 
-  private async pollFile(url: string, file: WatchedFile, force = false): Promise<void> {
+  private async pollFile(url: string, file: WatchedFile, force = false, initial = false): Promise<void> {
     if (this.files.get(url) !== file || file.subscribers.size === 0 || !this.isVisible()) return
-    if (!force && !this.hasActiveSubscribers(file)) return
+    if (!force && !this.hasActiveSubscribers(file) && !(initial && this.hasInterestedSubscribers(file))) return
     if (file.inFlight) {
-      if (!force) return
+      if (!force) {
+        await file.inFlight
+        if (initial && [...file.subscribers].some((subscriber) => subscriber.initializing)) {
+          return this.pollFile(url, file, false, true)
+        }
+        return
+      }
       await file.inFlight
       return this.pollFile(url, file, true)
     }
-    if (!force && this.now() < file.nextPollAt) return
+    if (!force && !initial && this.now() < file.nextPollAt) return
 
     const controller = new AbortController()
     file.controller = controller
@@ -221,7 +249,7 @@ export class LiveFileRefresh {
           file.fingerprint = fingerprint
           file.content = content
           for (const subscriber of file.subscribers) {
-            if (subscriber.active) this.deliverContent(subscriber, content)
+            if (subscriber.active || subscriber.initializing) this.deliverContent(subscriber, content)
           }
         }
       } catch (error) {
@@ -229,7 +257,8 @@ export class LiveFileRefresh {
         file.failures += 1
         file.nextPollAt = this.now() + Math.min(LIVE_FILE_POLL_INTERVAL_MS * 2 ** file.failures, MAX_ERROR_BACKOFF_MS)
         for (const subscriber of file.subscribers) {
-          if (subscriber.active) subscriber.onError?.(error)
+          if (subscriber.active || subscriber.initializing) subscriber.onError?.(error)
+          subscriber.initializing = false
         }
       }
     })().finally(() => {
@@ -246,7 +275,12 @@ export class LiveFileRefresh {
     return [...file.subscribers].some((subscriber) => subscriber.active)
   }
 
+  private hasInterestedSubscribers(file: WatchedFile): boolean {
+    return [...file.subscribers].some((subscriber) => subscriber.active || subscriber.initializing)
+  }
+
   private deliverContent(subscriber: FileSubscriber, content: string): void {
+    subscriber.initializing = false
     const fingerprint = contentFingerprint(content)
     if (subscriber.fingerprint === fingerprint) return
     subscriber.fingerprint = fingerprint
@@ -281,8 +315,9 @@ export function watchLiveFile(
   url: string,
   onContent: (content: string) => void,
   onError?: (error: unknown) => void,
+  options: LiveFileWatchOptions = {},
 ): LiveFileSubscription {
-  return liveFileRefresh.watch(url, onContent, onError)
+  return liveFileRefresh.watch(url, onContent, onError, options)
 }
 
 export function refreshLiveFile(url: string): Promise<void> {

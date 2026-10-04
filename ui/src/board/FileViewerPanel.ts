@@ -31,6 +31,8 @@ export type FileViewerState =
 export interface FileViewerOptions {
   /** A document model can supply its classification instead of suffix dispatch. */
   kind?: 'html' | 'text' | 'image' | 'pdf'
+  /** Inactive viewers read once for a preview, without periodic subscriptions. */
+  active?: boolean
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
   transformHtml?: (html: string) => string
   onState?: (state: FileViewerState) => void
@@ -200,6 +202,11 @@ export function resumeFileViewer(viewer: HTMLElement | null): void {
   if (viewer) void liveViewSubscriptions.get(viewer)?.resume()
 }
 
+/** Finish an inactive preview's initial read without activating its subscription. */
+export function loadFileViewerOnce(viewer: HTMLElement | null): void {
+  if (viewer) void liveViewSubscriptions.get(viewer)?.loadOnce()
+}
+
 function buildHtmlViewer(
   src: string,
   fullPath: string,
@@ -282,6 +289,7 @@ function buildHtmlViewer(
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
       options.onState?.({ status: 'error', error, hasContent: initialLoadHandled })
     },
+    { active: options.active, loadOnce: options.active === false },
   )
   liveViewSubscriptions.set(wrap, stop)
   viewerDisposers.set(wrap, () => { disposed = true; generation++; stagingFrame?.remove() })
@@ -347,6 +355,7 @@ function buildTextViewer(
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
       options.onState?.({ status: 'error', error, hasContent })
     },
+    { active: options.active, loadOnce: options.active === false },
   )
   liveViewSubscriptions.set(wrap, stop)
   return wrap

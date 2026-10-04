@@ -6,7 +6,7 @@ import { DocumentHost, withWorkspaceKeyBridge } from './DocumentHost.js'
 
 const render = vi.hoisted(() => ({
   calls: [] as Array<{ viewer: HTMLElement; path: string; owner: string; options: FileViewerOptions; frame?: (frame: HTMLIFrameElement, refreshed: boolean) => void; text?: (pane: HTMLElement) => void }>,
-  suspend: vi.fn(), resume: vi.fn(), dispose: vi.fn(), refresh: vi.fn(async () => {}),
+  suspend: vi.fn(), resume: vi.fn(), once: vi.fn(), dispose: vi.fn(), refresh: vi.fn(async () => {}),
 }))
 vi.mock('../FileViewerPanel.js', () => ({
   buildFileViewer: vi.fn((_base, path, owner, frame, text, options) => {
@@ -15,7 +15,7 @@ vi.mock('../FileViewerPanel.js', () => ({
     render.calls.push({ viewer, path, owner, options, frame, text })
     return viewer
   }),
-  disposeFileViewer: render.dispose, suspendFileViewer: render.suspend, resumeFileViewer: render.resume,
+  disposeFileViewer: render.dispose, suspendFileViewer: render.suspend, resumeFileViewer: render.resume, loadFileViewerOnce: render.once,
 }))
 vi.mock('../LiveFileRefresh.js', () => ({ refreshLiveFile: render.refresh }))
 
@@ -47,6 +47,7 @@ describe('stable document frames', () => {
     host.setChannel(docs.slice(0, 5), docs[2].key)
     expect(track.children).toHaveLength(5)
     expect(render.calls.map((call) => call.path)).toEqual([docs[1].path, docs[3].path, docs[2].path])
+    expect(render.calls.map((call) => call.options.active)).toEqual([false, false, true])
     expect(onFrame).toHaveBeenCalledTimes(5)
     const original = [...track.children]
     const frame = host.get(docs[2].key)!
@@ -107,6 +108,27 @@ describe('stable document frames', () => {
     expect(render.resume.mock.calls.filter(([viewer]) => viewer !== null)).toHaveLength(1)
     host.parkAll()
     expect(render.suspend).toHaveBeenCalledWith(right)
+  })
+
+  it('suspends unfinished off-channel loads and resumes their first load when the channel returns', async () => {
+    host.setChannel(docs.slice(0, 2), docs[0].key)
+    const selected = host.get(docs[0].key)!.viewer
+    const neighbour = host.get(docs[1].key)!.viewer
+    render.suspend.mockClear()
+    host.setChannel([docs[2]], docs[2].key)
+    expect(render.suspend).toHaveBeenCalledWith(selected)
+    expect(render.suspend).toHaveBeenCalledWith(neighbour)
+    render.resume.mockClear()
+    host.setChannel(docs.slice(0, 2), docs[0].key)
+    expect(render.resume).toHaveBeenCalledWith(selected)
+    expect(render.resume).not.toHaveBeenCalledWith(neighbour)
+    expect(render.once).toHaveBeenCalledWith(neighbour)
+    const call = render.calls.find((call) => call.viewer === neighbour)!
+    await ready(call)
+    expect(render.suspend).toHaveBeenCalledWith(neighbour)
+    render.suspend.mockClear()
+    host.parkAll()
+    expect(render.suspend).toHaveBeenCalledWith(selected)
   })
 
   it('keeps a global LRU of ten across channels and restores evicted text scroll by key', async () => {
@@ -294,6 +316,7 @@ describe('document keyboard bridge', () => {
     const html = withWorkspaceKeyBridge('<html><head><title>Report</title></head><body>Data</body></html>')
     expect(html).toContain('<head><script data-shuttle-workspace-bridge>')
     expect(html).toContain("type:'shuttle-workspace-key'")
+    expect(html).toContain('!e.shiftKey')
     expect(html).toContain('<body>Data</body>')
   })
 
@@ -310,6 +333,7 @@ describe('document keyboard bridge', () => {
     send(receded.contentWindow, arrow)
     send(window, arrow)
     send(selected.contentWindow, { ...arrow, altKey: false })
+    send(selected.contentWindow, { ...arrow, shiftKey: true })
     send(selected.contentWindow, { ...arrow, key: 'Delete' })
     expect(keydown).not.toHaveBeenCalled()
     send(selected.contentWindow, arrow)

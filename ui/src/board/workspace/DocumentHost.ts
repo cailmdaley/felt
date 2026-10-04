@@ -1,6 +1,6 @@
 import type { WorkspaceDocument, DocKey } from './documents.js'
 import {
-  buildFileViewer, disposeFileViewer, resumeFileViewer, suspendFileViewer,
+  buildFileViewer, disposeFileViewer, loadFileViewerOnce, resumeFileViewer, suspendFileViewer,
   type FileViewerState,
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
@@ -21,6 +21,7 @@ type FrameState = {
   pending: HTMLElement | null
   loaded: boolean
   active: boolean
+  initialSuspended: boolean
   scroll: ScrollPosition
   readScroll: (() => ScrollPosition) | null
   stopScroll: (() => void) | null
@@ -34,7 +35,7 @@ const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
 
 /** HTML documents forward workspace chords without changing their own navigation. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>document.addEventListener('keydown',function(e){if(e.defaultPrevented)return;var arrow=/^Arrow(Left|Right|Up|Down)$/.test(e.key);if((e.altKey&&!e.ctrlKey&&!e.metaKey&&arrow)||e.key==='Escape'){e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey},'*')}});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>document.addEventListener('keydown',function(e){if(e.defaultPrevented)return;var arrow=/^Arrow(Left|Right|Up|Down)$/.test(e.key);if((e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&arrow)||e.key==='Escape'){e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey},'*')}});</script>`
   const head = /<head\b[^>]*>/i
   return head.test(html) ? html.replace(head, (tag) => tag + bridge) : bridge + html
 }
@@ -96,6 +97,12 @@ export class DocumentHost {
       state.frame.sheet.inert = !selected
       state.frame.el.setAttribute('aria-hidden', String(!selected))
       this.setActive(state, selected)
+      // A neighbour's initial load is allowed only while its channel is visible.
+      if (parked) {
+        state.initialSuspended = !state.loaded && !!state.frame.viewer
+        suspendFileViewer(state.frame.viewer)
+        suspendFileViewer(state.pending)
+      }
     }
     // Touch neighbours first, leaving the actual subject newest in the LRU.
     const visible = [index - 1, index + 1, index]
@@ -166,6 +173,9 @@ export class DocumentHost {
       state.frame.sheet.inert = true
       state.frame.el.setAttribute('aria-hidden', 'true')
       this.setActive(state, false)
+      state.initialSuspended = !state.loaded && !!state.frame.viewer
+      suspendFileViewer(state.frame.viewer)
+      suspendFileViewer(state.pending)
       this.saveScroll(state)
     }
   }
@@ -196,7 +206,7 @@ export class DocumentHost {
     el.append(sheet)
     const frame: DocumentFrame = { el, sheet, content, label, doc, viewer: null }
     const state: FrameState = {
-      frame, pending: null, loaded: false, active: false,
+      frame, pending: null, loaded: false, active: false, initialSuspended: false,
       scroll: readScroll(doc.key), readScroll: null, stopScroll: null,
       notice: null, controller: null, revision: 0,
     }
@@ -212,7 +222,13 @@ export class DocumentHost {
   }
 
   private mount(state: FrameState): void {
-    if (state.frame.viewer) return
+    if (state.frame.viewer) {
+      if (state.initialSuspended) {
+        state.initialSuspended = false
+        loadFileViewerOnce(state.frame.viewer)
+      }
+      return
+    }
     if (state.frame.doc.kind === 'fiber') {
       const prose = this.options.buildProse(state.frame.doc)
       state.frame.content.replaceChildren(prose)
@@ -250,6 +266,7 @@ export class DocumentHost {
       },
       {
         quietLoading: true,
+        active: state.active,
         kind: doc.kind === 'fiber' || doc.kind === 'other' ? undefined : doc.kind,
         transformHtml: withWorkspaceKeyBridge,
         // A shared watcher may deliver cached text synchronously during build.
@@ -272,8 +289,6 @@ export class DocumentHost {
       state.frame.content.replaceChildren(viewer)
       state.frame.viewer = viewer
     }
-    // Neighbours get one initial load for their preview, then stop polling.
-    if (!state.active && replacement) suspendFileViewer(viewer)
   }
 
   private viewerState(state: FrameState, viewer: HTMLElement, result: FileViewerState): void {
@@ -298,6 +313,7 @@ export class DocumentHost {
     }
     viewer.style.opacity = ''
     state.loaded = true
+    state.initialSuspended = false
     this.clearNotice(state)
     if (!state.active) suspendFileViewer(viewer)
   }
@@ -306,8 +322,14 @@ export class DocumentHost {
     if (state.active === active) return
     if (!active) this.saveScroll(state)
     state.active = active
-    if (active) resumeFileViewer(state.frame.viewer)
-    else if (state.loaded) suspendFileViewer(state.frame.viewer)
+    if (active) {
+      state.initialSuspended = false
+      resumeFileViewer(state.frame.viewer)
+    }
+    else {
+      state.initialSuspended = !state.loaded && !!state.frame.viewer
+      suspendFileViewer(state.frame.viewer)
+    }
     if (!active) suspendFileViewer(state.pending)
   }
 
@@ -324,6 +346,7 @@ export class DocumentHost {
     state.pending = null
     state.frame.viewer = null
     state.loaded = false
+    state.initialSuspended = false
     state.notice = null
     this.placeholder(state)
   }
@@ -471,7 +494,7 @@ export class DocumentHost {
     if (!data || data.type !== 'shuttle-workspace-key') return
     const key = data.key
     const arrow = typeof key === 'string' && /^Arrow(Left|Right|Up|Down)$/.test(key)
-    if (key !== 'Escape' && !(arrow && data.altKey === true && !data.ctrlKey && !data.metaKey)) return
+    if (key !== 'Escape' && !(arrow && data.altKey === true && !data.ctrlKey && !data.metaKey && !data.shiftKey)) return
     // Bubble through the reader's existing keyboard handler, never a second route.
     this.track.dispatchEvent(new KeyboardEvent('keydown', {
       key: key as string, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
