@@ -38,7 +38,7 @@
 
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
-import type { MeetingJoinResult } from './workspace/Dock.js'
+import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
@@ -269,13 +269,15 @@ export class KanbanModal {
    */
   private gestureDepth = 0
   private workspace: Workspace | null = null
+  /** The conversation dock — one instance, lent to the workspace's reader. */
+  private readonly dock: Dock
   private workspaceReturnFocus: HTMLElement | null = null
   private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
   private readonly surfaces: KanbanSurfaceRenderer
 
   private readonly handleConversationOpening = (): void => {
     if (this.lastResponse) this.render(this.lastResponse)
-    this.workspace?.dock.refreshConversationOpening()
+    this.dock.refreshConversationOpening()
   }
 
   constructor(options: KanbanModalOptions) {
@@ -310,6 +312,22 @@ export class KanbanModal {
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
+    this.dock = new Dock(
+      this.shuttleBase,
+      () => { void this.fetchAndRender() },
+      // Temper / Discard route through the same optimistic path as the inline
+      // card buttons and drags — instant relocation, background commit, reconcile.
+      (card, target) => this.transition(card, target),
+      this.openWorkerAfterGesture,
+      {
+        meeting: {
+          canJoin: () => meetingJoinable(this.meetingStatus),
+          join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
+          current: () => this.meetingStatus.meeting,
+        },
+        workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
+      },
+    )
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
@@ -463,17 +481,7 @@ export class KanbanModal {
       cards: () => this.workspaceCards(),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
-      conversation: {
-        onChanged: () => { void this.fetchAndRender() },
-        onTransition: (card, target) => this.transition(card, target),
-        onWorkerOpen: this.openWorkerAfterGesture,
-        workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
-        meeting: {
-          canJoin: () => meetingJoinable(this.meetingStatus),
-          join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
-          current: () => this.meetingStatus.meeting,
-        },
-      },
+      dock: this.dock,
     })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
@@ -492,6 +500,7 @@ export class KanbanModal {
     if (this.container === null) return
     this.workspace?.dispose()
     this.workspace = null
+    this.dock.close()
     this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
@@ -1910,7 +1919,7 @@ export class KanbanModal {
         this.meetingStatus = status
         this.phoneAudio.observe(status.meeting)
         this.syncMeetingClock()
-        this.workspace?.dock.syncMeeting()
+        this.dock.syncMeeting()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.presentMeeting()
       } catch {
@@ -1994,7 +2003,7 @@ export class KanbanModal {
         // still gets its poll: its content moves with the clock (and with
         // activity and the ledgers), not only with the fiber feed. The open
         // card's worker pill crosses its idle threshold on the clock too.
-        this.syncWorkspaceRuntime()
+        this.syncWorkspaceRuntime(data)
         this.mountOrRefreshActiveView()
         return
       }
@@ -2106,17 +2115,20 @@ export class KanbanModal {
     if (view) this.renderViewFallback(view.title)
   }
 
-  /** Runtime changes repaint the conversation controls without replacing documents. */
-  private syncWorkspaceRuntime(): void {
+  /** Runtime changes repaint the dock's worker controls and the reader's
+   *  Conversation button without replacing documents. */
+  private syncWorkspaceRuntime(data: KanbanResponse): void {
+    const id = this.dock.openCardId
+    if (id) this.dock.syncRuntime(findCardById(data, id))
     this.workspace?.update()
   }
 
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
+    this.syncWorkspaceRuntime(data)
     if (this.workspace?.isActive) {
       this.lastResponse = data
       this.pendingDeskData = data
-      this.workspace.update()
       return
     }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FiberDetailModal } from './FiberDetailModal.js'
+import { Dock } from './workspace/Dock.js'
 import { dispatchFailureMessage, needsProjectDir, type DispatchFailureBody } from './KanbanModalShared.js'
 import { parseCompositeFeed, type CompositeEntry } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, inheritedProjectDir, projectDirIndex } from './KanbanReadModel.js'
@@ -257,7 +257,7 @@ describe('the detail panel answers a refused start with the prompt', () => {
       return replies.shift()
     }))
     const refreshed = vi.fn()
-    const panel = new FiberDetailModal('http://daemon', refreshed)
+    const panel = new Dock('http://daemon', refreshed)
     const close = vi.spyOn(panel, 'close').mockImplementation(() => {})
     const requeue = panel as unknown as {
       runRequeue: (c: ReturnType<typeof card>, directive: string, mode: 'fresh',
@@ -307,7 +307,7 @@ describe('the detail panel answers a refused start with the prompt', () => {
       message: 'cannot arm: agent claude-retired is not in the registry (shuttle set-agent to pick a current one)',
     }
     vi.stubGlobal('fetch', vi.fn(async () => ({ status: 422, ok: false, json: async () => other })))
-    const panel = new FiberDetailModal('http://daemon', vi.fn())
+    const panel = new Dock('http://daemon', vi.fn())
     const requeue = panel as unknown as {
       runRequeue: (c: ReturnType<typeof card>, directive: string, mode: 'fresh',
         btn: HTMLButtonElement, error: HTMLElement) => Promise<void>
@@ -317,33 +317,5 @@ describe('the detail panel answers a refused start with the prompt', () => {
       new FakeEl('button') as unknown as HTMLButtonElement, errorEl as unknown as HTMLElement)
     expect(errorEl.find('kbn-start-prompt')).toBeUndefined()
     expect(errorEl.textContent).toBe(`On owner-host: ${other.message}`)
-  })
-})
-
-describe('a start prompt presented on open unfolds the controls drawer', () => {
-  type Controls = {
-    pendingStartPrompt: { cardId: string; body: DispatchFailureBody } | null
-    buildControls: (c: ReturnType<typeof card>, shuttleManaged: boolean) => HTMLElement
-    buildControlsBody: (...args: unknown[]) => void
-  }
-  const drawer = (pending: boolean) => {
-    const panel = new FiberDetailModal('http://daemon', vi.fn()) as unknown as Controls
-    const task = card({ id: 'work/task', shuttleKind: 'oneshot', shuttleHost: 'owner-host' })
-    if (pending) panel.pendingStartPrompt = { cardId: task.id, body: refused }
-    // The composer consumes the pending prompt while the body builds.
-    panel.buildControlsBody = () => { panel.pendingStartPrompt = null }
-    const wrap = el(panel.buildControls(task, true))
-    return { body: el(wrap.find('kbn-detail-controls-body')), wrap }
-  }
-
-  it('opens when the prompt is waiting for this card', () => {
-    const { body, wrap } = drawer(true)
-    expect(body.hidden).toBe(false)
-    expect(wrap.className).toContain('kbn-detail-controls-open')
-    expect(el(wrap.find('kbn-detail-controls-toggle')).attrs['aria-expanded']).toBe('true')
-  })
-
-  it('stays folded otherwise', () => {
-    expect(drawer(false).body.hidden).toBe(true)
   })
 })

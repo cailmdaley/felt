@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { Workspace } from './Workspace.js'
+import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
@@ -53,7 +54,7 @@ beforeEach(() => {
   localStorage.clear()
   changed.mockClear()
   visibility.mockClear()
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, conversation: { onChanged: changed } })
+  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
 afterEach(() => { workspace?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -163,7 +164,7 @@ describe('workspace reader integration', () => {
   it('phone Back closes the dock once, preserves the document, then returns to Desk', async () => {
     workspace.dispose()
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, conversation: { onChanged: changed } })
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
     workspace.open(cards[0])
     await flush()
     const iframe = document.querySelector('.ws-selected iframe')

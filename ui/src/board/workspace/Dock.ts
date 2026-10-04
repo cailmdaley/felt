@@ -43,7 +43,6 @@ function dayStamp(ms: number): string {
   return `${day} ${clockTime(ms)}`
 }
 
-/** The board's meeting control, lent to the detail panel. */
 /** How a meeting join ended: the error to show beside the control (null once
  *  recording began), and whether the constitution's worker received it. */
 export interface MeetingJoinResult {
@@ -51,6 +50,7 @@ export interface MeetingJoinResult {
   delivered: boolean
 }
 
+/** The board's meeting control, lent to the dock. */
 export interface MeetingJoinControl {
   /** hark is available on this machine and nothing is recording. */
   canJoin(): boolean
@@ -374,13 +374,20 @@ interface AgentRecord {
 
 export interface DockOptions {
   meeting?: MeetingJoinControl
+  /** Whether the Desk draws this card's worker phase (it does in flight). */
   workerPhase?: (card: KanbanCard) => boolean
-  onCloseRequest?: () => void
 }
 
-/** Conversation controls only. The reader owns mounting, layout and dismissal. */
+/**
+ * The conversation dock: everything a channel carries that is not a document.
+ * The worker's state and the way into its real conversation head it; below
+ * sit the composer, the live meeting transcript, the folded settings, session
+ * history and the verdicts. The reader owns mounting, layout and dismissal.
+ */
 export class Dock {
-  readonly el: HTMLElement = document.createElement('aside')
+  /** Called when the dock asks to be closed (× or a verdict). */
+  onCloseRequest: (() => void) | null = null
+  private root: HTMLElement | null = null
   private card: KanbanCard | null = null
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
@@ -403,7 +410,6 @@ export class Dock {
   private composerError: HTMLElement | null = null
   private freshButton: HTMLButtonElement | null = null
   private epoch = 0
-  private disposed = false
   private readonly timers = new Set<number>()
   private composerDirty: (() => boolean) | null = null
   private readonly shuttleBase: string
@@ -411,7 +417,6 @@ export class Dock {
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
-  private readonly onClose?: () => void
   private readonly workerPhase: (card: KanbanCard) => boolean
 
   constructor(
@@ -419,20 +424,23 @@ export class Dock {
     onChanged: () => void,
     onTransition?: (card: KanbanCard, target: ColumnKind) => void,
     onWorkerOpen?: (tmuxSessionName: string, shuttleHost?: string) => void,
-    opts?: MeetingJoinControl | DockOptions,
-    onClose?: () => void,
-    workerPhase?: (card: KanbanCard) => boolean,
+    opts: DockOptions = {},
   ) {
     this.shuttleBase = shuttleBase
     this.onSaved = onChanged
     this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onWorkerOpen
-    const options: DockOptions = opts && 'canJoin' in opts ? { meeting: opts } : opts ?? {}
-    this.meeting = options.meeting ?? null
-    this.onClose = onClose ?? options.onCloseRequest
-    this.workerPhase = workerPhase ?? options.workerPhase ?? (() => true)
-    this.el.className = 'ws-dock'
-    this.el.setAttribute('aria-label', 'Conversation')
+    this.meeting = opts.meeting ?? null
+    this.workerPhase = opts.workerPhase ?? (() => true)
+  }
+
+  /** The dock's element, built on first use so controls can be exercised without a page. */
+  get el(): HTMLElement {
+    if (!this.root) {
+      this.root = document.createElement('div')
+      this.root.className = 'ws-dock'
+    }
+    return this.root
   }
 
   private later(fn: () => void, ms: number): number {
@@ -445,7 +453,6 @@ export class Dock {
   get openCardId(): string | null { return this.card?.id ?? null }
 
   open(card: KanbanCard): void {
-    if (this.disposed) return
     if (this.card?.id === card.id && this.card.originId === card.originId) {
       this.syncRuntime(card)
       return
@@ -477,7 +484,7 @@ export class Dock {
   close(): void {
     const wasOpen = this.isOpen
     this.clear()
-    if (wasOpen) this.onClose?.()
+    if (wasOpen) this.onCloseRequest?.()
   }
 
   private clear(): void {
@@ -501,18 +508,13 @@ export class Dock {
     this.composerDirty = null
     this.composerError = null
     this.freshButton = null
-    this.el.replaceChildren()
+    this.root?.replaceChildren()
   }
 
   handleEscape(): boolean {
     return Boolean(this.dismissConversation?.() || this.dismissMeeting?.() || this.dismissParent?.())
   }
 
-  dispose(): void {
-    this.clear()
-    this.pendingStartPrompt = null
-    this.disposed = true
-  }
 
   private paintGuidance(card: KanbanCard): void {
     if (!this.guidance) return
@@ -694,7 +696,7 @@ export class Dock {
 
   refreshConversationOpening(): void {
     this.syncRuntime(this.workerPillCard)
-    this.el.querySelectorAll('.kbn-ctl-history').forEach((history) => {
+    this.root?.querySelectorAll('.kbn-ctl-history').forEach((history) => {
       history.dispatchEvent(new Event(CONVERSATION_OPENING_CHANGED))
     })
   }

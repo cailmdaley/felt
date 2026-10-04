@@ -127,9 +127,11 @@ export class Reader {
 
   /** Change the available page box without replacing any live document. */
   mountDock(dock: HTMLElement | null, restoreFocus = false): void {
+    if (dock) dock.id = 'ws-conversation-dock'
     this.dockSlot.replaceChildren(...(dock ? [dock] : []))
     this.el.classList.toggle('ws-with-dock', dock !== null)
     this.conversation.setAttribute('aria-expanded', String(dock !== null))
+    this.syncDockSemantics()
     this.layout(false)
     if (restoreFocus) this.conversation.focus({ preventScroll: true })
   }
@@ -292,7 +294,16 @@ export class Reader {
     })
     this.track.style.transform = `translateX(${Math.round(W / 2 - centre)}px)`
   }
+  private syncDockSemantics(): void {
+    const sheet = this.phone.matches && this.dockSlot.childElementCount > 0
+    this.stage.inert = sheet
+    this.sidebar.inert = sheet
+    this.dockSlot.setAttribute('role', sheet ? 'dialog' : 'complementary')
+    if (sheet) this.dockSlot.setAttribute('aria-modal', 'true')
+    else this.dockSlot.removeAttribute('aria-modal')
+  }
   private readonly relayout = (): void => {
+    this.syncDockSemantics()
     this.renderSidebar()
     this.layout(false)
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
@@ -428,6 +439,16 @@ export class Reader {
   }
   private readonly keydown = (e: KeyboardEvent): void => {
     if (!this.active || e.isComposing || document.querySelector('.kbn-detail-overlay,[data-state="open"][role="dialog"]')) return
+    if (e.key === 'Tab' && this.phone.matches && this.dockSlot.childElementCount) {
+      const controls = [...this.dockSlot.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea,input:not(:disabled),select:not(:disabled),[tabindex="0"]')]
+        .filter(el => !el.closest('[hidden]') && getComputedStyle(el).display !== 'none')
+      const first = controls[0], last = controls.at(-1)
+      if (first && ((e.shiftKey && (document.activeElement === first || !this.dockSlot.contains(document.activeElement))) || (!e.shiftKey && document.activeElement === last))) {
+        e.preventDefault(); e.stopImmediatePropagation()
+        ;(e.shiftKey ? last : first)?.focus()
+        return
+      }
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
       e.preventDefault(); e.stopImmediatePropagation()
       this.sidebarOpen = !this.sidebarOpen

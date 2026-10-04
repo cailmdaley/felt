@@ -23,7 +23,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
-import { FiberDetailModal } from './FiberDetailModal.js'
+import { Dock } from './workspace/Dock.js'
 import { dueCivilDay, isoDayLocal } from './civilDay.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { card as baseCard, response } from './testFixtures.js'
@@ -714,8 +714,8 @@ describe('verdicts stop app workers before changing the card lifecycle', () => {
 
 // ── The detail panel's due editor ────────────────────────────────────────────
 
-describe('FiberDetailModal.livePatch — the due branch', () => {
-  const makePanel = (): FiberDetailModal => new FiberDetailModal(BASE, () => {})
+describe('Dock.livePatch — the due branch', () => {
+  const makePanel = (): Dock => new Dock(BASE, () => {})
 
   it('posts a bare civil day to /felt-edit', async () => {
     const day = dayFromNow(21)
@@ -783,8 +783,8 @@ describe('FiberDetailModal.livePatch — the due branch', () => {
 // bodyLinks.test.ts on why the shims were removed); the panel's own harness
 // (`npm run harness`) is where that is looked at.
 
-describe('FiberDetailModal.livePatch — the kind branch', () => {
-  const makePanel = (): FiberDetailModal => new FiberDetailModal(BASE, () => {})
+describe('Dock.livePatch — the kind branch', () => {
+  const makePanel = (): Dock => new Dock(BASE, () => {})
   const pinned = (over: Partial<KanbanCard> = {}): KanbanCard =>
     card({ id: 'role-1', status: 'active', shuttleKind: 'pinned', shuttleAgent: 'claude', ...over })
 

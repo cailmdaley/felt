@@ -51,7 +51,7 @@ import {
   splitStashByReturn,
   boardDependents,
 } from './KanbanSurfaces.js'
-import { sessionWindow, stripFacts } from './FiberDetailModal.js'
+import { sessionWindow, stripFacts } from './workspace/Dock.js'
 import { isoDayLocal } from './civilDay.js'
 import { humanizeIdleAge } from './utils.js'
 

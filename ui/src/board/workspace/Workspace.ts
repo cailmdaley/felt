@@ -1,5 +1,5 @@
-import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
-import { Dock, type MeetingJoinControl } from './Dock.js'
+import type { KanbanCard } from '../KanbanTypes.js'
+import type { Dock } from './Dock.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { parseCompositeFeed } from '../KanbanComposite.js'
@@ -17,13 +17,8 @@ export interface WorkspaceOptions {
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
-  conversation?: {
-    onChanged(): void
-    onTransition?(card: KanbanCard, target: ColumnKind): void
-    onWorkerOpen?(tmuxSessionName: string, shuttleHost?: string): void
-    workerPhase?(card: KanbanCard): boolean
-    meeting?: MeetingJoinControl
-  }
+  /** The board's conversation dock, mounted beside the stage of the open channel. */
+  dock: Dock
 }
 interface ChannelState {
   card: KanbanCard
@@ -64,12 +59,8 @@ export class Workspace {
       if (open) this.openDock(false)
       else this.closeDock(false)
     })
-    this.dock = new Dock(opts.shuttleBase, () => opts.conversation?.onChanged(),
-      opts.conversation?.onTransition, opts.conversation?.onWorkerOpen, {
-        meeting: opts.conversation?.meeting,
-        workerPhase: opts.conversation?.workerPhase,
-        onCloseRequest: () => this.closeDock(),
-      })
+    this.dock = opts.dock
+    this.dock.onCloseRequest = () => this.closeDock()
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       cards: opts.cards,
@@ -315,7 +306,16 @@ export class Workspace {
         if (!res.ok) throw new Error(res.status === 404 ? `Fiber not found on ${state.card.originId}` : `${state.card.originId} is unreachable`)
         const data = await res.json() as { fibers?: Array<{ fiber?: { body?: string; outcome?: string } }> }
         const entry = parseCompositeFeed(data).entries[0]
-        if (entry) state.card = cardFromCompositeEntry(entry)
+        if (entry) {
+          // Body reads carry document metadata; the composite feed owns live workers.
+          const live = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner) ?? state.card
+          const metadata = cardFromCompositeEntry({ ...entry, origin: state.channel.owner })
+          for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
+            metadata[key] = live[key] as never
+          }
+          if (live.workerState) metadata.sessionUuid = live.sessionUuid
+          state.card = metadata
+        }
         const fiber = data.fibers?.[0]?.fiber
         if (!fiber) throw new Error(`Fiber not found on ${state.card.originId}`)
         state.channel = { ...state.channel, body: fiber.body ?? '', outcome: fiber.outcome ?? state.card.outcome }
@@ -373,7 +373,8 @@ export class Workspace {
     document.removeEventListener('visibilitychange', this.visibility)
     this.phone.removeEventListener('change', this.syncDockHistory)
     this.history.dispose()
-    this.dock.dispose()
+    this.closeDock(false)
+    this.dock.onCloseRequest = null
     this.reader.dispose()
   }
 }

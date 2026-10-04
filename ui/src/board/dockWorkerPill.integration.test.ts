@@ -9,7 +9,7 @@ interface BoardState {
   body: HTMLElement | null
   deskEl: HTMLElement | null
   lastResponse: KanbanResponse | null
-  detailModal: { open(card: KanbanCard): void; close(): void }
+  dock: { el: HTMLElement; open(card: KanbanCard): void; close(): void; refreshConversationOpening(): void }
   render(data: KanbanResponse): void
   teardownState(): void
 }
@@ -29,6 +29,7 @@ const worker = (over: Partial<KanbanCard>): KanbanCard => card({
 })
 
 const pill = (): HTMLElement | null => document.querySelector<HTMLElement>('.kbn-detail-aloft')
+const openDock = (c: KanbanCard): void => { state.dock.open(c); document.body.append(state.dock.el) }
 
 let board: KanbanModal
 let state: BoardState
@@ -48,28 +49,28 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  state.detailModal.close()
+  state.dock.close()
   state.teardownState()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
 
-describe('the open card follows its worker', () => {
-  it('updates an already open detail pill when its opening preference changes', () => {
+describe('the conversation dock follows its worker', () => {
+  it("updates an already open dock's pill when its opening preference changes", () => {
     const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
     state.lastResponse = response({ inFlight: [live] })
-    state.detailModal.open(live)
+    openDock(live)
     expect(pill()?.tagName).toBe('BUTTON')
     saveClaudeOpening('app')
-    ;(state.detailModal as unknown as { refreshConversationOpening(): void }).refreshConversationOpening()
+    ;state.dock.refreshConversationOpening()
     expect(pill()?.tagName).toBe('A')
     expect((pill() as HTMLAnchorElement).href).toBe('claude://claude.ai/code/session_test')
   })
   it('repaints a Waiting pill as Aloft when a poll reports the worker working', () => {
     const waiting = worker({ runtimePhase: 'waiting' })
     state.lastResponse = response({ inFlight: [waiting] })
-    state.detailModal.open(waiting)
+    openDock(waiting)
     expect(pill()?.textContent).toBe('Waiting')
 
     state.render(response({ inFlight: [worker({ runtimePhase: 'working', lastActivityAt: Date.now() })] }))
@@ -80,14 +81,14 @@ describe('the open card follows its worker', () => {
   it('shows the phase only where the Desk does: in flight', () => {
     const waiting = worker({ runtimePhase: 'waiting' })
     state.lastResponse = response({ awaitingReview: [waiting] })
-    state.detailModal.open(waiting)
+    openDock(waiting)
     expect(pill()?.textContent).toBe('Aloft')
   })
 
   it('drops the pill when the worker goes away', () => {
     const waiting = worker({ runtimePhase: 'waiting' })
     state.lastResponse = response({ inFlight: [waiting] })
-    state.detailModal.open(waiting)
+    openDock(waiting)
     state.render(response({ awaitingReview: [worker({ tmuxSession: undefined, runtimePhase: undefined })] }))
     expect(pill()).toBeNull()
   })
