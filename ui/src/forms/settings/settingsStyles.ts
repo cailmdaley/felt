@@ -96,7 +96,7 @@ const SHEET = `
 
 .set-rail {
   flex: 0 0 auto;
-  width: 9.5rem;
+  width: 11rem;
   padding: 12px 0 12px 12px;
   border-right: 1px solid rgba(46, 42, 38, 0.10);
   display: flex;
@@ -134,6 +134,29 @@ const SHEET = `
   font-weight: 600;
   box-shadow: inset 2px 0 0 #C49333;
 }
+
+.set-railgroup { display: flex; flex-direction: column; gap: 2px; }
+.set-railgroup + .set-railgroup { margin-top: 20px; }
+.set-railgroup-label { padding: 5px 10px 8px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: #9A8E80; }
+.set-pane-heading { margin-bottom: 22px; }
+.set-pane-heading h2 { font-size: 28px; font-weight: 500; line-height: 1.15; margin: 0 0 8px; }
+.set-pane-heading p { margin: 0; color: #7A7068; font-size: 15px; line-height: 1.4; max-width: 36rem; }
+.set-opening-options { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.set-opening-options legend { padding: 0 0 10px; }
+.set-opening-choice { display: flex; align-items: center; gap: 12px; border: 1px solid rgba(46,42,38,.15); border-radius: 4px; padding: 14px 16px; cursor: pointer; background: rgba(255,255,255,.22); }
+.set-opening-choice:hover { border-color: #9A8E80; }
+.set-opening-choice:focus-within { outline: 1px dashed #9A7B35; outline-offset: 2px; }
+.set-opening-selected { border-color: #C49333; background: rgba(196,147,51,.08); }
+.set-opening-choice input { accent-color: #9A7B35; width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+.set-opening-choice strong { font-size: 18px; font-weight: 500; }
+.set-opening-note { display: block; font-size: 14px; color: #7A7068; margin-top: 3px; }
+.set-opening-default { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: #8A6A20; }
+.set-opening-guidance { line-height: 1.5; font-size: 14px; color: #5C544D; margin: 14px 0 20px; }
+.set-opening-tip { font-size: 15px; line-height: 1.45; border-top: 1px solid rgba(46,42,38,.12); padding: 16px 0 10px; }
+.set-opening-tip strong { display: block; font-weight: 500; margin-bottom: 3px; }
+.set-opening-details { margin-top: 22px; border-top: 1px solid rgba(46,42,38,.12); padding-top: 12px; color: #5C544D; font-size: 14px; line-height: 1.5; }
+.set-opening-details summary { cursor: pointer; padding: 4px 0; }
+.set-opening-details p { margin: 10px 0; }
 
 /* ── The pane ──────────────────────────────────────────────────────────── */
 
@@ -397,6 +420,11 @@ const SHEET = `
     overflow-y: hidden;
     scrollbar-width: none;
   }
+  .set-railgroup { flex-direction: row; flex: 0 0 auto; }
+  .set-railgroup + .set-railgroup { margin: 0; padding-left: 8px; border-left: 1px solid rgba(46,42,38,.15); }
+  .set-railgroup-label { display: none; }
+  .set-pane-heading h2 { font-size: 25px; }
+  .set-opening-choice { padding: 12px; }
   .set-rail::-webkit-scrollbar { display: none; }
   .set-railbtn {
     flex: 0 0 auto;

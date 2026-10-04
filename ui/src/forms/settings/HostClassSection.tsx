@@ -30,13 +30,15 @@ import {
   type SettingsHost,
 } from './settingsApi'
 
+const CLASS_LABEL: Record<HostClass, string> = {
+  'single-user': 'Personal computer',
+  'shared-multi-user': 'Shared computer',
+  exposed: 'Authenticated gateway',
+}
 const CLASS_HELP: Record<HostClass, string> = {
-  'single-user':
-    'loopback is yours alone — a laptop or a workstation nobody else logs into.',
-  'shared-multi-user':
-    'a login node other accounts share — the daemon listens on a Unix socket instead of a TCP port.',
-  exposed:
-    'reachable beyond this machine — the narrowest of the three, meant for a daemon fronted by something that itself authenticates.',
+  'single-user': 'A laptop or workstation only you log into. Shuttle listens on a local TCP port.',
+  'shared-multi-user': 'A machine other accounts also use. Shuttle listens on a private Unix socket.',
+  exposed: 'A daemon reached through a gateway that already authenticates its users.',
 }
 
 export interface HostClassSectionProps {
@@ -113,10 +115,8 @@ export function HostClassSection({
   return (
     <>
       <p className="set-lede">
-        Whether {host.label}'s daemon listens on a loopback port anyone local can reach, or on a
-        Unix socket scoped to this account. Missing <span className="set-mono">host.json</span>{' '}
-        or a missing <span className="set-mono">"class"</span> key both read as{' '}
-        <span className="set-mono">single-user</span>. Takes effect at the next daemon restart.
+        Choose how this daemon can be reached on {host.label}.
+        Changes take effect after the daemon restarts.
       </p>
 
       {error && <div className="set-error" role="alert">{error}</div>}
@@ -125,7 +125,7 @@ export function HostClassSection({
 
       {doc !== null && (
         <>
-          <div className="set-section-label">Class</div>
+          <div className="set-section-label">This host is a</div>
           <ul className="set-list">
             <li className="set-row">
               <span className="set-row-main">
@@ -138,7 +138,7 @@ export function HostClassSection({
                 >
                   {HOST_CLASSES.map((c) => (
                     <option key={c} value={c}>
-                      {c}
+                      {CLASS_LABEL[c]}
                     </option>
                   ))}
                 </select>

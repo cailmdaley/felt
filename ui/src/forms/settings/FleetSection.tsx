@@ -168,10 +168,9 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
   return (
     <>
       <p className="set-lede">
-        The other shuttle daemons {host.label} aggregates onto its board. Each is reached either
-        at a URL outright — a Tailscale address needs no tunnel and survives a closed lid — or
-        through a local port this host forwards over SSH. Configured is not the same as
-        reachable, and neither is the same as up to date, so each row says all three.
+        Bring work from other hosts onto {host.label}’s board. Connect directly over Tailscale
+        or a URL, or forward a port over SSH. Each row shows whether that host is reachable
+        and which version it is running.
       </p>
 
       {error && <div className="set-error" role="alert">{error}</div>}

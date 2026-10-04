@@ -30,26 +30,19 @@ afterEach(() => {
 it('saves a browser preference without writing host configuration and notifies the board', () => {
   const changed = vi.fn()
   window.addEventListener(CONVERSATION_OPENING_CHANGED, changed)
-  const select = document.querySelector('select')!
-  expect([...select.options].map(({ text }) => text)).toEqual(['Terminal (Kitty)', 'Claude browser', 'Claude app'])
-  act(() => {
-    select.value = 'app'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+  const app = document.querySelector<HTMLInputElement>('input[value="app"]')!
+  expect([...document.querySelectorAll('input')].map(input => input.value)).toEqual(['terminal', 'browser', 'app'])
+  act(() => app.click())
   expect(values.get(CLAUDE_OPENING_KEY)).toBe('app')
   expect(changed).toHaveBeenCalledOnce()
   expect(fetch).not.toHaveBeenCalled()
-  expect(document.body.textContent).toContain('Remote Control enabled')
+  expect(document.body.textContent).toContain('Requires the Claude desktop app and Remote Control')
   window.removeEventListener(CONVERSATION_OPENING_CHANGED, changed)
 })
 
 it('reports blocked site storage without pretending the choice was saved', () => {
   vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('disabled') })
-  const select = document.querySelector('select')!
-  act(() => {
-    select.value = 'browser'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  expect(select.value).toBe('terminal')
+  act(() => document.querySelector<HTMLInputElement>('input[value="browser"]')!.click())
+  expect(document.querySelector<HTMLInputElement>('input[value="terminal"]')!.checked).toBe(true)
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('cannot save preferences')
 })

@@ -1,3 +1,4 @@
+import { addConversationMenu, conversationActions } from './conversationMenu'
 import { coarsePointer } from './mobile.js'
 import { humanizeIdleAge } from './utils.js'
 import { claudeAppRoute, claudeWebLink } from './sessionHistory.js'
@@ -111,6 +112,7 @@ export function terminalWorkerPill(
   const web = claudeWebLink(card.sessionLink)
   const desktop = canOpenDesktopApp(navigator.userAgent, coarse)
   const choice = effectiveClaudeOpening(desktop)
+  const withMenu = (pill: HTMLElement): HTMLElement => addConversationMenu(pill, conversationActions(card.sessionLink, desktop, tmuxName && options.openWorker ? () => options.openWorker!(tmuxName, card.shuttleHost) : undefined))
   const claude = Boolean(web) || (card.workerAgent ?? card.shuttleAgent ?? '').startsWith('claude-')
   if (web && choice !== 'terminal') {
     const app = choice === 'app' ? claudeAppRoute(web) : undefined
@@ -126,14 +128,14 @@ export function terminalWorkerPill(
     a.title = `${browserFallback ? `${CLAUDE_APP_ROUTE_UNAVAILABLE}\n` : ''}${state} — open this session in ${app ? 'the Claude app' : 'Claude in the browser'}`
     a.setAttribute('aria-label', `Open worker session in ${app ? 'the Claude app' : 'Claude in the browser'}: ${tmuxName}`)
     a.addEventListener('click', (e) => e.stopPropagation())
-    return a
+    return withMenu(a)
   }
   if (!desktop || !options.openWorker) {
     const mark = document.createElement('span')
     mark.className = classes
     mark.textContent = label
     mark.title = `${state} — ${tmuxName}${claude && choice !== 'terminal' ? `\n${REMOTE_CONTROL_REQUIRED}` : ''}`
-    return mark
+    return withMenu(mark)
   }
   const openWorker = options.openWorker
   const btn = document.createElement('button')
@@ -150,5 +152,5 @@ export function terminalWorkerPill(
     e.stopPropagation()
     openWorker(tmuxName, card.shuttleHost)
   })
-  return btn
+  return withMenu(btn)
 }

@@ -1,29 +1,4 @@
-/**
- * The settings sheet: browser opening preferences and any host's operator files.
- *
- * ## Why an overlay and not a fourth tab
- *
- * The board's three tabs are windows onto the work — the Desk, the chronicle,
- * and the shelf of what the work produced. Configuration is not work,
- * and giving it a tab would say it was. It is a sheet you open, change
- * something in, and dismiss, which is what `⌘,` has meant for thirty years.
- *
- * ## Why a host picker is the first control
- *
- * Because the alternative is dangerous. The board became reachable from a
- * phone and from a second hub, and the whole point of putting settings on it
- * is to configure the machine you are not sitting at. Every read and every
- * write below the host bar is addressed to the host named in it, and a page
- * that could write one machine's configuration onto another without saying
- * which is a page that eventually will. So the host is chosen before anything
- * else, it is visible from every section, and it is the key on every request.
- *
- * ## Layout
- *
- * A rail of sections beside a pane, under a band naming the host. On a phone
- * the rail becomes a scrolling strip of chips and the whole sheet is the
- * screen — the same reframing the Desk makes at the same threshold.
- */
+/** Browser preferences and explicitly scoped worker-host configuration. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -45,14 +20,14 @@ import {
 
 type SectionId = 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host' | 'conversations'
 
-const SECTIONS: Array<{ id: SectionId; label: string }> = [
-  { id: 'conversations', label: 'Conversations' },
-  { id: 'stores', label: 'Stores' },
-  { id: 'projects', label: 'Projects' },
-  { id: 'agents', label: 'Agents' },
-  { id: 'fleet', label: 'Fleet' },
-  { id: 'hostClass', label: 'Host class' },
-  { id: 'host', label: 'Host' },
+const SECTIONS: Array<{ id: SectionId; label: string; description: string }> = [
+  { id: 'conversations', label: 'Conversations', description: 'Where Aloft and History take you' },
+  { id: 'stores', label: 'Notes & tasks', description: 'Folders containing the notes and tasks this host reads' },
+  { id: 'projects', label: 'Project folders', description: 'Where you can create and capture work' },
+  { id: 'agents', label: 'Worker agents', description: 'Models and their default effort' },
+  { id: 'fleet', label: 'Connected hosts', description: 'Other daemons and SSH routes' },
+  { id: 'hostClass', label: 'Access & listening', description: 'Who can reach this daemon' },
+  { id: 'host', label: 'Daemon status', description: 'Health, version and launch quarantine' },
 ]
 
 export interface SettingsDialogProps {
@@ -71,7 +46,7 @@ export function SettingsDialog({
   injectSettingsStyles()
 
   const [originKey, setOriginKey] = useState(hosts[0]?.origin ?? '')
-  const [section, setSection] = useState<SectionId>('stores')
+  const [section, setSection] = useState<SectionId>('conversations')
   const drafts = useRef(new Set<string>())
   const writes = useRef(new Set<string>())
   const [waitingForWrite, setWaitingForWrite] = useState(false)
@@ -143,7 +118,7 @@ export function SettingsDialog({
   // variable is overriding it — the one thing a section cannot discover from
   // its own data, and the one that decides whether editing it does anything.
   useEffect(() => {
-    if (!host) return
+    if (!host || section === 'conversations') return
     let cancelled = false
     // Deliberately NOT cleared first on a revision bump. The index carries the
     // environment-override flag a section uses to disable editing, and a blank
@@ -164,7 +139,7 @@ export function SettingsDialog({
     return () => {
       cancelled = true
     }
-  }, [shuttleBase, host?.origin, revision])
+  }, [shuttleBase, host?.origin, revision, section])
 
   // Undefined for a host the index is not about — including for the render
   // immediately after a switch.
@@ -175,7 +150,7 @@ export function SettingsDialog({
 
   const changed = (): void => setRevision((n) => n + 1)
 
-  if (!host) {
+  if (!host && section !== 'conversations') {
     return (
       <AppDialog open onOpenChange={(next) => !next && navigate(onClose)} title="Settings" eyebrow="shuttle">
         <div className="set-empty">
@@ -191,7 +166,7 @@ export function SettingsDialog({
       open
       onOpenChange={(next) => !next && navigate(onClose)}
       title="Settings"
-      eyebrow={`shuttle · ${host.label}`}
+      eyebrow="shuttle"
       wide
       flush
     >
@@ -199,7 +174,7 @@ export function SettingsDialog({
       <div className="set-page">
         <div className="set-hostbar">
           <span className="set-hostbar-label">{section === 'conversations' ? 'This browser' : 'Configuring'}</span>
-          {section !== 'conversations' && <select
+          {section !== 'conversations' && host && <select
             className="set-select"
             value={host.origin}
             onChange={(e) => {
@@ -216,10 +191,10 @@ export function SettingsDialog({
               </option>
             ))}
           </select>}
-          <span className={`set-hostbar-note${section !== 'conversations' && host.stale ? ' set-hostbar-stale' : ''}`}>
-            {section === 'conversations' ? 'opening preferences for this browser' : host.isLocal
+          <span className={`set-hostbar-note${section !== 'conversations' && host?.stale ? ' set-hostbar-stale' : ''}`}>
+            {section === 'conversations' ? 'saved automatically · applies across your fleet' : host?.isLocal
               ? 'the daemon serving this page'
-              : host.stale
+              : host?.stale
                 ? 'not answering this hub’s poll — reads and writes may time out'
                 : 'reached through this hub'}
           </span>
@@ -229,7 +204,7 @@ export function SettingsDialog({
         {waitingForWrite && <div className="set-discard" role="status">Saving changes… Wait for this write to finish before leaving.</div>}
         {pendingNavigation && (
           <div className="set-discard" role="alert">
-            <span>You have unsaved edits on {host.label}.</span>
+            <span>You have unsaved edits on {host?.label}.</span>
             <button type="button" className="set-btn set-btn-primary" onClick={() => setPendingNavigation(null)}>Keep editing</button>
             <button type="button" className="set-btn" onClick={() => {
               if (writes.current.size) { setWaitingForWrite(true); return }
@@ -241,16 +216,20 @@ export function SettingsDialog({
         )}
         <div className="set-cols">
           <nav className="set-rail" aria-label="Settings sections">
-            {SECTIONS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                className={`set-railbtn${s.id === section ? ' set-railbtn-active' : ''}`}
-                aria-current={s.id === section ? 'page' : undefined}
-                onClick={() => { if (s.id !== section) navigate(() => setSection(s.id)) }}
-              >
-                {s.label}
-              </button>
+            {['This browser', 'Worker hosts'].map((group, index) => (
+              <div className="set-railgroup" key={group}>
+                <div className="set-railgroup-label">{group}</div>
+                {SECTIONS.filter(s => index === 0 ? s.id === 'conversations' : s.id !== 'conversations').map(s => (
+                  <button key={s.id} type="button"
+                    className={`set-railbtn${s.id === section ? ' set-railbtn-active' : ''}`}
+                    aria-current={s.id === section ? 'page' : undefined}
+                    title={s.description}
+                    disabled={!host && index === 1}
+                    onClick={() => { if (s.id !== section) navigate(() => setSection(s.id)) }}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             ))}
           </nav>
 
@@ -258,9 +237,13 @@ export function SettingsDialog({
               outright rather than feeding new props to a component still
               holding the previous host's draft text. On this page that is a
               correctness rule, not a performance one. */}
-          <div className="set-pane" key={`${host.origin}:${section}`}>
+          <div className="set-pane" key={section === 'conversations' ? section : `${host?.origin}:${section}`}>
+            {section !== 'conversations' && <header className="set-pane-heading">
+              <h2>{SECTIONS.find(s => s.id === section)?.label}</h2>
+              <p>{SECTIONS.find(s => s.id === section)?.description}</p>
+            </header>}
             {section === 'conversations' && <ConversationsSection />}
-            {section === 'stores' && (
+            {host && section === 'stores' && (
               <PathListSection
                 shuttleBase={shuttleBase}
                 host={host}
@@ -269,7 +252,7 @@ export function SettingsDialog({
                 onChanged={changed}
               />
             )}
-            {section === 'projects' && (
+            {host && section === 'projects' && (
               <PathListSection
                 shuttleBase={shuttleBase}
                 host={host}
@@ -278,7 +261,7 @@ export function SettingsDialog({
                 onChanged={changed}
               />
             )}
-            {section === 'agents' && (
+            {host && section === 'agents' && (
               <AgentsSection
                 shuttleBase={shuttleBase}
                 host={host}
@@ -286,10 +269,10 @@ export function SettingsDialog({
                 onChanged={changed}
               />
             )}
-            {section === 'fleet' && (
+            {host && section === 'fleet' && (
               <FleetSection shuttleBase={shuttleBase} host={host} onChanged={changed} />
             )}
-            {section === 'hostClass' && (
+            {host && section === 'hostClass' && (
               <HostClassSection
                 shuttleBase={shuttleBase}
                 host={host}
@@ -297,7 +280,7 @@ export function SettingsDialog({
                 onChanged={changed}
               />
             )}
-            {section === 'host' && <HostSection shuttleBase={shuttleBase} host={host} />}
+            {host && section === 'host' && <HostSection shuttleBase={shuttleBase} host={host} />}
           </div>
         </div>
       </div>

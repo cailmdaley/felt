@@ -97,14 +97,17 @@ export function AgentsSection({
   return (
     <>
       <p className="set-lede">
-        What <span className="set-mono">shuttle.agent:</span> resolves to on {host.label} — the
-        fleet built into its felt binary, with its own{' '}
-        <span className="set-mono">agents.json</span> folded over the top by id. A user record
-        replaces a built-in one <em>wholesale</em>; set{' '}
-        <span className="set-mono">"builtins": "restrict"</span> in the file to drop the shipped
-        layer altogether. Run <span className="set-mono">shuttle agents init</span> on that
-        host to seed the file with a worked example of every field.
+        Agents available to run tasks on {host.label}. Set each model’s default thinking effort below;
+        a task can override it when you dispatch.
       </p>
+      <details className="set-opening-details" style={{ margin: '0 0 18px' }}>
+        <summary>Custom agents and registry files</summary>
+        <p>The built-in registry is combined with this host’s <span className="set-mono">agents.json</span>.
+          A custom record replaces the built-in record with the same id. Set{' '}
+          <span className="set-mono">"builtins": "restrict"</span> to use only custom records.</p>
+        <p>Run <span className="set-mono">shuttle agents init</span> on this host for an example file.
+          The file editor below lets you configure every field.</p>
+      </details>
 
       {error && <div className="set-error" role="alert">{error}</div>}
 
