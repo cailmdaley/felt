@@ -1,5 +1,7 @@
 # shuttle
 
+Start with [Set up Shuttle](setup.md) for a working board and first task, then [connect your machines](remotes.md) or [choose where conversations open](conversations.md).
+
 Two Go CLIs divide the work. `felt` stores fibers as Markdown and preserves
 unknown frontmatter as opaque data. `shuttle` interprets an optional `shuttle:`
 block, validates it, and owns orchestration. The optional Elixir daemon polls
@@ -40,7 +42,7 @@ greppable, version-controlled markdown file.
 1. **Author.** Write a fiber body that describes a *desired state*. Then run
    `shuttle install` to attach the block and arm the fiber.
 2. **Dispatch.** The daemon polls the fiber tree every 30 s by default. For each
-   eligible fiber it starts exactly one tmux session, running an agent CLI in
+   eligible fiber it starts a terminal worker in tmux or a Codex app conversation, using
    `project_dir`. `shuttle session-name <fiber>` prints the session name,
    `<slug-leaf>-<uid>-shuttle`.
 3. **Work.** The worker reads the constitution fresh from disk. It reads the
@@ -85,15 +87,14 @@ fresh past that, with its prompt naming the cut-off session.
 - **The daemon** — an optional Elixir/OTP release that bundles its own Erlang
   runtime. The shuttle CLI starts and supervises it. One process, bound to
   `127.0.0.1:4000`, polls, dispatches, and serves an HTTP API.
-- **tmux** — hosts the worker process and is the view onto it. Not optional.
+- **tmux** — hosts terminal workers and lets you attach to them. Codex app workers use their native App Server instead.
   tmux owns the worker process; shuttle owns only the watcher. So restarting the
   daemon leaves live workers running — the daemon re-adopts them on boot. A
   worker's liveness is its process: when tmux reports a session absent, the
   daemon checks the process table before believing it (see
   [Operating](../dev/operating.md#a-worker-tmux-cannot-see)).
 - **The board** — a TypeScript UI, served by the daemon at
-  `http://127.0.0.1:4000/`. A kanban desk plus four more views (Day, Week,
-  Chronicle, and a canvas of the files workers sent) over the same fibers, tmux
+  `http://127.0.0.1:4000/`. Three views (Desk, Chronicle, and a canvas of the files workers sent) over the same fibers, tmux
   liveness, and the activity, session and commit [ledgers](telemetry.md) for
   every host it can reach (the **fleet** — one or more daemons working
   together, aggregated at a hub).

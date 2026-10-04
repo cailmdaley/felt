@@ -3,7 +3,8 @@
 # to ~/.config/systemd/user/shuttle-daemon.service. Placeholders:
 # __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__, __SHUTTLE_STORES__,
 # __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, __SSH_AUTH_SOCK__, and
-# __TMUX_TMPDIR__. The unrendered template is not a valid unit.
+# __TMUX_TMPDIR__, __CODEX_SOCKET__, and __CODEX_HOME__.
+# The unrendered template is not a valid unit.
 #
 # __SHUTTLE_BIN__ is the absolute Go CLI path; __SHUTTLE_RELEASE__ is the Mix
 # release directory. There is no TCC on Linux, so the release may live
@@ -65,6 +66,9 @@ Environment="SSH_AUTH_SOCK=__SSH_AUTH_SOCK__"
 # finds them only if both agree — a cluster rc file that moves it off /tmp
 # must reach the daemon too. Dropped when empty: tmux's default applies.
 Environment="TMUX_TMPDIR=__TMUX_TMPDIR__"
+# Optional desktop endpoint and state directory, preserved on reinstall.
+Environment="SHUTTLE_CODEX_SOCKET=__CODEX_SOCKET__"
+Environment="CODEX_HOME=__CODEX_HOME__"
 # SHUTTLE_LOG names the same file StandardOutput/StandardError append to below
 # — all three render from the same placeholder. It exists so the daemon can
 # know where its own stdout lands, which systemd never tells it: Shuttle.LogRotator caps that

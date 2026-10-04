@@ -261,8 +261,7 @@ daemon carrying its own Erlang runtime and the board bundle, so this adds no
 toolchain to your machine — it wants `tmux` and the two Go CLIs you just
 installed, and nothing else.
 
-[Installing the shuttle daemon](shuttle/installation.md) covers the rest,
-including how to keep it running.
+[Set up Shuttle](shuttle/setup.md) covers keeping it running, launching a first task, and connecting your machines.
 
 **Keep reading.** [Fibers](concepts/fibers.md) covers the data model in full,
 and [Organizing](concepts/organizing.md) covers the judgment calls — when a

@@ -4,11 +4,15 @@ What you need to drive shuttle from a session: when a fiber dispatches, the verb
 
 ## When a fiber dispatches
 
-The daemon launches a worker for a fiber when all three hold:
+A fiber is eligible for a worker when these conditions hold:
 
 1. The fiber lives in a store the daemon polls — from `SHUTTLE_STORES`, else `~/.config/shuttle/stores.json`, with no implicit default. A cross-project store such as `~/loom` brings in the project stores symlinked under it.
 2. It carries a `shuttle:` block, written by `shuttle install` (oneshot), `repeat` (standing) or `pin` (pinned).
-3. Its `status` is `active`. Nothing else gates dispatch: `open` is a draft, `closed` is awaiting review or finished, and tags never gate anything.
+3. Its `status` is `active`: `open` is a draft, `closed` is awaiting review or finished, and tags never gate anything.
+4. Its `shuttle.host` exactly matches this daemon's host ID.
+5. The boot quarantine is released with `shuttle daemon release`, except for observed live workers and cron-due standing roles.
+
+Inspect eligible work before releasing: the release applies to the whole host.
 
 `shuttle.agent` chooses what runs, from `shuttle agents`; without one the fiber gets the registry default. `depends_on` only orders the board, folding a queued card under its head.
 
@@ -86,10 +90,12 @@ From the claim on, you are the worker, and the skill's loop and exits apply.
 
 ## Remote hosts
 
-Each host lists the others it can reach in `~/.config/shuttle/remotes.json`, each with an SSH target and tunnel port or a Tailscale `url`; `shuttle remotes list|add|rm|path` edits it.
-Reach runs one way: a hub that lists a spoke sees the spoke's cards and sessions, and the spoke sees nothing of the hub until its own file names it.
-To talk back from a spoke, register the hub with `shuttle remotes add <host> --url https://<host>.<tailnet>.ts.net`.
-On a host running userspace `tailscaled` that also needs an outbound proxy, which opens an unauthenticated gateway into the whole tailnet: set it up only on a single-user hub, never on a shared login node (the installation guide's "Tailscale as fleet transport" has the recipe).
+Same-user daemons exposed through Tailscale Serve are discovered automatically.
+`shuttle remotes list` shows discovered and configured peers; `~/.config/shuttle/remotes.json` supplies SSH routes, explicit URLs, and overrides.
+SSH routes need a configured and running tunnel.
+Verify reach in both directions when workers need to talk back; one configured route does not imply its reverse.
+A userspace Tailscale host uses the private LocalAPI dialing path; do not introduce an unauthenticated outbound proxy on a shared machine.
+See [setup.md](setup.md) and the public [remote setup guide](https://cailmdaley.github.io/felt/shuttle/remotes/) for the supported recipes.
 
 From a hub, `shuttle reopen <fiber> --message "<directive>"` starts a worker on the fiber's own host, with the directive as its From User; the other lifecycle verbs reach remote fibers the same way.
 

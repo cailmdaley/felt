@@ -4,7 +4,7 @@ description: >
   Use when Shuttle dispatches, resumes, or captures you as a worker; when authoring a
   constitution or asked to "shuttle" work to a named agent; and for operating Shuttle — its
   board, agents, dispatch, roles and collaborators. Also covers messaging other sessions across
-  hosts and harnesses, and sending files to the human.
+  hosts and harnesses, and sending files to the human. Use for installing or setting up Shuttle, connecting remotes, and configuring how conversations open.
 ---
 
 # shuttle
@@ -119,6 +119,7 @@ To put a finished file in front of the human, use your harness's own file tool (
 
 | When | Read |
 |---|---|
+| Setting up Shuttle, adding a remote, or choosing terminal/desktop/browser opening | [references/setup.md](references/setup.md) |
 | Capturing a new idea into a fiber | [references/capture.md](references/capture.md) |
 | A meeting (`Meeting mode`, captured or joined to your constitution), a transcript to write up, or a predecessor's session to read | [references/meeting.md](references/meeting.md) |
 | Writing a constitution — the spec craft, install, drafts vs dispatch, agent choice, human gates | [references/authoring.md](references/authoring.md) |

@@ -4,7 +4,8 @@
   Shuttle's launchd LaunchAgent is rendered by `shuttle daemon install`.
   Placeholders: __LABEL__, __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__,
   __SHUTTLE_STORES__, __SHUTTLE_STORES_FILE__, __PATH__, __PORT__,
-  __SSH_AUTH_SOCK__, and __TMUX_TMPDIR__. The unrendered template is not a valid plist.
+  __SSH_AUTH_SOCK__, __TMUX_TMPDIR__, __CODEX_SOCKET__, and __CODEX_HOME__.
+  The unrendered template is not a valid plist.
 
   __SHUTTLE_BIN__ is the absolute path to the Go CLI. __SHUTTLE_RELEASE__ is
   the Mix release directory. Launchd starts the Go CLI in its forced start
@@ -87,6 +88,11 @@
         -->
         <key>TMUX_TMPDIR</key>
         <string>__TMUX_TMPDIR__</string>
+        <!-- Optional desktop endpoint and state directory, preserved on reinstall. -->
+        <key>SHUTTLE_CODEX_SOCKET</key>
+        <string>__CODEX_SOCKET__</string>
+        <key>CODEX_HOME</key>
+        <string>__CODEX_HOME__</string>
         <!--
           SHUTTLE_LOG names the very file StandardOutPath/StandardErrorPath
           below redirect to — all three render from the same placeholder. It

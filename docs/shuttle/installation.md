@@ -1,4 +1,8 @@
-# Installing felt, shuttle, and the daemon
+# Installation reference
+
+For a guided first installation, start with [Set up Shuttle](setup.md).
+[Connect your machines](remotes.md) covers the multi-host path, and [Opening conversations](conversations.md) covers terminals, apps, and Remote Control.
+This page carries the detailed service and configuration reference.
 
 The two Go CLIs are installed together: `felt` manages fiber data, and `shuttle`
 owns Shuttle configuration and orchestration. The Elixir daemon and board are
@@ -9,21 +13,21 @@ optional; choose how to add them.
   its Erlang runtime and board bundle. No toolchain or checkout is needed.
 - **Build from a checkout.** `scripts/bootstrap.sh` builds both CLIs and the
   daemon from source, places the board bundle, and installs the keep-alive.
-  This is the fleet path — what the deploy script updates, and what you want if
-  you are changing daemon code.
+  This is what the source deploy script updates; use it when changing daemon code.
+  Prebuilt releases also support multi-host fleets.
 
-The daemon needs `tmux` and both Go CLIs at runtime. Workers run in tmux
-sessions; the daemon shells out to `felt` for fiber content and generic writes,
+The daemon needs `tmux` and both Go CLIs at runtime. Terminal workers run in tmux
+sessions; Codex app workers use a native App Server.
+The daemon shells out to `felt` for fiber content and generic writes,
 and to `shuttle` for resolved reads and Shuttle-owned operations.
 
 !!! note "Platform and operating modes"
     Linux and macOS support single-host use — the daemon, board, and workers on
     one machine, with a keep-alive supervisor that restarts the daemon if it
     crashes. Multi-host tunnel management (`shuttle tunnels`) installs
-    launchd jobs on macOS and systemd user units on Linux. Multi-host operation
-    needs SSH access and configured remote daemons. Windows is unsupported.
+    launchd jobs on macOS and systemd user units on Linux. Multi-host operation uses Tailscale discovery or configured SSH tunnels. Windows is unsupported.
 
-This page gets you from nothing to a worker running on the board. The
+The [setup guide](setup.md) gets you from nothing to a worker running on the board. The
 [Keep-alive](#keep-alive) internals, store/agent/remote configuration, and the
 event stream come after — read them once the daemon is up and you want to
 understand what it's doing.
@@ -36,7 +40,7 @@ At runtime, whichever path you take:
 | --- | --- | --- |
 | `felt` | yes | The daemon shells out to felt for fiber content and generic writes. |
 | `shuttle` | yes | The daemon shells out to shuttle for resolved reads, Shuttle operations, and its CLI contract. |
-| `tmux` | yes | Every worker runs in a tmux session. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
+| `tmux` | yes | Terminal workers run in tmux sessions. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
 | `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
 
 Building from a checkout adds a toolchain, none of which the fetched daemon
@@ -123,9 +127,7 @@ alive; it cannot build one, and it cannot deploy to a fleet.
 ### Set up a supervised daemon on macOS
 
 This is the whole sequence on a Mac — from nothing to a daemon that starts at
-login and restarts itself when it dies. No checkout, no toolchain. Run the steps
-in order — step 3 refuses to install anything without the store you make in
-step 2.
+login and restarts itself when it dies. No checkout, no toolchain. Run the steps in order, or start the service first and register your store through Settings.
 
 **1. Install the CLI and the daemon.**
 
@@ -138,9 +140,8 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
 of `curl` it sets the wrong process's environment, and you get both Go CLIs
 but no daemon, reported as success.
 
-A fresh Mac ships no `tmux`, and the installer says so when it finds none. Every
-worker runs inside a tmux session, so a daemon without it serves a board and
-dispatches nothing:
+A fresh Mac ships no `tmux`, and the installer says so when it finds none. Terminal
+workers need tmux:
 
 ```bash
 brew install tmux
@@ -148,16 +149,15 @@ brew install tmux
 
 **2. Create a felt store — and keep it out of `~/Documents`.**
 
-The daemon polls felt stores, and it assumes none — it polls exactly the ones
-you name in step 3, which is why the store comes first. Make one somewhere
+The daemon polls exactly the felt stores you register and assumes none. Make one somewhere
 launchd is allowed to read:
 
 ```bash
 mkdir -p ~/notes && cd ~/notes && felt init
 ```
 
-Seed the stores registry before installing the supervisor; the installer
-refuses an empty effective store list:
+For a fresh installation, you can seed the stores registry before installing the supervisor.
+If it already exists, add to its list rather than replacing it; alternatively use Settings → Stores after startup:
 
 ```bash
 mkdir -p ~/.config/shuttle
@@ -178,7 +178,7 @@ printf '{"version":1,"felt_stores":["%s"]}\n' "$HOME/notes" \
     it prints.
 
 !!! warning "macOS: start your tmux server from a terminal, not the daemon"
-    Every worker runs inside tmux, and macOS charges file access to a process
+    Terminal workers run inside tmux, and macOS charges file access to a process
     tree's *responsible process* — for anything launchd spawns, that's the
     daemon's own executable, not the worker or its shells. If no tmux server
     is running when the daemon tries to dispatch, forking one itself would
@@ -335,8 +335,9 @@ started in the foreground logs to your terminal instead.
 
 Open <http://127.0.0.1:4000/> in your browser for [the board](board.md).
 
-The daemon binds `127.0.0.1:4000` and nothing else. It stays loopback-only by
-construction, but it carries no authentication layer. Treat it as a trusted
+A single-user host defaults to `127.0.0.1:4000`; shared and exposed hosts default to a protected Unix socket.
+See [Host classes and trust boundaries](#host-classes-and-trust-boundaries).
+The API carries no authentication layer. Treat it as a trusted
 single-user admin surface: anyone who can reach it through an SSH forward,
 Tailscale Serve, or another proxy can read and edit fibers, control workers,
 and launch agents. Keep any forwarding limited to people and networks you
@@ -346,14 +347,8 @@ trust; do not publish the port to the open internet.
 
 With the daemon up, here is the fastest path from nothing to a worker running.
 
-Register the current directory as a felt store, if `SHUTTLE_STORES` does not
-already cover it:
-
-```bash
-curl -s -X POST http://127.0.0.1:4000/api/v1/felt-stores \
-  -H 'Content-Type: application/json' \
-  -d '{"felt_stores": ["'"$PWD"'"]}'
-```
+Register the directory containing `.felt/` in **Settings → Stores**, preserving existing entries.
+If `SHUTTLE_STORES` pins the list, follow [Configuring stores](#configuring-stores) to change it.
 
 Add a fiber and give it a `constitution` tag — tags gate nothing, but they
 make the fiber findable as one:
@@ -371,17 +366,19 @@ Install the `shuttle:` block. This is what turns the fiber into something the
 daemon will pick up:
 
 ```bash
-shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-opus
+shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-opus --surface cli
+shuttle daemon release
 ```
 
+Inspect other eligible tasks before releasing: the release applies to the entire host.
 Open <http://127.0.0.1:4000/> — the fiber shows up as a card, armed. The
 daemon polls every 30 seconds by default, so the card moves to in-flight on
 its own; `shuttle dispatch pipeline/first-pass` skips the wait. `shuttle ps`
 lists the live tmux session, and `shuttle attach pipeline/first-pass` drops
 you into it.
 
-When the worker hands off, the fiber's `outcome` and `## Status` rewrite in
-place and the card lands in Awaiting review.
+When the worker closes, the fiber's `outcome` and `## Status` describe the result, and the card lands in Awaiting review.
+A handoff leaves the task active for another worker to continue.
 
 !!! note "First dispatch not starting?"
     Every restart arms a boot quarantine that holds new work until you run
@@ -426,6 +423,8 @@ The install fixes these values into the job:
 | — | `SHUTTLE_STORES_FILE` | `~/.config/shuttle/stores.json` |
 | `--path <PATH>` | `AGENT_PATH` | the login shell's `PATH`, captured at install time |
 | `--tmux-tmpdir <dir>` | `AGENT_TMUX_TMPDIR` | the login shell's `TMUX_TMPDIR`, captured at install time; omitted when empty |
+| `--codex-socket <path>` | `SHUTTLE_CODEX_SOCKET` | the installed supervisor's value, else native Codex default; `--codex-socket=` clears it |
+| no flag | `CODEX_HOME` | the installed supervisor's value, else Codex's default home |
 | `--log <file>` | `AGENT_LOG` | `~/Library/Logs/shuttle.log` (macOS), `~/.shuttle/shuttle.log` (Linux) |
 | `--ssh-auth-sock <path>` | `AGENT_SSH_AUTH_SOCK` | `~/.ssh/agent.sock` (macOS), empty (Linux) |
 | `--label <name>` | `AGENT_LABEL` | `io.shuttle.daemon` |
@@ -657,17 +656,8 @@ respawn it:
 lsof -ti:4000 -sTCP:LISTEN | xargs kill
 ```
 
-!!! warning "Remote revival needs `~/.shuttle/repo` on a fetched host"
-    A hub revives a dead remote by running `~/.local/bin/shuttle-launch` over
-    SSH with no environment. The script then resolves the daemon's directory
-    from `$SHUTTLE_DIR`, else the state file `~/.shuttle/repo`, else its own
-    parent directory — and only `scripts/bootstrap.sh` writes that state file. After a
-    fetched install, write it yourself or revival exits without starting
-    anything:
-
-    ```bash
-    mkdir -p ~/.shuttle && echo ~/.local/share/shuttle > ~/.shuttle/repo
-    ```
+A fetched daemon installation writes `~/.shuttle/repo` with its release directory, which lets `shuttle-launch` locate it during remote revival.
+If you move the release manually, update that path too.
 
 ## Configuring stores
 
@@ -677,12 +667,10 @@ The daemon polls felt stores. It resolves them in this order:
 2. `~/.config/shuttle/stores.json` — the persisted registry (override the path with
    `SHUTTLE_STORES_FILE`).
 
-**shuttle assumes no default store.** An unset variable and an absent registry
+**Shuttle assumes no default store.** An unset variable and an absent registry
 resolve to an empty list. The daemon then polls nothing: it boots, binds
-`:4000`, serves an empty board, and dispatches nothing. `shuttle daemon install`
-refuses an empty effective store list. For the first store, create
-`~/.config/shuttle/stores.json` before installing the supervisor; add further
-stores in **Settings → Stores** once the daemon is running.
+`:4000`, serves an empty board, and dispatches nothing. `shuttle daemon install` warns when the registry is absent and still starts the service.
+Register your first store in **Settings → Stores**, or create `~/.config/shuttle/stores.json` before startup.
 
 ### Switching a supervisor to the registry
 
@@ -926,22 +914,24 @@ instead of failing.
 
 ## Tailscale as fleet transport
 
-`shuttle remotes` reaches a remote daemon over an SSH tunnel by default —
-see [Configuring remotes](#configuring-remotes). Tailscale is an alternative
-transport for the same registry: a remote entry names a Tailscale URL instead
+Tailscale discovery and explicit SSH tunnels are supported fleet transports —
+see [Connect your machines](remotes.md) for a first setup.
+For a configured Tailscale remote, a remote entry names a Tailscale URL instead
 of an SSH port, and the composite board reaches it over the tailnet with no
 tunnel process, no `autossh`, and no SSH key or MFA-cert juggling to keep
 alive. It earns its place on two hosts a tunnel struggles with: a hub behind a
-laptop that closes its lid (a tunnel dies with the SSH session; a tailnet
-membership does not), and a cluster login node behind 2FA whose only
+laptop that closes its lid (connectivity pauses while the laptop sleeps, but its tailnet membership persists), and a cluster login node behind 2FA whose only
 "always-on" SSH story today is `--multiplex`'s `ControlMaster` babysitting.
-Tailscale replaces that whole apparatus with one join per host.
+Tailscale avoids maintaining a separate SSH tunnel for API access.
+It does not keep a sleeping host awake or replace institution-required authentication.
 
 **Read the policy caveat below before you join a node.**
 
 ### The unprivileged recipe
 
-Nothing here needs root or a TUN device — every host in this recipe runs
+For Linux hosts where policy permits a user-owned Tailscale process, this recipe needs no root or TUN device.
+Use a standard system Tailscale installation on a personal desktop when available.
+Every host in this advanced recipe runs
 `tailscaled` in **userspace-networking** mode, which is what makes it viable
 on a login node where you cannot install a kernel module or a system service:
 
@@ -950,7 +940,9 @@ on a login node where you cannot install a kernel module or a system service:
    needed).
 2. Keep `tailscaled` alive under tmux with `bin/tailscaled-launch`
    (`scripts/bootstrap.sh` installs it to `~/.local/bin` next to
-   `shuttle-launch`, whether or not you use it): it starts `tailscaled
+   `shuttle-launch`, whether or not you use it).
+   Fetched releases do not include this helper: obtain `bin/tailscaled-launch` from the matching source tag and install it explicitly, or arrange your own supervisor.
+   It starts `tailscaled
    --tun=userspace-networking` against a per-host state directory and
    respawns it if it dies, the same role `shuttle-launch` plays for the
    daemon.
@@ -959,12 +951,13 @@ on a login node where you cannot install a kernel module or a system service:
    ```bash
    export TS_SOCKET=$HOME/.local/state/tailscale/tailscaled.sock
    tailscale up          # one-time device auth
-   tailscale serve --bg 4000    # https://<node>.<tailnet>.ts.net → 127.0.0.1:4000
+   # Only when this host has a permitted TCP daemon listener on port 4000:
+   tailscale serve --bg 4000
    ```
    `tailscale up` prints a login URL the first time; approve it from any
    already-authenticated device or browser. `serve --bg` is what actually
-   exposes the daemon — the target is always the TCP loopback port, on every
-   host class: an unprivileged userspace `tailscaled` refuses to serve a
+   exposes the daemon when a TCP listener is configured.
+   A shared host defaults to a Unix socket, so stop here and choose the [shared-host route](remotes.md#shared-servers-and-clusters) unless you have deliberately configured and assessed a permitted TCP listener: an unprivileged userspace `tailscaled` refuses to serve a
    Unix socket ("must be root, or be an operator and able to run sudo
    tailscale to serve a path or Unix socket"), and the macOS system
    `tailscaled` cannot reach a filesystem socket at all. See [Host classes

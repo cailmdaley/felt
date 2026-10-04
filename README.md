@@ -20,7 +20,7 @@ everything, so the store diffs and versions like the rest of your repo.
 
 **shuttle** is a separate Go CLI and optional daemon built on felt. felt treats a `shuttle:`
 frontmatter block as opaque data; shuttle interprets it as a "constitution" — a description of a
-desired end state, not a list of steps. The daemon launches one tmux worker per active
+desired end state, not a list of steps. The daemon launches a terminal worker in tmux or a Codex app conversation per eligible active
 constitution; the worker drives toward that state, rewrites the fiber's `outcome` and `## Status`
 on exit, and the next worker lands warm. A localhost status board shows the fleet and lets you
 steer it.
@@ -81,7 +81,9 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | S
 
 Put `SHUTTLE_DAEMON=1` after the pipe, on `sh`, so the installer sees it. The daemon release
 carries its own Erlang runtime and board bundle; running it needs tmux plus both Go CLIs on
-`PATH`. See [Installation](https://cailmdaley.github.io/felt/shuttle/installation/).
+`PATH`. Follow [Set up Shuttle](https://cailmdaley.github.io/felt/shuttle/setup/) for a first task,
+[connect your machines](https://cailmdaley.github.io/felt/shuttle/remotes/) for a fleet, and
+[choose where conversations open](https://cailmdaley.github.io/felt/shuttle/conversations/) for terminal, desktop, or browser use.
 
 ## Quickstart
 

@@ -53,7 +53,11 @@ nav:
   - Getting Started: getting-started.md
   - shuttle orchestration:
       - Overview: shuttle/index.md
-      - Installation: shuttle/installation.md
+      - Set up Shuttle: shuttle/setup.md
+      - Connect your machines: shuttle/remotes.md
+      - Opening conversations: shuttle/conversations.md
+      - Codex desktop: shuttle/codex-desktop.md
+      - Installation reference: shuttle/installation.md
       - Constitutions: shuttle/constitutions.md
       - Lifecycle: shuttle/lifecycle.md
       - The board: shuttle/board.md

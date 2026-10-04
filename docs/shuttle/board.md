@@ -110,16 +110,14 @@ says why. While a send is in flight every verb waits and the thumbnails are
 frozen. A paste that carries text stays a text paste, even when the copying
 app put an image beside it.
 
-### Attach
+<a id="attach"></a>
+### Open a worker
 
-Attach opens the worker's tmux session in kitty specifically — a non-kitty user
-gets nothing from the button.
-
-That is terminal lock-in, not platform lock-in: it drives kitty's
-remote-control CLI, and kitty runs on Linux and macOS alike. The only
-mac-specific part is the `osascript` call that raises the kitty window, and
-that is already a no-op elsewhere. `shuttle attach <fiber>` reaches
-any worker on any platform.
+The Aloft, Waiting, and Needs you controls open the worker's conversation.
+For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
+Claude sessions with Remote Control can open in the browser or Claude app, using your browser's preference in Settings.
+Codex app workers use their native desktop link, with remote-access guidance on mobile.
+See [Opening conversations](conversations.md) for the choices, prerequisites, and quick-access terminal setup.
 
 ## Chronicle — where the time went
 
@@ -214,8 +212,8 @@ same with a pointer, pinned to the right edge on a phone so it never scrolls
 out of reach. `Esc` closes it. It is an overlay rather than a fourth tab — the
 three tabs are windows onto the work, and configuration is not work.
 
-**A host picker is the first control, and everything below it is addressed to
-that host.** The board is reachable from a phone and from a second hub, so the
+The conversation-opening preference belongs to this browser.
+The host picker selects which machine the remaining configuration addresses. The board is reachable from a phone and from a second hub, so the
 machine you are configuring is usually not the one you are sitting at; every
 read and write on the sheet carries the chosen host's origin and is
 owner-routed to the daemon that owns the file. Configuring a remote needs that
