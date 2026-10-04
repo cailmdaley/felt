@@ -52,22 +52,22 @@ const box = (x, y, w, h) => ({ x, y: y + 25, w, h })
 const scenes = [
   { card: true, duration: 4.5, title: 'The Shuttle board',
     lines: ['A short tour of the Desk and Chronicle', 'Screenshots of the real board, over a fictional example'] },
-  { image: 'shuttle-board-example.png', duration: 7, from: FULL, to: at(40, 20, 1360),
+  { image: 'shuttle-board-example.png', duration: 8, from: FULL, to: at(40, 20, 1360),
     captions: [
-      'The Desk shows every task as a card, in three lanes.',
-      'This example plans a small workshop. Its tasks and data are fictional.',
+      'The Desk groups tasks by what needs attention.',
+      'Here, the tasks belong to a fictional workshop.',
     ] },
   { image: 'shuttle-board-example.png', duration: 5.5, from: at(0, 40, 760), to: at(0, 50, 700),
     rings: [box(21, 108, 447, 214)],
     captions: ['Drafts: tasks written down, but not started.'] },
-  { image: 'shuttle-board-example.png', duration: 10, from: at(420, 50, 640), to: at(470, 110, 500),
+  { image: 'shuttle-board-example.png', duration: 14.5, from: at(420, 50, 640), to: at(470, 110, 500),
     rings: [box(497, 108, 446, 120)],
     captions: [
       'In flight: an agent, called a worker, is running on each of these.',
       'The card names the task and the result it should reach.',
       'Aloft marks a running worker. Click it to open that worker’s conversation.',
     ] },
-  { image: 'shuttle-board-example.png', duration: 10, from: at(840, 50, 600), to: at(940, 95, 500),
+  { image: 'shuttle-board-example.png', duration: 14.5, from: at(840, 50, 600), to: at(940, 95, 500),
     rings: [box(973, 108, 446, 120)],
     captions: [
       'Awaiting review: a worker finished and recorded an outcome.',

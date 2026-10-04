@@ -2,7 +2,7 @@
 
 A silent, under-a-minute tour of the Shuttle board's Desk and Chronicle.
 It walks one fictional project — planning a small workshop — through the
-three Desk lanes: tasks not yet started, tasks a worker is running, and
+three Desk lanes shown in this example: tasks not yet started, tasks a worker is running, and
 finished work waiting for you to review.
 
 <video controls preload="metadata" playsinline width="100%"
@@ -25,18 +25,18 @@ are part of the picture, so the video has no sound.
 | Time | On screen |
 |---|---|
 | 0:00 | **The Shuttle board — A short tour of the Desk and Chronicle — Screenshots of the real board, over a fictional example** |
-| 0:04 | The Desk shows every task as a card, in three lanes. |
-| 0:08 | This example plans a small workshop. Its tasks and data are fictional. |
-| 0:11 | Drafts: tasks written down, but not started. |
-| 0:17 | In flight: an agent, called a worker, is running on each of these. |
-| 0:20 | The card names the task and the result it should reach. |
-| 0:23 | Aloft marks a running worker. Click it to open that worker’s conversation. |
-| 0:27 | Awaiting review: a worker finished and recorded an outcome. |
-| 0:30 | This outcome says what still needs confirming before the workshop. |
-| 0:33 | Temper accepts the result. Discard sets it aside. |
-| 0:37 | Chronicle, the second tab, lays each task along the calendar. |
-| 0:41 | Marks show the days its workers were busy, through today. |
-| 0:45 | **Set up Shuttle — Start with one machine and one small task — cailmdaley.github.io/felt/shuttle/setup/** |
+| 0:04 | The Desk groups tasks by what needs attention. |
+| 0:08 | Here, the tasks belong to a fictional workshop. |
+| 0:12 | Drafts: tasks written down, but not started. |
+| 0:18 | In flight: an agent, called a worker, is running on each of these. |
+| 0:23 | The card names the task and the result it should reach. |
+| 0:27 | Aloft marks a running worker. Click it to open that worker’s conversation. |
+| 0:32 | Awaiting review: a worker finished and recorded an outcome. |
+| 0:37 | This outcome says what still needs confirming before the workshop. |
+| 0:42 | Temper accepts the result. Discard sets it aside. |
+| 0:47 | Chronicle, the second tab, lays each task along the calendar. |
+| 0:51 | Marks show the days its workers were busy, through today. |
+| 0:55 | **Set up Shuttle — Start with one machine and one small task — cailmdaley.github.io/felt/shuttle/setup/** |
 <!-- tour-transcript:end -->
 
 ## Read more

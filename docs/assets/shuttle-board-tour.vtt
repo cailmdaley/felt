@@ -7,51 +7,51 @@ A short tour of the Desk and Chronicle
 Screenshots of the real board, over a fictional example
 
 2
-00:00:04.900 --> 00:00:08.000
-The Desk shows every task as a card, in three lanes.
+00:00:04.900 --> 00:00:08.500
+The Desk groups tasks by what needs attention.
 
 3
-00:00:08.100 --> 00:00:11.200
-This example plans a small workshop. Its tasks and data are fictional.
+00:00:08.600 --> 00:00:12.200
+Here, the tasks belong to a fictional workshop.
 
 4
-00:00:11.900 --> 00:00:16.700
+00:00:12.900 --> 00:00:17.700
 Drafts: tasks written down, but not started.
 
 5
-00:00:17.400 --> 00:00:20.430
+00:00:18.400 --> 00:00:22.930
 In flight: an agent, called a worker, is running on each of these.
 
 6
-00:00:20.530 --> 00:00:23.570
+00:00:23.030 --> 00:00:27.570
 The card names the task and the result it should reach.
 
 7
-00:00:23.670 --> 00:00:26.700
+00:00:27.670 --> 00:00:32.200
 Aloft marks a running worker. Click it to open that worker’s conversation.
 
 8
-00:00:27.400 --> 00:00:30.430
+00:00:32.900 --> 00:00:37.430
 Awaiting review: a worker finished and recorded an outcome.
 
 9
-00:00:30.530 --> 00:00:33.570
+00:00:37.530 --> 00:00:42.070
 This outcome says what still needs confirming before the workshop.
 
 10
-00:00:33.670 --> 00:00:36.700
+00:00:42.170 --> 00:00:46.700
 Temper accepts the result. Discard sets it aside.
 
 11
-00:00:37.400 --> 00:00:41.000
+00:00:47.400 --> 00:00:51.000
 Chronicle, the second tab, lays each task along the calendar.
 
 12
-00:00:41.100 --> 00:00:44.700
+00:00:51.100 --> 00:00:54.700
 Marks show the days its workers were busy, through today.
 
 13
-00:00:45.000 --> 00:00:49.500
+00:00:55.000 --> 00:00:59.500
 Set up Shuttle
 Start with one machine and one small task
 cailmdaley.github.io/felt/shuttle/setup/
