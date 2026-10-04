@@ -218,6 +218,7 @@ function buildHtmlViewer(
 
   const veil = loadingVeil(fullPath, options)
   let disposed = false
+  let failed = false
 
   let iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
@@ -232,6 +233,7 @@ function buildHtmlViewer(
   initialFrame.addEventListener('load', () => {
     if (disposed || !hasContent || initialLoadHandled || iframe !== initialFrame) return
     initialLoadHandled = true
+    failed = false
     veil.remove()
     prepareIframeExternalLinks(initialFrame)
     onFrameLoad?.(initialFrame, false)
@@ -278,6 +280,7 @@ function buildHtmlViewer(
           initialLoadHandled = true
           veil.remove()
         }
+        failed = false
         onFrameLoad?.(iframe, !firstVisibleContent)
         options.onState?.({ status: 'ready' })
       })
@@ -286,10 +289,19 @@ function buildHtmlViewer(
     },
     (error) => {
       if (disposed) return
+      failed = true
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
       options.onState?.({ status: 'error', error, hasContent: initialLoadHandled })
     },
-    { active: options.active, loadOnce: options.active === false },
+    {
+      active: options.active, loadOnce: options.active === false,
+      onRecover: () => {
+        if (!disposed && failed && initialLoadHandled && !stagingFrame) {
+          failed = false
+          options.onState?.({ status: 'ready' })
+        }
+      },
+    },
   )
   liveViewSubscriptions.set(wrap, stop)
   viewerDisposers.set(wrap, () => { disposed = true; generation++; stagingFrame?.remove() })
@@ -333,6 +345,7 @@ function buildTextViewer(
   wrap.append(pane, veil)
 
   let hasContent = false
+  let failed = false
   const stop = watchLiveFile(
     src,
     (text) => {
@@ -349,13 +362,23 @@ function buildTextViewer(
       veil.remove()
       if (!hasContent) onReady?.(wrap)
       hasContent = true
+      failed = false
       options.onState?.({ status: 'ready' })
     },
     (error) => {
+      failed = true
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
       options.onState?.({ status: 'error', error, hasContent })
     },
-    { active: options.active, loadOnce: options.active === false },
+    {
+      active: options.active, loadOnce: options.active === false,
+      onRecover: () => {
+        if (failed && hasContent) {
+          failed = false
+          options.onState?.({ status: 'ready' })
+        }
+      },
+    },
   )
   liveViewSubscriptions.set(wrap, stop)
   return wrap

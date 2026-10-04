@@ -2,10 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer } from './FileViewerPanel.js'
 
-const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), stop: vi.fn() }))
-vi.mock('./LiveFileRefresh.js', () => ({ watchLiveFile: vi.fn((_url, content, error) => {
+const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), recover: null as null | (() => void), stop: vi.fn() }))
+vi.mock('./LiveFileRefresh.js', () => ({ watchLiveFile: vi.fn((_url, content, error, options) => {
   watch.content = content
   watch.error = error
+  watch.recover = options?.onRecover
   return Object.assign(watch.stop, { suspend: vi.fn(), resume: vi.fn(async () => {}) })
 }) }))
 beforeEach(() => {
@@ -57,6 +58,22 @@ describe('workspace file viewer hooks', () => {
     staging.dispatchEvent(new Event('load'))
     expect(onState).not.toHaveBeenCalled()
     expect(watch.stop).toHaveBeenCalledOnce()
+  })
+
+  it('waits for changed recovered HTML to load before declaring it ready', () => {
+    const onState = vi.fn()
+    const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onState })
+    document.body.append(viewer)
+    watch.content!('First')
+    viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
+    watch.error!(new Error('offline'))
+    watch.content!('Changed')
+    watch.recover!()
+    expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error' }))
+    const staged = viewer.querySelectorAll('iframe')[1]
+    staged.contentWindow!.scrollTo = vi.fn()
+    staged.dispatchEvent(new Event('load'))
+    expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
   })
 
   it('honours the workspace kind for text and HTML suffixes outside the shared suffix sets', () => {

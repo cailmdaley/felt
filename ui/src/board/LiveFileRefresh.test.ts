@@ -47,6 +47,30 @@ async function settle(): Promise<void> {
 afterEach(() => vi.restoreAllMocks())
 
 describe('LiveFileRefresh', () => {
+  it.each([304, 200])('signals recovery after an error and unchanged %s without redelivering bytes', async (status) => {
+    const etag = 'W/"sha256-' + 'a'.repeat(64) + '"'
+    const fetchFile = vi.fn().mockResolvedValueOnce(response(200, 'same', { etag }))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue(response(status, status === 200 ? 'same' : '', { etag }))
+    const h = harness(fetchFile as typeof fetch)
+    const content = vi.fn(), error = vi.fn(), recover = vi.fn()
+    const stop = h.poller.watch('/same', content, error, { onRecover: recover })
+    await settle()
+    expect(recover).not.toHaveBeenCalled()
+    h.setNow(LIVE_FILE_POLL_INTERVAL_MS)
+    await h.poller.pollNow()
+    expect(error).toHaveBeenCalledOnce()
+    h.setNow(3 * LIVE_FILE_POLL_INTERVAL_MS)
+    await h.poller.pollNow()
+    expect(recover).toHaveBeenCalledOnce()
+    expect(content).toHaveBeenCalledOnce()
+    expect(fetchFile).toHaveBeenNthCalledWith(3, '/same', expect.objectContaining({ headers: { 'If-None-Match': etag } }))
+    h.setNow(4 * LIVE_FILE_POLL_INTERVAL_MS)
+    await h.poller.pollNow()
+    expect(recover).toHaveBeenCalledOnce()
+    stop()
+  })
+
   it('loads an inactive preview once, even while slow, without joining periodic polling', async () => {
     let finish!: (value: Response) => void
     const fetchFile = vi.fn(() => new Promise<Response>((resolve) => { finish = resolve }))

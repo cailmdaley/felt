@@ -18,6 +18,8 @@ const MAX_ERROR_BACKOFF_MS = 60_000
 type FileSubscriber = {
   onContent: (content: string) => void
   onError?: (error: unknown) => void
+  onRecover?: () => void
+  failed: boolean
   active: boolean
   initializing: boolean
   fingerprint: string | null
@@ -45,6 +47,8 @@ export interface LiveFileWatchOptions {
   active?: boolean
   /** An inactive preview may read once without joining periodic polling. */
   loadOnce?: boolean
+  /** A successful read after an error, even when the bytes are unchanged. */
+  onRecover?: () => void
 }
 
 export interface LiveFileRefreshOptions {
@@ -104,7 +108,7 @@ export class LiveFileRefresh {
     }
 
     const subscriber: FileSubscriber = {
-      onContent, onError, active: options.active !== false,
+      onContent, onError, onRecover: options.onRecover, failed: false, active: options.active !== false,
       initializing: options.active === false && options.loadOnce === true, fingerprint: null,
     }
     file.subscribers.add(subscriber)
@@ -235,6 +239,9 @@ export class LiveFileRefresh {
           file.etag = response.headers.get('etag') ?? file.etag
           file.failures = 0
           file.nextPollAt = this.now() + LIVE_FILE_POLL_INTERVAL_MS
+          for (const subscriber of file.subscribers) {
+            if (subscriber.active || subscriber.initializing) this.recover(subscriber)
+          }
           return
         }
         if (!response.ok) throw new Error(`file request failed: ${response.status}`)
@@ -245,19 +252,24 @@ export class LiveFileRefresh {
         file.etag = response.headers.get('etag')
         file.failures = 0
         file.nextPollAt = this.now() + LIVE_FILE_POLL_INTERVAL_MS
+        const interested = [...file.subscribers].filter((subscriber) => subscriber.active || subscriber.initializing)
         if (fingerprint !== file.fingerprint) {
           file.fingerprint = fingerprint
           file.content = content
-          for (const subscriber of file.subscribers) {
-            if (subscriber.active || subscriber.initializing) this.deliverContent(subscriber, content)
-          }
+          for (const subscriber of interested) this.deliverContent(subscriber, content)
+        }
+        for (const subscriber of interested) {
+          if (file.subscribers.has(subscriber)) this.recover(subscriber)
         }
       } catch (error) {
         if (this.files.get(url) !== file || controller.signal.aborted) return
         file.failures += 1
         file.nextPollAt = this.now() + Math.min(LIVE_FILE_POLL_INTERVAL_MS * 2 ** file.failures, MAX_ERROR_BACKOFF_MS)
         for (const subscriber of file.subscribers) {
-          if (subscriber.active || subscriber.initializing) subscriber.onError?.(error)
+          if (subscriber.active || subscriber.initializing) {
+            subscriber.failed = true
+            subscriber.onError?.(error)
+          }
           subscriber.initializing = false
         }
       }
@@ -277,6 +289,16 @@ export class LiveFileRefresh {
 
   private hasInterestedSubscribers(file: WatchedFile): boolean {
     return [...file.subscribers].some((subscriber) => subscriber.active || subscriber.initializing)
+  }
+
+  private recover(subscriber: FileSubscriber): void {
+    if (!subscriber.failed) return
+    subscriber.failed = false
+    try {
+      subscriber.onRecover?.()
+    } catch {
+      // One view's recovery callback must not interrupt another view.
+    }
   }
 
   private deliverContent(subscriber: FileSubscriber, content: string): void {
