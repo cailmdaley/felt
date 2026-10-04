@@ -5,6 +5,7 @@ package shuttlecli
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,6 +177,53 @@ func TestCodexDesktopBridgeNativeExitCleansEndpoint(t *testing.T) {
 	}
 	h.wait(t)
 	h.clean(t)
+}
+
+func TestBridgeEndpointCreatedBetweenStatAndNativeExit(t *testing.T) {
+	socket := filepath.Join(bridgeTempDir(t), "native.sock")
+	parentDone := make(chan struct{})
+	var listener net.Listener
+	stat := func(path string) (os.FileInfo, error) {
+		if listener == nil {
+			var err error
+			listener, err = net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { listener.Close() })
+			if err := os.Chmod(socket, 0600); err != nil {
+				t.Fatal(err)
+			}
+			close(parentDone)
+			return nil, os.ErrNotExist
+		}
+		return os.Lstat(path)
+	}
+	endpoint, err := waitForBridgeEndpointWithStat(context.Background(), socket, parentDone, stat)
+	if err != nil {
+		t.Fatalf("final endpoint inspection: %v", err)
+	}
+	current, err := os.Lstat(socket)
+	if err != nil || endpoint == nil || !os.SameFile(endpoint, current) {
+		t.Fatalf("lost endpoint identity after native exit: %v, %v", endpoint, err)
+	}
+	removeOwnedEndpoint(socket, endpoint)
+	if _, err := os.Lstat(socket); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("raced endpoint was not cleaned: %v", err)
+	}
+}
+
+func TestBridgeEndpointAbsentAfterNativeExitStopsPolling(t *testing.T) {
+	parentDone := make(chan struct{})
+	close(parentDone)
+	calls := 0
+	endpoint, err := waitForBridgeEndpointWithStat(context.Background(), "/tmp/absent-native.sock", parentDone, func(string) (os.FileInfo, error) {
+		calls++
+		return nil, os.ErrNotExist
+	})
+	if endpoint != nil || err == nil || calls != 2 {
+		t.Fatalf("endpoint=%v err=%v stat calls=%d; want absent after one final inspection", endpoint, err, calls)
+	}
 }
 
 func TestCodexDesktopBridgeAlreadyIsolatedProcess(t *testing.T) {

@@ -4039,6 +4039,7 @@ defmodule Shuttle.PollerTest do
     # empty) but not due. Shuttle's resolved occurrences provide the schedule
     # times.
     write_dispatch_marker("tests/standing-stale", "seed-recent")
+    write_handoff_marker("tests/standing-stale")
 
     set_resolved_occurrences(
       "tests/standing-stale",
@@ -4054,8 +4055,8 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    MockRunner.set_ls_delay(100)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"

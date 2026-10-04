@@ -473,12 +473,17 @@ func ensureOwnedPrivate(info os.FileInfo, what string) error {
 // waitForBridgeEndpoint waits for native Codex (the relay's parent) to create
 // its private websocket endpoint, failing if the parent exits first.
 func waitForBridgeEndpoint(ctx context.Context, socket string, parentDone <-chan struct{}) (os.FileInfo, error) {
+	return waitForBridgeEndpointWithStat(ctx, socket, parentDone, os.Lstat)
+}
+
+func waitForBridgeEndpointWithStat(ctx context.Context, socket string, parentDone <-chan struct{}, stat func(string) (os.FileInfo, error)) (os.FileInfo, error) {
 	timer := time.NewTimer(bridgeStartupTimeout)
 	defer timer.Stop()
 	ticker := time.NewTicker(bridgePollInterval)
 	defer ticker.Stop()
+	parentExited := false
 	for {
-		if info, err := os.Lstat(socket); err == nil {
+		if info, err := stat(socket); err == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
 				if !sameUser(info) {
 					return info, fmt.Errorf("bridge endpoint symlink %q is not owned by the current user", socket)
@@ -519,9 +524,14 @@ func waitForBridgeEndpoint(ctx context.Context, socket string, parentDone <-chan
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("checking bridge endpoint: %w", err)
 		}
+		if parentExited {
+			return nil, errors.New("native Codex exited before creating its websocket endpoint")
+		}
 		select {
 		case <-parentDone:
-			return nil, errors.New("native Codex exited before creating its websocket endpoint")
+			// Native can create its endpoint between the last stat and exit.
+			// Inspect it once more so cleanup retains that endpoint's identity.
+			parentExited = true
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-timer.C:
