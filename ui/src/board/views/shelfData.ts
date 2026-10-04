@@ -1,9 +1,6 @@
 /**
- * shelfData — what the Shelf is a canvas OF.
- *
- * A leaf module: the fleet-wide sent-file record, its wire coercion, and the
- * pure transforms the view reads it through. No DOM, no layout — those are
- * ShelfView and shelfLayout.
+ * Fleet-wide sent-file records and wire coercion for the document workspace.
+ * No DOM or layout belongs to this leaf module.
  *
  * The record is `SentFile` (../sentFiles.ts) widened by the two facts a card
  * needs and a card's trail never did: WHICH FIBER sent it (`uid`, the key the
@@ -16,7 +13,7 @@
 import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
 import type { TemporalOrigins } from './TemporalData.js'
 
-/** One file on the shelf. */
+/** One fleet receipt, attributed to a fiber and byte owner when available. */
 export interface ShelfFile extends SentFile {
   /** The fiber that sent it — the fiber lens's cluster key. */
   uid?: string

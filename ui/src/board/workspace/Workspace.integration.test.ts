@@ -81,7 +81,7 @@ describe('workspace reader integration', () => {
   it('body links append one page without losing embeds, and Conversation uses only its bridge', async () => {
     workspace.open(cards[0])
     await flush()
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Prose')!
+    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Note')!
     proseTab.click()
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
@@ -131,6 +131,19 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected')?.textContent).toContain('Fiber not found on host-b')
     expect(document.querySelector('.ws-selected')?.textContent).toContain('Retry')
     expect(window.location.hash).toContain('no-card@host-b')
+  })
+
+  it('mouse entry does not focus chrome, but keyboard entry does', async () => {
+    workspace.open(cards[0])
+    await flush()
+    expect(document.activeElement).not.toBe(document.querySelector('.ws-return'))
+    const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
+    const press = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+    control.dispatchEvent(press)
+    expect(press.defaultPrevented).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
+    await flush()
+    expect(document.activeElement).toBe(document.querySelector('.ws-return'))
   })
 
   it('steps channels in supplied Desk order and ignores messages from unrelated frames', async () => {

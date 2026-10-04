@@ -80,6 +80,19 @@ describe('workspace routes', () => {
     expect(onRoute).toHaveBeenCalledTimes(2)
   })
 
+  it('establishes a view-key return point without retaining an older channel depth', async () => {
+    resetHash('#/board')
+    const history = create()
+    history.start()
+    history.enter('one', 'host')
+    history.view('#/desk')
+    expect(window.location.hash).toBe('#/desk')
+    history.view()
+    history.enter('two', 'host')
+    await nextPop(() => history.leave())
+    expect(window.location.hash).toBe('#/board')
+  })
+
   it('lets browser Back return to the previous channel rather than overview', async () => {
     resetHash('#/board')
     const onRoute = vi.fn()

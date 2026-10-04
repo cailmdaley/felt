@@ -438,6 +438,7 @@ export class Reader {
     if (this.sidebarOpen) this.sidebar.replaceChildren(this.channelList())
   }
   private readonly keydown = (e: KeyboardEvent): void => {
+    this.keyboardInput = true
     if (!this.active || e.isComposing || document.querySelector('.kbn-detail-overlay,[data-state="open"][role="dialog"]')) return
     if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
       e.preventDefault(); e.stopImmediatePropagation()

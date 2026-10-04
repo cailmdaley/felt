@@ -7,6 +7,7 @@ import { fiberDocUrl, renderMarkdown, showToast } from '../utils.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
+import { Overview } from './Overview.js'
 import { WorkspaceHistory, type WorkspaceRoute } from './route.js'
 
 export interface WorkspaceOptions {
@@ -14,6 +15,7 @@ export interface WorkspaceOptions {
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
+  onOverview?(): void
   onConversation(card: KanbanCard): void
 }
 interface ChannelState {
@@ -31,6 +33,7 @@ const channelId = (uid: string, owner: string): string => JSON.stringify([owner,
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
   readonly reader: Reader
+  readonly overview: Overview
   private readonly opts: WorkspaceOptions
   private readonly history: WorkspaceHistory
   private readonly channels = new Map<string, ChannelState>()
@@ -43,16 +46,23 @@ export class Workspace {
   private timer: number | null = null
   private disposed = false
   private routeEpoch = 0
+  private lastBoardRoute: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
-    this.reader = new Reader({
+    this.overview = new Overview({
       shuttleBase: opts.shuttleBase,
       cards: opts.cards,
+      onOpen: (card, doc) => this.open(card, 'Board', doc),
+    })
+    this.reader = new Reader({
+      shuttleBase: opts.shuttleBase,
+      cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
+      switcherCards: () => this.overview.orderedCards(),
       onSelect: key => this.select(key),
-      onReturn: () => this.history.leave(),
+      onReturn: () => { this.lastBoardRoute = null; this.history.leave() },
       onConversation: () => { if (this.current) opts.onConversation(this.current.card) },
       onChannel: card => this.open(card, this.origin),
       buildProse: doc => this.prose(doc.key),
@@ -70,10 +80,29 @@ export class Workspace {
 
   get isActive(): boolean { return this.reader.isActive }
 
-  open(card: KanbanCard, origin = this.opts.origin()): void {
+  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey): void {
     this.origin = origin
     const state = this.ensure(card)
-    this.history.enter(state.channel.uid, state.channel.owner, state.selected)
+    this.overview.opened(card)
+    this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected)
+  }
+
+  mountOverview(host: HTMLElement): void {
+    if (this.overview.el.parentElement !== host) host.append(this.overview.el)
+    this.overview.setVisible(!this.isActive)
+    this.overview.refresh()
+  }
+  hideOverview(): void { this.overview.setVisible(false) }
+
+  /** View keys park the reader; Board restores its last unreturned channel. */
+  suspend(view: 'desk' | 'chronicle'): void {
+    this.history.view(`#/${view}`)
+  }
+  showBoard(): void {
+    const remembered = this.lastBoardRoute
+    this.history.view()
+    this.origin = 'Board'
+    if (remembered) this.history.enter(remembered.uid, remembered.owner, remembered.doc)
   }
 
   /** Keep worker metadata current without rebuilding live file instruments. */
@@ -141,6 +170,11 @@ export class Workspace {
     const epoch = ++this.routeEpoch
     if (route.kind === 'overview') {
       this.reader.hide()
+      if (window.location.hash === '#/board') {
+        this.lastBoardRoute = null
+        this.opts.onOverview?.()
+      }
+      this.overview.setVisible(window.location.hash === '#/board')
       this.opts.onVisibility(false)
       this.stopTimer()
       return
@@ -155,6 +189,9 @@ export class Workspace {
       })
     }
     this.current = state
+    this.lastBoardRoute = route
+    this.overview.opened(state.card)
+    this.overview.setVisible(false)
     const wanted = route.doc ?? state.selected
     const loadedBefore = state.loaded
     const selectionVersion = state.selectionVersion
@@ -185,6 +222,7 @@ export class Workspace {
     if (!state.selected || !ch.documents.some(d => d.key === state.selected)) state.selected = defaultSelection(ch)
     this.refreshProse(state)
     this.reader.show(ch, state.selected, this.origin, state.card, animate)
+    this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: state.selected }
   }
   private select(key: DocKey): void {
     const state = this.current
@@ -194,6 +232,7 @@ export class Workspace {
     state.routedFile = undefined
     this.reader.select(key)
     this.history.select(key)
+    this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }
   }
   private isBodyFile(state: ChannelState, key: DocKey): boolean {
     const template = document.createElement('template')
@@ -309,5 +348,6 @@ export class Workspace {
     document.removeEventListener('visibilitychange', this.visibility)
     this.history.dispose()
     this.reader.dispose()
+    this.overview.dispose()
   }
 }

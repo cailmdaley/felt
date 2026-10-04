@@ -483,6 +483,7 @@ export class KanbanModal {
       cards: () => this.workspaceCards(),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
+      onOverview: () => this.setView('shelf', false),
       onConversation: (card) => this.openWorkspaceConversation(card),
     })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
@@ -625,13 +626,14 @@ export class KanbanModal {
       if (active) this.body.setAttribute('aria-hidden', 'true')
       else this.body.removeAttribute('aria-hidden')
     }
-    if (active) return
+    if (active) { this.workspace?.hideOverview(); return }
     if (this.pendingDeskData && this.activeViewId === 'desk') {
       const data = this.pendingDeskData
       this.pendingDeskData = null
       this.render(data)
     }
     if (this.activeViewId !== 'desk') this.mountOrRefreshActiveView()
+    if (this.activeViewId !== 'desk' || !this.workspaceReturnCard) return
     const address = this.workspaceReturnCard
     const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
     const target = this.workspaceReturnFocus?.isConnected ? this.workspaceReturnFocus
@@ -730,7 +732,11 @@ export class KanbanModal {
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
    * a stray click or repeated hotkey never tears a view down and back up.
    */
-  private setView(id: BoardViewId): void {
+  private setView(id: BoardViewId, navigate = true): void {
+    if (navigate && this.workspace) {
+      if (id === 'shelf') this.workspace.showBoard()
+      else this.workspace.suspend(id)
+    }
     if (id === this.activeViewId) return
     this.activeView?.unmount()
     this.activeView = null
@@ -883,6 +889,7 @@ export class KanbanModal {
     return {
       response,
       cards,
+      workspace: this.workspace ?? undefined,
       shuttleBase: this.shuttleBase,
       // The fetchers ARE the context's temporal half — closures over their own
       // cache, so spreading them is the same object, not a rebind.

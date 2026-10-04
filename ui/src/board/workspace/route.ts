@@ -111,6 +111,20 @@ export class WorkspaceHistory {
     this.onRoute(route)
   }
 
+  /** Establish an addressable view as the next channel stack's return point. */
+  view(hash = OVERVIEW_HASH): void {
+    this.ensureStarted()
+    this.pendingOwnPop = null
+    this.queuedEnter = null
+    this.depth = 0
+    this.base = true
+    this.baseHash = hash
+    this.currentHash = hash
+    this.current = { kind: 'overview' }
+    window.history.pushState(withRouteState(window.history.state, { depth: 0, base: true, baseHash: hash }), '', hash)
+    this.onRoute(this.current)
+  }
+
   select(doc: DocKey): void {
     if (this.pendingOwnPop !== null) {
       if (this.queuedEnter) this.queuedEnter = { ...this.queuedEnter, doc }
