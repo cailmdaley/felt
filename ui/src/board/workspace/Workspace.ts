@@ -1,4 +1,7 @@
-import type { KanbanCard } from '../KanbanTypes.js'
+import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
+import { Dock, type MeetingJoinControl } from './Dock.js'
+import type { DispatchFailureBody } from '../KanbanModalShared.js'
+import { MOBILE_MEDIA } from '../mobile.js'
 import { parseCompositeFeed } from '../KanbanComposite.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
@@ -14,7 +17,13 @@ export interface WorkspaceOptions {
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
-  onConversation(card: KanbanCard): void
+  conversation?: {
+    onChanged(): void
+    onTransition?(card: KanbanCard, target: ColumnKind): void
+    onWorkerOpen?(tmuxSessionName: string, shuttleHost?: string): void
+    workerPhase?(card: KanbanCard): boolean
+    meeting?: MeetingJoinControl
+  }
 }
 interface ChannelState {
   card: KanbanCard
@@ -31,6 +40,7 @@ const channelId = (uid: string, owner: string): string => JSON.stringify([owner,
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
   readonly reader: Reader
+  readonly dock: Dock
   private readonly opts: WorkspaceOptions
   private readonly history: WorkspaceHistory
   private readonly channels = new Map<string, ChannelState>()
@@ -43,17 +53,34 @@ export class Workspace {
   private timer: number | null = null
   private disposed = false
   private routeEpoch = 0
+  private dockVisible = false
+  private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
+  private readonly phone = window.matchMedia(MOBILE_MEDIA)
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.origin = opts.origin()
-    this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
+    this.history = new WorkspaceHistory(route => { void this.applyRoute(route) }, open => {
+      if (open) this.openDock(false)
+      else this.closeDock(false)
+    })
+    this.dock = new Dock(opts.shuttleBase, () => opts.conversation?.onChanged(),
+      opts.conversation?.onTransition, opts.conversation?.onWorkerOpen, {
+        meeting: opts.conversation?.meeting,
+        workerPhase: opts.conversation?.workerPhase,
+        onCloseRequest: () => this.closeDock(),
+      })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       cards: opts.cards,
       onSelect: key => this.select(key),
       onReturn: () => this.history.leave(),
-      onConversation: () => { if (this.current) opts.onConversation(this.current.card) },
+      onConversation: () => this.dockVisible ? this.closeDock() : this.openDock(),
+      onEscapeLayer: () => {
+        if (!this.dockVisible) return false
+        if (!this.dock.handleEscape()) this.closeDock()
+        return true
+      },
       onChannel: card => this.open(card, this.origin),
       buildProse: doc => this.prose(doc.key),
       onRefreshProse: async doc => {
@@ -66,9 +93,37 @@ export class Workspace {
     root.append(this.reader.el)
     this.history.start()
     document.addEventListener('visibilitychange', this.visibility)
+    this.phone.addEventListener('change', this.syncDockHistory)
   }
 
   get isActive(): boolean { return this.reader.isActive }
+
+  openDock(history = true): void {
+    if (!this.current || !this.isActive || this.dockVisible) return
+    this.dockVisible = true
+    this.dock.open(this.current.card)
+    this.reader.mountDock(this.dock.el)
+    if (history && this.phone.matches) this.history.setDock(true)
+    this.dock.el.querySelector<HTMLElement>('button,a,textarea')?.focus({ preventScroll: true })
+  }
+
+  closeDock(history = true): void {
+    if (!this.dockVisible) return
+    this.dockVisible = false
+    this.dock.close()
+    this.reader.mountDock(null, this.isActive)
+    if (history) this.history.setDock(false)
+  }
+
+  /** A refused Desk launch enters the document channel and exposes its recovery form. */
+  openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
+    this.startPrompt = { card, failure }
+    this.open(card)
+  }
+
+  private readonly syncDockHistory = (): void => {
+    this.history.setDock(this.dockVisible && this.phone.matches)
+  }
 
   open(card: KanbanCard, origin = this.opts.origin()): void {
     this.origin = origin
@@ -140,6 +195,7 @@ export class Workspace {
   private async applyRoute(route: WorkspaceRoute): Promise<void> {
     const epoch = ++this.routeEpoch
     if (route.kind === 'overview') {
+      this.closeDock(false)
       this.reader.hide()
       this.opts.onVisibility(false)
       this.stopTimer()
@@ -154,6 +210,7 @@ export class Workspace {
         status: '', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
       })
     }
+    if (this.current !== state) this.closeDock(false)
     this.current = state
     const wanted = route.doc ?? state.selected
     const loadedBefore = state.loaded
@@ -161,6 +218,12 @@ export class Workspace {
     if (route.doc) state.selected = route.doc
     this.opts.onVisibility(true)
     this.show(state)
+    const prompt = this.startPrompt
+    if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
+      this.startPrompt = null
+      this.openDock()
+      this.dock.openStartPrompt(prompt.card, prompt.failure)
+    }
     await this.load(state)
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
     if (state.selectionVersion === selectionVersion) {
@@ -185,6 +248,7 @@ export class Workspace {
     if (!state.selected || !ch.documents.some(d => d.key === state.selected)) state.selected = defaultSelection(ch)
     this.refreshProse(state)
     this.reader.show(ch, state.selected, this.origin, state.card, animate)
+    if (this.dockVisible) this.dock.syncRuntime(state.card)
   }
   private select(key: DocKey): void {
     const state = this.current
@@ -307,7 +371,9 @@ export class Workspace {
     this.routeEpoch++
     this.stopTimer()
     document.removeEventListener('visibilitychange', this.visibility)
+    this.phone.removeEventListener('change', this.syncDockHistory)
     this.history.dispose()
+    this.dock.dispose()
     this.reader.dispose()
   }
 }

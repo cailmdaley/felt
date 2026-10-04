@@ -11,7 +11,10 @@ vi.mock('../FileViewerPanel.js', () => ({
     const iframe = document.createElement('iframe')
     iframe.title = path
     iframe.srcdoc = '<p>Report</p>'
-    iframe.addEventListener('load', () => onLoad?.(iframe, false))
+    iframe.addEventListener('load', () => {
+      if (iframe.contentWindow) iframe.contentWindow.scrollTo = vi.fn()
+      onLoad?.(iframe, false)
+    })
     wrap.append(iframe)
     return wrap
   }),
@@ -25,7 +28,7 @@ const cards = [
 ]
 const body = 'The result is ready.\n\n:::{embed} report.html\n:title: Report\n:::\n\n[Data](data.csv)'
 const flush = async (): Promise<void> => { for (let i = 0; i < 25; i++) await Promise.resolve() }
-const conversation = vi.fn<(card: KanbanCard) => void>()
+const changed = vi.fn()
 const visibility = vi.fn<(active: boolean) => void>()
 
 beforeEach(() => {
@@ -48,9 +51,9 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/')
   sessionStorage.clear()
   localStorage.clear()
-  conversation.mockClear()
+  changed.mockClear()
   visibility.mockClear()
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, onConversation: conversation })
+  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, conversation: { onChanged: changed } })
 })
 afterEach(() => { workspace?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -78,7 +81,7 @@ describe('workspace reader integration', () => {
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(2)
   })
 
-  it('body links append one page without losing embeds, and Conversation uses only its bridge', async () => {
+  it('body links append one page without losing embeds, and Conversation mounts its dock', async () => {
     workspace.open(cards[0])
     await flush()
     const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Prose')!
@@ -91,7 +94,90 @@ describe('workspace reader integration', () => {
     expect(dataFrame.doc.provenance.some(p => p.kind === 'link')).toBe(true)
     expect(dataFrame.el.classList.contains('ws-selected')).toBe(true)
     document.querySelector<HTMLButtonElement>('.ws-conversation')!.click()
-    expect(conversation).toHaveBeenCalledWith(cards[0])
+    expect(workspace.dock.isOpen).toBe(true)
+    expect(document.querySelector('.ws-dock-slot')?.contains(workspace.dock.el)).toBe(true)
+    expect(document.querySelector('.kbn-detail-overlay')).toBeNull()
+  })
+
+  it('narrows and re-centres the stage without replacing the selected iframe or its window', async () => {
+    Object.defineProperty(workspace.reader.stage, 'clientWidth', { configurable: true, get: () => workspace.dock.isOpen ? 1040 : 1440 })
+    Object.defineProperty(workspace.reader.stage, 'clientHeight', { configurable: true, value: 848 })
+    workspace.open(cards[0])
+    await flush()
+    const frame = workspace.reader.host.get(docKey('host-a', '/notes/alpha/report.html', 'host-a'))!
+    const iframe = frame.content.querySelector('iframe')!
+    const innerWindow = iframe.contentWindow
+    const closedTransform = workspace.reader.track.style.transform
+    const historyLength = window.history.length
+    document.querySelector<HTMLButtonElement>('.ws-conversation')!.click()
+    expect(frame.el.style.width).toBe('1016px')
+    expect(workspace.reader.track.style.transform).not.toBe(closedTransform)
+    expect(frame.content.querySelector('iframe')).toBe(iframe)
+    expect(iframe.contentWindow).toBe(innerWindow)
+    expect(window.history.length).toBe(historyLength)
+    const textarea = workspace.dock.el.querySelector('textarea')
+    workspace.update()
+    expect(workspace.dock.el.querySelector('textarea')).toBe(textarea)
+    workspace.closeDock()
+    expect(frame.el.style.width).toBe('1040px')
+    expect(frame.content.querySelector('iframe')).toBe(iframe)
+    expect(document.activeElement).toBe(document.querySelector('.ws-conversation'))
+  })
+
+  it('Escape unwinds reader popovers, dock popovers, dock, expand and return in that order', async () => {
+    workspace.open(cards[0])
+    await flush()
+    const escape = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) }
+    document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!.click()
+    workspace.openDock()
+    document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!.click()
+    escape()
+    expect(document.querySelector('.ws-menu')).toBeNull()
+    expect(workspace.dock.isOpen).toBe(true)
+    const popover = vi.spyOn(workspace.dock, 'handleEscape').mockReturnValueOnce(true).mockReturnValue(false)
+    escape()
+    expect(workspace.dock.isOpen).toBe(true)
+    escape()
+    expect(workspace.dock.isOpen).toBe(false)
+    expect(document.querySelector('.ws-selected.ws-expanded')).not.toBeNull()
+    escape()
+    expect(document.querySelector('.ws-selected.ws-expanded')).toBeNull()
+    const returned = new Promise(resolve => window.addEventListener('popstate', resolve, { once: true }))
+    escape()
+    await returned
+    expect(workspace.isActive).toBe(false)
+    popover.mockRestore()
+  })
+
+  it('a refused Desk start opens its reader, dock and host-specific recovery prompt', async () => {
+    const managed: KanbanCard = { ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' }
+    workspace.openStartPrompt(managed, { reason: 'arm_refused', needs: 'project_dir', host: 'host-a', message: 'Choose a project directory.' })
+    await flush()
+    expect(workspace.isActive).toBe(true)
+    expect(workspace.dock.isOpen).toBe(true)
+    expect(window.location.hash).toContain('alpha@host-a')
+    expect(workspace.dock.el.querySelector('.kbn-start-prompt')?.textContent).toContain('Project directory on host-a')
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/dispatch'), expect.anything())
+  })
+
+  it('phone Back closes the dock once, preserves the document, then returns to Desk', async () => {
+    workspace.dispose()
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, conversation: { onChanged: changed } })
+    workspace.open(cards[0])
+    await flush()
+    const iframe = document.querySelector('.ws-selected iframe')
+    workspace.openDock()
+    const route = window.location.hash
+    const nextBack = (): Promise<void> => new Promise(resolve => { window.addEventListener('popstate', () => resolve(), { once: true }); window.history.back() })
+    await nextBack()
+    expect(workspace.dock.isOpen).toBe(false)
+    expect(workspace.isActive).toBe(true)
+    expect(window.location.hash).toBe(route)
+    expect(document.querySelector('.ws-selected iframe')).toBe(iframe)
+    await nextBack()
+    expect(workspace.isActive).toBe(false)
+    expect(visibility).toHaveBeenLastCalledWith(false)
   })
 
   it('keeps label controls and their keyboard focus through metadata polls', async () => {

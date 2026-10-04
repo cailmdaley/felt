@@ -38,7 +38,7 @@
 
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
-import { FiberDetailModal, type MeetingJoinResult } from './FiberDetailModal.js'
+import type { MeetingJoinResult } from './workspace/Dock.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
@@ -268,8 +268,6 @@ export class KanbanModal {
    * reads it; the gesture's own refetch is a direct call and always runs.
    */
   private gestureDepth = 0
-  /** Intermediate fiber-detail modal — one instance, re-used across opens. */
-  private readonly detailModal: FiberDetailModal
   private workspace: Workspace | null = null
   private workspaceReturnFocus: HTMLElement | null = null
   private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
@@ -277,7 +275,7 @@ export class KanbanModal {
 
   private readonly handleConversationOpening = (): void => {
     if (this.lastResponse) this.render(this.lastResponse)
-    this.detailModal.refreshConversationOpening()
+    this.workspace?.dock.refreshConversationOpening()
   }
 
   constructor(options: KanbanModalOptions) {
@@ -312,24 +310,6 @@ export class KanbanModal {
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
-    this.detailModal = new FiberDetailModal(
-      this.shuttleBase,
-      () => { void this.fetchAndRender() },
-      // Terminal moves (Temper / Compost) route through the same optimistic
-      // path as the inline card buttons and drags — instant relocation,
-      // background commit, reconcile.
-      (card, target) => this.transition(card, target),
-      // The terminal action → focus the running worker's Kitty tab.
-      this.openWorkerAfterGesture,
-      {
-        meeting: {
-          canJoin: () => meetingJoinable(this.meetingStatus),
-          join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
-          current: () => this.meetingStatus.meeting,
-        },
-        workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
-      },
-    )
     this.surfaces = new KanbanSurfaceRenderer({
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
@@ -483,7 +463,17 @@ export class KanbanModal {
       cards: () => this.workspaceCards(),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
-      onConversation: (card) => this.openWorkspaceConversation(card),
+      conversation: {
+        onChanged: () => { void this.fetchAndRender() },
+        onTransition: (card, target) => this.transition(card, target),
+        onWorkerOpen: this.openWorkerAfterGesture,
+        workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
+        meeting: {
+          canJoin: () => meetingJoinable(this.meetingStatus),
+          join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
+          current: () => this.meetingStatus.meeting,
+        },
+      },
     })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
@@ -500,9 +490,6 @@ export class KanbanModal {
    */
   unmount(): void {
     if (this.container === null) return
-    // The fiber-detail panel floats on document.body, not in our container —
-    // an unmount would otherwise orphan it over whatever is behind.
-    this.detailModal.close()
     this.workspace?.dispose()
     this.workspace = null
     this.phoneAudio.unmount()
@@ -605,18 +592,11 @@ export class KanbanModal {
     })
   }
 
-  /** Card entry points share the workspace route; worker controls stay separate. */
+  /** Desk and Chronicle cards enter the same owner-addressed document channel. */
   private openDocumentChannel(card: KanbanCard): void {
-    this.detailModal.close()
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
-    if (this.workspace) this.workspace.open(card)
-    else this.detailModal.open(card)
-  }
-
-  /** The Conversation control's bridge to the floating control surface. */
-  private openWorkspaceConversation(card: KanbanCard): void {
-    this.detailModal.open(card)
+    this.workspace?.open(card)
   }
 
   private showWorkspace(active: boolean): void {
@@ -973,7 +953,7 @@ export class KanbanModal {
    * awaiting).
    *
    * Drag-to-inFlight is the launch verb. It routes through the unified
-   * force-dispatch path (the same one FiberDetailModal's "New session ▸"
+   * force-dispatch path (the same one the dock's "New session ▸"
    * uses): a single fresh POST /api/v1/dispatch with `force: true, ad_hoc:
    * true` and no message — drag carries no directive (resume-previous and
    * "talk first" intent live behind the detail modal). force bypasses status /
@@ -1196,7 +1176,9 @@ export class KanbanModal {
     if (res.ok) return true
     const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
     if (needsProjectDir(body)) {
-      this.detailModal.openStartPrompt(card, body)
+      this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+      this.workspace?.openStartPrompt(card, body)
       return false
     }
     throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`))
@@ -1928,7 +1910,7 @@ export class KanbanModal {
         this.meetingStatus = status
         this.phoneAudio.observe(status.meeting)
         this.syncMeetingClock()
-        this.detailModal.syncMeeting()
+        this.workspace?.dock.syncMeeting()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.presentMeeting()
       } catch {
@@ -2012,7 +1994,7 @@ export class KanbanModal {
         // still gets its poll: its content moves with the clock (and with
         // activity and the ledgers), not only with the fiber feed. The open
         // card's worker pill crosses its idle threshold on the clock too.
-        this.syncDetailRuntime(data)
+        this.syncWorkspaceRuntime()
         this.mountOrRefreshActiveView()
         return
       }
@@ -2124,16 +2106,13 @@ export class KanbanModal {
     if (view) this.renderViewFallback(view.title)
   }
 
-  /** Hand the open card's fresh copy to its panel, whose worker pill follows
-   *  the worker's runtime phase. */
-  private syncDetailRuntime(data: KanbanResponse): void {
-    const id = this.detailModal.openCardId
-    if (id) this.detailModal.syncRuntime(findCardById(data, id))
+  /** Runtime changes repaint the conversation controls without replacing documents. */
+  private syncWorkspaceRuntime(): void {
+    this.workspace?.update()
   }
 
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
-    this.syncDetailRuntime(data)
     if (this.workspace?.isActive) {
       this.lastResponse = data
       this.pendingDeskData = data

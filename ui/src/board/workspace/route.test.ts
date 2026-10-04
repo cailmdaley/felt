@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { holdSheet } from '../sheetHistory.js'
 import { formatRoute, parseRoute, WorkspaceHistory, type WorkspaceRoute } from './route.js'
 
 const histories: WorkspaceHistory[] = []
@@ -12,8 +11,8 @@ afterEach(() => {
 function resetHash(hash: string): void {
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
 }
-function create(onRoute = vi.fn()): WorkspaceHistory {
-  const history = new WorkspaceHistory(onRoute)
+function create(onRoute = vi.fn(), onDock = vi.fn()): WorkspaceHistory {
+  const history = new WorkspaceHistory(onRoute, onDock)
   histories.push(history)
   return history
 }
@@ -139,22 +138,67 @@ describe('workspace routes', () => {
     expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview' })
   })
 
-  it('ignores a same-URL sheet pop, then applies the next route pop', async () => {
+  it('Back closes the phone dock once without re-applying the channel, then returns to overview', async () => {
     resetHash('#/board')
     const onRoute = vi.fn()
-    const history = create(onRoute)
+    const onDock = vi.fn()
+    const history = create(onRoute, onDock)
     history.start()
     history.enter('one', 'host')
-    const onSheetBack = vi.fn()
-    holdSheet('workspace-route-test', true, onSheetBack)
+    const channelLength = window.history.length
+    history.setDock(true)
+    history.setDock(true)
+    expect(window.history.length).toBe(channelLength + 1)
 
     await nextPop(() => window.history.back())
-    expect(onSheetBack).toHaveBeenCalledOnce()
+    expect(onDock).toHaveBeenCalledExactlyOnceWith(false)
     expect(onRoute).toHaveBeenCalledTimes(2)
     expect(window.location.hash).toBe(formatRoute({ kind: 'channel', uid: 'one', owner: 'host' }))
 
     await nextPop(() => window.history.back())
     expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview' })
     expect(onRoute).toHaveBeenCalledTimes(3)
+  })
+
+  it('queues a channel switch until an explicit dock close has returned its entry', async () => {
+    resetHash('#/board')
+    const onRoute = vi.fn(), onDock = vi.fn()
+    const history = create(onRoute, onDock)
+    history.start()
+    history.enter('one', 'host')
+    history.setDock(true)
+    const pop = nextPop(() => history.setDock(false))
+    history.enter('two', 'host')
+    await pop
+    expect(parseRoute(window.location.hash)).toEqual({ kind: 'channel', uid: 'two', owner: 'host' })
+    expect(onRoute).toHaveBeenCalledTimes(3)
+    expect(onDock).not.toHaveBeenCalled()
+    await nextPop(() => window.history.back())
+    expect(parseRoute(window.location.hash)).toEqual({ kind: 'channel', uid: 'one', owner: 'host' })
+  })
+
+  it('leaves from an open dock without leaving a second Back entry behind', async () => {
+    resetHash('#/board')
+    const onRoute = vi.fn(), onDock = vi.fn()
+    const history = create(onRoute, onDock)
+    history.start()
+    history.enter('one', 'host')
+    history.setDock(true)
+    await nextPop(() => history.leave())
+    expect(window.location.hash).toBe('#/board')
+    expect(onDock).toHaveBeenCalledExactlyOnceWith(false)
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview' })
+  })
+
+  it('reopens a phone dock when Forward returns to its same-address entry', async () => {
+    resetHash('#/board')
+    const onDock = vi.fn()
+    const history = create(vi.fn(), onDock)
+    history.start()
+    history.enter('one', 'host')
+    history.setDock(true)
+    await nextPop(() => window.history.back())
+    await nextPop(() => window.history.forward())
+    expect(onDock.mock.calls).toEqual([[false], [true]])
   })
 })

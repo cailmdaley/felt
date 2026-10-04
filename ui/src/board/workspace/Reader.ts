@@ -14,6 +14,7 @@ export interface ReaderOptions {
   onSelect(key: DocKey): void
   onReturn(): void
   onConversation(): void
+  onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
 }
@@ -43,6 +44,7 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly conversation: HTMLButtonElement
+  private readonly dockSlot = element('aside', 'ws-dock-slot')
   private readonly position = element('span', 'ws-position')
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
@@ -73,6 +75,9 @@ export class Reader {
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.conversation = button('ws-conversation', 'Conversation', () => opts.onConversation())
+    this.conversation.setAttribute('aria-expanded', 'false')
+    this.conversation.setAttribute('aria-controls', 'ws-conversation-dock')
+    this.dockSlot.setAttribute('aria-label', 'Conversation dock')
     const lead = element('div', 'ws-nav-lead')
     lead.append(this.returnButton, this.title)
     const trail = element('div', 'ws-nav-trail')
@@ -92,7 +97,7 @@ export class Reader {
     this.stage.append(this.track)
     this.sidebar.setAttribute('aria-label', 'Channels')
     const main = element('div', 'ws-stage-row')
-    main.append(this.sidebar, this.stage)
+    main.append(this.sidebar, this.stage, this.dockSlot)
     this.el.append(nav, main, thumb, this.announcement)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
@@ -120,6 +125,15 @@ export class Reader {
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
+  /** Change the available page box without replacing any live document. */
+  mountDock(dock: HTMLElement | null, restoreFocus = false): void {
+    this.dockSlot.replaceChildren(...(dock ? [dock] : []))
+    this.el.classList.toggle('ws-with-dock', dock !== null)
+    this.conversation.setAttribute('aria-expanded', String(dock !== null))
+    this.layout(false)
+    if (restoreFocus) this.conversation.focus({ preventScroll: true })
+  }
+
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
@@ -135,8 +149,10 @@ export class Reader {
     this.title.title = channel.name
     const state = card?.runtimePhase ?? card?.workerState ?? card?.status ?? 'open'
     const dot = element('span', `ws-state-dot ws-state-${state}`)
-    this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'))
-    this.conversation.title = `${card?.workerAgent ?? card?.shuttleAgent ?? ''} · ${state}`
+    const agent = card?.workerAgent ?? card?.shuttleAgent ?? ''
+    this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'), element('span', 'ws-conversation-agent', agent))
+    this.conversation.title = `${agent} · ${state}`
+    this.conversation.setAttribute('aria-label', `Conversation${agent ? ` · ${agent}` : ''} · ${state}`)
     this.tabs.render(channel.labels)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && animate)
@@ -427,6 +443,7 @@ export class Reader {
     if (key === 'Escape') {
       if (this.cancelResize) this.cancelResize()
       else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
+      else if (this.opts.onEscapeLayer?.()) { /* The dock owns the next layer. */ }
       else if (this.expanded) this.toggleExpand()
       else this.opts.onReturn()
       return true
