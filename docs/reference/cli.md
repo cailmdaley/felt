@@ -138,6 +138,7 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
+| `shuttle claim <fiber>` | Associate the current conversation with an installed draft without launching or activating a worker (`--surface cli\|app`, `--session <native-id>`, `--tmux-session <name>`, `--json`) |
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
 | `shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
 | `shuttle accept <fiber>` | Resolve the human verdict on an untempered role, closed or still active: a standing role re-arms and its run concludes (`handed_off_at`); a pinned role re-parks to `open`. The outcome is kept. `--local` skips the daemon |
@@ -148,6 +149,15 @@ untouched by any of this.
 | `shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
 | `shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
 | `shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
+
+To adopt your current conversation, install the constitution with
+`shuttle install <fiber> --disabled --project-dir <dir> -m <agent>`, then run
+`shuttle claim <fiber>` and, only after it succeeds, `shuttle resume <fiber>`.
+Terminal claims identify the current tmux pane; `--tmux-session` supplies an
+explicit existing session. App claims use `CODEX_THREAD_ID` or `--session`
+and require the daemon to verify the native conversation. The claimed host
+and surface must match the installed task. If verification fails, leave the
+constitution open; activating it could launch another worker.
 
 ### Read / inspect
 

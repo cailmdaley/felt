@@ -47,6 +47,13 @@ func newShuttleDaemonInstallCommand() *cobra.Command {
 		Short: "Install a per-user daemon supervisor",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !cmd.Flags().Changed("stores") {
+				options.Stores = os.Getenv("AGENT_STORES")
+				if options.Stores == "" {
+					options.Stores = os.Getenv("SHUTTLE_STORES")
+				}
+			}
+			options.StoresSet = cmd.Flags().Changed("stores")
 			options.Print, _ = cmd.Flags().GetBool("print")
 			options.OS, _ = cmd.Flags().GetString("os")
 			if cmd.Flags().Changed("ssh-auth-sock") {
@@ -102,6 +109,7 @@ type supervisorOptions struct {
 	Label        string
 	ShuttleBin   string
 	Stores       string
+	StoresSet    bool
 	StoresFile   string
 	Path         string
 	Log          string
@@ -184,11 +192,6 @@ func installDaemonSupervisor(options supervisorOptions) error {
 	if err := validateSupervisorOptions(options); err != nil {
 		return err
 	}
-	if options.Stores == "" {
-		if _, err := os.Stat(options.StoresFile); errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "No store registry at %s; add a store in Settings → Stores after startup.\n", options.StoresFile)
-		}
-	}
 	warnProtectedSupervisorPaths(options, release.Dir)
 	rendered, err := renderSupervisorTemplate(options.OS, string(template), options, release)
 	if err != nil {
@@ -197,6 +200,13 @@ func installDaemonSupervisor(options supervisorOptions) error {
 	if options.Print {
 		fmt.Print(rendered)
 		return nil
+	}
+	cwd, err := supervisorBootstrapDirectory()
+	if err != nil {
+		return err
+	}
+	if err := bootstrapSupervisorStore(options, cwd); err != nil {
+		return err
 	}
 	if _, _, _, err := seedOwnHost(); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠️  could not seed a host identity: %v\n", err)
@@ -249,7 +259,7 @@ func defaultDaemonSSHSocket(osName, home string) string {
 }
 
 // Explicit values override the installed supervisor; an omitted option preserves
-// the desktop endpoint across reinstalls from shells without Codex's environment.
+// installed desktop endpoints and fixed stores across reinstalls.
 func resolveSupervisorCodex(options *supervisorOptions) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -265,7 +275,14 @@ func resolveSupervisorCodex(options *supervisorOptions) error {
 		previous, err = supervisorCodexEnvironment(options.OS, string(source))
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("preserving Codex settings from %s: %w", path, err)
+		return fmt.Errorf("preserving supervisor settings from %s: %w", path, err)
+	}
+	if !options.StoresSet && options.Stores == "" {
+		_, agentSet := os.LookupEnv("AGENT_STORES")
+		_, shuttleSet := os.LookupEnv("SHUTTLE_STORES")
+		if !agentSet && !shuttleSet {
+			options.Stores = previous["SHUTTLE_STORES"]
+		}
 	}
 	if !options.CodexSocketSet {
 		if value, present := os.LookupEnv("SHUTTLE_CODEX_SOCKET"); present {
@@ -285,19 +302,19 @@ func resolveSupervisorCodex(options *supervisorOptions) error {
 func supervisorCodexEnvironment(osName, source string) (map[string]string, error) {
 	values := map[string]string{}
 	keep := func(key, value string) {
-		if key == "SHUTTLE_CODEX_SOCKET" || key == "CODEX_HOME" {
+		if key == "SHUTTLE_CODEX_SOCKET" || key == "CODEX_HOME" || key == "SHUTTLE_STORES" {
 			values[key] = value
 		}
 	}
 	if osName == "Linux" {
 		for _, line := range strings.Split(source, "\n") {
 			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "Environment=") || (!strings.Contains(line, "SHUTTLE_CODEX_SOCKET=") && !strings.Contains(line, "CODEX_HOME=")) {
+			if !strings.HasPrefix(line, "Environment=") || (!strings.Contains(line, "SHUTTLE_CODEX_SOCKET=") && !strings.Contains(line, "CODEX_HOME=") && !strings.Contains(line, "SHUTTLE_STORES=")) {
 				continue
 			}
 			assignment, err := strconv.Unquote(strings.TrimPrefix(line, "Environment="))
 			if err != nil {
-				return nil, fmt.Errorf("cannot decode Codex Environment assignment: %w", err)
+				return nil, fmt.Errorf("cannot decode supervisor Environment assignment: %w", err)
 			}
 			key, value, _ := strings.Cut(assignment, "=")
 			keep(key, strings.ReplaceAll(value, "%%", "%"))
