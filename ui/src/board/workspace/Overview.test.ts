@@ -209,6 +209,18 @@ describe('Overview stable lenses, visits, and DOM', () => {
     lens('projects'); expect(groups()).toEqual(['research / new'])
   })
 
+  it('names and groups a folio placed before the board metadata arrived', async () => {
+    const known = cards
+    cards = []
+    feed.files = [receipt('alpha', '/result.html')]; await refresh()
+    expect(name('alpha')).toContain('Other')
+    cards = known; overview.cardsChanged()
+    expect(name('alpha')).toContain('Alpha result')
+    lens('projects'); expect(groups()).toEqual(['science / shear'])
+    cards = [{ ...known[0], path: '.felt/research/new/alpha/alpha.md' }]; overview.cardsChanged()
+    expect(groups()).toEqual(['science / shear'])
+  })
+
   it('preserves mounted report-lead thumbnails through polls, Find, and hide/show, including sheet/ribbon scroll', async () => {
     feed.files = [receipt('alpha', '/notes/alpha/report.html', now() - 1000), receipt('alpha', '/notes/alpha/newest.html')]
     await refresh(); activate()

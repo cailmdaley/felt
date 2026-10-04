@@ -34,6 +34,10 @@ function button(cls: string, text: string, action: () => void, label = text): HT
   return b
 }
 
+/** Wide desktops open the channel sidebar unless the reader chose otherwise. */
+export const SIDEBAR_MEDIA = '(min-width: 1280px)'
+const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
+
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
   readonly el = element('section', 'ws-reader ws-dormant')
@@ -64,7 +68,12 @@ export class Reader {
   private menuAnchor: HTMLElement | null = null
   private switcher = false
   private sidebar = element('aside', 'ws-sidebar')
-  private sidebarOpen = false
+  private readonly sidebarFind = element('input', 'ws-channel-find')
+  private sidebarList: HTMLElement = element('div', 'ws-channel-list')
+  /** The persisted choice; absent, the sidebar follows the viewport width. */
+  private sidebarChoice: boolean | null = null
+  private readonly sidebarToggle: HTMLButtonElement
+  private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
   private liveWidth: number | null = null
   private cancelResize: (() => void) | null = null
   private instantRaf = 0
@@ -79,9 +88,11 @@ export class Reader {
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
+    this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Channels')
+    this.sidebarToggle.title = 'Channels (⌘\\)'
     this.conversation = button('ws-conversation', 'Conversation', () => opts.onConversation())
     this.lead = element('div', 'ws-nav-lead')
-    this.lead.append(this.returnButton, this.title)
+    this.lead.append(this.returnButton, this.sidebarToggle, this.title)
     this.trail = element('div', 'ws-nav-trail')
     this.trail.append(this.conversation)
     this.navbar = element('nav', 'ws-navbar')
@@ -98,6 +109,11 @@ export class Reader {
     this.announcement.setAttribute('aria-atomic', 'true')
     this.stage.append(this.track)
     this.sidebar.setAttribute('aria-label', 'Channels')
+    this.sidebarFind.type = 'search'
+    this.sidebarFind.placeholder = 'Find a channel'
+    this.sidebarFind.setAttribute('aria-label', 'Find a channel')
+    this.sidebarFind.addEventListener('input', () => this.fillSidebar())
+    this.sidebar.append(this.sidebarFind, this.sidebarList)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
     this.el.append(this.navbar, main, thumb, this.announcement)
@@ -117,12 +133,14 @@ export class Reader {
     document.addEventListener('keydown', this.keyboardModality, true)
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
+    this.wide.addEventListener('change', this.relayout)
     this.el.addEventListener('mousedown', e => {
       if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
     })
     try {
       this.sizes = JSON.parse(sessionStorage.getItem('shuttle:workspace:sizes') ?? '{}')
-      this.sidebarOpen = localStorage.getItem('shuttle:workspace:sidebar') === 'true'
+      const choice = localStorage.getItem(SIDEBAR_STORAGE)
+      if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
     } catch { /* Storage is optional. */ }
   }
 
@@ -266,16 +284,20 @@ export class Reader {
     if (this.phone.matches) { this.navbar.style.removeProperty('grid-template-columns'); return }
     const style = getComputedStyle(this.navbar)
     const gap = parseFloat(style.columnGap) || 12
-    const width = this.navbar.clientWidth - (parseFloat(style.paddingLeft) || 12) - (parseFloat(style.paddingRight) || 12)
+    const padLeft = parseFloat(style.paddingLeft) || 12
+    const width = this.navbar.clientWidth - padLeft - (parseFloat(style.paddingRight) || 12)
     if (!width) return
-    const lead = this.returnButton.offsetWidth + gap + Math.min(280, Math.max(100, this.title.scrollWidth))
+    const lead = this.returnButton.offsetWidth + this.sidebarToggle.offsetWidth + 2 * gap + Math.min(280, Math.max(100, this.title.scrollWidth))
     const trail = this.conversation.offsetWidth
     const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + Math.max(0, this.tabs.buttons.length - 1) * 2 + 4
-    const side = Math.max(lead, trail)
-    // Equal side bands centre a fitting strip over the full-width stage.
-    // A longer strip takes the remaining band, bounded by both controls.
-    this.navbar.style.gridTemplateColumns = tabs + 2 * (side + gap) <= width
-      ? `minmax(0, 1fr) ${tabs}px minmax(0, 1fr)`
+    // A fitting strip is centred over the stage, which starts after the sidebar;
+    // a longer strip takes the remaining band, bounded by both controls.
+    const sidebar = this.sidebarShown ? this.sidebar.offsetWidth : 0
+    const centre = sidebar + (this.navbar.clientWidth - sidebar) / 2 - padLeft
+    const leadBand = Math.floor(centre - tabs / 2 - gap)
+    const trailBand = width - leadBand - tabs - 2 * gap
+    this.navbar.style.gridTemplateColumns = leadBand >= lead && trailBand >= trail
+      ? `${leadBand}px ${tabs}px minmax(0, 1fr)`
       : `${Math.min(lead, width * 0.32)}px minmax(0, 1fr) ${trail}px`
   }
   private layout(animate: boolean): void {
@@ -413,7 +435,8 @@ export class Reader {
     const list = element('div', 'ws-channel-list')
     for (const card of (this.opts.switcherCards?.() ?? this.opts.cards())) {
       if (!`${card.name} ${card.path}`.toLowerCase().includes(filter.toLowerCase())) continue
-      const row = button('ws-channel-row', card.name, () => { this.closeMenu(); this.opts.onChannel(card) })
+      const row = button('ws-channel-row', '', () => { this.closeMenu(); this.opts.onChannel(card) }, card.name)
+      row.append(element('span', 'ws-channel-name', card.name))
       row.title = card.outcome ?? card.path
       row.setAttribute('aria-current', String((card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner))
       row.append(element('small', '', card.originId))
@@ -422,6 +445,7 @@ export class Reader {
     return list
   }
   private openSwitcher(): void {
+    if (this.sidebarShown) { this.sidebarFind.focus(); return }
     if (this.switcher) { this.closeMenu(); return }
     this.closeMenu()
     const menu = element('div', 'ws-menu ws-switcher')
@@ -440,18 +464,45 @@ export class Reader {
     menu.style.top = `${rect.bottom + 6}px`
     find.focus()
   }
+  /** Re-list the channel rows after the overview's order changes. */
+  refreshChannels(): void {
+    if (this.active && this.sidebarShown) this.fillSidebar()
+  }
+  private get sidebarShown(): boolean {
+    return !this.phone.matches && (this.sidebarChoice ?? this.wide.matches)
+  }
+  private toggleSidebar(): void {
+    this.sidebarChoice = !this.sidebarShown
+    try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
+    this.closeMenu()
+    this.renderSidebar(); this.layout(false)
+  }
   private renderSidebar(): void {
-    this.el.classList.toggle('ws-with-sidebar', this.sidebarOpen && !this.phone.matches)
-    if (this.sidebarOpen) this.sidebar.replaceChildren(this.channelList())
+    const shown = this.sidebarShown
+    this.el.classList.toggle('ws-with-sidebar', shown)
+    this.sidebarToggle.setAttribute('aria-pressed', String(shown))
+    this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide channels' : 'Show channels')
+    this.sidebar.inert = !shown
+    if (shown) this.fillSidebar()
+  }
+  /** Rows refresh in place; the list keeps its scroll and the find its text. */
+  private fillSidebar(): void {
+    const top = this.sidebarList.scrollTop
+    const next = this.channelList(this.sidebarFind.value)
+    this.sidebarList.replaceWith(next)
+    this.sidebarList = next
+    next.scrollTop = top
+    const current = next.querySelector<HTMLElement>('[aria-current="true"]')
+    if (current && (current.offsetTop < next.scrollTop || current.offsetTop + current.offsetHeight > next.scrollTop + next.clientHeight)) {
+      next.scrollTop = Math.max(0, current.offsetTop - next.clientHeight / 3)
+    }
   }
   private readonly keydown = (e: KeyboardEvent): void => {
     this.keyboardInput = true
     if (!this.active || e.isComposing || document.querySelector('.kbn-detail-overlay,[data-state="open"][role="dialog"]')) return
     if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
       e.preventDefault(); e.stopImmediatePropagation()
-      this.sidebarOpen = !this.sidebarOpen
-      try { localStorage.setItem('shuttle:workspace:sidebar', String(this.sidebarOpen)) } catch { /* Storage is optional. */ }
-      this.renderSidebar(); this.layout(false)
+      this.toggleSidebar()
       return
     }
     if (this.handleKey(e.key, e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {

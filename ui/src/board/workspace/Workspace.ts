@@ -56,6 +56,7 @@ export class Workspace {
       shuttleBase: opts.shuttleBase,
       cards: opts.cards,
       onOpen: (card, doc) => this.open(card, 'Board', doc),
+      onOrder: () => this.reader?.refreshChannels(),
     })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
@@ -107,6 +108,7 @@ export class Workspace {
 
   /** Keep worker metadata current without rebuilding live file instruments. */
   update(): void {
+    this.overview.cardsChanged()
     if (!this.current || !this.isActive) return
     const card = this.opts.cards().find(c => (c.uid ?? c.id) === this.current?.channel.uid && c.originId === this.current.channel.owner)
     if (!card) return
@@ -190,6 +192,8 @@ export class Workspace {
     }
     this.current = state
     this.lastBoardRoute = route
+    // The sidebar and switcher list the overview's rows, so a direct entry reads them too.
+    this.overview.refresh()
     this.overview.opened(state.card)
     this.overview.setVisible(false)
     const wanted = route.doc ?? state.selected

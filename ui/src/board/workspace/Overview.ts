@@ -93,6 +93,8 @@ interface Folio {
   recent: string
   project: string
   host: string
+  /** Placed before board metadata named it; its first real card sets the groups. */
+  provisional: boolean
   el: HTMLButtonElement
   stack: HTMLElement
   name: HTMLElement
@@ -264,6 +266,9 @@ export class Overview {
     })()
   }
 
+  /** Board metadata arrived or changed; folios keep their places. */
+  cardsChanged(): void { if (!this.disposed) this.reconcile() }
+
   opened(card: KanbanCard): void {
     if (this.disposed) return
     const uid = uidOf(card)
@@ -357,7 +362,11 @@ export class Overview {
         folio.recent = overviewDayGroup(latest, Date.now())
         folio.project = projectOf(card)
         folio.host = card.originId
+      } else if (folio.provisional && known.has(uid)) {
+        folio.project = projectOf(card)
+        folio.host = card.originId
       }
+      folio.provisional = !known.has(uid)
       folio.card = card; folio.receipts = receipts
       this.updateFolio(folio)
     }
@@ -383,7 +392,7 @@ export class Overview {
     const count = node('span', '')
     const when = node('span', 'ws-overview-when')
     footer.append(marks, count, when); tx.append(title, outcome, footer); el.append(stack, tx)
-    const folio: Folio = { uid, card, receipts: [], latest: 0, recent: 'Earlier', project: projectOf(card), host: card.originId,
+    const folio: Folio = { uid, card, receipts: [], latest: 0, recent: 'Earlier', project: projectOf(card), host: card.originId, provisional: true,
       el, stack, name, fresh, outcome, marks, count, when }
     el.addEventListener('click', () => { void this.open(folio.card) })
     return folio

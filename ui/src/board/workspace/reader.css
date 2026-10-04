@@ -120,14 +120,23 @@
 .ws-receipts { color: var(--ws-ink-muted); padding: var(--ws-small-gap) var(--ws-inset); font-size: var(--ws-small-size); }
 .ws-receipts > div { overflow-wrap: anywhere; padding: var(--ws-small-gap) 0; }
 .ws-receipts summary { cursor: pointer; }
-.ws-switcher { width: var(--ws-menu-ceiling); }
+.ws-switcher { width: var(--ws-menu-ceiling); display: flex; flex-direction: column; gap: var(--ws-small-gap); }
 .ws-channel-find { width: 100%; background: var(--ws-paper); color: var(--ws-ink); font: var(--ws-label-size)/1.4 var(--ws-mono); padding: var(--ws-small-gap); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
 .ws-channel-list { overflow: auto; }
-.ws-channel-row { display: flex; flex-direction: column; width: 100%; text-align: left; padding: var(--ws-inset); border-radius: var(--ws-control-radius); font-family: var(--ws-serif) !important; font-size: var(--ws-title-size) !important; }
-.ws-channel-row small { font: var(--ws-small-size)/1.5 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); color: var(--ws-ink-muted); }
-.ws-channel-row:hover, .ws-channel-row[aria-current='true'] { background: var(--ws-fill); }
-.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; overflow: auto; border-right: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); }
-.ws-with-sidebar .ws-sidebar { display: block; }
+.ws-channel-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: var(--ws-small-gap) var(--ws-inset); border-radius: var(--ws-control-radius); font: 500 var(--ws-row-size)/1.25 var(--ws-serif) !important; color: var(--ws-ink-soft) !important; }
+.ws-channel-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.ws-channel-row small { font: var(--ws-small-size)/1.5 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); color: var(--ws-ink-faint); }
+.ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink) !important; }
+.ws-channel-row[aria-current='true'] { background: var(--ws-fill); color: var(--ws-ink) !important; }
+/* The channel sidebar is a Desk column: rag sheet, ochre rule, compact rows. */
+.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-small-gap); min-height: 0; padding: var(--ws-inset) var(--ws-small-gap); border-right: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-sheet); }
+.ws-sidebar .ws-channel-find { flex: none; }
+.ws-sidebar .ws-channel-list { flex: 1; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent; }
+.ws-with-sidebar .ws-sidebar { display: flex; }
+.ws-sidebar-toggle { flex: none; width: var(--ws-control-height); height: var(--ws-control-height); border-radius: var(--ws-control-radius); position: relative; color: var(--ws-ink-faint) !important; }
+.ws-sidebar-toggle::before { content: ''; position: absolute; inset: 9px 8px; border: var(--ws-line-width) solid currentColor; border-radius: 2px; border-left-width: 4px; }
+.ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-pressed='true'] { color: var(--ws-ink-muted) !important; }
+.ws-sidebar-toggle:hover { background: var(--ws-hover); }
 .ws-thumbbar { display: none; }
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -179,7 +188,7 @@
   .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) 1fr var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); min-height: var(--ws-thumb-height); border-top: var(--ws-line-width) solid var(--ws-hairline); }
   .ws-thumb-button { width: var(--ws-phone-target); height: var(--ws-phone-target); font-size: var(--ws-section-size) !important; }
   .ws-position { text-align: center; color: var(--ws-ink-muted); }
-  .ws-icon-button, .ws-sidebar, .ws-page .ws-edge { display: none !important; }
+  .ws-icon-button, .ws-sidebar, .ws-sidebar-toggle, .ws-page .ws-edge { display: none !important; }
   .ws-label-title { max-width: 50%; }
   .ws-prose, .ws-content .kbn-detail-prose { padding: var(--ws-gap) var(--ws-inset); }
   .ws-menu-item { min-height: var(--ws-phone-target); }

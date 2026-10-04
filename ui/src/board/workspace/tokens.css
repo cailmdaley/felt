@@ -69,7 +69,8 @@
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  --ws-sidebar-width: 280px;
+  --ws-sidebar-width: 240px;
+  --ws-row-size: 16px;
   --ws-html-width: 1040px;
   --ws-pdf-width: 900px;
 }
