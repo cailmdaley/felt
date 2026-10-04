@@ -1,25 +1,49 @@
-# shuttle
+# Shuttle
 
-Start with [Set up Shuttle](setup.md) for a working board and first task, then [connect your machines](remotes.md) or [choose where conversations open](conversations.md).
+Shuttle runs coding agents against written tasks and gives you a board for following their work.
+Use it when you want to describe a result, choose where an agent works, and come back to a recorded outcome.
+It can run tasks on your laptop or on an awake remote machine.
 
-Two Go CLIs divide the work. `felt` stores fibers as Markdown and preserves
-unknown frontmatter as opaque data. `shuttle` interprets an optional `shuttle:`
-block, validates it, and owns orchestration. The optional Elixir daemon polls
-felt stores, launches workers, and serves the board.
+Tasks live in **felt**, the command-line tool for Markdown notes shipped in this repository.
+felt calls each note a **fiber** and keeps it under a `.felt/` directory in your project.
+You can edit a fiber in any text editor and keep it in Git.
+Shuttle adds execution settings to selected fibers; your other fibers remain notes.
 
-A fiber without the block stays a plain note. Add it and the daemon can hand
-the fiber to a coding agent as a **constitution**: a description of the desired
-state, not a list of steps.
+[Set up Shuttle](setup.md) takes you from installation to a small task on one machine.
+You don't need a multi-machine setup to start.
 
-!!! note "You can skip this whole section"
-    felt works without the Shuttle CLI or daemon. Use it for a notes-and-tasks
-    store, and stop at [Concepts](../concepts/fibers.md) — you lose nothing.
+## From a written task to a result
 
-## The block
+Suppose you want an agent to fix a cache that returns stale data.
+Write a fiber describing the problem, the desired behavior, and how to verify it.
+Shuttle calls this task description a **constitution**: it gives the agent a result to work toward and the constraints it must respect.
+The agent chooses its implementation steps.
+
+1. **Prepare the task.** Write the fiber, choose an installed agent, and tell Shuttle the project directory where it should work.
+2. **Start the work.** Activate the task with `shuttle resume` or the board.
+   Shuttle's background service, called the **daemon**, watches your registered note collections and launches the agent.
+   A running agent session is called a **worker**.
+3. **Follow and steer.** Read the task on the board, open its conversation, or attach to a terminal worker with `shuttle attach <fiber>`.
+   You can revise the written task as your requirements change.
+4. **Read the result.** The worker records its conclusion in the fiber's `outcome` field.
+   It closes the task for your review, or leaves continuation notes and hands off so another session can continue.
+
+A terminal worker runs in **tmux**, which keeps its terminal session alive when you close a window or disconnect from SSH.
+Codex can also run through its native desktop backend; see [Opening conversations](conversations.md) for the available choices.
+The machine doing the work must stay awake.
+
+## A task carries its own context
+
+The fiber's body holds the goal, constraints, and evidence.
+Its `outcome` is a short conclusion you can read without opening the whole document.
+A `## Status` section tells a continuing worker what's done, what remains, and how to proceed.
+This makes unfinished work readable across sessions, including sessions with a fresh conversation.
+
+Shuttle stores execution settings in the fiber's YAML header, under `shuttle:`:
 
 ```yaml
 ---
-name: Rewrite the covariance loader
+name: Reject stale cache entries
 status: active
 shuttle:
   kind: oneshot
@@ -29,87 +53,36 @@ shuttle:
 ---
 ```
 
-Those keys cover the dispatch interface. felt preserves this block without
-interpreting or validating it; `shuttle install`, `shuttle check`, and the daemon
-own its schema and behavior. Remove Shuttle and you still have a readable,
-greppable, version-controlled markdown file.
+Here `oneshot` means a finite task, `host` selects the machine that may run it, `project_dir` sets the agent's working directory, and `agent` selects a configured agent.
+Use `shuttle install` to write these settings rather than assembling the block by hand.
+[Set up Shuttle](setup.md#run-one-small-task) shows the complete commands and explains the release step that allows tasks to launch after a daemon restart.
 
-(The board reads a small calendar vocabulary outside the block — `start:`,
-`horizon:`, and the `cycle` tag. See [Cycles and eras](cycles.md).)
+felt preserves the `shuttle:` settings without interpreting them.
+The `shuttle` command validates them and manages the task's lifecycle.
+The document stays readable even without Shuttle running.
 
-## The loop
+## Follow the work on the board
 
-1. **Author.** Write a fiber body that describes a *desired state*. Then run
-   `shuttle install` to attach the block and arm the fiber.
-2. **Dispatch.** The daemon polls the fiber tree every 30 s by default. For each
-   eligible fiber it starts a terminal worker in tmux or a Codex app conversation, using
-   `project_dir`. `shuttle session-name <fiber>` prints the session name,
-   `<slug-leaf>-<uid>-shuttle`.
-3. **Work.** The worker reads the constitution fresh from disk. It reads the
-   previous session's `## Status` handoff. Then it drives toward the desired
-   state and picks its own slice. Sequencing emerges; nobody scripts it.
-4. **Exit.** Before exiting, the worker rewrites `outcome:` (the kanban
-   headline) and the body's `## Status` block (the next worker's landing pad).
-   Then it exits one of two ways: to continue, it runs `shuttle handoff
-   <fiber>`, which stamps a clean-exit marker and ends its own tmux session
-   in one move; to stop, it runs `shuttle close <fiber>` and does nothing else.
-5. **Redispatch or review.** A fiber still marked `active` gets a fresh worker
-   on the next tick, and that worker lands warm on `## Status`. A fiber the
-   worker closed waits for a human verdict.
+The daemon serves a browser board at `http://127.0.0.1:4000/` on a single-user machine.
+It has three views:
 
-## State across sessions
+- **Desk:** task cards, running workers, and results awaiting your review.
+- **Chronicle:** activity, sessions, and commits over time.
+- **Board:** a canvas of files workers have sent, such as plots and reports.
 
-Realization spans sessions by design. A context window is finite; a piece of
-work often is not. So the fiber carries the durable state, not a transcript.
-Each worker starts fresh, reads the spec and the handoff, and adds what it can.
+[The board guide](board.md) covers editing, review, and the controls in each view.
+The command line also supports task lifecycle operations if you prefer working from a terminal.
 
-Realization therefore stays asymptotic. You amend the constitution as the world
-changes. You do not empty it like a checklist. Work finishes when a human says
-it finishes.
+Each machine runs its own daemon and owns the workers it starts.
+Connecting machines lets one board show their combined tasks and activity; this group of connected machines is called a **fleet**.
+[Connect your machines](remotes.md) covers discovery, SSH, and shared servers.
 
-Two state channels cross sessions. Keep them apart:
+## Continue
 
-| Channel | Fields | Who writes it |
-|---|---|---|
-| Handoff prose | `outcome:`, the body's `## Status` | The worker, rewritten every session |
-| Machine continuation | `shuttle.runtime.{session_uuid, dispatched_at, run_id, handed_off_at}` | The daemon at dispatch; the worker at clean exit; `accept`/`resume` when they re-arm a role |
+- [Set up Shuttle](setup.md): install the service and run your first task.
+- [Constitutions](constitutions.md): write goals and constraints an agent can act on.
+- [Lifecycle](lifecycle.md): pause, resume, review, and continue work.
+- [Opening conversations](conversations.md): return to workers in a terminal, desktop app, or browser.
+- [Installation reference](installation.md): configuration files, service management, and recovery.
 
-`handed_off_at` newer than `dispatched_at` marks a clean exit, so the next
-worker starts fresh. Otherwise the worker died dirty: a oneshot resumes the
-prior transcript while it is warm (written in the last 45 minutes), and starts
-fresh past that, with its prompt naming the cut-off session.
-
-## The pieces
-
-- **The shuttle CLI** — a Go binary beside felt. It owns the Shuttle schema,
-  configuration, lifecycle, and resolved fiber reads. `shuttle daemon` manages
-  the local daemon release; `shuttle doctor` diagnoses the host and runtime.
-- **The daemon** — an optional Elixir/OTP release that bundles its own Erlang
-  runtime. The shuttle CLI starts and supervises it. One process, bound to
-  `127.0.0.1:4000`, polls, dispatches, and serves an HTTP API.
-- **tmux** — hosts terminal workers and lets you attach to them. Codex app workers use their native App Server instead.
-  tmux owns the worker process; shuttle owns only the watcher. So restarting the
-  daemon leaves live workers running — the daemon re-adopts them on boot. A
-  worker's liveness is its process: when tmux reports a session absent, the
-  daemon checks the process table before believing it (see
-  [Operating](../dev/operating.md#a-worker-tmux-cannot-see)).
-- **The board** — a TypeScript UI, served by the daemon at
-  `http://127.0.0.1:4000/`. Three views (Desk, Chronicle, and a canvas of the files workers sent) over the same fibers, tmux
-  liveness, and the activity, session and commit [ledgers](telemetry.md) for
-  every host it can reach (the **fleet** — one or more daemons working
-  together, aggregated at a hub).
-  It holds no state of its own. Skip it if you like:
-  the CLI covers every lifecycle operation. (Cycles are the one thing only the
-  board draws — see [Cycles and eras](cycles.md).)
-- **The agent registry** — maps an agent id (`claude-opus`, `codex-luna`,
-  `pi-luna`, …) to a CLI invocation. `shuttle agents` prints it.
-
-## Next
-
-- [Constitutions](constitutions.md) — how to author one.
-- [Lifecycle](lifecycle.md) — the worker loop, exit semantics, dispatch gates.
-- [The board](board.md) — the three views, and what each gesture writes.
-- [Cycles and eras](cycles.md) — naming a span of time.
-- [Telemetry and the ledgers](telemetry.md) — what the time views read.
-- [Installation](installation.md) — installing both CLIs, fetching or building
-  the optional daemon, and operating it.
+For notes without agent execution, start with [felt's getting-started guide](../getting-started.md).

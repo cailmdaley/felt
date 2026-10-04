@@ -1,8 +1,14 @@
 # Set up Shuttle
 
-Shuttle gives your coding agents a shared board and keeps their work attached to written tasks.
-Start with one machine, run a small task, then connect another machine if you need it.
+Shuttle runs coding agents against written tasks and shows their progress and results on a browser board.
+Tasks are Markdown notes managed by **felt**, the command-line tool installed alongside Shuttle.
+A background service, called the **daemon**, watches those notes and starts agents in the project directory you choose.
+Each running agent session is called a **worker**.
+
+This guide sets up one machine and runs a small task that identifies your project without changing its files.
+You'll create a note collection, register it with the service, and follow the task through to a result.
 You can use macOS or Linux; Windows isn't supported.
+Once the first task works, you can connect another machine if you need remote execution.
 
 If you'd like your coding agent to guide the setup, install the [felt integration](../agents.md) and ask it to use the Shuttle skill's **setup** reference.
 The agent can inspect your machine, explain the choices, and check each step with you.
@@ -51,7 +57,8 @@ For a specific release, use the [version-pinning instructions](installation.md#p
 
 ## Register your work
 
-A **store** is a directory containing `.felt/`, where the task documents live.
+A **store** is the collection of Markdown notes in a project's `.felt/` directory.
+Each note is called a **fiber**; Shuttle uses selected fibers as task documents.
 Use an existing store if you have one.
 Otherwise, create one in your project:
 
@@ -105,7 +112,7 @@ The board may be empty until you add a task.
 
 ## Run one small task
 
-From your registered project directory, create a task document, called a **fiber**:
+From the project directory you added in Settings, create a task fiber:
 
 ```sh
 felt add first-task "Describe this project" -s open

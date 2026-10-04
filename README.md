@@ -11,60 +11,60 @@
 
 **[Documentation](https://cailmdaley.github.io/felt/)**
 
-**felt** is a work journal made of markdown files, with a CLI. Each entry is a "fiber": a
-directory under `.felt/` holding one markdown file — YAML frontmatter (`name`, `status`, `tags`,
-`outcome`, timestamps) above a free-form body. A fiber holds a task, a decision, a finding, a
-question, or a spec. Directories nest fibers into a hierarchy; `[[wikilinks]]` in bodies
-cross-reference them. The `felt` command adds, edits, searches, and shows them; the markdown holds
-everything, so the store diffs and versions like the rest of your repo.
+When work spans several days or coding-agent sessions, decisions and unfinished tasks can disappear into chat transcripts.
+**felt** keeps them in Markdown files beside your project, with a command-line tool for recording, searching, and connecting them.
+You and your agents read and write the same notes; Git keeps their history.
 
-**shuttle** is a separate Go CLI and optional daemon built on felt. felt treats a `shuttle:`
-frontmatter block as opaque data; shuttle interprets it as a "constitution" — a description of a
-desired end state, not a list of steps. The daemon launches a terminal worker in tmux or a Codex app conversation per eligible active
-constitution; the worker drives toward that state, rewrites the fiber's `outcome` and `## Status`
-on exit, and the next worker lands warm. A localhost status board shows the fleet and lets you
-steer it.
+Each note is called a **fiber**.
+It can hold a task, a question, a decision, a finding, or a project specification.
+A fiber lives in its own directory under `.felt/`, with metadata above its Markdown body:
 
-This repository ships two Go CLIs — `felt` for memory and notes, `shuttle` for orchestration —
-plus the optional shuttle daemon and its board UI. You can use felt on its own to record, search,
-and link with nothing running. It gives AI agents the same memory it gives you: one plugin
-installs into Claude Code and Codex, and a pi package into pi. The shuttle daemon is optional;
-adopt it when you want work dispatched, not just recorded.
-
-![Shuttle board with example data](docs/assets/shuttle-board-example.png)
-
-*Shuttle board with example data.*
-
-Any other top-level YAML key in a fiber's frontmatter is preserved opaquely, so another tool can
-own its own schema without felt claiming it. Back-references, data-flow consumers, and body search
-are computed from the markdown tree on demand — nothing else to maintain.
-
-A fiber on disk, at `.felt/covariance-estimation/covariance-estimation.md`:
-
-```yaml
+```markdown
 ---
-id: 01KTC9C1G1CBJ84H6WB92J8A13
-name: Covariance estimation
+name: Choose a cache policy
 status: closed
-tags: [methods]
-created-at: 2026-01-15T10:30:00Z
-closed-at: 2026-01-16T14:20:00Z
-outcome: "Jackknife covariance, 10x faster than analytic, <2% bias at all scales"
+outcome: Cache parsed inputs by content hash so changed files never reuse stale data.
 ---
 
-Tried analytic first — too slow for the number of bins we need.
-Jackknife on 150 patches gives a stable diagonal and off-diagonal.
-
-See also [[use-des-y3-weights]].
+Modification times aren't enough: copied inputs can preserve them.
+Hashing the input contents gives each cached result a reproducible key.
 ```
+
+Related fibers nest in directories and connect through `[[wikilinks]]` in their text.
+Plots and reports live beside the note that explains them.
+Use any editor, open `.felt/` as an Obsidian vault, or give a coding agent the [felt integration](https://cailmdaley.github.io/felt/agents/).
+felt works without a background service.
+
+**shuttle** adds optional agent orchestration: write a task, choose an agent and project directory, and let it run.
+A background service launches agents and serves a browser board where you can follow work and review results.
+Agents record conclusions and continuation notes in the task's fiber, so unfinished work can span sessions.
+Start on one machine, then connect others if you need remote execution.
+
+![Shuttle board with example tasks](docs/assets/shuttle-board-example.png)
+
+This repository ships the `felt` and `shuttle` Go CLIs, plus the optional Shuttle service and board.
+[Getting started](https://cailmdaley.github.io/felt/getting-started/) walks through a first note.
+[Set up Shuttle](https://cailmdaley.github.io/felt/shuttle/setup/) walks through a first agent task.
 
 ## Install
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh  # release binary
-brew install cailmdaley/tap/felt                                                  # Homebrew
-go install github.com/cailmdaley/felt/cmd/felt@latest                            # felt from source
-go install github.com/cailmdaley/felt/cmd/shuttle@latest                         # shuttle from source
+Install the release binaries:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+```
+
+Or use Homebrew:
+
+```sh
+brew install cailmdaley/tap/felt
+```
+
+To build from source with Go:
+
+```sh
+go install github.com/cailmdaley/felt/cmd/felt@latest
+go install github.com/cailmdaley/felt/cmd/shuttle@latest
 ```
 
 The install script needs only `curl` and `tar`. It supports macOS and Linux on x86_64 and arm64.
@@ -82,35 +82,40 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | S
 Put `SHUTTLE_DAEMON=1` after the pipe, on `sh`, so the installer sees it. The daemon release
 carries its own Erlang runtime and board bundle; running it needs tmux plus both Go CLIs on
 `PATH`. Follow [Set up Shuttle](https://cailmdaley.github.io/felt/shuttle/setup/) for a first task,
-[connect your machines](https://cailmdaley.github.io/felt/shuttle/remotes/) for a fleet, and
+[connect your machines](https://cailmdaley.github.io/felt/shuttle/remotes/) for a multi-machine setup, and
 [choose where conversations open](https://cailmdaley.github.io/felt/shuttle/conversations/) for terminal, desktop, or browser use.
 
 ## Quickstart
 
-```bash
-felt init                                            # create .felt/ in this project
-felt add covariance-estimation "Covariance estimation"
-felt edit covariance-estimation -s active            # status is opt-in
-felt edit covariance-estimation -s closed -o "jackknife — 10x faster, <2% bias"
-felt show covariance-estimation                      # body, metadata, back-references
-felt tree                                            # containment hierarchy
-felt ls -s all "jackknife"                           # search names, outcomes, frontmatter
-felt find "jackknife"                                # the same search, across the whole store
-felt setup claude                                    # install the Claude Code plugin
-felt setup codex                                     # install the Codex plugin
-felt setup pi                                        # install the pi package
+From your project directory:
+
+```sh
+felt init
+felt add cache-policy "Choose a cache policy" -s open
 ```
+
+Open `.felt/cache-policy/cache-policy.md` in your editor and describe the question below its metadata.
+When you've answered it, close the task with a conclusion you can use later:
+
+```sh
+felt edit cache-policy -s closed \
+  -o "Cache parsed inputs by content hash so changed files never reuse stale data."
+felt show cache-policy
+felt ls -s all "cache"
+```
+
+Status is optional: use it for unfinished work, and leave it off a note that records an existing decision.
+Install your agent's integration with `felt setup claude`, `felt setup codex`, or `felt setup pi`.
 
 ## Documentation
 
-Everything deeper lives at **<https://cailmdaley.github.io/felt/>**:
+The [documentation site](https://cailmdaley.github.io/felt/) covers the next steps:
 
-- concepts — fibers, stores, nesting, wikilinks, outcomes, frontmatter ownership
-- the full command reference and flags
-- agent integration — one plugin for Claude Code and Codex, one pi package, shared skills and hook-equivalent behavior
-- Obsidian compatibility — open a `.felt/` directory directly as an Obsidian vault
-- the shuttle layer — constitutions, dispatch, the board, the HTTP API
-- installing and operating the daemon, including its sharp edges
+- [Organize notes and tasks](https://cailmdaley.github.io/felt/concepts/organizing/): nesting, links, statuses, and useful conclusions.
+- [Integrate coding agents](https://cailmdaley.github.io/felt/agents/): Claude Code, Codex, and pi.
+- [Keep files with notes](https://cailmdaley.github.io/felt/concepts/companions/): plots, PDFs, and reports.
+- [Run tasks with Shuttle](https://cailmdaley.github.io/felt/shuttle/): task descriptions, the board, and review.
+- [Look up commands](https://cailmdaley.github.io/felt/reference/cli/).
 
 ## Contributing
 

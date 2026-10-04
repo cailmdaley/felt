@@ -4,9 +4,25 @@ Use this route when you want Shuttle to create and continue conversations in you
 Terminal Codex workers (`--surface cli`) don't need it.
 For the general opening choices, see [Opening conversations](conversations.md).
 
-Shuttle needs a live connection to the **same App Server** the desktop app uses.
-An ordinary desktop session keeps its backend private; finding its transcript files doesn't give Shuttle control of the conversation.
-`shuttle codex-desktop-bridge` shares that backend through a private Unix socket while preserving the desktop app's native tools.
+The **App Server** is the Codex process that runs conversations and tools; the desktop app is a client of that process.
+Shuttle needs a connection to that same running process to steer the conversation you see in the app.
+Sharing transcript files with a second server does not establish that connection.
+
+For a local desktop launch that uses private standard-input/output pipes, `shuttle codex-desktop-bridge` gives Shuttle a private Unix socket into the same server.
+It translates the desktop's newline-delimited messages to the server's WebSocket transport while keeping the native executable in the desktop's child process, with its native tools environment.
+
+## When you can skip the bridge
+
+- **Terminal workers:** use Codex normally with `--surface cli`.
+- **An existing shared native server:** if the desktop already connects to an App Server through a Unix socket, point Shuttle at that socket and verify the same conversation. Shuttle already speaks the native protocol; it doesn't need a relay in this arrangement.
+- **A remote project opened through the app's SSH connection:** if that connection uses an existing shared native App Server socket, configure Shuttle on the execution host to use that exact endpoint, as in step 3, and verify the same conversation as in step 5. No local desktop wrapper is needed for that arrangement. The [remote setup guide](remotes.md) separately connects the Shuttle daemons; it does not establish their Codex backend connection.
+
+Codex documents [stdio and socket transports](https://learn.chatgpt.com/docs/app-server), but its `--listen` option selects one transport; it doesn't add a socket alongside a desktop's existing stdio connection.
+The native `app-server proxy` forwards raw socket bytes, rather than translating the desktop's newline-delimited messages, so it is not a replacement wrapper.
+
+Desktop builds may also contain development switches for connecting to an external server.
+Treat those as unverified alternatives until you have tested the same live thread and native tools: connecting successfully alone does not establish equivalent desktop behavior.
+This guide uses the bridge for the local stdio case, not as a requirement for all Codex integration.
 
 The bridge follows the app's lifetime.
 Keep the desktop app open while using these conversations through Shuttle.
@@ -16,13 +32,14 @@ This explicit integration depends on the installed desktop build, so verify the 
 ## 1. Locate the native executable
 
 Use the Codex executable bundled with the desktop app, rather than a separately installed CLI or another wrapper.
-For a build installed as `/Applications/ChatGPT.app`, it is:
+For a build using the packaged CLI layout inside `/Applications/ChatGPT.app`, it is:
 
 ```text
-/Applications/ChatGPT.app/Contents/Resources/codex
+/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
 ```
 
-Inspect your installed app and adjust that path if it differs.
+Inspect your installed app and adjust that path if it differs; some layouts put the executable directly at `Contents/Resources/codex`.
+Run that executable with `--version` to confirm the path before creating the wrapper.
 Also check the Shuttle CLI you'll put in the wrapper:
 
 ```sh
@@ -42,7 +59,7 @@ Create `~/.local/bin/codex-shuttle-desktop` with this content, replacing both ex
 ```sh
 #!/bin/sh
 exec "$HOME/.local/bin/shuttle" codex-desktop-bridge \
-  --codex /Applications/ChatGPT.app/Contents/Resources/codex \
+  --codex /Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex \
   --socket "${CODEX_HOME:-$HOME/.codex}/shuttle-desktop/app-server.sock" \
   -- "$@"
 ```

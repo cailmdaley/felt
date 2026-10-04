@@ -1,111 +1,102 @@
 # felt
 
-**felt tracks the durable trail that builds up around work, from the command
-line.**
+When a project spans several days or coding-agent sessions, its decisions often end up scattered across chat transcripts, issue comments, and half-finished notes.
+felt gives those decisions, questions, and tasks a place beside the work: ordinary Markdown files that you and your agents can read, edit, search, and keep in Git.
 
-felt is a personal-scale tool for a trusted user working with coding agents.
-Your fibers remain plain Markdown in your own Git repository, so the trail stays
-readable and versioned alongside the work.
+**felt is a command-line tool for keeping project notes and tasks.**
+Each note is called a **fiber**.
+A fiber can record why you chose a method, hold a question you haven't answered, or describe work you want done.
+You can use felt on its own, with any editor and no background service.
 
-Each entry — a *fiber* — lives in its own directory under `.felt/`. The
-directory holds a `<slug>.md` file with YAML frontmatter and a plain markdown
-body. File a fiber for a task, a decision, a question, a finding, a spec, or a
-reference doc. Nest the directories to build hierarchy. Write `[[wikilinks]]`
-in bodies to cross-reference.
+**Shuttle is an optional tool for assigning written tasks to coding agents.**
+It uses the same fibers, starts agents in your project, and shows their progress and results in a browser board.
+Start with felt for notes, or go to [Set up Shuttle](shuttle/setup.md) if you want agents to run tasks.
 
-felt computes back-references, reverse consumers, and body search from the
-markdown on demand. So the store stays readable, greppable, diffable, and
-yours.
+## Keep a decision beside your project
 
-Install it in one line — [Getting started](getting-started.md) walks the rest:
+Install felt on macOS or Linux:
 
-```bash
+```sh
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
 ```
 
-```bash
-felt add covariance-estimation "Covariance estimation" -s open
-felt edit covariance-estimation -s closed \
-  -o "Jackknife on 150 patches — 10x faster than analytic, <2% bias"
+The installer includes both the `felt` and `shuttle` commands.
+[Getting started](getting-started.md) covers other installation options and agent integration.
+
+From your project directory, create a place for notes and record a task:
+
+```sh
+felt init
+felt add cache-policy "Choose a cache policy" -s open
 ```
 
-## The trail and its readers
+This creates `.felt/cache-policy/cache-policy.md`.
+Open it in your editor and write the question, evidence, or constraints below its metadata.
+Once you've decided, record the answer:
 
-Work leaves a trail: the thing you decided, the reason you rejected the other
-option, the number you measured at 2am. Issue trackers want tickets. Notes apps
-want a silo. Neither survives contact with a coding agent, which needs the trail
-in a form it can read and write without a special client.
-
-felt takes the boring option. Plain markdown files in a directory next to the
-code. That keeps the store legible to three readers at once:
-
-- **You**, with any editor. A `.felt/` directory opens as an
-  [Obsidian](https://obsidian.md) vault — the wikilinks and graph view work
-  because the format matches.
-- **Your tooling**, with `grep`, `git`, and the `felt` CLI.
-- **Coding agents**, which read and write fibers through the same CLI you do.
-  felt ships a plugin for Claude Code and Codex so agents see the active fibers
-  at session start and file what they learn before they exit.
-
-felt treats that last reader as a design constraint, not an afterthought. Agent
-sessions end. The fiber tree carries context to the next one.
-
-Metadata stays small on purpose. Everything except `name` is optional. `status`
-is opt-in. felt preserves any frontmatter key it does not own, so downstream
-tools can layer their own schema without felt claiming it.
-
-## felt and shuttle
-
-This repository ships four artifacts: the **felt** CLI, the **shuttle** CLI,
-the **shuttle** daemon, and the board UI served by the daemon.
-
-**felt** is a lean CLI and Go library for fibers: Markdown notes with metadata,
-links, search, and a Git-synchronized store. It needs no daemon or server.
-felt preserves unknown frontmatter as opaque data, so it can store a `shuttle:`
-block without understanding or validating it.
-
-**shuttle** is the separate Go CLI for network and orchestration features. It
-uses felt's library to read and write fibers, interprets the `shuttle:` block,
-and owns the host, fleet, and worker lifecycle. You can install and use the
-Shuttle CLI without running a daemon.
-
-The optional Elixir/OTP daemon polls the tree and launches one tmux worker per
-eligible constitution. It serves a [board](shuttle/board.md) at
-`http://127.0.0.1:4000/` — a kanban desk for steering the work and views for
-following activity and sent files. Workers hand off through the fiber, so work
-can span many sessions. The daemon shells `felt` for fiber content and generic
-fiber writes, and `shuttle` for Shuttle-owned operations.
-
-The installer always installs both Go CLIs. Add the daemon release with
-`SHUTTLE_DAEMON=1`:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE_DAEMON=1 sh
+```sh
+felt edit cache-policy -s closed \
+  -o "Cache parsed inputs by content hash so changed files never reuse stale data."
+felt show cache-policy
 ```
 
-The variable goes after the pipe, on `sh`, so the installer sees it. The
-prebuilt daemon carries its own Erlang runtime and board bundle; the host needs
-no build toolchain to run it. Single-host use is supported on Linux and macOS.
-Multi-host operation adds SSH tunnels and host configuration; see
-[Installation](shuttle/installation.md). You can use felt independently of
-Shuttle.
+The task is closed, but its answer stays in the project.
+Search for it later with `felt ls -s all "cache"`, or let a coding agent read it before changing the cache.
 
-![Shuttle board with example data](assets/shuttle-board-example.png)
+A fiber is a Markdown document with a small YAML header:
 
-*Shuttle board with example data.*
+```markdown
+---
+name: Choose a cache policy
+status: closed
+outcome: Cache parsed inputs by content hash so changed files never reuse stale data.
+---
 
-## Where to go next
+Modification times aren't enough: copied inputs can preserve them.
+Hashing the input contents gives each cached result a reproducible key.
+```
 
-| If you want to | Read |
+felt also stamps an identity and timestamps when it creates and edits fibers.
+Status is optional: a note that records an existing decision doesn't need to become a task.
+
+## Grow notes with the work
+
+Keep related fibers in nested directories and connect them with `[[wikilinks]]` in their text.
+Plots, PDFs, and reports can live beside the note that explains them.
+The files remain readable in any editor, and `.felt/` can open as an [Obsidian](https://obsidian.md) vault.
+Commit them to Git to keep their history; [cross-project stores](concepts/cross-project.md) let several projects share one collection.
+
+The [agent integration](agents.md) gives Claude Code, Codex, and pi access to this same collection.
+Agents receive project context at session start and instructions for recording what they learn.
+The next session can read the conclusion and its reasoning without recovering a whole conversation.
+
+## Run written tasks with Shuttle
+
+With Shuttle, a fiber can also describe a result you want an agent to produce.
+For example: “Make the cache reject stale inputs, and verify it with a test that changes an input file.”
+You choose the agent and project directory, and Shuttle starts the work.
+
+A background service, called the **daemon**, watches the registered fiber collections and runs eligible tasks.
+Its browser **board** lets you read and edit tasks, follow running agents, and review their results.
+Agents write results and continuation notes back into the fiber, so another session can continue unfinished work.
+You can run this on one machine or [connect several machines](shuttle/remotes.md).
+
+![Shuttle board with example tasks](assets/shuttle-board-example.png)
+
+[The Shuttle overview](shuttle/index.md) explains the task workflow.
+[Set up Shuttle](shuttle/setup.md) walks through installation and a first task on one machine.
+Shuttle's service and board are optional; recording and searching notes with felt needs neither.
+
+## Continue
+
+| Your next step | Guide |
 |---|---|
-| Install the CLI and file your first fiber | [Getting started](getting-started.md) |
-| Understand the fiber layout on disk | [Fibers](concepts/fibers.md) |
-| Learn statuses, nesting, outcomes, wikilinks | [Organizing](concepts/organizing.md) |
-| Carry your own YAML alongside felt's | [Frontmatter](concepts/frontmatter.md) |
-| Attach plots, PDFs, and HTML reports to a fiber | [Companion files](concepts/companions.md) |
-| Search across every project at once | [Cross-project stores](concepts/cross-project.md) |
-| Wire up Claude Code or Codex | [Agent integration](agents.md) |
-| See shuttle orchestration | [shuttle](shuttle/index.md) |
+| Install felt and work through a first note | [Getting started](getting-started.md) |
+| Decide when to track a task, nest notes, or link them | [Organizing](concepts/organizing.md) |
+| Understand the file format | [Fibers](concepts/fibers.md) and [Frontmatter](concepts/frontmatter.md) |
+| Keep plots, PDFs, and reports with a note | [Companion files](concepts/companions.md) |
+| Give your coding agent project context | [Agent integration](agents.md) |
+| Assign work to agents and follow it on a board | [Shuttle](shuttle/index.md) |
 | Look up a command | [CLI reference](reference/cli.md) |
 
 ## License
