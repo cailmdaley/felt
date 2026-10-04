@@ -423,8 +423,8 @@
 }
 /* Dense wrap — chips fill the available width and wrap to as many rows as the
    pinned set needs; no cap, no scrollbar, no pager. Stable left-to-right order
-   (chips sorted by fiber path) so muscle memory works — a launcher's whole
-   point is that a role sits in the same place every visit. */
+   (newest-created first, with identity ties) is independent of activity,
+   file timestamps and path renames. */
 .kbn-pinned-row {
   display: flex;
   flex-wrap: wrap;

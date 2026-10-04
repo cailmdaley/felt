@@ -3,7 +3,6 @@ import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
   civilDayToLocalDate,
-  descByKey,
   dueCivilDay,
   dueSortMs,
   instantMs,
@@ -46,7 +45,7 @@ import type {
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
-import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { byCreatedAtDesc, deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
 import type { PhoneMeeting } from './phoneMeeting'
 import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
@@ -608,8 +607,8 @@ export class KanbanSurfaceRenderer {
    *  chips. These are schedule-less `kind:pinned` roles the poller never
    *  auto-fires; you dispatch one by dragging it onto the Now In-flight column
    *  (the chips are draggable and `findCardColumn` returns 'pinned' so the drag
-   *  routes through `transition(card,'inFlight')`). Chips are stable-ordered by
-   *  fiber path so the launcher band holds still, and EVERY ONE OF THEM
+   *  routes through `transition(card,'inFlight')`). Chips follow the read
+   *  model's creation order, and EVERY ONE OF THEM
    *  RENDERS — no row cap, no "+N more" pager, because a launcher runs on
    *  muscle memory and a role you reach for daily must never be on page 2. The
    *  band wraps to as many rows as the pinned set needs. ALWAYS rendered — even
@@ -639,12 +638,7 @@ export class KanbanSurfaceRenderer {
       hint.textContent = 'Drag a role here to park it on the strip'
       row.append(hint)
     } else {
-      // Stable ordering by fiber path (id) so the launcher band holds still —
-      // pinned is a *launcher*, and muscle memory only works if a role sits in
-      // the same place every visit. The read model's most-recently-used order
-      // would shuffle chips out from under the user's hand.
-      const ordered = [...pinned].sort((a, b) => a.id.localeCompare(b.id))
-      for (const card of ordered) row.append(this.renderPinnedChip(card, staleness[card.originId]))
+      for (const card of pinned) row.append(this.renderPinnedChip(card, staleness[card.originId]))
     }
     section.append(row)
     // The "onto the shelf" half of the Pinned strip: dropping a card here
@@ -2789,9 +2783,11 @@ function returnMs(card: KanbanCard): number | undefined {
  *  warm/cold split) is untouched; only the order of clusters and the cards
  *  within each is affected. */
 export function sortDatedByReturn(clusters: StashCluster[]): StashCluster[] {
+  const byReturn = (a: KanbanCard, b: KanbanCard): number =>
+    ascByKey(returnMs(a), returnMs(b)) || byCreatedAtDesc(a, b)
   return clusters
-    .map((c) => ({ ...c, cards: [...c.cards].sort((a, b) => ascByKey(returnMs(a), returnMs(b))) }))
-    .sort((a, b) => ascByKey(returnMs(a.cards[0]), returnMs(b.cards[0])))
+    .map((c) => ({ ...c, cards: [...c.cards].sort(byReturn) }))
+    .sort((a, b) => a.cold !== b.cold ? (a.cold ? 1 : -1) : byReturn(a.cards[0], b.cards[0]))
 }
 
 /**
@@ -2822,14 +2818,11 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
     }
   }
   for (const c of out) {
-    // `createdAt` is an INSTANT: compare epoch ms, never the RFC3339 strings —
-    // a string compare orders by local wall clock, so a Berkeley-created fiber
-    // sinks below an older Paris one (see civilDay.ts).
-    c.cards.sort((a, b) => descByKey(instantMs(a.createdAt), instantMs(b.createdAt)))
+    c.cards.sort(byCreatedAtDesc)
   }
   out.sort((a, b) => {
     if (a.cold !== b.cold) return a.cold ? 1 : -1
-    return descByKey(instantMs(a.cards[0]?.createdAt), instantMs(b.cards[0]?.createdAt))
+    return byCreatedAtDesc(a.cards[0], b.cards[0])
   })
   return out
 }

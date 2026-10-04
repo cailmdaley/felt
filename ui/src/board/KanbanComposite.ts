@@ -63,10 +63,8 @@ interface CompositeRuntime {
    * while its launch is not running). */
   phase?: string;
   /** Real ms timestamp of this live session's most-recent hook event of ANY
-   * type. Replaces the old bogus `== started_at` value, which never updated on
-   * activity — so it's what makes idle-duration ranking possible at all. Present
-   * only for a tracked running worker; drives the In-flight idle-descending sort
-   * and the 60s waiting-chip gate. */
+   * type. Present only for a tracked running worker; drives activity-age labels
+   * and the 60s waiting-chip gate, never card ordering. */
   lastActivityAt?: number;
   /** Owner-served: where a phone opens this worker — the claude.ai bridge URL
    * the session wrote into its own transcript. Absent when never bridged. */
