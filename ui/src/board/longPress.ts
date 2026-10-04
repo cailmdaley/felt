@@ -131,6 +131,10 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
   })
 
   const onDown = (e: PointerEvent): void => {
+    // This is the touch equivalent of a context menu. Mouse users already
+    // have right-click, and a mouse drag can suppress pointermove until the
+    // browser starts native drag-and-drop, leaving this timer armed.
+    if (e.pointerType === 'mouse') return
     // Only the primary button: a right-click already has a context menu, and a
     // middle-click drag is not a press.
     if (e.button !== 0) return
@@ -147,7 +151,10 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
   el.addEventListener('contextmenu', onContextMenu)
   // A drag that gets going is the other reading of the same press — desktop
   // keeps its drag, and the timer must not fire mid-flight.
-  el.addEventListener('dragstart', onEnd)
+  // Capture at the window: nested draggable rows deliberately stop their
+  // `dragstart` from bubbling through the card, but their drag still ends the
+  // card's long-press candidate.
+  window.addEventListener('dragstart', onEnd, true)
   window.addEventListener('pointerup', onEnd)
   window.addEventListener('pointercancel', onEnd)
   window.addEventListener('scroll', onEnd, true)
@@ -157,7 +164,7 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
     el.removeEventListener('pointerdown', onDown)
     el.removeEventListener('pointermove', onMove)
     el.removeEventListener('contextmenu', onContextMenu)
-    el.removeEventListener('dragstart', onEnd)
+    window.removeEventListener('dragstart', onEnd, true)
     window.removeEventListener('pointerup', onEnd)
     window.removeEventListener('pointercancel', onEnd)
     window.removeEventListener('scroll', onEnd, true)

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { LongPressTracker } from './longPress'
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from 'vitest'
+import { attachLongPress, LongPressTracker } from './longPress'
 
 /** A hand-turned clock: timers only run when the test says so, so every
  *  assertion is about the rule and not about wall time. */
@@ -101,5 +102,44 @@ describe('LongPressTracker', () => {
     t.down(1, { x: 0, y: 0 })
     t.cancel()
     expect(states).toEqual([true, false, true, false])
+  })
+})
+
+describe('attachLongPress', () => {
+  it('ignores mouse holds and cancels a nested row drag that stops bubbling', () => {
+    const card = document.createElement('div')
+    const row = document.createElement('div')
+    card.append(row)
+    document.body.append(card)
+    row.addEventListener('dragstart', (event: Event) => event.stopPropagation())
+    const clock = fakeClock()
+    const onFire = vi.fn()
+    const detach = attachLongPress(card as unknown as HTMLElement, {
+      onFire,
+      setTimer: clock.setTimer,
+      clearTimer: clock.clearTimer,
+    })
+
+    const mouseDown = Object.assign(new Event('pointerdown', { bubbles: true }), {
+      button: 0, pointerId: 1, pointerType: 'mouse', clientX: 10, clientY: 10,
+    })
+    card.dispatchEvent(mouseDown)
+    expect(clock.armed).toBe(0)
+
+    // Pen uses the same press path as touch, so the drag-start guard still
+    // matters for a draggable descendant that stops event bubbling.
+    const penDown = Object.assign(new Event('pointerdown', { bubbles: true }), {
+      button: 0, pointerId: 2, pointerType: 'pen', clientX: 10, clientY: 10,
+    })
+    card.dispatchEvent(penDown)
+    expect(clock.armed).toBe(1)
+    // A real bubbling event reaches window capture before the row stops it.
+    row.dispatchEvent(new Event('dragstart', { bubbles: true }))
+    clock.elapse()
+
+    expect(onFire).not.toHaveBeenCalled()
+    expect(clock.armed).toBe(0)
+    detach()
+    card.remove()
   })
 })
