@@ -27,7 +27,7 @@ describe('shared keyboard table', () => {
     expect(keyIntent(event('ArrowRight', { altKey: true }, field), 'reader')).toBe('next')
     expect(shouldForwardDocumentKey(event('ArrowRight', { altKey: true }, field))).toBe(false)
   })
-  it('guards nested contenteditable nodes, including srcdoc realms', () => {
+  it('guards nested contenteditable nodes and non-editable islands', () => {
     const editable = document.createElement('div')
     editable.setAttribute('contenteditable', 'true')
     const child = document.createElement('span')
@@ -36,6 +36,19 @@ describe('shared keyboard table', () => {
     expect(shouldForwardDocumentKey(event('j', {}, child))).toBe(false)
     child.setAttribute('contenteditable', 'false')
     expect(keyIntent(event('j', {}, child), 'reader')).toBe('next')
+  })
+  it('recognizes editable targets from another document realm', () => {
+    const frame = document.createElement('iframe')
+    document.body.append(frame)
+    const frameDocument = frame.contentDocument!
+    const editable = frameDocument.createElement('div')
+    editable.setAttribute('contenteditable', 'true')
+    const child = frameDocument.createElement('span')
+    editable.append(child)
+    const key = event('j', {}, child)
+    expect(keyIntent(key, 'desk')).toBeNull()
+    expect(shouldForwardDocumentKey(key)).toBe(false)
+    frame.remove()
   })
   it.each([{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }, { altKey: true }])('ignores composing/modifier bare keys %j', init => {
     expect(keyIntent(event('j', init), 'desk')).toBeNull()

@@ -38,6 +38,9 @@
 
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
+import { DeskKeyboard } from './DeskKeyboard.js'
+import { KeymapHelp } from './KeymapHelp.js'
+import { keyIntent } from './keymap.js'
 import { FiberDetailModal, type MeetingJoinResult } from './FiberDetailModal.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
@@ -271,6 +274,8 @@ export class KanbanModal {
   /** Intermediate fiber-detail modal — one instance, re-used across opens. */
   private readonly detailModal: FiberDetailModal
   private workspace: Workspace | null = null
+  private deskKeyboard: DeskKeyboard | null = null
+  private keymapHelp: KeymapHelp | null = null
   private workspaceReturnFocus: HTMLElement | null = null
   private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
   private readonly surfaces: KanbanSurfaceRenderer
@@ -478,6 +483,9 @@ export class KanbanModal {
     const wanted = new URLSearchParams(window.location.search).get('view')
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
     else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
+    this.keymapHelp = new KeymapHelp(
+      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'overview',
+    )
     this.workspace = new Workspace(this.container!, {
       shuttleBase: this.shuttleBase,
       cards: () => this.workspaceCards(),
@@ -503,6 +511,10 @@ export class KanbanModal {
     // The fiber-detail panel floats on document.body, not in our container —
     // an unmount would otherwise orphan it over whatever is behind.
     this.detailModal.close()
+    this.keymapHelp?.dispose()
+    this.keymapHelp = null
+    this.deskKeyboard?.dispose()
+    this.deskKeyboard = null
     this.workspace?.dispose()
     this.workspace = null
     this.phoneAudio.unmount()
@@ -588,6 +600,10 @@ export class KanbanModal {
     this.dragHorizonEl.className = 'kbn-draghorizon'
     this.deskEl = document.createElement('div')
     this.deskEl.className = 'kbn-desk'
+    this.deskKeyboard = new DeskKeyboard(this.deskEl, address => {
+      const card = boardCards(this.lastResponse).find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
+      if (card) this.openDocumentChannel(card)
+    })
     this.viewHostEl = document.createElement('div')
     this.viewHostEl.className = 'kbn-view-host'
     this.body.append(this.tabsEl, this.dragHorizonEl, this.deskEl, this.viewHostEl)
@@ -607,8 +623,11 @@ export class KanbanModal {
 
   /** Card entry points share the workspace route; worker controls stay separate. */
   private openDocumentChannel(card: KanbanCard): void {
+    if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.detailModal.close()
-    this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement
+      : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
     if (this.workspace) this.workspace.open(card)
     else this.detailModal.open(card)
@@ -632,6 +651,8 @@ export class KanbanModal {
       this.render(data)
     }
     if (this.activeViewId !== 'desk') this.mountOrRefreshActiveView()
+    else this.deskKeyboard?.refresh(true)
+    if (this.activeViewId === 'desk' && this.deskKeyboard?.focusSelection()) return
     const address = this.workspaceReturnCard
     const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
     const target = this.workspaceReturnFocus?.isConnected ? this.workspaceReturnFocus
@@ -2198,6 +2219,7 @@ export class KanbanModal {
     this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
+    this.deskKeyboard?.refresh(true)
     this.claimInitialFocus()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
@@ -2529,6 +2551,15 @@ export class KanbanModal {
     }
     if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
+    if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
+      const intent = keyIntent(e, 'desk')
+      const nativeActivation = e.key === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
+      if (intent && !nativeActivation && this.deskKeyboard?.handle(intent)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+    }
     // Column Tab-nav is a Desk gesture — a temporal view owns its own focus
     // order, and the Desk's column heads are display:none behind it anyway.
     if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
