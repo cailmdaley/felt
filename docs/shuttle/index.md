@@ -11,6 +11,7 @@ Shuttle adds execution settings to selected fibers; your other fibers remain not
 
 [Set up Shuttle](setup.md) takes you from installation to a small task on one machine.
 You don't need a multi-machine setup to start.
+For a first look at the board, watch the [board tour](tour.md), a silent video under a minute long.
 
 ## From a written task to a result
 
