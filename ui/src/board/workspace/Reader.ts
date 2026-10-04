@@ -56,6 +56,7 @@ export class Reader {
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
+  private agent = ''
   private selected: DocKey | null = null
   private expanded = false
   private active = false
@@ -144,7 +145,8 @@ export class Reader {
     const state = card?.runtimePhase ?? card?.workerState ?? card?.status ?? 'open'
     const dot = element('span', `ws-state-dot ws-state-${state}`)
     this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'))
-    this.conversation.title = `${card?.workerAgent ?? card?.shuttleAgent ?? ''} · ${state}`
+    this.agent = card?.workerAgent ?? card?.shuttleAgent ?? ''
+    this.conversation.title = `${this.agent} · ${state}`
     this.tabs.render(channel.labels)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && animate)
@@ -223,22 +225,27 @@ export class Reader {
     const sent = doc.provenance.filter(p => p.kind === 'sent')
     const latest = sent.at(-1)
     const embed = doc.provenance.find(p => p.kind === 'embed')
-    let summary = doc.kind === 'fiber' ? 'fiber prose' : embed ? 'embedded' : 'linked from body'
+    // Provenance reads in the mono register; the machine that sent it wears cobalt.
+    const segments: Array<string | HTMLElement> = [doc.kind === 'fiber' ? 'fiber page' : embed ? 'embedded' : 'linked from body']
     if (latest?.kind === 'sent') {
       const age = Math.max(0, Math.round((Date.now() - latest.time) / 60000))
-      summary = `sent ${age < 60 ? `${age}m` : age < 1440 ? `${Math.floor(age / 60)}h` : `${Math.floor(age / 1440)}d`} ago`
-      if (sent.length > 1) summary += ` · ${sent.length} receipts`
-      if (latest.worker) summary += ` · ${latest.worker}`
-    } else if (embed?.kind === 'embed' && embed.title) summary += ` · ${embed.title}`
-    summary += ` · ${doc.owner}`
+      segments[0] = `sent ${age < 60 ? `${age}m` : age < 1440 ? `${Math.floor(age / 60)}h` : `${Math.floor(age / 1440)}d`} ago`
+      if (sent.length > 1) segments.push(`${sent.length} receipts`)
+      const agent = latest.worker ?? this.agent
+      if (agent) segments.push(element('span', 'ws-agent', agent))
+    } else if (embed?.kind === 'embed' && embed.title) segments.push(embed.title)
+    segments.push(doc.owner)
     const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', text: '≡', other: '□' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
+    const summary = segments.map(part => typeof part === 'string' ? part : part.textContent).join(' · ')
     parts.glyph.textContent = glyph
     parts.title.textContent = label
     parts.title.title = doc.path
-    parts.provenance.textContent = summary
-    parts.provenance.title = summary
+    if (parts.provenance.title !== summary) {
+      parts.provenance.replaceChildren(...segments.flatMap((part, i) => i ? [' · ', part] : [part]))
+      parts.provenance.title = summary
+    }
     parts.expand.textContent = this.expanded ? '⤡' : '⤢'
     parts.expand.setAttribute('aria-label', this.expanded ? 'Restore size' : 'Expand document')
   }
