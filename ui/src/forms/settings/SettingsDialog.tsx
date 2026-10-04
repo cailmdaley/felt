@@ -1,5 +1,5 @@
 /**
- * The settings sheet: one surface, five sections, any host in the fleet.
+ * The settings sheet: browser opening preferences and any host's operator files.
  *
  * ## Why an overlay and not a fourth tab
  *
@@ -30,6 +30,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppDialog } from '../AppDialog'
 import { SettingsDraftContext } from './SettingsDraftContext'
 import { AgentsSection } from './AgentsSection'
+import { ConversationsSection } from './ConversationsSection'
 import { FleetSection } from './FleetSection'
 import { HostClassSection } from './HostClassSection'
 import { HostSection } from './HostSection'
@@ -42,9 +43,10 @@ import {
   type SettingsHost,
 } from './settingsApi'
 
-type SectionId = 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host'
+type SectionId = 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host' | 'conversations'
 
 const SECTIONS: Array<{ id: SectionId; label: string }> = [
+  { id: 'conversations', label: 'Conversations' },
   { id: 'stores', label: 'Stores' },
   { id: 'projects', label: 'Projects' },
   { id: 'agents', label: 'Agents' },
@@ -196,8 +198,8 @@ export function SettingsDialog({
       <SettingsDraftContext.Provider value={trackDraft}>
       <div className="set-page">
         <div className="set-hostbar">
-          <span className="set-hostbar-label">Configuring</span>
-          <select
+          <span className="set-hostbar-label">{section === 'conversations' ? 'This browser' : 'Configuring'}</span>
+          {section !== 'conversations' && <select
             className="set-select"
             value={host.origin}
             onChange={(e) => {
@@ -213,9 +215,9 @@ export function SettingsDialog({
                 {h.stale ? ' (stale)' : ''}
               </option>
             ))}
-          </select>
-          <span className={`set-hostbar-note${host.stale ? ' set-hostbar-stale' : ''}`}>
-            {host.isLocal
+          </select>}
+          <span className={`set-hostbar-note${section !== 'conversations' && host.stale ? ' set-hostbar-stale' : ''}`}>
+            {section === 'conversations' ? 'opening preferences for this browser' : host.isLocal
               ? 'the daemon serving this page'
               : host.stale
                 ? 'not answering this hub’s poll — reads and writes may time out'
@@ -257,6 +259,7 @@ export function SettingsDialog({
               holding the previous host's draft text. On this page that is a
               correctness rule, not a performance one. */}
           <div className="set-pane" key={`${host.origin}:${section}`}>
+            {section === 'conversations' && <ConversationsSection />}
             {section === 'stores' && (
               <PathListSection
                 shuttleBase={shuttleBase}

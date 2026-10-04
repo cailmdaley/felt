@@ -1,5 +1,7 @@
 import { coarsePointer } from './mobile.js'
 import { humanizeIdleAge } from './utils.js'
+import { claudeAppRoute, claudeWebLink } from './sessionHistory.js'
+import { effectiveClaudeOpening, REMOTE_CONTROL_REQUIRED, CLAUDE_APP_ROUTE_UNAVAILABLE } from './conversationOpening.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
 const DESKTOP_THREAD_LINK = /^codex:\/\/threads\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -72,10 +74,11 @@ export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement
 /**
  * A terminal worker's pill, one control on the Desk card and in the open card.
  *
- * At a desktop it is a button that opens the worker's tmux session in kitty.
- * A phone or tablet has no terminal to open, so under a finger it is a link to
- * the session in the Claude app when the owning daemon has stamped the bridge
- * address (`sessionLink`), and otherwise a mark of the worker's state. The
+ * Desktop Claude opening follows this browser's preference: Kitty, the
+ * Remote Control web link, or the installed Claude app's session route.
+ * An unavailable Remote Control link is an explicitly labelled terminal
+ * fallback. Other CLI harnesses open in Kitty. Phones use a recorded Claude
+ * HTTPS link or a mark of the worker's state. The
  * touch stylesheet keys on the element, not on a class: a `.kbn-card-worker`
  * that is not a link takes no taps. In the open card's header a link also gets
  * a 44px target band; a Desk card has no room for one.
@@ -84,7 +87,7 @@ export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement
  * colour, title); a card outside In flight passes false and stays "Aloft".
  */
 export function terminalWorkerPill(
-  card: Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'runtimePhase' | 'lastActivityAt' | 'launchError' | 'shuttleHost'>,
+  card: Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'runtimePhase' | 'lastActivityAt' | 'launchError' | 'shuttleHost' | 'workerAgent' | 'shuttleAgent'>,
   options: {
     classes?: string
     phase?: boolean
@@ -105,33 +108,44 @@ export function terminalWorkerPill(
       : `Worker paused on input${age}`
 
   const coarse = coarsePointer()
-  if (coarse && card.sessionLink) {
+  const web = claudeWebLink(card.sessionLink)
+  const desktop = canOpenDesktopApp(navigator.userAgent, coarse)
+  const choice = effectiveClaudeOpening(desktop)
+  const claude = Boolean(web) || (card.workerAgent ?? card.shuttleAgent ?? '').startsWith('claude-')
+  if (web && choice !== 'terminal') {
+    const app = choice === 'app' ? claudeAppRoute(web) : undefined
+    const browserFallback = choice === 'app' && !app
     const a = document.createElement('a')
     a.className = classes
-    a.textContent = label
-    a.href = card.sessionLink
-    a.title = `${state} — open this session in the Claude app`
-    a.setAttribute('aria-label', `Open worker session in the Claude app: ${tmuxName}`)
+    a.textContent = browserFallback ? `${label} · browser` : label
+    a.href = app ?? web
+    if (desktop && !app) {
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+    }
+    a.title = `${browserFallback ? `${CLAUDE_APP_ROUTE_UNAVAILABLE}\n` : ''}${state} — open this session in ${app ? 'the Claude app' : 'Claude in the browser'}`
+    a.setAttribute('aria-label', `Open worker session in ${app ? 'the Claude app' : 'Claude in the browser'}: ${tmuxName}`)
     a.addEventListener('click', (e) => e.stopPropagation())
     return a
   }
-  if (coarse || !options.openWorker) {
+  if (!desktop || !options.openWorker) {
     const mark = document.createElement('span')
     mark.className = classes
     mark.textContent = label
-    mark.title = `${state} — ${tmuxName}`
+    mark.title = `${state} — ${tmuxName}${claude && choice !== 'terminal' ? `\n${REMOTE_CONTROL_REQUIRED}` : ''}`
     return mark
   }
   const openWorker = options.openWorker
   const btn = document.createElement('button')
   btn.type = 'button'
   btn.className = classes
-  btn.textContent = label
+  const fallback = claude && choice !== 'terminal' && !web
+  btn.textContent = fallback ? `${label} · terminal` : label
   const aria = !takesOver
     ? 'Open worker terminal'
     : card.runtimePhase === 'attention' ? 'Worker needs you — open terminal' : 'Worker waiting for you — open terminal'
   btn.setAttribute('aria-label', `${aria}: ${tmuxName}`)
-  btn.title = `${state} — click to open ${tmuxName} in kitty`
+  btn.title = `${fallback ? `${REMOTE_CONTROL_REQUIRED}\n` : ''}${state} — click to open ${tmuxName} in Kitty`
   btn.addEventListener('click', (e) => {
     e.stopPropagation()
     openWorker(tmuxName, card.shuttleHost)

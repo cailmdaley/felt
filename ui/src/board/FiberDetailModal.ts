@@ -1,4 +1,5 @@
 import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from './appConversation.js'
+import { claudeOpening, CONVERSATION_OPENING_CHANGED } from './conversationOpening.js'
 import {
   basename,
   cacheBustUrl,
@@ -784,6 +785,7 @@ export class FiberDetailModal {
   /** The header's worker pill, the status pill it sits before, and the runtime
    *  state it was drawn from — repainted by {@link syncRuntime}. */
   private workerPill: HTMLElement | null = null
+  private workerPillCard: KanbanCard | null = null
   private statusPill: HTMLElement | null = null
   private workerPillKey = ''
 
@@ -1170,6 +1172,7 @@ export class FiberDetailModal {
    * An app worker's destination follows the conversation backend.
    */
   private buildWorkerPill(card: KanbanCard): HTMLElement | null {
+    this.workerPillCard = card
     if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
       const workerState = workerVariant(card)
       return appWorkerLink(card, `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`)
@@ -1201,6 +1204,7 @@ export class FiberDetailModal {
       card.launchError ?? null,
       this.workerPhase(card),
       workerVariant(card),
+      claudeOpening(),
     ])
   }
 
@@ -1212,6 +1216,7 @@ export class FiberDetailModal {
    */
   syncRuntime(card: KanbanCard | null): void {
     if (!card || !this.overlay || !this.statusPill || this.card?.id !== card.id) return
+    this.workerPillCard = card
     const key = this.workerPillState(card)
     if (key === this.workerPillKey) return
     this.workerPillKey = key
@@ -1222,8 +1227,16 @@ export class FiberDetailModal {
     this.workerPill = next
   }
 
+  refreshConversationOpening(): void {
+    this.syncRuntime(this.workerPillCard)
+    this.overlay?.querySelectorAll('.kbn-ctl-history').forEach((history) => {
+      history.dispatchEvent(new Event(CONVERSATION_OPENING_CHANGED))
+    })
+  }
+
   close(): void {
     this.workerPill = null
+    this.workerPillCard = null
     this.statusPill = null
     this.workerPillKey = ''
     this.transcriptCard = null

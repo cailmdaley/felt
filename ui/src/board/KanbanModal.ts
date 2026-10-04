@@ -271,6 +271,11 @@ export class KanbanModal {
   private readonly detailModal: FiberDetailModal
   private readonly surfaces: KanbanSurfaceRenderer
 
+  private readonly handleConversationOpening = (): void => {
+    if (this.lastResponse) this.render(this.lastResponse)
+    this.detailModal.refreshConversationOpening()
+  }
+
   constructor(options: KanbanModalOptions) {
     this.onOpenWorker = options.onOpenWorker
     // Kitty's quick-access panel hides on focus loss. If we activate it inside
@@ -310,7 +315,7 @@ export class KanbanModal {
       // path as the inline card buttons and drags — instant relocation,
       // background commit, reconcile.
       (card, target) => this.transition(card, target),
-      // The Aloft pill → focus the running worker's kitty tab.
+      // The terminal action → focus the running worker's Kitty tab.
       this.openWorkerAfterGesture,
       {
         meeting: {
@@ -468,6 +473,7 @@ export class KanbanModal {
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
+    window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     this.startPolling()
     void this.fetchAndRender()
     // ?view=chronicle|shelf deep-links a view — for humans sharing a
@@ -497,6 +503,7 @@ export class KanbanModal {
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     document.removeEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.removeEventListener('resize', this.handleResize)
+    window.removeEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     this.stopMobileWatch?.()
     this.stopMobileWatch = null
     if (this.resizeRaf !== null) {

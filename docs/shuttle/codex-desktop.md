@@ -31,7 +31,8 @@ shuttle codex-desktop-bridge --help
 shuttle daemon install --help
 ```
 
-The service installer must provide `--codex-socket`; update the matching CLI and daemon release if yours doesn't.
+The service installer must provide `--codex-socket`, and its daemon release must include matching supervisor templates.
+If your packaged release lacks them, use the [source installation](installation.md#build-from-a-checkout) for this integration or keep using terminal workers.
 An agent can help inspect the paths and installed versions before changing anything.
 
 ## 2. Create the bridge wrapper

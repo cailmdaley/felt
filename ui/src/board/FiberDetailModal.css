@@ -113,7 +113,7 @@
   box-shadow: 0 0 0 0.5px rgba(196, 147, 51, 0.18) inset;
 }
 /* The header borrows the grid card's Aloft pill (.kbn-card-worker in
-   KanbanModal.css — teal, pulsing, click → kitty). Locally it joins the
+   KanbanModal.css — teal, pulsing, opening the chosen conversation surface). Locally it joins the
    status stamp's ink-stamp idiom: same size, same slight hand-applied
    rotation, so the two read as a pair of stamps on the page head. */
 .kbn-detail-aloft {
@@ -2482,6 +2482,14 @@
   cursor: pointer;
 }
 .kbn-ctl-session-link { margin-left: auto; }
+.kbn-ctl-session-opening-note {
+  flex-basis: 100%;
+  color: var(--ctl-faint);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: normal;
+}
+.kbn-ctl-session:has(.kbn-ctl-session-opening-note) { flex-wrap: wrap; }
 .kbn-ctl-session-alt { color: var(--ctl-faint); }
 .kbn-ctl-session-link:hover,
 .kbn-ctl-session-alt:hover { text-decoration: underline; }

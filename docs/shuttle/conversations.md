@@ -24,6 +24,7 @@ This is a preference for the browser you're using, separate from the host config
 Claude browser/app routes require a recorded Remote Control link for that session.
 The preference doesn't enable Remote Control by itself.
 If the link is missing on desktop, the control says **terminal** and falls back to Kitty; History explains that Remote Control is needed.
+A valid browser link without a supported desktop-app route opens in the browser and is labelled **browser**.
 
 On a phone, Shuttle uses the available conversation link because there is no local terminal to raise.
 Codex app workers keep their own native opening route.
