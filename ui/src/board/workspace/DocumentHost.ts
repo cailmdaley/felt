@@ -35,7 +35,8 @@ const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
 
 /** HTML documents forward workspace chords without changing their own navigation. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>document.addEventListener('keydown',function(e){if(e.defaultPrevented)return;var arrow=/^Arrow(Left|Right|Up|Down)$/.test(e.key);if((e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&arrow)||e.key==='Escape'){e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey},'*')}});</script>`
+  // Install after report load handlers so its document/window dialogs get first refusal.
+  const bridge = `<script data-shuttle-workspace-bridge>window.addEventListener('load',function(){window.setTimeout(function(){window.addEventListener('keydown',function(e){if(e.defaultPrevented)return;var arrow=/^Arrow(Left|Right|Up|Down)$/.test(e.key);if((e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&arrow)||e.key==='Escape'){e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey},'*')}})},0)},{once:true});</script>`
   const head = /<head\b[^>]*>/i
   return head.test(html) ? html.replace(head, (tag) => tag + bridge) : bridge + html
 }

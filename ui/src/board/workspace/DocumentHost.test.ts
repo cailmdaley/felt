@@ -328,6 +328,38 @@ describe('refresh and failure states', () => {
 })
 
 describe('document keyboard bridge', () => {
+  it('lets document and report load-time window handlers consume Escape before forwarding', async () => {
+    const iframe = document.createElement('iframe')
+    document.body.append(iframe)
+    const win = iframe.contentWindow!
+    const report = iframe.contentDocument!
+    const postMessage = vi.fn()
+    const markup = document.createElement('div')
+    markup.innerHTML = withWorkspaceKeyBridge('<html><head></head><body>Report</body></html>')
+    const script = markup.querySelector('script')!.textContent!
+    new Function('window', 'parent', script)(win, { postMessage })
+    let documentDialog = true, windowDialog = true
+    report.addEventListener('keydown', e => { if (documentDialog && e.key === 'Escape') e.preventDefault() })
+    win.addEventListener('load', () => {
+      win.addEventListener('keydown', e => { if (windowDialog && e.key === 'Escape') e.preventDefault() })
+    }, { once: true })
+    win.dispatchEvent(new Event('load'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const press = (key: string, altKey = false) => report.body.dispatchEvent(new KeyboardEvent('keydown', { key, altKey, bubbles: true, cancelable: true }))
+    press('Escape')
+    expect(postMessage).not.toHaveBeenCalled()
+    documentDialog = false
+    press('Escape')
+    expect(postMessage).not.toHaveBeenCalled()
+    windowDialog = false
+    press('Escape')
+    expect(postMessage).toHaveBeenCalledOnce()
+    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'Escape' }), '*')
+    press('ArrowRight', true)
+    expect(postMessage).toHaveBeenCalledTimes(2)
+    iframe.remove()
+  })
+
   it('adds the script in head without changing document content', () => {
     const html = withWorkspaceKeyBridge('<html><head><title>Report</title></head><body>Data</body></html>')
     expect(html).toContain('<head><script data-shuttle-workspace-bridge>')
