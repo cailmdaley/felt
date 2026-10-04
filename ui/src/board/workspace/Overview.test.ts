@@ -41,8 +41,7 @@ const folio = (uid: string): HTMLButtonElement => overview.el.querySelector<HTML
 const name = (uid: string): string => folio(uid).querySelector('.ws-overview-folio-title')!.textContent!
 const groups = (): string[] => [...overview.el.querySelectorAll('.ws-overview-group')].filter(el => !(el as HTMLElement).hidden).map(el => el.querySelector('h2')!.firstChild!.textContent!)
 const lens = (value: string): void => {
-  const select = overview.el.querySelector<HTMLSelectElement>('.ws-overview-lens')!
-  select.value = value; select.dispatchEvent(new Event('change'))
+  overview.el.querySelector<HTMLButtonElement>(`.ws-overview-lens [data-lens="${value}"]`)!.click()
 }
 const find = (value: string): void => {
   const input = overview.el.querySelector<HTMLInputElement>('.ws-overview-find')!
@@ -196,7 +195,7 @@ describe('Overview stable lenses, visits, and DOM', () => {
     find(''); lens('hosts'); expect(groups()).toEqual(['host-a', 'host-b'])
     overview.dispose(); overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen })
     document.body.append(overview.el); await refresh()
-    expect(overview.el.querySelector<HTMLSelectElement>('.ws-overview-lens')!.value).toBe('hosts')
+    expect(overview.el.querySelector('.ws-overview-lens [aria-checked="true"]')?.getAttribute('data-lens')).toBe('hosts')
   })
 
   it('updates Projects/Hosts only on a newer receipt after metadata changes', async () => {
@@ -262,6 +261,23 @@ describe('Overview thumbnail budget and safe content', () => {
     Observer.current.deliver(live, false); draw()
     expect(overview.el.querySelectorAll('iframe').length).toBeLessThanOrEqual(16)
     expect(live.filter(t => t.querySelector('iframe')).length).toBeLessThan(16)
+  })
+
+  it('settles when the loading ring holds more thumbnails than the budget', async () => {
+    cards = Array.from({ length: 30 }, (_, i) => card({ id: `fiber${i}`, uid: `fiber${i}`, originId: 'host-a' }))
+    feed.files = cards.map((c, i) => receipt(c.uid!, `/reports/${i}.html`, now() - i))
+    await refresh()
+    const thumbs = [...Observer.current.targets]
+    Object.defineProperty(overview.el, 'getBoundingClientRect', { configurable: true, value: () => rect(0, 0, 1000, 800) })
+    // Inside the ring, below the visible sheet: near, never on screen.
+    thumbs.forEach((el, i) => Object.defineProperty(el, 'getBoundingClientRect', { configurable: true, value: () => rect(820 + i, 10) }))
+    Observer.current.deliver(thumbs); draw()
+    const loadAll = (): void => { for (const iframe of overview.el.querySelectorAll('iframe')) iframe.dispatchEvent(new Event('load')); draw() }
+    for (let round = 0; round < 8; round++) loadAll()
+    const settled = [...overview.el.querySelectorAll('iframe')]
+    expect(settled).toHaveLength(16)
+    for (let round = 0; round < 8; round++) { Observer.current.deliver(thumbs); loadAll() }
+    expect([...overview.el.querySelectorAll("iframe")].filter(f => !settled.includes(f)).length).toBe(0)
   })
 
   it('renders text as inert textContent, owner-routes images, and leaves unsupported files as faces', async () => {

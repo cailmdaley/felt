@@ -20,7 +20,7 @@ const WINDOW_MS = 30 * 86400000
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
 const DAY_GROUPS = ['Today', 'Yesterday', 'This week', 'Earlier'] as const
-const HOST_MARKS = ['○', '■', '▲', '◇', '◐']
+const HOST_MARKS = ['○', '■', '▲', '◇', '◐', '□', '△', '◆']
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0
 const uidOf = (card: KanbanCard): string => card.uid ?? card.id
 
@@ -131,13 +131,14 @@ export class Overview {
   readonly el = node('div', 'ws-overview')
   private readonly opts: OverviewOptions
   private readonly inner = node('div', 'ws-overview-inner')
-  private readonly summary = node('div', 'ws-overview-summary')
-  private readonly legend = node('div', 'ws-overview-legend')
+  private readonly summary = node('div', 'ws-overview-summary ws-overview-meta')
+  private readonly legend = node('div', 'ws-overview-legend ws-overview-meta')
   private readonly ribbon = node('div', 'ws-overview-ribbon')
   private readonly groupsEl = node('div', 'ws-overview-groups')
   private readonly status = node('p', 'ws-overview-status')
   private readonly find = node('input', 'ws-overview-find')
-  private readonly lensSelect = node('select', 'ws-overview-lens')
+  private readonly lensGroup = node('div', 'ws-overview-lens')
+  private readonly lensButtons = new Map<OverviewLens, HTMLButtonElement>()
   private readonly folios = new Map<string, Folio>()
   private readonly ribbonItems = new Map<DocKey, RibbonItem>()
   private readonly groups = new Map<string, Group>()
@@ -171,7 +172,12 @@ export class Overview {
     }
     const header = node('header', 'ws-overview-masthead')
     const heading = node('div', 'ws-overview-heading')
-    heading.append(node('h1', '', 'Documents'), this.summary)
+    // The Desk's column heads open on an illuminated initial; so does the sheet.
+    const title = node('h1', '')
+    const cap = node('span', 'kbn-cap', 'D'); cap.dataset.letter = 'D'
+    title.append(cap, 'ocuments')
+    title.setAttribute('aria-label', 'Documents')
+    heading.append(title, this.summary)
     this.legend.setAttribute('aria-label', 'Host legend')
     header.append(heading, this.legend)
     const receipts = node('section', 'ws-overview-receipts')
@@ -180,20 +186,29 @@ export class Overview {
     receiptHeading.append(node('span', 'ws-overview-section-count', '12 newest across the fleet'))
     receipts.append(receiptHeading, this.ribbon)
     const controls = node('div', 'ws-overview-controls')
-    this.lensSelect.setAttribute('aria-label', 'Group documents')
-    for (const [value, label] of [['recent', 'Recent work'], ['projects', 'Projects'], ['hosts', 'Hosts']]) {
-      const option = node('option', '', label); option.value = value; this.lensSelect.append(option)
+    this.lensGroup.setAttribute('role', 'radiogroup')
+    this.lensGroup.setAttribute('aria-label', 'Group documents')
+    for (const [value, label] of [['recent', 'Recent work'], ['projects', 'Projects'], ['hosts', 'Hosts']] as const) {
+      const option = button('')
+      option.textContent = label
+      option.setAttribute('role', 'radio')
+      option.dataset.lens = value
+      option.addEventListener('click', () => this.setLens(value))
+      this.lensButtons.set(value, option); this.lensGroup.append(option)
     }
-    this.lensSelect.value = this.lens
-    this.lensSelect.addEventListener('change', () => {
-      this.lens = this.lensSelect.value as OverviewLens
-      persist(LENS_STORAGE, this.lens)
-      this.render()
+    this.markLens()
+    this.lensGroup.addEventListener('keydown', e => {
+      const order = [...this.lensButtons.keys()]
+      const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+      if (!step) return
+      e.preventDefault(); e.stopPropagation()
+      const next = order[(order.indexOf(this.lens) + step + order.length) % order.length]
+      this.setLens(next); this.lensButtons.get(next)?.focus()
     })
     this.find.type = 'search'; this.find.placeholder = 'Find work or files…'
     this.find.setAttribute('aria-label', 'Find work or files')
     this.find.addEventListener('input', () => this.render())
-    controls.append(this.lensSelect, this.find)
+    controls.append(this.lensGroup, this.find)
     this.status.setAttribute('role', 'status')
     this.inner.append(header, receipts, controls, this.groupsEl, this.status)
     this.el.append(this.inner)
@@ -269,6 +284,19 @@ export class Overview {
   }
   show(): void { this.setVisible(true) }
   hide(): void { this.setVisible(false) }
+  setLens(lens: OverviewLens): void {
+    if (lens === this.lens) return
+    this.lens = lens
+    persist(LENS_STORAGE, lens)
+    this.markLens()
+    this.render()
+  }
+  private markLens(): void {
+    for (const [value, option] of this.lensButtons) {
+      option.setAttribute('aria-checked', String(value === this.lens))
+      option.tabIndex = value === this.lens ? 0 : -1
+    }
+  }
   /** Find never truncates keyboard channel order. */
   orderedCards(): KanbanCard[] { return [...this.order] }
 
@@ -350,7 +378,7 @@ export class Overview {
     const name = node('span', '')
     title.append(fresh, name)
     const outcome = node('div', 'ws-overview-outcome')
-    const footer = node('div', 'ws-overview-footer')
+    const footer = node('div', 'ws-overview-footer ws-overview-meta')
     const marks = node('span', 'ws-overview-hostmarks')
     const count = node('span', '')
     const when = node('span', 'ws-overview-when')
@@ -445,7 +473,7 @@ export class Overview {
         const thumb = this.createThumbnail(`ribbon:${receipt.key}`, receipt, receipt.basename)
         const label = node('span', 'ws-overview-rib-label')
         const name = node('span', 'ws-overview-rib-name')
-        const footer = node('span', 'ws-overview-rib-footer')
+        const footer = node('span', 'ws-overview-rib-footer ws-overview-meta')
         const when = node('span', ''), host = node('span', 'ws-overview-hostmark')
         footer.append(when, host); el.append(thumb.el, label, name, footer)
         item = { el, receipt, thumb, label, name, when, host }; this.ribbonItems.set(receipt.key, item)
@@ -523,20 +551,36 @@ export class Overview {
     const root = this.el.getBoundingClientRect(), rect = thumb.el.getBoundingClientRect()
     return rect.width > 0 && rect.height > 0 && rect.bottom > root.top && rect.top < root.bottom && rect.right > root.left && rect.left < root.right
   }
+  /** On screen outranks the loading ring, which outranks everything else. */
+  private priority(thumb: Thumbnail): number {
+    if (!thumb.el.isConnected || thumb.el.closest('[hidden]')) return 0
+    if (this.onScreen(thumb)) return 2
+    return (this.observer ? thumb.near : false) ? 1 : 0
+  }
+  /**
+   * Mount the nearest drawable thumbnails within the budget. A candidate may
+   * displace only a live body of strictly lower priority, so a dense sheet
+   * whose ring holds more than the budget settles instead of trading bodies
+   * back and forth on every load.
+   */
   private pump(): void {
     if (this.disposed || !this.visible) return
     this.scaleThumbnails()
-    const eligible = (t: Thumbnail): boolean => t.el.isConnected && !t.el.closest('[hidden]') && (!!this.observer ? t.near : this.onScreen(t))
-    const alive = [...this.thumbnails.values()].filter(t => t.state === 'live' || t.state === 'loading')
-    // Make room before mounting, keeping the sixteen-body bound strict even in a dense viewport.
-    const candidates = [...this.thumbnails.values()].filter(t => t.state === 'idle' && t.file && eligible(t) && ['page', 'image', 'text'].includes(shelfKind(t.file.fullPath)))
-    if (candidates.length && alive.length >= LOAD_POLICY.maxLive) {
-      const victims = chooseEvictions(alive.map(t => ({ key: t.key, lastVisible: t.lastVisible, exempt: eligible(t) && this.onScreen(t) })), { maxLive: LOAD_POLICY.maxLive - 1, evictTo: LOAD_POLICY.evictTo })
+    const all = [...this.thumbnails.values()]
+    const drawable = (t: Thumbnail): boolean => !!t.file && ['page', 'image', 'text'].includes(shelfKind(t.file.fullPath))
+    const candidates = all.filter(t => t.state === 'idle' && drawable(t) && this.priority(t) > 0)
+    if (!candidates.length) return
+    const best = Math.max(...candidates.map(t => this.priority(t)))
+    const alive = all.filter(t => t.state === 'live' || t.state === 'loading')
+    if (alive.length >= LOAD_POLICY.maxLive) {
+      const victims = chooseEvictions(alive.map(t => ({ key: t.key, lastVisible: t.lastVisible, exempt: t.state === 'loading' || this.priority(t) >= best })),
+        { maxLive: LOAD_POLICY.maxLive - 1, evictTo: LOAD_POLICY.evictTo })
       for (const key of victims) this.unmount(this.thumbnails.get(key)!)
     }
-    const population = [...this.thumbnails.values()].filter(t => t.state === 'live' || t.state === 'loading')
+    const population = all.filter(t => t.state === 'live' || t.state === 'loading')
     const slots = Math.min(LOAD_POLICY.maxConcurrent - population.filter(t => t.state === 'loading').length, LOAD_POLICY.maxLive - population.length)
-    for (const key of chooseLoads(candidates.map(t => ({ key: t.key, distance: this.distance(t) })), slots)) this.mount(this.thumbnails.get(key)!)
+    const ranked = candidates.filter(t => this.priority(t) === best)
+    for (const key of chooseLoads(ranked.map(t => ({ key: t.key, distance: this.distance(t) })), slots)) this.mount(this.thumbnails.get(key)!)
   }
   private scaleThumbnails(): void {
     for (const thumb of this.thumbnails.values()) {
