@@ -6,52 +6,54 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
-### Removed
+### Breaking changes
 
-- `felt shuttle accept --keep-outcome`. Accept and resume always keep the outcome: the last run's digest stays the card's headline until the next run writes its own.
-  The `keep_outcome` parameter of `POST /api/v1/lifecycle` is gone with it.
-- `SHUTTLE_LIFECYCLE_OFFLINE`. Pass `--local` to `felt shuttle accept` or `resume` to write the document without the daemon.
-- `felt shuttle migrate-runtime`. felt reads continuation keys only under `shuttle.runtime`; a flat `shuttle.session_uuid` no longer resolves a message target.
-- The `mode:` alias for `kind:` in a `shuttle:` block, in felt and the daemon alike.
-- `POST /api/v1/inject`.
-- `bin/shuttle snapshot` and `bin/shuttle dispatch`. Use `felt shuttle snapshot` and `felt shuttle dispatch [--ad-hoc]`; `bin/shuttle` keeps `start`, `status`, `release`, `reset`, `version` and the keep-alive verbs.
+- Shuttle has its own `shuttle` executable, installed alongside `felt`.
+  Replace `felt shuttle <command>` with `shuttle <command>` in scripts and instructions.
+  Manage the background service with `shuttle daemon start|stop|status|install|release`.
+  The `felt` CLI owns fiber storage and preserves Shuttle frontmatter without interpreting it.
+- Shuttle configuration lives under `~/.config/shuttle/`.
+  Upgrade both CLIs and the daemon together; the daemon requires Shuttle CLI contract level 6.
+  The Go archive contains both CLIs, and daemon archives are named `shuttled_<os>_<arch>.tar.gz`.
+  Use `SHUTTLE_DAEMON=1` with the installer to fetch the daemon.
+  Follow [Upgrade from 1.x](docs/shuttle/installation.md#upgrade-from-1x) to copy settings and refresh the supervisor.
+- `accept --keep-outcome`, `SHUTTLE_LIFECYCLE_OFFLINE`, `migrate-runtime`, the `mode:` alias for `kind:`, and `POST /api/v1/inject` are removed.
+  Accept and resume preserve the outcome; pass `--local` for offline lifecycle writes.
+  Continuation keys belong under `shuttle.runtime`.
+
+### Added
+
+- A [guided setup path](docs/shuttle/setup.md) covers the first worker, multiple hosts, terminal and browser opening, and the Codex desktop backend.
+  The Shuttle skill includes an agent-guided setup reference.
+- Daemons discover same-user peers through Tailscale; explicit remote configuration adds, overrides, or disables discovered peers.
+  Shared hosts can use a protected Unix socket and SSH tunnels.
+- Each browser can choose how Claude conversations open through Settings → Conversations.
+  Codex desktop bridge settings survive daemon supervisor installation.
+- Capture supports phone microphone input and reports the recorder's audio modes and the selected worker host's browser capabilities.
+- Images pasted or dropped into the board composer travel to the worker's host as attachments.
+  Stored attachments expire after 30 days.
 
 ### Changed
 
-- felt is the one writer of `accept` and `resume`. From the CLI they go through the owning daemon, which runs `felt shuttle <verb> --local` between poll cycles; `--local`, or an unreachable daemon, writes the document directly.
-  Accept takes an untempered role that is closed or still in flight, and re-arming a closed standing role checks its `project_dir` and agent as any arming does.
-  Resume on a standing role awaiting review concludes the run (`shuttle.runtime.handed_off_at`) on every path, so the next run comes at the schedule's next tick.
-  `POST /api/v1/lifecycle` relays felt's refusal of either as 422 `shuttle exited <status>: <message>`.
-- The daemon/CLI contract is level 4. Upgrade felt with the daemon: a daemon finding an older felt holds at boot and reports the skew.
-- felt alone resolves the host id. The daemon takes `SHUTTLE_HOST`, now trimmed, or asks `felt shuttle host --json` once at boot, and does not boot when felt cannot answer.
-  `felt shuttle host seed` writes the id to `~/.shuttle/host` when it holds none; `shuttle install-agent` runs it.
-- `$SHUTTLE_DATA_DIR` is trimmed and a leading `~` expanded for every file shuttle keeps: the event stream, the ledgers, the message mailboxes, the default socket and daemon state.
-- One reader follows `events.jsonl` for activity, waiting state and the sent-files trail. A sent file stays on the trail through one rotation of the stream, and waiting state carries across a rotation.
-- The board reads its temporal feeds from the `/composite` routes only; a peer's missing feed reads as empty for that window.
-- `felt check --json` exits non-zero when it reports an error-level issue, as plain `felt check` does.
-  Scripts that read the JSON and judge it themselves should expect exit status 1 on a store with errors.
-- Arming requires a `project_dir` on every verb that arms a fiber (`felt shuttle resume`, `reopen`, `accept`, `felt edit -s active`), not only on `install` and `repeat`.
-  `felt shuttle resume` and `reopen` take `--project-dir <dir>` to set it and arm in one step; the refusal names the one that applies.
-  An edit that leaves an already-armed fiber active arms nothing and is not gated, so a role armed without a `project_dir` still takes tags and outcomes.
-  The daemon's force-dispatch of a closed fiber shells `reopen`, so it is refused for a block without a `project_dir` until one is set.
-- An `inputs:` entry with a `from:` is a data-flow edge whether or not it has an `id:`.
-  `felt check` and `show --consumers` now see unlabelled entries, which `nest` already rewrote; check locates them as `inputs[<n>].from`.
-- `felt shuttle set-model` validates the surface with the agent, as `set-agent` does: a `surface: app` block moves off Codex only through `set-agent <fiber> <agent> --surface cli`.
-- `felt shuttle status <fiber>` reports where an armed fiber is eligible for dispatch, reading host ownership as well as status, notes a block with no `project_dir` (its worker starts in the felt store), and no longer promises a launch the boot quarantine could hold.
-- `show --citations` and `--consumers` print one line per edge instead of a YAML dump; `--json` output is unchanged.
+- The owning daemon serializes `shuttle accept` and `shuttle resume` with polling.
+  Local lifecycle writes validate before changing the fiber.
+- Arming through Shuttle requires a project directory.
+  A forced start validates the directory before changing lifecycle state and refuses to launch in the felt store as a fallback.
+- Worker execution and opening a conversation are separate choices.
+  Terminal sessions stay in tmux; Codex app conversations retain their backend identity across daemon restarts.
+- Intentional daemon restarts hold fresh dispatches until `shuttle daemon release`.
+  Hosts can opt into automatic recovery after a qualifying hard crash with existing workers intact.
+- `felt check --json` exits nonzero for error-level issues.
+  Data-flow entries with `from:` are recognized without an `id:`.
+  `show --citations` and `--consumers` render one line per edge; their JSON format is unchanged.
 
 ### Fixed
 
-- Workers launched by a daemon running from a release no longer inherit its Erlang runtime: the run script drops the release from `PATH` and unsets `ROOTDIR`, `BINDIR`, `PROGNAME` and `EMU`, so `mix`, `erl` and `elixir` in a worker find the host's own toolchain instead of dying with `cannot get bootfile`.
-  The Makefile's mix targets scrub the same variables, so `make daemon` and `make mix-test` work from such a shell.
-- An id written out in full resolves to that fiber before any prefix completion.
-  From a project view, `felt edit other/deep` no longer edits a local `other/deepx` when `other/deep` exists in the enclosing store, and `felt rm` no longer calls the exact id a guess.
-- A query spelling a fiber's own file as an id (`science/cmbx/cmbx` for `.felt/science/cmbx/cmbx.md`) is a stale path the slug rescue answers, not a stray file to migrate.
-- `felt add -s <status>` validates the status as `felt edit` does, and `-s closed` stamps `closed-at`.
-- `felt shuttle set-model` can no longer leave a Claude or Pi agent on `surface: app`, a block `set-agent` then refused.
-- Run-time errors print the error without the usage block; only a command line cobra cannot accept (an unknown flag, a wrong argument count, a missing required flag, exclusive flags together) shows usage.
-- `felt shuttle reshape --help` no longer shows a UTC default for `--tz`; omitting it keeps the block's timezone.
-- Messages say "fiber" where they said "felt" (`No fibers matching`, `no fiber found matching`), and `install --disabled` confirms "(draft, status: open)".
+- Codex bridge startup cleanup handles a native process exiting while its socket appears, without deleting a replaced endpoint.
+- Deployed workers do not inherit the daemon release's Erlang runtime environment.
+- Exact fiber IDs take precedence over prefix completion, and ambiguous slugs report their candidates.
+- `felt add -s` validates status and stamps closed fibers consistently with `felt edit`.
+- Runtime command errors omit usage text; invalid command syntax still includes it.
 
 ## [1.1.0] — 2026-09-08
 

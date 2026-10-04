@@ -32,6 +32,36 @@ The [setup guide](setup.md) gets you from nothing to a worker running on the boa
 event stream come after — read them once the daemon is up and you want to
 understand what it's doing.
 
+## Upgrade from 1.x
+
+Version 2 separates the `felt` and `shuttle` commands.
+Replace `felt shuttle …` with `shuttle …` in your scripts, and use `shuttle daemon …` for service management.
+The 1.x `felt update` installs only one binary, so use the [release installer](#fetch-the-release) with `SHUTTLE_DAEMON=1` to install both CLIs and the matching daemon.
+Keep your original `FELT_INSTALL_DIR` and `SHUTTLE_HOME` overrides if you customized the installation paths.
+
+Before restarting, copy your Shuttle settings to their current directory without overwriting settings already there:
+
+```sh
+mkdir -p ~/.config/shuttle
+for name in host.json remotes.json agents.json stores.json projects.json; do
+  if [ -f "$HOME/.config/felt/$name" ] && \
+     [ ! -e "$HOME/.config/shuttle/$name" ] && \
+     [ ! -L "$HOME/.config/shuttle/$name" ]; then
+    cp -p "$HOME/.config/felt/$name" "$HOME/.config/shuttle/$name"
+  fi
+done
+```
+
+Your fiber stores stay where they are.
+Review the existing supervisor's environment and any custom service options before replacing it.
+Preview the replacement with `shuttle daemon install --print`; supply your existing store list, PATH, SSH socket, tmux directory, log path, label, and port overrides when needed.
+Use `shuttle daemon install --help` for those flags.
+If your supervisor uses `FELT_STORES_FILE` for a custom store registry, carry that path forward as `SHUTTLE_STORES_FILE` in its environment.
+Then run `shuttle daemon install` with the reviewed options to reload the service, followed by `shuttle doctor`.
+Review eligible tasks before running `shuttle daemon release` to end the startup hold.
+
+For source checkouts, `bin/shuttle-deploy` copies these configuration files and refreshes pre-split supervisors as part of deployment.
+
 ## Prerequisites
 
 At runtime, whichever path you take:
@@ -257,14 +287,17 @@ and the daemon release when requested:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=1.1.0 SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.0.0 SHUTTLE_DAEMON=1 sh
 ```
 
-Replace `1.1.0` with the tag you want. Both variables sit after the pipe, for
+Replace `2.0.0` with the tag you want. Both variables sit after the pipe, for
 the reason above: an install that silently drops `FELT_VERSION` fetches the
 latest stable instead. The tag is accepted with or without its leading `v`. If
 it has no `shuttled_<os>_<arch>.tar.gz` asset for your platform, the install
 names the tag and missing asset rather than leaving a bare `curl` error.
+
+Releases before 2.0.0 packaged a single CLI and require the installer from their own Git tag.
+The current installer requires both `felt` and `shuttle` in the CLI archive.
 
 Prerelease tags and release candidates are excluded from latest and Homebrew
 selection. Pin one explicitly with `FELT_VERSION` when you want to test it.
