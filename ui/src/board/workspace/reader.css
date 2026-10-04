@@ -172,7 +172,9 @@
 .ws-document-state { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: var(--ws-inset); padding: var(--ws-prose-padding); color: var(--ws-ink-muted); }
 .ws-document-state h3 { font: var(--ws-section-size)/1.25 var(--ws-serif); color: var(--ws-ink); margin: 0; }
 .ws-document-state code { font: var(--ws-label-size)/1.5 var(--ws-mono); user-select: all; overflow-wrap: anywhere; }
-.ws-document-state a, .ws-document-state button { align-self: flex-start; padding: var(--ws-inset); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); color: var(--ws-ink); }
+.ws-document-state > p:first-child { margin: 0; font: italic var(--ws-section-size)/1.25 var(--ws-serif); color: var(--ws-ink); }
+.ws-document-state a, .ws-document-state button { align-self: flex-start; padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); color: var(--ws-ink-soft); background: var(--ws-paper); text-decoration: none; font: var(--ws-label-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); text-transform: uppercase; }
+.ws-document-state a:hover, .ws-document-state button:hover { border-color: var(--ws-ink-faint); color: var(--ws-ink); }
 .ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); z-index: 2; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
