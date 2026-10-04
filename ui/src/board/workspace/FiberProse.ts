@@ -73,7 +73,7 @@ export function buildFiberProse(
   const scroller = document.createElement('div')
   scroller.className = 'ws-prose-scroll'
   const article = document.createElement('article')
-  article.className = 'ws-fiber-prose kbn-detail-prose'
+  article.className = 'ws-prose ws-fiber-prose kbn-detail-prose'
   const header = document.createElement('header')
   header.className = 'ws-prose-header'
   for (const [name, value] of [
