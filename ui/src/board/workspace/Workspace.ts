@@ -155,7 +155,7 @@ export class Workspace {
     if (!state) {
       state = {
         card,
-        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome }),
+        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined }),
         links: [], selectionVersion: 0, loaded: false,
       }
       this.channels.set(key, state)
@@ -320,7 +320,7 @@ export class Workspace {
     const links = provisional ? [...state.links, { path: provisional.path, owner: provisional.owner }] : state.links
     const sent = this.receipts.filter(f => f.uid === (card.uid ?? card.id)).map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
-      uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome,
+      uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
       sent, links, previous: before,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {
