@@ -259,13 +259,15 @@ const DRAFTS: MockFiber[] = [
   },
 ]
 
-// In flight (status:active, shuttle block; first one has a live worker).
+// In flight: the older, busy run belongs in Working; the newer paused
+// reimbursement belongs in Needs you. Activity age does not rank either band.
 const IN_FLIGHT: MockFiber[] = [
   {
     id: 'work/spt3g_papers/bmodes-2d/run',
     uid: ULID.bmodes,
     name: 'Run the 2D B-mode null tests',
     status: 'active',
+    created_at: iso(-5 * 86_400_000),
     outcome: 'Compute χ²_B and the PTE across the patch set; checking the covariance Hartlap factor.',
     tags: ['spt3g', 'research'],
     // The one fiber running off-box — see shuttleBlockElsewhere. A null-test
@@ -277,6 +279,7 @@ const IN_FLIGHT: MockFiber[] = [
     uid: ULID.receipts,
     name: 'File the conference travel reimbursement',
     status: 'active',
+    created_at: iso(-2 * 86_400_000),
     outcome: 'Attach the receipts; submit before the quarter closes.',
     tags: ['admin'],
     shuttle: shuttleBlock(),
@@ -487,6 +490,7 @@ const APP_CONVERSATION = fiber({
   uid: '01KVBR2G7CXDWMG85592QW78ZZ',
   name: 'App conversation continuity',
   status: 'active',
+  created_at: iso(-1 * 86_400_000),
   outcome: 'Continue this conversation from the ChatGPT app on desktop or phone.',
   shuttle: shuttleBlock(),
 })
@@ -569,21 +573,23 @@ const MOCK_FEED = {
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
     ...PINNED.map(fiber),
-    // A pinned role with a live Codex app worker: no tmux session, so the card
-    // must reach In flight through the runtime's `state` and open the app.
+    // An older pinned role with a live Codex app worker that raised its hand.
+    // It sits BELOW the newer waiting reimbursement inside Needs you, not at
+    // the top by urgency. No tmux session: liveness and the app link are native.
     {
       ...fiber({
         id: 'roles/pinned-app',
         name: 'codex app role',
         status: 'active',
-        outcome: 'Launcher role running in the Codex app.',
+        created_at: iso(-7 * 86_400_000),
+        outcome: 'The app worker needs a decision about the next run.',
         tags: ['pinned'],
         shuttle: { ...shuttleBlock('pinned'), agent: 'codex-sol', surface: 'app' },
       }),
       origin: 'ada-workstation',
       runtime: {
         state: 'running',
-        phase: 'waiting',
+        phase: 'attention',
         surface: 'app',
         tmux_session: null,
         session_uuid: '01a0be38-6c36-7cd1-aec9-53a680d1f693',

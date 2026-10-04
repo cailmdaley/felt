@@ -320,12 +320,12 @@ describe('a mirrored fiber renders as ONE card', () => {
     expect(a[0].mirroredOrigins).toEqual(b[0].mirroredOrigins)
   })
 
-  it('collapses on the slug when a row predates uids', () => {
+  it('keeps host-local paths distinct when rows have no uid proving a mirror', () => {
     const feed = feedWith(
       [mirrored('kelvin', { uid: undefined }), mirrored('laptop', { uid: undefined })],
       { laptop: { kind: 'local', stale: false }, kelvin: { kind: 'remote', stale: false } },
     )
-    expect(drafts(feed)).toHaveLength(1)
+    expect(drafts(feed).map((c) => c.originId)).toEqual(['kelvin', 'laptop'])
   })
 
   describe('an OWNED fiber answers only through its owner', () => {

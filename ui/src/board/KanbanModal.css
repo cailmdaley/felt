@@ -423,8 +423,8 @@
 }
 /* Dense wrap — chips fill the available width and wrap to as many rows as the
    pinned set needs; no cap, no scrollbar, no pager. Stable left-to-right order
-   (chips sorted by fiber path) so muscle memory works — a launcher's whole
-   point is that a role sits in the same place every visit. */
+   (newest-created first, with identity ties) is independent of activity,
+   file timestamps and path renames. */
 .kbn-pinned-row {
   display: flex;
   flex-wrap: wrap;
@@ -1316,6 +1316,29 @@
   overflow-y: auto;
   padding: 8px;
   display: flex; flex-direction: column;
+  gap: 8px;
+}
+/* Quiet captions mark the only ordering seam inside In flight. Both bands
+   share one scroller and retain the cards' own attention/status signals. */
+.kbn-flight-band {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.kbn-flight-caption {
+  margin: 0 0 6px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-weight: 400;
+  color: #7A6F5C;
+}
+.kbn-flight-band + .kbn-flight-band {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(27, 22, 17, 0.14);
+}
+.kbn-flight-band-list {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 /* A live meeting. It folds into the card of the fiber it belongs to

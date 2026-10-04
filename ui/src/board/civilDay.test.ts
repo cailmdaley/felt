@@ -15,7 +15,6 @@ import {
   byClosedAtDesc,
   byCreatedAtDesc,
   byDueAtAsc,
-  byRecentActivityThenName,
 } from './KanbanReadModel.js';
 import type { KanbanCard } from './KanbanTypes.js';
 import { expectPinnedZone } from './testFixtures.js';
@@ -224,10 +223,6 @@ describe('the board comparators, over cards from two continents', () => {
 
   it('byCreatedAtDesc puts the newer instant first', () => {
     expect([pa, bk].sort(byCreatedAtDesc).map((c) => c.id)).toEqual(['bk', 'pa']);
-  });
-
-  it('byRecentActivityThenName puts the newer instant first', () => {
-    expect([pa, bk].sort(byRecentActivityThenName).map((c) => c.id)).toEqual(['bk', 'pa']);
   });
 
   it('byClosedAtDesc puts the newer instant first', () => {

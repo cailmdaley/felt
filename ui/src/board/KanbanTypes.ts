@@ -87,7 +87,7 @@ export interface KanbanCard {
    * `working` (busy mid-tool — sinks to the bottom, no chip), `waiting`
    * (paused at a stop — "waiting for you" once idle ≥60s), `attention` (raised
    * its hand — "needs you", sorts top), or `blocked` (the worker is
-   * `workerState: 'blocked'` — sorts top with `launchError`). Absent when there
+   * `workerState: 'blocked'` — in the Needs you band with `launchError`). Absent when there
    * is no worker, or before a live worker's first activity event.
    */
   runtimePhase?: string
@@ -96,8 +96,8 @@ export interface KanbanCard {
   /**
    * Real ms timestamp of the live worker's most-recent hook event (any type).
    * Present only for a live worker (paired with `workerState`);
-   * drives the In-flight idle-descending sort (`now - lastActivityAt`, longest-
-   * stopped first) and the 60s waiting-chip gate. Absent for worker-less cards.
+   * drives the activity-age label and the 60s waiting-chip gate, never card
+   * ordering. Absent for worker-less cards.
    */
   lastActivityAt?: number
   /**

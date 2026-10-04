@@ -76,6 +76,15 @@ export function railCivilDay(ms: number, startHour = RAIL_START_HOUR): string {
 }
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Date.parse normalizes some impossible dates (for example February 30).
+// Reject them rather than giving malformed timestamps a real sort position.
+function validCalendarDay(day: string): boolean {
+  const [year, month, date] = day.split('-').map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && date >= 1 && date <= days[month - 1];
+}
 // A civil day serialized as a timestamp: midnight, exactly, in whatever offset
 // the value itself declares — `Z`, `+00:00`, `+02:00`, `-07:00`. The optional
 // fractional seconds cover the `.000Z` variants other writers emit.
@@ -99,11 +108,11 @@ export function dueCivilDay(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  if (DATE_ONLY_RE.test(trimmed)) return trimmed;
+  if (DATE_ONLY_RE.test(trimmed)) return validCalendarDay(trimmed) ? trimmed : undefined;
+  const ms = instantMs(trimmed);
+  if (ms === undefined) return undefined;
   const declaredMidnight = DECLARED_MIDNIGHT_RE.exec(trimmed);
-  if (declaredMidnight) return declaredMidnight[1];
-  const ms = Date.parse(trimmed);
-  return Number.isFinite(ms) ? isoDayLocal(ms) : undefined;
+  return declaredMidnight ? declaredMidnight[1] : isoDayLocal(ms);
 }
 
 /**
@@ -115,7 +124,7 @@ export function dueCivilDay(value: unknown): string | undefined {
 export function civilDayToLocalDate(day: string | undefined): Date | undefined {
   if (!day) return undefined;
   const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
-  if (!parts) return undefined;
+  if (!parts || !validCalendarDay(day)) return undefined;
   const d = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
   return Number.isNaN(d.getTime()) ? undefined : d;
 }
@@ -131,7 +140,9 @@ export function civilDayToLocalDate(day: string | undefined): Date | undefined {
  * board sorts by time.
  */
 export function instantMs(value: unknown): number | undefined {
-  if (typeof value !== 'string' || !value) return undefined;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const day = /^(\d{4}-\d{2}-\d{2})(?:T|$)/.exec(value.trim())?.[1];
+  if (day && !validCalendarDay(day)) return undefined;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : undefined;
 }
