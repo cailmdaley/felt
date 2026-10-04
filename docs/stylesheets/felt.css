@@ -467,6 +467,12 @@
   border: none;
 }
 
+/* Copyable agent prompts read as prose, including on narrow screens. */
+.md-typeset .agent-prompt pre > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Inline code keeps the report's gilt tint rather than the block's rag, so
    a name in running prose stays part of the sentence. */
 .md-typeset :not(pre) > code {

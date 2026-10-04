@@ -10,7 +10,7 @@ You don't need to organize a collection of notes or learn the command-line tools
 
 ## 1. Give your agent this prompt
 
-```text
+```{.text .agent-prompt}
 Read https://cailmdaley.github.io/felt/shuttle/agent-setup/ and help me set up Shuttle on this machine. Use existing configuration where possible, explain the choices I need to make, and record this setup as a task on the board. Give me the board URL when it is ready.
 ```
 
