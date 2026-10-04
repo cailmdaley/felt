@@ -1,0 +1,62 @@
+:root {
+  --ws-ground: #f5f4ed;
+  --ws-paper: #fbfaf5;
+  --ws-ink: #244a72;
+  --ws-ink-muted: #536f89;
+  --ws-hairline: rgba(36, 74, 114, 0.24);
+  --ws-red: #b23a2a;
+  --ws-hover: rgba(36, 74, 114, 0.05);
+  --ws-fill: rgba(36, 74, 114, 0.09);
+  --ws-grid: rgba(36, 74, 114, 0.055);
+  --ws-grid-major: rgba(36, 74, 114, 0.085);
+  --ws-mask: #000;
+
+  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
+  --ws-sans: var(--font-sans, system-ui, sans-serif);
+  --ws-mono: var(--font-mono, ui-monospace, monospace);
+
+  --ws-crossing: 280ms;
+  --ws-ease: ease;
+  --ws-receded-scale: 0.94;
+  --ws-receded-opacity: 0.55;
+  --ws-gap: 24px;
+  --ws-inset: 12px;
+  --ws-tab-floor: 90px;
+  --ws-tab-ceiling: 220px;
+  --ws-tab-fade: 16px;
+  --ws-tab-gap: 2px;
+  --ws-drag-latch: 4px;
+
+  --ws-reader-layer: 9000;
+  --ws-line-width: 1px;
+  --ws-focus-width: 2px;
+  --ws-radius: 10px;
+  --ws-control-radius: 7px;
+  --ws-control-height: 32px;
+  --ws-nav-height: 52px;
+  --ws-phone-nav-height: 48px;
+  --ws-label-height: 40px;
+  --ws-thumb-height: 56px;
+  --ws-dot-size: 8px;
+  --ws-parking-x: -20000px;
+  --ws-small-gap: 6px;
+
+  --ws-chrome-size: 14px;
+  --ws-title-size: 17px;
+  --ws-label-size: 12.5px;
+  --ws-small-size: 11.5px;
+  --ws-heading-size: 30px;
+  --ws-section-size: 23px;
+  --ws-lede-size: 21px;
+  --ws-prose-size: 18px;
+  --ws-prose-width: 760px;
+  --ws-prose-padding: 44px 40px 72px;
+
+  --ws-grid-major-size: 120px;
+  --ws-phone-target: 44px;
+  --ws-menu-width: 220px;
+  --ws-menu-ceiling: 360px;
+  --ws-sidebar-width: 280px;
+  --ws-html-width: 1040px;
+  --ws-pdf-width: 900px;
+}
