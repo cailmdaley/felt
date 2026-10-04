@@ -6,9 +6,9 @@
  * The tour teaches the board's actions. Controls the screenshots show (the
  * Drafts plus, the In flight star, Aloft, Temper and Discard) are zoomed and
  * ringed on docs/assets/shuttle-board-example.png. Controls no screenshot
- * shows (the Stash and New idea dialogs, a card's drawer, the Meeting menu)
+ * shows (the Stash and New idea dialogs and a card's drawer)
  * appear as control guides: diagrams drawn here with ffmpeg, whose labels come
- * from ui/src/forms/StashForm.tsx, CaptureForm.tsx, meetingApi.ts and
+ * from ui/src/forms/StashForm.tsx, CaptureForm.tsx and
  * ui/src/board/FiberDetailModal.ts, and which say on screen that they are not
  * screenshots. Nothing is captured from a live board.
  *
@@ -155,7 +155,6 @@ const scenes = [
       label(240, 464, 'HOST'), label(510, 464, 'PROJECT'), label(780, 464, 'AGENT'),
       ...field(240, 482, 250, 40, 'my-laptop'), ...field(510, 482, 250, 40, 'workshop'), ...field(780, 482, 260, 40, 'claude-opus (default)', { size: 17 }),
       ...button(808, 600, 104, 44, 'Cancel'), ...button(924, 600, 116, 44, 'Spawn', 'cobalt'),
-      text(200, 682, 'With Meeting on, the dialog becomes “Start a meeting”, and a scribe files the meeting as a new task.', { size: 15, color: MUTED }),
     ],
     rings: [ring(502, 474, 266, 56, [0]), ring(916, 592, 132, 60, [0, 1])],
     shows: 'Control guide of the New idea dialog: a large text box, a Meeting toggle, Host, Project and Agent, and the Spawn button.',
@@ -198,43 +197,6 @@ const scenes = [
       'If a worker is still running, the board asks before cutting it off.',
       'Resume requests the task’s previous conversation.',
       'Use it when finished work needs one more change.',
-    ] },
-  { guide: [
-      ...guideHead('Meeting opens Call, Room or Phone'),
-      panel(60, 140, 600, 400),
-      text(90, 160, 'workshop/participant-guide', { font: MONO, size: 14, color: MUTED }),
-      text(90, 182, 'Prepare the workshop guide', { font: SERIF, size: 28 }),
-      rect(90, 234, 540, 116, FIELD, RULE),
-      text(106, 248, 'What should the worker do next?', { font: SERIF, size: 19, color: `${INK}@0.45` }),
-      ...button(110, 298, 124, 40, 'Meeting'), ...button(244, 298, 150, 40, 'New session', 'send'), ...button(404, 298, 130, 40, 'Resume', 'send'),
-      rect(110, 344, 170, 150, FIELD, `${INK}@0.35`),
-      text(128, 356, 'Call', { font: SERIF, size: 19 }), text(128, 404, 'Room', { font: SERIF, size: 19 }), text(128, 452, 'Phone', { font: SERIF, size: 19 }),
-      text(300, 358, 'the recorder computer’s mic and system audio', { size: 15, color: MUTED }),
-      text(300, 406, 'the recorder computer’s mic alone', { size: 15, color: MUTED }),
-      text(300, 454, 'your browser’s mic, streamed from the board', { size: 15, color: MUTED }),
-      panel(720, 140, 500, 400),
-      text(750, 162, 'WHILE IT RECORDS, ON THE CARD', { font: MONO, size: 13, color: MUTED }),
-      rect(750, 196, 12, 12, MADDER, null, 'fill'), text(772, 190, 'Recording', { font: SERIF, size: 19 }), text(880, 193, '4:12', { font: MONO, size: 16, color: MUTED }),
-      label(750, 236, 'LIVE TRANSCRIPT'),
-      rect(750, 260, 420, 10, `${INK}@0.14`, null, 'fill'), rect(750, 284, 360, 10, `${INK}@0.14`, null, 'fill'),
-      rect(750, 308, 400, 10, `${INK}@0.14`, null, 'fill'), rect(750, 332, 300, 10, `${INK}@0.14`, null, 'fill'),
-      ...button(750, 376, 110, 42, 'Stop', 'discard'), ...button(872, 376, 130, 42, 'Terminal'),
-      text(750, 446, 'The worker follows the transcript, files', { size: 16, color: MUTED }),
-      text(750, 470, 'notes in a child fiber, and answers when', { size: 16, color: MUTED }),
-      text(750, 494, 'someone addresses it by name.', { size: 16, color: MUTED }),
-      text(60, 572, 'Meeting appears where the hark recorder is available. One meeting records at a time.', { size: 16, color: MUTED }),
-      text(60, 598, 'The message box becomes the meeting’s note; the meeting joins this task’s worker.', { size: 16, color: MUTED }),
-    ],
-    rings: [
-      ring(102, 290, 140, 56, [0]), ring(102, 336, 550, 166, [1]),
-      ring(740, 228, 448, 120, [2]), ring(742, 368, 126, 58, [3]),
-    ],
-    shows: 'Control guide of the Meeting menu, with Call, Room and Phone, beside a card recording a meeting, with its live transcript, Stop and Terminal.',
-    say: [
-      'Meeting records a conversation and joins it to this task.',
-      'Call records the recorder computer’s microphone and system audio. Room uses its microphone alone. Phone uses your browser’s microphone.',
-      'The worker follows the live transcript, takes notes, and answers when you address it by name.',
-      'Stop ends the recording.',
     ] },
   { image: 'shuttle-board-example.png', from: at(10, 12, 1420), to: at(470, 60, 500),
     rings: [ring(...Object.values(shot(881, 195, 54, 26)))],
