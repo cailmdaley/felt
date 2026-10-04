@@ -124,6 +124,7 @@ export class DocumentHost {
     state.frame.content.replaceChildren(element)
     state.frame.viewer = element
     state.loaded = true
+    this.clearNotice(state)
     this.bindScroller(state, element)
     this.live.delete(key)
     this.live.set(key, state)
@@ -138,7 +139,7 @@ export class DocumentHost {
       return
     }
     if (state.frame.doc.kind === 'fiber') {
-      if (this.options.onRefreshProse) void this.options.onRefreshProse(state.frame.doc)
+      if (this.options.onRefreshProse) void this.refreshProse(state)
       else this.updateProse(key, this.options.buildProse(state.frame.doc))
       return
     }
@@ -249,6 +250,7 @@ export class DocumentHost {
       },
       {
         quietLoading: true,
+        kind: doc.kind === 'fiber' || doc.kind === 'other' ? undefined : doc.kind,
         transformHtml: withWorkspaceKeyBridge,
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
@@ -398,6 +400,14 @@ export class DocumentHost {
     }).catch((error: unknown) => {
       if (!controller.signal.aborted && !this.disposed) this.failure(state, error, false)
     })
+  }
+
+  private async refreshProse(state: FrameState): Promise<void> {
+    try {
+      await this.options.onRefreshProse?.(state.frame.doc)
+    } catch (error) {
+      if (!this.disposed) this.failure(state, error, state.loaded)
+    }
   }
 
   private async revalidate(state: FrameState): Promise<void> {

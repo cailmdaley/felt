@@ -29,6 +29,8 @@ export type FileViewerState =
   | { status: 'error'; error: unknown; hasContent: boolean }
 
 export interface FileViewerOptions {
+  /** A document model can supply its classification instead of suffix dispatch. */
+  kind?: 'html' | 'text' | 'image' | 'pdf'
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
   transformHtml?: (html: string) => string
   onState?: (state: FileViewerState) => void
@@ -61,7 +63,7 @@ export function buildFileViewer(
   const ext = fileExt(fullPath)
   const src = fileBytesUrl(shuttleBase, fullPath, originId)
 
-  if (IMAGE_EXTS.has(ext)) {
+  if (options.kind === 'image' || (!options.kind && IMAGE_EXTS.has(ext))) {
     // Mount the plate on a vellum mat so it reads as a mounted figure, centered
     // with breathing room, rather than a bitmap bled to the cell edge.
     const wrap = document.createElement('div')
@@ -87,7 +89,7 @@ export function buildFileViewer(
     return wrap
   }
 
-  if (AUDIO_EXTS.has(ext)) {
+  if (!options.kind && AUDIO_EXTS.has(ext)) {
     const wrap = document.createElement('div')
     wrap.className = 'kbn-fileview-audio'
     const audio = document.createElement('audio')
@@ -107,11 +109,11 @@ export function buildFileViewer(
   // `.kbn-detail-prose` skin so a sent report looks like the fiber it came
   // from; anything else as a code block, reusing the `md-code-block` markup
   // the markdown renderer already emits for fenced code.
-  if (TEXT_EXTS.has(ext)) {
+  if (options.kind === 'text' || (!options.kind && TEXT_EXTS.has(ext))) {
     return buildTextViewer(src, fullPath, ext, onTextPane, options)
   }
 
-  if (ext === 'html' || ext === 'htm') {
+  if (options.kind === 'html' || (!options.kind && (ext === 'html' || ext === 'htm'))) {
     return buildHtmlViewer(src, fullPath, onFrameLoad, options)
   }
 

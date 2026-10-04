@@ -59,6 +59,18 @@ describe('workspace file viewer hooks', () => {
     expect(watch.stop).toHaveBeenCalledOnce()
   })
 
+  it('honours the workspace kind for text and HTML suffixes outside the shared suffix sets', () => {
+    const text = buildFileViewer('', '/events.jsonl', 'host-a', undefined, undefined, { kind: 'text' })
+    watch.content!('{"event":"sent"}')
+    expect(text.querySelector('iframe')).toBeNull()
+    expect(text.textContent).toContain('"event":"sent"')
+    const html = buildFileViewer('', '/report.xhtml', 'host-a', undefined, undefined, {
+      kind: 'html', transformHtml: (source) => source + '<script>bridge()</script>',
+    })
+    watch.content!('<h1>Report</h1>')
+    expect(html.querySelector('iframe')!.srcdoc).toContain('<script>bridge()</script>')
+  })
+
   it('reports text readiness and preserves its scroll on changed content or failure', () => {
     const onState = vi.fn(), onText = vi.fn()
     const viewer = buildFileViewer('', '/notes.txt', 'host-a', undefined, onText, { onState })
