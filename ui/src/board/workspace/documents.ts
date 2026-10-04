@@ -36,6 +36,8 @@ export interface ChannelInput {
   fiberDir: string
   body: string
   outcome?: string
+  /** True when the fiber carries a `shuttle:` block. */
+  isConstitution?: boolean
   embeds?: { path: string; title?: string }[]
   sent?: { path: string; owner?: string; session?: string; time: number; worker?: string }[]
   links?: { path: string; owner?: string; title?: string }[]
@@ -192,7 +194,7 @@ export function buildChannel(input: ChannelInput): Channel {
 
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
-    documents: ordered, labels: documentLabels(ordered), body: input.body,
+    documents: ordered, labels: documentLabels(ordered, input.isConstitution), body: input.body,
   }
   if (input.outcome !== undefined) channel.outcome = input.outcome
   return channel
@@ -216,31 +218,107 @@ export function fallbackSelection(previousKeys: DocKey[], nextKeys: DocKey[], se
   return nextKeys[index]
 }
 
-/** Shortest distinguishing folder suffix; report pages are labelled by their folder. */
-export function documentLabels(documents: WorkspaceDocument[]): string[] {
-  const parents = documents.map((document) => document.path.split('/').filter(Boolean).slice(0, -1))
-  const bases = documents.map((document, index) => document.kind === 'fiber' ? 'Prose'
-    : document.name.toLowerCase() === 'report.html' ? parents[index].at(-1) || document.name : document.name)
-  const labels = documents.map((document, index) => {
-    const peers = documents.map((_, other) => other).filter((other) => other !== index && bases[other] === bases[index])
-    if (!peers.length) return bases[index]
-    for (let depth = 1; depth <= parents[index].length; depth++) {
-      const folder = parents[index].slice(-depth).join('/')
-      if (peers.every((other) => parents[other].slice(-depth).join('/') !== folder)) {
-        return document.name.toLowerCase() === 'report.html' ? folder : `${folder}/${bases[index]}`
+/** Use the shortest unique path suffix, with report pages named for their folder. */
+export function documentLabels(documents: WorkspaceDocument[], isConstitution = false): string[] {
+  const candidates = documents.map((document) => {
+    const labels: string[] = []
+    const add = (label: string): void => { if (label && !labels.includes(label)) labels.push(label) }
+    if (document.kind === 'fiber') {
+      add(isConstitution ? 'Constitution' : 'Note')
+      return labels
+    }
+
+    const parts = document.path.split('/').filter(Boolean)
+    const reportPage = /^(?:report|index)\.html$/i.test(document.name)
+    if (reportPage) {
+      const folders = parts.slice(0, -1)
+      for (let depth = 1; depth <= folders.length; depth++) {
+        const first = folders.length - depth
+        if (first > 0 && folders[first].length <= 2) continue
+        add(folders.slice(first).join('/'))
+      }
+      if (!folders.length) add(document.name)
+      for (let depth = 2; depth <= parts.length; depth++) {
+        const first = parts.length - depth
+        if (first > 0 && parts[first].length <= 2) continue
+        add(parts.slice(first).join('/'))
+      }
+    } else {
+      add(document.name)
+      for (let depth = 2; depth <= parts.length; depth++) {
+        const first = parts.length - depth
+        if (first > 0 && parts[first].length <= 2) continue
+        add(parts.slice(first).join('/'))
       }
     }
-    return `${document.owner}:${bases[index]}`
+    if (!labels.length) add(document.name)
+    return labels
   })
 
-  // A report folder can coincide with another file's basename; keep every tab label unique.
+  const positions = documents.map(() => 0)
+  const ownerQualified = documents.map(() => false)
+  const fallback = documents.map(() => false)
+  const labelAt = (index: number): string => {
+    const document = documents[index]
+    if (fallback[index]) return document.kind === 'fiber'
+      ? `${document.owner}:${isConstitution ? 'Constitution' : 'Note'}`
+      : `${document.owner}:${document.path}`
+    const label = candidates[index][positions[index]]
+    return ownerQualified[index] ? `${document.owner}:${label}` : label
+  }
+
+  let changed = true
+  while (changed) {
+    changed = false
+    const groups = new Map<string, number[]>()
+    for (let index = 0; index < documents.length; index++) {
+      const label = labelAt(index)
+      const group = groups.get(label) ?? []
+      group.push(index)
+      groups.set(label, group)
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue
+      const byPath = new Map<string, number[]>()
+      for (const index of group) {
+        const path = documents[index].path
+        byPath.set(path, [...(byPath.get(path) ?? []), index])
+      }
+      const ownerTies = new Set<number>()
+      for (const samePath of byPath.values()) {
+        const owners = new Set(samePath.map((index) => documents[index].owner))
+        const qualifiedLabels = new Set(samePath.map((index) => `${documents[index].owner}:${candidates[index][positions[index]]}`))
+        if (samePath.length < 2 || owners.size !== samePath.length || qualifiedLabels.size !== samePath.length) continue
+        for (const index of samePath) {
+          if (!ownerQualified[index]) {
+            ownerQualified[index] = true
+            changed = true
+          }
+          ownerTies.add(index)
+        }
+      }
+      for (const index of group) {
+        if (ownerTies.has(index)) continue
+        if (positions[index] + 1 < candidates[index].length) {
+          positions[index]++
+          changed = true
+        } else if (!ownerQualified[index]) {
+          ownerQualified[index] = true
+          changed = true
+        } else if (!fallback[index]) {
+          fallback[index] = true
+          changed = true
+        }
+      }
+    }
+  }
+
   const used = new Set<string>()
-  return labels.map((label, index) => {
-    let unique = label
-    if (used.has(unique)) unique = `${documents[index].owner}:${unique}`
+  return documents.map((document, index) => {
+    let label = labelAt(index)
     let suffix = 2
-    while (used.has(unique)) unique = `${documents[index].owner}:${documents[index].path} (${suffix++})`
-    used.add(unique)
-    return unique
+    while (used.has(label)) label = `${document.owner}:${document.path} (${suffix++})`
+    used.add(label)
+    return label
   })
 }

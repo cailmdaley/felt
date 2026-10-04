@@ -53,8 +53,13 @@ describe('buildChannel', () => {
       name: 'report.html', kind: 'html',
       provenance: [{ kind: 'embed', title: 'Results' }],
     })
-    expect(channel.labels).toEqual(['Prose', 'task'])
+    expect(channel.labels).toEqual(['Note', 'task'])
     expect(channel.documents[0].path).toBe('/store/project/task/task.md')
+  })
+
+  it('labels the fiber page as a Note or Constitution according to Shuttle presence', () => {
+    expect(buildChannel({ ...base, body: 'plain text' }).labels[0]).toBe('Note')
+    expect(buildChannel({ ...base, body: 'plain text', isConstitution: true }).labels[0]).toBe('Constitution')
   })
 
   it('honors explicit embeds while preserving the unmodified source body', () => {
@@ -152,6 +157,23 @@ describe('selection and labels', () => {
     expect(fallbackSelection(['a'], [], 'a')).toBeUndefined()
   })
 
+  it('uses the shortest unique path suffix and expands short directory segments', () => {
+    const documents = [
+      file('host-a', '/store/project/redesign-2/a/report.html'),
+      file('host-a', '/store/project/redesign-2/b/report.html'),
+      file('host-a', '/store/project/redesign-2/c/report.html'),
+      file('host-a', '/store/project/redesign-2/a/comment.md'),
+      file('host-a', '/store/project/redesign-2/b/comment.md'),
+      file('host-a', '/store/project/redesign-2/d/index.html'),
+    ]
+    expect(documentLabels(documents)).toEqual([
+      'redesign-2/a', 'redesign-2/b', 'redesign-2/c',
+      'redesign-2/a/comment.md', 'redesign-2/b/comment.md', 'redesign-2/d',
+    ])
+    expect(documentLabels([file('host-a', '/store/project/redesign-2/a/b/c/report.html')]))
+      .toEqual(['redesign-2/a/b/c'])
+  })
+
   it('disambiguates duplicate names with the nearest folder and owner', () => {
     const documents = [
       file('host-a', '/store/task/Prose.md', 'Fiber prose'),
@@ -163,7 +185,8 @@ describe('selection and labels', () => {
     ]
     documents[0].kind = 'fiber'
     expect(documentLabels(documents)).toEqual([
-      'Prose', 'host-a:a', 'b', 'host-b:a', 'a/result.json', 'b/result.json',
+      'Note', 'host-a:task/a', 'task/b', 'host-b:task/a',
+      'task/a/result.json', 'task/b/result.json',
     ])
     expect(new Set(documentLabels(documents)).size).toBe(documents.length)
   })
