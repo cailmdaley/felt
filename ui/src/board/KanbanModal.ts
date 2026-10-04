@@ -37,6 +37,7 @@
  */
 
 import './KanbanModal.css'
+import { Workspace } from './workspace/Workspace.js'
 import { FiberDetailModal, type MeetingJoinResult } from './FiberDetailModal.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
@@ -269,6 +270,9 @@ export class KanbanModal {
   private gestureDepth = 0
   /** Intermediate fiber-detail modal — one instance, re-used across opens. */
   private readonly detailModal: FiberDetailModal
+  private workspace: Workspace | null = null
+  private workspaceReturnFocus: HTMLElement | null = null
+  private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
   private readonly surfaces: KanbanSurfaceRenderer
 
   private readonly handleConversationOpening = (): void => {
@@ -338,7 +342,7 @@ export class KanbanModal {
       stackQueueRow: (fiberId, plan) => this.stackQueueRow(fiberId, plan),
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
-      openDetail: (card) => this.detailModal.open(card),
+      openDetail: (card) => this.openDocumentChannel(card),
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
@@ -471,19 +475,22 @@ export class KanbanModal {
     this.assembleChrome()
     this.phoneAudio.mount()
     host.append(this.container!)
+    const wanted = new URLSearchParams(window.location.search).get('view')
+    if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
+    else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
+    this.workspace = new Workspace(this.container!, {
+      shuttleBase: this.shuttleBase,
+      cards: () => this.workspaceCards(),
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
+      onVisibility: (active) => this.showWorkspace(active),
+      onConversation: (card) => this.openWorkspaceConversation(card),
+    })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     this.startPolling()
     void this.fetchAndRender()
-    // ?view=chronicle|shelf deep-links a view — for humans sharing a
-    // spot and for headless QA, which can't press a hotkey. Unknown values
-    // fall through to the Desk.
-    const wanted = new URLSearchParams(window.location.search).get('view')
-    if (wanted && listViews().some((v) => v.id === wanted)) {
-      this.setView(wanted as BoardViewId)
-    }
   }
 
   /**
@@ -496,6 +503,8 @@ export class KanbanModal {
     // The fiber-detail panel floats on document.body, not in our container —
     // an unmount would otherwise orphan it over whatever is behind.
     this.detailModal.close()
+    this.workspace?.dispose()
+    this.workspace = null
     this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
@@ -594,6 +603,55 @@ export class KanbanModal {
     this.stopMobileWatch = onMobileChange(() => {
       if (this.activeViewId === 'desk' && this.lastResponse) this.render(this.lastResponse)
     })
+  }
+
+  /** Card entry points share the workspace route; worker controls stay separate. */
+  private openDocumentChannel(card: KanbanCard): void {
+    this.detailModal.close()
+    this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+    if (this.workspace) this.workspace.open(card)
+    else this.detailModal.open(card)
+  }
+
+  /** The Conversation control's bridge to the floating control surface. */
+  private openWorkspaceConversation(card: KanbanCard): void {
+    this.detailModal.open(card)
+  }
+
+  private showWorkspace(active: boolean): void {
+    if (this.body) {
+      this.body.inert = active
+      if (active) this.body.setAttribute('aria-hidden', 'true')
+      else this.body.removeAttribute('aria-hidden')
+    }
+    if (active) return
+    if (this.pendingDeskData && this.activeViewId === 'desk') {
+      const data = this.pendingDeskData
+      this.pendingDeskData = null
+      this.render(data)
+    }
+    if (this.activeViewId !== 'desk') this.mountOrRefreshActiveView()
+    const address = this.workspaceReturnCard
+    const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
+    const target = this.workspaceReturnFocus?.isConnected ? this.workspaceReturnFocus
+      : cardStillOwned ? Array.from(this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []).find(el => el.dataset.fiberId === address.id || el.dataset.fiberId === address.head)
+      : this.tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')
+    target?.focus({ preventScroll: true })
+  }
+
+  /** Drawn Desk order, followed by undrawn folded and chronological cards. */
+  private workspaceCards(): KanbanCard[] {
+    if (!this.lastResponse) return []
+    const cards = boardCards(this.lastResponse)
+    const byId = new Map(cards.map(card => [card.id, card]))
+    const seen = new Set<string>()
+    const ordered: KanbanCard[] = []
+    for (const el of this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []) {
+      const card = byId.get(el.dataset.fiberId ?? '')
+      if (card && !seen.has(card.id)) { seen.add(card.id); ordered.push(card) }
+    }
+    return [...ordered, ...cards.filter(card => !seen.has(card.id))]
   }
 
   // ── View switching ──────────────────────────────────────────────────────────
@@ -831,7 +889,7 @@ export class KanbanModal {
       ...this.temporal,
       openCard: (cardId) => {
         const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
-        if (card) this.detailModal.open(card)
+        if (card) this.openDocumentChannel(card)
       },
       requestRefresh: () => { void this.fetchAndRender() },
     }
@@ -2076,6 +2134,12 @@ export class KanbanModal {
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
     this.syncDetailRuntime(data)
+    if (this.workspace?.isActive) {
+      this.lastResponse = data
+      this.pendingDeskData = data
+      this.workspace.update()
+      return
+    }
 
     // Never rebuild the Desk while it is hidden behind a temporal view. Every
     // pass at the end of this method MEASURES — `expandOutcomesToFillSpace`
@@ -2454,6 +2518,7 @@ export class KanbanModal {
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {
     if (!this.body) return
+    if (this.workspace?.isActive) return
     // Escape releases an engaged lens and goes no further — "back out of what
     // I'm looking at", and the lens is the nearest thing being looked through.
     if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk') {

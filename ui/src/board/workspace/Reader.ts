@@ -1,0 +1,459 @@
+import './tokens.css'
+import './reader.css'
+import type { KanbanCard } from '../KanbanTypes.js'
+import { MOBILE_MEDIA } from '../mobile.js'
+import { fileBytesUrl, showToast } from '../utils.js'
+import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
+import type { Channel, DocKey, WorkspaceDocument } from './documents.js'
+import { TabStrip } from './TabStrip.js'
+
+export interface ReaderOptions {
+  shuttleBase: string
+  buildProse(doc: WorkspaceDocument): HTMLElement
+  onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
+  onSelect(key: DocKey): void
+  onReturn(): void
+  onConversation(): void
+  onChannel(card: KanbanCard): void
+  cards(): KanbanCard[]
+}
+
+function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tag)
+  el.className = cls
+  if (text) el.textContent = text
+  return el
+}
+function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
+  const b = element('button', cls, text)
+  b.type = 'button'
+  b.setAttribute('aria-label', label)
+  b.addEventListener('click', action)
+  return b
+}
+
+/** A single stage whose identity-keyed pages stay attached across channels. */
+export class Reader {
+  readonly el = element('section', 'ws-reader ws-dormant')
+  readonly track = element('div', 'ws-track')
+  readonly stage = element('div', 'ws-stage')
+  readonly host: DocumentHost
+  private readonly opts: ReaderOptions
+  private readonly tabs: TabStrip
+  private readonly title: HTMLButtonElement
+  private readonly returnButton: HTMLButtonElement
+  private readonly conversation: HTMLButtonElement
+  private readonly position = element('span', 'ws-position')
+  private readonly announcement = element('div', 'ws-sr-only')
+  private readonly prev: HTMLButtonElement
+  private readonly next: HTMLButtonElement
+  private readonly observer: ResizeObserver | null
+  private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
+  private channel: Channel | null = null
+  private selected: DocKey | null = null
+  private expanded = false
+  private active = false
+  private menu: HTMLElement | null = null
+  private menuAnchor: HTMLElement | null = null
+  private switcher = false
+  private sidebar = element('aside', 'ws-sidebar')
+  private sidebarOpen = false
+  private liveWidth: number | null = null
+  private cancelResize: (() => void) | null = null
+  private instantRaf = 0
+  private sizes: Record<string, number> = {}
+  private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
+  private readonly phone = window.matchMedia(MOBILE_MEDIA)
+
+  constructor(opts: ReaderOptions) {
+    this.opts = opts
+    this.el.setAttribute('aria-label', 'Document reader')
+    this.el.inert = true
+    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
+    this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
+    this.title = button('ws-channel-title', '', () => this.openSwitcher())
+    this.conversation = button('ws-conversation', 'Conversation', () => opts.onConversation())
+    const lead = element('div', 'ws-nav-lead')
+    lead.append(this.returnButton, this.title)
+    const trail = element('div', 'ws-nav-trail')
+    trail.append(this.conversation)
+    const nav = element('nav', 'ws-navbar')
+    nav.append(lead, this.tabs.el, trail)
+    this.prev = button('ws-thumb-button', '‹', () => this.step(-1), 'Previous document')
+    this.next = button('ws-thumb-button', '›', () => this.step(1), 'Next document')
+    const thumbMenu = button('ws-thumb-button', '⋯', () => {
+      const doc = this.document
+      if (doc) this.openMenu(doc, thumbMenu)
+    }, 'Document menu')
+    const thumb = element('div', 'ws-thumbbar')
+    thumb.append(this.prev, this.position, this.next, thumbMenu)
+    this.announcement.setAttribute('aria-live', 'polite')
+    this.announcement.setAttribute('aria-atomic', 'true')
+    this.stage.append(this.track)
+    this.sidebar.setAttribute('aria-label', 'Channels')
+    const main = element('div', 'ws-stage-row')
+    main.append(this.sidebar, this.stage)
+    this.el.append(nav, main, thumb, this.announcement)
+    this.host = new DocumentHost(this.track, {
+      shuttleBase: opts.shuttleBase,
+      buildProse: opts.buildProse,
+      onRefreshProse: opts.onRefreshProse,
+      onSelect: key => opts.onSelect(key),
+      onFrame: frame => this.prepareFrame(frame),
+    })
+    this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
+    this.observer?.observe(this.stage)
+    window.addEventListener('resize', this.relayout)
+    document.addEventListener('keydown', this.keydown, true)
+    document.addEventListener('pointerdown', this.outside)
+    this.motion.addEventListener('change', this.relayout)
+    this.phone.addEventListener('change', this.relayout)
+    this.el.addEventListener('mousedown', e => {
+      if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
+    })
+    try {
+      this.sizes = JSON.parse(sessionStorage.getItem('shuttle:workspace:sizes') ?? '{}')
+      this.sidebarOpen = localStorage.getItem('shuttle:workspace:sidebar') === 'true'
+    } catch { /* Storage is optional. */ }
+  }
+
+  get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
+  get isActive(): boolean { return this.active }
+
+  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true): void {
+    const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
+    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
+    this.channel = channel
+    this.selected = selected
+    this.active = true
+    this.el.classList.remove('ws-dormant')
+    this.el.inert = false
+    this.el.removeAttribute('aria-hidden')
+    this.returnButton.textContent = `‹ ${origin}`
+    this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
+    this.title.textContent = channel.name
+    this.title.title = channel.name
+    const state = card?.runtimePhase ?? card?.workerState ?? card?.status ?? 'open'
+    const dot = element('span', `ws-state-dot ws-state-${state}`)
+    this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'))
+    this.conversation.title = `${card?.workerAgent ?? card?.shuttleAgent ?? ''} · ${state}`
+    this.tabs.render(channel.labels)
+    this.host.setChannel(channel.documents, selected)
+    this.paint(!switching && animate)
+    this.renderSidebar()
+    if (switching) this.returnButton.focus({ preventScroll: true })
+    requestAnimationFrame(() => this.layout(false))
+  }
+
+  select(key: DocKey): void {
+    if (!this.channel?.documents.some(d => d.key === key) || key === this.selected) return
+    this.cancelResize?.()
+    this.closeMenu()
+    this.selected = key
+    this.host.select(key)
+    this.paint(true)
+  }
+
+  hide(): void {
+    this.cancelResize?.()
+    this.active = false
+    this.closeMenu()
+    this.host.parkAll()
+    this.el.classList.add('ws-dormant')
+    this.el.inert = true
+    this.el.setAttribute('aria-hidden', 'true')
+  }
+
+  private selectIndex(index: number): void {
+    const doc = this.channel?.documents[index]
+    if (doc) this.opts.onSelect(doc.key)
+  }
+  private step(delta: number): void {
+    if (this.channel) this.selectIndex(this.channel.documents.findIndex(d => d.key === this.selected) + delta)
+  }
+  private paint(animate: boolean): void {
+    const ch = this.channel
+    if (!ch) return
+    const index = ch.documents.findIndex(d => d.key === this.selected)
+    ch.documents.forEach((doc, i) => {
+      const frame = this.host.get(doc.key)
+      if (!frame) return
+      frame.el.classList.toggle('ws-before', i < index)
+      frame.el.classList.toggle('ws-after', i > index)
+      frame.el.classList.toggle('ws-expanded', doc.key === this.selected && this.expanded)
+      this.fillLabel(frame, ch.labels[i])
+    })
+    this.tabs.mark(index, animate)
+    this.position.textContent = `${index + 1} / ${ch.documents.length}`
+    this.prev.disabled = index <= 0
+    this.next.disabled = index >= ch.documents.length - 1
+    const announcement = `${ch.labels[index]}, ${index + 1} of ${ch.documents.length}`
+    if (this.announcement.textContent !== announcement) this.announcement.textContent = announcement
+    this.layout(animate)
+  }
+  private prepareFrame(frame: DocumentFrame): void {
+    frame.el.setAttribute('role', 'tabpanel')
+    frame.el.setAttribute('aria-label', frame.doc.name)
+    const glyph = element('span', 'ws-kind-glyph')
+    const title = element('span', 'ws-label-title')
+    const provenance = element('span', 'ws-provenance')
+    const expand = button('ws-icon-button ws-expand-button', '⤢', () => this.toggleExpand(), 'Expand document')
+    const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
+    frame.label.append(glyph, title, provenance, expand, menu)
+    this.labels.set(frame, { glyph, title, provenance, expand })
+    frame.label.addEventListener('dblclick', e => {
+      if (!(e.target as Element).closest('button,a') && frame.doc.key === this.selected) this.toggleExpand()
+    })
+    for (const side of ['left', 'right'] as const) {
+      const edge = element('div', `ws-edge ws-edge-${side}`)
+      edge.addEventListener('pointerdown', e => this.resizeStart(e, frame, side))
+      frame.el.append(edge)
+    }
+  }
+  private fillLabel(frame: DocumentFrame, label: string): void {
+    const doc = frame.doc
+    const sent = doc.provenance.filter(p => p.kind === 'sent')
+    const latest = sent.at(-1)
+    const embed = doc.provenance.find(p => p.kind === 'embed')
+    let summary = doc.kind === 'fiber' ? 'fiber prose' : embed ? 'embedded' : 'linked from body'
+    if (latest?.kind === 'sent') {
+      const age = Math.max(0, Math.round((Date.now() - latest.time) / 60000))
+      summary = `sent ${age < 60 ? `${age}m` : age < 1440 ? `${Math.floor(age / 60)}h` : `${Math.floor(age / 1440)}d`} ago`
+      if (sent.length > 1) summary += ` · ${sent.length} receipts`
+      if (latest.worker) summary += ` · ${latest.worker}`
+    } else if (embed?.kind === 'embed' && embed.title) summary += ` · ${embed.title}`
+    summary += ` · ${doc.owner}`
+    const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', text: '≡', other: '□' }[doc.kind]
+    const parts = this.labels.get(frame)
+    if (!parts) return
+    parts.glyph.textContent = glyph
+    parts.title.textContent = label
+    parts.title.title = doc.path
+    parts.provenance.textContent = summary
+    parts.provenance.title = summary
+    parts.expand.textContent = this.expanded ? '⤡' : '⤢'
+    parts.expand.setAttribute('aria-label', this.expanded ? 'Restore size' : 'Expand document')
+  }
+
+  private measure(name: string, fallback: number): number {
+    return parseFloat(getComputedStyle(this.el).getPropertyValue(`--ws-${name}`)) || fallback
+  }
+  private preferredWidth(doc: WorkspaceDocument, max: number, height: number): number {
+    if (this.phone.matches) return max
+    const saved = this.sizes[doc.key]
+    if (Number.isFinite(saved) && saved > 0) return Math.min(max, saved)
+    let width = this.measure(doc.kind === 'html' ? 'html-width' : doc.kind === 'pdf' ? 'pdf-width' : 'prose-width', doc.kind === 'html' ? 1040 : doc.kind === 'pdf' ? 900 : 760)
+    const img = this.host.get(doc.key)?.content.querySelector('img')
+    if (doc.kind === 'image' && img?.naturalWidth && img.naturalHeight) width = Math.max(320, (height - this.measure('label-height', 40)) * img.naturalWidth / img.naturalHeight)
+    return Math.min(max, width)
+  }
+  private layout(animate: boolean): void {
+    const ch = this.channel
+    if (!ch || !this.active) return
+    const W = this.stage.clientWidth, H = this.stage.clientHeight
+    if (!W || !H) return
+    const inset = this.measure('inset', 12), gap = this.measure('gap', 24)
+    const boxW = W - inset * 2, boxH = H - inset * 2
+    if (!animate || this.motion.matches) {
+      this.stage.classList.add('ws-instant')
+      void this.stage.offsetWidth
+      cancelAnimationFrame(this.instantRaf)
+      this.instantRaf = requestAnimationFrame(() => {
+        this.instantRaf = requestAnimationFrame(() => this.stage.classList.remove('ws-instant'))
+      })
+    }
+    let x = 0, centre = 0
+    ch.documents.forEach(doc => {
+      const f = this.host.get(doc.key)
+      if (!f) return
+      const sel = doc.key === this.selected
+      const width = sel && this.expanded ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
+      f.el.style.left = `${x}px`
+      f.el.style.width = `${width}px`
+      f.el.style.height = `${boxH}px`
+      if (sel) centre = x + width / 2
+      x += width + gap
+    })
+    this.track.style.transform = `translateX(${Math.round(W / 2 - centre)}px)`
+  }
+  private readonly relayout = (): void => {
+    this.renderSidebar()
+    this.layout(false)
+    const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
+    this.tabs.mark(index, false)
+  }
+  private toggleExpand(): void {
+    this.cancelResize?.()
+    this.expanded = !this.expanded
+    this.paint(true)
+  }
+  private resizeStart(e: PointerEvent, frame: DocumentFrame, side: 'left' | 'right'): void {
+    if (this.phone.matches || this.expanded || frame.doc.key !== this.selected || e.button !== 0) return
+    e.preventDefault()
+    this.cancelResize?.()
+    const edge = e.currentTarget as HTMLElement
+    edge.setPointerCapture(e.pointerId)
+    const startX = e.clientX, width = frame.el.offsetWidth
+    let latched = false
+    this.stage.classList.add('ws-resizing')
+    const move = (ev: PointerEvent): void => {
+      const delta = (ev.clientX - startX) * (side === 'right' ? 1 : -1)
+      if (!latched && Math.abs(delta) < this.measure('drag-latch', 4)) return
+      latched = true
+      this.liveWidth = Math.max(Math.min(320, this.stage.clientWidth - 24), Math.min(this.stage.clientWidth - 24, width + delta * 2))
+      this.layout(false)
+    }
+    const finish = (commit: boolean): void => {
+      edge.removeEventListener('pointermove', move)
+      edge.removeEventListener('pointerup', up)
+      edge.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('keydown', key, true)
+      this.cancelResize = null
+      if (commit && latched && this.liveWidth !== null) {
+        this.sizes[frame.doc.key] = this.liveWidth
+        try { sessionStorage.setItem('shuttle:workspace:sizes', JSON.stringify(this.sizes)) } catch { /* Storage is optional. */ }
+      }
+      this.liveWidth = null
+      this.stage.classList.remove('ws-resizing')
+      this.layout(false)
+      if (edge.hasPointerCapture(e.pointerId)) edge.releasePointerCapture(e.pointerId)
+    }
+    const up = (): void => finish(true)
+    const cancel = (): void => finish(false)
+    const key = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); finish(false) }
+    }
+    this.cancelResize = cancel
+    edge.addEventListener('pointermove', move)
+    edge.addEventListener('pointerup', up)
+    edge.addEventListener('pointercancel', cancel)
+    window.addEventListener('keydown', key, true)
+  }
+
+  private openMenu(doc: WorkspaceDocument, anchor: HTMLElement): void {
+    const same = this.menuAnchor === anchor
+    this.closeMenu()
+    if (same) return
+    const menu = element('div', 'ws-menu')
+    menu.setAttribute('aria-label', 'Document actions')
+    const url = doc.kind === 'fiber' ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
+    for (const [label, download] of [['Open in new tab', false], ['Download', true]] as const) {
+      const a = element('a', 'ws-menu-item', label)
+      a.href = doc.kind === 'fiber' && download ? fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner) : url
+      if (download) a.download = doc.name
+      else { a.target = '_blank'; a.rel = 'noopener' }
+      menu.append(a)
+    }
+    menu.append(button('ws-menu-item', 'Copy path', () => {
+      void navigator.clipboard?.writeText(doc.path).then(() => showToast('Path copied')).catch(() => showToast('Couldn’t copy path', 'error'))
+      this.closeMenu()
+    }))
+    menu.append(button('ws-menu-item', 'Refresh', () => { this.host.refresh(doc.key); this.closeMenu() }))
+    const receipts = element('details', 'ws-receipts')
+    const sends = doc.provenance.filter(p => p.kind === 'sent')
+    receipts.append(element('summary', '', `Receipts (${sends.length})`))
+    for (const p of [...sends].reverse()) {
+      if (p.kind === 'sent') receipts.append(element('div', '', `${new Date(p.time).toLocaleString()} · ${p.worker ?? ''} · ${p.session ?? ''}`))
+    }
+    menu.append(receipts, element('code', 'ws-path', `${doc.owner}:${doc.path}`))
+    this.el.append(menu)
+    this.menu = menu
+    this.menuAnchor = anchor
+    const r = anchor.getBoundingClientRect()
+    menu.style.left = `${Math.max(12, Math.min(window.innerWidth - menu.offsetWidth - 12, r.right - menu.offsetWidth))}px`
+    menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 6)}px`
+    menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
+  }
+  private closeMenu(): boolean {
+    if (!this.menu) return false
+    this.menu.remove()
+    this.menu = null
+    this.menuAnchor = null
+    this.switcher = false
+    return true
+  }
+  private readonly outside = (e: PointerEvent): void => {
+    if (this.menu && !this.menu.contains(e.target as Node) && !this.menuAnchor?.contains(e.target as Node)) this.closeMenu()
+  }
+  private channelList(filter = ''): HTMLElement {
+    const list = element('div', 'ws-channel-list')
+    for (const card of this.opts.cards()) {
+      if (!`${card.name} ${card.path}`.toLowerCase().includes(filter.toLowerCase())) continue
+      const row = button('ws-channel-row', card.name, () => { this.closeMenu(); this.opts.onChannel(card) })
+      row.title = card.outcome ?? card.path
+      row.setAttribute('aria-current', String((card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner))
+      row.append(element('small', '', card.originId))
+      list.append(row)
+    }
+    return list
+  }
+  private openSwitcher(): void {
+    if (this.switcher) { this.closeMenu(); return }
+    this.closeMenu()
+    const menu = element('div', 'ws-menu ws-switcher')
+    const find = element('input', 'ws-channel-find')
+    find.placeholder = 'Find a channel'
+    find.setAttribute('aria-label', 'Find a channel')
+    let list = this.channelList()
+    find.addEventListener('input', () => { const next = this.channelList(find.value); list.replaceWith(next); list = next })
+    menu.append(find, list)
+    this.el.append(menu)
+    this.menu = menu
+    this.menuAnchor = this.title
+    this.switcher = true
+    const rect = this.title.getBoundingClientRect()
+    menu.style.left = `${Math.min(rect.left, Math.max(12, window.innerWidth - menu.offsetWidth - 12))}px`
+    menu.style.top = `${rect.bottom + 6}px`
+    find.focus()
+  }
+  private renderSidebar(): void {
+    this.el.classList.toggle('ws-with-sidebar', this.sidebarOpen && !this.phone.matches)
+    if (this.sidebarOpen) this.sidebar.replaceChildren(this.channelList())
+  }
+  private readonly keydown = (e: KeyboardEvent): void => {
+    if (!this.active || e.isComposing || document.querySelector('.kbn-detail-overlay,[data-state="open"][role="dialog"]')) return
+    if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+      e.preventDefault(); e.stopImmediatePropagation()
+      this.sidebarOpen = !this.sidebarOpen
+      try { localStorage.setItem('shuttle:workspace:sidebar', String(this.sidebarOpen)) } catch { /* Storage is optional. */ }
+      this.renderSidebar(); this.layout(false)
+      return
+    }
+    if (this.handleKey(e.key, e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {
+      e.preventDefault(); e.stopImmediatePropagation()
+    }
+  }
+  private handleKey(key: string, alt: boolean): boolean {
+    if (key === 'Escape') {
+      if (this.cancelResize) this.cancelResize()
+      else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
+      else if (this.expanded) this.toggleExpand()
+      else this.opts.onReturn()
+      return true
+    }
+    if (!alt) return false
+    if (key === 'ArrowLeft' || key === 'ArrowRight') { this.step(key === 'ArrowLeft' ? -1 : 1); return true }
+    if (key === 'ArrowUp' || key === 'ArrowDown') {
+      const cards = this.opts.cards()
+      const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
+      const card = cards[index + (key === 'ArrowUp' ? -1 : 1)]
+      if (index >= 0 && card) this.opts.onChannel(card)
+      return true
+    }
+    return false
+  }
+  dispose(): void {
+    this.cancelResize?.()
+    this.closeMenu()
+    this.observer?.disconnect()
+    window.removeEventListener('resize', this.relayout)
+    cancelAnimationFrame(this.instantRaf)
+    this.tabs.dispose()
+    this.host.dispose()
+    document.removeEventListener('keydown', this.keydown, true)
+    document.removeEventListener('pointerdown', this.outside)
+    this.motion.removeEventListener('change', this.relayout)
+    this.phone.removeEventListener('change', this.relayout)
+    this.el.remove()
+  }
+}
