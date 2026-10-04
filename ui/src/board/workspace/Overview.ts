@@ -93,7 +93,6 @@ interface Folio {
   recent: string
   project: string
   host: string
-  opened: boolean
   el: HTMLButtonElement
   stack: HTMLElement
   name: HTMLElement
@@ -331,7 +330,7 @@ export class Overview {
         folio.project = projectOf(card)
         folio.host = card.originId
       }
-      folio.card = card; folio.receipts = receipts; folio.opened = this.openedCards.has(uid)
+      folio.card = card; folio.receipts = receipts
       this.updateFolio(folio)
     }
     for (const [uid, folio] of this.folios) if (!byUid.has(uid)) {
@@ -357,7 +356,7 @@ export class Overview {
     const when = node('span', 'ws-overview-when')
     footer.append(marks, count, when); tx.append(title, outcome, footer); el.append(stack, tx)
     const folio: Folio = { uid, card, receipts: [], latest: 0, recent: 'Earlier', project: projectOf(card), host: card.originId,
-      opened: false, el, stack, name, fresh, outcome, marks, count, when }
+      el, stack, name, fresh, outcome, marks, count, when }
     el.addEventListener('click', () => { void this.open(folio.card) })
     return folio
   }
