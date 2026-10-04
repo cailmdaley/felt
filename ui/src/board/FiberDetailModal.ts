@@ -7,14 +7,12 @@ import {
   fileBytesUrl,
   fileInfoUrl,
   humanizeIdleAge,
-  renderMarkdown,
   resolveAbs,
   showToast,
 } from './utils.js'
 import {
   PREVIEW_BYTES,
   attachmentGlyph,
-  extractEmbeds,
   fileKind,
   fileTapAction,
   formatBytes,
@@ -30,6 +28,7 @@ import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, p
 import { buildProjectDirPrompt } from './projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from './fiberSearch.js'
 import { installWikilinks } from './wikilinks.js'
+import { installBodyFileLinks, ledeHtml, renderFiberMarkdown } from './workspace/FiberProse.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { cardFromCompositeEntry } from './KanbanReadModel.js'
 import {
@@ -1397,24 +1396,8 @@ export class FiberDetailModal {
     this.disposeAttachmentPreviews()
     this.attachHost?.replaceChildren()
     if (body) {
-      // Resolve a relative `:::{embed}` / image against the fiber's own dir
-      // (carried on the card from the composite feed) and route the bytes
-      // through `/file`. A fiber whose dir didn't resolve degrades to embed
-      // placeholders + un-rewritten images, but the prose still reads.
-      const bodyOpts = {
-        basePath: card.fiberDir,
-        originId: card.originId,
-        projectDir: card.shuttleProjectDir,
-        // The reading surface resolves [[…]] (installWikilinkNavigation below);
-        // it is the one surface that may render them as links.
-        wikilinks: true,
-      }
-      // The body's `:::{embed}` directives are DECLARATIONS, not placements:
-      // each names a file the fiber keeps current, they leave the prose
-      // entirely, and every one of them is drawn as a card in the strip above
-      // (renderAttachments). See attachments.ts for why inline rendering went.
-      const { body: prose_md, attachments } = extractEmbeds(body)
-      prose.innerHTML = lede + renderMarkdown(prose_md, bodyOpts)
+      const { html, attachments } = renderFiberMarkdown(body, outcome, card)
+      prose.innerHTML = html
       this.renderAttachments(attachments, card)
       this.installBodyFileLinks(prose, card)
       void this.installWikilinkNavigation(prose, overlay)
@@ -1934,24 +1917,12 @@ export class FiberDetailModal {
    * external link never reaches this handler.
    */
   private installBodyFileLinks(prose: HTMLElement, card: KanbanCard): void {
-    for (const link of prose.querySelectorAll<HTMLAnchorElement>('a[data-file-path]')) {
-      const fullPath = link.dataset.filePath
-      if (!fullPath) continue
-      link.title = `Open ${basename(fullPath)} in the viewer`
-      link.addEventListener('click', (e) => {
-        // Leave the modified clicks to the browser — a cmd-click means "new
-        // tab" everywhere else and should here too.
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
-        e.preventDefault()
-        e.stopPropagation()
-        const target = link.dataset.filePath ?? fullPath
-        this.activateFile(
-          { fullPath: target, basename: basename(target), timestamp: Date.now() },
-          card,
-        )
-      })
-      void this.settleLinkAnchor(link)
-    }
+    installBodyFileLinks(prose, (fullPath) => {
+      this.activateFile(
+        { fullPath, basename: basename(fullPath), timestamp: Date.now() },
+        card,
+      )
+    })
   }
 
   /**
@@ -2057,41 +2028,6 @@ export class FiberDetailModal {
     )
     tabbed.open(card)
     return { label: card.name || fiberId, close: () => tabbed.close() }
-  }
-
-  /**
-   * Decide which of a body link's two candidate directories actually holds the
-   * file, by asking.
-   *
-   * A relative link is ambiguous: `[AGENTS.md](AGENTS.md)` is either a file
-   * beside the fiber or a file at the root of the repo the worker was dispatched
-   * into. Both are plausible and the markdown does not say. So the renderer
-   * emits both and this probes the primary with a HEAD; on anything but a
-   * success it swaps the anchor over to the project-dir candidate. One extra
-   * HEAD per relative link, and only for links that carry an alternate.
-   *
-   * Deliberately not a race: the swap only happens when the FIRST candidate is
-   * confirmed missing, so a slow probe can never overwrite a good anchor. On a
-   * network failure the primary stands — an unverified guess beats swapping to
-   * a second unverified guess.
-   */
-  private async settleLinkAnchor(link: HTMLAnchorElement): Promise<void> {
-    const altUrl = link.dataset.fileUrlAlt
-    const altPath = link.dataset.filePathAlt
-    if (!altUrl || !altPath) return
-    const primary = link.getAttribute('href')
-    if (!primary) return
-    try {
-      // Relative, like the images the same renderer emits — the bundle is served
-      // by the daemon, so a relative `/api/v1/file` reaches it without CORS.
-      const res = await fetch(primary, { method: 'HEAD' })
-      if (res.ok) return
-    } catch {
-      return
-    }
-    link.setAttribute('href', altUrl)
-    link.dataset.filePath = altPath
-    link.title = `Open ${basename(altPath)} in the viewer`
   }
 
   // ── Panel geometry: default + remembered, drag, resize ────────────────────
@@ -4302,13 +4238,6 @@ export class FiberDetailModal {
         }
     })
   }
-}
-
-/** The outcome as the page's lede callout, or nothing for an empty one. */
-function ledeHtml(outcome: string): string {
-  return outcome
-    ? `<div class="kbn-detail-lede">${renderMarkdown(outcome, { wikilinks: true })}</div>`
-    : ''
 }
 
 interface FileInfo {
