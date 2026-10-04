@@ -478,12 +478,13 @@ export class KanbanModal {
     const wanted = new URLSearchParams(window.location.search).get('view')
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
     else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
+    else if (window.location.hash === '#/chronicle') this.setView('chronicle')
     this.workspace = new Workspace(this.container!, {
       shuttleBase: this.shuttleBase,
       cards: () => this.workspaceCards(),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
-      onOverview: () => this.setView('shelf', false),
+      onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
       onConversation: (card) => this.openWorkspaceConversation(card),
     })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
@@ -2525,7 +2526,8 @@ export class KanbanModal {
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {
     if (!this.body) return
-    if (this.workspace?.isActive) return
+    // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
+    if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
     // Escape releases an engaged lens and goes no further — "back out of what
     // I'm looking at", and the lens is the nearest thing being looked through.
     if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk') {

@@ -15,7 +15,8 @@ export interface WorkspaceOptions {
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
-  onOverview?(): void
+  /** A history entry addressed one of the board's views; switch to it without pushing. */
+  onView?(view: WorkspaceView): void
   onConversation(card: KanbanCard): void
 }
 interface ChannelState {
@@ -28,6 +29,8 @@ interface ChannelState {
   loaded: boolean
   error?: string
 }
+export type WorkspaceView = 'desk' | 'chronicle' | 'board'
+const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board' }
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
@@ -63,7 +66,7 @@ export class Workspace {
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
       switcherCards: () => this.overview.orderedCards(),
       onSelect: key => this.select(key),
-      onReturn: () => { this.lastBoardRoute = null; this.history.leave() },
+      onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
       onConversation: () => { if (this.current) opts.onConversation(this.current.card) },
       onChannel: card => this.open(card, this.origin),
       buildProse: doc => this.prose(doc.key),
@@ -172,10 +175,9 @@ export class Workspace {
     const epoch = ++this.routeEpoch
     if (route.kind === 'overview') {
       this.reader.hide()
-      if (window.location.hash === '#/board') {
-        this.lastBoardRoute = null
-        this.opts.onOverview?.()
-      }
+      const view = VIEW_HASHES[window.location.hash]
+      if (view === 'board') this.lastBoardRoute = null
+      if (view) this.opts.onView?.(view)
       this.overview.setVisible(window.location.hash === '#/board')
       this.opts.onVisibility(false)
       this.stopTimer()
@@ -191,7 +193,7 @@ export class Workspace {
       })
     }
     this.current = state
-    this.lastBoardRoute = route
+    if (this.origin === 'Board') this.lastBoardRoute = route
     // The sidebar and switcher list the overview's rows, so a direct entry reads them too.
     this.overview.refresh()
     this.overview.opened(state.card)
@@ -226,7 +228,7 @@ export class Workspace {
     if (!state.selected || !ch.documents.some(d => d.key === state.selected)) state.selected = defaultSelection(ch)
     this.refreshProse(state)
     this.reader.show(ch, state.selected, this.origin, state.card, animate)
-    this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: state.selected }
+    if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: state.selected }
   }
   private select(key: DocKey): void {
     const state = this.current
@@ -236,7 +238,7 @@ export class Workspace {
     state.routedFile = undefined
     this.reader.select(key)
     this.history.select(key)
-    this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }
+    if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }
   }
   private isBodyFile(state: ChannelState, key: DocKey): boolean {
     const template = document.createElement('template')
