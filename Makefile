@@ -231,6 +231,7 @@ bootstrap-test:
 plugin-hooks-test:
 	bash scripts/test-plugin-hooks.sh
 	node --experimental-strip-types extensions/pi/test.mjs
+	node --experimental-strip-types --test extensions/pi/handoff.test.mjs scripts/test-handoff-hook.mjs
 
 # Fail if a maintainer's own host or account name has crept back into tracked
 # source. Fleet members belong in ~/.config/shuttle/remotes.json, not in the repo.

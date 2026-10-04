@@ -60,7 +60,9 @@ make mix-test              # full Elixir suite; shells both CLIs on PATH, so `ma
 (cd daemon && mix test --only focus)  # tagged subset
 (cd ui && npm test)        # the board suite; runs vitest TWICE, under two
                            # pinned TZs (America/Los_Angeles, Europe/Paris)
+make plugin-hooks-test     # shell shims, Pi adapter, handoff policy and transcript pipe tests
 bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandboxed
+node extensions/pi/real-handoff.mjs  # opt-in real Pi engine; isolated synthetic provider, no credentials
 bash scripts/test-bootstrap.sh     # bootstrap.sh's login PATH and fail-fast checks, HOME sandboxed
 
 # Opt-in real harness smoke. Opens real Claude/Codex/Pi CLIs in tmux,
