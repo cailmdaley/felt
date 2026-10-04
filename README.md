@@ -15,19 +15,34 @@ When work spans several days or coding-agent sessions, decisions and unfinished 
 **felt** keeps them in Markdown files beside your project, with a command-line tool for recording, searching, and connecting them.
 You and your agents read and write the same notes; Git keeps their history.
 
+## Set up with your agent
+
+**Shuttle** is the optional task board that launches agents and follows their work.
+We recommend asking your existing agent to help you set it up.
+Give it this prompt:
+
+```text
+Read https://cailmdaley.github.io/felt/shuttle/agent-setup/ and help me set up Shuttle. Record this setup as a task on the board, and give me the board URL when it is ready.
+```
+
+The [setup guide](https://cailmdaley.github.io/felt/shuttle/setup/) explains what to expect.
+To use felt for notes on its own, follow the commands below.
+
+## Keep project notes
+
 Each note is called a **fiber**.
 It can hold a task, a question, a decision, a finding, or a project specification.
 A fiber lives in its own directory under `.felt/`, with metadata above its Markdown body:
 
 ```markdown
 ---
-name: Choose a cache policy
+name: Choose a workshop venue
 status: closed
-outcome: Cache parsed inputs by content hash so changed files never reuse stale data.
+outcome: "Use the library meeting room: it seats 30 and is near the station."
 ---
 
-Modification times aren't enough: copied inputs can preserve them.
-Hashing the input contents gives each cached result a reproducible key.
+We expect 25 people, and several will arrive by train.
+The café is closer, but its back room only seats 18.
 ```
 
 Related fibers nest in directories and connect through `[[wikilinks]]` in their text.
@@ -40,7 +55,7 @@ A background service launches agents and serves a browser board where you can fo
 Agents record conclusions and continuation notes in the task's fiber, so unfinished work can span sessions.
 Start on one machine, then connect others if you need remote execution.
 
-![Shuttle board with example tasks](docs/assets/shuttle-board-example.png)
+![Shuttle board showing tasks for a small workshop](docs/assets/shuttle-board-example.png)
 
 This repository ships the `felt` and `shuttle` Go CLIs, plus the optional Shuttle service and board.
 [Getting started](https://cailmdaley.github.io/felt/getting-started/) walks through a first note.
@@ -91,17 +106,17 @@ From your project directory:
 
 ```sh
 felt init
-felt add cache-policy "Choose a cache policy" -s open
+felt add workshop-venue "Choose a workshop venue" -s open
 ```
 
-Open `.felt/cache-policy/cache-policy.md` in your editor and describe the question below its metadata.
+Open `.felt/workshop-venue/workshop-venue.md` in your editor and describe the question below its metadata.
 When you've answered it, close the task with a conclusion you can use later:
 
 ```sh
-felt edit cache-policy -s closed \
-  -o "Cache parsed inputs by content hash so changed files never reuse stale data."
-felt show cache-policy
-felt ls -s all "cache"
+felt edit workshop-venue -s closed \
+  -o "Use the library meeting room: it seats 30 and is near the station."
+felt show workshop-venue
+felt ls -s all "workshop"
 ```
 
 Status is optional: use it for unfinished work, and leave it off a note that records an existing decision.

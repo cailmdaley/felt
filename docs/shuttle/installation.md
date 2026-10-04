@@ -187,7 +187,7 @@ mkdir -p ~/notes && cd ~/notes && felt init
 ```
 
 For a fresh installation, you can seed the stores registry before installing the supervisor.
-If it already exists, add to its list rather than replacing it; alternatively use Settings → Stores after startup:
+If it already exists, add to its list rather than replacing it; alternatively use Settings → Notes & tasks after startup:
 
 ```bash
 mkdir -p ~/.config/shuttle
@@ -232,7 +232,7 @@ printf '{"version":1,"felt_stores":["%s"]}\n' "$HOME/notes" \
     nothing is wrong: you asked for this.
 
     Once the daemon is running, bring existing stores in through
-    Settings → Stores individually, or — better past the first couple —
+    Settings → Notes & tasks individually, or — better past the first couple —
     join them by symlink into a single **cross-project store** and
     name only that. felt re-discovers a store's symlinked substores, so the
     aggregate is the one entry the daemon needs, and adding a project later
@@ -255,7 +255,7 @@ shuttle daemon install
 That writes `~/Library/LaunchAgents/io.shuttle.daemon.plist` and loads it. The
 daemon comes up immediately, comes back at every login, and restarts on crash.
 The board reads `~/notes` from the registry; add any additional stores in
-**Settings → Stores**. Changes take effect without reinstalling the supervisor.
+**Settings → Notes & tasks**. Changes take effect without reinstalling the supervisor.
 
 **4. Check it, and know how to undo it.**
 
@@ -380,7 +380,7 @@ trust; do not publish the port to the open internet.
 
 With the daemon up, here is the fastest path from nothing to a worker running.
 
-Register the directory containing `.felt/` in **Settings → Stores**, preserving existing entries.
+Register the directory containing `.felt/` in **Settings → Notes & tasks**, preserving existing entries.
 If `SHUTTLE_STORES` pins the list, follow [Configuring stores](#configuring-stores) to change it.
 
 Add a fiber and give it a `constitution` tag — tags gate nothing, but they
@@ -700,10 +700,15 @@ The daemon polls felt stores. It resolves them in this order:
 2. `~/.config/shuttle/stores.json` — the persisted registry (override the path with
    `SHUTTLE_STORES_FILE`).
 
-**Shuttle assumes no default store.** An unset variable and an absent registry
-resolve to an empty list. The daemon then polls nothing: it boots, binds
-`:4000`, serves an empty board, and dispatches nothing. `shuttle daemon install` warns when the registry is absent and still starts the service.
-Register your first store in **Settings → Stores**, or create `~/.config/shuttle/stores.json` before startup.
+`shuttle daemon install` prepares a default collection when no registry or fixed store list exists.
+It reuses the current project's felt store if it finds one; otherwise it creates `~/felt/.felt` and registers `~/felt` before starting the service.
+Existing registries—including empty ones—and explicit store lists are preserved.
+An explicit `-C` or `--store` selects the store to register; an invalid selection fails rather than creating a different store.
+Reinstalling also preserves a fixed store list saved in the supervisor unless a flag or environment override replaces it.
+`--print` previews the service without creating notes or registry files.
+
+Starting the daemon directly doesn't create a store: with no variable or registry it serves an empty board and polls nothing.
+Use **Settings → Notes & tasks** to add collections, or edit the registry before startup.
 
 ### Switching a supervisor to the registry
 
@@ -711,12 +716,12 @@ If a supervisor was installed with `--stores`, its pinned list takes precedence
 over the editable registry. To switch, back up the job and `stores.json`, then
 write the daemon's **currently effective** store list into the registry. Do
 not activate a stale registry list blindly: it may contain additional stores
-you did not intend to poll. Reinstall with `shuttle daemon install` (or `make
-install-agent`) without `--stores` or `AGENT_STORES`. Keep any existing PATH,
+you did not intend to poll. Reinstall with `shuttle daemon install --stores=` to explicitly clear the saved fixed list and use the registry.
+Keep any existing PATH,
 socket, label, port, or log overrides when reinstalling. A custom
 `SHUTTLE_STORES_FILE` must be present in the installation environment too.
 
-Installation replaces and reloads the supervisor. Check Settings → Stores:
+Installation replaces and reloads the supervisor. Check Settings → Notes & tasks:
 the source should be the registry, the effective stores should be unchanged,
 and editing should be enabled. Verify the board still contains the expected
 fibers, then release the restart quarantine with `shuttle daemon release`.
@@ -737,7 +742,7 @@ without one is a store with no fibers, which the poller reads as empty rather
 than as an error.
 
 Everything in this section and the two below it is also reachable from the
-board's [settings sheet](board.md#settings-the-operator-files-on-any-host)
+board's [settings sheet](board.md#settings)
 (`⌘,`), for any host in the fleet — which is how you configure a machine you
 have no shell on.
 

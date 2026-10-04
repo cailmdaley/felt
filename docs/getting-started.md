@@ -1,269 +1,118 @@
 # Getting started
 
-This page installs both Go CLIs and walks one fiber from creation to a closed
-outcome with `felt`. It takes about five minutes. The quickest path needs only
-`curl` and `tar`.
+**For Shuttle, we recommend letting your agent guide setup.**
+[Set up Shuttle](shuttle/setup.md) gives you one prompt to copy: your agent installs the service, prepares a notes collection, and puts the setup task on your board.
+The linked instructions are readable by you as well as the agent.
+
+The walkthrough below is for using **felt on its own**: install the command-line tools, create a note, and record a decision.
+You can follow it yourself or ask your agent to work through it with you.
 
 ## Install
 
-The install script downloads both Go CLI binaries for your platform:
+On macOS or Linux:
 
-```bash
+```sh
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
 ```
 
-It installs to `/usr/local/bin` if that is writable, otherwise `~/.local/bin`.
-Override with `FELT_INSTALL_DIR`. It supports macOS and Linux on x86_64 and
-arm64. There is no Windows build.
+The installer downloads the `felt` and `shuttle` commands and prints where it puts them.
+It uses `/usr/local/bin` if writable, otherwise `~/.local/bin`; add that directory to `PATH` if your shell cannot find the commands.
+Both x86_64 and arm64 are supported.
+There is no Windows build.
 
-Homebrew:
+It also installs felt's integration for supported agent CLIs it finds, including Claude Code and Codex.
+That writes to those agents' configuration folders; `felt uninstall` reverses the integration.
+If you prefer installing the tools separately from the integration, use Homebrew:
 
-```bash
+```sh
 brew install cailmdaley/tap/felt
 ```
 
-From source, if you have Go 1.23.4 or newer (`go.mod` declares `go 1.23.4`, so
-an earlier 1.23 patch triggers a toolchain download):
-
-```bash
-go install github.com/cailmdaley/felt/cmd/felt@latest
-go install github.com/cailmdaley/felt/cmd/shuttle@latest
-```
-
-Check the install:
-
-```bash
-felt --version
-shuttle --help
-```
-
-If the command is not found, the install directory is not on your `PATH`. The
-script prints the line to add.
-
-!!! note "The script also wires up your coding agents"
-    If `claude` or `codex` is on your `PATH`, `install.sh` runs `felt setup
-    claude` and `felt setup codex` for you. That registers felt's plugin
-    marketplace and installs its hooks, which writes to `~/.claude` and
-    `~/.codex`. There is no opt-out flag. The script prints what it is doing
-    before it does it, and `felt uninstall` reverses it. If you would rather
-    decide yourself, download the script and run it after reading, or use
-    Homebrew and run `felt setup claude` when you want it.
-
-Later, upgrade with `felt update`. That replaces both Go CLIs and refreshes
-the agent plugin in one step, so the binaries never skew.
+For source builds and other installation choices, see the [installation reference](shuttle/installation.md).
+Check your installation with `felt --version`; use `felt update` later to update both commands and refresh agent integration.
 
 ## Create a store
 
-Create a store — a `.felt/` directory — at the root of the project where your
-work lives:
+A **store** is a folder containing your felt notes in a `.felt/` directory.
+From the project directory where you want to keep notes:
 
-```bash
-cd ~/dev/my-project
+```sh
 felt init
 ```
 
-`felt init` creates or repairs `.felt/` and writes a `.gitignore` for felt's
-per-fiber write locks. Run it again any time — it is idempotent.
-
-Commit `.felt/` to your repository. The trail is worth versioning.
+You can run this again safely; it creates or repairs the store without replacing its notes.
+If you use Git, commit `.felt/` with your project to keep the history.
+You can connect projects to a [shared store](concepts/cross-project.md) later.
 
 ## File a fiber
 
-```bash
-felt add covariance-estimation "Covariance estimation" -s open
+Each note is called a **fiber**.
+Suppose you're planning a small workshop and need to choose a venue:
+
+```sh
+felt add workshop-venue "Choose a workshop venue" -s open
 ```
 
-Two arguments: the slug you will address it by, and the human name. Everything
-else is optional. `-s open` opts this fiber into status tracking, which is what
-makes it show up in `felt ls`.
+This creates `.felt/workshop-venue/workshop-venue.md`.
+Open it in your editor and write your constraints below the metadata:
 
-Most fibers do not need a status. A fiber that records a decision or a finding
-completes the moment you write it. Nothing stays to do. Reach for `-s` when you
-want the thing to nag you.
-
-Give it a body:
-
-```bash
-felt edit covariance-estimation \
-  -b "Analytic covariance is too slow for our bin count. Trying jackknife."
+```markdown
+We expect 25 people, and several will arrive by train.
+Compare the library meeting room with the café's back room.
 ```
 
-!!! warning
-    `felt edit -b` replaces the whole body. For anything longer than a couple of
-    sentences, open `.felt/covariance-estimation/covariance-estimation.md` in
-    your editor and write there. felt reads it back on the next command.
-
-## Add a child
-
-Work grows sub-questions. Give them their own fibers, under the fiber they
-belong to:
-
-```bash
-felt add covariance-estimation/jackknife-patches "Jackknife patch count" -s active
-```
-
-```
-covariance-estimation/jackknife-patches
-```
-
-You rarely have to type the whole path. When the first segment of a slug names
-a fiber that already exists, felt puts the new one under it:
-
-```bash
-felt add jackknife-patches/binning "Binning choice"
-```
-
-```
-Resolved jackknife-patches/binning under covariance-estimation/jackknife-patches/binning
-covariance-estimation/jackknife-patches/binning
-```
-
-If the leading segment matches fibers in more than one subtree, felt stops and
-lists the candidates rather than guessing. `--top-level` forces a root fiber
-when you want one despite a matching name.
-
-Structure that was right when you filed it often stops being right later, so
-containment is movable:
-
-```bash
-felt unnest jackknife-patches                       # promote to the top level
-felt nest jackknife-patches covariance-estimation   # move back under a parent
-```
-
-`felt nest` moves the whole subtree on disk and rewrites the addresses whose
-meaning the move would change, wikilinks and `inputs.from` alike, naming each fiber
-it rewrote. The directory tree carries containment on its own, so
-no parent field can drift.
-
-## Look at the store
-
-```bash
-felt ls
-```
-
-```
-○ covariance-estimation
-    Covariance estimation
-◐ covariance-estimation/jackknife-patches
-    Jackknife patch count
-```
-
-`felt ls` shows tracked fibers only, open and active by default. Pass a query to
-search names, outcomes, frontmatter text, and slugs. Any filter widens the
-search to every status except closed, which it counts in a trailing hint:
-
-```bash
-felt ls "jackknife"          # search
-felt ls -s all               # everything tracked, closed included
-felt ls --body "patches"     # search bodies too
-```
-
-`felt ls` lists the view you are standing in. When this project's `.felt` is
-mounted inside a larger store — a loom that aggregates several projects —
-`felt find` searches the whole thing, printing local hits first and the rest of
-the store under a separator that names it. The ids it prints from out there
-work as arguments: `felt show`, `edit`, and `shuttle` all act on the fiber
-where it actually lives.
-
-```bash
-felt find "jackknife"        # the same search, across every linked project
-```
-
-`felt tree` shows containment:
-
-```
-○ covariance-estimation  Covariance estimation
-    └── ◐ .../jackknife-patches  Jackknife patch count
-```
-
-`felt show` reads one fiber:
-
-```bash
-felt show jackknife-patches
-```
-
-A bare slug resolves when it is globally unique, so you rarely have to type the
-full path. `felt show` has four detail levels — `felt show <id> -d compact` for
-metadata and outcome only, `-d full` for everything.
+The short name `workshop-venue` is how you address the note in commands.
+The title is what you and your agents see when reading it.
+`-s open` marks it as a task you haven't finished.
+An existing decision or reference note doesn't need a status.
 
 ## Close it with a real outcome
 
-This part matters most.
+When you've made the decision:
 
-```bash
-felt edit jackknife-patches -s closed \
-  -o "150 patches: stable off-diagonal, <2% bias at all scales"
+```sh
+felt edit workshop-venue -s closed \
+  -o "Use the library meeting room: it seats 30 and is near the station."
 ```
 
-Write the `outcome` as a one-line conclusion. `felt show -d compact` puts that
-line in front of you months later. Say what you learned, decided, or measured,
-in a sentence that stands alone. An outcome that says "done" has failed — the
-status field already said that.
+Add the reasoning to the body so someone can understand the choice later:
 
-Closing stamps `closed-at`. The fiber stays in the tree. `felt ls -s all` still
-finds it. felt deletes nothing.
-
-## The file on disk
-
-```yaml
----
-id: 01KYTG89NAA3MZ68RZSG6MS7VT
-name: Jackknife patch count
-status: closed
-created-at: 2026-07-30T14:52:55-07:00
-updated-at: 2026-07-30T15:10:41-07:00
-closed-at: 2026-07-30T15:10:41-07:00
-outcome: "150 patches: stable off-diagonal, <2% bias at all scales"
----
-
-Tried 50 and 300 as well. Below 100 the off-diagonal is noise-dominated.
-
-Rolls up into [[covariance-estimation]].
+```markdown
+We expect 25 people, and several will arrive by train.
+The café is closer, but its back room only seats 18.
 ```
 
-That covers the whole storage format. felt mints the `id` as a ULID at `felt
-add` and preserves it across moves. The `[[wikilink]]` points at another fiber
-in the narrative. felt computes the reverse direction on demand, so `felt show
-covariance-estimation --citations` finds this fiber pointing at it.
+The outcome is the conclusion you can read without opening the whole note.
+Closing the task keeps that conclusion and the reasoning in your project.
 
-## Next steps
+## Find it again
 
-**Wire up your coding agent.** If the install script did not already do it:
-
-```bash
-felt setup claude    # or: felt setup codex, or: felt setup pi
+```sh
+felt show workshop-venue
+felt ls -s all "workshop"
 ```
 
-This installs the felt integration: a session-start context that lists active and
-recently touched fibers, a gate that nudges the agent to load the felt skill
-before it starts editing, and the `felt` and `shuttle` skills themselves. The
-agent then reads and writes the same store you do. See
-[Agent integration](agents.md).
+`felt ls` by itself lists unfinished tasks.
+`-s all` includes closed tasks so you can retrieve completed decisions.
+Notes remain ordinary Markdown files you can read in any editor.
 
-**See the store in a browser.** felt ships with [shuttle](shuttle/index.md), an
-optional daemon whose [board](shuttle/board.md) serves your fibers at
-`localhost:4000` — cards you can read, edit and rearrange, `[[wikilinks]]` you
-can follow, embedded plots and reports rendered in place, and views of where
-your time actually went. shuttle also runs agents autonomously against fibers,
-but the board is worth having on its own. Re-run the install script with
-`SHUTTLE_DAEMON=1` to add the daemon, then point it at this store:
+When the workshop grows, keep related notes in nested folders and connect them with `[[wikilinks]]` in their text.
+[Organizing](concepts/organizing.md) explains when to split a note, nest it, or link it.
+[Companion files](concepts/companions.md) shows how to keep a programme, plot, or report beside the note it belongs to.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | SHUTTLE_DAEMON=1 sh
-SHUTTLE_STORES=$PWD shuttle daemon start
+## Work with your agent
+
+If the installer didn't already add your agent's integration, run the matching command:
+
+```sh
+felt setup claude
+# Or: felt setup codex
+# Or: felt setup pi
 ```
 
-`SHUTTLE_DAEMON=1` goes after the pipe, where it sets the environment of `sh`. In front
-of `curl` it sets curl's, the script never sees it, and you get both CLIs but
-no daemon. What the script unpacks into `~/.local/share/shuttle` is a prebuilt
-daemon carrying its own Erlang runtime and the board bundle, so this adds no
-toolchain to your machine — it wants `tmux` and the two Go CLIs you just
-installed, and nothing else.
+The integration gives the agent project context at session start and instructions for recording what it learns.
+You and the agent read and write the same notes.
+For example, an agent preparing the participant guide can read the venue decision instead of asking you to repeat it.
+[Agent integration](agents.md) explains the details.
 
-[Set up Shuttle](shuttle/setup.md) covers keeping it running, launching a first task, and connecting your machines.
-
-**Keep reading.** [Fibers](concepts/fibers.md) covers the data model in full,
-and [Organizing](concepts/organizing.md) covers the judgment calls — when a
-status earns its keep, when to nest, how to write an outcome, and when a
-wikilink is doing real work.
+To assign tasks and follow agents on a board, continue with [Set up Shuttle](shuttle/setup.md).

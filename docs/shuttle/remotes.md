@@ -82,7 +82,7 @@ shuttle remotes add workstation \
 ```
 
 `remotes add` replaces the configured record for that name.
-If you already have extra settings on that record, edit it in **Settings → Fleet** instead of overwriting them.
+If you already have extra settings on that record, edit it in **Settings → Connected hosts** instead of overwriting them.
 No `shuttle tunnels install` is needed for a URL-only remote.
 
 To see both directions, Serve must be configured on both hosts and each must discover or configure the other.
@@ -169,7 +169,7 @@ Read the [host boundaries](installation.md#host-classes-and-trust-boundaries) an
 
 ## Verify work across the connection
 
-Open the hub's **Settings → Fleet** and check that the remote answers.
+Open the hub's **Settings → Connected hosts** and check that the remote answers.
 Choose the remote host in Settings to inspect its registered stores and projects.
 Use Capture with that host and an existing remote project for a small read-only task, then confirm the card runs there and you can return to its conversation.
 For a terminal workflow, test SSH attachment as well as board visibility.

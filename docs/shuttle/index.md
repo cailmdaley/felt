@@ -14,8 +14,10 @@ You don't need a multi-machine setup to start.
 
 ## From a written task to a result
 
-Suppose you want an agent to fix a cache that returns stale data.
-Write a fiber describing the problem, the desired behavior, and how to verify it.
+Suppose you are planning a small workshop.
+You have recorded your venue choice in felt and written a draft programme.
+Now you want an agent to turn those notes into a one-page guide for participants.
+Write a fiber describing the result: include travel directions and the schedule, use the existing notes, and flag missing details rather than inventing them.
 Shuttle calls this task description a **constitution**: it gives the agent a result to work toward and the constraints it must respect.
 The agent chooses its implementation steps.
 
@@ -43,12 +45,12 @@ Shuttle stores execution settings in the fiber's YAML header, under `shuttle:`:
 
 ```yaml
 ---
-name: Reject stale cache entries
+name: Prepare the workshop guide
 status: active
 shuttle:
   kind: oneshot
   host: my-laptop
-  project_dir: /home/me/dev/pipeline
+  project_dir: /home/me/projects/workshop
   agent: claude-opus
 ---
 ```

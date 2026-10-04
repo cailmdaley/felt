@@ -54,6 +54,7 @@ nav:
   - shuttle orchestration:
       - Overview: shuttle/index.md
       - Set up Shuttle: shuttle/setup.md
+      - Agent setup guide: shuttle/agent-setup.md
       - Connect your machines: shuttle/remotes.md
       - Opening conversations: shuttle/conversations.md
       - Codex desktop: shuttle/codex-desktop.md

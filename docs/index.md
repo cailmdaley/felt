@@ -12,6 +12,18 @@ You can use felt on its own, with any editor and no background service.
 It uses the same fibers, starts agents in your project, and shows their progress and results in a browser board.
 Start with felt for notes, or go to [Set up Shuttle](shuttle/setup.md) if you want agents to run tasks.
 
+## Set up with your agent
+
+We recommend asking your existing agent to help you set up Shuttle.
+Give it this prompt:
+
+```text
+Read https://cailmdaley.github.io/felt/shuttle/agent-setup/ and help me set up Shuttle. Record this setup as a task on the board, and give me the board URL when it is ready.
+```
+
+The [setup guide](shuttle/setup.md) explains what to expect.
+To use felt for notes on its own, follow the commands below.
+
 ## Keep a decision beside your project
 
 Install felt on macOS or Linux:
@@ -23,37 +35,38 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | s
 The installer includes both the `felt` and `shuttle` commands.
 [Getting started](getting-started.md) covers other installation options and agent integration.
 
-From your project directory, create a place for notes and record a task:
+Suppose you are planning a small workshop and need to choose a venue.
+From your project directory, create a place for notes and record the task:
 
 ```sh
 felt init
-felt add cache-policy "Choose a cache policy" -s open
+felt add workshop-venue "Choose a workshop venue" -s open
 ```
 
-This creates `.felt/cache-policy/cache-policy.md`.
+This creates `.felt/workshop-venue/workshop-venue.md`.
 Open it in your editor and write the question, evidence, or constraints below its metadata.
 Once you've decided, record the answer:
 
 ```sh
-felt edit cache-policy -s closed \
-  -o "Cache parsed inputs by content hash so changed files never reuse stale data."
-felt show cache-policy
+felt edit workshop-venue -s closed \
+  -o "Use the library meeting room: it seats 30 and is near the station."
+felt show workshop-venue
 ```
 
 The task is closed, but its answer stays in the project.
-Search for it later with `felt ls -s all "cache"`, or let a coding agent read it before changing the cache.
+Search for it later with `felt ls -s all "workshop"`, or let an agent read it when preparing information for participants.
 
 A fiber is a Markdown document with a small YAML header:
 
 ```markdown
 ---
-name: Choose a cache policy
+name: Choose a workshop venue
 status: closed
-outcome: Cache parsed inputs by content hash so changed files never reuse stale data.
+outcome: "Use the library meeting room: it seats 30 and is near the station."
 ---
 
-Modification times aren't enough: copied inputs can preserve them.
-Hashing the input contents gives each cached result a reproducible key.
+We expect 25 people, and several will arrive by train.
+The café is closer, but its back room only seats 18.
 ```
 
 felt also stamps an identity and timestamps when it creates and edits fibers.
@@ -73,7 +86,8 @@ The next session can read the conclusion and its reasoning without recovering a 
 ## Run written tasks with Shuttle
 
 With Shuttle, a fiber can also describe a result you want an agent to produce.
-For example: “Make the cache reject stale inputs, and verify it with a test that changes an input file.”
+For example: “Prepare a one-page workshop guide using our venue decision and draft programme.
+Include travel directions and the schedule; flag missing details for me to fill in.”
 You choose the agent and project directory, and Shuttle starts the work.
 
 A background service, called the **daemon**, watches the registered fiber collections and runs eligible tasks.
@@ -81,7 +95,9 @@ Its browser **board** lets you read and edit tasks, follow running agents, and r
 Agents write results and continuation notes back into the fiber, so another session can continue unfinished work.
 You can run this on one machine or [connect several machines](shuttle/remotes.md).
 
-![Shuttle board with example tasks](assets/shuttle-board-example.png)
+![Shuttle board showing tasks for a small workshop](assets/shuttle-board-example.png)
+
+The example board follows the same workshop: venue research, a draft programme, and a participant guide.
 
 [The Shuttle overview](shuttle/index.md) explains the task workflow.
 [Set up Shuttle](shuttle/setup.md) walks through installation and a first task on one machine.

@@ -5,42 +5,30 @@ The public [setup guide](https://cailmdaley.github.io/felt/shuttle/setup/) carri
 Read the pages for the branch you're setting up, and check the installed CLI's `--help` before using commands that may differ by release.
 In a source checkout, use `docs/shuttle/` so guidance matches the code being built.
 
-## Establish the setup
+## First machine: use the shared checklist
 
-Inspect before asking what the machine can tell you: OS, installed `felt`, `shuttle`, `tmux`, harness versions, `shuttle host --json`, `shuttle doctor`, and `felt setup receipt --json`.
-Read existing configuration before changing it and preserve unrelated settings.
-Don't print authentication files or tokens.
+Read the public [agent setup guide](https://cailmdaley.github.io/felt/shuttle/agent-setup/), or `docs/shuttle/agent-setup.md` in a source checkout.
+That page is the canonical onboarding procedure and is readable by the human following along.
+The [setup page](https://cailmdaley.github.io/felt/shuttle/setup/) supplies the copyable prompt; don't send a newcomer through a command catalogue first.
 
-Ask only for decisions you cannot infer: which machines should run work, which project/store to use, whether other people have accounts there, and where the user wants conversations to open.
-Explain the recommendation in those terms, without presenting every configuration field at once.
-An agent CLI must already authenticate on each execution host; let the human complete login and trust prompts.
+Reuse existing configuration and stores.
+For a fresh installation, use the installer's default notes collection rather than making the user design a store layout.
+Explain where it lives and how to change it later.
+Inspect before asking; reserve questions for real choices such as shared-host access, desired remote machines, or conversation opening.
+Leave authentication and device permission prompts to the human.
 
-Distinguish these choices throughout:
+Represent this setup with a fiber named **Set up Shuttle**, reusing an existing setup fiber where appropriate.
+Don't reinstall or claim a setup fiber owned by another live worker.
+Give it a lede, Desired State, and current Status; keep it open while installing its Shuttle block as a draft.
+When this harness can identify and attach its current session, claim it successfully before activating it, as in [capture.md](capture.md).
+Never guess a conversation ID or launch a duplicate worker to populate the board.
+If adoption is unsupported, leave a visible draft with an honest outcome and continue helping from the current conversation.
+Return the working board URL once the setup card is visible.
 
-- The worker's host and execution surface: terminal in tmux, or Codex app conversation.
-- The fleet transport: Tailscale or SSH between Shuttle daemons.
-- The conversation view: terminal, Claude browser/app, or Codex desktop/remote access.
-
-Remote Control is not a general prerequisite for Shuttle.
-Kitty's local control socket, Claude Remote Control, and Codex remote access serve different purposes.
-
-## Reach one local task
-
-Use the prebuilt release unless the user is developing Shuttle.
-Initialize or select the store, declare the host class, install the daemon supervisor, then register the store in Settings or its registry.
-An empty registry permits the service to start but gives it no work to poll.
-Projects in the Capture picker are configured separately from stores.
-
-On macOS, terminal workers need an existing terminal-owned tmux server or Kitty available to start one.
-Never kill a populated tmux server to repair its permissions.
-On Linux, establish how the daemon survives logout: an authorized lingering systemd user service, or the documented tmux supervisor where systemd isn't available.
-
-Create a small read-only task as a draft and select an installed harness explicitly.
-Use `--surface cli` for a terminal Codex test; new Codex tasks otherwise default to app and require an App Server endpoint.
-Arm the test, inspect other eligible tasks, then release the daemon's startup hold.
-Verify the actual worker starts in the right directory, receives a message, and closes to Awaiting review.
-For a terminal worker, test attach and detach too.
-If the user only requested the board, don't launch a worker to test it.
+A successful claim verifies adoption, not fresh dispatch.
+The guide distinguishes the optional read-only worker test from connecting this conversation.
+Record separately whether the board, dispatch, messaging, and chosen opener were actually verified.
+Don't mark an unavailable desktop backend as working by silently substituting a terminal worker.
 
 ## Add a remote
 

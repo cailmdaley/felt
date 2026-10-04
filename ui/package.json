@@ -11,7 +11,8 @@
     "test": "TZ=America/Los_Angeles vitest run && TZ=Europe/Paris vitest run",
     "typecheck": "tsc --noEmit",
     "harness": "vite build -c vite.harness.config.ts",
-    "harness:board": "vite build -c vite.harness-board.config.ts"
+    "harness:board": "vite build -c vite.harness-board.config.ts",
+    "screenshots:docs": "npm run harness:board && node scripts/capture-docs.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.15",

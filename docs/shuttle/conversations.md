@@ -19,7 +19,10 @@ Changing an opening preference doesn't change a task's execution surface.
 
 ## Choose where Claude opens
 
-In **Settings → Conversations**, choose the browser's preference for opening Claude conversations: **Terminal (Kitty)**, **Claude browser**, or **Claude app**.
+Settings opens to **Conversations**, with **Open conversations in** at the top.
+Choose the default for Claude sessions: **Terminal**, **Claude browser**, or **Claude app**.
+The choice saves immediately.
+Right-click **Aloft** to use another available route for that conversation without changing the default.
 This is a preference for the browser you're using, separate from the host configuration selected in Settings.
 Claude browser/app routes require a recorded Remote Control link for that session.
 The preference doesn't enable Remote Control by itself.

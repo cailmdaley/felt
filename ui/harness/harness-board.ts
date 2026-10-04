@@ -10,6 +10,7 @@
  * session), `live` (a capture not yet claimed, on its own card) or `failed`;
  * leave it unset to exercise the idle board. Add `?capture=meeting` to open
  * Capture with the daemon reporting meeting support.
+ * `?example=workshop` selects the fictional, single-machine documentation example.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -32,6 +33,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
+import { workshopExample } from './workshop-example.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
@@ -52,6 +54,10 @@ import type {
 //   • status:closed + no `tempered`          → Awaiting review
 const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
+const docsExample = new URLSearchParams(window.location.search).get('example') === 'workshop'
+  ? workshopExample(now)
+  : null
+if (docsExample) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 const meetingScenario = new URLSearchParams(window.location.search).get('meeting')
 const MOCK_TAIL = [
@@ -1230,7 +1236,12 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const bodyOrigin = (): string => (body().origin as string) || LOCAL_HOST
 
   // The board's composite feed and the local-only meeting control plane.
-  if (url.includes('/api/v1/fibers/composite')) return json(MOCK_FEED)
+  if (url.includes('/api/v1/fibers/composite')) return json(docsExample?.feed ?? MOCK_FEED)
+  if (docsExample && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
+    const id = decodeURIComponent(url.split('/api/v1/fibers/')[1].split('?')[0])
+    const row = docsExample.feed.fibers.find(row => row.fiber.id === id)
+    return json({ fibers: [{ fiber: { ...row?.fiber, body: docsExample.bodies[id] ?? row?.fiber.outcome ?? '' } }] })
+  }
   // The arXiv digest card carries both kinds of file a card can open: a
   // `:::{embed}` report in its body (the attachment strip) and a sent-files
   // trail. Every other card's body and trail stay empty.
@@ -1238,12 +1249,14 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ fibers: [{ fiber: { body: MOCK_DIGEST_BODY, outcome: 'Digest delivered.' } }] })
   }
   if (url.includes('/api/v1/sent-files?')) {
+    if (docsExample) return json({ files: [] })
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     return json({ files: uid === ULID.arxivDigest ? MOCK_DIGEST_SENT : [] })
   }
   // The parent picker's index: the feed's rows plus a sibling of the null-test
   // run, so its picker offers a parent before anything is typed.
   if (url.endsWith('/api/v1/fibers')) {
+    if (docsExample) return json({ fibers: docsExample.feed.fibers })
     return json({ fibers: [...MOCK_FEED.fibers, { fiber: { id: 'work/spt3g_papers/bmodes-2d/null-suite', name: 'Null-test suite' } }] })
   }
   if (url.endsWith('/api/v1/meeting/stop')) {
@@ -1402,12 +1415,14 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ attached: true })
   }
   if (url.includes('/api/v1/sessions/composite')) {
+    if (docsExample) return json({ host: docsExample.feed.host, records: docsExample.sessions, origins: docsExample.feed.origins })
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     const records = [...MOCK_SESSIONS, ...APP_SESSIONS].filter((r) => !uid || r.uid === uid)
     return json({ host: LOCAL_HOST, records, origins: MOCK_ORIGINS })
   }
 
   if (url.includes('/api/v1/sent-files/all/composite')) {
+    if (docsExample) return json({ files: [], origins: docsExample.feed.origins })
     return json({ files: MOCK_SENT_FILES, origins: MOCK_ORIGINS })
   }
   // A text card's body. Images, pages and PDFs load by URL, not through
@@ -1478,7 +1493,7 @@ try {
     onOpenWorker: (session) => { document.body.dataset.harnessTerminalSession = session },
     onSettingsClick: () => { void openSettings({ shuttleBase: '' }) },
     shuttleBase: '',
-    temporalFetchers: MOCK_TEMPORAL,
+    temporalFetchers: docsExample?.temporal ?? MOCK_TEMPORAL,
   })
 
   const host = document.createElement('div')
@@ -1499,8 +1514,8 @@ try {
   // range the board's cards live in.
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,
-    MOCK_FEED,
-    temporal: MOCK_TEMPORAL,
+    MOCK_FEED: docsExample?.feed ?? MOCK_FEED,
+    temporal: docsExample?.temporal ?? MOCK_TEMPORAL,
     feedSpanMs: FEED_SPAN_MS,
     feedFromMs: now - FEED_SPAN_MS,
     feedToMs: now,

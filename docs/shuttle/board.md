@@ -27,12 +27,10 @@ Three surfaces: the **Now** board of cards that need something, a **Pinned**
 strip of perennial roles, and **Resting**, where snoozed work and standing
 roles between runs wait.
 
-![The Desk: Drafts, In Flight and Awaiting Review columns, each card carrying a
-fiber's title, path, latest outcome and the agent assigned to it, with the
-Pinned strip and Resting shelf below.](../assets/board-desk.jpg)
+![The Desk with fictional workshop tasks: lunch options and speaker bios in Drafts, the participant guide and venue access In Flight, and the programme and venue decision Awaiting Review.](../assets/board-desk.jpg)
 
-*A card's body is its `outcome` — the line the worker rewrote when it last
-stopped. Several are blurred here; they are ordinary fiber text.*
+*The cards use fictional workshop data.
+Each card shows its fiber's `outcome`, so the venue decision is readable beside the guide that uses it.*
 
 Where a card lands is two independent decisions: which column it belongs to,
 and which horizon it sits on.
@@ -130,11 +128,7 @@ strip of [cycle](cycles.md) bands. Activity is inked on each lifeline, one mark
 per civil day; ahead of today a row carries only hollow marks for what is due
 and what is armed.
 
-![The Chronicle view: dozens of fibers as horizontal lifelines running from
-first day to last across a calendar of weeks, tick marks marking periods of
-use, a status glyph on each row, and a header strip of named eras such as "the
-temporal-ui push" and "recovery week"; a few rows are
-blurred.](../assets/board-chronicle.jpg)
+![Chronicle with the same fictional workshop tasks: venue research, programme review, access checks, and guide preparation across September and October, under the Plan a small workshop cycle.](../assets/board-chronicle.jpg)
 
 *No fill, just marks on a line per fiber, so months of fibers stack without
 drowning each other. The era strip is the same [cycle](cycles.md) data that
@@ -204,7 +198,7 @@ Without the bundle the root URL 404s with a hint, and the API stays fully
 usable. If you change any `/api/v1/*` route, rebuild the bundle — a stale
 bundle against a changed route table fails silently as a 404.
 
-## Settings — the operator files, on any host
+## Settings
 
 `⌘,` opens the settings sheet, and so does a bare `,`: the board's own idiom
 is bare keys, and a phone has no `⌘`. The ⚙︎ closing the tab strip does the
@@ -212,7 +206,11 @@ same with a pointer, pinned to the right edge on a phone so it never scrolls
 out of reach. `Esc` closes it. It is an overlay rather than a fourth tab — the
 three tabs are windows onto the work, and configuration is not work.
 
-The conversation-opening preference belongs to this browser.
+Settings opens to **Conversations**, where you choose the default Aloft action for Claude sessions.
+The conversation-opening preference belongs to this browser and saves immediately.
+Right-click Aloft to choose another supported opening route for that session without changing your default.
+
+Host settings sit separately under **Worker hosts**.
 The host picker selects which machine the remaining configuration addresses. The board is reachable from a phone and from a second hub, so the
 machine you are configuring is usually not the one you are sitting at; every
 read and write on the sheet carries the chosen host's origin and is
@@ -222,13 +220,15 @@ says so.
 
 | Section | What it holds |
 |---|---|
-| **Stores** | `stores.json` — the store list this daemon is configured with, and the symlinked substores it reaches through them |
-| **Projects** | `projects.json` — the checkouts Stash and Capture offer; adding one initializes its `.felt/` |
-| **Agents** | The merged registry, each record marked with the layer it came from, with a default-effort select per agent (written as an `overrides` entry), over `agents.json` |
-| **Fleet** | `remotes.json` as rows — how each remote is reached, whether it answered, what build it is running — plus the supervised tunnel jobs derived from it |
-| **Host** | Build, CLI contract, poll health, running workers, and the boot quarantine |
+| **Conversations** | The default for opening Claude conversations in this browser; worker execution stays unchanged |
+| **Notes & tasks** | `stores.json` — the store list this daemon is configured with, and the symlinked substores it reaches through them |
+| **Project folders** | `projects.json` — the checkouts Stash and Capture offer; adding one initializes its `.felt/` |
+| **Worker agents** | The merged registry, each record marked with the layer it came from, with a default-effort select per agent (written as an `overrides` entry), over `agents.json` |
+| **Connected hosts** | `remotes.json` as rows — how each remote is reached, whether it answered, what build it is running — plus the supervised tunnel jobs derived from it |
+| **Access & listening** | Whether this is a personal or shared machine, and who can reach its daemon |
+| **Daemon status** | Build, CLI contract, poll health, running workers, and the boot quarantine |
 
-**Every section ends with its own file, editable as text.** That is what makes
+**Host configuration sections offer an advanced text editor for their files.** That is what makes
 the sheet hold *all* the configuration rather than all of it there is a widget
 for, and it is the only safe way to touch `remotes.json`: a structured round
 trip drops every key the model does not know about, and that file carries
