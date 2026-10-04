@@ -24,6 +24,18 @@ import {
   renderMarkdown,
 } from './utils.js'
 
+export type FileViewerState =
+  | { status: 'ready' }
+  | { status: 'error'; error: unknown; hasContent: boolean }
+
+export interface FileViewerOptions {
+  /** Transform HTML after its base URL is installed, before srcdoc assignment. */
+  transformHtml?: (html: string) => string
+  onState?: (state: FileViewerState) => void
+  /** Paint paper until load rather than a loading message. */
+  quietLoading?: boolean
+}
+
 /**
  * Render a deliverable into a fresh element by extension — the shared dispatch
  * the accordion mounts per open file. The iframe variant carries a loading veil
@@ -44,6 +56,7 @@ export function buildFileViewer(
   originId: string,
   onFrameLoad?: (iframe: HTMLIFrameElement, refreshed: boolean) => void,
   onTextPane?: (scroller: HTMLElement) => void,
+  options: FileViewerOptions = {},
 ): HTMLElement {
   const ext = fileExt(fullPath)
   const src = fileBytesUrl(shuttleBase, fullPath, originId)
@@ -57,6 +70,19 @@ export function buildFileViewer(
     img.className = 'kbn-fileview-image'
     img.src = src
     img.alt = basename(fullPath)
+    let disposed = false
+    const controller = new AbortController()
+    img.addEventListener('load', () => {
+      if (!disposed) options.onState?.({ status: 'ready' })
+    })
+    img.addEventListener('error', () => {
+      void fetch(src, { method: 'HEAD', signal: controller.signal }).then((res) => {
+        if (!disposed) options.onState?.({ status: 'error', error: new Error(`file request failed: ${res.status}`), hasContent: false })
+      }).catch((error: unknown) => {
+        if (!disposed) options.onState?.({ status: 'error', error, hasContent: false })
+      })
+    })
+    viewerDisposers.set(wrap, () => { disposed = true; controller.abort() })
     wrap.append(img)
     return wrap
   }
@@ -82,18 +108,23 @@ export function buildFileViewer(
   // from; anything else as a code block, reusing the `md-code-block` markup
   // the markdown renderer already emits for fenced code.
   if (TEXT_EXTS.has(ext)) {
-    return buildTextViewer(src, fullPath, ext, onTextPane)
+    return buildTextViewer(src, fullPath, ext, onTextPane, options)
   }
 
   if (ext === 'html' || ext === 'htm') {
-    return buildHtmlViewer(src, fullPath, onFrameLoad)
+    return buildHtmlViewer(src, fullPath, onFrameLoad, options)
   }
 
   // Non-live iframe deliverables (PDF and opaque browser-native formats).
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 
-  const veil = loadingVeil(fullPath)
+  const veil = loadingVeil(fullPath, options)
+  let disposed = false
+  let loaded = false
+  let checked = false
+  let faulted = false
+  const controller = new AbortController()
 
   const iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
@@ -101,9 +132,19 @@ export function buildFileViewer(
   iframe.title = basename(fullPath)
   wrap.append(iframe, veil)
 
-  const failed = (detail: string): void => showLoadFailure(veil, wrap, fullPath, detail)
+  const failed = (detail: string): void => {
+    if (disposed) return
+    faulted = true
+    showLoadFailure(veil, wrap, fullPath, detail)
+    options.onState?.({ status: 'error', error: new Error(`file request failed: ${detail}`), hasContent: false })
+  }
+  const ready = (): void => {
+    if (!disposed && !faulted && loaded && checked) options.onState?.({ status: 'ready' })
+  }
 
   iframe.addEventListener('load', () => {
+    if (disposed) return
+    loaded = true
     // The 404 document loads too, and it loads AFTER the probe has usually
     // answered. Lifting the veil unconditionally here would erase the error the
     // probe just wrote and leave a blank frame. Only a frame nobody has faulted
@@ -112,6 +153,7 @@ export function buildFileViewer(
     veil.remove()
     prepareIframeExternalLinks(iframe)
     onFrameLoad?.(iframe, false)
+    ready()
   })
   // `error` on an iframe fires for NETWORK failures only. An HTTP 404 is a
   // perfectly successful navigation to an error document, so `load` fires, the
@@ -122,22 +164,28 @@ export function buildFileViewer(
   // So ASK. A HEAD settles what the iframe's own events cannot tell us apart.
   // Ordering is not a race: `failed` re-attaches the veil if `load` already
   // removed it, so whichever resolves second still tells the truth.
-  void fetch(src, { method: 'HEAD' })
+  void fetch(src, { method: 'HEAD', signal: controller.signal })
     .then((res) => {
+      checked = true
       if (!res.ok) failed(`${res.status}${res.statusText ? ` ${res.statusText}` : ''}`)
+      else ready()
     })
     .catch(() => failed('the daemon could not be reached'))
+  viewerDisposers.set(wrap, () => { disposed = true; controller.abort() })
 
   return wrap
 }
 
 const liveViewSubscriptions = new WeakMap<HTMLElement, LiveFileSubscription>()
+const viewerDisposers = new WeakMap<HTMLElement, () => void>()
 
 /** Stop the shared poll when its viewer tab closes. */
 export function disposeFileViewer(viewer: HTMLElement | null): void {
   if (!viewer) return
   liveViewSubscriptions.get(viewer)?.()
   liveViewSubscriptions.delete(viewer)
+  viewerDisposers.get(viewer)?.()
+  viewerDisposers.delete(viewer)
 }
 
 /** Pause a hidden reader tab without tearing down its viewer DOM. */
@@ -154,11 +202,13 @@ function buildHtmlViewer(
   src: string,
   fullPath: string,
   onFrameLoad?: (iframe: HTMLIFrameElement, refreshed: boolean) => void,
+  options: FileViewerOptions = {},
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 
-  const veil = loadingVeil(fullPath)
+  const veil = loadingVeil(fullPath, options)
+  let disposed = false
 
   let iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
@@ -171,18 +221,21 @@ function buildHtmlViewer(
   let stagingFrame: HTMLIFrameElement | null = null
   const initialFrame = iframe
   initialFrame.addEventListener('load', () => {
-    if (!hasContent || initialLoadHandled || iframe !== initialFrame) return
+    if (disposed || !hasContent || initialLoadHandled || iframe !== initialFrame) return
     initialLoadHandled = true
     veil.remove()
     prepareIframeExternalLinks(initialFrame)
     onFrameLoad?.(initialFrame, false)
+    options.onState?.({ status: 'ready' })
   })
 
   const stop = watchLiveFile(
     src,
     (html) => {
+      if (disposed) return
       veil.classList.remove('kbn-fileview-loading-error')
-      const srcdoc = htmlWithBase(html, src)
+      const withBase = htmlWithBase(html, src)
+      const srcdoc = options.transformHtml?.(withBase) ?? withBase
       if (!hasContent) {
         hasContent = true
         iframe.srcdoc = srcdoc
@@ -198,7 +251,7 @@ function buildHtmlViewer(
       const currentGeneration = ++generation
       let loaded = false
       next.addEventListener('load', () => {
-        if (loaded || currentGeneration !== generation) return
+        if (disposed || loaded || currentGeneration !== generation) return
         loaded = true
         prepareIframeExternalLinks(next)
         const panelScroll = wrap.parentElement?.scrollTop ?? 0
@@ -217,15 +270,19 @@ function buildHtmlViewer(
           veil.remove()
         }
         onFrameLoad?.(iframe, !firstVisibleContent)
+        options.onState?.({ status: 'ready' })
       })
       wrap.append(next)
       next.srcdoc = srcdoc
     },
     (error) => {
+      if (disposed) return
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
+      options.onState?.({ status: 'error', error, hasContent: initialLoadHandled })
     },
   )
   liveViewSubscriptions.set(wrap, stop)
+  viewerDisposers.set(wrap, () => { disposed = true; generation++; stagingFrame?.remove() })
   return wrap
 }
 
@@ -254,11 +311,12 @@ function buildTextViewer(
   fullPath: string,
   ext: string,
   onReady?: (scroller: HTMLElement) => void,
+  options: FileViewerOptions = {},
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-text-wrap'
 
-  const veil = loadingVeil(fullPath)
+  const veil = loadingVeil(fullPath, options)
 
   const pane = document.createElement('div')
   pane.className = 'kbn-fileview-text'
@@ -281,9 +339,11 @@ function buildTextViewer(
       veil.remove()
       if (!hasContent) onReady?.(wrap)
       hasContent = true
+      options.onState?.({ status: 'ready' })
     },
     (error) => {
       if (!hasContent) showLoadError(veil, wrap, fullPath, error)
+      options.onState?.({ status: 'error', error, hasContent })
     },
   )
   liveViewSubscriptions.set(wrap, stop)
@@ -291,10 +351,11 @@ function buildTextViewer(
 }
 
 /** The "Loading <file>…" veil every instrument shows until its file lands. */
-function loadingVeil(fullPath: string): HTMLElement {
+function loadingVeil(fullPath: string, options: FileViewerOptions = {}): HTMLElement {
   const veil = document.createElement('div')
   veil.className = 'kbn-fileview-loading'
-  veil.textContent = `Loading ${basename(fullPath)}…`
+  veil.textContent = options.quietLoading ? '' : `Loading ${basename(fullPath)}…`
+  if (options.quietLoading) veil.style.animation = 'none'
   return veil
 }
 
