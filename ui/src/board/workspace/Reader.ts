@@ -41,6 +41,10 @@ const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
   readonly el = element('section', 'ws-reader ws-dormant')
+  /** The vellum the reader floats on; the only blurred layer, and it never moves. */
+  private readonly veil = element('div', 'ws-veil')
+  private departure: ReturnType<typeof setTimeout> | null = null
+  private arrival = 0
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
   readonly host: DocumentHost
@@ -116,7 +120,7 @@ export class Reader {
     this.sidebar.append(this.sidebarFind, this.sidebarList)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
-    this.el.append(this.navbar, main, thumb, this.announcement)
+    this.el.append(this.veil, this.navbar, main, thumb, this.announcement)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -152,8 +156,9 @@ export class Reader {
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
     this.channel = channel
     this.selected = selected
+    const arriving = !this.active
     this.active = true
-    this.el.classList.remove('ws-dormant')
+    if (arriving) this.arrive(origin === 'Board')
     this.el.inert = false
     this.el.removeAttribute('aria-hidden')
     this.returnButton.textContent = `‹ ${origin}`
@@ -182,14 +187,48 @@ export class Reader {
     this.paint(true)
   }
 
-  hide(): void {
+  /**
+   * Leave the reader. Toward the Desk or Chronicle the veil lifts and the page
+   * sinks back as one motion before the pages park; toward the Board, whose
+   * sheet wears the same veil, it goes at once.
+   */
+  hide(animate = false): void {
     this.cancelResize?.()
     this.active = false
     this.closeMenu()
-    this.host.parkAll()
-    this.el.classList.add('ws-dormant')
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
+    cancelAnimationFrame(this.arrival)
+    if (this.departure !== null) clearTimeout(this.departure)
+    this.departure = null
+    const settle = (): void => {
+      this.departure = null
+      this.host.parkAll()
+      // Dormant first: it suspends transitions, so the veil resets without replaying.
+      this.el.classList.add('ws-dormant')
+      this.el.classList.remove('ws-departing')
+    }
+    this.el.classList.remove('ws-arriving', 'ws-veil-held')
+    if (!animate || this.motion.matches || this.el.classList.contains('ws-dormant')) { settle(); return }
+    this.el.classList.add('ws-departing')
+    this.departure = setTimeout(settle, this.measure('veil-time', 180))
+  }
+  /** The veil fades in while the stage settles up; over the Board's veil only the stage moves. */
+  private arrive(veilHeld: boolean): void {
+    if (this.departure !== null) { clearTimeout(this.departure); this.departure = null }
+    const fromRest = this.el.classList.contains('ws-dormant')
+    this.el.classList.remove('ws-departing')
+    if (!fromRest || this.motion.matches) { this.el.classList.remove('ws-dormant'); return }
+    // Take the starting pose while dormant (no transitions), then wake and release it.
+    this.el.classList.toggle('ws-veil-held', veilHeld)
+    this.el.classList.add('ws-arriving')
+    void this.el.offsetWidth
+    this.el.classList.remove('ws-dormant')
+    cancelAnimationFrame(this.arrival)
+    this.arrival = requestAnimationFrame(() => {
+      this.arrival = 0
+      this.el.classList.remove('ws-arriving', 'ws-veil-held')
+    })
   }
 
   private selectIndex(index: number): void {
@@ -534,6 +573,9 @@ export class Reader {
     this.observer?.disconnect()
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
+    cancelAnimationFrame(this.arrival)
+    if (this.departure !== null) clearTimeout(this.departure)
+    this.wide.removeEventListener('change', this.relayout)
     this.tabs.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)

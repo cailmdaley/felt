@@ -1,12 +1,29 @@
 .ws-reader {
   position: fixed; inset: 0; z-index: var(--ws-reader-layer);
   display: flex; flex-direction: column; min-width: 0;
-  background: var(--ws-ground); color: var(--ws-ink);
+  background: transparent; color: var(--ws-ink);
   font: var(--ws-chrome-size)/1.45 var(--ws-serif);
   -webkit-font-smoothing: antialiased;
 }
 .ws-reader *, .ws-reader *::before, .ws-reader *::after { box-sizing: border-box; }
 .ws-reader.ws-dormant { opacity: 0; pointer-events: none; z-index: -1; }
+/* The veil is the one blurred layer, beneath everything and never moving, so
+   the crossing never re-samples the Desk behind it. */
+.ws-veil {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background: var(--ws-veil); -webkit-backdrop-filter: var(--ws-veil-filter); backdrop-filter: var(--ws-veil-filter);
+}
+.ws-stage-row, .ws-thumbbar { position: relative; z-index: 1; }
+.ws-veil, .ws-navbar, .ws-stage-row, .ws-thumbbar { transition: opacity var(--ws-veil-time) var(--ws-ease); }
+.ws-stage { transition: transform var(--ws-veil-time) var(--ws-ease); }
+.ws-reader.ws-arriving .ws-veil, .ws-reader.ws-departing .ws-veil,
+.ws-reader.ws-arriving .ws-navbar, .ws-reader.ws-departing .ws-navbar,
+.ws-reader.ws-arriving .ws-stage-row, .ws-reader.ws-departing .ws-stage-row,
+.ws-reader.ws-arriving .ws-thumbbar, .ws-reader.ws-departing .ws-thumbbar { opacity: 0; }
+.ws-reader.ws-veil-held .ws-veil { opacity: 1; transition: none; }
+.ws-reader.ws-dormant .ws-veil, .ws-reader.ws-dormant .ws-navbar, .ws-reader.ws-dormant .ws-stage-row,
+.ws-reader.ws-dormant .ws-thumbbar, .ws-reader.ws-dormant .ws-stage { transition: none; }
+.ws-reader.ws-arriving .ws-stage, .ws-reader.ws-departing .ws-stage { transform: var(--ws-settle); }
 .ws-reader button { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; }
 .ws-reader button:focus, .ws-reader a:focus { outline: none; box-shadow: none; }
 .ws-reader button:disabled { opacity: var(--ws-receded-opacity); cursor: default; }
@@ -21,7 +38,7 @@
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
   align-items: center; gap: var(--ws-inset); padding: 0 var(--ws-inset);
   min-height: var(--ws-nav-height); border-bottom: var(--ws-line-width) solid var(--ws-hairline);
-  background: var(--ws-ground); position: relative; z-index: 3;
+  background: transparent; position: relative; z-index: 3;
 }
 .ws-nav-lead, .ws-nav-trail { display: flex; align-items: center; min-width: 0; gap: var(--ws-small-gap); }
 .ws-nav-trail { justify-content: flex-end; }
@@ -70,25 +87,20 @@
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
 .ws-stage {
   position: relative; overflow: hidden; flex: 1; min-height: 0; min-width: 0;
-  background-color: var(--ws-ground);
-  background-image: linear-gradient(var(--ws-grid-major) var(--ws-line-width), transparent var(--ws-line-width)),
-    linear-gradient(90deg, var(--ws-grid-major) var(--ws-line-width), transparent var(--ws-line-width)),
-    linear-gradient(var(--ws-grid) var(--ws-line-width), transparent var(--ws-line-width)),
-    linear-gradient(90deg, var(--ws-grid) var(--ws-line-width), transparent var(--ws-line-width));
-  background-size: var(--ws-grid-major-size) var(--ws-grid-major-size), var(--ws-grid-major-size) var(--ws-grid-major-size), var(--ws-gap) var(--ws-gap), var(--ws-gap) var(--ws-gap);
+  background: transparent; transform-origin: center 40%;
 }
 .ws-track { position: absolute; left: 0; top: 0; height: 100%; width: 0; transition: transform var(--ws-crossing) var(--ws-ease); }
 .ws-page {
   position: absolute; top: var(--ws-inset); transform-origin: center;
   transition: left var(--ws-crossing) var(--ws-ease), width var(--ws-crossing) var(--ws-ease), height var(--ws-crossing) var(--ws-ease), transform var(--ws-crossing) var(--ws-ease), opacity var(--ws-crossing) var(--ws-ease);
 }
-.ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-radius); overflow: hidden; background: var(--ws-paper); }
+.ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-radius); overflow: hidden; background: var(--ws-paper); box-shadow: var(--ws-float); transition: box-shadow var(--ws-crossing) var(--ws-ease); }
 .ws-content { position: relative; flex: 1; display: flex; min-height: 0; min-width: 0; overflow: hidden; background: var(--ws-paper); }
 .ws-content > * { flex: 1; min-height: 0; min-width: 0; }
 .ws-page.ws-receded { transform: scale(var(--ws-receded-scale)); opacity: var(--ws-receded-opacity); cursor: pointer; }
 .ws-page.ws-receded.ws-before { transform-origin: right center; }
 .ws-page.ws-receded.ws-after { transform-origin: left center; }
-.ws-page.ws-receded .ws-sheet { pointer-events: none; }
+.ws-page.ws-receded .ws-sheet { pointer-events: none; box-shadow: none; }
 .ws-page.ws-parked { left: var(--ws-parking-x) !important; transition: none; pointer-events: none; }
 .ws-page.ws-parked::after { content: ''; position: absolute; inset: 0; background: var(--ws-paper); z-index: 4; }
 .ws-stage.ws-instant .ws-track, .ws-stage.ws-instant .ws-page, .ws-stage.ws-resizing .ws-track, .ws-stage.ws-resizing .ws-page { transition: none; }
@@ -197,4 +209,10 @@
   .ws-prose, .ws-content .kbn-detail-prose { padding: var(--ws-gap) var(--ws-inset); }
   .ws-menu-item { min-height: var(--ws-phone-target); }
 }
-@media (prefers-reduced-motion: reduce) { .ws-track, .ws-page { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .ws-track, .ws-page { transition: none !important; }
+  .ws-veil, .ws-navbar, .ws-stage-row, .ws-thumbbar, .ws-stage, .ws-sheet { transition: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

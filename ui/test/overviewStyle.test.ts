@@ -57,4 +57,13 @@ describe('workspace palette follows the Desk', () => {
     expect(tokens.match(/--kbn-you/g)).toHaveLength(1)
     expect(tokens).toMatch(/--ws-focus:[^;]*--kbn-you/)
   })
+  it('floats the workspace on a vellum veil, blurring only still layers', () => {
+    for (const sheet of [tokens, reader, css]) expect(sheet).not.toMatch(/--ws-grid/)
+    expect(tokens).toMatch(/--ws-veil:\s*color-mix\(in srgb, var\(--kbn-parchment\) 70%, transparent\)/)
+    const blurred = [...`${reader}\n${css}`.matchAll(/([^{}]+)\{[^{}]*backdrop-filter:\s*var\(--ws-veil-filter\)/g)].map(m => m[1].trim())
+    expect(blurred).toEqual(['.ws-veil', '.ws-overview'])
+    expect(reader).toMatch(/\.ws-page\.ws-receded \.ws-sheet\s*\{[^}]*box-shadow: none/)
+    expect(reader).toMatch(/\.ws-sheet\s*\{[^}]*box-shadow: var\(--ws-float\)/)
+    for (const sheet of [reader, css]) expect(sheet).toMatch(/prefers-reduced-transparency: reduce[^]*backdrop-filter: none/)
+  })
 })

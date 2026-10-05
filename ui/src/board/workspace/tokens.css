@@ -18,8 +18,13 @@
   --ws-fresh: var(--kbn-owed-bright);
   --ws-owed: var(--kbn-owed);
   --ws-focus: color-mix(in srgb, var(--kbn-you) 55%, transparent);
-  --ws-grid: color-mix(in srgb, var(--kbn-ink) 3%, transparent);
-  --ws-grid-major: color-mix(in srgb, var(--kbn-ink) 4.5%, transparent);
+  /* The vellum veil: the Desk's parchment, thinned so the Desk shows through
+     soft and unreadable under a blur. */
+  --ws-veil: color-mix(in srgb, var(--kbn-parchment) 70%, transparent);
+  --ws-veil-filter: blur(20px) saturate(1.15) brightness(1.03);
+  /* A page floats: one tight contact shadow and one long ambient one. */
+  --ws-float: 0 1px 2px color-mix(in srgb, var(--kbn-ink) 10%, transparent),
+    0 24px 56px -16px color-mix(in srgb, var(--kbn-ink) 22%, transparent);
   --ws-mask: var(--kbn-ink);
 
   --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
@@ -28,6 +33,8 @@
   --ws-mono-tracking: 0.08em;
 
   --ws-crossing: 280ms;
+  --ws-veil-time: 180ms;
+  --ws-settle: translateY(6px) scale(0.985);
   --ws-ease: ease;
   --ws-receded-scale: 0.94;
   --ws-receded-opacity: 0.55;
@@ -65,7 +72,6 @@
   --ws-prose-width: 760px;
   --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
 
-  --ws-grid-major-size: 120px;
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;

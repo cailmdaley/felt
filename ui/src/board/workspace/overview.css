@@ -1,7 +1,7 @@
-/* The Board's contact sheet: the Desk's materials laid out on a drafting
-   table. Names and outcomes in the serif, metadata in the Desk's mono
-   register, folios on card paper over column-sheet stacks, gold only for
-   what is fresh. The faint iron-gall grid is the one note the Desk lacks. */
+/* The Board's contact sheet: the Desk's materials on a vellum veil laid over
+   the Desk itself. Names and outcomes in the serif, metadata in the Desk's
+   mono register, folios on card paper over column-sheet stacks, gold only for
+   what is fresh. */
 .ws-overview {
   --overview-width: 1480px;
   --overview-gutter: 40px;
@@ -14,13 +14,9 @@
   height: 100%; min-height: 0; min-width: 0; width: 100%;
   overflow: auto; overflow-x: hidden; overscroll-behavior: contain;
   scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent;
-  color: var(--ws-ink); background-color: var(--ws-ground);
-  background-image:
-    linear-gradient(var(--ws-grid-major) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ws-grid-major) 1px, transparent 1px),
-    linear-gradient(var(--ws-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ws-grid) 1px, transparent 1px);
-  background-size: var(--ws-grid-major-size) var(--ws-grid-major-size), var(--ws-grid-major-size) var(--ws-grid-major-size), var(--ws-gap) var(--ws-gap), var(--ws-gap) var(--ws-gap);
+  color: var(--ws-ink);
+  /* The same vellum as the reader: the Desk lies beneath, soft and unreadable. */
+  background: var(--ws-veil); -webkit-backdrop-filter: var(--ws-veil-filter); backdrop-filter: var(--ws-veil-filter);
   font: 400 15px/1.45 var(--ws-serif);
   -webkit-font-smoothing: antialiased;
 }
@@ -144,6 +140,9 @@
 .ws-overview-when { margin-left: auto; }
 .ws-overview-status { font: italic 16px/1.5 var(--ws-serif); color: var(--ws-ink-muted); margin: 30px 0 0; }
 .ws-overview-status:empty { display: none; }
+@media (prefers-reduced-transparency: reduce) {
+  .ws-overview { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-overview { --overview-gutter: 16px; --overview-ribbon-width: 138px; --overview-ribbon-height: 96px; }
@@ -157,8 +156,8 @@
   .ws-overview-lens button { flex: 1; padding: 0 6px; }
   .ws-overview-find { flex: 1 1 100%; width: auto; }
   .ws-overview-folios { grid-template-columns: 1fr; gap: 0; }
-  .ws-overview-folio {
-    grid-template-columns: minmax(0, 1fr) 92px; gap: 14px; padding: 14px 0;
+  .ws-overview .ws-overview-folio {
+    grid-template-columns: minmax(0, 1fr) 92px; gap: 14px; padding: 16px 0;
     border-bottom: 1px solid var(--ws-hairline-soft); min-height: var(--ws-phone-target);
   }
   .ws-overview-stack { order: 2; margin: 2px 6px 6px 0; align-self: start; }
