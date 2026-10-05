@@ -634,8 +634,14 @@ defmodule Shuttle.TailnetDialTest do
 
   test "a half-closed TLS peer cannot leave a draining relay task behind", %{base: base} do
     previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_drain = Application.get_env(:shuttle, :tailnet_dial_drain_timeout_ms)
     Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
-    on_exit(fn -> restore_cacerts(previous_cacerts) end)
+    Application.put_env(:shuttle, :tailnet_dial_drain_timeout_ms, 200)
+
+    on_exit(fn ->
+      restore_cacerts(previous_cacerts)
+      restore_app_env(:tailnet_dial_drain_timeout_ms, previous_drain)
+    end)
 
     {tls_port, _peer} = start_silent_tls_peer(base, close_write?: true)
     localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
