@@ -31,6 +31,10 @@ let frames: Map<number, FrameRequestCallback>
 let frameId = 0
 const now = (): number => Date.now()
 const receipt = (uid: string, path: string, at = now(), host = 'host-a', extra: Record<string, unknown> = {}): Record<string, unknown> => ({ uid, fullPath: path, timestamp: at, host, ...extra })
+const receiptOrigins = (remoteAt = now(), stale = false): Record<string, unknown> => ({
+  'host-a': { kind: 'local', stale: false, last_polled_at: null },
+  'host-b': { kind: 'remote', stale, last_polled_at: new Date(remoteAt).toISOString() },
+})
 const settle = async (): Promise<void> => { for (let i = 0; i < 15; i++) await Promise.resolve() }
 const draw = (): void => {
   const current = [...frames.values()]; frames.clear()
@@ -65,7 +69,7 @@ beforeEach(() => {
   document.body.replaceChildren()
   cards = [card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha result', path: '.felt/science/shear/alpha/alpha.md', originId: 'host-a', fiberDir: '/notes/alpha', outcome: 'A checked measurement.' }),
     card({ id: 'work/beta', uid: 'beta', name: 'Beta pipeline', path: '.felt/tools/pipeline/beta/beta.md', originId: 'host-b' })]
-  feed = { files: [], origins: { 'host-b': {}, 'host-a': {} } }
+  feed = { files: [], origins: receiptOrigins() }
   fetchMock = vi.fn(async (url: string) => url.includes('/sent-files/all/composite')
     ? new Response(JSON.stringify(feed), { status: 200 })
     : new Response('', { status: 404 }))
@@ -106,6 +110,73 @@ describe('Overview receipt membership and identity', () => {
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
   })
 
+  it('increments from a safe per-origin watermark, merges identities, and keeps the overlap on failures', async () => {
+    const started = now()
+    const remoteAt = started - 5 * 60_000
+    const kept = receipt('alpha', '/report.html', started - 1000, 'host-b', { sessionId: 'session-a' })
+    feed.origins = receiptOrigins(remoteAt, true)
+    feed.files = [kept]
+    await refresh()
+    expect(fetchMock.mock.calls[0][0]).toBe(`http://daemon/api/v1/sent-files/all/composite?since_ms=${started - 30 * 86400000}`)
+
+    vi.setSystemTime(started + 5000)
+    feed.files = [kept,
+      receipt('alpha', '/report.html', started + 4000, 'host-b', { sessionId: 'session-b' }),
+      receipt('alpha', '/report.html', started + 4000, 'host-a', { sessionId: 'session-b' })]
+    await refresh()
+    const incremental = new URL(fetchMock.mock.calls[1][0])
+    expect(incremental.searchParams.get('since_ms')).toBe(String(remoteAt - 60_000))
+    const retained = (overview as unknown as { files: Array<{ uid?: string; host?: string; fullPath: string; timestamp: number; sessionId?: string }> }).files
+    expect(retained.map(({ host, uid, fullPath, timestamp, sessionId }) => [host, uid, fullPath, timestamp, sessionId])).toEqual([
+      ['host-b', 'alpha', '/report.html', started - 1000, 'session-a'],
+      ['host-b', 'alpha', '/report.html', started + 4000, 'session-b'],
+      ['host-a', 'alpha', '/report.html', started + 4000, 'session-b'],
+    ])
+
+    vi.setSystemTime(started + 6000)
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }))
+    overview.refresh(); await settle()
+    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('since_ms')).toBe(String(remoteAt - 60_000))
+    expect((overview as unknown as { files: unknown[] }).files).toHaveLength(3)
+
+    feed.origins = receiptOrigins(started + 7000, false)
+    feed.files = [...feed.files, receipt('alpha', '/recovered.html', started + 8000, 'host-b', { sessionId: 'session-c' })]
+    await refresh()
+    expect(new URL(fetchMock.mock.calls[3][0]).searchParams.get('since_ms')).toBe(String(remoteAt - 60_000))
+    expect((overview as unknown as { files: unknown[] }).files).toHaveLength(4)
+
+    vi.setSystemTime(started + 31 * 86400000)
+    feed.origins = receiptOrigins(now(), false)
+    feed.files = [receipt('alpha', '/fresh.html', now(), 'host-a')]
+    await refresh()
+    expect(new URL(fetchMock.mock.calls[4][0]).searchParams.get('since_ms')).toBe(String(now() - 30 * 86400000))
+    expect((overview as unknown as { files: Array<{ fullPath: string }> }).files.map(file => file.fullPath)).toEqual(['/fresh.html'])
+  })
+
+  it('backfills the rolling window when a new origin joins after the cursor advanced', async () => {
+    const started = now()
+    const local = { 'host-a': { kind: 'local', stale: false, last_polled_at: null } }
+    const grown = { ...local, 'host-c': { kind: 'remote', stale: true, last_polled_at: new Date(started - 3 * 86400000).toISOString() } }
+    const historical = receipt('alpha', '/new-host/history.html', started - 2 * 86400000, 'host-c')
+    let reads = 0
+    fetchMock.mockImplementation(async (url: string) => {
+      if (!url.includes('/sent-files/all/composite')) return new Response('', { status: 404 })
+      reads++
+      const body = reads === 1 ? { files: [], origins: local }
+        : reads === 2 ? { files: [], origins: grown }
+          : { files: [historical], origins: grown }
+      return new Response(JSON.stringify(body))
+    })
+    await refresh()
+    vi.setSystemTime(started + 10_000)
+    await refresh()
+
+    expect(reads).toBe(3)
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(String(started - 60_000))
+    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('since_ms')).toBe(String(now() - 30 * 86400000))
+    expect((overview as unknown as { files: Array<{ fullPath: string }> }).files.map(file => file.fullPath)).toEqual(['/new-host/history.html'])
+  })
+
   it('takes twelve newest documents, not twelve sends, and deterministically breaks ties', async () => {
     feed.files = Array.from({ length: 15 }, (_, i) => receipt('alpha', `/file/${String(i).padStart(2, '0')}.html`, now() - i * 1000))
     feed.files.push(receipt('alpha', '/file/00.html', now() - 1000))
@@ -133,6 +204,10 @@ describe('Overview receipt membership and identity', () => {
     await refresh()
     expect(folio('beta').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
     feed.files = []; await refresh()
+    expect(overview.orderedCards()).toEqual([cards[1]]) // An empty incremental page does not erase receipts.
+    overview.dispose()
+    overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen })
+    document.body.append(overview.el); await refresh()
     expect(overview.orderedCards()).toEqual([]) // Session membership is not persisted.
   })
 

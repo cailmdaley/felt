@@ -56,7 +56,16 @@ beforeEach(() => {
   sessionStorage.clear(); document.body.replaceChildren()
   window.history.replaceState(null, '', '#/board')
   cards = []; files = []; opens = vi.fn()
-  reads = vi.fn(async url => url.includes('/sent-files/all/') ? json({ files }) : json({}))
+  reads = vi.fn(async url => {
+    if (url.includes('/sent-files/all/')) return json({ files, origins: { owner: { kind: 'local', stale: false, last_polled_at: null } } })
+    if (url.includes('/api/v1/sent-files?')) {
+      const query = new URL(url, 'http://workspace.test').searchParams
+      const scoped = files.filter(file => file.uid === query.get('uid') && file.host === query.get('origin'))
+        .map(({ uid: _uid, host: _host, ...file }) => file)
+      return json({ files: scoped })
+    }
+    return json({})
+  })
   vi.stubGlobal('fetch', reads)
 })
 afterEach(() => {
@@ -131,6 +140,7 @@ describe('Overview metadata recovery and navigation', () => {
     files = [receipt('alpha')]
     reads.mockImplementation(async url => url.includes('/sent-files/all/') ? json({ files }) : json({}, 503))
     sheet().refresh(); await settle()
+    vi.setSystemTime(Date.now() + 31 * 86400000)
     files = []; overview!.refresh(); await settle()
     const before = fiberReads().length
     await vi.advanceTimersByTimeAsync(60000)
@@ -277,7 +287,9 @@ describe('Workspace owner integration', () => {
   it('publishes cold-route body metadata to the sidebar without another visit or duplicate preload', async () => {
     files = [receipt('alpha')]
     const pending = deferred<Response>()
-    reads.mockImplementation(url => url.includes('/sent-files/all/') ? Promise.resolve(json({ files })) : pending.promise)
+    reads.mockImplementation(url => url.includes('/sent-files/all/')
+      ? Promise.resolve(json({ files }))
+      : url.includes('/api/v1/sent-files?') ? Promise.resolve(json({ files: [] })) : pending.promise)
     reader('#/board/alpha@owner'); await settle()
     expect(fiberReads()).toHaveLength(1)
     expect(overview!.orderedCards()[0].name).toBe('alpha')

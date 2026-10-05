@@ -50,8 +50,8 @@ export class Workspace {
   private readonly proseRevisions = new Map<DocKey, string>()
   private current: ChannelState | null = null
   private origin = 'Board'
-  private receipts: ShelfFile[] = []
-  private receiptsRead: Promise<void> | null = null
+  private readonly receipts = new Map<string, { files: ShelfFile[]; etag?: string }>()
+  private readonly receiptsRead = new Map<string, Promise<void>>()
   private readonly loads = new Map<string, Promise<void>>()
   private timer: number | null = null
   private disposed = false
@@ -319,17 +319,35 @@ export class Workspace {
     } catch { showToast(`Couldn’t open ${id} on ${owner}`, 'error') }
   }
 
-  private async readReceipts(): Promise<void> {
-    if (this.receiptsRead) return this.receiptsRead
-    this.receiptsRead = (async () => {
+  private readReceipts(state: ChannelState): Promise<void> {
+    const key = channelId(state.channel.uid, state.channel.owner)
+    const pending = this.receiptsRead.get(key)
+    if (pending) return pending
+    const cached = this.receipts.get(key)
+    const query = `uid=${encodeURIComponent(state.channel.uid)}&origin=${encodeURIComponent(state.channel.owner)}`
+    const promise = (async () => {
       try {
-        // The raw fleet trail retains every send, unlike the capped per-fiber trail.
-        const res = await fetch(`${this.opts.shuttleBase}/api/v1/sent-files/all/composite?since_ms=0`, { cache: 'no-store', signal: AbortSignal.timeout(25000) })
+        const res = await fetch(`${this.opts.shuttleBase}/api/v1/sent-files?${query}`, {
+          cache: 'no-store',
+          headers: cached?.etag ? { 'If-None-Match': cached.etag } : undefined,
+          signal: AbortSignal.timeout(25000),
+        })
+        if (res.status === 304) return
         if (!res.ok) throw new Error('Receipt feed unavailable')
-        this.receipts = normalizeShelfFiles(await res.json())
+        const raw: unknown = await res.json()
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray((raw as { files?: unknown }).files)) {
+          throw new Error('Invalid receipt feed')
+        }
+        const files = normalizeShelfFiles(raw).map(file => ({
+          ...file,
+          uid: file.uid ?? state.channel.uid,
+          host: file.host ?? state.channel.owner,
+        }))
+        this.receipts.set(key, { files, etag: res.headers.get('ETag') ?? undefined })
       } catch { /* A failed read keeps the last receipt set. */ }
-    })().finally(() => { this.receiptsRead = null })
-    return this.receiptsRead
+    })().finally(() => { this.receiptsRead.delete(key) })
+    this.receiptsRead.set(key, promise)
+    return promise
   }
   private load(state: ChannelState): Promise<void> {
     if (state.channel.uid.startsWith('other:')) {
@@ -345,7 +363,7 @@ export class Workspace {
     const promise = (async () => {
       const controller = new AbortController()
       const timeout = window.setTimeout(() => controller.abort(), 25000)
-      const receiptRead = this.readReceipts()
+      const receiptRead = this.readReceipts(state)
       try {
         const entry = await readFiber(this.opts.shuttleBase, state.card.id, state.channel.owner, controller.signal)
         if (entry) {
@@ -386,7 +404,7 @@ export class Workspace {
     const provisional = state.routedFile ? parseDocKey(state.routedFile) : null
     const links = provisional ? [...state.links, { path: provisional.path, owner: provisional.owner }] : state.links
     const receipts = state.channel.uid.startsWith('other:') ? this.overview.unfiledReceipts(state.channel.uid)
-      : this.receipts.filter(f => f.uid === (card.uid ?? card.id))
+      : this.receipts.get(channelId(state.channel.uid, state.channel.owner))?.files ?? []
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,

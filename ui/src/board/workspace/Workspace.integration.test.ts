@@ -74,6 +74,13 @@ beforeEach(() => {
       { fullPath: '/notes/alpha/report.html', uid: 'alpha', host: 'host-a', timestamp: 2, sessionId: 'session-two' },
       { fullPath: '/notes/alpha/table.html', uid: 'alpha', host: 'host-a', timestamp: 3 },
     ] }))
+    if (url.includes('/api/v1/sent-files?')) {
+      const uid = new URL(url, 'http://workspace.test').searchParams.get('uid')
+      return new Response(JSON.stringify({ files: uid === 'alpha' ? [
+        { fullPath: '/notes/alpha/report.html', timestamp: 2, sessionId: 'session-two' },
+        { fullPath: '/notes/alpha/table.html', timestamp: 3 },
+      ] : [] }), { headers: { ETag: '"alpha-receipts"' } })
+    }
     if (url.includes('/api/v1/fibers/')) {
       const request = new URL(url, 'http://workspace.test')
       const id = request.pathname.slice('/api/v1/fibers/'.length).split('/').map(decodeURIComponent).join('/')
@@ -129,6 +136,73 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
+  it('loads receipts from each channel owner with conditional revalidation and last-good retention', async () => {
+    const shared = [
+      card({ id: 'work/shared', uid: 'shared-uid', name: 'Shared A', originId: 'host-a', fiberDir: '/notes/shared', path: 'work/shared/shared.md' }),
+      card({ id: 'work/shared', uid: 'shared-uid', name: 'Shared B', originId: 'host-b', fiberDir: '/notes/shared', path: 'work/shared/shared.md' }),
+    ]
+    bodyCards = shared
+    workspace.dispose()
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    let failA = false
+    const result = (owner: string): Response => owner === 'host-a'
+      ? new Response(JSON.stringify({ files: [
+        { fullPath: '/notes/shared/report.html', timestamp: 10, sessionId: 'session-a' },
+        { fullPath: '/remote/atlas.html', host: 'archive-host', timestamp: 11, sessionId: 'session-byte-owner' },
+      ] }), { headers: { ETag: '"a-v1"' } })
+      : new Response(JSON.stringify({ files: [{ fullPath: '/notes/shared/report.html', timestamp: 20, sessionId: 'session-b' }] }), { headers: { ETag: '"b-v1"' } })
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      if (url.includes('/api/v1/sent-files?')) {
+        const request = new URL(url, 'http://workspace.test')
+        const owner = request.searchParams.get('origin')!
+        const validator = new Headers(init?.headers).get('If-None-Match')
+        if (owner === 'host-a' && validator) return new Response(null, { status: failA ? 503 : 304 })
+        if (validator) return new Response(null, { status: 304 })
+        return result(owner)
+      }
+      if (url.includes('/sent-files/all/composite')) return new Response(JSON.stringify({ files: [], origins: { 'host-a': { kind: 'local', stale: false } } }))
+      if (url.includes('/api/v1/fibers/')) {
+        const request = new URL(url, 'http://workspace.test')
+        const source = shared.find(item => item.originId === request.searchParams.get('origin'))!
+        return fiberReadResponse(source)
+      }
+      return new Response('{}')
+    })
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => shared, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+
+    const reportA = docKey('host-a', '/notes/shared/report.html', 'host-a')
+    const reportB = docKey('host-b', '/notes/shared/report.html', 'host-b')
+    workspace.open(shared[0]); await flush()
+    expect(workspace.reader.host.get(reportA)?.doc.provenance).toContainEqual({ kind: 'sent', time: 10, session: 'session-a' })
+    const receiptCache = (workspace as unknown as { receipts: Map<string, { files: Array<{ uid?: string; host?: string }> }> }).receipts
+    expect(receiptCache.get(JSON.stringify(['host-a', 'shared-uid']))?.files[0]).toMatchObject({ uid: 'shared-uid', host: 'host-a' })
+    const byteOwned = workspace.reader.host.get(docKey('archive-host', '/remote/atlas.html', 'host-a'))
+    expect(byteOwned?.doc.owner).toBe('archive-host')
+    expect(byteOwned?.doc.provenance).toContainEqual({ kind: 'sent', time: 11, session: 'session-byte-owner' })
+    workspace.open(shared[1]); await flush()
+    expect(workspace.reader.host.get(reportB)?.doc.provenance).toContainEqual({ kind: 'sent', time: 20, session: 'session-b' })
+    expect(workspace.reader.host.get(reportB)?.doc.provenance).not.toContainEqual(expect.objectContaining({ session: 'session-a' }))
+
+    workspace.open(shared[0]); await flush()
+    expect(workspace.reader.host.get(reportA)?.doc.provenance).toContainEqual({ kind: 'sent', time: 10, session: 'session-a' })
+    workspace.open(shared[1]); await flush()
+    failA = true
+    workspace.open(shared[0]); await flush()
+    expect(workspace.reader.host.get(reportA)?.doc.provenance).toContainEqual({ kind: 'sent', time: 10, session: 'session-a' })
+
+    const receiptCalls = calls.filter(call => call.url.includes('/api/v1/sent-files?'))
+    expect(receiptCalls.map(({ url }) => {
+      const request = new URL(url, 'http://workspace.test')
+      return [request.searchParams.get('uid'), request.searchParams.get('origin')]
+    })).toEqual([['shared-uid', 'host-a'], ['shared-uid', 'host-b'], ['shared-uid', 'host-a'], ['shared-uid', 'host-b'], ['shared-uid', 'host-a']])
+    expect(new Headers(receiptCalls[2].init?.headers).get('If-None-Match')).toBe('"a-v1"')
+    expect(new Headers(receiptCalls[3].init?.headers).get('If-None-Match')).toBe('"b-v1"')
+    expect(new Headers(receiptCalls[4].init?.headers).get('If-None-Match')).toBe('"a-v1"')
+    expect(calls.filter(call => call.url.includes('/sent-files/all/composite')).every(({ url }) => !url.includes('since_ms=0'))).toBe(true)
+  })
+
   it('selects the declared report on first entry and retains the same iframe through pages, expand and return', async () => {
     workspace.open(cards[0])
     await flush()
@@ -149,7 +223,7 @@ describe('workspace reader integration', () => {
     workspace.open(cards[0])
     await flush()
     expect(workspace.reader.host.get(reportKey)?.content.querySelector('iframe')).toBe(iframe)
-    expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(2)
+    expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
   })
 
   it('keeps body links and embeds while placing the inline controls above the outcome', async () => {
