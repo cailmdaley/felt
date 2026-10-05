@@ -11,14 +11,14 @@ import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { Overview } from './Overview.js'
-import { WorkspaceHistory, type WorkspaceRoute } from './route.js'
+import { WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 
 export interface WorkspaceOptions {
   shuttleBase: string
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
-  /** A history entry addressed one of the board's views; switch to it without pushing. */
+  /** A history entry addressed a board view or channel origin; switch to it without pushing. */
   onView?(view: WorkspaceView): void
   dock: Dock
 }
@@ -33,8 +33,10 @@ interface ChannelState {
   metadataKnown: boolean
   error?: string
 }
-export type WorkspaceView = 'desk' | 'chronicle' | 'board'
+export type WorkspaceView = WorkspaceOriginView
 const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board' }
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
@@ -119,7 +121,7 @@ export class Workspace {
     this.origin = origin
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
-    this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected)
+    this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin))
   }
 
   mountOverview(host: HTMLElement): void {
@@ -214,15 +216,19 @@ export class Workspace {
     this.picker.close()
     if (route.kind === 'overview') {
       const hash = route.hash ?? window.location.hash
-      const view = VIEW_HASHES[hash]
+      const view = VIEW_HASHES[hash] ?? this.history.originView
       this.reader.hide(view !== 'board')
       if (view === 'board') this.lastBoardRoute = null
-      if (view) this.opts.onView?.(view)
+      this.origin = VIEW_LABELS[view]
+      this.opts.onView?.(view)
       this.overview.setVisible(view === 'board')
       this.opts.onVisibility(false)
       this.stopTimer()
       return
     }
+    const originView = this.history.originView
+    this.origin = VIEW_LABELS[originView]
+    this.opts.onView?.(originView)
     let state = this.channels.get(channelId(route.uid, route.owner))
     if (!state) {
       const card = this.opts.cards().find(c => (c.uid ?? c.id) === route.uid && c.originId === route.owner)
