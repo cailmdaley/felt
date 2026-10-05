@@ -64,8 +64,13 @@
 .ws-dock .kbn-detail-controls-open .kbn-detail-controls-chevron { transform: rotate(90deg); }
 .ws-dock .kbn-ctl-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ws-dock .kbn-ctl-strip { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; }
-.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-strip { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-facts { display: inline-flex; flex-wrap: nowrap; }
+.ws-dock .kbn-detail-controls-toggle { min-width: 0; overflow: hidden; }
+/* Folded, the facts hold one line: each keeps its width but the place (a
+   host:path), which yields and ends in an ellipsis. */
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-strip { display: flex; overflow: hidden; white-space: nowrap; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-facts { display: flex; flex-wrap: nowrap; min-width: 0; overflow: hidden; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-facts > * { flex: none; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-facts > .kbn-ctl-place { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 .ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-run { display: none; }
 .ws-dock .kbn-ctl-facts { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; }
 .ws-dock .kbn-ctl-who { display: inline-flex; gap: var(--ws-small-gap); }

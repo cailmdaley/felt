@@ -837,6 +837,33 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   }
 })
 
+test('Phone fiber page: the folded settings line ends in an ellipsis and counts wrap without orphan separators', async p => {
+  await open(p); await choose(p, 'Constitution')
+  const toggle = selected(p).locator('.kbn-detail-controls-toggle')
+  const history = selected(p).locator('.kbn-ctl-history-toggle')
+  const [t, h] = await Promise.all([toggle.boundingBox(), history.boundingBox()])
+  assert.ok(t.x + t.width <= h.x + 0.5 || t.y + t.height <= h.y + 0.5, `settings ${JSON.stringify(t)} and History ${JSON.stringify(h)} do not collide`)
+  assert.ok(await selected(p).locator('.kbn-ctl-place').evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis'), 'the path yields and ends in an ellipsis')
+  const lines = await selected(p).locator('.ws-prose-contents').evaluate(nav => {
+    const clip = nav.getBoundingClientRect().left + parseFloat(getComputedStyle(nav).getPropertyValue('--ws-contents-sep'))
+    const items = [...nav.children].map(el => el.getBoundingClientRect())
+    const starts = items.filter(r => Math.abs(r.left - items[0].left) < 1)
+    return { clip, starts: starts.map(r => r.left), tops: new Set(items.map(r => Math.round(r.top))).size }
+  })
+  assert.ok(lines.tops > 1, 'the fixture counts wrap at this width')
+  for (const left of lines.starts) assert.ok(left + parseFloat('18') <= lines.clip + 0.5, 'a line-leading separator is clipped')
+}, { width: 402, height: 874 })
+
+test('Landscape phone keeps a one-row top bar while the fiber awaits review', async p => {
+  await open(p)
+  assert.ok(!await p.locator('.ws-nav-verdicts').isVisible(), 'the verdict pair moves to the page sheet')
+  const bar = await p.locator('.ws-navbar').boundingBox()
+  const title = await p.locator('.ws-channel-title').boundingBox()
+  assert.ok(bar.height <= title.height + 12, `one row: navbar ${bar.height}px for a ${title.height}px title`)
+  await p.locator('.ws-page-choice').click()
+  await p.locator('.ws-page-sheet-actions .kbn-ctl-temper').waitFor()
+}, { width: 844, height: 390 }, 'false', 'reduce', true)
+
 test('Key discard then plate Temper replaces the pending verdict with one delayed write', async p => {
   await open(p); await reportReady(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
