@@ -7,30 +7,33 @@ defmodule ShuttleWeb.RemoteControllerTest do
   returns onto statuses — 409 for a breaker that isn't tripped, 404 for an
   unconfigured remote, 503 when no registry runs.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
   @endpoint ShuttleWeb.Endpoint
 
-  # The endpoint calls the globally named Shuttle.RemoteRegistry (test env
-  # sets start_remote_registry: false, so the name is ours to claim).
+  # The endpoint calls this test's Shuttle.RemoteRegistry (`Shuttle.Env.server/1`),
+  # an unnamed instance registered in the test's scope.
   # auto_poll: false keeps the registry inert — no HTTP client is ever hit.
   defp start_registry do
-    start_supervised!(%{
-      id: make_ref(),
-      start:
-        {Shuttle.RemoteRegistry, :start_link,
-         [
+    Shuttle.Test.Env.start_scoped!(
+      %{
+        id: make_ref(),
+        start:
+          {Shuttle.RemoteRegistry, :start_link,
            [
-             name: Shuttle.RemoteRegistry,
-             remotes: [%{name: "candide", url: "http://localhost:4001"}],
-             auto_poll: false
-           ]
-         ]},
-      restart: :temporary
-    })
+             [
+               name: nil,
+               remotes: [%{name: "candide", url: "http://localhost:4001"}],
+               auto_poll: false
+             ]
+           ]},
+        restart: :temporary
+      },
+      Shuttle.RemoteRegistry
+    )
   end
 
   test "409 when the remote's breaker is not tripped" do

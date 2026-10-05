@@ -6,7 +6,8 @@ defmodule ShuttleWeb.FileControllerTest do
   against real temp files; the remote branch uses the header-aware
   `Shuttle.OriginRouter.forward_file_get/5` with a stubbed transport.
   """
-  use ExUnit.Case
+  # group: FileReadTrace sets a VM-wide call-trace pattern on File.read/1 (shared with PollerTest's :dbg).
+  use ExUnit.Case, async: true, group: :call_trace
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
   alias Shuttle.Test.StubGetFileClient

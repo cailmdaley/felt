@@ -1,13 +1,12 @@
 defmodule ShuttleWeb.FiberControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
 
   @endpoint ShuttleWeb.Endpoint
 
-  alias Shuttle.Test.StubPostClient
+  alias Shuttle.Test.{Env, StubPostClient}
 
   setup do
     tmp =
@@ -18,24 +17,14 @@ defmodule ShuttleWeb.FiberControllerTest do
 
     File.mkdir_p!(tmp)
 
-    old_felt_stores = System.get_env("SHUTTLE_STORES")
-    old_felt_stores_file = System.get_env("SHUTTLE_STORES_FILE")
-    old_shuttle_host = System.get_env("SHUTTLE_HOST")
-
-    System.put_env("SHUTTLE_STORES", tmp)
-    System.put_env("SHUTTLE_STORES_FILE", Path.join(tmp, "felt_stores.json"))
+    Env.put_env("SHUTTLE_STORES", tmp)
+    Env.put_env("SHUTTLE_STORES_FILE", Path.join(tmp, "felt_stores.json"))
     # Pin the daemon's identity for this test via the env var — the
     # Application config path is gone. Test assertions read `test-host`
     # back from the auto-stamped shuttle.host field.
-    System.put_env("SHUTTLE_HOST", "test-host")
+    Env.put_env("SHUTTLE_HOST", "test-host")
 
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_felt_stores)
-      restore_env("SHUTTLE_STORES_FILE", old_felt_stores_file)
-      restore_env("SHUTTLE_HOST", old_shuttle_host)
-
-      File.rm_rf(tmp)
-    end)
+    on_exit(fn -> File.rm_rf(tmp) end)
 
     {:ok, tmp: tmp}
   end
@@ -130,7 +119,7 @@ defmodule ShuttleWeb.FiberControllerTest do
     project_dir = Path.join(tmp, "project-dir")
     File.mkdir_p!(daemon_root)
     File.mkdir_p!(project_dir)
-    System.put_env("SHUTTLE_STORES", daemon_root)
+    Env.put_env("SHUTTLE_STORES", daemon_root)
 
     conn =
       api_conn()
@@ -190,15 +179,8 @@ defmodule ShuttleWeb.FiberControllerTest do
       {:ok, 200, Jason.encode!(%{"id" => "tests/remote-stash", "path" => "/candide/.felt/…"})}
     )
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "candide", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, StubPostClient)
 
     conn =
       api_conn()
@@ -237,15 +219,8 @@ defmodule ShuttleWeb.FiberControllerTest do
     # discriminates: "ghost" doesn't match "candide", so it stays local and the
     # forward plane is never touched.
     StubPostClient.start!()
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "candide", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, StubPostClient)
 
     conn =
       api_conn()

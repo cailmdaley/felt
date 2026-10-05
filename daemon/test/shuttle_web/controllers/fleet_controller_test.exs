@@ -9,9 +9,8 @@ defmodule ShuttleWeb.FleetControllerTest do
   the same reason `test_helper.exs` pins it suite-wide: the file summary in the
   response resolves through it.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
 
   alias Shuttle.{Remote, RemoteRegistry}
@@ -82,37 +81,28 @@ defmodule ShuttleWeb.FleetControllerTest do
   end
 
   setup do
-    previous_file = System.get_env("SHUTTLE_REMOTES_FILE")
-    previous_runner = Application.get_env(:shuttle, :felt_runner)
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-
     path =
       Path.join(
         System.tmp_dir!(),
         "shuttle-fleet-ctrl-#{System.unique_integer([:positive])}.json"
       )
 
-    System.put_env("SHUTTLE_REMOTES_FILE", path)
-    Application.put_env(:shuttle, :remotes, [])
-    Application.put_env(:shuttle, :felt_runner, MockFelt)
+    Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
+    Shuttle.Test.Env.put_app_env(:remotes, [])
+    Shuttle.Test.Env.put_app_env(:felt_runner, MockFelt)
     start_supervised!(MockFelt)
 
-    on_exit(fn ->
-      File.rm(path)
-      restore_env("SHUTTLE_REMOTES_FILE", previous_file)
-      restore_app_env(:felt_runner, previous_runner)
-      restore_app_env(:remotes, previous_remotes)
-    end)
+    on_exit(fn -> File.rm(path) end)
 
     {:ok, path: path}
   end
 
-  # The registry under its production name, since `FleetController` reads it
-  # there. `auto_poll: false` keeps the one poll this test drives deterministic.
+  # An unnamed registry registered as this test's `RemoteRegistry`, which is
+  # what `FleetController` reads (`Shuttle.Env.server/1`). `auto_poll: false` keeps the one poll this test drives deterministic.
   defp start_registry! do
-    start_supervised!(
+    Shuttle.Test.Env.start_scoped!(
       {RemoteRegistry,
-       name: RemoteRegistry,
+       name: nil,
        remotes: [
          %Remote{
            name: "candide",
@@ -125,10 +115,11 @@ defmodule ShuttleWeb.FleetControllerTest do
        ],
        client: MockClient,
        auto_poll: false,
-       tick_interval_ms: 60_000}
+       tick_interval_ms: 60_000},
+      RemoteRegistry
     )
 
-    :ok = RemoteRegistry.poll_now(RemoteRegistry)
+    :ok = RemoteRegistry.poll_now()
   end
 
   describe "GET /api/v1/fleet" do

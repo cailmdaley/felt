@@ -8,7 +8,7 @@ defmodule ShuttleWeb.KillControllerTest do
   which ExUnit controller tests don't boot, so here we pin only the request
   contract guard.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
