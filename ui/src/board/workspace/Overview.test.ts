@@ -326,7 +326,7 @@ describe('Overview stable lenses, visits, and DOM', () => {
     await refresh(); activate(); await settle()
     const thumbnail = folio('alpha').querySelector('.ws-overview-thumb')!
     const iframe = thumbnail.querySelector('iframe')!
-    expect(iframe.srcdoc).toContain(encodeURIComponent('/notes/alpha/report.html'))
+    expect(iframe.src).toContain('/api/v1/file-assets/host-a/notes/alpha/report.html')
     expect(iframe.getAttribute('sandbox')).toBe('')
     expect(iframe.inert).toBe(true); expect(iframe.tabIndex).toBe(-1)
     iframe.dispatchEvent(new Event('load')); draw()

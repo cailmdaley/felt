@@ -1,5 +1,7 @@
 import type { WorkspaceDocument, DocKey } from './documents.js'
-import { keyIntent, shouldForwardDocumentKey, surfaceBindings } from '../keymap.js'
+import { keyIntent } from '../keymap.js'
+import { frameBridge, type DocumentKey } from './DocumentBridge.js'
+export { withWorkspaceKeyBridge } from './DocumentBridge.js'
 import {
   buildFileViewer, disposeFileViewer, loadFileViewerOnce, resumeFileViewer, suspendFileViewer,
   type FileViewerState,
@@ -33,26 +35,11 @@ type FrameState = {
   controller: AbortController | null
   revision: number
   transferTime: number | null
+  weight: number
 }
 
 const RETAIN = 10
 const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
-
-/** HTML documents forward workspace chords without changing their own navigation. */
-export function withWorkspaceKeyBridge(html: string): string {
-  // Install after report load handlers so its document/window dialogs get first refusal.
-  const bridge = `<script data-shuttle-workspace-bridge>(function(intent,forward,bindings){window.addEventListener('load',function(){window.setTimeout(function(){window.addEventListener('keydown',function(e){if(!forward(e)||!intent(e,'reader',bindings,function(target){return !forward({target:target,defaultPrevented:false})}))return;e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey,repeat:e.repeat},'*')})},0)},{once:true})})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)});</script>`
-  let insertion = 0
-  const doctype = /<!doctype\b[^>]*>/i.exec(html)
-  if (doctype) insertion = doctype.index + doctype[0].length
-  const head = /<head\b[^>]*>/i.exec(html)
-  if (head) insertion = Math.max(insertion, head.index + head[0].length)
-  const bases = /<base\b[^>]*>/ig
-  for (let base; (base = bases.exec(html));) {
-    if (base.index >= insertion) insertion = base.index + base[0].length
-  }
-  return html.slice(0, insertion) + bridge + html.slice(insertion)
-}
 
 /** Stable frames, a fleet-wide live-document budget, and selected-only polling. */
 export class DocumentHost {
@@ -67,6 +54,8 @@ export class DocumentHost {
     shuttleBase: string
     buildProse: (doc: WorkspaceDocument) => HTMLElement
     onSelect: (key: DocKey) => void
+    /** Active-document positions, including restoration, from local or validated bridge scrolls. */
+    onScroll?: (key: DocKey, y: number) => void
     onFrame?: (frame: DocumentFrame) => void
     /** The controller owns fetching fiber bodies; it calls updateProse on success. */
     onRefreshProse?: (doc: WorkspaceDocument) => void | Promise<void>
@@ -75,7 +64,6 @@ export class DocumentHost {
   constructor(track: HTMLElement, options: DocumentHost['options']) {
     this.track = track
     this.options = options
-    window.addEventListener('message', this.onMessage)
     document.addEventListener('keydown', this.onMediaKey, true)
   }
 
@@ -93,6 +81,7 @@ export class DocumentHost {
     }
     this.select(selected)
     for (const page of this.audioPages.values()) page.updateDocuments(documents)
+    this.pruneFrames()
   }
 
   select(key: DocKey): void {
@@ -138,11 +127,29 @@ export class DocumentHost {
       this.live.set(id, state)
       this.transferAudioPosition(state)
     }
-    while (this.live.size > RETAIN) {
-      const victim = [...this.live.keys()].find((id) => !visible.includes(id))
+    this.enforceBudget(visible)
+  }
+
+  private enforceBudget(visible = this.visibleKeys()): void {
+    while ([...this.live.values()].reduce((sum, state) => sum + state.weight, 0) > RETAIN) {
+      const victim = [...this.live.keys()].find(id => !visible.includes(id))
       if (victim === undefined) break
       this.evict(this.live.get(victim)!)
       this.live.delete(victim)
+    }
+    this.pruneFrames()
+  }
+  private visibleKeys(): DocKey[] {
+    const index = this.documents.findIndex(doc => doc.key === this.selected)
+    return index < 0 ? [] : this.documents.slice(Math.max(0, index - 1), index + 2).map(doc => doc.key)
+  }
+  /** Current-channel placeholders give the filmstrip its geometry, not retained state. */
+  private pruneFrames(): void {
+    const current = new Set(this.documents.map(doc => doc.key))
+    for (const [key, state] of this.frames) {
+      if (current.has(key) || this.live.has(key)) continue
+      state.frame.el.remove()
+      this.frames.delete(key)
     }
   }
 
@@ -202,7 +209,6 @@ export class DocumentHost {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    window.removeEventListener('message', this.onMessage)
     document.removeEventListener('keydown', this.onMediaKey, true)
     for (const state of this.frames.values()) {
       this.evict(state)
@@ -228,7 +234,7 @@ export class DocumentHost {
     const state: FrameState = {
       frame, pending: null, loaded: false, active: false, initialSuspended: false,
       scroll: readScroll(doc.key), readScroll: null, stopScroll: null,
-      notice: null, controller: null, revision: 0, transferTime: null,
+      notice: null, controller: null, revision: 0, transferTime: null, weight: 1,
     }
     this.placeholder(state)
     el.addEventListener('click', event => {
@@ -288,7 +294,6 @@ export class DocumentHost {
         quietLoading: true,
         active: state.active,
         kind: doc.kind === 'fiber' ? undefined : doc.kind,
-        transformHtml: withWorkspaceKeyBridge,
         decorateAudio: audio => {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect)
           this.audioPages.set(audio, page)
@@ -296,6 +301,12 @@ export class DocumentHost {
           return () => { page.dispose(); this.audioPages.delete(audio) }
         },
         onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
+        onDocumentKey: key => this.forwardKey(state, key),
+        onWeight: weight => queueMicrotask(() => {
+          if (this.disposed || state.revision !== revision) return
+          state.weight = weight
+          this.enforceBudget()
+        }),
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
           if (this.disposed || state.revision !== revision) return
@@ -467,7 +478,10 @@ export class DocumentHost {
       scroller.scrollTop = state.scroll.y
       scroller.scrollLeft = state.scroll.x
     })
-    const save = () => this.saveScroll(state)
+    const save = (): void => {
+      this.saveScroll(state)
+      if (state.active) this.options.onScroll?.(state.frame.doc.key, state.scroll.y)
+    }
     state.readScroll = () => ({ x: scroller.scrollLeft, y: scroller.scrollTop })
     scroller.addEventListener('scroll', save, { passive: true })
     state.stopScroll = () => scroller.removeEventListener('scroll', save)
@@ -475,18 +489,19 @@ export class DocumentHost {
 
   private bindFrameScroll(state: FrameState, iframe: HTMLIFrameElement, refreshed: boolean): void {
     state.stopScroll?.()
-    const win = iframe.contentWindow
-    if (!win) return
-    try {
-      if (!refreshed) win.scrollTo(state.scroll.x, state.scroll.y)
-      state.readScroll = () => ({ x: win.scrollX, y: win.scrollY })
-      const save = () => this.saveScroll(state)
-      win.addEventListener('scroll', save, { passive: true })
-      state.stopScroll = () => win.removeEventListener('scroll', save)
-    } catch {
-      // Browser-native PDF frames cannot expose their internal scroll offset.
+    const bridge = frameBridge(iframe)
+    if (!bridge) {
+      // Browser-native PDF frames keep their internal scroll state themselves.
       this.bindScroller(state, state.frame.content)
+      return
     }
+    if (!refreshed) bridge.command('restore', state.scroll)
+    state.readScroll = () => bridge.position
+    state.stopScroll = bridge.subscribeScroll(position => {
+      state.scroll = position
+      this.saveScroll(state)
+      if (state.active) this.options.onScroll?.(state.frame.doc.key, position.y)
+    })
   }
 
   private saveScroll(state: FrameState): void {
@@ -521,14 +536,8 @@ export class DocumentHost {
     else seekAudio(media, media.currentTime + (intent === 'audioBack' ? -5 : 5))
   }
 
-  private readonly onMessage = (event: MessageEvent): void => {
-    if (this.disposed || !this.selected) return
-    const state = this.frames.get(this.selected)
-    const frames = state?.frame.viewer?.querySelectorAll('iframe')
-    if (!event.source || !frames || ![...frames].some((frame) => frame.contentWindow === event.source)) return
-    const data = event.data as Record<string, unknown> | null
-    if (!data || data.type !== 'shuttle-workspace-key') return
-    if (typeof data.key !== 'string' || state?.frame.doc.kind !== 'html') return
+  private forwardKey(state: FrameState, data: DocumentKey): void {
+    if (this.disposed || state.frame.doc.key !== this.selected || !state.active || state.frame.doc.kind !== 'html') return
     const forwarded = new KeyboardEvent('keydown', {
       key: data.key, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
       metaKey: data.metaKey === true, shiftKey: data.shiftKey === true, repeat: data.repeat === true,

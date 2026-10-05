@@ -160,6 +160,10 @@ defmodule ShuttleWeb.Router do
   # controller runs. The controller sets the response content-type itself and
   # renders its error bodies as JSON directly, so it needs no format negotiation.
   scope "/api/v1", ShuttleWeb do
+    # Sandboxed reports resolve sibling resources under this owner/path prefix.
+    # Raw asset bytes bypass JSON negotiation; this adds no CORS access for
+    # opaque (`null`) origins.
+    get("/file-assets/:origin/*path", FileController, :asset)
     get("/file", FileController, :show)
     # Exact native JSONL bytes. Kept outside the JSON pipeline like `/file` so
     # arbitrary harness bytes are relayed without content negotiation.

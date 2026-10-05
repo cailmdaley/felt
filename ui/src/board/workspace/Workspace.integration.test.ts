@@ -695,6 +695,25 @@ describe('workspace reader integration', () => {
     expect(visibility).toHaveBeenCalledWith(true)
   })
 
+  it('restores a Desk-opened channel over Desk after reload', async () => {
+    workspace.open(cards[0])
+    await flush()
+    expect(document.querySelector('.ws-return')?.textContent).toBe('‹ Desk')
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'desk' } })
+
+    workspace.dispose()
+    document.body.replaceChildren()
+    const onView = vi.fn()
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => cards, origin: () => 'Board', onVisibility: visibility, onView,
+      dock: new Dock('', changed),
+    })
+    await flush()
+
+    expect(onView).toHaveBeenCalledWith('desk')
+    expect(document.querySelector('.ws-return')?.textContent).toBe('‹ Desk')
+  })
+
   it('restores overview scroll after returning from a channel opened on the Board', async () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()

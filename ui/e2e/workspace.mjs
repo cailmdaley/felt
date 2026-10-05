@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, writeFile, readFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
@@ -39,9 +40,13 @@ async function revealLatestFiles(p) {
 const reportPage = p => p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/.felt/research/workspace/calibration-report/report.html"]')
 const report = p => reportPage(p).locator('iframe')
 async function reportReady(p) {
-  await poll(p, () => [...document.querySelectorAll('.ws-page iframe')].some(f => f.contentDocument?.querySelector('#report-sentinel')))
+  await report(p).contentFrame().locator('#report-sentinel').waitFor()
+  await poll(p, () => { const viewer = document.querySelector('.ws-selected .ws-document-viewer'); return viewer && getComputedStyle(viewer).opacity === '1' })
   return report(p)
 }
+async function reportDocument(p) { return (await report(p).elementHandle()).contentFrame() }
+async function reportY(p) { return (await reportDocument(p)).evaluate(() => document.scrollingElement.scrollTop) }
+async function pollReport(p, fn, arg) { await (await reportDocument(p)).waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
 async function records(p) { return p.evaluate(() => window.__harness.requests) }
 
 test('Desk keyboard starts in awaiting review and Enter opens report first', async p => {
@@ -56,7 +61,11 @@ test('Desk keyboard starts in awaiting review and Enter opens report first', asy
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
   await open(p)
   const iframe = await reportReady(p)
-  await iframe.evaluate(f => { window.__reportWindow = f.contentWindow; f.contentWindow.__sentinel = 'kept'; window.__reportIdentity = f.contentDocument.querySelector('#report-identity').textContent })
+  await mkdir(shots, { recursive: true })
+  await p.screenshot({ path: resolve(shots, 'sandbox-report-desktop.png') })
+  await iframe.evaluate(f => { window.__reportFrame = f; window.__reportWindow = f.contentWindow })
+  const inner = await reportDocument(p)
+  const identity = await inner.evaluate(() => { window.__sentinel = 'kept'; return document.querySelector('#report-identity').textContent })
   for (const [forward, backward] of [['l', 'h'], ['ArrowRight', 'ArrowLeft']]) {
     await p.keyboard.press(forward)
     assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'false')
@@ -65,24 +74,30 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   }
   await choose(p, 'brief.md')
   await choose(p, 'calibration-report')
-  await iframe.evaluate(f => {
-    const report = f.contentDocument
-    const querySelectorAll = report.querySelectorAll.bind(report)
-    report.__workspaceBodyWalks = 0
-    report.querySelectorAll = selector => {
-      if (selector === 'body *') report.__workspaceBodyWalks++
+  await inner.evaluate(() => {
+    const querySelectorAll = document.querySelectorAll.bind(document)
+    window.__workspaceBodyWalks = 0
+    document.querySelectorAll = selector => {
+      if (selector === 'body *') window.__workspaceBodyWalks++
       return querySelectorAll(selector)
     }
   })
-  for (const [down, up] of [['ArrowDown', 'ArrowUp']]) {
-    await iframe.evaluate(f => f.contentWindow.scrollTo(0, 0))
+  for (const [down, up] of [['ArrowDown', 'ArrowUp'], ['d', 'u'], ['Space', 'Shift+Space']]) {
+    await inner.evaluate(() => window.scrollTo(0, 0))
     await p.keyboard.press(down)
-    await poll(p, () => window.__reportWindow.scrollY > 0)
-    const before = await iframe.evaluate(f => f.contentWindow.scrollY)
+    await pollReport(p, () => document.scrollingElement.scrollTop > 0)
+    const before = await reportY(p)
     await p.keyboard.press(up)
-    await poll(p, before => window.__reportWindow.scrollY < before, before)
+    await pollReport(p, before => document.scrollingElement.scrollTop < before, before)
   }
-  assert.ok(await iframe.evaluate(f => f.contentDocument.__workspaceBodyWalks) <= 1, 'report scroller is resolved at most once for the frame')
+  await p.keyboard.down('ArrowDown')
+  await p.keyboard.press('ArrowDown')
+  await p.keyboard.up('ArrowDown')
+  assert.ok(await reportY(p) > 0, 'held arrow scrolling repeats')
+  assert.ok(await inner.evaluate(() => window.__workspaceBodyWalks) <= 1, 'report scroller is cached')
+  const readingY = await reportY(p)
+  await choose(p, 'brief.md'); await choose(p, 'calibration-report')
+  assert.equal(await reportY(p), readingY, 'reading position survives tab selection')
   await tab(p, 'calibration-report').dblclick()
   assert.ok(await p.locator('.ws-page.ws-expanded').count())
   await p.locator('.ws-page.ws-expanded .ws-labelbar').dblclick()
@@ -94,10 +109,186 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   await p.mouse.down(); await p.mouse.move(box.x - 120, box.y + box.height / 2); await p.mouse.up()
   assert.notEqual(await iframe.evaluate(f => f.closest('.ws-page').getBoundingClientRect().width), width)
   await p.setViewportSize({ width: 1250, height: 760 })
-  assert.ok(await iframe.evaluate(f => f.contentWindow === window.__reportWindow && f.contentWindow.__sentinel === 'kept'), 'browser resize must retain the iframe')
+  assert.ok(await iframe.evaluate(f => f === window.__reportFrame && f.contentWindow === window.__reportWindow), 'browser resize must retain the iframe')
+  assert.equal(await inner.evaluate(() => window.__sentinel), 'kept')
   await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
   await open(p)
-  assert.ok(await iframe.evaluate(f => f.contentWindow === window.__reportWindow && f.contentWindow.__sentinel === 'kept' && f.contentDocument.querySelector('#report-identity').textContent === window.__reportIdentity))
+  assert.ok(await iframe.evaluate(f => f === window.__reportFrame && f.contentWindow === window.__reportWindow))
+  assert.equal(await inner.evaluate(() => document.querySelector('#report-identity').textContent), identity)
+  assert.equal(await reportY(p), readingY)
+})
+
+test('Opaque report denies parent DOM and same-origin API reads; links open outside the frame', async p => {
+  const requests = []
+  const html = await readFile(resolve('harness-board-dist/index.html'))
+  const server = createServer(async (req, res) => {
+    const rawPath = new URL(req.url, 'http://file.test').searchParams.get('path')
+    if ((req.url.startsWith('/api/v1/file-assets/') && req.url.endsWith('/opaque-popup.html')) || (req.url.startsWith('/api/v1/file?') && rawPath?.endsWith('.html'))) {
+      res.setHeader('Content-Type', 'text/html')
+      if (!process.env.WORKSPACE_UNSAFE_FILES) res.setHeader('Content-Security-Policy', 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms')
+      res.end('<!doctype html><html><body>Hostile file probe<script>(async()=>{let storageDenied=false,apiDenied=false;try{window.sentinel=localStorage.getItem("opaque-board-sentinel")}catch{storageDenied=true}try{await fetch("' + base + '/api/v1/version")}catch{apiDenied=true}window.__access={storageDenied,apiDenied,sentinel:window.sentinel??null}})()</script></body></html>')
+    } else if (req.url.startsWith('/api/v1/file-assets/') && /opaque-probe\.(css|js|svg)$/.test(req.url)) {
+      const ext = req.url.split('.').at(-1)
+      res.setHeader('Content-Type', { css: 'text/css', js: 'application/javascript', svg: 'image/svg+xml' }[ext])
+      res.end({ css: 'body { --opaque-asset: loaded; }', js: 'window.__opaqueAsset = true', svg: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>' }[ext])
+    } else if (req.url.startsWith('/api/v1/')) {
+      requests.push({ url: req.url, origin: req.headers.origin })
+      res.setHeader('Content-Type', 'application/json')
+      res.end('{"private":true}')
+    } else if (['/harness-board.js', '/shuttle-ui.css'].includes(req.url)) {
+      res.setHeader('Content-Type', req.url.endsWith('.js') ? 'application/javascript' : 'text/css')
+      res.end(await readFile(resolve('harness-board-dist' + req.url)))
+    } else { res.setHeader('Content-Type', 'text/html'); res.end(html) }
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const base = `http://127.0.0.1:${server.address().port}`
+  try {
+    await p.goto(base + '/?example=workspace')
+    await open(p); const iframe = await reportReady(p)
+    assert.equal(await iframe.getAttribute('sandbox'), 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms')
+    assert.equal(await iframe.evaluate(f => f.contentDocument), null, 'parent cannot access opaque frame DOM')
+    const inner = await reportDocument(p)
+    const access = await inner.evaluate(async base => {
+      let parentDenied = false, apiDenied = false
+      try { void parent.document.body } catch { parentDenied = true }
+      try { await fetch(base + '/api/v1/version') } catch { apiDenied = true }
+      return { parentDenied, apiDenied }
+    }, base)
+    assert.deepEqual(access, { parentDenied: true, apiDenied: true })
+    assert.ok(requests.some(request => request.url === '/api/v1/version' && request.origin === 'null'), 'opaque fetch sends Origin: null, never parent origin')
+    const assets = await inner.evaluate(async () => {
+      const load = element => new Promise((resolve, reject) => { element.onload = resolve; element.onerror = reject; document.head.append(element) })
+      const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = 'opaque-probe.css'
+      const script = document.createElement('script'); script.src = 'opaque-probe.js'
+      const image = document.createElement('img'); image.src = 'opaque-probe.svg'
+      await Promise.all([load(css), load(script), load(image)])
+      return { css: getComputedStyle(document.body).getPropertyValue('--opaque-asset').trim(), script: window.__opaqueAsset, image: image.naturalWidth, url: script.src }
+    })
+    assert.equal(assets.css, 'loaded')
+    assert.equal(assets.script, true)
+    assert.equal(assets.image, 8)
+    assert.match(assets.url, /\/api\/v1\/file-assets\/umber-workstation\/.*\/opaque-probe.js$/, 'relative assets retain the owning host')
+    const link = await inner.evaluate(() => {
+      const link = document.createElement('a'); link.href = 'https://example.com/paper'; link.textContent = 'External paper'
+      document.body.prepend(link)
+      link.addEventListener('click', event => event.preventDefault())
+      link.click()
+      return { target: link.target, rel: link.rel }
+    })
+    assert.deepEqual(link, { target: '_blank', rel: 'noopener noreferrer' })
+    const local = await inner.evaluate(() => {
+      localStorage.setItem('plot-theme', 'dark')
+      sessionStorage.setItem('slide', '1')
+      history.replaceState({ slide: 1 }, '', document.baseURI + '#/slide-1')
+      return { theme: localStorage.getItem('plot-theme'), slide: sessionStorage.getItem('slide'), state: history.state }
+    })
+    assert.deepEqual(local, { theme: 'dark', slide: '1', state: { slide: 1 } })
+    const key = await selected(p).getAttribute('data-key')
+    await inner.evaluate(() => {
+      document.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowRight') return
+        // Deck navigation must reach preventDefault even with an opaque URL.
+        history.replaceState({ slide: 2 }, '', document.baseURI + '#/slide-2')
+        sessionStorage.setItem('slide', '2')
+        event.preventDefault()
+      })
+      document.body.tabIndex = -1
+      document.body.focus()
+    })
+    await p.keyboard.press('ArrowRight')
+    assert.equal(await inner.evaluate(() => sessionStorage.getItem('slide')), '2')
+    assert.equal(await selected(p).getAttribute('data-key'), key, 'deck-owned arrows never step workspace documents')
+    assert.equal(await p.evaluate(() => localStorage.getItem('plot-theme')), null, 'report preferences cannot leak to board storage')
+    await p.evaluate(() => localStorage.setItem('opaque-board-sentinel', 'private-board-state'))
+    await inner.evaluate(() => {
+      const link = document.createElement('a'); link.href = 'opaque-popup.html'; link.textContent = 'Sibling hostile HTML'; document.body.prepend(link)
+    })
+    const checkPopup = async click => {
+      const opened = p.context().waitForEvent('page')
+      await click()
+      const popup = await opened
+      await popup.waitForFunction(() => window.__access)
+      const access = await popup.evaluate(() => window.__access)
+      await popup.close()
+      assert.deepEqual(access, { storageDenied: true, apiDenied: true, sentinel: null }, 'raw HTML popups cannot regain the board origin')
+      return access
+    }
+    const siblingPopup = await checkPopup(() => inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).click())
+    await selected(p).getByRole('button', { name: 'Document menu', exact: true }).click()
+    const rawFilePopup = await checkPopup(() => p.getByRole('link', { name: 'Open in new tab', exact: true }).click())
+    await mkdir(shots, { recursive: true })
+    await writeFile(resolve(shots, 'security-probes.json'), JSON.stringify({ iframe: access, relativeAssets: assets, siblingPopup, rawFilePopup, requests }, null, 2))
+  } finally { await new Promise(resolve => server.close(resolve)) }
+})
+
+test('Embedded HTML media pauses on recede and park without reloading or auto-resuming', async p => {
+  await open(p); await reportReady(p)
+  const inner = await reportDocument(p)
+  const audio = `data:audio/wav;base64,${(await readFile(resolve('harness/fixtures/sine.wav'))).toString('base64')}`
+  await inner.evaluate(async src => {
+    const media = document.createElement('audio'); media.id = 'embedded-audio'; media.controls = true; media.src = src
+    document.body.prepend(media); window.__mediaIdentity = media
+    await media.play()
+  }, audio)
+  await pollReport(p, () => !document.querySelector('audio').paused && document.querySelector('audio').currentTime > 0)
+  await choose(p, 'brief.md')
+  await pollReport(p, () => document.querySelector('audio').paused)
+  const position = await inner.evaluate(() => document.querySelector('audio').currentTime)
+  await choose(p, 'calibration-report')
+  assert.ok(await inner.evaluate(position => document.querySelector('audio') === window.__mediaIdentity && document.querySelector('audio').paused && document.querySelector('audio').currentTime === position, position))
+  await inner.evaluate(() => document.querySelector('audio').play())
+  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await pollReport(p, () => document.querySelector('audio').paused)
+  await open(p)
+  assert.ok(await inner.evaluate(() => document.querySelector('audio') === window.__mediaIdentity && document.querySelector('audio').paused))
+})
+
+test('Late nested report layout retains its restore and then accepts reader scrolling', async p => {
+  await open(p); await reportReady(p)
+  await p.locator('.ws-selected iframe').evaluate(frame => {
+    const bridge = new DOMParser().parseFromString(frame.srcdoc, 'text/html').querySelector('[data-shuttle-workspace-bridge]').outerHTML
+    frame.srcdoc = '<!doctype html><html><head>' + bridge + '</head><body><p id="early">Short initial layout</p><script>window.addEventListener("load",()=>setTimeout(()=>window.__shortReady=true,0))</script></body></html>'
+  })
+  const inner = await reportDocument(p)
+  await inner.waitForFunction(() => window.__shortReady)
+  const command = async (type, payload) => p.locator('.ws-selected iframe').evaluate((frame, data) => frame.contentWindow.postMessage(data, '*'), { protocol: 'shuttle-document', version: 1, type, payload })
+  await command('restore', { x: 0, y: 160 })
+  await command('active', { active: false })
+  const saved = () => p.evaluate(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y)
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 160)
+  assert.equal(await saved(), 160, 'pending restore is not overwritten by a clamped zero')
+  await inner.evaluate(() => {
+    document.querySelector('#early').remove()
+    const main = document.createElement('main'); main.id = 'late'; main.style.cssText = 'height:280px;overflow:auto;line-height:20px'
+    main.innerHTML = '<div style="height:6000px">Late asynchronous report content</div>'
+    document.body.append(main)
+  })
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 160)
+  await command('active', { active: true })
+  // Focus the report's scrollable content, not the frame's top-left boundary.
+  // The iframe element alone can be focused while its document has no focus.
+  await inner.locator('#late').click()
+  await inner.waitForFunction(() => document.hasFocus())
+  await p.keyboard.press('ArrowDown')
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop > 160)
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y > 160)
+  assert.ok(await saved() > 160)
+})
+
+test('Desk-opened channel reload and Back restore its Desk return control', async p => {
+  await open(p); await reportReady(p)
+  await choose(p, 'brief.md')
+  await p.reload()
+  await tab(p, 'brief.md').waitFor()
+  await p.getByRole('button', { name: 'Return to Desk', exact: true }).waitFor()
+  assert.ok(await p.locator('.kbn-modal').count(), 'Desk stays behind the reader')
+  await p.locator('.ws-channel-title').focus()
+  await p.keyboard.press('j')
+  await p.goBack()
+  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Calibrate the shear response')
+  await p.getByRole('button', { name: 'Return to Desk', exact: true }).waitFor()
+  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
 })
 
 test('Filmstrip previews share a safe budget, condense instantly, and retain selection through a fresh re-send', async p => {
@@ -508,6 +699,21 @@ test('Phone overview single column, reader tabs, footer stepping and Back', asyn
   assert.ok(await p.getByRole('searchbox', { name: 'Find work or files', exact: true }).isVisible())
 }, { width: 390, height: 844 })
 
+test('Phone HTML reader retains its opaque frame and reading position', async p => {
+  await open(p); const frame = await reportReady(p)
+  const inner = await reportDocument(p)
+  assert.equal(await frame.evaluate(f => f.contentDocument), null)
+  await inner.evaluate(() => window.scrollTo(0, 160))
+  await pollReport(p, () => document.scrollingElement.scrollTop === 160)
+  await p.getByRole('button', { name: 'Next document', exact: true }).click()
+  await p.getByRole('button', { name: 'Previous document', exact: true }).click()
+  assert.equal(await reportY(p), 160)
+  const box = await selected(p).boundingBox()
+  assert.ok(box.x >= 11 && box.width <= 367, 'HTML page stays in phone gutters')
+  await mkdir(shots, { recursive: true })
+  await p.screenshot({ path: resolve(shots, 'sandbox-report-phone.png') })
+}, { width: 390, height: 844 })
+
 test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
   await open(p)
   const title = p.locator('.ws-channel-title')
@@ -794,7 +1000,7 @@ try {
       try { assert.deepEqual(errors, [], 'pageerror events') } catch (error) { failure = failure ? new AggregateError([failure, error]) : error }
       await context.close()
     }
-    if (failure) console.error(`FAIL ${name}\n${failure.stack}`)
+    if (failure) console.error(`FAIL ${name}\n${failure.stack}\n${failure.errors?.map(error => error.stack).join('\n') ?? ''}`)
     else { passed++; console.log(`PASS ${name}`) }
   }
 } finally { await browser.close() }

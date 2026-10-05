@@ -7,7 +7,8 @@ export type WorkspaceRoute =
 
 const OVERVIEW_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
-interface RouteState { depth: number; base: boolean; baseHash: string }
+export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board'
+interface RouteState { depth: number; base: boolean; baseHash: string; originView?: WorkspaceOriginView }
 type StateObject = Record<string, unknown>
 
 function encode(value: string): string {
@@ -15,6 +16,19 @@ function encode(value: string): string {
 }
 function decode(value: string): string | null {
   try { return decodeURIComponent(value) } catch { return null }
+}
+
+function isOriginView(value: unknown): value is WorkspaceOriginView {
+  return value === 'desk' || value === 'chronicle' || value === 'board'
+}
+function originFromHash(hash: string): WorkspaceOriginView | null {
+  if (hash === '#/desk') return 'desk'
+  if (hash === '#/chronicle') return 'chronicle'
+  if (hash === OVERVIEW_HASH || hash.startsWith(`${OVERVIEW_HASH}/`)) return 'board'
+  return null
+}
+function hashFromOrigin(view: WorkspaceOriginView): string {
+  return view === 'board' ? OVERVIEW_HASH : `#/${view}`
 }
 
 export function parseRoute(hash: string): WorkspaceRoute | null {
@@ -52,9 +66,9 @@ function stateObject(value: unknown): StateObject {
 function readRouteState(value: unknown): RouteState | null {
   const entry = stateObject(value)[STATE_KEY]
   if (!entry || typeof entry !== 'object') return null
-  const { depth, base, baseHash } = entry as Partial<RouteState>
+  const { depth, base, baseHash, originView } = entry as Partial<RouteState>
   return Number.isInteger(depth) && depth! >= 0 && typeof base === 'boolean' && typeof baseHash === 'string'
-    ? { depth: depth!, base, baseHash }
+    ? { depth: depth!, base, baseHash, ...(isOriginView(originView) ? { originView } : {}) }
     : null
 }
 
@@ -71,13 +85,16 @@ export class WorkspaceHistory {
   private depth = 0
   private base = false
   private baseHash = ''
+  private routeOrigin: WorkspaceOriginView = 'board'
   private pendingOwnPop: string | null = null
-  private queuedEnter: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
+  private queuedEnter: (Extract<WorkspaceRoute, { kind: 'channel' }> & { originView?: WorkspaceOriginView }) | null = null
   private queuedLeave = false
 
   constructor(onRoute: (route: WorkspaceRoute) => void) {
     this.onRoute = onRoute
   }
+
+  get originView(): WorkspaceOriginView { return this.routeOrigin }
 
   start(): void {
     if (this.started) return
@@ -90,6 +107,7 @@ export class WorkspaceHistory {
       this.depth = 0
       this.base = true
       this.baseHash = this.currentHash
+      this.routeOrigin = readRouteState(window.history.state)?.originView ?? originFromHash(this.currentHash) ?? this.routeOrigin
       return
     }
     this.current = route
@@ -97,16 +115,19 @@ export class WorkspaceHistory {
     this.onRoute(route)
   }
 
-  enter(uid: string, owner: string, doc?: DocKey): void {
+  enter(uid: string, owner: string, doc?: DocKey, originView?: WorkspaceOriginView): void {
     this.ensureStarted()
     const route: Extract<WorkspaceRoute, { kind: 'channel' }> = { kind: 'channel', uid, owner, ...(doc === undefined ? {} : { doc }) }
     if (this.pendingOwnPop !== null) {
-      this.queuedEnter = route
+      this.queuedEnter = { ...route, originView: originView ?? this.routeOrigin }
       return
     }
     const nextDepth = this.depth + 1
     const hash = formatRoute(route)
-    window.history.pushState(withRouteState(window.history.state, { depth: nextDepth, base: this.base, baseHash: this.baseHash }), '', hash)
+    if (originView) this.routeOrigin = originView
+    // Back lands on this entry, so it needs the channel's origin as well.
+    window.history.replaceState(withRouteState(window.history.state, this.routeState()), '')
+    window.history.pushState(withRouteState(window.history.state, this.routeState(nextDepth)), '', hash)
     this.current = route
     this.currentHash = hash
     this.depth = nextDepth
@@ -121,9 +142,10 @@ export class WorkspaceHistory {
     this.depth = 0
     this.base = true
     this.baseHash = hash
+    this.routeOrigin = originFromHash(hash) ?? 'board'
     this.currentHash = hash
     this.current = { kind: 'overview', hash }
-    window.history.pushState(withRouteState(window.history.state, { depth: 0, base: true, baseHash: hash }), '', hash)
+    window.history.pushState(withRouteState(window.history.state, this.routeState()), '', hash)
     this.onRoute(this.current)
   }
 
@@ -135,7 +157,7 @@ export class WorkspaceHistory {
     if (this.current?.kind !== 'channel') return
     const route: WorkspaceRoute = { ...this.current, doc }
     const hash = formatRoute(route)
-    window.history.replaceState(withRouteState(window.history.state, { depth: this.depth, base: this.base, baseHash: this.baseHash }), '', hash)
+    window.history.replaceState(withRouteState(window.history.state, this.routeState()), '', hash)
     this.current = route
     this.currentHash = hash
   }
@@ -155,13 +177,14 @@ export class WorkspaceHistory {
       this.onRoute(overview)
       return
     }
-    window.history.replaceState(withRouteState(window.history.state, { depth: 0, base: true, baseHash: OVERVIEW_HASH }), '', OVERVIEW_HASH)
-    const overview: WorkspaceRoute = { kind: 'overview', hash: OVERVIEW_HASH }
+    const hash = hashFromOrigin(this.routeOrigin)
+    const overview: WorkspaceRoute = { kind: 'overview', hash }
     this.current = overview
-    this.currentHash = OVERVIEW_HASH
+    this.currentHash = hash
     this.depth = 0
     this.base = true
-    this.baseHash = OVERVIEW_HASH
+    this.baseHash = hash
+    window.history.replaceState(withRouteState(window.history.state, this.routeState()), '', hash)
     this.onRoute(overview)
   }
 
@@ -178,6 +201,10 @@ export class WorkspaceHistory {
     if (!this.started) this.start()
   }
 
+  private routeState(depth = this.depth): RouteState {
+    return { depth, base: this.base, baseHash: this.baseHash, originView: this.routeOrigin }
+  }
+
   private adoptDepth(state: unknown, route: WorkspaceRoute, hash: string): void {
     const saved = readRouteState(state)
     if (saved) {
@@ -189,6 +216,10 @@ export class WorkspaceHistory {
       this.base = route.kind === 'overview'
       this.baseHash = route.kind === 'overview' ? hash : ''
     }
+    this.routeOrigin = saved?.originView
+      ?? originFromHash(saved?.baseHash ?? '')
+      ?? originFromHash(hash)
+      ?? (route.kind === 'channel' ? 'board' : this.routeOrigin)
   }
 
   private handleLocation(state: unknown): void {
@@ -207,14 +238,17 @@ export class WorkspaceHistory {
       }
       const queued = this.queuedEnter
       this.queuedEnter = null
-      if (queued) this.enter(queued.uid, queued.owner, queued.doc)
+      if (queued) this.enter(queued.uid, queued.owner, queued.doc, queued.originView)
       return
     }
 
     if (hash === this.currentHash) {
-      if (route) {
-        this.current = route
-        this.adoptDepth(state, route, hash)
+      const previousOrigin = this.routeOrigin
+      const current: WorkspaceRoute | null = route ?? (this.current ? { kind: 'overview', hash } : null)
+      if (current) {
+        this.current = current
+        this.adoptDepth(state, current, hash)
+        if (previousOrigin !== this.routeOrigin) this.onRoute(current)
       }
       return
     }

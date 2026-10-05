@@ -6,13 +6,15 @@
  * as PDF stay in their own iframe. HTML, markdown, and text subscribe to the
  * shared conditional file poller; their DOM changes only when the body does.
  *
- * Every file URL uses the daemon's owner-routed `GET /api/v1/file` endpoint.
+ * File bytes and validators use owner-routed `GET /api/v1/file`; HTML bases
+ * and thumbnails use `/api/v1/file-assets/:origin/*path` for relative resources.
  */
 
 import './FileViewerPanel.css'
 import './prose.css'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import { fileKind } from './attachments.js'
+import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import {
   AUDIO_EXTS,
   IMAGE_EXTS,
@@ -23,7 +25,6 @@ import {
   fileBytesUrl,
   fileExt,
   fileInfoUrl,
-  prepareIframeExternalLinks,
   renderMarkdown,
 } from './utils.js'
 
@@ -42,6 +43,8 @@ export interface FileViewerOptions {
   active?: boolean
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
   transformHtml?: (html: string) => string
+  onDocumentKey?: (key: DocumentKey) => void
+  onWeight?: (slots: number) => void
   onState?: (state: FileViewerState) => void
   /** Declared metadata shares the inert preview's source read. */
   onThumbnailSource?: (source: string | Uint8Array, etag?: string) => void
@@ -163,7 +166,6 @@ export function buildFileViewer(
     // gets revealed.
     if (veil.classList.contains('kbn-fileview-loading-error')) return
     veil.remove()
-    prepareIframeExternalLinks(iframe)
     onFrameLoad?.(iframe, false)
     ready()
   })
@@ -191,35 +193,12 @@ export function buildFileViewer(
 type MediaState = { media: HTMLMediaElement; active: boolean }
 const mediaViewers = new WeakMap<HTMLElement, MediaState>()
 const players = new Set<HTMLMediaElement>()
-type EmbeddedMediaState = { active: boolean; players: Set<HTMLMediaElement>; unbind: () => void }
+type EmbeddedMediaState = { active: boolean; bridge: FrameBridge | null }
 const embeddedMediaViewers = new WeakMap<HTMLElement, EmbeddedMediaState>()
-
-function bindEmbeddedMedia(wrap: HTMLElement, iframe: HTMLIFrameElement): void {
-  const state = embeddedMediaViewers.get(wrap)
-  if (!state) return
-  state.unbind()
-  for (const media of state.players) { media.pause(); players.delete(media) }
-  state.players.clear()
-  try {
-    const content = iframe.contentDocument
-    if (!content) return
-    const play = (event: Event): void => {
-      const media = event.target as HTMLMediaElement
-      if (!['AUDIO', 'VIDEO'].includes(media.tagName)) return
-      state.players.add(media)
-      players.add(media)
-      if (!state.active) { media.pause(); return }
-      for (const other of players) if (other !== media) other.pause()
-    }
-    content.addEventListener('play', play, true)
-    for (const media of content.querySelectorAll<HTMLMediaElement>('audio,video')) {
-      state.players.add(media)
-      players.add(media)
-      if (!state.active) media.pause()
-      else if (!media.paused) for (const other of players) if (other !== media) other.pause()
-    }
-    state.unbind = () => content.removeEventListener('play', play, true)
-  } catch { /* Cross-origin frames keep their browser-owned controls. */ }
+const embeddedPlayers = new Set<EmbeddedMediaState>()
+function pauseOtherPlayers(except?: EmbeddedMediaState): void {
+  for (const media of players) media.pause()
+  for (const state of embeddedPlayers) if (state !== except) state.bridge?.command('pause')
 }
 
 function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', options: FileViewerOptions): HTMLElement {
@@ -238,6 +217,7 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   media.addEventListener('play', () => {
     if (!state.active) { media.pause(); return }
     for (const other of players) if (other !== media) other.pause()
+    for (const embedded of embeddedPlayers) embedded.bridge?.command('pause')
   })
   media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
   let disposed = false
@@ -330,25 +310,17 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       frame.allow = "autoplay 'none'"
     }
     // Native PDF viewers need their plugin; the host makes the whole slot inert.
-    const loaded = (): void => {
-      if (kind === 'html' && !frame.hasAttribute('srcdoc')) return
-      frame.removeEventListener('load', loaded)
-      if (kind === 'html') finish(true)
-      else void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => finish(res.ok)).catch(() => finish(false))
-    }
-    frame.addEventListener('load', loaded)
+    frame.addEventListener('load', () => {
+      if (kind === 'html') { finish(true); return }
+      void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => finish(res.ok)).catch(() => finish(false))
+    }, { once: true })
     frame.addEventListener('error', () => finish(false), { once: true })
-    if (kind === 'html') {
-      void fetch(src, { signal: controller.signal }).then(async res => {
-        if (!res.ok) throw new Error('Thumbnail unavailable')
-        const source = await res.text()
-        if (disposed) return
-        options.onThumbnailSource?.(source, res.headers.get('ETag') ?? undefined)
-        frame.srcdoc = htmlWithBase(source, src)
-      }).catch(() => finish(false))
-    } else {
-      frame.src = `${src}#page=1&view=FitH&toolbar=0`
-      if (options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
+    frame.src = kind === 'pdf' ? `${src}#page=1&view=FitH&toolbar=0` : htmlAssetUrl(src)
+    const onSource = options.onThumbnailSource
+    if (onSource) {
+      void readThumbnailMetadata(src, controller.signal, kind === 'html'
+        ? (bytes, etag) => onSource(typeof bytes === 'string' ? bytes : new TextDecoder().decode(bytes), etag)
+        : onSource)
     }
     wrap.append(frame)
   } else if (kind === 'audio' || kind === 'video') {
@@ -431,7 +403,7 @@ export function suspendFileViewer(viewer: HTMLElement | null): void {
     const state = mediaViewers.get(viewer)
     if (state) { state.active = false; state.media.pause() }
     const embedded = embeddedMediaViewers.get(viewer)
-    if (embedded) { embedded.active = false; for (const media of embedded.players) media.pause() }
+    if (embedded) { embedded.active = false; embedded.bridge?.command('active', { active: false }) }
   }
 }
 
@@ -442,7 +414,7 @@ export function resumeFileViewer(viewer: HTMLElement | null): void {
     const state = mediaViewers.get(viewer)
     if (state) state.active = true
     const embedded = embeddedMediaViewers.get(viewer)
-    if (embedded) embedded.active = true
+    if (embedded) { embedded.active = true; embedded.bridge?.command('active', { active: true }) }
   }
 }
 
@@ -459,33 +431,60 @@ function buildHtmlViewer(
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
-  const embedded: EmbeddedMediaState = { active: options.active !== false, players: new Set(), unbind: () => {} }
+  const embedded: EmbeddedMediaState = { active: options.active !== false, bridge: null }
   embeddedMediaViewers.set(wrap, embedded)
-
+  embeddedPlayers.add(embedded)
   const veil = loadingVeil(fullPath, options)
   let disposed = false
   let failed = false
-
-  let iframe = document.createElement('iframe')
-  iframe.className = 'kbn-fileview-frame'
-  iframe.title = basename(fullPath)
-  wrap.append(iframe, veil)
-
   let hasContent = false
   let initialLoadHandled = false
   let generation = 0
   let stagingFrame: HTMLIFrameElement | null = null
-  const initialFrame = iframe
-  initialFrame.addEventListener('load', () => {
-    if (disposed || !hasContent || initialLoadHandled || iframe !== initialFrame) return
+  let stagingBridge: FrameBridge | null = null
+  const byteWeights = new WeakMap<HTMLIFrameElement, number>()
+  const createFrame = (ready: (frame: HTMLIFrameElement, bridge: FrameBridge) => void): HTMLIFrameElement => {
+    const frame = document.createElement('iframe')
+    frame.className = 'kbn-fileview-frame'
+    frame.title = basename(fullPath)
+    frame.setAttribute('sandbox', DOCUMENT_SANDBOX)
+    let announced = false
+    let charged = 0
+    const charge = (media = false): void => {
+      const weight = Math.max(charged, byteWeights.get(frame) ?? 1, media ? 2 : 1)
+      if (weight <= charged) return
+      charged = weight
+      options.onWeight?.(weight)
+    }
+    const bridge = connectDocumentFrame(frame, message => {
+      if (disposed) return
+      if (message.type === 'ready') {
+        if (announced) return
+        announced = true
+        charge(message.payload.media === true)
+        ready(frame, bridge)
+      } else if (message.type === 'key' && embedded.bridge === bridge && embedded.active && typeof message.payload.key === 'string') {
+        options.onDocumentKey?.(message.payload as unknown as DocumentKey)
+      } else if (message.type === 'media') {
+        charge(true)
+        if (embedded.bridge !== bridge || !embedded.active) bridge.command('pause')
+        else pauseOtherPlayers(embedded)
+      }
+    })
+    return frame
+  }
+  let iframe = createFrame((frame, bridge) => {
+    if (!hasContent || initialLoadHandled || iframe !== frame) return
     initialLoadHandled = true
+    embedded.bridge = bridge
+    bridge.command('active', { active: embedded.active })
     failed = false
     veil.remove()
-    prepareIframeExternalLinks(initialFrame)
-    bindEmbeddedMedia(wrap, initialFrame)
-    onFrameLoad?.(initialFrame, false)
+    onFrameLoad?.(frame, false)
     options.onState?.({ status: 'ready' })
   })
+  let currentBridge = frameBridge(iframe)!
+  wrap.append(iframe, veil)
 
   const stop = watchLiveFile(
     src,
@@ -494,45 +493,44 @@ function buildHtmlViewer(
       options.onThumbnailSource?.(html)
       veil.classList.remove('kbn-fileview-loading-error')
       const withBase = htmlWithBase(html, src)
-      const srcdoc = options.transformHtml?.(withBase) ?? withBase
+      const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(withBase)
+      const weight = new Blob([html]).size > 2 * 1024 * 1024 || /<(?:audio|video)\b/i.test(html) ? 2 : 1
       if (!hasContent) {
         hasContent = true
+        byteWeights.set(iframe, weight)
         iframe.srcdoc = srcdoc
         return
       }
 
+      stagingBridge?.dispose()
       stagingFrame?.remove()
-      const next = document.createElement('iframe')
-      next.className = 'kbn-fileview-frame'
-      next.title = basename(fullPath)
-      next.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;visibility:hidden'
-      stagingFrame = next
       const currentGeneration = ++generation
       let loaded = false
-      next.addEventListener('load', () => {
-        if (disposed || loaded || currentGeneration !== generation) return
+      const next = createFrame((frame, bridge) => {
+        if (loaded || currentGeneration !== generation) return
         loaded = true
-        prepareIframeExternalLinks(next)
-        bindEmbeddedMedia(wrap, next)
-        const panelScroll = wrap.parentElement?.scrollTop ?? 0
-        try {
-          next.contentWindow?.scrollTo(0, iframe.contentWindow?.scrollY ?? 0)
-        } catch {
-          if (wrap.parentElement) wrap.parentElement.scrollTop = panelScroll
-        }
-        iframe.replaceWith(next)
-        iframe = next
+        const position = initialLoadHandled ? currentBridge.position : undefined
+        currentBridge.command('pause')
+        currentBridge.dispose()
+        currentBridge = bridge
+        embedded.bridge = bridge
+        bridge.command('active', { active: embedded.active })
+        if (position) bridge.command('restore', position)
+        iframe.replaceWith(frame)
+        iframe = frame
         stagingFrame = null
-        next.style.cssText = ''
+        stagingBridge = null
+        frame.style.cssText = ''
         const firstVisibleContent = !initialLoadHandled
-        if (firstVisibleContent) {
-          initialLoadHandled = true
-          veil.remove()
-        }
+        if (firstVisibleContent) { initialLoadHandled = true; veil.remove() }
         failed = false
         onFrameLoad?.(iframe, !firstVisibleContent)
         options.onState?.({ status: 'ready' })
       })
+      next.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none'
+      stagingFrame = next
+      byteWeights.set(next, weight)
+      stagingBridge = frameBridge(next) ?? null
       wrap.append(next)
       next.srcdoc = srcdoc
     },
@@ -556,18 +554,39 @@ function buildHtmlViewer(
   viewerDisposers.set(wrap, () => {
     disposed = true
     generation++
+    stagingBridge?.dispose()
     stagingFrame?.remove()
-    embedded.unbind()
-    for (const media of embedded.players) { media.pause(); players.delete(media) }
+    currentBridge.command('pause')
+    currentBridge.dispose()
+    embeddedPlayers.delete(embedded)
     embeddedMediaViewers.delete(wrap)
   })
   return wrap
 }
 
-/** Give a srcdoc document the same base URL its direct `/file` navigation had. */
+/** A path-shaped owner route lets the browser resolve CSS, scripts and sibling images. */
+export function htmlAssetUrl(src: string): string {
+  const url = new URL(src, document.baseURI)
+  const path = url.searchParams.get('path')
+  if (!url.pathname.endsWith('/api/v1/file') || !path?.startsWith('/')) return url.href
+  const owner = url.searchParams.get('origin') || 'local'
+  url.pathname = url.pathname.slice(0, -'/file'.length) + `/file-assets/${encodeURIComponent(owner)}` + path.split('/').map(encodeURIComponent).join('/')
+  url.search = ''
+  return url.href
+}
+
+/** Srcdoc inherits its parent's URL, so install the byte-owning report's asset base. */
 export function htmlWithBase(html: string, src: string): string {
-  if (/<base\b/i.test(html)) return html
-  const base = `<base href="${escapeHtml(new URL(src, document.baseURI).href)}">`
+  const asset = htmlAssetUrl(src)
+  const declared = /<base\b[^>]*>/i.exec(html)
+  if (declared) {
+    const template = document.createElement('template')
+    template.innerHTML = declared[0]
+    const base = template.content.querySelector('base')!
+    base.href = new URL(base.getAttribute('href') ?? '', asset).href
+    return html.slice(0, declared.index) + base.outerHTML + html.slice(declared.index + declared[0].length)
+  }
+  const base = `<base href="${escapeHtml(asset)}">`
   const head = /<head\b[^>]*>/i
   if (head.test(html)) return html.replace(head, (match) => `${match}${base}`)
   const htmlTag = /<html\b[^>]*>/i

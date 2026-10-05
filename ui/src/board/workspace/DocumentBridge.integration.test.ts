@@ -101,17 +101,22 @@ async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
   // JSDOM doesn't navigate srcdoc and doesn't populate MessageEvent.source.
   // Execute the renderer's actual srcdoc in its iframe; adapt only transport,
   // preserving the real frame Window identity for DocumentHost's source gate.
-  Object.defineProperty(win, 'parent', { configurable: true, value: {
+  const parent = {
     postMessage(data: unknown, origin: string) {
       messages(data, origin)
       window.dispatchEvent(new MessageEvent('message', { data, source: win }))
     },
-  } })
+  }
+  Object.defineProperty(win, 'parent', { configurable: true, value: parent })
+  win.postMessage = (data: unknown) => win.dispatchEvent(new browser.window.MessageEvent('message', { data, source: parent as unknown as Window }))
+  ;(win as Window & typeof globalThis).HTMLMediaElement.prototype.pause = vi.fn()
+  ;(win as Window & typeof globalThis).matchMedia = () => ({ matches: true } as MediaQueryList)
   frame.contentDocument!.open()
   frame.contentDocument!.write(frame.srcdoc)
   frame.contentDocument!.close()
   win.dispatchEvent(new Event('load'))
   await new Promise(resolve => win.setTimeout(resolve, 0))
+  messages.mockClear()
   return frame
 }
 
@@ -135,7 +140,7 @@ describe('minified production document keyboard bridge', () => {
     for (const [key, init, intent] of keys) {
       expect(press(frame, key, init).defaultPrevented).toBe(true)
       expect(app).toHaveBeenLastCalledWith(intent, expect.objectContaining({ key, target: track, ...init }))
-      expect(messages).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'shuttle-workspace-key', key, ...init }), '*')
+      expect(messages).toHaveBeenLastCalledWith(expect.objectContaining({ protocol: 'shuttle-document', version: 1, type: 'key', payload: expect.objectContaining({ key, ...init }) }), '*')
     }
     expect(app).toHaveBeenCalledTimes(keys.length)
     expect(messages).toHaveBeenCalledTimes(keys.length)
@@ -223,7 +228,7 @@ describe('minified production document keyboard bridge', () => {
     press(first, 'l')
     expect(messages).toHaveBeenCalledOnce()
     expect(app).not.toHaveBeenCalled()
-    const data = { type: 'shuttle-workspace-key', key: 'l' }
+    const data = { protocol: 'shuttle-document', version: 1, type: 'key', payload: { key: 'l' } }
     for (const source of [window, null]) window.dispatchEvent(new MessageEvent('message', { source, data }))
     expect(app).not.toHaveBeenCalled()
     press(second, 'l')
@@ -234,6 +239,111 @@ describe('minified production document keyboard bridge', () => {
     host.parkAll()
     press(second, 'j')
     expect(app).toHaveBeenCalledOnce()
+  })
+
+  it('scrolls, caches nested scrollers and saves/restores positions through parent-only commands', async () => {
+    const frame = await report()
+    const content = frame.contentDocument!
+    const main = content.createElement('main')
+    main.style.overflowY = 'auto'
+    main.style.lineHeight = '20px'
+    Object.defineProperties(main, { clientHeight: { value: 200 }, clientWidth: { value: 600 }, scrollHeight: { value: 3000 } })
+    main.scrollTo = vi.fn(({ top, left }: ScrollToOptions) => { main.scrollTop = top ?? 0; main.scrollLeft = left ?? 0 }) as HTMLElement['scrollTo']
+    main.scrollBy = vi.fn(({ top }: ScrollToOptions) => { main.scrollTop += top ?? 0; main.dispatchEvent(new Event('scroll')) }) as HTMLElement['scrollBy']
+    content.body.append(main)
+    const walk = vi.spyOn(content, 'querySelectorAll')
+    const command = (type: string, payload: Record<string, unknown>, source = frame.contentWindow!.parent) => {
+      frame.contentWindow!.dispatchEvent(new MessageEvent('message', { source, data: { protocol: 'shuttle-document', version: 1, type, payload } }))
+    }
+    command('restore', { x: 2, y: 160 }, window)
+    expect(main.scrollTop).toBe(0)
+    command('active', { active: true })
+    for (const [intent, amount] of [['scrollDown', 60], ['scrollUp', -60], ['halfDown', 100], ['halfUp', -100], ['pageDown', 200], ['pageUp', -200]] as const) {
+      command('scroll', { intent, instant: true })
+      expect(main.scrollBy).toHaveBeenLastCalledWith({ top: amount, behavior: 'instant' })
+    }
+    expect(walk.mock.calls.filter(([selector]) => selector === 'body *')).toHaveLength(1)
+    command('restore', { x: 2, y: 160 })
+    expect(main.scrollTop).toBe(160)
+    const key = documents[0].key
+    expect(JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + key)!).y).toBe(160)
+    host.setChannel([documents[1]], documents[1].key)
+    host.setChannel(documents, key)
+    expect(host.get(key)!.viewer!.querySelector('iframe')).toBe(frame)
+    expect(main.scrollTop).toBe(160)
+    main.remove()
+    const replacement = content.createElement('main')
+    replacement.style.overflowY = 'auto'
+    Object.defineProperties(replacement, { clientHeight: { value: 200 }, clientWidth: { value: 600 }, scrollHeight: { value: 3000 } })
+    replacement.scrollBy = vi.fn()
+    content.body.append(replacement)
+    command('scroll', { intent: 'scrollDown', instant: true })
+    expect(replacement.scrollBy).toHaveBeenCalledOnce()
+  })
+
+  it('preserves an early restore until an asynchronously created nested scroller can hold it', async () => {
+    const frame = await report()
+    const win = frame.contentWindow!
+    const content = frame.contentDocument!
+    const command = (type: string, payload: Record<string, unknown>) => win.dispatchEvent(new MessageEvent('message', {
+      source: win.parent, data: { protocol: 'shuttle-document', version: 1, type, payload },
+    }))
+    command('restore', { x: 0, y: 160 })
+    command('active', { active: false })
+    const key = documents[0].key
+    expect(JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + key)!).y).toBe(160)
+    const main = content.createElement('main')
+    main.style.overflowY = 'auto'
+    Object.defineProperties(main, { clientHeight: { value: 200 }, clientWidth: { value: 600 }, scrollHeight: { value: 3000 } })
+    main.scrollTo = vi.fn(({ top }: ScrollToOptions) => { main.scrollTop = top ?? 0 }) as HTMLElement['scrollTo']
+    main.scrollBy = vi.fn(({ top }: ScrollToOptions) => { main.scrollTop += top ?? 0; main.dispatchEvent(new Event('scroll')) }) as HTMLElement['scrollBy']
+    content.body.append(main)
+    await new Promise(resolve => win.setTimeout(resolve, 0))
+    expect(main.scrollTop).toBe(160)
+    command('active', { active: true })
+    command('scroll', { intent: 'halfDown', instant: true })
+    expect(main.scrollTop).toBe(260)
+    expect(JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + key)!).y).toBe(260)
+  })
+
+  it('cannot downgrade the media charge with a second child readiness message', async () => {
+    reportHtml = '<html><body><audio></audio></body></html>'
+    const frame = await report()
+    const weight = () => (host as unknown as { frames: Map<string, { weight: number }> }).frames.get(documents[0].key)!.weight
+    expect(weight()).toBe(2)
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow, data: { protocol: 'shuttle-document', version: 1, type: 'ready', payload: { media: false } },
+    }))
+    expect(weight()).toBe(2)
+  })
+
+  it('pauses embedded media on recede and park, and prepares dynamically inserted external links', async () => {
+    const frame = await report()
+    const content = frame.contentDocument!
+    const media = content.createElement('audio')
+    media.pause = vi.fn()
+    media.currentTime = .7
+    content.body.append(media)
+    host.select(documents[1].key)
+    expect(media.pause).toHaveBeenCalled()
+    host.select(documents[0].key)
+    expect(media.currentTime).toBe(.7)
+    media.pause = vi.fn()
+    host.parkAll()
+    expect(media.pause).toHaveBeenCalled()
+    const link = content.createElement('a')
+    link.href = 'https://example.com/paper'
+    content.body.append(link)
+    link.addEventListener('click', event => event.preventDefault())
+    link.click()
+    expect(link.target).toBe('_blank')
+    expect(link.rel).toBe('noopener noreferrer')
+    const anchor = content.createElement('a')
+    anchor.href = '#section'
+    content.body.append(anchor)
+    anchor.click()
+    expect(anchor.target).toBe('')
+    expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin')
   })
 
   it('never applies the HTML transform to native PDF, image, or audio viewers', async () => {

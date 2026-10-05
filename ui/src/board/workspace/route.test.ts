@@ -92,6 +92,45 @@ describe('workspace routes', () => {
     expect(window.location.hash).toBe('#/board')
   })
 
+  it('restores the origin view from history state after reload and browser Back', async () => {
+    resetHash('')
+    const first = create()
+    first.start()
+    first.enter('one', 'host', undefined, 'desk')
+    first.select('host:/store/report.html')
+    expect(window.history.state).toMatchObject({
+      shuttleWorkspace: { depth: 1, base: true, baseHash: '', originView: 'desk' },
+    })
+    first.dispose()
+
+    const onRoute = vi.fn()
+    const reloaded = create(onRoute)
+    reloaded.start()
+    expect(reloaded.originView).toBe('desk')
+    expect(onRoute).toHaveBeenCalledWith({
+      kind: 'channel', uid: 'one', owner: 'host', doc: 'host:/store/report.html',
+    })
+
+    await nextPop(() => window.history.back())
+    expect(window.location.hash).toBe('')
+    expect(reloaded.originView).toBe('desk')
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'desk' } })
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '' })
+  })
+
+  it('returns a directly loaded Desk-origin channel to Desk when no managed base exists', () => {
+    const hash = formatRoute({ kind: 'channel', uid: 'one', owner: 'host' })
+    resetHash(hash)
+    window.history.replaceState({ shuttleWorkspace: { depth: 0, base: false, baseHash: '', originView: 'desk' } }, '', hash)
+    const onRoute = vi.fn()
+    const history = create(onRoute)
+    history.start()
+    expect(history.originView).toBe('desk')
+    history.leave()
+    expect(window.location.hash).toBe('#/desk')
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/desk' })
+  })
+
   it('lets browser Back return to the previous channel rather than overview', async () => {
     resetHash('#/board')
     const onRoute = vi.fn()

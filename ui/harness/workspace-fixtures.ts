@@ -64,9 +64,10 @@ export function installWorkspaceNativeURLs(example: WorkspaceExample): Workspace
   const rewrite = (source: string): string => {
     if (!source.includes('/api/v1/file')) return source
     const url = new URL(source, document.baseURI)
-    if (!url.pathname.endsWith('/api/v1/file')) return source
-    const path = url.searchParams.get('path')
-    const owner = url.searchParams.get('origin') || example.host
+    const asset = /\/api\/v1\/file-assets\/([^/]+)(\/.*)$/.exec(url.pathname)
+    if (!asset && !url.pathname.endsWith('/api/v1/file')) return source
+    const path = asset ? decodeURIComponent(asset[2]) : url.searchParams.get('path')
+    const owner = asset ? decodeURIComponent(asset[1]) : url.searchParams.get('origin') || example.host
     if (!path) return source
     const blobURL = blobURLs[key(owner, path)]
     if (!blobURL) return source
