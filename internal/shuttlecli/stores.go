@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // Store resolution for the shuttle aggregate-read verbs (status, ps) and the
@@ -32,7 +33,7 @@ import (
 // surface (configuredFeltStores).
 func shuttleStores() ([]string, error) {
 	if changeDir != "" {
-		root, err := felt.ProjectRoot(changeDir)
+		root, err := felt.ProjectRoot(sysenv.OS(), changeDir)
 		if err != nil {
 			return nil, err
 		}

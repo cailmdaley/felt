@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -38,11 +39,11 @@ own, structured ones included.`,
   felt edit analysis/covariance --set horizon=stashed`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := felt.RequireStore(changeDir)
+		storage, root, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return err
 		}
-		scopeID := felt.CommandScope(root, changeDir)
+		scopeID := felt.CommandScope(sysenv.OS(), root, changeDir)
 		// A fiber in the enclosing store is edited where it lives.
 		target, err := felt.ResolveRef(storage, scopeID, args[0])
 		if err != nil {

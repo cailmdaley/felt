@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -154,11 +155,11 @@ outside this view, the move happens in the enclosing store.`,
 	Example: `  felt nest covariance analysis`,
 	Args:    cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := felt.RequireStore(changeDir)
+		storage, root, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return err
 		}
-		scopeID := felt.CommandScope(root, changeDir)
+		scopeID := felt.CommandScope(sysenv.OS(), root, changeDir)
 
 		childRef, err := felt.ResolveExactRef(storage, scopeID, args[0])
 		if err != nil {
@@ -230,11 +231,11 @@ store's top level.`,
 	Example: `  felt unnest analysis/covariance`,
 	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := felt.RequireStore(changeDir)
+		storage, root, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return err
 		}
-		scopeID := felt.CommandScope(root, changeDir)
+		scopeID := felt.CommandScope(sysenv.OS(), root, changeDir)
 
 		child, err := felt.ResolveExactRef(storage, scopeID, args[0])
 		if err != nil {
@@ -296,7 +297,7 @@ func init() {
 
 func resolveMigrationStorage(dir string) (*felt.Storage, error) {
 	if dir == "" {
-		storage, _, err := felt.RequireStore(changeDir)
+		storage, _, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return nil, err
 		}

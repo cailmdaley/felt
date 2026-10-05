@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -22,11 +23,11 @@ not guesses.`,
   felt rm analysis/scratch`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := felt.RequireStore(changeDir)
+		storage, root, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return err
 		}
-		scopeID := felt.CommandScope(root, changeDir)
+		scopeID := felt.CommandScope(sysenv.OS(), root, changeDir)
 
 		// An id that names a fiber in the enclosing store is deleted there,
 		// and the output says where — a cross-store deletion is never silent.

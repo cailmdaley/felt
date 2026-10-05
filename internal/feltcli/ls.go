@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +67,7 @@ felt find searches the rest of it.`,
   felt ls --json --json-field id,status   machine-readable, two fields`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			storage, _, err := felt.RequireStore(view.directory())
+			storage, _, err := felt.RequireStore(sysenv.OS(), view.directory())
 			if err != nil {
 				return err
 			}
@@ -686,7 +687,7 @@ the full tree.`,
 	Example: `  felt tree analysis -L 2`,
 	Args:    cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := felt.RequireStore(changeDir)
+		storage, _, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return err
 		}

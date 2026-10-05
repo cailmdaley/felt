@@ -14,25 +14,26 @@ import (
 )
 
 func TestCodexSocketSelection(t *testing.T) {
-	home, err := os.UserHomeDir()
+	env := testEnv(t)
+	home, err := env.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CODEX_HOME", "")
-	t.Setenv("SHUTTLE_CODEX_SOCKET", "")
+	env.Set("CODEX_HOME", "")
+	env.Set("SHUTTLE_CODEX_SOCKET", "")
 	want := filepath.Join(home, ".codex", "app-server-control", "app-server-control.sock")
-	if got := codexSocket(); got != want {
+	if got := codexSocket(env); got != want {
 		t.Fatalf("default socket = %q, want %q", got, want)
 	}
 	custom := filepath.Join(t.TempDir(), "custom-codex")
-	t.Setenv("CODEX_HOME", custom)
+	env.Set("CODEX_HOME", custom)
 	want = filepath.Join(custom, "app-server-control", "app-server-control.sock")
-	if got := codexSocket(); got != want {
+	if got := codexSocket(env); got != want {
 		t.Fatalf("custom home socket = %q, want %q", got, want)
 	}
 	override := filepath.Join(home, "desktop.sock")
-	t.Setenv("SHUTTLE_CODEX_SOCKET", override)
-	if got := codexSocket(); got != override {
+	env.Set("SHUTTLE_CODEX_SOCKET", override)
+	if got := codexSocket(env); got != override {
 		t.Fatalf("override socket = %q, want %q", got, override)
 	}
 }
@@ -139,6 +140,7 @@ func (f *fakeCodex) methodCount(method string) int {
 }
 
 func TestCodexMutationReceipts(t *testing.T) {
+	env := testEnv(t)
 	tests := []struct {
 		name, state, mutation string
 		wake                  bool
@@ -160,12 +162,12 @@ func TestCodexMutationReceipts(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeCodex{t: t, state: tc.state, mutation: tc.mutation, mutationReply: tc.reply, collideRequest: tc.collision}
-			t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-			t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+			env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+			env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			req := Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "message-1", Wake: tc.wake}
-			receipt, _ := Send(ctx, "h", req)
+			receipt, _ := Send(ctx, env, "h", req)
 			if receipt.Status != tc.wantStatus {
 				t.Fatalf("status=%q, want %q (%#v)", receipt.Status, tc.wantStatus, receipt)
 			}
@@ -188,11 +190,12 @@ func TestCodexMutationReceipts(t *testing.T) {
 }
 
 func TestCodexRefusesSteerWithoutActiveTurnID(t *testing.T) {
+	env := testEnv(t)
 	for _, wake := range []bool{false, true} {
 		f := &fakeCodex{t: t, state: "active", emptyActiveTurnID: true, mutation: "turn/steer", mutationReply: map[string]any{}}
-		t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-		t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-		receipt, err := Send(context.Background(), "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "no-turn-id", Wake: wake})
+		env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+		env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+		receipt, err := Send(context.Background(), env, "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "no-turn-id", Wake: wake})
 		if receipt.Status != StatusRejected || ErrorCode(err) != "busy_race" {
 			t.Fatalf("wake=%v: %#v, %v", wake, receipt, err)
 		}
@@ -203,13 +206,14 @@ func TestCodexRefusesSteerWithoutActiveTurnID(t *testing.T) {
 }
 
 func TestCodexWakeRefusesPendingInputWithoutMutation(t *testing.T) {
+	env := testEnv(t)
 	// These native activeFlags also drive Shuttle.CodexApp thread_status/2.
 	for _, flag := range []string{"waitingOnApproval", "waitingOnUserInput"} {
 		for _, wake := range []bool{false, true} {
 			f := &fakeCodex{t: t, state: "active", activeFlags: []string{flag}, mutation: "turn/steer", mutationReply: map[string]any{"turnId": "turn-1"}}
-			t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-			t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-			receipt, err := Send(context.Background(), "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "pending-input", Wake: wake})
+			env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+			env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+			receipt, err := Send(context.Background(), env, "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "pending-input", Wake: wake})
 			if wake {
 				if receipt.Status != StatusRejected || ErrorCode(err) != "pending_input" || f.methodCount("turn/steer") != 0 {
 					t.Fatalf("wake with %s: %#v, %v", flag, receipt, err)
@@ -225,12 +229,13 @@ func TestCodexWakeRefusesPendingInputWithoutMutation(t *testing.T) {
 }
 
 func TestCodexLostWakeAcknowledgmentIsNotRetried(t *testing.T) {
+	env := testEnv(t)
 	f := &fakeCodex{t: t, state: "idle", mutation: "turn/start", dropMutationReply: true}
-	t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	req := Request{Address: "shuttle://h/codex/thread-1", Text: "do work", MessageID: "lost-wake", Wake: true}
 	for range 2 {
-		receipt, err := Send(context.Background(), "h", req)
+		receipt, err := Send(context.Background(), env, "h", req)
 		if receipt.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
 			t.Fatalf("%#v, %v", receipt, err)
 		}
@@ -241,13 +246,14 @@ func TestCodexLostWakeAcknowledgmentIsNotRetried(t *testing.T) {
 }
 
 func TestCodexLostAcknowledgmentIsDeduplicated(t *testing.T) {
+	env := testEnv(t)
 	f := &fakeCodex{t: t, state: "idle", mutation: "thread/inject_items", dropMutationReply: true}
-	t.Setenv("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	req := Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "lost-ack"}
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		receipt, err := Send(ctx, "h", req)
+		receipt, err := Send(ctx, env, "h", req)
 		cancel()
 		if receipt.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
 			t.Fatalf("attempt %d: %#v, %v", attempt+1, receipt, err)

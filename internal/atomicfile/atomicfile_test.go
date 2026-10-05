@@ -29,6 +29,7 @@ func leftovers(t *testing.T, dir string) []string {
 // TestWrite_SetsTheIntendedModeAndLeavesNoTemp: os.CreateTemp makes 0600;
 // the installed file carries the mode asked for.
 func TestWrite_SetsTheIntendedModeAndLeavesNoTemp(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.md")
 	if err := Write(path, []byte("one"), 0o644); err != nil {
@@ -54,6 +55,7 @@ func TestWrite_SetsTheIntendedModeAndLeavesNoTemp(t *testing.T) {
 // TestWrite_FollowsASymlink: like os.WriteFile, a symlinked target has the
 // file it names replaced, and the link survives.
 func TestWrite_FollowsASymlink(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real.md")
 	link := filepath.Join(dir, "link.md")
@@ -77,6 +79,7 @@ func TestWrite_FollowsASymlink(t *testing.T) {
 // TestCreate_AbortLeavesTheTargetAndNoTemp — and names its temp file so
 // IsTemp recognizes it.
 func TestCreate_AbortLeavesTheTargetAndNoTemp(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.md")
 	if err := os.WriteFile(path, []byte("kept"), 0o644); err != nil {
@@ -114,6 +117,7 @@ var writers = map[string]func(string, []byte, os.FileMode) error{
 // TestWriteUnsynced_ReplacesLikeWrite: skipping fsync changes durability
 // only — mode, symlink following and temp cleanup are the same.
 func TestWriteUnsynced_ReplacesLikeWrite(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	real := filepath.Join(dir, "real.md")
 	link := filepath.Join(dir, "link.md")
@@ -145,6 +149,7 @@ func TestWriteUnsynced_ReplacesLikeWrite(t *testing.T) {
 // replaced, a hard link keeps the old content, and a dangling symlink is
 // replaced by a regular file.
 func TestWrite_InodeSwapSemantics(t *testing.T) {
+	t.Parallel()
 	for name, write := range writers {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
@@ -28,11 +29,11 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	if out := hook("SessionStart"); out != "" {
 		t.Fatal(out)
 	}
-	if !messaging.MailboxAvailable("claude", "s", "host") {
+	if !messaging.MailboxAvailable(sysenv.OS(), "claude", "s", "host") {
 		t.Fatal("hook failed to register")
 	}
 	r := messaging.Request{Address: "shuttle://host/claude/s", Text: "peer message", From: "peer", MessageID: "m"}
-	if _, err := messaging.Send(context.Background(), "host", r); err != nil {
+	if _, err := messaging.Send(context.Background(), sysenv.OS(), "host", r); err != nil {
 		t.Fatal(err)
 	}
 	if out := hook("Stop"); out != "" {
@@ -49,7 +50,7 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 		t.Fatalf("duplicated message: %s", out)
 	}
 	hook("SessionEnd")
-	if messaging.MailboxAvailable("claude", "s", "host") {
+	if messaging.MailboxAvailable(sysenv.OS(), "claude", "s", "host") {
 		t.Fatal("mailbox still available")
 	}
 }
@@ -60,11 +61,11 @@ func TestEventHookOffersCodexMailbox(t *testing.T) {
 	t.Setenv("SHUTTLE_HOST", "host")
 	var out bytes.Buffer
 	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"SessionStart","session_id":"s","model":"gpt-6","cwd":"/work"}`), &out)
-	if out.Len() != 0 || !messaging.MailboxAvailable("codex", "s", "host") {
+	if out.Len() != 0 || !messaging.MailboxAvailable(sysenv.OS(), "codex", "s", "host") {
 		t.Fatal("Codex hook failed to register a mailbox")
 	}
 	r := messaging.Request{Address: "shuttle://host/codex/s", Text: "peer context", MessageID: "m"}
-	if receipt, err := messaging.Send(context.Background(), "host", r); err != nil || receipt.Transport != "codex-hook" {
+	if receipt, err := messaging.Send(context.Background(), sysenv.OS(), "host", r); err != nil || receipt.Transport != "codex-hook" {
 		t.Fatalf("send: %+v %v", receipt, err)
 	}
 	out.Reset()
@@ -92,11 +93,11 @@ func TestEventHookOffersPiMailboxOnlyOnPrompt(t *testing.T) {
 		}
 		return out.String()
 	}
-	if out := hook("SessionStart"); out != "" || !messaging.MailboxAvailable("pi", "session", "host") {
+	if out := hook("SessionStart"); out != "" || !messaging.MailboxAvailable(sysenv.OS(), "pi", "session", "host") {
 		t.Fatalf("Pi hook did not register: %q", out)
 	}
 	request := messaging.Request{Address: "shuttle://host/pi/session", Text: "queued", MessageID: "pi-hook"}
-	if _, err := messaging.Send(context.Background(), "host", request); err != nil {
+	if _, err := messaging.Send(context.Background(), sysenv.OS(), "host", request); err != nil {
 		t.Fatal(err)
 	}
 	if out := hook("PreToolUse"); out != "" {
@@ -119,7 +120,7 @@ func TestEventHookDoesNotClassifyUnknownPayloadAsCodex(t *testing.T) {
 	t.Setenv("SHUTTLE_EVENTS", "off")
 	var out bytes.Buffer
 	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"PreToolUse","session_id":"s"}`), &out)
-	if out.Len() != 0 || messaging.MailboxAvailable("codex", "s", "") {
+	if out.Len() != 0 || messaging.MailboxAvailable(sysenv.OS(), "codex", "s", "") {
 		t.Fatal("unidentified hook registered a Codex mailbox")
 	}
 }
@@ -136,7 +137,7 @@ func TestClaudeHookHonorsCustomConfigDirectory(t *testing.T) {
 	if err := runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
 		t.Fatal(err)
 	}
-	if !messaging.MailboxAvailable("claude", input.SessionID, "host") || messaging.MailboxAvailable("codex", input.SessionID, "host") {
+	if !messaging.MailboxAvailable(sysenv.OS(), "claude", input.SessionID, "host") || messaging.MailboxAvailable(sysenv.OS(), "codex", input.SessionID, "host") {
 		t.Fatal("custom Claude config registered the wrong harness")
 	}
 	input.TranscriptPath = filepath.Join(config+"-unrelated", "projects", "workspace", "custom-session.jsonl")

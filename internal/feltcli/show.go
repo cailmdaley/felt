@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -35,7 +36,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
   felt show analysis/covariance --field status`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			storage, root, err := felt.RequireStore(view.directory())
+			storage, root, err := felt.RequireStore(sysenv.OS(), view.directory())
 			if err != nil {
 				return err
 			}
@@ -63,7 +64,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, or --field")
 			}
 
-			scopeID := felt.CommandScope(root, view.directory())
+			scopeID := felt.CommandScope(sysenv.OS(), root, view.directory())
 
 			// An id that names a fiber in the enclosing store is shown from
 			// there: everything below runs against the store that holds it, with

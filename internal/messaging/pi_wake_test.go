@@ -9,6 +9,7 @@ import (
 )
 
 func TestPiWakeAcknowledgements(t *testing.T) {
+	env := testEnv(t)
 	for _, tc := range []struct {
 		name, reply, status string
 	}{
@@ -35,12 +36,12 @@ func TestPiWakeAcknowledgements(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, socket := piFixture(t, tc.reply+"\n")
-			t.Setenv("SHUTTLE_CONFER_STATE_DIR", root)
-			t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+			env.Set("SHUTTLE_CONFER_STATE_DIR", root)
+			env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 			req := Request{Address: "shuttle://h/pi/job-1", Text: "do work", MessageID: "pi-wake", Wake: true}
 			data := []byte{0, 255, 42}
 			req.Attachments = []Attachment{testAttachment("input.bin", data)}
-			receipt, err := Send(context.Background(), "h", req)
+			receipt, err := Send(context.Background(), env, "h", req)
 			if receipt.Status != tc.status || (err != nil) != (tc.status != StatusAccepted) {
 				t.Fatalf("%#v, %v", receipt, err)
 			}
@@ -58,7 +59,7 @@ func TestPiWakeAcknowledgements(t *testing.T) {
 			if err := os.Remove(socket); err != nil {
 				t.Fatal(err)
 			}
-			retry, retryErr := Send(context.Background(), "h", req)
+			retry, retryErr := Send(context.Background(), env, "h", req)
 			if !reflect.DeepEqual(retry, receipt) || ErrorCode(retryErr) != ErrorCode(err) {
 				t.Fatalf("retry: %#v, %v", retry, retryErr)
 			}
@@ -67,14 +68,15 @@ func TestPiWakeAcknowledgements(t *testing.T) {
 }
 
 func TestPiPreflightEvidence(t *testing.T) {
+	env := testEnv(t)
 	for _, tc := range []struct{ reply, status, code string }{
 		{`{"ok":false,"phase":"preflight","jobId":"job-1","requestId":"rpc-1","rpcType":"prompt","error":"closed"}`, StatusRejected, "preflight_failed"},
 		{`{"ok":false,"phase":"preflight","jobId":"wrong","requestId":"rpc-1","rpcType":"prompt","error":"closed"}`, StatusUnknown, "ambiguous_delivery"},
 	} {
 		root, _ := piFixture(t, tc.reply+"\n")
-		t.Setenv("SHUTTLE_CONFER_STATE_DIR", root)
+		env.Set("SHUTTLE_CONFER_STATE_DIR", root)
 		req := Request{Address: "shuttle://h/pi/job-1", Text: "do work", MessageID: "preflight", Wake: true}
-		receipt, err := (piAdapter{}).send(context.Background(), Address{ID: "job-1"}, req)
+		receipt, err := (piAdapter{}).send(context.Background(), env, Address{ID: "job-1"}, req)
 		if receipt.Status != tc.status || ErrorCode(err) != tc.code {
 			t.Fatalf("receipt=%#v err=%v", receipt, err)
 		}

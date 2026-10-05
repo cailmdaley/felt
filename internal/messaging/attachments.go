@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 const (
@@ -110,12 +112,12 @@ func validateAttachmentName(name string) error {
 	return nil
 }
 
-func materializeAttachments(messageID string, attachments []Attachment) ([]ReceivedFile, error) {
+func materializeAttachments(env *sysenv.Env, messageID string, attachments []Attachment) ([]ReceivedFile, error) {
 	if len(attachments) == 0 {
 		return nil, nil
 	}
 	idHash := sha256.Sum256([]byte(messageID))
-	root, err := filepath.Abs(dataDir())
+	root, err := env.Abs(dataDir(env))
 	if err != nil {
 		return nil, err
 	}

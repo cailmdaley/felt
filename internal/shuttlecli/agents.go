@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -71,7 +72,7 @@ stream.`,
 				shuttle.SourceBuiltin, shuttle.SourceUser, agentsSourceFilter)
 		}
 
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
@@ -124,7 +125,7 @@ agent does not support — so a caller can distinguish a constraint violation
 from a successful resolve.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
@@ -132,7 +133,7 @@ from a successful resolve.`,
 		if err != nil {
 			return err
 		}
-		resolved := shuttle.NewResolvedAgent(rec, axes)
+		resolved := reg.NewResolvedAgent(rec, axes)
 		if jsonOutput {
 			return outputJSON(resolved)
 		}
@@ -169,7 +170,7 @@ field across several harnesses — edit it in place.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := agentsInitPath
 		if path == "" {
-			p, err := shuttle.UserAgentsPath()
+			p, err := shuttle.UserAgentsPath(sysenv.OS())
 			if err != nil {
 				return err
 			}
@@ -230,7 +231,7 @@ created; a bare-array file is rewritten in the object form.`,
 		if (level == "") == !agentsEffortReset {
 			return fmt.Errorf("give exactly one of <level> or --reset")
 		}
-		path, id, changed, err := shuttle.SetEffortOverride(args[0], level)
+		path, id, changed, err := shuttle.SetEffortOverride(sysenv.OS(), args[0], level)
 		if err != nil {
 			return err
 		}
@@ -264,7 +265,7 @@ func sourceMarker(a shuttle.AgentRecord) string {
 func registryFooter(reg *shuttle.AgentRegistry) string {
 	total := len(reg.Records())
 	if reg.UserPath() == "" {
-		path, err := shuttle.UserAgentsPath()
+		path, err := shuttle.UserAgentsPath(sysenv.OS())
 		if err != nil {
 			path = "~/.config/shuttle/agents.json"
 		}

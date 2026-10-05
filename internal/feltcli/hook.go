@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -165,7 +166,7 @@ func buildSessionContext() string {
 	sb.WriteString(sessionDirective)
 	sb.WriteString("\n\n")
 
-	root, err := felt.ProjectRoot(changeDir)
+	root, err := felt.ProjectRoot(sysenv.OS(), changeDir)
 	if err != nil || root == "" {
 		sb.WriteString(sessionNoRepoNote)
 		sb.WriteString("\n")

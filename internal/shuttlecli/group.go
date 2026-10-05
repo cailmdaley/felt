@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -26,12 +27,12 @@ func shuttleResolveFiber(query string, full bool) (*felt.Felt, *felt.Storage, er
 }
 
 func shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, felt.Ref, error) {
-	root, err := felt.ProjectRoot(changeDir)
+	root, err := felt.ProjectRoot(sysenv.OS(), changeDir)
 	if err != nil {
 		return nil, nil, felt.Ref{}, err
 	}
 	storage := felt.NewStorage(root)
-	ref, err := felt.ResolveRef(storage, felt.CommandScope(root, changeDir), query)
+	ref, err := felt.ResolveRef(storage, felt.CommandScope(sysenv.OS(), root, changeDir), query)
 	if err != nil {
 		return nil, nil, felt.Ref{}, err
 	}

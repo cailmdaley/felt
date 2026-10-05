@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +46,7 @@ included; --limit caps it only when given.`,
   felt find -t rule: -r "data|vector"`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := felt.RequireStore(changeDir)
+		storage, _, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return err
 		}

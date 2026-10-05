@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // A missing registry gets an existing project store or a home-directory store.
@@ -68,7 +69,7 @@ func nearestBootstrapStore(cwd string) (string, error) {
 		return "", err
 	}
 	for {
-		if root, err := felt.ProjectRoot(dir); err == nil {
+		if root, err := felt.ProjectRoot(sysenv.OS(), dir); err == nil {
 			return root, nil
 		}
 		parent := filepath.Dir(dir)
@@ -81,7 +82,7 @@ func nearestBootstrapStore(cwd string) (string, error) {
 
 func supervisorBootstrapDirectory() (string, error) {
 	if changeDir != "" {
-		return felt.ProjectRoot(changeDir)
+		return felt.ProjectRoot(sysenv.OS(), changeDir)
 	}
 	return os.Getwd()
 }

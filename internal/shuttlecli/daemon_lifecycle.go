@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -393,7 +394,7 @@ func signalDaemonPID(pid int, signal syscall.Signal) error {
 }
 
 func daemonStopMarkerPath() (string, error) {
-	dir, err := shuttle.DataDir()
+	dir, err := shuttle.DataDir(sysenv.OS())
 	if err != nil {
 		return "", err
 	}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +15,7 @@ var shuttleCheckCmd = &cobra.Command{
 	Long:  "Checks every mapping-valued shuttle: block against Shuttle's schema and reports local host-name drift.",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := felt.RequireStore(changeDir)
+		storage, _, err := felt.RequireStore(sysenv.OS(), changeDir)
 		if err != nil {
 			return err
 		}

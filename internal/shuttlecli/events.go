@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // This file is the Go half of the host-local state contract: where the hook
@@ -31,7 +32,7 @@ const (
 // shuttleStatePath resolves one host-local state file the way the Elixir side
 // resolves it — an explicit env var, else the data directory, else ~/.shuttle:
 //
-//	$<envVar> → <shuttle.DataDir()>/<leaf>
+//	$<envVar> → <shuttle.DataDir(sysenv.OS())>/<leaf>
 //
 // explicit reports whether the env var named the path — an explicit path is
 // explicit intent, so it also overrides the write gate below. The path is ""
@@ -40,7 +41,7 @@ func shuttleStatePath(envVar, leaf string) (path string, explicit bool) {
 	if v := strings.TrimSpace(os.Getenv(envVar)); v != "" {
 		return v, true
 	}
-	dir, err := shuttle.DataDir()
+	dir, err := shuttle.DataDir(sysenv.OS())
 	if err != nil {
 		return "", false
 	}

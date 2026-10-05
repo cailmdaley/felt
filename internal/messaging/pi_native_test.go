@@ -94,14 +94,15 @@ func piNativeFixture(t *testing.T, reply any) (string, func()) {
 }
 
 func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	t.Setenv("SHUTTLE_CONFER_STATE_DIR", t.TempDir())
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+	env.Set("SHUTTLE_CONFER_STATE_DIR", t.TempDir())
 	socket, closeFixture := piNativeFixture(t, map[string]any{"ok": true})
 	defer closeFixture()
-	if err := RegisterMailbox("pi", "session", "host", "/project", os.Getpid(), true); err != nil {
+	if err := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
-	if err := RegisterPiNative("session", "host", "/project", socket, "", os.Getpid(), true); err != nil {
+	if err := RegisterPiNative(env, "session", "host", "/project", socket, "", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	// A launcher alias must not duplicate the same live native conversation.
@@ -116,23 +117,24 @@ func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(jobs, "job-alias.json"), job, 0600); err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := (piAdapter{}).discover(context.Background(), "host")
+	sessions, err := (piAdapter{}).discover(context.Background(), env, "host")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(sessions) != 1 || sessions[0].CWD != "/project" || sessions[0].State != "unknown" {
 		t.Fatalf("sessions: %#v", sessions)
 	}
-	if err := RegisterPiNative("session", "host", "/project", socket, "/tmp/session.jsonl", os.Getpid(), false); err != nil {
+	if err := RegisterPiNative(env, "session", "host", "/project", socket, "/tmp/session.jsonl", os.Getpid(), false); err != nil {
 		t.Fatal(err)
 	}
-	if piNativeAvailable("session", "host") {
+	if piNativeAvailable(env, "session", "host") {
 		t.Fatal("native registration survived shutdown")
 	}
 }
 
 func TestPiNativeRegistrationReplacesDeadSameSessionSocket(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	dir := socketTempDir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -146,16 +148,16 @@ func TestPiNativeRegistrationReplacesDeadSameSessionSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldListener.(*net.UnixListener).SetUnlinkOnClose(false)
-	if err := RegisterPiNative("session", "host", "/project", oldSocket, "", os.Getpid(), true); err != nil {
+	if err := RegisterPiNative(env, "session", "host", "/project", oldSocket, "", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	if err := oldListener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if !piNativeAvailable("session", "host") {
+	if !piNativeAvailable(env, "session", "host") {
 		t.Fatal("stale socket should retain its filesystem identity until the replacement starts")
 	}
-	if sessions := piNativeSessions("host"); len(sessions) != 0 {
+	if sessions := piNativeSessions(env, "host"); len(sessions) != 0 {
 		t.Fatalf("dead Pi socket remained discoverable: %#v", sessions)
 	}
 
@@ -168,17 +170,18 @@ func TestPiNativeRegistrationReplacesDeadSameSessionSocket(t *testing.T) {
 	if err := os.Chmod(newSocket, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := RegisterPiNative("session", "host", "/project", newSocket, "", os.Getpid()+1, true); err != nil {
+	if err := RegisterPiNative(env, "session", "host", "/project", newSocket, "", os.Getpid()+1, true); err != nil {
 		t.Fatalf("new receiver could not replace the dead receiver: %v", err)
 	}
-	registration, err := readPiNative("session")
+	registration, err := readPiNative(env, "session")
 	if err != nil || registration.Socket != newSocket {
 		t.Fatalf("registration=%#v err=%v", registration, err)
 	}
 }
 
 func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	tests := []struct {
 		name   string
 		reply  map[string]any
@@ -194,7 +197,7 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+			env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 			socket, closeFixture := piNativeFixture(t, func(request map[string]any) any {
 				requestID, _ := request["requestId"].(string)
 				if tc.reply["requestId"] == "" {
@@ -206,11 +209,11 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 				return tc.reply
 			})
 			defer closeFixture()
-			if err := RegisterPiNative("session", "host", "/project", socket, "/tmp/session.jsonl", os.Getpid(), true); err != nil {
+			if err := RegisterPiNative(env, "session", "host", "/project", socket, "/tmp/session.jsonl", os.Getpid(), true); err != nil {
 				t.Fatal(err)
 			}
 			req := Request{Address: "shuttle://host/pi/session", Text: "hello", MessageID: "native", Wake: true}
-			receipt, err := sendPiNative(context.Background(), Address{Host: "host", Harness: "pi", ID: "session"}, req)
+			receipt, err := sendPiNative(context.Background(), env, Address{Host: "host", Harness: "pi", ID: "session"}, req)
 			codeMatches := (tc.code == "" && err == nil) || (tc.code != "" && ErrorCode(err) == tc.code)
 			if receipt.Status != tc.status || !codeMatches {
 				t.Fatalf("receipt=%#v err=%v", receipt, err)
@@ -220,17 +223,18 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 }
 
 func TestPiMailboxSupportsPassiveContext(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	if err := RegisterMailbox("pi", "session", "host", "/project", os.Getpid(), true); err != nil {
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+	if err := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	req := Request{Address: "shuttle://host/pi/session", Text: "context", MessageID: "passive"}
-	receipt, err := Send(context.Background(), "host", req)
+	receipt, err := Send(context.Background(), env, "host", req)
 	if err != nil || receipt.Status != StatusQueued || receipt.Transport != "pi-hook" {
 		t.Fatalf("send: %#v %v", receipt, err)
 	}
 	var offered []Request
-	if err := OfferMailbox("pi", "session", "host", func(requests []Request) error { offered = requests; return nil }); err != nil {
+	if err := OfferMailbox(env, "pi", "session", "host", func(requests []Request) error { offered = requests; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if len(offered) != 1 || offered[0].Text != "context" || strings.Contains(offered[0].Text, "base64") {

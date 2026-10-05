@@ -23,6 +23,7 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 // The twins only coexist in the git index here, as on a macOS checkout: the
 // index entries are added without a second file on disk.
 func TestCheckCaseCollisionsInGitIndex(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -75,6 +76,7 @@ func TestCheckCaseCollisionsInGitIndex(t *testing.T) {
 // one entry, not a collision: git status is clean on a case-insensitive
 // filesystem, and a case-sensitive one holds a single entry either way.
 func TestCheckCaseCollisionsIgnoresDiskRespelling(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -112,6 +114,7 @@ func TestCheckCaseCollisionsIgnoresDiskRespelling(t *testing.T) {
 // does not record (project, on disk and in the link, for the index's Project)
 // still sees the index twins.
 func TestCheckCaseCollisionsThroughRespelledSymlink(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -171,6 +174,7 @@ func wantReportTwins(t *testing.T, s *Storage) {
 // Repo) still sees the index twins. Only a case-insensitive filesystem
 // resolves that symlink.
 func TestCheckCaseCollisionsThroughRespelledRepoAncestor(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -189,6 +193,7 @@ func TestCheckCaseCollisionsThroughRespelledRepoAncestor(t *testing.T) {
 // A trailing space in the repository's name is part of the name, not
 // whitespace around git's output.
 func TestCheckCaseCollisionsRepoNameWithTrailingSpace(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}

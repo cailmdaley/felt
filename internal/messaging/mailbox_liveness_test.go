@@ -25,45 +25,47 @@ func startReceiver(t *testing.T) *exec.Cmd {
 }
 
 func TestMailboxOfExitedReceiverLeavesDiscoveryAndRejects(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	receiver := startReceiver(t)
-	if err := RegisterMailbox("codex", "old-worker", "host", "/project", receiver.Process.Pid, true); err != nil {
+	if err := RegisterMailbox(env, "codex", "old-worker", "host", "/project", receiver.Process.Pid, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := RegisterMailbox("codex", "live-worker", "host", "/project", os.Getpid(), true); err != nil {
+	if err := RegisterMailbox(env, "codex", "live-worker", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
-	if got := mailboxSessions("codex", "host"); len(got) != 2 {
+	if got := mailboxSessions(env, "codex", "host"); len(got) != 2 {
 		t.Fatalf("live receivers: %#v", got)
 	}
 	req := Request{Address: "shuttle://host/codex/old-worker", Text: "context", MessageID: "before"}
-	if receipt, err := queueMailbox(Address{Host: "host", Harness: "codex", ID: "old-worker"}, req); err != nil || receipt.Status != StatusQueued {
+	if receipt, err := queueMailbox(env, Address{Host: "host", Harness: "codex", ID: "old-worker"}, req); err != nil || receipt.Status != StatusQueued {
 		t.Fatalf("live receiver refused: %#v %v", receipt, err)
 	}
 
 	_ = receiver.Process.Kill()
 	_, _ = receiver.Process.Wait()
 
-	got := mailboxSessions("codex", "host")
+	got := mailboxSessions(env, "codex", "host")
 	if len(got) != 1 || got[0].ID != "live-worker" {
 		t.Fatalf("exited receiver still discovered: %#v", got)
 	}
-	if MailboxAvailable("codex", "old-worker", "host") {
+	if MailboxAvailable(env, "codex", "old-worker", "host") {
 		t.Fatal("exited receiver still advertised")
 	}
 	req.MessageID = "after"
-	receipt, err := queueMailbox(Address{Host: "host", Harness: "codex", ID: "old-worker"}, req)
+	receipt, err := queueMailbox(env, Address{Host: "host", Harness: "codex", ID: "old-worker"}, req)
 	if err == nil || receipt.Status != StatusRejected || ErrorCode(err) != "unavailable" || !strings.Contains(receipt.Detail, "no longer running") {
 		t.Fatalf("exited receiver was not refused honestly: %#v %v", receipt, err)
 	}
-	if _, err := os.Stat(filepath.Join(mailboxDir("codex", "old-worker"), "pending", mailboxKey("after")+".json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(mailboxDir(env, "codex", "old-worker"), "pending", mailboxKey("after")+".json")); !os.IsNotExist(err) {
 		t.Fatalf("message queued for an exited receiver: %v", err)
 	}
 }
 
 func TestMailboxRegistrationWithoutReceiverProcessIsNotLive(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	dir := mailboxDir("codex", "legacy")
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+	dir := mailboxDir(env, "codex", "legacy")
 	if err := ensureDir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -71,26 +73,27 @@ func TestMailboxRegistrationWithoutReceiverProcessIsNotLive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "receiver.json"), []byte(legacy), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if got := mailboxSessions("codex", "host"); len(got) != 0 {
+	if got := mailboxSessions(env, "codex", "host"); len(got) != 0 {
 		t.Fatalf("unverifiable registration discovered: %#v", got)
 	}
-	if MailboxAvailable("codex", "legacy", "host") {
+	if MailboxAvailable(env, "codex", "legacy", "host") {
 		t.Fatal("unverifiable registration advertised")
 	}
 }
 
 func TestRegisterMailboxRefusesAReceiverThatIsNotRunning(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	receiver := startReceiver(t)
 	pid := receiver.Process.Pid
 	_ = receiver.Process.Kill()
 	_, _ = receiver.Process.Wait()
 	for _, candidate := range []int{0, -1, pid} {
-		if err := RegisterMailbox("claude", "s", "host", "/", candidate, true); err == nil {
+		if err := RegisterMailbox(env, "claude", "s", "host", "/", candidate, true); err == nil {
 			t.Fatalf("registered receiver pid %d", candidate)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(mailboxDir("claude", "s"), "receiver.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(mailboxDir(env, "claude", "s"), "receiver.json")); !os.IsNotExist(err) {
 		t.Fatalf("registration written for a missing receiver: %v", err)
 	}
 }
@@ -140,15 +143,16 @@ func TestHookReceiverPIDSkipsShells(t *testing.T) {
 }
 
 func TestSendToExitedHookReceiverIsRejectedNotQueued(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	t.Setenv("SHUTTLE_CODEX_SOCKET", filepath.Join(t.TempDir(), "absent.sock"))
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(t.TempDir(), "absent.sock"))
 	receiver := startReceiver(t)
-	if err := RegisterMailbox("codex", "gone", "host", "/", receiver.Process.Pid, true); err != nil {
+	if err := RegisterMailbox(env, "codex", "gone", "host", "/", receiver.Process.Pid, true); err != nil {
 		t.Fatal(err)
 	}
 	_ = receiver.Process.Kill()
 	_, _ = receiver.Process.Wait()
-	receipt, err := Send(context.Background(), "host", Request{Address: "shuttle://host/codex/gone", Text: "hi", MessageID: "m"})
+	receipt, err := Send(context.Background(), env, "host", Request{Address: "shuttle://host/codex/gone", Text: "hi", MessageID: "m"})
 	if err == nil || receipt.Status != StatusRejected {
 		t.Fatalf("context-only send to exited receiver: %#v %v", receipt, err)
 	}

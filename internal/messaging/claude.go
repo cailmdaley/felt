@@ -5,19 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 type claudeAdapter struct{}
 
-func (claudeAdapter) discover(ctx context.Context, host string) ([]Session, error) {
-	hookSessions := mailboxSessions("claude", host)
+func (claudeAdapter) discover(ctx context.Context, env *sysenv.Env, host string) ([]Session, error) {
+	hookSessions := mailboxSessions(env, "claude", host)
 	for i := range hookSessions {
-		if claudeNativeAvailable(hookSessions[i].ID, host) {
+		if claudeNativeAvailable(env, hookSessions[i].ID, host) {
 			hookSessions[i].Capabilities = append(hookSessions[i].Capabilities, "wake")
 		}
 	}
-	cmd := exec.CommandContext(ctx, "claude", "agents", "--json")
+	cmd := env.CommandContext(ctx, "claude", "agents", "--json")
 	var out cappedBuffer
 	cmd.Stdout = &out
 	err := cmd.Run()
@@ -52,10 +53,10 @@ func (claudeAdapter) discover(ctx context.Context, host string) ([]Session, erro
 		}
 		addr, _ := FormatAddress(host, "claude", id)
 		capabilities := []string{}
-		if MailboxAvailable("claude", id, host) {
+		if MailboxAvailable(env, "claude", id, host) {
 			capabilities = append(capabilities, "context")
 		}
-		if claudeNativeAvailable(id, host) {
+		if claudeNativeAvailable(env, id, host) {
 			capabilities = append(capabilities, "wake")
 		}
 		ss = append(ss, Session{Address: addr, Host: host, Harness: "claude", ID: id, Title: stringField(m, "name"), CWD: stringField(m, "cwd", "workspace"), State: stringField(m, "status"), Capabilities: capabilities})
@@ -79,15 +80,15 @@ func stringField(m map[string]any, keys ...string) string {
 	}
 	return ""
 }
-func (claudeAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error) {
-	receipt, err, _ := (claudeAdapter{}).sendWithDedupMetadata(ctx, a, r)
+func (claudeAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error) {
+	receipt, err, _ := (claudeAdapter{}).sendWithDedupMetadata(ctx, env, a, r)
 	return receipt, err
 }
 
-func (claudeAdapter) sendWithDedupMetadata(ctx context.Context, a Address, r Request) (Receipt, error, dedupMetadata) {
+func (claudeAdapter) sendWithDedupMetadata(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error, dedupMetadata) {
 	if r.Wake {
-		return sendClaudeNativeWithMetadata(ctx, a, r)
+		return sendClaudeNativeWithMetadata(ctx, env, a, r)
 	}
-	receipt, err := queueMailbox(a, r)
+	receipt, err := queueMailbox(env, a, r)
 	return receipt, err, dedupMetadata{}
 }

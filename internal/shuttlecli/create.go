@@ -7,6 +7,7 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -97,7 +98,7 @@ refused, with a pointer at the verb that edits in place (reshape for kind or
 schedule, set-model / set-agent for the agent, uninstall to start over).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
@@ -226,7 +227,7 @@ refused — use 'shuttle reshape' to change its kind or re-time its schedule,
 set-model / set-agent for the agent, uninstall to start over.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
@@ -343,7 +344,7 @@ refused — use 'shuttle reshape <fiber> pinned' to convert an existing role
 in place, set-model / set-agent for the agent, uninstall to start over.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}

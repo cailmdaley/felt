@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +54,7 @@ func runShuttleSessionDiscovery(ctx context.Context) error {
 		if hostErr != nil {
 			return hostErr
 		}
-		directory = messaging.Discover(ctx, host)
+		directory = messaging.Discover(ctx, sysenv.OS(), host)
 	} else {
 		directory, err = fetchPeerDirectory(sessionsDiscoveryHost, sessionsDiscoveryHarness)
 	}
@@ -197,7 +198,7 @@ exit 1 means rejected, unknown, or another command error.`,
 			if hostErr != nil {
 				return hostErr
 			}
-			receipt, err = messaging.Send(cmd.Context(), host, request)
+			receipt, err = messaging.Send(cmd.Context(), sysenv.OS(), host, request)
 			if messageRequestJSON && err != nil {
 				feltErrorCode = messaging.ErrorCode(err)
 			}

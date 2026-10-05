@@ -11,6 +11,7 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -349,7 +350,7 @@ func checkArmable(fiberID, verb string, block *shuttle.Block) error {
 	if strings.TrimSpace(block.ProjectDir) == "" {
 		return fmt.Errorf("cannot arm %s: its shuttle: block has no project_dir (set it as you arm it: shuttle %s %s --project-dir <dir>)", fiberID, verb, fiberID)
 	}
-	reg, err := shuttle.LoadAgentRegistry()
+	reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 	if err != nil {
 		return err
 	}
@@ -782,7 +783,7 @@ agent without starting or replacing a worker.`,
 		if routed, err := forwardLifecycleAction(cmd, args, owner, "set-model", f, map[string]any{"agent": args[1]}); routed || err != nil {
 			return err
 		}
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
@@ -887,7 +888,7 @@ or replace a worker.`,
 				return err
 			}
 		}
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}
@@ -1036,7 +1037,7 @@ pause / resume / close / reopen for that.`,
 				return err
 			}
 		}
-		reg, err := shuttle.LoadAgentRegistry()
+		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
 		if err != nil {
 			return fmt.Errorf("loading agent registry: %w", err)
 		}

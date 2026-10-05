@@ -12,6 +12,7 @@ import (
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -200,7 +201,7 @@ type hostSettings struct {
 	Listen       string `json:"listen"`
 	ListenSource string `json:"listen_source"`
 	File         string `json:"file"`
-	// DataDir is shuttle.DataDir(): the resolved host-local state directory, so
+	// DataDir is shuttle.DataDir(sysenv.OS()): the resolved host-local state directory, so
 	// a shell (the stop-marker writers) applies the same trim and leading-~
 	// rule the CLI and the daemon share. Empty when it cannot be resolved.
 	DataDir string `json:"data_dir"`
@@ -295,7 +296,7 @@ func resolveHostSettings() (hostSettings, error) {
 		return hostSettings{}, err
 	}
 	s := hostSettings{File: path, Class: string(hostClassSingleUser), ClassSource: hostSourceDefault}
-	if dir, err := shuttle.DataDir(); err == nil {
+	if dir, err := shuttle.DataDir(sysenv.OS()); err == nil {
 		s.DataDir = dir
 	}
 
@@ -346,7 +347,7 @@ func resolveHostSettings() (hostSettings, error) {
 // classDefaultListen is the listener a class gets when nothing overrides it.
 func classDefaultListen(class hostClass) (listenAddr, error) {
 	if class.usesSocket() {
-		dir, err := shuttle.DataDir()
+		dir, err := shuttle.DataDir(sysenv.OS())
 		if err != nil {
 			return listenAddr{}, err
 		}

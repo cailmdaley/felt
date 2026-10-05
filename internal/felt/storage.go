@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -2240,9 +2241,10 @@ func displayScope(scopeID string) string {
 	return scopeID
 }
 
-// FindProjectRoot walks up from the current directory to find a .felt directory.
-func FindProjectRoot() (string, error) {
-	dir, err := os.Getwd()
+// FindProjectRoot walks up from env's working directory to find a .felt
+// directory.
+func FindProjectRoot(env *sysenv.Env) (string, error) {
+	dir, err := env.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("getting working directory: %w", err)
 	}
