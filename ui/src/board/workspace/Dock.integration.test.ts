@@ -124,7 +124,8 @@ describe('Dock dispatch recovery', () => {
     expect(verb.disabled).toBe(true)
     dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
     expect(verb.disabled).toBe(false)
-    expect(verb.textContent).toBe(label)
+    // The verb names the state it now stands in: a live session makes a fresh start the secondary "New session".
+    expect(verb.textContent).toBe(name === 'Resume' ? label : 'New session')
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
   })
 })
@@ -157,6 +158,20 @@ describe('state-shaped act zone', () => {
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
+  })
+  it.each([
+    ['drafts', { status: 'open' }, ['Launch ↵']],
+    ['pinned with a session', { status: 'active', shuttleKind: 'pinned', sessionUuid: 's' }, ['New session', 'Resume ↵']],
+    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session', 'Resume ↵']],
+    ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
+    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session', 'Resume ↵']],
+    ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
+  ] as const)('offers a sensible verb set: %s', (_name, patch, verbs) => {
+    band = dock.bandFor(task(patch as Partial<KanbanCard>))
+    const shown = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-sends button')].filter(b => !b.hidden)
+    expect(shown.map(b => b.textContent)).toEqual(verbs)
+    const fresh = shown[0]
+    expect(fresh.classList.contains('kbn-ctl-secondary')).toBe(verbs.length > 1)
   })
   it('Enter resumes the named session and Alt-Enter explicitly starts fresh', async () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))

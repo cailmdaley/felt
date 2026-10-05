@@ -705,6 +705,7 @@ export class Dock {
         blocked.error.style.display = 'none'
       }
       this.blockedDispatches.delete(button)
+      this.composerPaint?.()
     }
     this.workerPillCard = card
     this.paintGuidance(card)
@@ -896,8 +897,11 @@ export class Dock {
     this.composerPaint = () => {
       const draft = fiberPageColumn(card) === 'drafts'
       const resumable = !draft && Boolean(card.sessionUuid)
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : 'Start ↵'
-      fresh.hidden = resumable
+      // A resumable session makes Resume the default verb; a fresh session
+      // stays beside it as the secondary verb (⌥↵).
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : resumable ? 'New session' : 'Start ↵'
+      fresh.classList.toggle('kbn-ctl-secondary', resumable)
+      fresh.title = resumable ? 'Start a new session (⌥↵)' : ''
       resume.hidden = !resumable
       message.placeholder = fiberPageColumn(card) === 'awaitingReview'
         ? resumable ? 'Reply and resume…' : 'Reply and start…'

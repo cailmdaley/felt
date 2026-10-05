@@ -256,6 +256,10 @@
 .ws-dock .kbn-ctl-composer .kbn-ctl-composer-foot { padding-right: 0; }
 .ws-dock .kbn-ctl-sends { border: 0; overflow: visible; }
 .ws-dock .kbn-ctl-sends .kbn-ctl-btn { border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-fill); }
+/* Beside a resumable session, a new session is the quieter, secondary verb. */
+.ws-dock .kbn-ctl-sends { gap: var(--ws-small-gap); }
+.ws-dock .kbn-ctl-sends .kbn-ctl-btn.kbn-ctl-secondary { background: transparent; color: var(--ws-ink-muted); }
+.ws-dock .kbn-ctl-sends .kbn-ctl-btn.kbn-ctl-secondary:hover:not(:disabled) { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn { position: relative; font-size: 0 !important; background-image: none; padding: 0; width: 36px; border: 1px solid var(--ws-hairline); }
 .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn::before { content: ''; position: absolute; left: calc(50% - 3px); top: calc(50% - 8px); width: 6px; height: 11px; border: 1px solid currentColor; border-radius: 4px; }
 .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn::after { content: ''; position: absolute; left: calc(50% - 6px); top: calc(50% - 3px); width: 12px; height: 9px; border: 1px solid currentColor; border-top: 0; border-radius: 0 0 8px 8px; box-shadow: 0 5px 0 -4px currentColor; }
@@ -272,4 +276,6 @@
   .ws-dock .kbn-ctl-composer:not(:has(.kbn-ctl-microphone)) { grid-template-columns: minmax(0, 1fr) auto; }
   .ws-dock .kbn-ctl-composer:not(:focus-within, .kbn-ctl-composer-draft):not(:has(.kbn-ctl-microphone)) .kbn-ctl-composer-foot { grid-column: 2; }
   .ws-dock .kbn-ctl-verdict .kbn-ctl-btn, .ws-dock .kbn-ctl-verdict-menu summary, .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn { min-height: 44px; min-width: 44px; }
+  /* Two verbs take their own row, so the resting composer keeps its prompt legible. */
+  .ws-dock .kbn-ctl-composer:has(.kbn-ctl-secondary) .kbn-ctl-composer-foot { grid-column: 1 / -1 !important; grid-row: auto !important; }
 }
