@@ -147,6 +147,8 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
                  {:error, reason}
 
         assert Default.get_file("https://hub.example.invalid/x", 1_000) == {:error, reason}
+
+        assert Default.head_file("https://hub.example.invalid/x", [], 1_000) == {:error, reason}
       end
     end
 

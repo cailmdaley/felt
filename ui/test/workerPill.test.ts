@@ -1,13 +1,8 @@
 /**
- * The terminal worker's pill under a mouse and under a finger, checked against
- * the touch stylesheet that decides whether a tap on it lands.
- *
- * There is no DOM here, so the pill is built on a minimal fake document and
- * the stylesheet's `@media (pointer: coarse)` rules are matched against it by
- * a small compound-selector matcher (tag, class, attribute, `:not()`).
- * Out here rather than beside the code for the reason `mobileMedia.test.ts`
- * gives: it reads the stylesheets. The in-browser check is
- * `npm run harness:board`, then `node scripts/check-worker-tap.mjs`.
+ * Check the terminal worker pill against the touch stylesheet on a fake DOM.
+ * The matcher covers the compound selectors used by coarse-pointer rules.
+ * The in-browser check runs with `npm run harness:board` and
+ * `node scripts/check-worker-tap.mjs`.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -95,9 +90,22 @@ function coarseDeclarations(el: FakeElement, css: string): Map<string, string> {
   return out
 }
 
-const TOUCH_CSS = ['KanbanModal.css', 'FiberDetailModal.css']
-  .map((file) => readFileSync(fileURLToPath(new URL(`../src/board/${file}`, import.meta.url)), 'utf8'))
-  .join('\n')
+function readBoardCss(file: string): string {
+  return readFileSync(fileURLToPath(new URL(`../src/board/${file}`, import.meta.url)), 'utf8')
+}
+
+function declarationsFor(selector: string, css: string): string {
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  return [...clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((rule) => rule[1].trim() === selector)
+    .map((rule) => rule[2])
+    .join(';')
+}
+
+const DOCK_CSS = readBoardCss('workspace/dock.css')
+const READER_CSS = readBoardCss('workspace/reader.css')
+const TOKENS_CSS = readBoardCss('workspace/tokens.css')
+const TOUCH_CSS = [readBoardCss('KanbanModal.css'), DOCK_CSS, READER_CSS].join('\n')
 const LINK = 'https://claude.ai/code/session_bridged'
 const now = Date.now()
 const worker = (phase: string, sessionLink?: string) => ({
@@ -107,10 +115,10 @@ const worker = (phase: string, sessionLink?: string) => ({
   shuttleHost: 'workstation',
   sessionLink,
 })
-/** Where the pill is built: the Desk card, and the open card's header. */
+/** Where the pill is built: the Desk card and the fiber page's controls. */
 const SURFACES = [
   ['Desk card', {}],
-  ['open card', { classes: 'kbn-detail-aloft' }],
+  ['fiber page controls', {}],
 ] as const
 
 afterEach(() => vi.unstubAllGlobals())
@@ -139,18 +147,22 @@ describe('the terminal worker pill under a finger', () => {
     }
   })
 
-  it('gives the open card\'s link a 44px target band, and the Desk card\'s none', () => {
-    useDevice(PHONE_PORTRAIT)
-    const code = TOUCH_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
-    const bands = [...code.matchAll(/([^{}]+)::after\s*\{([^}]*)\}/g)]
-      .filter(([, , body]) => /calc\(50% - 22px\)/.test(body))
-      .map(([, selector]) => selector.trim())
-    expect(bands).toEqual(['a.kbn-detail-aloft[href]'])
-    const open = terminalWorkerPill(worker('waiting', LINK), { classes: 'kbn-detail-aloft' }) as unknown as FakeElement
-    const desk = terminalWorkerPill(worker('waiting', LINK)) as unknown as FakeElement
-    expect(matchesCompound(open, bands[0])).toBe(true)
-    expect(matchesCompound(desk, bands[0])).toBe(false)
-  })
+  for (const [deviceName, device] of [['phone', PHONE_PORTRAIT], ['iPad', IPAD_PORTRAIT]] as const) {
+    it(`gives the fiber page worker pill a 44px touch target on ${deviceName}`, () => {
+      useDevice(device)
+      const phoneMedia = DOCK_CSS.match(
+        /@media\s*\(max-width:\s*700px\),\s*\(max-height:\s*500px\)\s*and\s*\(pointer:\s*coarse\)\s*\{([\s\S]*)\n\}\s*$/,
+      )?.[1] ?? ''
+      const fiberPill = terminalWorkerPill(worker('waiting', LINK)) as unknown as FakeElement
+
+      expect(fiberPill.classes).toContain('kbn-card-worker')
+      expect(declarationsFor('.ws-dock', phoneMedia)).toMatch(/--ctl-h:\s*var\(--ws-phone-target\)/)
+      expect(declarationsFor('.ws-dock .kbn-card-worker', DOCK_CSS)).toMatch(/min-height:\s*var\(--ctl-h\)/)
+      expect(coarseDeclarations(fiberPill, DOCK_CSS).get('min-height')).toBe('var(--ws-phone-target)')
+      expect(coarseDeclarations(fiberPill, READER_CSS).get('min-height')).toBe('var(--ws-phone-target)')
+      expect(TOKENS_CSS).toMatch(/--ws-phone-target:\s*44px/)
+    })
+  }
 })
 
 describe('the terminal worker pill under a mouse', () => {

@@ -183,7 +183,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     // shuttle.runtime — the machine-managed nested block (session_uuid,
     // dispatched_at, handed_off_at, run_id). Readers read ONLY the nested
     // form; nothing writes the retired flat keys. Two instants surface on the
-    // board: they bound the session window the detail panel prints.
+    // board: they bound the session window the fiber page prints.
     const runtime = s.runtime;
     if (runtime && typeof runtime === 'object' && !Array.isArray(runtime)) {
       const r = runtime as Record<string, unknown>;

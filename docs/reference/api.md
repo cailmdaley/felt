@@ -422,10 +422,10 @@ sibling of `/transcript` because that receipt hashes the whole file.
 
 ## Temporal read plane
 
-The feeds behind Chronicle and the Board canvas. The four host-scoped feeds
-each have a `/composite` fan-in sibling; `/sent-files` is owner-routed instead
-and has none. See [Telemetry and the ledgers](../shuttle/telemetry.md) for what
-writes the files underneath.
+The feeds behind Chronicle and the Board's document overview and reader. The
+four host-scoped feeds each have a `/composite` fan-in sibling; `/sent-files`
+is owner-routed instead and has none. See [Telemetry and the
+ledgers](../shuttle/telemetry.md) for what writes the files underneath.
 
 | Route | Reads | Serves |
 |---|---|---|

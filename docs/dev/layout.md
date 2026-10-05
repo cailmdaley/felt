@@ -33,7 +33,8 @@ felt/
 ├── ui/                      TypeScript board; npm run build produces ui/dist
 │   ├── src/board/views/     temporal and artifact views
 │   ├── src/phone/           browser microphone, PCM worklet, relay, and audio session
-│   └── harness/             offline visual-verification harnesses
+│   ├── harness/             offline visual-verification harnesses
+│   └── e2e/                 document workspace browser suite
 ├── claude-plugin/           Claude Code and Codex plugin payload
 ├── scripts/                 bootstrap, release, and verification tooling
 └── docs/                    documentation, artwork, and mkdocs.yml
@@ -46,10 +47,9 @@ Run root Make targets for the daily loop; run direct Mix commands inside `daemon
 `make build SKIP_UI=1` leaves the bundle to whatever put it there.
 The documentation builds from the root with `mkdocs build -f docs/mkdocs.yml`.
 
-The UI harnesses mount real components against a mocked daemon.
-Run `npm run harness` or `npm run harness:board` inside `ui/` to build
-self-contained bundles in `ui/harness-dist/` and `ui/harness-board-dist/`.
-They open over `file://` without a running daemon.
+The board harness mounts the real board against a mocked daemon.
+Run `npm run harness:board` inside `ui/` to build a self-contained bundle in
+`ui/harness-board-dist/`. It opens over `file://` without a running daemon.
 
 ## Tests
 
@@ -60,6 +60,7 @@ make mix-test              # full Elixir suite; shells both CLIs on PATH, so `ma
 (cd daemon && mix test --only focus)  # tagged subset
 (cd ui && npm test)        # the board suite; runs vitest TWICE, under two
                            # pinned TZs (America/Los_Angeles, Europe/Paris)
+(cd ui && npm run e2e)     # builds the file:// harness and tests the workspace in system Chrome
 make plugin-hooks-test     # shell shims, Pi adapter, handoff policy and transcript pipe tests
 bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandboxed
 node extensions/pi/real-handoff.mjs  # opt-in real Pi engine; isolated synthetic provider, no credentials
@@ -75,6 +76,10 @@ second pinned offset is where the civil-day logic breaks, so a hand-run `npx
 vitest run` can go green on a change `make test` would fail. CI runs `npm test`
 under America/Los_Angeles and Europe/Paris, then type-checks and builds the
 bundle with `npm run build`.
+
+The browser suite uses `playwright-core`, a fixed clock, and Europe/Paris time.
+Set `CHROME_PATH` to override the system Chrome executable.
+It tests a mocked daemon and never operates real fibers.
 
 ### The stranger test: bootstrap in a clean container
 

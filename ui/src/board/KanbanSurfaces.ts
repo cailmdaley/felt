@@ -3,7 +3,6 @@ import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
   civilDayToLocalDate,
-  descByKey,
   dueCivilDay,
   dueSortMs,
   instantMs,
@@ -46,7 +45,7 @@ import type {
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
-import { deriveCycleLens, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { byCreatedAtDesc, deriveCycleLens, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
 import type { PhoneMeeting } from './phoneMeeting'
 import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
@@ -200,8 +199,8 @@ interface KanbanSurfaceRendererOptions {
     horizon: HorizonKind,
     opts?: { cold?: boolean; due?: string | null },
   ) => void | Promise<void>
-  /** Reshape a fiber to a resting `kind:pinned` role — the drag-onto-the-
-   *  Pinned-strip gesture. The off-the-shelf twin of `setSurface`/`transition`. */
+  /** Reshape a fiber to a resting `kind:pinned` role with the Pinned-strip
+   *  gesture, alongside `setSurface` and `transition`. */
   pin: (card: KanbanCard) => void | Promise<void>
   /** Author a sequence edge — `card.depends_on = tailId`, the card-onto-card
    *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
@@ -608,8 +607,8 @@ export class KanbanSurfaceRenderer {
    *  chips. These are schedule-less `kind:pinned` roles the poller never
    *  auto-fires; you dispatch one by dragging it onto the Now In-flight column
    *  (the chips are draggable and `findCardColumn` returns 'pinned' so the drag
-   *  routes through `transition(card,'inFlight')`). Chips are stable-ordered by
-   *  fiber path so the launcher band holds still, and EVERY ONE OF THEM
+   *  routes through `transition(card,'inFlight')`). Chips follow the read
+   *  model's creation order, and EVERY ONE OF THEM
    *  RENDERS — no row cap, no "+N more" pager, because a launcher runs on
    *  muscle memory and a role you reach for daily must never be on page 2. The
    *  band wraps to as many rows as the pinned set needs. ALWAYS rendered — even
@@ -639,22 +638,15 @@ export class KanbanSurfaceRenderer {
       hint.textContent = 'Drag a role here to park it on the strip'
       row.append(hint)
     } else {
-      // Stable ordering by fiber path (id) so the launcher band holds still —
-      // pinned is a *launcher*, and muscle memory only works if a role sits in
-      // the same place every visit. The read model's most-recently-used order
-      // would shuffle chips out from under the user's hand.
-      const ordered = [...pinned].sort((a, b) => a.id.localeCompare(b.id))
-      for (const card of ordered) row.append(this.renderPinnedChip(card, staleness[card.originId]))
+      for (const card of pinned) row.append(this.renderPinnedChip(card, staleness[card.originId]))
     }
     section.append(row)
-    // The "onto the shelf" half of the Pinned strip: dropping a card here
-    // reshapes it to a resting `kind:pinned` role via `reshape` — the off-write
-    // twin of dragging a pinned card onto In-flight (which dispatches it), and
-    // a `/lifecycle` reshape rather than the `/felt-edit` field the Now and
-    // Resting shelves write. A card already on the strip is handled inside
-    // pinRole, which banners "already pinned" rather than no-opping silently.
-    // NO `rowDrop`: a peek row never arms `dragSourceId`, so the shelf stays
-    // inert for it and the release passes through — deliberately.
+    // Dropping a card on the Pinned strip reshapes it to a resting
+    // `kind:pinned` role via `reshape` — the sibling of dragging a pinned card
+    // onto In-flight (which dispatches it), and a `/lifecycle` reshape rather
+    // than the `/felt-edit` field that Now and Resting write. A card already on
+    // the strip is handled inside `pinRole`, which reports "already pinned".
+    // No `rowDrop`: a peek row never arms `dragSourceId`, so it cannot land here.
     this.installSectionDragHandlers(section, {
       skipColHead: false,
       commit: (card) => void this.o.pin(card),
@@ -692,6 +684,8 @@ export class KanbanSurfaceRenderer {
     el.type = 'button'
     el.className = `kbn-pin-chip${isAgent ? ' kbn-pin-chip-agent' : ' kbn-pin-chip-human'}${isStale ? ' kbn-card--stale' : ''}`
     el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
     el.setAttribute('role', 'listitem')
     el.draggable = !isStale && !coarsePointer()
     el.title = card.outcome ? `${card.name} — ${card.outcome}` : card.name
@@ -1048,11 +1042,9 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Install drop handlers on a shelf (Now, Resting, Pinned) — drop anywhere
-   *  inside it that isn't a column header and `commit` writes the shelf's
-   *  meaning for the card. `rowDrop`, when given, also accepts a peek-list row
-   *  (which leaves the queue and takes that horizon); its absence keeps the
-   *  shelf inert for a row, since a row never arms `dragSourceId`. */
+  /** Install drop handlers on a section (Now, Resting, Pinned). A drop outside
+   *  a column header calls `commit`; `rowDrop` also accepts a peek-list row,
+   *  which leaves the queue and takes that horizon. */
   private installSectionDragHandlers(
     section: HTMLElement,
     spec: {
@@ -1078,8 +1070,8 @@ export class KanbanSurfaceRenderer {
     section.addEventListener('drop', (e) => {
       if (overHead(e)) return
       section.classList.remove('kbn-section-drop')
-      // A peek-list row landing here leaves the queue; the shelf still means
-      // what it means (Now surfaces the card, Resting keeps it at rest).
+      // A peek-list row landing here leaves the queue; Now surfaces the card,
+      // while Resting keeps it at rest.
       if (rowInFlight() && spec.rowDrop) {
         e.preventDefault()
         this.handleQueueRowDropOut({ horizon: spec.rowDrop })
@@ -1266,6 +1258,8 @@ export class KanbanSurfaceRenderer {
     if (sleeping) el.classList.add('kbn-cluster-item-standing')
     el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
     el.title = card.name
     el.setAttribute('role', 'listitem')
     el.setAttribute('aria-label', card.name)
@@ -1422,7 +1416,7 @@ export class KanbanSurfaceRenderer {
           : 'Work returns here when its agent hands it back for review.'
       list.append(empty)
     } else {
-      for (const card of cards) {
+      const appendCard = (parent: HTMLElement, card: KanbanCard): void => {
         const hostsMeeting = meeting !== null && card.id === this.meetingHostId
         const el = this.renderCard(card, kind, staleness[card.originId], {
           // A lensed column recedes what the cycle does not claim. The card
@@ -1431,7 +1425,31 @@ export class KanbanSurfaceRenderer {
           dim: !hostsMeeting && lens !== null && !lens.memberIds.has(card.id),
         })
         if (hostsMeeting) this.hostMeeting(el, meeting)
-        list.append(el)
+        parent.append(el)
+      }
+      if (kind === 'inFlight') {
+        // The read model owns order within each band. These captions expose
+        // the one state change that can move a card across the seam.
+        for (const [key, label] of [['needsYou', 'Needs you'], ['working', 'Working']] as const) {
+          const members = cards.filter((card) => inFlightBand(card) === key)
+          if (members.length === 0) continue
+          const band = document.createElement('div')
+          band.className = 'kbn-flight-band'
+          band.dataset.flightBand = key
+          band.setAttribute('role', 'listitem')
+          const caption = document.createElement('h3')
+          caption.className = 'kbn-flight-caption'
+          caption.textContent = label
+          const bandList = document.createElement('div')
+          bandList.className = 'kbn-flight-band-list'
+          bandList.setAttribute('role', 'list')
+          bandList.setAttribute('aria-label', label)
+          for (const card of members) appendCard(bandList, card)
+          band.append(caption, bandList)
+          list.append(band)
+        }
+      } else {
+        for (const card of cards) appendCard(list, card)
       }
       // Ghosts sit AFTER the real cards: they are not on this column, they are
       // being shown as belonging to the chapter you are looking at.
@@ -1694,8 +1712,9 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * Render one grid card. Title click opens the reading surface in vellum;
-   * body click opens the action detail modal.
+   * Render one grid card. Clicking it opens the document workspace reader;
+   * the worker pill opens its conversation, and fiber controls live inline on
+   * the fiber page.
    */
   private renderCard(
     card: KanbanCard,
@@ -1720,6 +1739,8 @@ export class KanbanSurfaceRenderer {
     // touch path to the same transitions (`onCardLongPress`).
     el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
     // A fiber in a git-synced store is served by every daemon holding it. The
     // board shows one card (see `dedupeMirroredRows`); say on hover where else
     // it lives, so "one card" doesn't read as "the other host lost it".
@@ -1748,10 +1769,8 @@ export class KanbanSurfaceRenderer {
     glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
     glyph.textContent = isAgentCard(card) ? '◐' : '✓'
 
-    // The title is plain text — clicking anywhere on the card (title
-    // included) opens the fiber-detail panel, which IS the fiber as a
-    // vellum page; drill-out to the full workspace lives in the panel (id
-    // slug, dropdown, wikilinks).
+    // Clicking the title opens the document workspace reader. The fiber page
+    // carries its controls inline, and the worker pill opens the conversation.
     const name = document.createElement('span')
     name.className = 'kbn-card-name'
     name.textContent = card.name
@@ -2124,6 +2143,10 @@ export class KanbanSurfaceRenderer {
       // place some of these fibers appear on the board at all (the fold draws
       // them here and nowhere else), so it has to be a way in.
       const member = members[i]
+      if (member) {
+        li.dataset.cardUid = member.uid ?? member.id
+        li.dataset.cardOrigin = member.originId
+      }
       li.addEventListener('click', (e) => {
         e.stopPropagation()
         if (member) this.o.openDetail(member)
@@ -2789,9 +2812,11 @@ function returnMs(card: KanbanCard): number | undefined {
  *  warm/cold split) is untouched; only the order of clusters and the cards
  *  within each is affected. */
 export function sortDatedByReturn(clusters: StashCluster[]): StashCluster[] {
+  const byReturn = (a: KanbanCard, b: KanbanCard): number =>
+    ascByKey(returnMs(a), returnMs(b)) || byCreatedAtDesc(a, b)
   return clusters
-    .map((c) => ({ ...c, cards: [...c.cards].sort((a, b) => ascByKey(returnMs(a), returnMs(b))) }))
-    .sort((a, b) => ascByKey(returnMs(a.cards[0]), returnMs(b.cards[0])))
+    .map((c) => ({ ...c, cards: [...c.cards].sort(byReturn) }))
+    .sort((a, b) => a.cold !== b.cold ? (a.cold ? 1 : -1) : byReturn(a.cards[0], b.cards[0]))
 }
 
 /**
@@ -2822,14 +2847,11 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
     }
   }
   for (const c of out) {
-    // `createdAt` is an INSTANT: compare epoch ms, never the RFC3339 strings —
-    // a string compare orders by local wall clock, so a Berkeley-created fiber
-    // sinks below an older Paris one (see civilDay.ts).
-    c.cards.sort((a, b) => descByKey(instantMs(a.createdAt), instantMs(b.createdAt)))
+    c.cards.sort(byCreatedAtDesc)
   }
   out.sort((a, b) => {
     if (a.cold !== b.cold) return a.cold ? 1 : -1
-    return descByKey(instantMs(a.cards[0]?.createdAt), instantMs(b.cards[0]?.createdAt))
+    return byCreatedAtDesc(a.cards[0], b.cards[0])
   })
   return out
 }

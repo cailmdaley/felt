@@ -19,10 +19,14 @@ defmodule Shuttle.Test.StubGetFileClient do
   def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
   def last, do: Agent.get(__MODULE__, & &1.last)
 
-  def get_file(url, _timeout_ms), do: get_file(url, [], 0)
+  def get_file(url, timeout_ms), do: get_file(url, [], timeout_ms)
 
-  def get_file(url, req_headers, _timeout_ms) do
-    Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, headers: req_headers}))
+  def get_file(url, req_headers, timeout_ms) do
+    Agent.update(
+      __MODULE__,
+      &Map.put(&1, :last, %{url: url, headers: req_headers, timeout: timeout_ms})
+    )
+
     Agent.get(__MODULE__, & &1.response)
   end
 end

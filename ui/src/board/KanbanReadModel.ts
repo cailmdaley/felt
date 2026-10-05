@@ -133,8 +133,9 @@ export function buildKanbanResponseFromComposite(
  * looks fine, so which card you happened to grab decided whether the gesture
  * worked.
  *
- * Identity is `uid` (felt's intrinsic ULID, stable across stores) falling back
- * to the slug id for the handful of rows that predate uids. The survivor is
+ * Identity is `uid` (felt's intrinsic ULID, stable across stores). Without a
+ * uid, only rows from the same origin with the same id can be identified as
+ * one fiber: unrelated host-local paths must not collapse. The survivor is
  * chosen by a fixed precedence, because "whichever the feed listed first" is
  * how you get a board that reshuffles between polls:
  *
@@ -143,7 +144,7 @@ export function buildKanbanResponseFromComposite(
  *   2. failing that, a row from a FRESH origin over a stale one — a stale
  *      origin's rows are last-known-good, which is exactly what you don't want
  *      to show when a live copy exists;
- *   3. failing that, the newest `modified_at`.
+ *   3. failing that, the newest valid `modified_at`, then origin and id.
  *
  * The losing origin is not discarded silently: it rides on `mirroredOrigins` so
  * the card can say where else this fiber lives.
@@ -187,29 +188,31 @@ export function dedupeMirroredRows(
     isOwner(e) ? 0 : isLocal(e.origin) ? 1 : isStale(e.origin) ? 3 : 2;
 
   const winners = new Map<string, CompositeEntry>();
-  const alsoOn = new Map<string, string[]>();
+  const alsoOn = new Map<string, Set<string>>();
   for (const entry of entries) {
-    const key = entry.fiber.uid ?? entry.fiber.id;
+    const key = entry.fiber.uid
+      ? `uid:${entry.fiber.uid}`
+      : JSON.stringify([entry.origin, entry.fiber.id]);
     const held = winners.get(key);
     if (!held) {
       winners.set(key, entry);
       continue;
     }
-    alsoOn.set(key, [...(alsoOn.get(key) ?? []), entry.origin]);
-    const heldRank = rank(held);
-    const mineRank = rank(entry);
-    const better =
-      mineRank !== heldRank
-        ? mineRank < heldRank
-        : (instantMs(entry.fiber.modifiedAt) ?? 0) > (instantMs(held.fiber.modifiedAt) ?? 0);
-    if (better) {
-      winners.set(key, entry);
-      alsoOn.set(key, [...(alsoOn.get(key) ?? []).filter((o) => o !== entry.origin), held.origin]);
-    }
+    const origins = alsoOn.get(key) ?? new Set<string>();
+    origins.add(held.origin);
+    origins.add(entry.origin);
+    alsoOn.set(key, origins);
+    const precedence = rank(entry) - rank(held)
+      || descByKey(instantMs(entry.fiber.modifiedAt), instantMs(held.fiber.modifiedAt))
+      || compareText(entry.origin, held.origin)
+      || compareText(entry.fiber.id, held.fiber.id);
+    if (precedence < 0) winners.set(key, entry);
   }
 
   return [...winners.entries()].map(([key, entry]) => {
-    const others = alsoOn.get(key);
+    const others = [...(alsoOn.get(key) ?? [])]
+      .filter((origin) => origin !== entry.origin)
+      .sort(compareText);
     // A row that is not the owner's cannot speak for an owned fiber's liveness
     // in either direction: it has no tmux session to report, and a `runtime` on
     // it (an old leaky daemon, a renamed host) would invent a worker that this
@@ -323,50 +326,13 @@ function assembleSurfaces(
   folded.sort(byCreatedAtDesc);
 
   scheduled.sort(byCreatedAtDesc);
-  // Pinned strip: most-recently-used first. A running role leaves the strip and
-  // returns (re-armed) when accepted, freshly touched, so recent activity floats
-  // the roles you actually use to the reachable left edge. Tie-break by name for
-  // stability among never-run roles.
-  pinned.sort(byRecentActivityThenName);
+  // Desk has no persisted human arrangement; pinned launchers use creation
+  // order, just like drafts. Neither activity nor a renamed path moves them.
+  pinned.sort(byCreatedAtDesc);
   drafts.sort(byCreatedAtDesc);
-  // In-flight order surfaces the workers most likely to need the human at the TOP and
-  // sinks the busy ones to the bottom — the inverse of a newest-first list.
-  //   tier 0  attention / — the worker raised its hand (last hook event is a
-  //           blocked       Notification), or its app launch is blocked on a
-  //                         human. Pinned to the very top.
-  //   tier 1  waiting     — the worker is STOPPED (last event stop/subagent_
-  //                         stop). Ranked CONTINUOUSLY by idle = nowMs −
-  //                         lastActivityAt, longest-stopped first: a review
-  //                         abandoned 24h ago beats one stopped 30s ago.
-  //   tier 2  working +   — a worker mid-tool (last event pre/post_tool_use /
-  //           everything    prompt / session_start) is BUSY, not idle, so it
-  //           else          sinks here regardless of how long its long-running
-  //                         tool has been going — the CATEGORY, not raw wall-
-  //                         clock, is what guards against a mid-tool worker
-  //                         being mistaken for idle. A worker with no phase
-  //                         yet, and an armed card with no worker, land here
-  //                         too and fall through to the active / createdAt
-  //                         tiebreaks.
-  // 60s is ONLY the chip threshold (KanbanSurfaces); the sort is continuous, so
-  // a worker stopped 30s still ranks above a working one — just without a chip.
-  const inFlightActivityRank = (card: KanbanCard): { tier: number; idle: number } => {
-    if (card.runtimePhase === 'attention' || card.runtimePhase === 'blocked') return { tier: 0, idle: 0 };
-    if (card.runtimePhase === 'waiting') {
-      const idle = card.lastActivityAt !== undefined ? nowMs - card.lastActivityAt : 0;
-      return { tier: 1, idle };
-    }
-    return { tier: 2, idle: 0 };
-  };
-  inFlight.sort((a, b) => {
-    const aRank = inFlightActivityRank(a);
-    const bRank = inFlightActivityRank(b);
-    if (aRank.tier !== bRank.tier) return aRank.tier - bRank.tier;
-    if (aRank.tier === 1 && aRank.idle !== bRank.idle) return bRank.idle - aRank.idle; // longest-stopped first
-    const aActive = hasLiveWorker(a) || a.status === 'active' ? 0 : 1;
-    const bActive = hasLiveWorker(b) || b.status === 'active' ? 0 : 1;
-    if (aActive !== bActive) return aActive - bActive;
-    return byCreatedAtDesc(a, b);
-  });
+  // A card moves only when it crosses the visible Needs you / Working seam.
+  // Activity age and phase changes within a band do not change its position.
+  inFlight.sort(byInFlightBand);
   awaitingReview.sort(byClosedAtDesc);
   tempered.sort(byClosedAtDesc);
   composted.sort(byClosedAtDesc);
@@ -389,12 +355,11 @@ function assembleSurfaces(
   futureDated.sort(byDueAtAsc);
 
   // Cycles are the calendar's backdrop, so they read left to right: earliest
-  // band first, ties broken by name so the order holds still across polls.
+  // band first, with identity ties and absent dates last.
   cycles.sort((a, b) => {
-    const aStart = a.cycleStart ?? dueCivilDay(a.due) ?? '';
-    const bStart = b.cycleStart ?? dueCivilDay(b.due) ?? '';
-    if (aStart !== bStart) return aStart < bStart ? -1 : 1;
-    return (a.name || '').localeCompare(b.name || '');
+    const aStart = dueSortMs(a.cycleStart ?? a.due);
+    const bStart = dueSortMs(b.cycleStart ?? b.due);
+    return ascByKey(aStart, bStart) || byCardIdentity(a, b);
   });
 
   return {
@@ -750,7 +715,7 @@ function originStaleness(name: string, origin: CompositeOrigin): KanbanOriginSta
     : { status, hostname: name };
 }
 
-// `createdAt` / `modifiedAt` / `closedAt` / `nextLaunchAt` are INSTANTS. Order
+// `createdAt` / `closedAt` / `nextLaunchAt` are INSTANTS. Order
 // them by epoch milliseconds, never by the RFC3339 string: the string carries
 // an offset, so a lexicographic compare orders by LOCAL WALL CLOCK.
 // `2026-07-27T09:00:00-07:00` sorts below `2026-07-27T18:00:00+02:00` although
@@ -759,21 +724,39 @@ function originStaleness(name: string, origin: CompositeOrigin): KanbanOriginSta
 // civilDay.ts. `due:` is the exception — a civil day, keyed by its local
 // midnight, not by an instant.
 
-export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
-  return descByKey(instantMs(a.createdAt), instantMs(b.createdAt));
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
-export function byRecentActivityThenName(a: KanbanCard, b: KanbanCard): number {
-  const aT = instantMs(a.modifiedAt) ?? instantMs(a.createdAt);
-  const bT = instantMs(b.modifiedAt) ?? instantMs(b.createdAt);
-  if (aT !== bT) return descByKey(aT, bT);
-  return (a.name || '').localeCompare(b.name || '');
+/** Locale-independent identity order, including distinct host-local ids. */
+export function byCardIdentity(a: KanbanCard, b: KanbanCard): number {
+  return compareText(a.uid ?? '', b.uid ?? '')
+    || compareText(a.originId ?? '', b.originId ?? '')
+    || compareText(a.id, b.id);
+}
+
+export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
+  return descByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || byCardIdentity(a, b);
+}
+
+export type InFlightBand = 'needsYou' | 'working';
+
+export function inFlightBand(card: KanbanCard): InFlightBand {
+  return card.runtimePhase === 'waiting' || card.runtimePhase === 'blocked' || card.runtimePhase === 'attention'
+    ? 'needsYou'
+    : 'working';
+}
+
+export function byInFlightBand(a: KanbanCard, b: KanbanCard): number {
+  const aBand = inFlightBand(a);
+  const bBand = inFlightBand(b);
+  return (aBand === bBand ? 0 : aBand === 'needsYou' ? -1 : 1) || byCreatedAtDesc(a, b);
 }
 
 export function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {
   const aT = instantMs(a.closedAt) ?? instantMs(a.createdAt);
   const bT = instantMs(b.closedAt) ?? instantMs(b.createdAt);
-  return descByKey(aT, bT);
+  return descByKey(aT, bT) || byCardIdentity(a, b);
 }
 
 export function byDueAtAsc(a: KanbanCard, b: KanbanCard): number {
@@ -782,7 +765,7 @@ export function byDueAtAsc(a: KanbanCard, b: KanbanCard): number {
   // the two are comparable on one axis.
   const aT = a.nextLaunchAt ? instantMs(a.nextLaunchAt) : dueSortMs(a.due);
   const bT = b.nextLaunchAt ? instantMs(b.nextLaunchAt) : dueSortMs(b.due);
-  return ascByKey(aT, bT);
+  return ascByKey(aT, bT) || byCardIdentity(a, b);
 }
 
 function mergeByClosedAtDesc(a: KanbanCard[], b: KanbanCard[]): KanbanCard[] {

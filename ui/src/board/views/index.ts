@@ -1,7 +1,7 @@
 /**
  * The view barrel. Importing this module is what puts the views in the
  * registry — each view file calls `registerView` at module scope, so IMPORT
- * ORDER HERE IS TAB ORDER (chronicle · shelf), which follows the strip after
+ * ORDER HERE IS TAB ORDER (chronicle · board), which follows the strip after
  * Desk and matches the `1`-`3` hotkeys.
  *
  * KanbanModal imports this one module; nothing else needs to know the view
@@ -12,7 +12,7 @@
 import './views.css'
 
 import './ChronicleView.js'
-import './ShelfView.js'
+import './BoardView.js'
 
 export {
   blockingDialogOpen,

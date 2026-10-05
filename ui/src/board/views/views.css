@@ -19,6 +19,13 @@
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
+/* The Board floats over the Desk: its host leaves the flow and covers the page
+   below the tab strip, while the Desk stays drawn (inert) beneath its veil. */
+.kbn-body-veiled { overflow: hidden; }
+.kbn-body-veiled > .kbn-view-host {
+  position: absolute; left: 0; right: 0; bottom: 0; top: var(--kbn-veil-top, 0px);
+  z-index: 4; overflow: hidden;
+}
 
 /* One sheet. Bordered like `.kbn-section-timeline` so the views read as the
    same substrate the Desk's sections are laid on. */

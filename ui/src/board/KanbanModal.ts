@@ -29,7 +29,7 @@
  *   • Drag back up to the now-board → clear horizon/cold.
  *   • Drop on a now-board column header routes through the daemon's
  *     /api/v1/transition lifecycle path.
- *   • Click a card body to open its detail modal.
+ *   • Click a card body to open its channel in the document workspace.
  *
  * Classification happens once, frontend-side: `classifyFiber` in
  * `KanbanRules.ts` buckets the composite feed into surfaces. The drag handler's
@@ -37,7 +37,11 @@
  */
 
 import './KanbanModal.css'
-import { FiberDetailModal, type MeetingJoinResult } from './FiberDetailModal.js'
+import { Workspace } from './workspace/Workspace.js'
+import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
+import { DeskKeyboard } from './DeskKeyboard.js'
+import { KeymapHelp } from './KeymapHelp.js'
+import { keyIntent } from './keymap.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
@@ -267,13 +271,17 @@ export class KanbanModal {
    * reads it; the gesture's own refetch is a direct call and always runs.
    */
   private gestureDepth = 0
-  /** Intermediate fiber-detail modal — one instance, re-used across opens. */
-  private readonly detailModal: FiberDetailModal
+  private workspace: Workspace | null = null
+  private readonly dock: Dock
+  private deskKeyboard: DeskKeyboard | null = null
+  private keymapHelp: KeymapHelp | null = null
+  private workspaceReturnFocus: HTMLElement | null = null
+  private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
   private readonly surfaces: KanbanSurfaceRenderer
 
   private readonly handleConversationOpening = (): void => {
     if (this.lastResponse) this.render(this.lastResponse)
-    this.detailModal.refreshConversationOpening()
+    this.dock.refreshConversationOpening()
   }
 
   constructor(options: KanbanModalOptions) {
@@ -308,14 +316,12 @@ export class KanbanModal {
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
-    this.detailModal = new FiberDetailModal(
+    this.dock = new Dock(
       this.shuttleBase,
       () => { void this.fetchAndRender() },
-      // Terminal moves (Temper / Compost) route through the same optimistic
-      // path as the inline card buttons and drags — instant relocation,
-      // background commit, reconcile.
+      // Temper / Discard route through the same optimistic path as the inline
+      // card buttons and drags — instant relocation, background commit, reconcile.
       (card, target) => this.transition(card, target),
-      // The terminal action → focus the running worker's Kitty tab.
       this.openWorkerAfterGesture,
       {
         meeting: {
@@ -338,7 +344,7 @@ export class KanbanModal {
       stackQueueRow: (fiberId, plan) => this.stackQueueRow(fiberId, plan),
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
-      openDetail: (card) => this.detailModal.open(card),
+      openDetail: (card) => this.openDocumentChannel(card),
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
@@ -471,19 +477,27 @@ export class KanbanModal {
     this.assembleChrome()
     this.phoneAudio.mount()
     host.append(this.container!)
+    const wanted = new URLSearchParams(window.location.search).get('view')
+    if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
+    else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
+    else if (window.location.hash === '#/chronicle') this.setView('chronicle')
+    this.keymapHelp = new KeymapHelp(
+      () => this.workspace?.isActive ? 'reader' : this.activeViewId === 'desk' ? 'desk' : 'overview',
+    )
+    this.workspace = new Workspace(this.container!, {
+      shuttleBase: this.shuttleBase,
+      cards: () => this.workspaceCards(),
+      origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
+      onVisibility: (active) => this.showWorkspace(active),
+      onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
+      dock: this.dock,
+    })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     this.startPolling()
     void this.fetchAndRender()
-    // ?view=chronicle|shelf deep-links a view — for humans sharing a
-    // spot and for headless QA, which can't press a hotkey. Unknown values
-    // fall through to the Desk.
-    const wanted = new URLSearchParams(window.location.search).get('view')
-    if (wanted && listViews().some((v) => v.id === wanted)) {
-      this.setView(wanted as BoardViewId)
-    }
   }
 
   /**
@@ -493,9 +507,13 @@ export class KanbanModal {
    */
   unmount(): void {
     if (this.container === null) return
-    // The fiber-detail panel floats on document.body, not in our container —
-    // an unmount would otherwise orphan it over whatever is behind.
-    this.detailModal.close()
+    this.keymapHelp?.dispose()
+    this.keymapHelp = null
+    this.deskKeyboard?.dispose()
+    this.deskKeyboard = null
+    this.workspace?.dispose()
+    this.workspace = null
+    this.dock.reset()
     this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
@@ -523,6 +541,7 @@ export class KanbanModal {
     this.resizeRaf = window.requestAnimationFrame(() => {
       this.resizeRaf = null
       this.expandOutcomesToFillSpace()
+      this.placeVeil()
     })
   }
 
@@ -579,6 +598,10 @@ export class KanbanModal {
     this.dragHorizonEl.className = 'kbn-draghorizon'
     this.deskEl = document.createElement('div')
     this.deskEl.className = 'kbn-desk'
+    this.deskKeyboard = new DeskKeyboard(this.deskEl, address => {
+      const card = boardCards(this.lastResponse).find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
+      if (card) this.openDocumentChannel(card)
+    })
     this.viewHostEl = document.createElement('div')
     this.viewHostEl.className = 'kbn-view-host'
     this.body.append(this.tabsEl, this.dragHorizonEl, this.deskEl, this.viewHostEl)
@@ -594,6 +617,54 @@ export class KanbanModal {
     this.stopMobileWatch = onMobileChange(() => {
       if (this.activeViewId === 'desk' && this.lastResponse) this.render(this.lastResponse)
     })
+  }
+
+  /** Desk and Chronicle cards enter the same owner-addressed document channel. */
+  private openDocumentChannel(card: KanbanCard): void {
+    if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
+    this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement
+      : null
+    this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+    this.workspace?.open(card)
+  }
+
+  private showWorkspace(active: boolean): void {
+    if (this.body) {
+      this.body.inert = active
+      if (active) this.body.setAttribute('aria-hidden', 'true')
+      else this.body.removeAttribute('aria-hidden')
+    }
+    if (active) { this.workspace?.hideOverview(); return }
+    if (this.pendingDeskData && this.activeViewId === 'desk') {
+      const data = this.pendingDeskData
+      this.pendingDeskData = null
+      this.render(data)
+    }
+    if (this.activeViewId !== 'desk') this.mountOrRefreshActiveView()
+    else this.deskKeyboard?.refresh(true)
+    if (this.activeViewId !== 'desk' || !this.workspaceReturnCard) return
+    if (this.deskKeyboard?.focusSelection()) return
+    const address = this.workspaceReturnCard
+    const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
+    const target = this.workspaceReturnFocus?.isConnected ? this.workspaceReturnFocus
+      : cardStillOwned ? Array.from(this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []).find(el => el.dataset.fiberId === address.id || el.dataset.fiberId === address.head)
+      : this.tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')
+    target?.focus({ preventScroll: true })
+  }
+
+  /** Drawn Desk order, followed by undrawn folded and chronological cards. */
+  private workspaceCards(): KanbanCard[] {
+    if (!this.lastResponse) return []
+    const cards = boardCards(this.lastResponse)
+    const byId = new Map(cards.map(card => [card.id, card]))
+    const seen = new Set<string>()
+    const ordered: KanbanCard[] = []
+    for (const el of this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []) {
+      const card = byId.get(el.dataset.fiberId ?? '')
+      if (card && !seen.has(card.id)) { seen.add(card.id); ordered.push(card) }
+    }
+    return [...ordered, ...cards.filter(card => !seen.has(card.id))]
   }
 
   // ── View switching ──────────────────────────────────────────────────────────
@@ -672,7 +743,11 @@ export class KanbanModal {
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
    * a stray click or repeated hotkey never tears a view down and back up.
    */
-  private setView(id: BoardViewId): void {
+  private setView(id: BoardViewId, navigate = true): void {
+    if (navigate && this.workspace) {
+      if (id === 'shelf') this.workspace.showBoard()
+      else this.workspace.suspend(id)
+    }
     if (id === this.activeViewId) return
     this.activeView?.unmount()
     this.activeView = null
@@ -727,9 +802,19 @@ export class KanbanModal {
   /** Paint the selected tab and show exactly one of Desk / view host. */
   private syncViewChrome(): void {
     const onDesk = this.activeViewId === 'desk'
+    // The Board's sheet is a vellum veil over the Desk, which stays drawn
+    // beneath it, untouchable and out of the accessibility tree.
+    const veiled = this.activeViewId === 'shelf'
     // Leaving the Desk mid-drag takes the horizon with it.
     if (!onDesk) this.syncDragHorizon(false)
-    if (this.deskEl) this.deskEl.style.display = onDesk ? '' : 'none'
+    if (this.deskEl) {
+      this.deskEl.style.display = onDesk || veiled ? '' : 'none'
+      this.deskEl.inert = veiled
+      if (veiled) this.deskEl.setAttribute('aria-hidden', 'true')
+      else this.deskEl.removeAttribute('aria-hidden')
+    }
+    this.body?.classList.toggle('kbn-body-veiled', veiled)
+    this.placeVeil()
     // The chips ride in the tab strip, which every view shares — but the lens
     // they engage only means anything on the Desk.
     if (this.lensSlotEl) this.lensSlotEl.style.display = onDesk ? '' : 'none'
@@ -745,6 +830,13 @@ export class KanbanModal {
         tab.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
       }
     }
+  }
+
+  /** The veiled view host starts under the tab strip and covers the rest of the page. */
+  private placeVeil(): void {
+    if (!this.container || !this.tabsEl || this.activeViewId !== 'shelf') return
+    const top = this.tabsEl.getBoundingClientRect().bottom - this.container.getBoundingClientRect().top
+    this.container.style.setProperty('--kbn-veil-top', `${Math.max(0, Math.round(top))}px`)
   }
 
   /**
@@ -825,13 +917,14 @@ export class KanbanModal {
     return {
       response,
       cards,
+      workspace: this.workspace ?? undefined,
       shuttleBase: this.shuttleBase,
       // The fetchers ARE the context's temporal half — closures over their own
       // cache, so spreading them is the same object, not a rebind.
       ...this.temporal,
       openCard: (cardId) => {
         const card = resolveOpenTarget(cardId, cards, this.lastResponse?.cycles ?? [])
-        if (card) this.detailModal.open(card)
+        if (card) this.openDocumentChannel(card)
       },
       requestRefresh: () => { void this.fetchAndRender() },
     }
@@ -866,7 +959,7 @@ export class KanbanModal {
    * `1`–`3` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a Radix
-   * dialog / fiber-detail panel layered over the board. Returns true when the
+   * dialog layered over the board. Returns true when the
    * key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
@@ -915,10 +1008,10 @@ export class KanbanModal {
    * awaiting).
    *
    * Drag-to-inFlight is the launch verb. It routes through the unified
-   * force-dispatch path (the same one FiberDetailModal's "New session ▸"
+   * force-dispatch path (the same one the dock's "New session ▸"
    * uses): a single fresh POST /api/v1/dispatch with `force: true, ad_hoc:
    * true` and no message — drag carries no directive (resume-previous and
-   * "talk first" intent live behind the detail modal). force bypasses status /
+   * "talk first" intent live on the fiber page). force bypasses status /
    * enabled / review_state / schedule / validity gates, so closed (tempered or
    * composted), paused, awaiting-review, and dormant-standing cards all
    * fire a worker immediately — no waiting on the 15s poller; the dispatch
@@ -960,7 +1053,7 @@ export class KanbanModal {
     // asked first. Confirm the destructive one too. Gated on `hasWorkerToStop`, so
     // the overwhelmingly common case (a verdict on a finished run) stays a
     // single click. This is the choke point for every path — the card's inline
-    // buttons, the detail panel's terminal moves, and a drag onto the column —
+    // buttons, the dock's Temper / Discard, and a drag onto the column —
     // so one guard covers all three.
     if ((target === 'tempered' || target === 'composted') && hasWorkerToStop(card)) {
       const verb = target === 'tempered' ? 'temper' : 'discard'
@@ -1120,7 +1213,7 @@ export class KanbanModal {
    * a second write would race it into a 409 already_running.
    *
    * A drag carries no message and always starts fresh; resuming and saying
-   * something first live behind the detail panel, where they are chosen on
+   * something first live on the fiber page, where they are chosen on
    * purpose. `fresh` is stamped explicitly rather than left to the daemon's
    * auto-decide, which would resume a transcript that died dirty.
    *
@@ -1138,7 +1231,9 @@ export class KanbanModal {
     if (res.ok) return true
     const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
     if (needsProjectDir(body)) {
-      this.detailModal.openStartPrompt(card, body)
+      this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+      this.workspace?.openStartPrompt(card, body)
       return false
     }
     throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`, res.status))
@@ -1870,7 +1965,7 @@ export class KanbanModal {
         this.meetingStatus = status
         this.phoneAudio.observe(status.meeting)
         this.syncMeetingClock()
-        this.detailModal.syncMeeting()
+        this.dock.syncMeeting()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.presentMeeting()
       } catch {
@@ -1954,7 +2049,7 @@ export class KanbanModal {
         // still gets its poll: its content moves with the clock (and with
         // activity and the ledgers), not only with the fiber feed. The open
         // card's worker pill crosses its idle threshold on the clock too.
-        this.syncDetailRuntime(data)
+        this.syncWorkspaceRuntime()
         this.mountOrRefreshActiveView()
         return
       }
@@ -2066,16 +2161,19 @@ export class KanbanModal {
     if (view) this.renderViewFallback(view.title)
   }
 
-  /** Hand the open card's fresh copy to its panel, whose worker pill follows
-   *  the worker's runtime phase. */
-  private syncDetailRuntime(data: KanbanResponse): void {
-    const id = this.detailModal.openCardId
-    if (id) this.detailModal.syncRuntime(findCardById(data, id))
+  /** Refresh inline worker controls and the reader's worker pill without replacing documents. */
+  private syncWorkspaceRuntime(): void {
+    this.workspace?.update()
   }
 
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
-    this.syncDetailRuntime(data)
+    this.syncWorkspaceRuntime()
+    if (this.workspace?.isActive) {
+      this.lastResponse = data
+      this.pendingDeskData = data
+      return
+    }
 
     // Never rebuild the Desk while it is hidden behind a temporal view. Every
     // pass at the end of this method MEASURES — `expandOutcomesToFillSpace`
@@ -2092,11 +2190,16 @@ export class KanbanModal {
     // `deskEl` docstring true: the Desk that comes back is the one the user
     // left, scroll positions and clamps intact, repainted from fresh data at
     // the moment it can see what it is doing.
+    // The Board veils a Desk that must exist: its first paint happens beneath
+    // the veil, and later data waits for the Desk to be in front again.
+    const veiledFirstPaint = this.activeViewId === 'shelf' && !this.deskEl.hasChildNodes()
     if (this.activeViewId !== 'desk') {
       this.lastResponse = data
-      this.pendingDeskData = data
       this.mountOrRefreshActiveView()
-      return
+      if (!veiledFirstPaint) {
+        this.pendingDeskData = data
+        return
+      }
     }
     this.pendingDeskData = null
 
@@ -2134,6 +2237,7 @@ export class KanbanModal {
     this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
+    this.deskKeyboard?.refresh(true)
     this.claimInitialFocus()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
@@ -2454,6 +2558,8 @@ export class KanbanModal {
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {
     if (!this.body) return
+    // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
+    if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
     // Escape releases an engaged lens and goes no further — "back out of what
     // I'm looking at", and the lens is the nearest thing being looked through.
     if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk') {
@@ -2464,6 +2570,23 @@ export class KanbanModal {
     }
     if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
+    if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
+      const intent = keyIntent(e, 'desk')
+      if (intent === 'find') {
+        const filter = [...this.deskEl!.querySelectorAll<HTMLInputElement>('input[type="search"], input[data-card-filter]')]
+          .find(input => !input.closest('[hidden],[inert]') && input.getClientRects().length > 0)
+        if (filter) filter.focus({ preventScroll: true })
+        else this.workspace?.findConstitution()
+        e.preventDefault(); e.stopPropagation()
+        return
+      }
+      const nativeActivation = e.key === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
+      if (intent && !nativeActivation && this.deskKeyboard?.handle(intent)) {
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+    }
     // Column Tab-nav is a Desk gesture — a temporal view owns its own focus
     // order, and the Desk's column heads are display:none behind it anyway.
     if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
@@ -2687,7 +2810,7 @@ export class KanbanModal {
 
   /**
    * Off the strip: reshape a pinned role back to a one-shot so it can be
-   * planned again. The exact write the detail panel's kind segmented control
+   * planned again. The exact write the dock's kind segmented control
    * makes — `reshape` rewrites the shape keys alone, leaving agent, host and
    * project_dir where they are. The strip's only exit that is not a verdict,
    * and the inverse of {@link commitPin}'s first call.

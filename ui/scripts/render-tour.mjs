@@ -9,7 +9,7 @@
  * shows (the Stash and New idea dialogs and a card's drawer)
  * appear as control guides: diagrams drawn here with ffmpeg, whose labels come
  * from ui/src/forms/StashForm.tsx, CaptureForm.tsx and
- * ui/src/board/FiberDetailModal.ts, and which say on screen that they are not
+ * ui/src/board/workspace/Dock.ts, and which say on screen that they are not
  * screenshots. Nothing is captured from a live board.
  *
  * Each scene's narration is a list of sentences. Every sentence is spoken by

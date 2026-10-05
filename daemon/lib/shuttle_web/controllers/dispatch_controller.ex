@@ -2,9 +2,9 @@ defmodule ShuttleWeb.DispatchController do
   @moduledoc """
   Agent-API endpoint: POST /api/v1/dispatch
 
-  The single force/ad-hoc dispatch surface: the kanban's drag-to-inFlight
-  launch, the detail modal's requeue / "New session", and `shuttle
-  dispatch` (internal/shuttlecli/daemon_verbs.go) all land here.
+  The single force/ad-hoc dispatch surface: the kanban's drag-to-In flight
+  launch, the fiber page's New session action, and `shuttle dispatch`
+  (internal/shuttlecli/daemon_verbs.go) all land here.
 
     * a request carrying `origin` — a remote-owned card — is forwarded by
       `Shuttle.OriginRouter` to the owning daemon's identical `/dispatch`

@@ -1310,6 +1310,15 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
+  # HEAD uses the same profile, proxy, private dial, and verified TLS setup.
+  def head_file(url, req_headers, timeout_ms)
+      when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
+    case request(:head, url, req_headers, nil, timeout_ms) do
+      {:ok, status, headers, body} -> {:ok, status, headers, content_type_header(headers), body}
+      {:error, _reason} = error -> error
+    end
+  end
+
   # The one httpc call every callback makes: `{:ok, status, headers, body}`
   # with lowercased string headers, or `{:error, reason}`.
   #

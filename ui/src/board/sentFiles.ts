@@ -1,10 +1,9 @@
 /**
  * The sent-files trail — what a worker pushed with `SendUserFile`.
  *
- * A leaf module: shape and pure transforms only, no DOM and no fetch, so the
- * detail panel (which opens the trail in its accordion) and the Board canvas
- * (which lays the sends out as cards) read the same records the same way
- * rather than growing two dialects of "a sent file".
+ * A leaf module: shape and pure transforms only, no DOM and no fetch, so every
+ * Board surface that shows sent files reads the same records rather than
+ * growing separate dialects of "a sent file".
  */
 
 /**

@@ -1,5 +1,5 @@
 /**
- * shelfLoad — how many bodies may be alive at once, and whose turn it is.
+ * Board overview load policy — how many document bodies may be alive at once.
  *
  * A board card has two layers. The FACE is metadata: a name, a fiber, an age,
  * a glyph for its kind. It is synchronous, costs nothing, and is what a card

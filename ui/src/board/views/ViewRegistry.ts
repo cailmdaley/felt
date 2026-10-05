@@ -6,12 +6,10 @@
  *   1  desk       the kanban page (Now board + Pinned + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
  *   2  chronicle  ┐ registered views — each mounts into a full-width host
- *   3  shelf      ┘ where the Desk surfaces would otherwise be.
+ *   3  board      ┘ where the Desk surfaces would otherwise be.
  *
- * Chronicle is the whole record in time. Shelf is not a window onto time at
- * all — it is the fleet's sent WORK on a canvas, ordered by a lens. It shares
- * the lifecycle and nothing else, which is exactly what the interface asks of
- * it.
+ * Chronicle holds the record in time. Board is the document workspace's
+ * contact sheet, grouped by recent work, project or host.
  *
  * A view is a plain object with a three-call lifecycle. KanbanModal owns the
  * host element and the data; the view owns everything inside the host.
@@ -56,6 +54,8 @@ export interface TemporalView {
  */
 export interface ViewContext extends TemporalFetchers {
   response: KanbanResponse
+  /** Persistent document sheet, owned by the board's workspace controller. */
+  workspace?: { mountOverview(host: HTMLElement): void; hideOverview(): void }
   /**
    * WORK — every card on the eight lifecycle/planning surfaces, deduped. This
    * is the list to walk for due-marks and lane building.
@@ -74,7 +74,7 @@ export interface ViewContext extends TemporalFetchers {
    */
   shuttleBase: string
   /**
-   * Open a card's detail panel. Resolves against `cards` AND `response.cycles`,
+   * Open a fiber in the workspace reader. Resolves against `cards` AND `response.cycles`,
    * so a cycle band or chip can hand over its id directly — the split above is
    * about what a view iterates, not about what it can open.
    *
@@ -186,7 +186,7 @@ export function isBlockingDialog(
  * change here.
  */
 export const BLOCKING_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], .kbn-detail-overlay'
+  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"]'
 
 /**
  * Is a dialog currently layered over the board?

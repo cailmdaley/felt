@@ -41,6 +41,17 @@
 <body>
 <div class="sim-corner sim-corner-close" aria-hidden="true">✕</div>
 <div class="sim-corner sim-corner-new" aria-hidden="true">◳</div>
+<script>
+  (() => {
+    const original = window.fetch.bind(window)
+    function indirectFetch(...args) {
+      const current = window.fetch
+      return current === indirectFetch ? original(...args) : current(...args)
+    }
+    window.__harnessNativeFetch = original
+    window.fetch = indirectFetch
+  })()
+</script>
 <script src="./harness-board.js"></script>
 </body>
 </html>

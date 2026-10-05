@@ -1,8 +1,8 @@
 # Telemetry and the ledgers
 
 The Desk needs only fibers and tmux. [Chronicle](board.md#chronicle-where-the-time-went)
-and the Board canvas need a record of what happened, and that record is three
-append-only JSONL files in the daemon's state directory.
+and the Board's receipt ribbon and folios need a record of what happened, and
+that record is three append-only JSONL files in the daemon's state directory.
 
 | File | Written by | Carries |
 |---|---|---|
@@ -48,8 +48,7 @@ The eight hook types collapse into three kinds, plus one facet laid over them:
   message counts, never both.
 
 The same stream feeds the in-flight idle ranking on the Desk and the
-[sent-files trail](../concepts/companions.md#sent-files-shuttle-only) behind the
-Board canvas.
+[Board's document receipts](../concepts/companions.md#sent-files-shuttle-only).
 
 See [The event stream and the
 ledgers](installation.md#the-event-stream-and-the-ledgers) for how it is

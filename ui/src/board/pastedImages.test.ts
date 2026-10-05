@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FiberDetailModal } from './FiberDetailModal.js'
+import { Dock } from './workspace/Dock.js'
 import {
   MAX_PASTED_IMAGES,
   MAX_PASTED_IMAGE_BYTES,
@@ -200,8 +200,7 @@ describe('a send with images', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ files: [{ path: '/h/a.png' }] }) })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tmux_session: 'w' }) })
     vi.stubGlobal('fetch', fetch)
-    const panel = new FiberDetailModal('http://daemon', vi.fn())
-    vi.spyOn(panel, 'close').mockImplementation(() => {})
+    const panel = new Dock('http://daemon', vi.fn())
     const images = new PastedImages()
     images.add([file('a.png', 'image/png')])
     const target = card({ id: 'work/task', originId: 'local' })
@@ -223,7 +222,7 @@ describe('a send with images', () => {
       ok: false, status: 404, text: async () => JSON.stringify({ error: 'fiber not found: work/task' }),
     })
     vi.stubGlobal('fetch', fetch)
-    const panel = new FiberDetailModal('http://daemon', vi.fn())
+    const panel = new Dock('http://daemon', vi.fn())
     const images = new PastedImages()
     images.add([file('a.png', 'image/png')])
     const target = card({ id: 'work/task' })

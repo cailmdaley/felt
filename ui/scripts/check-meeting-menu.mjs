@@ -1,10 +1,9 @@
-/** The drawer's Meeting menu picks under both engines' focus rules. Run
+/** The fiber page's Meeting menu picks under both engines' focus rules. Run
  * `npm run harness:board` then `node scripts/check-meeting-menu.mjs`.
  *
  * WebKit gives a clicked button no focus: pressing Room blurs the focused Call
- * to the body before Room's click lands. A menu that closes on that blur hides
- * Room under the pointer and the pick never reaches the daemon — which Chromium,
- * where the pressed button takes focus, cannot show.
+ * to the body before Room's click lands. The open menu must remain available
+ * until the choice reaches the daemon.
  */
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
@@ -19,7 +18,9 @@ for (const engine of [webkit, chromium]) {
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
     await page.getByText('Run the 2D B-mode null tests', { exact: true }).click()
-    await page.locator('.kbn-detail-controls-toggle').click()
+    const controls = page.locator('.ws-selected .ws-dock')
+    await controls.waitFor({ state: 'visible' })
+    await controls.locator('.kbn-detail-controls-toggle').click()
     await page.evaluate(() => {
       window.joins = []
       const originalFetch = window.fetch
@@ -28,10 +29,10 @@ for (const engine of [webkit, chromium]) {
         return originalFetch(input, init)
       }
     })
-    const menu = page.getByRole('menu', { name: 'Meeting kind', exact: true })
-    await page.getByRole('button', { name: 'Meeting', exact: true }).click()
+    const menu = controls.getByRole('menu', { name: 'Meeting kind', exact: true })
+    await controls.getByRole('button', { name: 'Meeting', exact: true }).click()
     assert.ok(await menu.isVisible(), `${engine.name()}: Meeting opens its kinds`)
-    await page.getByRole('menuitem', { name: 'Room', exact: true }).click({ timeout: 2000 })
+    await controls.getByRole('menuitem', { name: 'Room', exact: true }).click({ timeout: 2000 })
     await page.waitForTimeout(200)
     const joins = await page.evaluate(() => window.joins)
     assert.deepEqual(joins.map(j => j.meeting.mode), ['room'], `${engine.name()}: picking Room starts one room meeting`)

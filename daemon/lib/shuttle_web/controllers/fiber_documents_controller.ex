@@ -130,21 +130,18 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
   **Owner-routed via `Shuttle.OriginRouter`, exactly like `/file`.** Only the
   daemon that owns a fiber's host can read its body off that host's filesystem.
-  The composite board stamps each fiber with its `origin`; the detail panel
+  The composite board stamps each fiber with its `origin`; the document reader
   carries that origin back here. A local-owned fiber is read here; a remote-owned
   fiber forwards to the owning daemon's identical `/api/v1/fibers/:id` (origin
-  stripped) over the SSH tunnel and relays the JSON verbatim. This is the ONLY
-  correct source for a remote constitution's body — git-mirror replication is
-  incidental and must never be relied on for availability.
+  stripped) over the SSH tunnel and relays the JSON verbatim. This is the source
+  for a remote constitution's body; git-mirror replication is not an availability
+  guarantee.
 
-  **A caller that names no origin does not get the mirror.** Not every caller
-  holds one: a `[[wikilink]]` opens a fiber the board never carded, so it has no
-  composite row to read an origin off. Rather than serve this host's git copy of
-  work another daemon owns — the same mistake the feed made until `5669fc7`, and
-  worse here because the panel then routes its saves by the origin this envelope
-  reports — the local lookup reads the copy it has, sees `shuttle.host` naming
-  someone else, and forwards there. The answer therefore always comes from the
-  owner, whoever asked and however little they knew.
+  **A caller that names no origin does not get the mirror.** A `[[wikilink]]`
+  can open a fiber absent from the composite feed, so it has no row to supply an
+  origin. The local lookup reads its copy, checks `shuttle.host`, and forwards
+  to the owner when the fiber belongs elsewhere. The answer therefore comes
+  from the owner regardless of which reader opened the link.
 
   The forward carries `routed=1`, which suppresses a second self-route on the
   far side. One hop, always: two daemons whose git copies disagree about `host:`

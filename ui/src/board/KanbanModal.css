@@ -1,15 +1,15 @@
 /* One typographic scale for the whole board.
  *
- * Every px font-size in the board CSS — chassis, cards, detail panel, and the
- * three temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
+ * Every px font-size in the board CSS — chassis, cards, the document workspace,
+ * and the temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
  * so the design sizes stay readable in the source and the whole hierarchy moves
  * together from one number. Nothing else scales: spacing, rules and column
  * widths are deliberately left alone, so raising type tightens the page rather
  * than zooming it.
  *
- * Declared on :root (not `.kbn-modal`) because the detail overlay and the file
- * viewer mount outside the board's own subtree. Every call site carries a
- * fallback of 1, so a host that never loads this file renders at design size.
+ * Declared on :root because the document reader mounts outside the board's
+ * `.kbn-modal` subtree. Every call site carries a fallback of 1, so a host that
+ * never loads this file renders at design size.
  */
 :root {
   --kbn-type-scale: 1.18;
@@ -44,6 +44,10 @@
 
      A hue outside these is a claim the data never made. */
 
+  /* Shared neutral materials: iron gall carries text and chrome, never an actor. */
+  --kbn-ink: #1B1611;
+  --kbn-ink-muted: #7A6F5C;
+
   /* YOU. A message you sent, a role you drive, a human actor. The attention
      tick on the Chronicle, the glyph on a pin. */
   --kbn-you: #BC4538;
@@ -65,6 +69,25 @@
      and never wear it. */
   --kbn-tempered: #3F8278;
   --kbn-tempered-ink: #2E6862;
+
+  /* ── THE BOARD'S MATERIALS ─────────────────────────────────────────────
+     The surfaces the pigments sit on, shared by the Desk and the document
+     workspace so the two cannot drift apart. Parchment is the desk; the
+     column sheet is rag laid on it; the plate is the deeper sheet a column
+     head or a selection sits on; card paper is what a card (and a document,
+     a card opened) is printed on. Iron gall is every piece of chrome and
+     text, at four strengths; the ochre rule is the hairline. */
+  --kbn-parchment: #EDE2CE;
+  --kbn-sheet: #F2E8D2;
+  --kbn-plate: #E8DCC1;
+  --kbn-paper: #FBF6E9;
+  --kbn-hairline: #E4DACB;
+  --kbn-rule: rgba(196, 147, 51, 0.22);
+  --kbn-rule-strong: rgba(196, 147, 51, 0.32);
+  --kbn-ink: #1B1611;
+  --kbn-ink-soft: #3A332A;
+  --kbn-ink-muted: #7A6F5C;
+  --kbn-ink-faint: #A89B83;
 
   /* LOC ACCOUNTING — a fifth axis, orthogonal to the four above: how much a
      change weighed has nothing to say about who made it, when, or whether it
@@ -127,7 +150,7 @@
      the iron-gall calligraphic ornament layered over it as the
      "detail strokes" pass that traditionally finishes an
      illumination. */
-  color: #1B1611;
+  color: var(--kbn-ink);
   opacity: 0.45;
   text-transform: uppercase;
   position: absolute;
@@ -174,7 +197,7 @@
      top so the substrate has texture rather than reading as a flat
      fill. Pigments hold their saturation against the warmth rather
      than dissolving into it. */
-  background-color: #EDE2CE;
+  background-color: var(--kbn-parchment);
   background-image:
     radial-gradient(ellipse 85% 55% at 10% -10%, rgba(196, 147, 51, 0.18), transparent 60%),
     radial-gradient(ellipse 100% 60% at 92% 110%, rgba(61, 91, 160, 0.09), transparent 62%),
@@ -183,7 +206,7 @@
   background-size: auto, auto, 256px;
   display: flex; flex-direction: column;
   font-family: var(--font-main, 'EB Garamond', serif);
-  color: #1B1611;
+  color: var(--kbn-ink);
   overflow: hidden;
 }
 /* aria-live region — invisible but observable in the a11y tree. */
@@ -263,11 +286,11 @@
   font-weight: 400;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
 .kbn-viewtab:hover {
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
   border-color: rgba(122, 111, 92, 0.45);
 }
 .kbn-viewtab:focus-visible {
@@ -275,7 +298,7 @@
   outline-offset: 2px;
 }
 .kbn-viewtab-active {
-  color: #1B1611;
+  color: var(--kbn-ink);
   border-color: #BC4538;
   background: rgba(188, 69, 56, 0.06);
 }
@@ -376,14 +399,14 @@
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.06em;
   text-transform: none;
-  color: #1B1611;
+  color: var(--kbn-ink);
   white-space: nowrap;
 }
 /* Count in the column-count idiom — same mono, same muted ink, same offset. */
 .kbn-bandhead-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
 }
 /* Pinned band — schedule-less umbrella roles, dispatchable on demand. A slim
    launcher strip above the Now board. Pinned is a *launcher*, not a monitor:
@@ -423,8 +446,8 @@
 }
 /* Dense wrap — chips fill the available width and wrap to as many rows as the
    pinned set needs; no cap, no scrollbar, no pager. Stable left-to-right order
-   (chips sorted by fiber path) so muscle memory works — a launcher's whole
-   point is that a role sits in the same place every visit. */
+   (newest-created first, with identity ties) is independent of activity,
+   file timestamps and path renames. */
 .kbn-pinned-row {
   display: flex;
   flex-wrap: wrap;
@@ -451,11 +474,11 @@
   max-width: 260px;
   margin: 0;
   padding: 3px 8px;
-  background: #FBF6E9;
+  background: var(--kbn-paper);
   border: 1px solid rgba(27, 22, 17, 0.12);
   border-radius: 3px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  color: #1B1611;
+  color: var(--kbn-ink);
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
@@ -538,7 +561,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   padding: 2px;
 }
 
@@ -583,7 +606,7 @@
   transition: height 130ms cubic-bezier(0.22, 0.61, 0.36, 1);
   /* Opaque, because it hangs over the board rather than sitting in the column
      of it. The parchment ground is `.kbn-modal`'s own. */
-  background: #EDE2CE;
+  background: var(--kbn-parchment);
   border-radius: 3px;
   box-shadow: 0 6px 14px rgba(27, 22, 17, 0.14);
 }
@@ -600,7 +623,7 @@
   font-style: italic;
   font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: calc(15px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -658,7 +681,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   letter-spacing: 0.06em;
 }
 .kbn-timeline-day-num {
@@ -723,7 +746,7 @@
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.05em;
   line-height: 1.05;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   white-space: nowrap;
 }
 
@@ -782,11 +805,11 @@
   font-variant-emoji: text;
   font-size: calc(14px * var(--kbn-type-scale, 1));
   line-height: 1;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
 .kbn-viewtabs-settings:hover {
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
   border-color: rgba(122, 111, 92, 0.45);
   background: rgba(122, 111, 92, 0.06);
 }
@@ -921,7 +944,7 @@
    different container but the register of its contents (flattened list lines
    instead of card plates) and the `-cold` variation below. */
 .kbn-cluster {
-  background: #F2E8D2;
+  background: var(--kbn-sheet);
   border: 1px solid rgba(196, 147, 51, 0.22);
   border-radius: 3px;
   padding: 4px 8px 8px;
@@ -946,7 +969,7 @@
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(10.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.02em;
-  color: #1B1611;
+  color: var(--kbn-ink);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -965,7 +988,7 @@
 .kbn-cluster-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(9px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 .kbn-cluster-tag {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -983,7 +1006,7 @@
   font-family: var(--font-serif, 'EB Garamond', serif);
   font-style: italic;
   font-size: calc(11px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   padding: 6px 0;
 }
 /* The seam between Resting's two halves — undated (watch list) above,
@@ -991,7 +1014,7 @@
    held-open divider, with a hairline above it so the two temperatures of
    Resting still read as one region split, not a second section. */
 .kbn-cluster-divider-group {
-  border-top: 1px solid #E4DACB;
+  border-top: 1px solid var(--kbn-hairline);
   margin-top: 4px;
   padding-top: 10px;
 }
@@ -1001,7 +1024,7 @@
   font-family: var(--font-serif, 'EB Garamond', serif);
   font-style: italic;
   font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   padding: 14px 0;
 }
 .kbn-cluster-item {
@@ -1033,12 +1056,12 @@
    at the weight a plateless list line can carry, and on the board's single
    3px radius. */
 .kbn-cluster-item:hover {
-  color: #1B1611;
-  background: #FBF6E9;
+  color: var(--kbn-ink);
+  background: var(--kbn-paper);
   border-radius: 3px;
 }
 .kbn-cluster-cold .kbn-cluster-item {
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
   font-style: italic;
 }
 .kbn-cluster-item-glyph {
@@ -1080,7 +1103,7 @@
 
 .kbn-col {
   /* Desk cards/chrome render at design size — the 1.18 scale is for the
-     temporal views, detail modal and file viewer, not the kanban lanes.
+     temporal views and document workspace reader, not the Desk lanes.
      KanbanModal's expandOutcomesToFillSpace reads this off each card's
      computed style rather than the root, so it follows this override. */
   --kbn-type-scale: 1;
@@ -1096,7 +1119,7 @@
   /* Each column reads as a sheet of rag laid on the parchment desk — a
      touch warmer-bright than the page beneath, with a hairline ochre
      rule rather than the previous near-invisible ink border. */
-  background: #F2E8D2;
+  background: var(--kbn-sheet);
   border: 1px solid rgba(196, 147, 51, 0.22);
   border-radius: 3px;
   overflow: hidden;
@@ -1112,7 +1135,7 @@
   box-shadow: inset 0 0 0 1px rgba(196, 147, 51, 0.18);
 }
 .kbn-col-drafts {
-  background: #E8DCC1;
+  background: var(--kbn-plate);
   border-style: dashed;
   opacity: 0.92;
 }
@@ -1212,7 +1235,7 @@
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.06em;
   text-transform: none;
-  color: #1B1611;
+  color: var(--kbn-ink);
   margin: 0;
 }
 .kbn-col-title .kbn-cap {
@@ -1237,7 +1260,7 @@
 .kbn-col-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
   margin-left: 8px;
 }
 
@@ -1316,6 +1339,29 @@
   overflow-y: auto;
   padding: 8px;
   display: flex; flex-direction: column;
+  gap: 8px;
+}
+/* Quiet captions mark the only ordering seam inside In flight. Both bands
+   share one scroller and retain the cards' own attention/status signals. */
+.kbn-flight-band {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.kbn-flight-caption {
+  margin: 0 0 6px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-weight: 400;
+  color: var(--kbn-ink-muted);
+}
+.kbn-flight-band + .kbn-flight-band {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(27, 22, 17, 0.14);
+}
+.kbn-flight-band-list {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 /* A live meeting. It folds into the card of the fiber it belongs to
@@ -1460,12 +1506,10 @@
   font-style: normal;
 }
 /* Card — a slip of rag laid on the sheet. Kind differentiation rides
-   the background tint and border-style on the existing .kbn-card-*
-   modifiers; no painted left-edge ribbon. The column container
-   already signals lifecycle, the kbn-pill stamp carries the status
-   mark, and the worker / dispatch chips do the rest. */
+   the background tint and border style on .kbn-card-* modifiers; the
+   column signals lifecycle, and worker and dispatch chips carry live state. */
 .kbn-card {
-  background: #FBF6E9;
+  background: var(--kbn-paper);
   border: 1px solid rgba(27, 22, 17, 0.12);
   border-radius: 3px;
   padding: 10px 12px;
@@ -1574,7 +1618,7 @@
 .kbn-card-glyph-human {
   color: var(--kbn-you);
 }
-/* Plain text: the whole card opens the fiber-detail panel, so the card's own
+/* Plain text: clicking the card opens the workspace reader, so the card's own
    cursor applies. */
 .kbn-card-name {
   flex: 1;
@@ -1583,31 +1627,6 @@
   line-height: 1.25;
   text-align: left;
   color: inherit;
-}
-.kbn-pill {
-  display: inline-block;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-.kbn-pill-open {
-  background: rgba(196, 147, 51, 0.12);
-  color: #C49333;
-  border: 1px solid rgba(196, 147, 51, 0.3);
-}
-.kbn-pill-active {
-  background: rgba(196, 147, 51, 0.25);
-  color: #8C6A24;
-  border: 1px solid rgba(196, 147, 51, 0.45);
-}
-.kbn-pill-closed {
-  background: rgba(122, 111, 92, 0.15);
-  color: #7A6F5C;
-  border: 1px solid rgba(122, 111, 92, 0.35);
 }
 .kbn-card-id {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -1624,7 +1643,7 @@
 .kbn-card-outcome {
   font-size: calc(12.5px * var(--kbn-type-scale, 1));
   line-height: 1.4;
-  color: #3A332A;
+  color: var(--kbn-ink-soft);
   /* Truncate at N lines with an ellipsis. Aligns the cutoff to a line
      boundary (no half-cropped letters) and signals truncation explicitly.
      N defaults to 4 but JS expands it post-render when a column has
@@ -1716,7 +1735,7 @@
   text-transform: uppercase;
   background: rgba(27, 22, 17, 0.04);
   border: 1px solid rgba(27, 22, 17, 0.18);
-  color: #3A332A;
+  color: var(--kbn-ink-soft);
   padding: 3px 8px;
   border-radius: 2px;
   cursor: pointer;
@@ -1724,12 +1743,12 @@
 }
 .kbn-action:hover {
   background: rgba(27, 22, 17, 0.10);
-  color: #1B1611;
+  color: var(--kbn-ink);
   border-color: rgba(27, 22, 17, 0.30);
 }
 .kbn-action:focus { outline: none; }
 .kbn-action:focus-visible {
-  outline: 1px dashed #7A6F5C;
+  outline: 1px dashed var(--kbn-ink-muted);
   outline-offset: 1px;
 }
 .kbn-action-tempered {
@@ -1753,7 +1772,7 @@
 }
 /* Subtler card style inside the drafts column. */
 .kbn-card-drafts {
-  background: #E8DCC1;
+  background: var(--kbn-plate);
   border-style: dashed;
 }
 .kbn-card-actor,
@@ -1766,7 +1785,7 @@
 /* The base is MUTED, not verdigris. An actor line with no variant is not
    making a verdict, and the two variants below carry the actual claim. */
 .kbn-card-actor {
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
 }
 .kbn-card-actor-agent {
   color: var(--kbn-agent);
@@ -1775,7 +1794,7 @@
   color: var(--kbn-you);
 }
 .kbn-card-due {
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
   background: rgba(27, 22, 17, 0.045);
   border: 1px solid rgba(27, 22, 17, 0.10);
   border-radius: 2px;
@@ -2076,18 +2095,18 @@
 }
 /* Stale-origin card: the originating agent is disconnected. The
    snapshot is preserved (last-known-good) so the card still reads
-   and opens its detail panel, but drag is disabled because
+   and opens in the workspace reader, but drag is disabled because
    mutation has nowhere to land until reconnect. Visual signal
    is a desaturated dim plus a not-allowed cursor on the drag
    handle. */
 .kbn-card--stale {
   opacity: 0.62;
-  background: #EDE2CE;
+  background: var(--kbn-parchment);
   border-style: dashed;
   cursor: default;
 }
 .kbn-card--stale:hover {
-  background: #EDE2CE;
+  background: var(--kbn-parchment);
   border-color: rgba(27, 22, 17, 0.18);
   transform: none;
 }
@@ -2316,10 +2335,10 @@
     outline-offset: -3px;
   }
   .kbn-folio-seg-active {
-    background: #F2E8D2;
+    background: var(--kbn-sheet);
     border-color: rgba(196, 147, 51, 0.42);
-    border-bottom-color: #F2E8D2;
-    color: #1B1611;
+    border-bottom-color: var(--kbn-sheet);
+    color: var(--kbn-ink);
   }
   .kbn-folio-name {
     font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
@@ -2337,7 +2356,7 @@
     flex: 0 0 auto;
     font-family: var(--font-mono, 'IBM Plex Mono', monospace);
     font-size: 10.5px;
-    color: #7A6F5C;
+    color: var(--kbn-ink-muted);
   }
   /* The initial rides at the strip's own size; the F1 flourish still reads at
      ~22px, which is why the segment gets the illumination and the two band
@@ -2414,8 +2433,8 @@
 
   /* ── Cards, compact ────────────────────────────────────────────────────
      Title, path on one line, the opening line of the outcome, then agent and
-     badges in a single row. A phone card is an index entry you tap, not a
-     card you read — the detail panel is one touch away and holds the rest. */
+     badges in a single row. A phone card is an index entry you tap; its
+     document opens in the workspace reader, and its actions live on the fiber page. */
   .kbn-card {
     padding: 9px 11px;
     gap: 5px;

@@ -1,25 +1,14 @@
 /**
- * Attachments — what a fiber body declares with `:::{embed} <path>`.
+ * Parse `:::{embed}` declarations from a fiber body.
  *
- * A leaf module: parse only, no DOM and no fetch. An embed used to render
- * INLINE, which nested a scrolling document inside the scrolling constitution
- * — awkward on a desktop and unusable on a phone, where an embedded PDF could
- * never reach page 2. So the directive is now a DECLARATION, not a placement:
- * it names a file the fiber keeps current, and the panel draws every one of
- * them as a card in a strip above the prose. Where the directive sat in the
- * body no longer means anything, and nothing of it is left in the text.
- *
- * It is not quite a leaf any more: it imports the extension VOCABULARY from
- * utils (the same sets the Reader dispatches on) so that a card face and the
- * Reader can never disagree about what kind a file is. Still no DOM, no fetch.
- *
- * Attachments are deliberately not sent files. An attachment is evergreen and
- * central (the report the fiber IS about); a sent file is a one-off delivery
- * on a trail. The panel keeps them as two groups for that reason.
+ * The parser has no DOM or network work. The document workspace lists declared
+ * artifacts on the fiber page and keeps them distinct from sent-file receipts.
+ * Extension sets from `utils` give the overview and reader one file taxonomy.
  */
 
 import {
   AUDIO_EXTS,
+  VIDEO_EXTS,
   IMAGE_EXTS,
   MARKDOWN_EXTS,
   TEXT_EXTS,
@@ -28,8 +17,8 @@ import {
 
 /** One `:::{embed}` declaration, in body order. */
 export interface Attachment {
-  /** The path exactly as written — relative paths resolve against the fiber's
-   *  own dir at render time, the same anchor inline embeds used. */
+  /** The path exactly as written; the reader resolves relative paths against
+   *  the fiber's directory. */
   path: string
   /** The `:title:` option, when the author gave one. */
   title?: string
@@ -73,8 +62,7 @@ function parseEmbedTitle(block: string): string | undefined {
   return undefined
 }
 
-/** The extension glyph a card wears, mirroring the Shelf's card face: the
- *  suffix, lowercased, or `file` when there is none. */
+/** The lowercased extension shown on a document card, or `file` when absent. */
 export function attachmentGlyph(path: string): string {
   const base = path.split('/').filter(Boolean).pop() ?? path
   const dot = base.lastIndexOf('.')
@@ -102,12 +90,13 @@ export function formatBytes(size: number | undefined): string {
  * browser has nothing to show for it, which is precisely why it behaves
  * differently from the kinds that do.
  */
-export type FileKind = 'image' | 'audio' | 'html' | 'markdown' | 'text' | 'pdf' | 'other'
+export type FileKind = 'image' | 'audio' | 'video' | 'html' | 'markdown' | 'text' | 'pdf' | 'other'
 
 export function fileKind(path: string): FileKind {
   const ext = fileExt(path)
   if (IMAGE_EXTS.has(ext)) return 'image'
   if (AUDIO_EXTS.has(ext)) return 'audio'
+  if (VIDEO_EXTS.has(ext)) return 'video'
   if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'pdf') return 'pdf'
   if (MARKDOWN_EXTS.has(ext)) return 'markdown'
@@ -116,20 +105,9 @@ export function fileKind(path: string): FileKind {
 }
 
 /**
- * What a single click/tap on a file card should do.
- *
- * The rule is one line and it belongs in one place, because two surfaces obey
- * it — the attachment strip and the sent-files trail. Under a mouse, always
- * `read`: the Reader window has the tabs, the zoom and the ⤓.
- *
- * Under a FINGER it used to be `download`, always — because the Reader could
- * only ever hand a phone an iframe, and an iframed PDF cannot reach page 2.
- * But that indicted the iframe, not the Reader: an image, an audio file, a
- * rendered HTML report and now a rendered markdown/text pane all read fine in
- * the Reader's mobile sheet, and downloading them instead throws away the
- * tabs and the zoom to no purpose. So the download escape is narrowed to the
- * kinds that genuinely need the native viewer — a PDF, and anything the
- * browser can't lay out at all.
+ * Choose whether a file opens in the Board reader or downloads.
+ * Fine pointers open every kind in the reader. Coarse pointers download PDFs
+ * and unsupported formats; other documents remain readable in the reader.
  */
 export function fileTapAction(coarse: boolean, path: string): 'read' | 'download' {
   if (!coarse) return 'read'
@@ -137,10 +115,7 @@ export function fileTapAction(coarse: boolean, path: string): 'read' | 'download
   return kind === 'pdf' || kind === 'other' ? 'download' : 'read'
 }
 
-/** How many bytes of a text file a card face needs. Generous enough that ~6
- *  lines survive even a file of long lines, small enough that a strip of them
- *  costs nothing. The daemon's file route answers a `Range` request with the
- *  whole body (no `Accept-Ranges`), so the slice happens here, not there. */
+/** Text preview budget: enough for six opening lines on a card face. */
 export const PREVIEW_BYTES = 2048
 
 /**

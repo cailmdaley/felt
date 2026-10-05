@@ -94,7 +94,6 @@ describe('isBlockingDialog', () => {
   })
 
   it('treats a dialog layered over the board as blocking', () => {
-    expect(isBlockingDialog(el('kbn-detail-overlay'))).toBe(true)
     expect(isBlockingDialog(el('app-dialog-card'))).toBe(true)
     expect(isBlockingDialog(el())).toBe(true)
   })
@@ -112,12 +111,11 @@ describe('isBlockingDialog', () => {
 })
 
 describe('BLOCKING_DIALOG_SELECTOR', () => {
-  it('covers Radix, hand-rolled aria dialogs, and the fiber panel', () => {
+  it('covers Radix and hand-rolled aria dialogs', () => {
     // A hand-rolled dialog is the case M1 missed: role="dialog"
     // aria-modal="true", no data-state anywhere.
     expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][data-state="open"]')
     expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][aria-modal="true"]')
-    expect(BLOCKING_DIALOG_SELECTOR).toContain('.kbn-detail-overlay')
   })
 })
 

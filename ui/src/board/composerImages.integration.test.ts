@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FiberDetailModal, type MeetingJoinControl } from './FiberDetailModal'
+import type { KanbanCard } from './KanbanTypes.js'
+import { Dock, type MeetingJoinControl } from './workspace/Dock.js'
 import { card } from './testFixtures'
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
@@ -35,11 +36,11 @@ const dispatched = { ok: true, status: 200, json: async () => ({ tmux_session: '
 
 let composer: HTMLElement
 let fetch: ReturnType<typeof vi.fn>
-let panel: FiberDetailModal
-let closeSpy: ReturnType<typeof vi.spyOn>
+let panel: Dock
+const saved = vi.fn()
 
 interface PanelInternals {
-  buildComposer(c: ReturnType<typeof card>, swallow: (el: HTMLElement) => void): HTMLElement
+  buildComposer(c: ReturnType<typeof card>): HTMLElement
   pendingStartPrompt: { cardId: string; body: unknown } | null
 }
 
@@ -47,9 +48,9 @@ interface PanelInternals {
  *  control and a start prompt waiting for the card. */
 function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = {}): void {
   document.body.innerHTML = ''
-  panel = new FiberDetailModal('https://daemon.example', vi.fn(), undefined, undefined,
+  saved.mockClear()
+  panel = new Dock('https://daemon.example', saved, undefined, undefined,
     opts.meeting ? { meeting: opts.meeting } : undefined)
-  closeSpy = vi.spyOn(panel, 'close').mockImplementation(() => {})
   const internals = panel as unknown as PanelInternals
   if (opts.pendingStart) {
     internals.pendingStartPrompt = {
@@ -57,7 +58,7 @@ function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = 
       body: { dispatched: false, reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir' },
     }
   }
-  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster' }), () => {})
+  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster' }))
   document.body.append(composer)
 }
 
@@ -72,6 +73,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  panel.reset()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
@@ -100,11 +102,11 @@ describe('resuming while the daemon starts', () => {
     expect(textarea().value).toBe('continue with this correction')
     expect(resume().disabled).toBe(false)
     expect(fresh().disabled).toBe(false)
-    expect(closeSpy).not.toHaveBeenCalled()
+    expect(saved).not.toHaveBeenCalled()
     expect(fetch).toHaveBeenCalledTimes(1)
 
     resume().click()
-    await vi.waitFor(() => expect(closeSpy).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledTimes(1))
     expect(fetch).toHaveBeenCalledTimes(2)
     for (const [url, options] of fetch.mock.calls) {
       expect(url).toBe('https://daemon.example/api/v1/dispatch')
@@ -223,6 +225,51 @@ describe('the composer takes pasted images', () => {
     expect(dispatch.user_message).toBe('begin here\n[Image: /srv/.shuttle/attachments/u/abc.png]')
   })
 
+  it('re-composes a refused message from the text and images shown at retry', async () => {
+    fetch.mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({
+      reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir',
+    }) })
+    textarea().value = 'first version'
+    resume().click()
+    await vi.waitFor(() => expect(error().querySelector('.kbn-start-prompt')).not.toBeNull())
+    textarea().value = 'revised version'
+    paste(textarea(), [png('revision.png')])
+    fetch.mockResolvedValueOnce(uploaded('/srv/revision.png')).mockResolvedValueOnce(dispatched)
+    const dir = error().querySelector<HTMLInputElement>('.kbn-start-prompt-input')!
+    dir.value = '/srv/project'; dir.dispatchEvent(new Event('input'))
+    error().querySelector<HTMLButtonElement>('.kbn-start-prompt button.kbn-ctl-send')!.click()
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce())
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://daemon.example/api/v1/dispatch', 'https://daemon.example/api/v1/attachments', 'https://daemon.example/api/v1/dispatch',
+    ])
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toMatchObject({
+      user_message: 'revised version\n[Image: /srv/revision.png]', resume_mode: 'previous', project_dir: '/srv/project', origin: 'cluster',
+    })
+    expect(textarea().value).toBe('')
+    expect(chips()).toHaveLength(0)
+  })
+
+  it.each([false, true])('a refused Desk drag sends a parked draft only after an edit (%s)', async edited => {
+    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
+    const band = panel.bandFor(task)
+    composer = band.el
+    document.body.append(composer)
+    textarea().value = 'parked thought'
+    paste(textarea(), [png('parked.png')])
+    band.openStartPrompt(task, { reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir' })
+    if (edited) { textarea().value = 'intentional message'; textarea().dispatchEvent(new Event('input')) }
+    fetch.mockClear()
+    fetch.mockImplementation(async (url: string) => url.endsWith('/attachments') ? uploaded('/srv/parked.png') : dispatched)
+    const dir = error().querySelector<HTMLInputElement>('.kbn-start-prompt-input')!
+    dir.value = '/srv/project'; dir.dispatchEvent(new Event('input'))
+    error().querySelector<HTMLButtonElement>('.kbn-start-prompt button.kbn-ctl-send')!.click()
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledTimes(edited ? 2 : 1)
+    expect(JSON.parse(fetch.mock.calls.at(-1)![1].body).user_message).toBe(edited ? 'intentional message\n[Image: /srv/parked.png]' : '')
+    expect(textarea().value).toBe(edited ? '' : 'parked thought')
+    expect(chips()).toHaveLength(edited ? 0 : 1)
+  })
+
   it('holds every verb and freezes the chips while a send is in flight', async () => {
     const meeting: MeetingJoinControl = {
       canJoin: () => true, current: () => null, join: vi.fn(async () => ({ error: null, delivered: true })),
@@ -303,10 +350,55 @@ describe('the composer takes pasted images', () => {
     expect(textarea().value).toBe('')
   })
 
-  it('revokes every thumbnail URL when the panel closes', () => {
+  it('rebuilds a same-identity note band when promotion adds its composer', () => {
+    const note = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster' })
+    const band = panel.bandFor(note)
+    const root = band.el
+    expect(root.querySelector('textarea')).toBeNull()
+
+    const managed = { ...note, shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol' }
+    expect(panel.bandFor(managed)).toBe(band)
+    expect(band.el).toBe(root)
+    const input = root.querySelector<HTMLTextAreaElement>('textarea')!
+    input.value = 'half a thought'
+    paste(input, [png('one.png')])
+
+    const updated = { ...managed, id: 'work/renamed', path: '/stores/cluster/.felt/work/renamed.md' }
+    expect(panel.bandFor(updated)).toBe(band)
+    expect(band.el.querySelector('textarea')).toBe(input)
+    expect(input.value).toBe('half a thought')
+    expect(band.el.querySelectorAll('.kbn-ctl-image')).toHaveLength(1)
+  })
+
+  it('retains a draft and image chips in its owner+uid band across channel switches', () => {
+    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
+    const firstBand = panel.bandFor(task)
+    document.body.append(firstBand.el)
+    const input = firstBand.el.querySelector<HTMLTextAreaElement>('textarea')!
+    input.value = 'half a thought'
+    paste(input, [png('one.png')])
+
+    const otherBand = panel.bandFor(card({ id: 'work/other', uid: 'other-uid', originId: 'cluster' }))
+    document.body.append(otherBand.el)
+    expect(panel.bandFor(task)).toBe(firstBand)
+    expect(firstBand.el.querySelector('textarea')).toBe(input)
+    expect(input.value).toBe('half a thought')
+    expect(firstBand.el.querySelectorAll('.kbn-ctl-image')).toHaveLength(1)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+    const renamed = { ...task, id: 'work/renamed', path: '/stores/cluster/.felt/work/renamed.md', name: 'Renamed task' }
+    expect(panel.bandFor(renamed)).toBe(firstBand)
+    expect(firstBand.el.querySelector('textarea')).toBe(input)
+    expect(input.value).toBe('half a thought')
+    expect((firstBand as unknown as { card: KanbanCard }).card).toMatchObject({ id: renamed.id, path: renamed.path })
+    expect(firstBand.el.querySelectorAll('.kbn-ctl-image')).toHaveLength(1)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    expect(panel.bandFor(card({ id: 'work/task', uid: 'task-uid', originId: 'other-host' }))).not.toBe(firstBand)
+  })
+
+  it('revokes every thumbnail URL when the dock forgets its card', () => {
     paste(textarea(), [png('one.png'), png('two.png')])
-    closeSpy.mockRestore()
-    panel.close()
+    panel.reset()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-2')
   })
