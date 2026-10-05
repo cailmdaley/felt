@@ -42,7 +42,7 @@ defmodule ShuttleWeb.VersionController do
   end
 
   defp contract_check(true) do
-    Shuttle.Poller.snapshot(Shuttle.Poller, 1_500)
+    Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), 1_500)
     |> Map.get(:contract, %{})
     |> Map.put(:expected, Shuttle.Contract.expected_level())
   catch

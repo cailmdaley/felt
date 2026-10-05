@@ -66,14 +66,20 @@ defmodule Shuttle.Test.Env do
   """
   def start_scoped!(child_spec, module \\ nil) do
     pid = ExUnit.Callbacks.start_supervised!(child_spec)
-    module = module || spec_module(child_spec)
-    put_app_env(module, pid)
+    put_server(module || spec_module(child_spec), pid)
     pid
   end
 
+  @doc """
+  Make `server` (a pid or registered name) what `name` means to this test's
+  processes: daemon code addresses default-named singletons through
+  `Shuttle.Env.server/1`.
+  """
+  def put_server(name, server) when is_atom(name), do: put(:server, name, {:set, server})
+
   @doc "The calling test's instance of `module`, as registered by `start_scoped!/2`."
   def server!(module) do
-    case Shuttle.Env.app(module) do
+    case Shuttle.Env.server(module) do
       pid when is_pid(pid) ->
         pid
 

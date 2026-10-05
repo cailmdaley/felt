@@ -167,8 +167,12 @@ defmodule Shuttle.RemoteRegistry do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @doc """
@@ -204,7 +208,7 @@ defmodule Shuttle.RemoteRegistry do
   registry.
   """
   @spec poll_now() :: :ok
-  def poll_now, do: poll_now(__MODULE__)
+  def poll_now, do: poll_now(Shuttle.Env.server(__MODULE__))
 
   @spec poll_now(GenServer.server()) :: :ok
   def poll_now(server) do
@@ -227,7 +231,7 @@ defmodule Shuttle.RemoteRegistry do
   `{:error, :unknown_remote}` when the name isn't configured.
   """
   @spec reset_breaker(String.t()) :: :ok | {:error, :not_tripped | :unknown_remote}
-  def reset_breaker(name), do: reset_breaker(__MODULE__, name)
+  def reset_breaker(name), do: reset_breaker(Shuttle.Env.server(__MODULE__), name)
 
   @spec reset_breaker(GenServer.server(), String.t()) ::
           :ok | {:error, :not_tripped | :unknown_remote}

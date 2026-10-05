@@ -12,8 +12,7 @@ defmodule Shuttle.ConfigFilesTest do
   stubbed at the shared `:felt_runner` seam, so a real CLI on the developer's
   PATH never decides whether these tests pass.
   """
-  use ExUnit.Case, async: false
-  import Shuttle.Test.EnvHelpers
+  use ExUnit.Case, async: true
 
   alias Shuttle.ConfigFiles
 
@@ -77,10 +76,6 @@ defmodule Shuttle.ConfigFilesTest do
   end
 
   setup do
-    previous_files = Enum.map(@file_vars, fn {_id, var} -> {var, System.get_env(var)} end)
-    previous_compact = Enum.map(@compact_vars, fn {_id, var} -> {var, System.get_env(var)} end)
-    previous_runner = Application.get_env(:shuttle, :felt_runner)
-
     dir =
       Path.join(System.tmp_dir!(), "shuttle-config-files-#{System.unique_integer([:positive])}")
 
@@ -89,23 +84,18 @@ defmodule Shuttle.ConfigFilesTest do
     paths =
       Map.new(@file_vars, fn {id, var} ->
         path = Path.join(dir, "#{id}.json")
-        System.put_env(var, path)
+        Shuttle.Test.Env.put_env(var, path)
         {id, Path.expand(path)}
       end)
 
     # The compact forms win over the files ENTIRELY, so an operator shell
     # exporting one would leak into every `env_override` assertion below.
-    Enum.each(@compact_vars, fn {_id, var} -> System.delete_env(var) end)
+    Enum.each(@compact_vars, fn {_id, var} -> Shuttle.Test.Env.delete_env(var) end)
 
-    Application.put_env(:shuttle, :felt_runner, MockFelt)
+    Shuttle.Test.Env.put_app_env(:felt_runner, MockFelt)
     start_supervised!(MockFelt)
 
-    on_exit(fn ->
-      File.rm_rf(dir)
-      Enum.each(previous_files, fn {var, value} -> restore_env(var, value) end)
-      Enum.each(previous_compact, fn {var, value} -> restore_env(var, value) end)
-      restore_app_env(:felt_runner, previous_runner)
-    end)
+    on_exit(fn -> File.rm_rf(dir) end)
 
     {:ok, dir: dir, paths: paths}
   end
@@ -136,13 +126,8 @@ defmodule Shuttle.ConfigFilesTest do
     end
 
     test "falls back to ~/.config/shuttle/<stem>.json when nothing overrides it" do
-      # Cleared and restored in one breath: while a `*_FILE` var is absent every
-      # other reader in the VM resolves at the developer's real config, and this
-      # suite's whole job is to never go near it.
-      previous = Enum.map(@file_vars, fn {_id, var} -> {var, System.get_env(var)} end)
-      Enum.each(@file_vars, fn {_id, var} -> System.delete_env(var) end)
+      Enum.each(@file_vars, fn {_id, var} -> Shuttle.Test.Env.delete_env(var) end)
       resolved = Map.new(ConfigFiles.ids(), &{&1, ConfigFiles.path(&1)})
-      Enum.each(previous, fn {var, value} -> restore_env(var, value) end)
 
       assert resolved == %{
                stores: Path.expand("~/.config/shuttle/stores.json"),
@@ -179,9 +164,8 @@ defmodule Shuttle.ConfigFilesTest do
     end
 
     test "names the compact env form overriding a path-list file" do
-      System.put_env("SHUTTLE_STORES", "/tmp/a,/tmp/b")
-      System.put_env("SHUTTLE_PROJECTS", "/tmp/c")
-      on_exit(fn -> Enum.each(@compact_vars, fn {_id, var} -> System.delete_env(var) end) end)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", "/tmp/a,/tmp/b")
+      Shuttle.Test.Env.put_env("SHUTTLE_PROJECTS", "/tmp/c")
 
       assert ConfigFiles.summary(:stores).env_override == %{
                var: "SHUTTLE_STORES",
@@ -198,9 +182,8 @@ defmodule Shuttle.ConfigFilesTest do
       # Even with same-named variables exported, which a confused operator will
       # do sooner or later: `SHUTTLE_REMOTES` is not a thing shuttle reads, and
       # saying it overrode the file would be a lie in the other direction.
-      System.put_env("SHUTTLE_REMOTES", "/tmp/a,/tmp/b")
-      System.put_env("SHUTTLE_AGENTS", "/tmp/c")
-      on_exit(fn -> Enum.each(["SHUTTLE_REMOTES", "SHUTTLE_AGENTS"], &System.delete_env/1) end)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES", "/tmp/a,/tmp/b")
+      Shuttle.Test.Env.put_env("SHUTTLE_AGENTS", "/tmp/c")
 
       assert ConfigFiles.summary(:remotes).env_override == nil
       assert ConfigFiles.summary(:agents).env_override == nil

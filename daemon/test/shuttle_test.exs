@@ -1,5 +1,5 @@
 defmodule ShuttleTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   # The version has ONE source, mix.exs's `version:` (which CI stamps with the
   # release tag). This asserts the agreement that makes that true: what the
@@ -15,26 +15,16 @@ defmodule ShuttleTest do
   # so the port, the server flag, and the signing key must be decidable on the
   # machine that runs the daemon, not the one that built it.
   describe "Shuttle.Application.configure_endpoint/0" do
-    setup do
-      previous = Application.get_env(:shuttle, ShuttleWeb.Endpoint)
-      previous_listen = Application.get_env(:shuttle, :listen)
-      previous_class = Application.get_env(:shuttle, :host_class)
-
-      on_exit(fn ->
-        Application.put_env(:shuttle, ShuttleWeb.Endpoint, previous)
-        Shuttle.Test.EnvHelpers.restore_app_env(:listen, previous_listen)
-        Shuttle.Test.EnvHelpers.restore_app_env(:host_class, previous_class)
-      end)
-
-      :ok
-    end
-
+    # The inputs are scoped; `endpoint_settings/0` is what
+    # `configure_endpoint/0` writes, resolved without writing it.
     defp configured(config, env \\ %{}) do
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, config)
-      Enum.each(env, fn {k, v} -> System.put_env(k, v) end)
-      on_exit(fn -> Enum.each(env, fn {k, _} -> System.delete_env(k) end) end)
-      Shuttle.Application.configure_endpoint()
-      Application.get_env(:shuttle, ShuttleWeb.Endpoint)
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, config)
+      Enum.each(env, fn {k, v} -> Shuttle.Test.Env.put_env(k, v) end)
+
+      {ShuttleWeb.Endpoint, endpoint} =
+        List.keyfind(Shuttle.Application.endpoint_settings(), ShuttleWeb.Endpoint, 0)
+
+      endpoint
     end
 
     test "an explicit server: false survives — the test config must stay authoritative" do

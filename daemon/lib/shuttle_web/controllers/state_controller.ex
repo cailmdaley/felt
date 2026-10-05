@@ -58,13 +58,14 @@ defmodule ShuttleWeb.StateController do
   end
 
   defp poller_state do
-    {:ok, Shuttle.Poller.orchestrator_state(Shuttle.Poller, @state_timeout_ms)}
+    {:ok,
+     Shuttle.Poller.orchestrator_state(Shuttle.Env.server(Shuttle.Poller), @state_timeout_ms)}
   catch
     :exit, reason -> {:error, reason}
   end
 
   defp local_snapshot do
-    Shuttle.Poller.snapshot(Shuttle.Poller, @state_timeout_ms)
+    Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), @state_timeout_ms)
   catch
     :exit, reason ->
       %{
@@ -78,7 +79,10 @@ defmodule ShuttleWeb.StateController do
   end
 
   defp remote_snapshots do
-    Shuttle.RemoteRegistry.snapshots(Shuttle.RemoteRegistry, @state_timeout_ms)
+    Shuttle.RemoteRegistry.snapshots(
+      Shuttle.Env.server(Shuttle.RemoteRegistry),
+      @state_timeout_ms
+    )
   catch
     :exit, reason ->
       %{

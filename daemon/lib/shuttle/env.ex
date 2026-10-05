@@ -21,7 +21,9 @@ defmodule Shuttle.Env do
   An override is either a value or a deletion (the variable reads as unset,
   the app key as absent). `child_env/0` hands a scope's OS-env overrides to
   child processes, so a command spawned through `Shuttle.Runner.Default` sees
-  the same environment its caller does. The test-side writer is
+  the same environment its caller does. `server/1` resolves which process a
+  default-named singleton (`Shuttle.Poller`, the remote registries) means for
+  the caller, so a test can run its own unnamed instance. The test-side writer is
   `Shuttle.Test.Env`.
   """
 
@@ -112,6 +114,31 @@ defmodule Shuttle.Env do
         callers = Process.get(:"$callers", [])
         ancestors = Process.get(:"$ancestors", [])
         walk([self() | callers ++ ancestors], MapSet.new(), 0)
+      end
+    end
+
+    @doc """
+    `key`, qualified by the caller's scope owner when it has one: for
+    process-global caches (`:persistent_term`) that would otherwise be shared
+    by concurrent tests.
+    """
+    @spec scope_key(term()) :: term()
+    def scope_key(key) do
+      case owner() do
+        nil -> key
+        owner -> {key, owner}
+      end
+    end
+
+    @doc """
+    The process to address for a singleton registered as `name`: the
+    caller's scoped instance when a test registered one, else `name`.
+    """
+    @spec server(atom()) :: GenServer.server()
+    def server(name) do
+      case lookup(:server, name) do
+        {:ok, {:set, server}} -> server
+        _ -> name
       end
     end
 
@@ -207,6 +234,14 @@ defmodule Shuttle.Env do
     @doc "No scoped overrides exist outside test builds."
     @spec child_env() :: []
     def child_env, do: []
+
+    @doc "`key` itself: there are no scopes outside test builds."
+    @spec scope_key(term()) :: term()
+    def scope_key(key), do: key
+
+    @doc "The singleton registered as `name`."
+    @spec server(atom()) :: atom()
+    def server(name), do: name
 
     @doc "No scopes exist outside test builds, so there is no chain to hand on."
     @spec callers() :: []

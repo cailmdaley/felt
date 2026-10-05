@@ -164,8 +164,12 @@ defmodule Shuttle.RemoteTemporalRegistry do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   # The default on-disk home for the per-feed caches, honoring the same env
@@ -181,7 +185,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   — callers tolerate this for graceful degradation.
   """
   @spec entries(feed()) :: %{String.t() => view()}
-  def entries(feed), do: entries(__MODULE__, feed)
+  def entries(feed), do: entries(Shuttle.Env.server(__MODULE__), feed)
 
   @spec entries(GenServer.server(), feed()) :: %{String.t() => view()}
   def entries(server, feed) when feed in @feeds do
@@ -194,7 +198,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   prime the registry deterministically against a stub client.
   """
   @spec refresh_now() :: :ok
-  def refresh_now, do: refresh_now(__MODULE__)
+  def refresh_now, do: refresh_now(Shuttle.Env.server(__MODULE__))
 
   @spec refresh_now(GenServer.server()) :: :ok
   def refresh_now(server),

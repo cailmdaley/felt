@@ -63,7 +63,7 @@ defmodule Shuttle.FeltStores do
     now = System.monotonic_time(:millisecond)
 
     case {PathListConfig.read_configured(@spec_),
-          :persistent_term.get(@expanded_cache_key, :none)} do
+          :persistent_term.get(Shuttle.Env.scope_key(@expanded_cache_key), :none)} do
       {{:ok, base}, {base, expanded, walked_at}} when now - walked_at < max_age_ms ->
         expanded
 
@@ -75,7 +75,7 @@ defmodule Shuttle.FeltStores do
 
       {{:ok, base}, _cached} ->
         expanded = expand_with_symlinked_substores(base)
-        :persistent_term.put(@expanded_cache_key, {base, expanded, now})
+        :persistent_term.put(Shuttle.Env.scope_key(@expanded_cache_key), {base, expanded, now})
         expanded
     end
   end

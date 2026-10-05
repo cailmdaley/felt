@@ -1,26 +1,18 @@
 defmodule Shuttle.ProjectsTest do
-  use ExUnit.Case, async: false
-  import Shuttle.Test.EnvHelpers
+  use ExUnit.Case, async: true
 
   alias Shuttle.Projects
 
   setup do
-    prev_env = System.get_env("SHUTTLE_PROJECTS")
-    prev_file = System.get_env("SHUTTLE_PROJECTS_FILE")
-
     # Point the registry at a throwaway file so tests never read/clobber the
     # user's real ~/.config/shuttle/projects.json.
     path =
       Path.join(System.tmp_dir!(), "shuttle-projects-#{System.unique_integer([:positive])}.json")
 
-    System.delete_env("SHUTTLE_PROJECTS")
-    System.put_env("SHUTTLE_PROJECTS_FILE", path)
+    Shuttle.Test.Env.delete_env("SHUTTLE_PROJECTS")
+    Shuttle.Test.Env.put_env("SHUTTLE_PROJECTS_FILE", path)
 
-    on_exit(fn ->
-      File.rm(path)
-      restore_env("SHUTTLE_PROJECTS", prev_env)
-      restore_env("SHUTTLE_PROJECTS_FILE", prev_file)
-    end)
+    on_exit(fn -> File.rm(path) end)
 
     {:ok, path: path}
   end
@@ -44,7 +36,7 @@ defmodule Shuttle.ProjectsTest do
   end
 
   test "SHUTTLE_PROJECTS env overrides the file" do
-    System.put_env("SHUTTLE_PROJECTS", "/tmp/x, /tmp/y")
+    Shuttle.Test.Env.put_env("SHUTTLE_PROJECTS", "/tmp/x, /tmp/y")
     assert Projects.configured_projects() == ["/tmp/x", "/tmp/y"]
   end
 

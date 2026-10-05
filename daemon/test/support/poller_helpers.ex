@@ -3,7 +3,6 @@ defmodule Shuttle.Test.PollerHelpers do
   Fixture builders and the supervised-poller starter shared by the suites that
   drive a `Shuttle.Poller` against `Shuttle.Test.FeltStoreRunner`.
 
-  `import Shuttle.Test.PollerHelpers` from a NON-async test module.
   """
 
   import ExUnit.Callbacks, only: [start_supervised!: 1]
@@ -51,6 +50,15 @@ defmodule Shuttle.Test.PollerHelpers do
   def start_poller!(opts) do
     opts = Keyword.put_new_lazy(opts, :daemon_heartbeat_file, &test_heartbeat_file/0)
 
+    # No name (or the singleton's own) starts an unnamed Poller and makes it
+    # this test's `Shuttle.Poller` (`Shuttle.Env.server/1`), so concurrent
+    # tests each address their own; an explicit other name is kept as given.
+    {scoped?, opts} =
+      case Keyword.get(opts, :name, Shuttle.Poller) do
+        Shuttle.Poller -> {true, Keyword.put(opts, :name, nil)}
+        _name -> {false, opts}
+      end
+
     pid =
       start_supervised!(%{
         id: make_ref(),
@@ -58,6 +66,7 @@ defmodule Shuttle.Test.PollerHelpers do
         restart: :temporary
       })
 
+    if scoped?, do: Shuttle.Test.Env.put_server(Shuttle.Poller, pid)
     {:ok, pid}
   end
 

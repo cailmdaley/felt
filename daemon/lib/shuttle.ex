@@ -301,6 +301,15 @@ defmodule Shuttle.Application do
   # only the lowest-ranked input to its single-user default.
   @doc false
   def configure_endpoint do
+    Enum.each(endpoint_settings(), fn {key, value} ->
+      Application.put_env(:shuttle, key, value)
+    end)
+  end
+
+  # The `:shuttle` app env `configure_endpoint/0` writes, resolved without
+  # writing it.
+  @doc false
+  def endpoint_settings do
     if Shuttle.Env.get("SHUTTLE_PEER_UID") do
       Logger.warning(
         "SHUTTLE_PEER_UID is set; it overrides the effective uid when shared TCP peer gating is active"
@@ -332,12 +341,6 @@ defmodule Shuttle.Application do
     {peer_gate, peer_gate_expected_uid, peer_gate_uid_source} =
       configure_peer_gate(class, listen, listen_string, server?)
 
-    Application.put_env(:shuttle, :listen, listen_string)
-    Application.put_env(:shuttle, :host_class, class)
-    Application.put_env(:shuttle, :peer_gate, peer_gate)
-    Application.put_env(:shuttle, :peer_gate_expected_uid, peer_gate_expected_uid)
-    Application.put_env(:shuttle, :peer_gate_uid_source, peer_gate_uid_source)
-
     merged =
       Keyword.merge(existing,
         http: Keyword.merge(http, bind),
@@ -347,7 +350,14 @@ defmodule Shuttle.Application do
         secret_key_base: secret_key_base(existing)
       )
 
-    Application.put_env(:shuttle, ShuttleWeb.Endpoint, merged)
+    [
+      {:listen, listen_string},
+      {:host_class, class},
+      {:peer_gate, peer_gate},
+      {:peer_gate_expected_uid, peer_gate_expected_uid},
+      {:peer_gate_uid_source, peer_gate_uid_source},
+      {ShuttleWeb.Endpoint, merged}
+    ]
   end
 
   defp configure_peer_gate(:exposed, {:tcp, _ip, _port}, listen_string, true) do

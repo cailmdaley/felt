@@ -4,6 +4,7 @@ defmodule Shuttle.LogLevelTest do
   valid level, ignores an unset or blank one, and keeps the configured level
   with a warning on anything else.
   """
+  # sync: Logger.configure/1 sets the VM-wide log level.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog

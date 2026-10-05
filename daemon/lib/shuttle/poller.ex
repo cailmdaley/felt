@@ -324,12 +324,16 @@ defmodule Shuttle.Poller do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @spec snapshot() :: map()
-  def snapshot, do: snapshot(__MODULE__)
+  def snapshot, do: snapshot(Shuttle.Env.server(__MODULE__))
 
   @spec snapshot(GenServer.server()) :: map()
   def snapshot(server) do
@@ -343,7 +347,7 @@ defmodule Shuttle.Poller do
 
   @spec cached_fiber_documents(keyword() | GenServer.server()) :: {:ok, map()} | {:error, term()}
   def cached_fiber_documents(opts) when is_list(opts),
-    do: cached_fiber_documents(__MODULE__, opts)
+    do: cached_fiber_documents(Shuttle.Env.server(__MODULE__), opts)
 
   def cached_fiber_documents(server), do: cached_fiber_documents(server, [])
 
@@ -363,7 +367,7 @@ defmodule Shuttle.Poller do
   work carries no entry and the marker clears.
   """
   @spec parked_index(GenServer.server()) :: map()
-  def parked_index(server \\ __MODULE__) do
+  def parked_index(server \\ Shuttle.Env.server(__MODULE__)) do
     GenServer.call(server, :parked_index, @orchestrator_state_call_timeout_ms)
   catch
     :exit, _ -> %{}
@@ -385,7 +389,8 @@ defmodule Shuttle.Poller do
   reconcile rather than failing the mutation the user already committed.
   """
   @spec refresh_document(GenServer.server(), String.t()) :: :ok
-  def refresh_document(server \\ __MODULE__, fiber_id) when is_binary(fiber_id) do
+  def refresh_document(server \\ Shuttle.Env.server(__MODULE__), fiber_id)
+      when is_binary(fiber_id) do
     GenServer.call(server, {:refresh_document, fiber_id}, @orchestrator_state_call_timeout_ms)
   catch
     # Best-effort by contract: if the Poller is unavailable (not started, e.g. a
@@ -398,7 +403,7 @@ defmodule Shuttle.Poller do
   # ── Agent-API Client ──
 
   @spec worker_status(String.t()) :: map() | nil
-  def worker_status(fiber_id), do: worker_status(__MODULE__, fiber_id)
+  def worker_status(fiber_id), do: worker_status(Shuttle.Env.server(__MODULE__), fiber_id)
 
   @spec worker_status(GenServer.server(), String.t()) :: map() | nil
   def worker_status(server, fiber_id) do
@@ -420,7 +425,7 @@ defmodule Shuttle.Poller do
   the cache — the caller degrades to comparing against the previous value.
   """
   @spec session_uuid(String.t()) :: String.t() | nil
-  def session_uuid(fiber_id), do: session_uuid(__MODULE__, fiber_id)
+  def session_uuid(fiber_id), do: session_uuid(Shuttle.Env.server(__MODULE__), fiber_id)
 
   @spec session_uuid(GenServer.server(), String.t()) :: String.t() | nil
   def session_uuid(server, fiber_id) when is_binary(fiber_id) do
@@ -436,7 +441,7 @@ defmodule Shuttle.Poller do
   """
   @spec live_worker(String.t()) ::
           %{session: String.t(), session_uuid: String.t() | nil, cli: String.t() | nil} | nil
-  def live_worker(fiber_id), do: live_worker(__MODULE__, fiber_id)
+  def live_worker(fiber_id), do: live_worker(Shuttle.Env.server(__MODULE__), fiber_id)
 
   @spec live_worker(GenServer.server(), String.t()) :: map() | nil
   def live_worker(server, fiber_id) when is_binary(fiber_id) do
@@ -444,7 +449,8 @@ defmodule Shuttle.Poller do
   end
 
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
-  def dispatch_fiber(fiber_id, opts \\ []), do: dispatch_fiber(__MODULE__, fiber_id, opts)
+  def dispatch_fiber(fiber_id, opts \\ []),
+    do: dispatch_fiber(Shuttle.Env.server(__MODULE__), fiber_id, opts)
 
   @spec dispatch_fiber(GenServer.server(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, atom()}
@@ -473,7 +479,7 @@ defmodule Shuttle.Poller do
   """
   @spec claim_session(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def claim_session(fiber_id, tmux_session, opts \\ []),
-    do: claim_session(__MODULE__, fiber_id, tmux_session, opts)
+    do: claim_session(Shuttle.Env.server(__MODULE__), fiber_id, tmux_session, opts)
 
   @spec claim_session(GenServer.server(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
@@ -506,7 +512,7 @@ defmodule Shuttle.Poller do
   while a worker keeps mutating the fiber.
   """
   @spec kill_session(String.t()) :: {:ok, String.t() | :no_session} | {:error, String.t()}
-  def kill_session(fiber_id), do: kill_session(__MODULE__, fiber_id)
+  def kill_session(fiber_id), do: kill_session(Shuttle.Env.server(__MODULE__), fiber_id)
 
   @spec kill_session(GenServer.server(), String.t()) ::
           {:ok, String.t() | :no_session} | {:error, String.t()}
@@ -523,7 +529,7 @@ defmodule Shuttle.Poller do
   capture scribes).
   """
   @spec capture(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def capture(yap, opts \\ []), do: capture(__MODULE__, yap, opts)
+  def capture(yap, opts \\ []), do: capture(Shuttle.Env.server(__MODULE__), yap, opts)
 
   @spec capture(GenServer.server(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def capture(server, yap, opts) do
@@ -539,7 +545,7 @@ defmodule Shuttle.Poller do
   """
   @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t()) ::
           Shuttle.Felt.result()
-  def lifecycle_transition(server \\ __MODULE__, verb, fiber_id) do
+  def lifecycle_transition(server \\ Shuttle.Env.server(__MODULE__), verb, fiber_id) do
     GenServer.call(server, {:lifecycle_transition, verb, fiber_id}, @dispatch_call_timeout_ms)
   end
 
@@ -560,7 +566,7 @@ defmodule Shuttle.Poller do
   poll interval. Served over HTTP as `POST /api/v1/quarantine/release`.
   """
   @spec release_boot_quarantine() :: :ok
-  def release_boot_quarantine, do: release_boot_quarantine(__MODULE__)
+  def release_boot_quarantine, do: release_boot_quarantine(Shuttle.Env.server(__MODULE__))
 
   @spec release_boot_quarantine(GenServer.server()) :: :ok
   def release_boot_quarantine(server) do
@@ -2291,7 +2297,7 @@ defmodule Shuttle.Poller do
   a test poller started under a different name.
   """
   @spec own_host_id() :: String.t()
-  def own_host_id, do: own_host_id(__MODULE__)
+  def own_host_id, do: own_host_id(Shuttle.Env.server(__MODULE__))
 
   @spec own_host_id(GenServer.server()) :: String.t()
   def own_host_id(server) do
