@@ -119,8 +119,9 @@ describe('Reader channel sidebar', () => {
     expect(row.dataset.part).toBe('sidebar-card')
     expect(row.hasAttribute('data-ws-theme-boundary')).toBe(true)
     expect(reader.el.hasAttribute('data-ws-theme-boundary')).toBe(true)
-    expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(2)
-    for (const part of ['tab-strip', 'tab', 'thumbnail', 'thumbnail-face', 'page-sheet', 'page-sheet-panel']) {
+    // The running head sits on the veil: there are no chrome plates to theme.
+    expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(0)
+    for (const part of ['tab-strip', 'tab', 'tab-preview', 'page-sheet', 'page-sheet-panel']) {
       expect(reader.el.querySelector(`[data-part="${part}"]`)).not.toBeNull()
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
@@ -200,8 +201,9 @@ describe('Reader channel sidebar', () => {
     const wide = makeReader()
     const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
-    expect(wideToggle.textContent).toBe('▥ Constitutions')
-    expect(wideToggle.title).toBe('Constitutions (s or ⌘\\)')
+    expect(wideToggle.textContent).toBe('')
+    expect(wideToggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(wideToggle.title).toBe('Constitutions · s')
     expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
     disposeReader(wide)
 
