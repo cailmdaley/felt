@@ -159,13 +159,15 @@ describe('Overview metadata recovery and navigation', () => {
     expect(folio('alpha')?.textContent).toContain('Live alpha')
     expect(fiberReads()).toHaveLength(1)
   })
-  it('fresh refresh retries even a confirmed miss whose folio has moved to Unfiled', async () => {
+  it('a fresh visit retries even a confirmed miss whose folio has moved to Unfiled', async () => {
     files = [receipt('alpha')]
     let healthy = false
     reads.mockImplementation(async url => url.includes('/sent-files/all/') ? json({ files }) : healthy ? json(envelope('alpha')) : json({ fibers: [] }))
     sheet().refresh(); await settle()
     expect(folio('other:owner')).not.toBeNull()
     healthy = true; overview!.refresh(); await settle()
+    expect(fiberReads()).toHaveLength(1)
+    overview!.hide(); overview!.show(); overview!.refresh(); await settle()
     expect(folio('other:owner')).toBeNull()
     expect(folio('alpha')?.textContent).toContain('Resolved alpha')
     expect(fiberReads()).toHaveLength(2)

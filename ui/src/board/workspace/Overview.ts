@@ -26,6 +26,9 @@ export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
 const RECEIPT_OVERLAP_MS = 60000
 const MAX_CHANGE_ROWS = 8
+/** Metadata read backoff: an unreachable owner retries within 30 s; a fiber its owner says does not exist waits 30 s, doubling to 5 min. */
+const RETRY_MS = 30000
+const MISSING_RETRY_MS = 300000
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
 const SEEN_STORAGE = 'shuttle.workspace.overview.seen'
@@ -343,7 +346,10 @@ export class Overview {
   /** Metadata paints immediately; one coalesced feed read finishes asynchronously. */
   refresh(): void {
     if (this.disposed) return
-    if (!this.request) for (const retry of this.cardRetries.values()) retry.at = 0
+    // A poll retries transient failures at once. An owner that answered "not
+    // found" keeps its backoff until the next visit, because every read of a
+    // missing fiber asks each host in turn.
+    if (!this.request) for (const [uid, retry] of this.cardRetries) if (!this.missingCards.has(uid)) retry.at = 0
     this.reconcile()
     if (this.request) return
     const controller = new AbortController()
@@ -427,6 +433,7 @@ export class Overview {
     if (this.disposed) return
     if (visible === this.visible) { if (visible) this.startVisit(); return }
     if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; this.leaveVisit() }
+    else for (const retry of this.cardRetries.values()) retry.at = 0
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
@@ -942,9 +949,11 @@ export class Overview {
       const current = this.knownCards().get(uid)
       if (current) return current
       if (!this.disposed) {
-        if (error instanceof Error && error.message.startsWith('Fiber not found on ')) this.missingCards.add(uid)
+        const missing = error instanceof Error && error.message.startsWith('Fiber not found on ')
+        if (missing) this.missingCards.add(uid)
         const attempts = (this.cardRetries.get(uid)?.attempts ?? 0) + 1
-        this.cardRetries.set(uid, { attempts, at: Date.now() + Math.min(30000, 1000 * 2 ** Math.min(attempts - 1, 5)) })
+        const wait = missing ? Math.min(MISSING_RETRY_MS, RETRY_MS * 2 ** Math.min(attempts - 1, 4)) : Math.min(RETRY_MS, 1000 * 2 ** Math.min(attempts - 1, 5))
+        this.cardRetries.set(uid, { attempts, at: Date.now() + wait })
       }
       return undefined
     }

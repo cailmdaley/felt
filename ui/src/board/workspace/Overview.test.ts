@@ -272,6 +272,16 @@ describe('Overview receipt membership and identity', () => {
     expect(onOpen.mock.calls[0][1]).toBe('bytes-host:/remote/report.html')
   })
 
+  it('backs off a confirmed missing fiber across polls instead of asking its owner again on every one', async () => {
+    feed.files = [receipt('missing', '/remote/report.html', now(), 'bytes-host')]
+    const reads = (): number => fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/v1/fibers/missing?')).length
+    await refresh()
+    expect(reads()).toBe(1)
+    for (let poll = 0; poll < 8; poll++) { vi.advanceTimersByTime(15000); await refresh() }
+    expect(reads()).toBeLessThanOrEqual(3)
+    expect(name('other:bytes-host')).toBe('Unfiled · bytes-host')
+  })
+
   it('coalesces refresh reads and retains the sheet on feed failure', async () => {
     feed.files = [receipt('alpha', '/report.html')]; await refresh()
     const original = folio('alpha')
