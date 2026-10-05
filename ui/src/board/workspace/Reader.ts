@@ -92,6 +92,7 @@ export class Reader {
   private readonly returnButton: HTMLButtonElement
   /** The awaiting-review verdicts, beside the fiber's name, reachable from any page. */
   private readonly verdicts = element('span', 'ws-nav-verdicts')
+  private verdictKey: string | null = null
   private readonly position = element('span', 'ws-position')
   private readonly pageTitle = element('span', 'ws-thumb-title')
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
@@ -151,7 +152,7 @@ export class Reader {
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
-    this.sidebarToggle.title = 'Constitutions (⌘\\)'
+    this.sidebarToggle.title = 'Constitutions (s or ⌘\\)'
     this.lead = element('div', 'ws-nav-lead')
     this.lead.dataset.part = 'chrome-plate'
     this.lead.append(this.returnButton, this.sidebarToggle, this.title, this.verdicts)
@@ -343,13 +344,16 @@ export class Reader {
   private paintVerdicts(): void {
     const card = this.currentCard
     const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview'
-    const navbar = review && this.document?.kind !== 'fiber' ? this.opts.verdictPlate?.(card) ?? null : null
-    const focused = this.verdicts.contains(document.activeElement)
-      ? document.activeElement?.matches('.kbn-ctl-temper') ? '.kbn-ctl-temper' : '.kbn-ctl-discard' : null
-    this.verdicts.replaceChildren(...(navbar ? [navbar] : []))
-    this.verdicts.hidden = !navbar
-    if (focused) this.verdicts.querySelector<HTMLElement>(focused)?.focus({ preventScroll: true })
-    this.pageSheet.setActions(review && card ? this.opts.verdictPlate?.(card) ?? null : null)
+    // The pair is built once per reviewing fiber, so a repaint never swaps
+    // the buttons under the pointer or the focus.
+    const key = review && card ? JSON.stringify([card.originId, card.uid ?? card.id, card.path, card.status, card.tempered, card.workerState, card.tmuxSession]) : null
+    if (key !== this.verdictKey) {
+      this.verdictKey = key
+      const navbar = key && card ? this.opts.verdictPlate?.(card) ?? null : null
+      this.verdicts.replaceChildren(...(navbar ? [navbar] : []))
+      this.pageSheet.setActions(key && card ? this.opts.verdictPlate?.(card) ?? null : null)
+    }
+    this.verdicts.hidden = !key || !this.verdicts.firstChild || this.document?.kind === 'fiber'
   }
   private paint(animate: boolean): void {
     this.paintVerdicts()

@@ -252,6 +252,7 @@
 
 /* The fiber's worker pill: the sidebar card's own plate, on its own row. */
 .ws-dock-body > .ws-worker-pill { grid-column: 1 / -1; display: flex; justify-content: flex-start; }
+.ws-dock-body > .ws-worker-pill[hidden] { display: none; }
 .ws-dock .ws-worker-pill .ws-worker-control { padding: 0 10px; border: var(--ws-line-width) solid var(--ws-hairline) !important; border-radius: 999px; background: var(--ws-paper); }
 .ws-dock .ws-worker-pill .ws-worker-control:hover { background: var(--ws-hover); }
 
