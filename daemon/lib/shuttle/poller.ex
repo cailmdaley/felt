@@ -68,6 +68,8 @@ defmodule Shuttle.Poller do
   @daemon_host_key {@own_host_pt_namespace, :daemon}
   @dispatch_call_timeout_ms 30_000
   @orchestrator_state_call_timeout_ms 30_000
+  # A slug hint is worth waiting for only while it beats felt's UID walk.
+  @slug_for_uid_timeout_ms 1_000
 
   # Resume-loop circuit breaker. A still-active oneshot whose worker exits is
   # re-dispatched on the next poll (resuming the prior transcript on a dirty
@@ -350,6 +352,20 @@ defmodule Shuttle.Poller do
   @spec cached_fiber_documents(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
   def cached_fiber_documents(server, opts) do
     GenServer.call(server, {:cached_fiber_documents, opts}, @orchestrator_state_call_timeout_ms)
+  end
+
+  @doc """
+  The slug the last poll saw for a fiber `uid`, or nil.
+
+  felt reads a slug directly and walks the whole store for a UID, so a reader
+  addressed by UID names this slug to felt and checks the UID on the answer.
+  A pure read of the poll-built `uid_slug_index`; an unavailable poller is nil.
+  """
+  @spec slug_for_uid(GenServer.server(), String.t()) :: String.t() | nil
+  def slug_for_uid(server \\ __MODULE__, uid) when is_binary(uid) do
+    GenServer.call(server, {:slug_for_uid, uid}, @slug_for_uid_timeout_ms)
+  catch
+    :exit, _ -> nil
   end
 
   @doc """
@@ -955,6 +971,10 @@ defmodule Shuttle.Poller do
   @impl true
   def handle_call(:snapshot, _from, state) do
     {:reply, add_poll_health(Snapshot.build_snapshot(state), state), state}
+  end
+
+  def handle_call({:slug_for_uid, uid}, _from, state) do
+    {:reply, Map.get(state.uid_slug_index, uid), state}
   end
 
   def handle_call(:parked_index, _from, state) do

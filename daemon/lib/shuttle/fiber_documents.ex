@@ -205,9 +205,27 @@ defmodule Shuttle.FiberDocuments do
     stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
     with_body? = cli == "felt" and Keyword.get(opts, :with_body, false)
 
-    case fast_lookup(stores, id, with_body?, cli) do
+    with :miss <- address_lookup(stores, id, Keyword.get(opts, :address), with_body?, cli),
+         :miss <- fast_lookup(stores, id, with_body?, cli) do
+      scan_lookup(stores, id, with_body?, cli)
+    else
       {:ok, entry} -> {:ok, envelope(stores, [entry])}
-      :miss -> scan_lookup(stores, id, with_body?, cli)
+    end
+  end
+
+  # A caller that knows a UID's slug names it as `:address`: felt shows a slug
+  # directly, where a UID costs a walk of the whole store. The answer counts
+  # only when it carries the requested UID, so a stale address falls through
+  # to the lookup by UID.
+  defp address_lookup(_stores, _id, nil, _with_body?, _cli), do: :miss
+
+  defp address_lookup(stores, id, address, with_body?, cli) do
+    case fast_lookup(stores, address, with_body?, cli) do
+      {:ok, %{fiber: %{"uid" => uid}} = entry} when is_binary(uid) ->
+        if String.upcase(uid) == String.upcase(id), do: {:ok, entry}, else: :miss
+
+      _ ->
+        :miss
     end
   end
 

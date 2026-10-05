@@ -771,6 +771,52 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = Jason.decode!(by_slug.resp_body)["fibers"]
   end
 
+  test "GET /api/v1/fibers/:id reads a polled ULID through its slug, and checks the answer",
+       %{store: store} do
+    ulid = "01JZ0000000000000000000002"
+    other = "01JZ0000000000000000000003"
+
+    for {slug, uid} <- [{"tests/by-slug", ulid}, {"tests/other", other}] do
+      write_fiber!(store, slug, """
+      ---
+      id: #{uid}
+      name: #{slug}
+      status: active
+      shuttle:
+        enabled: true
+        host: test-host
+      ---
+
+      Body of #{slug}.
+      """)
+    end
+
+    poller = warm_poller!(store)
+    assert Shuttle.Poller.slug_for_uid(ulid) == "tests/by-slug"
+    log = install_logging_felt!(store)
+
+    conn = get(api_conn(), "/api/v1/fibers/#{ulid}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^ulid, "body" => "Body of tests/by-slug."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/by-slug -j\n"
+
+    # A stale slug answers with another fiber's UID; the read falls through to
+    # the UID itself rather than serving the wrong document.
+    :sys.replace_state(poller, fn state ->
+      %{state | uid_slug_index: Map.put(state.uid_slug_index, ulid, "tests/other")}
+    end)
+
+    File.write!(log, "")
+    conn = get(api_conn(), "/api/v1/fibers/#{ulid}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^ulid, "body" => "Body of tests/by-slug."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/other -j\nshow #{ulid} -j\n"
+  end
+
   test "GET /api/v1/fibers/:id?body=true includes the felt body alongside full metadata",
        %{store: store} do
     write_fiber!(store, "tests/single-body", """
@@ -1157,6 +1203,28 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
   # the (here empty) whole-store scan. Lets a controller test distinguish the
   # fast path from the scan fallback by RESULT alone, no timing. `$(pwd)` (not
   # `$PWD`, which `cd:` leaves stale) gives felt's per-call working store.
+  # A felt that records each invocation's arguments, then runs the real felt.
+  defp install_logging_felt!(store) do
+    real = System.find_executable("felt") || flunk("felt not on PATH")
+    bin_dir = Path.join(Path.dirname(store), "logging-bin")
+    log = Path.join(Path.dirname(store), "felt-calls.log")
+    File.mkdir_p!(bin_dir)
+    File.write!(log, "")
+    bin = Path.join(bin_dir, "felt")
+
+    File.write!(bin, """
+    #!/bin/sh
+    printf '%s\\n' "$*" >> '#{log}'
+    exec '#{real}' "$@"
+    """)
+
+    File.chmod!(bin, 0o755)
+    old_path = System.get_env("PATH")
+    System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
+    on_exit(fn -> restore_env("PATH", old_path) end)
+    log
+  end
+
   defp install_body_read_fake_felt!(store) do
     bin_dir = Path.join(Path.dirname(store), "fake-bin")
     File.mkdir_p!(bin_dir)

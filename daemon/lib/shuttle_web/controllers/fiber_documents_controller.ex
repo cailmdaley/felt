@@ -166,9 +166,12 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # this read path coalesces whole answers. Daemon-internal reads that follow a
   # write run their own lookup: a miss may share a store listing in flight, but
   # the answer always comes from a fresh `show`.
+  #
+  # The board addresses fibers by UID. A UID the poller has seen reads through
+  # its slug, a direct felt read instead of a walk of the store.
   defp show_local(conn, id, with_body?, routed?) do
     case Shuttle.SingleFlight.run({:fiber_get, id, with_body?}, fn ->
-           Shuttle.FiberDocuments.get(id, with_body: with_body?)
+           Shuttle.FiberDocuments.get(id, with_body: with_body?, address: slug_hint(id))
          end) do
       {:ok, body} ->
         case owning_remote(body, routed?) do
@@ -181,6 +184,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
         |> put_status(:service_unavailable)
         |> json(%{error: "felt_show_failed", stores: errors})
     end
+  end
+
+  defp slug_hint(id) do
+    if Shuttle.ULID.valid?(id), do: Shuttle.Poller.slug_for_uid(id)
   end
 
   defp forward_show(remote, id, with_body?) do
