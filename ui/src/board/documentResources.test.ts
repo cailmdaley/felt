@@ -1,7 +1,7 @@
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  bytes, fact, fetchDocument, head, peek, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS,
+  bytes, fact, fetchDocument, head, peek, peekVersion, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS,
   RESOURCE_PRIORITY, text, type ResourcePriority,
 } from './documentResources.js'
 import { resetLanes } from './requestLanes.js'
@@ -149,6 +149,23 @@ describe('shared reads', () => {
     expect(fetcher).toHaveBeenCalledTimes(3)
     expect(await peek(src, RESOURCE_PRIORITY.duration, { stale: true, now: Date.now() + 10 * RESOURCE_FRESH_MS })).toBe(first)
     expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('never lets a stat validator vouch for bytes: it re-reads the range and versions facts by content', async () => {
+    let content = 'ID3-a'
+    const fetcher = vi.fn(async (_src: string, init?: RequestInit) => header(init, 'If-None-Match')
+      ? new Response(null, { status: 304 })
+      : body(content, 'W/"stat-1790000000-5-42"'))
+    vi.stubGlobal('fetch', fetcher)
+    const src = '/api/v1/file?path=%2Ftake.wav'
+    const first = (await peek(src))!
+    content = 'ID3-b'
+    const later = (await peek(src, RESOURCE_PRIORITY.title, { now: Date.now() + RESOURCE_FRESH_MS + 1 }))!
+    expect(header(fetcher.mock.calls[1][1], 'If-None-Match')).toBeNull()
+    expect(new TextDecoder().decode(later.bytes)).toBe('ID3-b')
+    expect(peekVersion(later)).not.toBe(peekVersion(first))
+    const digest = { bytes: new Uint8Array([1]), etag: 'W/"sha256-a"' }
+    expect(peekVersion(digest)).toBe('W/"sha256-a"')
   })
 
   it('keeps a missing document as an answer while fresh, but not a failed read', async () => {

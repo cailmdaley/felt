@@ -192,6 +192,20 @@ function deadline(signal: AbortSignal | null | undefined, ms: number | null): { 
 }
 
 const etagOf = (response: Response): string | undefined => response.headers.get('ETag') ?? undefined
+/**
+ * Whether a validator proves the bytes unchanged. The daemon's content
+ * digests do; its `stat-` validator (mtime to the second, size, inode) misses
+ * a same-size rewrite within one second, so it never earns a 304.
+ */
+const provesContent = (etag: string | undefined): etag is string => !!etag && !/^W\/"stat-/.test(etag)
+
+/** The version of a document a peek describes, for facts derived from it. */
+export function peekVersion(value: Peek): string {
+  if (provesContent(value.etag)) return value.etag
+  let hash = 2166136261
+  for (const byte of value.bytes) hash = Math.imul(hash ^ byte, 16777619)
+  return `${value.etag ?? ''}|${value.size ?? ''}|${(hash >>> 0).toString(16)}`
+}
 
 /**
  * Whether a document exists, with its size and modification time, from the
@@ -247,7 +261,7 @@ function peekOfText(entry: Entry): Peek {
 async function readPeek(entry: Entry, signal: AbortSignal): Promise<Peek | null> {
   const known = entry.peek?.value.etag ?? entry.text?.value.etag
   const headers: Record<string, string> = { Range: `bytes=0-${PEEK_BYTES - 1}` }
-  if (known) headers['If-None-Match'] = known
+  if (provesContent(known)) headers['If-None-Match'] = known
   const limit = deadline(signal, RESOURCE_DEADLINE_MS)
   try {
     const response = await fetch(entry.src, { cache: 'no-store', headers, signal: limit.signal })
@@ -357,7 +371,7 @@ export async function text(src: string, priority: ResourcePriority = RESOURCE_PR
   }
   return shared(`text\0${resourceKey(src)}`, priority, async signal => {
     const etag = entry.text?.value.etag
-    const response = await readWhole(entry, { cache: 'no-store', signal, headers: etag ? { 'If-None-Match': etag } : undefined }, priority)
+    const response = await readWhole(entry, { cache: 'no-store', signal, headers: provesContent(etag) ? { 'If-None-Match': etag } : undefined }, priority)
     return response.ok || response.status === 304 ? entry.text?.value ?? null : null
   }, options.signal).catch(() => null)
 }

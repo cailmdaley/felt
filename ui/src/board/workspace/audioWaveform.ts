@@ -1,4 +1,4 @@
-import { bytes, fact, knownFact, peek, queued, RESOURCE_PRIORITY, type ResourcePriority } from '../documentResources.js'
+import { bytes, fact, knownFact, peek, peekVersion, queued, RESOURCE_PRIORITY, type ResourcePriority } from '../documentResources.js'
 import { durationFromHead } from './audioDuration.js'
 
 const MAX_BYTES = 60 * 1024 * 1024
@@ -16,7 +16,7 @@ export interface Waveform { peaks: number[]; duration: number }
 export async function loadDuration(src: string, signal: AbortSignal, priority: ResourcePriority = RESOURCE_PRIORITY.duration): Promise<number | null> {
   const head = await peek(src, priority, { stale: true })
   if (!head || signal.aborted) return null
-  return fact(src, 'duration', head.etag ?? `size:${head.size}`, async () =>
+  return fact(src, 'duration', peekVersion(head), async () =>
     durationFromHead(head.bytes, head.size) ?? queued(RESOURCE_PRIORITY.duration, () => readDuration(src), signal))
 }
 
@@ -61,7 +61,7 @@ export function audioPeaks(channels: Float32Array[], bins = BINS): number[] {
 export async function loadWaveform(key: string, src: string, signal: AbortSignal, decode = true): Promise<Waveform | null> {
   const head = await peek(src, decode ? RESOURCE_PRIORITY.selected : RESOURCE_PRIORITY.neighbour)
   if (!head || signal.aborted || (head.size ?? 0) > MAX_BYTES) return null
-  const validator = head.etag ?? `size:${head.size}`
+  const validator = peekVersion(head)
   const storageKey = CACHE_PREFIX + JSON.stringify([key, validator])
   const saved = savedWaveform(storageKey)
   if (saved) return fact(src, 'waveform', validator, async () => saved)
