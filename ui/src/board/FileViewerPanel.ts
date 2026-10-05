@@ -401,22 +401,33 @@ function buildHtmlViewer(
   let generation = 0
   let stagingFrame: HTMLIFrameElement | null = null
   let stagingBridge: FrameBridge | null = null
-  let heavy = false
+  const byteWeights = new WeakMap<HTMLIFrameElement, number>()
   const createFrame = (ready: (frame: HTMLIFrameElement, bridge: FrameBridge) => void): HTMLIFrameElement => {
     const frame = document.createElement('iframe')
     frame.className = 'kbn-fileview-frame'
     frame.title = basename(fullPath)
     frame.setAttribute('sandbox', DOCUMENT_SANDBOX)
+    let announced = false
+    let charged = 0
+    const charge = (media = false): void => {
+      const weight = Math.max(charged, byteWeights.get(frame) ?? 1, media ? 2 : 1)
+      if (weight <= charged) return
+      charged = weight
+      options.onWeight?.(weight)
+    }
     const bridge = connectDocumentFrame(frame, message => {
       if (disposed) return
       if (message.type === 'ready') {
-        options.onWeight?.(heavy || message.payload.media === true ? 2 : 1)
+        if (announced) return
+        announced = true
+        charge(message.payload.media === true)
         ready(frame, bridge)
       } else if (message.type === 'key' && embedded.bridge === bridge && embedded.active && typeof message.payload.key === 'string') {
         options.onDocumentKey?.(message.payload as unknown as DocumentKey)
       } else if (message.type === 'media') {
+        charge(true)
         if (embedded.bridge !== bridge || !embedded.active) bridge.command('pause')
-        else { options.onWeight?.(2); pauseOtherPlayers(embedded) }
+        else pauseOtherPlayers(embedded)
       }
     })
     return frame
@@ -431,6 +442,7 @@ function buildHtmlViewer(
     onFrameLoad?.(frame, false)
     options.onState?.({ status: 'ready' })
   })
+  let currentBridge = frameBridge(iframe)!
   wrap.append(iframe, veil)
 
   const stop = watchLiveFile(
@@ -440,9 +452,10 @@ function buildHtmlViewer(
       veil.classList.remove('kbn-fileview-loading-error')
       const withBase = htmlWithBase(html, src)
       const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(withBase)
-      heavy = new Blob([html]).size > 2 * 1024 * 1024
+      const weight = new Blob([html]).size > 2 * 1024 * 1024 || /<(?:audio|video)\b/i.test(html) ? 2 : 1
       if (!hasContent) {
         hasContent = true
+        byteWeights.set(iframe, weight)
         iframe.srcdoc = srcdoc
         return
       }
@@ -454,9 +467,10 @@ function buildHtmlViewer(
       const next = createFrame((frame, bridge) => {
         if (loaded || currentGeneration !== generation) return
         loaded = true
-        const position = embedded.bridge?.position
-        embedded.bridge?.command('pause')
-        embedded.bridge?.dispose()
+        const position = initialLoadHandled ? currentBridge.position : undefined
+        currentBridge.command('pause')
+        currentBridge.dispose()
+        currentBridge = bridge
         embedded.bridge = bridge
         bridge.command('active', { active: embedded.active })
         if (position) bridge.command('restore', position)
@@ -473,6 +487,7 @@ function buildHtmlViewer(
       })
       next.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none'
       stagingFrame = next
+      byteWeights.set(next, weight)
       stagingBridge = frameBridge(next) ?? null
       wrap.append(next)
       next.srcdoc = srcdoc
@@ -499,9 +514,8 @@ function buildHtmlViewer(
     generation++
     stagingBridge?.dispose()
     stagingFrame?.remove()
-    embedded.bridge?.command('pause')
-    embedded.bridge?.dispose()
-    frameBridge(iframe)?.dispose()
+    currentBridge.command('pause')
+    currentBridge.dispose()
     embeddedPlayers.delete(embedded)
     embeddedMediaViewers.delete(wrap)
   })

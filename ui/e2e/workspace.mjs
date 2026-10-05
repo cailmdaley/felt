@@ -110,7 +110,12 @@ test('Opaque report denies parent DOM and same-origin API reads; links open outs
   const requests = []
   const html = await readFile(resolve('harness-board-dist/index.html'))
   const server = createServer(async (req, res) => {
-    if (req.url.startsWith('/api/v1/file-assets/') && /opaque-probe\.(css|js|svg)$/.test(req.url)) {
+    const rawPath = new URL(req.url, 'http://file.test').searchParams.get('path')
+    if ((req.url.startsWith('/api/v1/file-assets/') && req.url.endsWith('/opaque-popup.html')) || (req.url.startsWith('/api/v1/file?') && rawPath?.endsWith('.html'))) {
+      res.setHeader('Content-Type', 'text/html')
+      if (!process.env.WORKSPACE_UNSAFE_FILES) res.setHeader('Content-Security-Policy', 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms')
+      res.end('<!doctype html><html><body>Hostile file probe<script>(async()=>{let storageDenied=false,apiDenied=false;try{window.sentinel=localStorage.getItem("opaque-board-sentinel")}catch{storageDenied=true}try{await fetch("' + base + '/api/v1/version")}catch{apiDenied=true}window.__access={storageDenied,apiDenied,sentinel:window.sentinel??null}})()</script></body></html>')
+    } else if (req.url.startsWith('/api/v1/file-assets/') && /opaque-probe\.(css|js|svg)$/.test(req.url)) {
       const ext = req.url.split('.').at(-1)
       res.setHeader('Content-Type', { css: 'text/css', js: 'application/javascript', svg: 'image/svg+xml' }[ext])
       res.end({ css: 'body { --opaque-asset: loaded; }', js: 'window.__opaqueAsset = true', svg: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="red"/></svg>' }[ext])
@@ -182,6 +187,25 @@ test('Opaque report denies parent DOM and same-origin API reads; links open outs
     assert.equal(await inner.evaluate(() => sessionStorage.getItem('slide')), '2')
     assert.equal(await selected(p).getAttribute('data-key'), key, 'deck-owned arrows never step workspace documents')
     assert.equal(await p.evaluate(() => localStorage.getItem('plot-theme')), null, 'report preferences cannot leak to board storage')
+    await p.evaluate(() => localStorage.setItem('opaque-board-sentinel', 'private-board-state'))
+    await inner.evaluate(() => {
+      const link = document.createElement('a'); link.href = 'opaque-popup.html'; link.textContent = 'Sibling hostile HTML'; document.body.prepend(link)
+    })
+    const checkPopup = async click => {
+      const opened = p.context().waitForEvent('page')
+      await click()
+      const popup = await opened
+      await popup.waitForFunction(() => window.__access)
+      const access = await popup.evaluate(() => window.__access)
+      await popup.close()
+      assert.deepEqual(access, { storageDenied: true, apiDenied: true, sentinel: null }, 'raw HTML popups cannot regain the board origin')
+      return access
+    }
+    const siblingPopup = await checkPopup(() => inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).click())
+    await selected(p).getByRole('button', { name: 'Document menu', exact: true }).click()
+    const rawFilePopup = await checkPopup(() => p.getByRole('link', { name: 'Open in new tab', exact: true }).click())
+    await mkdir(shots, { recursive: true })
+    await writeFile(resolve(shots, 'security-probes.json'), JSON.stringify({ iframe: access, relativeAssets: assets, siblingPopup, rawFilePopup, requests }, null, 2))
   } finally { await new Promise(resolve => server.close(resolve)) }
 })
 
@@ -205,6 +229,34 @@ test('Embedded HTML media pauses on recede and park without reloading or auto-re
   await pollReport(p, () => document.querySelector('audio').paused)
   await open(p)
   assert.ok(await inner.evaluate(() => document.querySelector('audio') === window.__mediaIdentity && document.querySelector('audio').paused))
+})
+
+test('Late nested report layout retains its restore and then accepts reader scrolling', async p => {
+  await open(p); await reportReady(p)
+  await p.locator('.ws-selected iframe').evaluate(frame => {
+    const bridge = new DOMParser().parseFromString(frame.srcdoc, 'text/html').querySelector('[data-shuttle-workspace-bridge]').outerHTML
+    frame.srcdoc = '<!doctype html><html><head>' + bridge + '</head><body><p id="early">Short initial layout</p><script>window.addEventListener("load",()=>setTimeout(()=>window.__shortReady=true,0))</script></body></html>'
+  })
+  const inner = await reportDocument(p)
+  await inner.waitForFunction(() => window.__shortReady)
+  const command = async (type, payload) => p.locator('.ws-selected iframe').evaluate((frame, data) => frame.contentWindow.postMessage(data, '*'), { protocol: 'shuttle-document', version: 1, type, payload })
+  await command('restore', { x: 0, y: 160 })
+  await command('active', { active: false })
+  const saved = () => p.evaluate(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y)
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 160)
+  assert.equal(await saved(), 160, 'pending restore is not overwritten by a clamped zero')
+  await inner.evaluate(() => {
+    document.querySelector('#early').remove()
+    const main = document.createElement('main'); main.id = 'late'; main.style.cssText = 'height:280px;overflow:auto;line-height:20px'
+    main.innerHTML = '<div style="height:6000px">Late asynchronous report content</div>'
+    document.body.append(main)
+  })
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 160)
+  await command('active', { active: true })
+  await inner.locator('body').click({ position: { x: 1, y: 1 } }); await p.keyboard.press('ArrowDown')
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop > 160)
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y > 160)
+  assert.ok(await saved() > 160)
 })
 
 test('Desk-opened channel reload and Back restore its Desk return control', async p => {

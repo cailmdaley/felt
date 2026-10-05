@@ -75,6 +75,47 @@ describe('workspace file viewer hooks', () => {
     expect(watch.stop).toHaveBeenCalledOnce()
   })
 
+  it('disposes an unready initial bridge when refreshed content becomes ready first', async () => {
+    const { frameBridge } = await import('./workspace/DocumentBridge')
+    const onWeight = vi.fn()
+    const removed = vi.spyOn(window, 'removeEventListener')
+    const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onWeight })
+    document.body.append(viewer)
+    watch.content!('First')
+    const first = viewer.querySelector('iframe')!
+    expect(frameBridge(first)).toBeDefined()
+    watch.content!('Changed before initial readiness')
+    const next = viewer.querySelectorAll('iframe')[1]
+    ready(next)
+    expect(frameBridge(first)).toBeUndefined()
+    expect(removed.mock.calls.filter(([event]) => event === 'message')).toHaveLength(1)
+    expect(viewer.querySelector('iframe')).toBe(next)
+    document.body.append(first)
+    ready(first)
+    expect(onWeight).toHaveBeenCalledTimes(1)
+    disposeFileViewer(viewer)
+    expect(removed.mock.calls.filter(([event]) => event === 'message')).toHaveLength(2)
+    removed.mockRestore()
+  })
+
+  it('keeps media weight monotonic despite forged readiness and resets it for new bytes', () => {
+    const onWeight = vi.fn()
+    const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onWeight })
+    document.body.append(viewer)
+    watch.content!('<audio src="song.mp3"></audio>')
+    const first = viewer.querySelector('iframe')!
+    const message = (frame: HTMLIFrameElement, type: string, payload: Record<string, unknown>): void => {
+      window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope(type, payload) }))
+    }
+    message(first, 'ready', { media: false })
+    message(first, 'media', {})
+    message(first, 'ready', { media: false })
+    expect(onWeight.mock.calls).toEqual([[2]])
+    watch.content!('A light replacement')
+    ready(viewer.querySelectorAll('iframe')[1])
+    expect(onWeight.mock.calls).toEqual([[2], [1]])
+  })
+
   it('waits for changed recovered HTML to load before declaring it ready', () => {
     const onState = vi.fn()
     const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onState })

@@ -1310,7 +1310,7 @@ reports and companion artifacts can render.
 HTML reader pages execute JavaScript in an opaque-origin sandbox, without access to the board's DOM or origin storage.
 Their preferences live only in their retained document, and their history state cannot change the board's address.
 Sibling images, CSS and classic scripts use the owner-routed `/file-assets` route; it grants no CORS access for report fetch/XHR requests.
-Opening `/file` directly in a separate tab is outside the reader's sandbox.
+Raw HTML, XHTML and SVG file responses carry a CSP sandbox too, so a report's popup or an “Open in new tab” action cannot regain the board's origin.
 Do not expose a daemon containing untrusted reports publicly; the daemon's trusted-user boundary applies to files as well as API writes.
 
 **Every restart arms a boot quarantine.** On every (re)start the daemon parks

@@ -281,6 +281,42 @@ describe('minified production document keyboard bridge', () => {
     expect(replacement.scrollBy).toHaveBeenCalledOnce()
   })
 
+  it('preserves an early restore until an asynchronously created nested scroller can hold it', async () => {
+    const frame = await report()
+    const win = frame.contentWindow!
+    const content = frame.contentDocument!
+    const command = (type: string, payload: Record<string, unknown>) => win.dispatchEvent(new MessageEvent('message', {
+      source: win.parent, data: { protocol: 'shuttle-document', version: 1, type, payload },
+    }))
+    command('restore', { x: 0, y: 160 })
+    command('active', { active: false })
+    const key = documents[0].key
+    expect(JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + key)!).y).toBe(160)
+    const main = content.createElement('main')
+    main.style.overflowY = 'auto'
+    Object.defineProperties(main, { clientHeight: { value: 200 }, clientWidth: { value: 600 }, scrollHeight: { value: 3000 } })
+    main.scrollTo = vi.fn(({ top }: ScrollToOptions) => { main.scrollTop = top ?? 0 }) as HTMLElement['scrollTo']
+    main.scrollBy = vi.fn(({ top }: ScrollToOptions) => { main.scrollTop += top ?? 0; main.dispatchEvent(new Event('scroll')) }) as HTMLElement['scrollBy']
+    content.body.append(main)
+    await new Promise(resolve => win.setTimeout(resolve, 0))
+    expect(main.scrollTop).toBe(160)
+    command('active', { active: true })
+    command('scroll', { intent: 'halfDown', instant: true })
+    expect(main.scrollTop).toBe(260)
+    expect(JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + key)!).y).toBe(260)
+  })
+
+  it('cannot downgrade the media charge with a second child readiness message', async () => {
+    reportHtml = '<html><body><audio></audio></body></html>'
+    const frame = await report()
+    const weight = () => (host as unknown as { frames: Map<string, { weight: number }> }).frames.get(documents[0].key)!.weight
+    expect(weight()).toBe(2)
+    window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow, data: { protocol: 'shuttle-document', version: 1, type: 'ready', payload: { media: false } },
+    }))
+    expect(weight()).toBe(2)
+  })
+
   it('pauses embedded media on recede and park, and prepares dynamically inserted external links', async () => {
     const frame = await report()
     const content = frame.contentDocument!
