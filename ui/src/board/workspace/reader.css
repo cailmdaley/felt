@@ -259,7 +259,7 @@
   .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
   /* Phone neighbours are flat sheets beside the page, seen only while a swipe or crossing carries them in. */
-  .ws-page.ws-receded, .ws-page.ws-receded.ws-text-page { transform: none; opacity: 1; mask-image: none; }
+  .ws-page.ws-receded, .ws-page.ws-receded:is(.ws-text-page, .ws-before, .ws-after) { transform: none; opacity: 1; mask-image: none; }
   .ws-page.ws-receded .ws-sheet { box-shadow: none; }
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }

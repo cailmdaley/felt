@@ -1287,6 +1287,7 @@ test('Phone page swipe follows the finger, snaps back short of the threshold and
   assert.ok(Math.abs(held - (rest - 60)) <= 2, `the track follows the finger (${rest} → ${held})`)
   const neighbour = await p.locator('.ws-page.ws-after').first().boundingBox()
   assert.ok(neighbour.x < p.viewportSize().width, 'the next page peeks in')
+  assert.deepEqual(await p.locator('.ws-page.ws-after').first().evaluate(el => { const s = getComputedStyle(el); return [s.maskImage, s.opacity, s.transform] }), ['none', '1', 'none'], 'the phone neighbour is a flat sheet, not a faded recession')
   await p.waitForTimeout(200)
   await touch('touchEnd')
   await poll(p, rest => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector('.ws-track')).transform).m41 - rest) < 1, rest)
