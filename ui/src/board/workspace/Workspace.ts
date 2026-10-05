@@ -461,7 +461,8 @@ export class Workspace {
     this.receiptsRead.set(key, promise)
     return promise
   }
-  private load(state: ChannelState): Promise<void> {
+  /** A periodic refresh re-reads the body in the slow lane; an open reads it at once. */
+  private load(state: ChannelState, refresh = false): Promise<void> {
     if (state.channel.uid.startsWith('other:')) {
       state.loaded = true
       state.channel.body = `Files sent on ${state.channel.owner} without a filed fiber.`
@@ -474,10 +475,14 @@ export class Workspace {
     this.overview.resolving(state.channel.uid, true)
     const promise = (async () => {
       const controller = new AbortController()
-      const timeout = window.setTimeout(() => controller.abort(), 25000)
+      let timeout = 0
       const receiptRead = this.readReceipts(state)
+      const read = () => {
+        timeout = window.setTimeout(() => controller.abort(), 25000)
+        return readFiber(this.opts.shuttleBase, state.card.id, state.channel.owner, controller.signal)
+      }
       try {
-        const entry = await readFiber(this.opts.shuttleBase, state.card.id, state.channel.owner, controller.signal)
+        const entry = await (refresh ? inLane('slow', read) : read())
         if (entry) {
           // Body reads carry document metadata; the composite feed owns live workers.
           const live = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner) ?? state.card
@@ -564,7 +569,7 @@ export class Workspace {
       this.timer = null
       const state = this.current
       if (!state || !this.isActive) return
-      void this.load(state).then(() => {
+      void this.load(state, true).then(() => {
         if (this.current === state && this.isActive && !this.disposed) { this.show(state); this.history.select(state.selected ?? defaultSelection(state.channel)); this.startTimer() }
       })
     }, 15000)
