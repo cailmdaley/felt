@@ -2049,7 +2049,7 @@ export class KanbanModal {
         // still gets its poll: its content moves with the clock (and with
         // activity and the ledgers), not only with the fiber feed. The open
         // card's worker pill crosses its idle threshold on the clock too.
-        this.syncWorkspaceRuntime(data)
+        this.syncWorkspaceRuntime()
         this.mountOrRefreshActiveView()
         return
       }
@@ -2161,17 +2161,14 @@ export class KanbanModal {
     if (view) this.renderViewFallback(view.title)
   }
 
-  /** Runtime changes repaint the dock's worker controls and the reader's
-   *  Conversation button without replacing documents. */
-  private syncWorkspaceRuntime(data: KanbanResponse): void {
-    const id = this.dock.openCardId
-    if (id) this.dock.syncRuntime(findCardById(data, id))
+  /** Refresh inline worker controls and the reader's worker pill without replacing documents. */
+  private syncWorkspaceRuntime(): void {
     this.workspace?.update()
   }
 
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
-    this.syncWorkspaceRuntime(data)
+    this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
       this.lastResponse = data
       this.pendingDeskData = data

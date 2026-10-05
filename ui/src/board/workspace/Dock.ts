@@ -449,6 +449,7 @@ export class Dock {
       this.root = document.createElement('div')
       this.root.className = 'ws-dock'
       this.root.tabIndex = -1
+      this.root.addEventListener('click', event => event.stopPropagation())
     }
     return this.root
   }
@@ -765,9 +766,6 @@ export class Dock {
   }
 
   private buildControlsBody(body: HTMLElement, card: KanbanCard, shuttleManaged: boolean): void {
-    const swallow = (el: HTMLElement): void => {
-      el.addEventListener('click', e => e.stopPropagation())
-    }
     const statusEl = document.createElement('span')
     statusEl.className = 'kbn-detail-save-status'
     statusEl.setAttribute('aria-live', 'polite')
@@ -775,7 +773,7 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    if (shuttleManaged) body.append(this.buildComposer(card, swallow))
+    if (shuttleManaged) body.append(this.buildComposer(card))
     body.append(this.buildTranscriptPane(card))
 
     const settings = document.createElement('div')
@@ -815,8 +813,8 @@ export class Dock {
       reflect({})
     }
     ledger.append(
-      this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, swallow, reflect, reseed),
-      this.buildCardFields(card, statusEl, errorEl, swallow, reflect, fn => watchers.push(fn), reseed),
+      this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, reflect, reseed),
+      this.buildCardFields(card, statusEl, errorEl, reflect, fn => watchers.push(fn), reseed),
     )
     toggle.addEventListener('click', () => {
       ledger.hidden = !ledger.hidden
@@ -867,7 +865,7 @@ export class Dock {
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
   }
 
-  private buildComposer(card: KanbanCard, swallow: (el: HTMLElement) => void): HTMLElement {
+  private buildComposer(card: KanbanCard): HTMLElement {
     const epoch = this.epoch
     const wrap = document.createElement('div')
     wrap.className = 'kbn-ctl-compose'
@@ -879,7 +877,6 @@ export class Dock {
     message.rows = 1
     message.placeholder = 'What should the worker do next?'
     message.setAttribute('aria-label', 'Message for the next worker')
-    swallow(message)
     // The resting composer is one line; focus or a draft gives it room to grow.
     const fit = (): void => {
       message.style.height = 'auto'
@@ -1167,7 +1164,6 @@ export class Dock {
     shuttleManaged: boolean,
     statusEl: HTMLElement,
     errorEl: HTMLElement,
-    swallow: (el: HTMLElement) => void,
     reflect: (patch: Partial<KanbanCard>) => void,
     reseed: (fn: () => void) => void,
   ): HTMLElement {
@@ -1181,7 +1177,6 @@ export class Dock {
     // Until the registry answers, the select holds the card's own agent — the
     // value it will show once it does, so nothing flickers.
     agentSelect.append(new Option(card.shuttleAgent || '…', card.shuttleAgent ?? ''))
-    swallow(agentSelect)
 
     // Effort options are the selected agent's concrete `effort_levels`. There
     // is deliberately no synthetic "default": an omitted fiber value resolves
@@ -1192,14 +1187,12 @@ export class Dock {
     effortSelect.className = 'kbn-ctl-select kbn-ctl-effort-select'
     effortSelect.setAttribute('aria-label', 'Effort')
     if (card.shuttleEffort) effortSelect.append(new Option(card.shuttleEffort, card.shuttleEffort))
-    swallow(effortSelect)
 
     const chrome = ctlToggle('Chrome', 'kbn-ctl-chrome')
     chrome.input.id = 'kbn-detail-chrome'
     chrome.input.checked = card.shuttleChrome === true
     // Until the registry says which agents take it, show Chrome where it is on.
     chrome.label.hidden = !chrome.input.checked
-    swallow(chrome.label)
 
     const surface = segmented<ExecutionSurface>(
       'Session',
@@ -1290,7 +1283,6 @@ export class Dock {
     cronInput.value = baseline.schedule
     cronInput.spellcheck = false
     cronInput.setAttribute('aria-label', 'Cron')
-    swallow(cronInput)
 
     const tzInput = document.createElement('input')
     tzInput.type = 'text'
@@ -1299,7 +1291,6 @@ export class Dock {
     tzInput.value = baseline.tz
     tzInput.spellcheck = false
     tzInput.setAttribute('aria-label', 'Timezone')
-    swallow(tzInput)
 
     // The cron said the way a person would, beside the expression.
     const spoken = document.createElement('span')
@@ -1463,7 +1454,6 @@ export class Dock {
     card: KanbanCard,
     statusEl: HTMLElement,
     errorEl: HTMLElement,
-    swallow: (el: HTMLElement) => void,
     reflect: (patch: Partial<KanbanCard>) => void,
     watch: (fn: (view: KanbanCard) => void) => void,
     reseed: (fn: () => void) => void,
@@ -1490,7 +1480,6 @@ export class Dock {
     const label = card.isCycle ? 'Ends' : card.storedHorizon === 'stashed' ? 'Returns' : 'Due'
     input.setAttribute('aria-label', card.isCycle ? 'Cycle end date' : label === 'Returns' ? 'Return date' : 'Due date')
     input.value = current ?? ''
-    swallow(input)
     const clear = ctlButton('×', 'kbn-ctl-clear')
     clear.setAttribute('aria-label', 'Clear date')
     const paint = (): void => {
@@ -1536,7 +1525,7 @@ export class Dock {
       paint()
     })
 
-    col.append(field('Parent', this.buildParentPicker(card, livePatch, swallow, reseed)))
+    col.append(field('Parent', this.buildParentPicker(card, livePatch, reseed)))
     return col
   }
 
@@ -1548,7 +1537,6 @@ export class Dock {
   private buildParentPicker(
     card: KanbanCard,
     livePatch: (changes: { parentId: string | null }, onCommitted: () => void, onFailed?: () => void) => void,
-    swallow: (el: HTMLElement) => void,
     reseed: (fn: () => void) => void,
   ): HTMLElement {
     const segments = card.id.split('/')
@@ -1579,7 +1567,6 @@ export class Dock {
     search.setAttribute('role', 'combobox')
     search.setAttribute('aria-expanded', 'false')
     search.setAttribute('aria-haspopup', 'listbox')
-    swallow(search)
 
     const dropdown = document.createElement('div')
     dropdown.className = 'kbn-detail-parent-dropdown'

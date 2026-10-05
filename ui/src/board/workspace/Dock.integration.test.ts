@@ -39,6 +39,21 @@ beforeEach(async () => {
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+describe('Dock click boundary', () => {
+  it('isolates all control clicks at the band rather than wiring each field', () => {
+    const outside = document.createElement('div')
+    document.body.append(outside); outside.append(band.el)
+    const bubbled = vi.fn()
+    outside.addEventListener('click', bubbled)
+    band.el.querySelector<HTMLButtonElement>('.kbn-detail-controls-toggle')!.click()
+    expect(band.el.querySelector<HTMLButtonElement>('.kbn-detail-controls-toggle')?.getAttribute('aria-expanded')).toBe('true')
+    select('Agent').click()
+    band.el.querySelector<HTMLTextAreaElement>('textarea')!.click()
+    band.el.click()
+    expect(bubbled).not.toHaveBeenCalled()
+  })
+})
+
 describe('Dock booting dispatch rejection', () => {
   it.each(['New session', 'Resume'])('explains a 503 booting %s without consuming the draft or retrying', async name => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!

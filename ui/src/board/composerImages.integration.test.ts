@@ -40,7 +40,7 @@ let panel: Dock
 const saved = vi.fn()
 
 interface PanelInternals {
-  buildComposer(c: ReturnType<typeof card>, swallow: (el: HTMLElement) => void): HTMLElement
+  buildComposer(c: ReturnType<typeof card>): HTMLElement
   pendingStartPrompt: { cardId: string; body: unknown } | null
 }
 
@@ -58,7 +58,7 @@ function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = 
       body: { dispatched: false, reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir' },
     }
   }
-  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster' }), () => {})
+  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster' }))
   document.body.append(composer)
 }
 

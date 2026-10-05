@@ -6,8 +6,21 @@ import { card } from './testFixtures.js'
 
 interface WorkspaceBoard {
   launchFromDrag(card: KanbanCard): Promise<boolean>
+  syncWorkspaceRuntime(): void
+  workspace: { update(): void }
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+describe('Desk runtime handoff to the workspace', () => {
+  it('updates the workspace without querying the band manager as an open Dock', () => {
+    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
+    const update = vi.fn()
+    board.workspace = { update }
+    Object.defineProperty(board, 'dock', { get: () => { throw new Error('The band manager has no open card') } })
+    board.syncWorkspaceRuntime()
+    expect(update).toHaveBeenCalledOnce()
+  })
+})
 
 describe('Desk dispatch into the document workspace', () => {
   it('explains a booting dispatch refusal on the Desk drag path and sends no message', async () => {
