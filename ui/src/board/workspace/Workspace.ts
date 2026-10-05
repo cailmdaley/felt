@@ -133,14 +133,14 @@ export class Workspace {
   }
 
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.shuttleAgent, state.error, state.loaded])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.shuttleAgent, state.error, state.loaded, state.metadataKnown])
   }
   private prose(key: DocKey): HTMLElement {
     const state = [...this.channels.values()].find(s => s.channel.documents[0]?.key === key)
     if (!state) return document.createElement('div')
     this.proseRevisions.set(key, this.proseRevision(state))
     const page = buildFiberProse(state.card, state.channel, {
-      controls: state.channel.uid.startsWith('other:') ? undefined : this.dock.bandFor(state.card).el,
+      controls: state.metadataKnown && !state.channel.uid.startsWith('other:') ? this.dock.bandFor(state.card).el : undefined,
       shuttleBase: this.opts.shuttleBase,
       onSelect: key => this.select(key),
       onFiber: id => { void this.openFiber(id, state.card.originId) },

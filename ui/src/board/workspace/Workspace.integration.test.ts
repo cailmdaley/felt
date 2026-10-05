@@ -427,6 +427,32 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:alpha')
   })
 
+  it('waits for authoritative metadata before caching a cold constitution control band', async () => {
+    const managed = card({ id: 'work/cold', uid: 'cold', name: 'Cold constitution', originId: 'host-a',
+      fiberDir: '/notes/cold', path: 'work/cold/cold.md', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
+    let deliver!: (value: Response) => void
+    const originalFetch = fetch
+    vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('/api/v1/fibers/cold?')
+      ? new Promise<Response>(resolve => { deliver = resolve }) : originalFetch(url)))
+    window.history.replaceState(null, '', '#/board/cold@host-a')
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    expect(document.querySelector('.ws-selected .ws-dock')).toBeNull()
+    deliver(fiberReadResponse(managed))
+    await flush()
+    const band = document.querySelector<HTMLElement>('.ws-fiber-prose .ws-dock')!
+    const textarea = band.querySelector<HTMLTextAreaElement>('textarea')!
+    expect(textarea).not.toBeNull()
+    expect(band.querySelector('.kbn-detail-controls-toggle')?.textContent).toContain('codex-sol')
+    textarea.value = 'Unsent cold-entry draft'
+    workspace.open(cards[0])
+    await flush()
+    workspace.open(managed)
+    await flush()
+    expect(workspace.dock.bandFor(managed).el).toBe(band)
+    expect(band.querySelector('textarea')).toBe(textarea)
+    expect(textarea.value).toBe('Unsent cold-entry draft')
+  })
+
   it('gives an unknown routed fiber its own retryable failure page', async () => {
     workspace.open(cards[0])
     await flush()
