@@ -27,6 +27,7 @@
   border: 0; padding: 0; cursor: pointer; min-height: var(--ws-phone-target);
 }
 .ws-overview :focus { outline: none; }
+.ws-overview .ws-key-selected { outline: 2px solid var(--ws-ink); outline-offset: 4px; border-radius: var(--overview-radius); }
 .ws-overview :focus-visible { outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: 4px; border-radius: var(--overview-radius); }
 .ws-overview-meta {
   font: 400 var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking);

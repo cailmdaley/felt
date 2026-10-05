@@ -1,12 +1,11 @@
-import { isTypingTarget } from './views/ViewRegistry.js'
-
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'help'
+export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'help'
 export interface KeyBinding {
   keys: readonly string[]
   intent: KeyIntent
   label: string
   alt?: boolean
+  command?: boolean
 }
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
@@ -31,36 +30,38 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['g'], 'first', 'First folio'), bind(['G'], 'last', 'Last folio'), bind(['Enter', 'o'], 'open', 'Open channel'), bind(['?'], 'help', 'Keyboard help'),
   ],
   reader: [
-    bind(['h', 'k', 'ArrowLeft'], 'prev', 'Previous page'), bind(['l', 'j', 'ArrowRight'], 'next', 'Next page'),
-    bind(['ArrowDown'], 'scrollDown', 'Scroll document down'), bind(['ArrowUp'], 'scrollUp', 'Scroll document up'),
+    { ...bind(['\\'], 'sidebar', 'Toggle channel sidebar'), command: true },
+    bind(['h', 'ArrowLeft'], 'prev', 'Previous tab'), bind(['l', 'ArrowRight'], 'next', 'Next tab'),
+    bind(['j', 'ArrowDown'], 'scrollDown', 'Scroll document down (3 lines)'), bind(['k', 'ArrowUp'], 'scrollUp', 'Scroll document up (3 lines)'),
+    bind(['d'], 'halfDown', 'Scroll half a viewport down'), bind(['u'], 'halfUp', 'Scroll half a viewport up'),
     bind([' '], 'pageDown', 'Page document down'), bind(['Shift+ '], 'pageUp', 'Page document up'),
     bind(['J'], 'nextChannel', 'Next channel'), bind(['K'], 'prevChannel', 'Previous channel'),
     bind(['ArrowLeft'], 'prev', 'Previous page', true), bind(['ArrowRight'], 'next', 'Next page', true),
     bind(['ArrowDown'], 'nextChannel', 'Next channel', true), bind(['ArrowUp'], 'prevChannel', 'Previous channel', true),
-    bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape', 'u'], 'back', 'Return to origin view'),
+    bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Return to origin view'),
     bind(['g'], 'first', 'First page'), bind(['G'], 'last', 'Last page'), bind(['?'], 'help', 'Keyboard help'),
   ],
 }
 
 /** Uses the target's own realm, including ancestors of contenteditable nodes. */
 export function isEditableTarget(target: EventTarget | null): boolean {
-  const el = target as HTMLElement | null
-  if (!el?.tagName) return false
-  if (isTypingTarget(el)) return true
-  const editable = el.closest?.('[contenteditable]')
-  return !!editable && editable.getAttribute('contenteditable') !== 'false'
+  return !shouldForwardDocumentKey({ target, defaultPrevented: false })
 }
 
 /** A document gets first refusal; native viewers don't install this bridge. */
 export function shouldForwardDocumentKey(event: Pick<KeyboardEvent, 'defaultPrevented' | 'target'>): boolean {
-  return !event.defaultPrevented && !isEditableTarget(event.target)
+  const el = event.target as HTMLElement | null
+  const field = el?.closest?.('input,textarea,select,[role="textbox"],[contenteditable]')
+  return !event.defaultPrevented && (!field || field.getAttribute('contenteditable') === 'false')
 }
 
-export function keyIntent(event: KeyboardEvent, surface: KeySurface): KeyIntent | null {
-  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.metaKey || event.ctrlKey) return null
-  if (!event.altKey && isEditableTarget(event.target)) return null
+export function keyIntent(event: KeyboardEvent, surface: KeySurface,
+  bindings = surfaceBindings, editable = isEditableTarget): KeyIntent | null {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return null
+  const command = event.metaKey || event.ctrlKey
+  if (!command && !event.altKey && editable(event.target)) return null
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
-  const binding = surfaceBindings[surface].find(b => !!b.alt === event.altKey && b.keys.includes(key))
+  const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
   if (event.repeat && ['open', 'back', 'help'].includes(binding.intent)) return null
   return binding.intent
@@ -68,5 +69,5 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface): KeyIntent 
 
 export function bindingKeyLabel(binding: KeyBinding): string {
   const names: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowDown: '↓', ArrowUp: '↑', Escape: 'Esc', ' ': 'Space', 'Shift+ ': '⇧Space', J: '⇧J', K: '⇧K' }
-  return binding.keys.map(key => `${binding.alt ? '⌥' : ''}${names[key] ?? key}`).join(' / ')
+  return binding.keys.map(key => `${binding.command ? '⌘' : ''}${binding.alt ? '⌥' : ''}${names[key] ?? key}`).join(' / ')
 }

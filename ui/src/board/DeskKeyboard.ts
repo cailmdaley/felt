@@ -67,7 +67,9 @@ export class DeskKeyboard {
     const regions = this.regions()
     if (!regions.length) return false
     const current = this.node()
-    let column = current ? regions.findIndex(region => region.includes(current)) : 0
+    const initial = ['awaitingReview', 'inFlight', 'drafts'].map(kind =>
+      regions.findIndex(region => region[0].closest(`[data-column="${kind}"]`))).find(index => index >= 0) ?? 0
+    let column = current ? regions.findIndex(region => region.includes(current)) : initial
     let row = current ? regions[column].indexOf(current) : 0
     if (intent === 'open') {
       if (!this.selected || !current) return false

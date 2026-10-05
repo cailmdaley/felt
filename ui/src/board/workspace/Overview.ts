@@ -1,7 +1,8 @@
 import type { KanbanCard } from '../KanbanTypes.js'
-import { parseCompositeFeed } from '../KanbanComposite.js'
+import { readFiber } from './fiberSource.js'
+import { keyIntent, type KeyIntent } from '../keymap.js'
+import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
-import { fiberDocUrl } from '../utils.js'
 import { fileUrl, normalizeShelfFiles, shelfKind, type ShelfFile } from '../views/shelfData.js'
 import { chooseEvictions, chooseLoads, LOAD_POLICY, TextCache } from '../views/shelfLoad.js'
 import { docKey, parseDocKey, type DocKey } from './documents.js'
@@ -151,6 +152,9 @@ export class Overview {
   private readonly openedCards = new Map<string, KanbanCard>()
   private readonly fetchedCards = new Map<string, KanbanCard>()
   private readonly cardLoads = new Map<string, Promise<KanbanCard>>()
+  private readonly attemptedCards = new Set<string>()
+  private readonly missingCards = new Set<string>()
+  private selection: HTMLButtonElement | null = null
   private readonly cardControllers = new Set<AbortController>()
   private readonly observer?: IntersectionObserver
   private readonly resizeObserver?: ResizeObserver
@@ -239,6 +243,7 @@ export class Overview {
       this.resizeObserver.observe(this.el)
     }
     window.addEventListener('resize', this.schedule)
+    document.addEventListener('keydown', this.keydown)
     this.render()
   }
 
@@ -309,7 +314,8 @@ export class Overview {
     }
   }
   /** Find never truncates keyboard channel order. */
-  orderedCards(): KanbanCard[] { return [...this.order] }
+  orderedCards(): KanbanCard[] { this.resolveFolios(); return [...this.order] }
+  unfiledReceipts(uid: string): ShelfFile[] { return this.folios.get(uid)?.receipts ?? [] }
 
   dispose(): void {
     if (this.disposed) return
@@ -322,6 +328,7 @@ export class Overview {
     for (const thumb of this.thumbnails.values()) this.unmount(thumb)
     this.thumbnails.clear()
     window.removeEventListener('resize', this.schedule)
+    document.removeEventListener('keydown', this.keydown)
     this.el.removeEventListener('scroll', this.schedule)
     this.ribbon.removeEventListener('scroll', this.schedule)
     this.el.remove()
@@ -335,7 +342,7 @@ export class Overview {
     return known
   }
   private fallback(uid: string, owner: string): KanbanCard {
-    return { id: uid, uid, name: uid.startsWith('other:') ? 'Other' : `Other · ${uid}`, path: '', originId: owner, status: '', createdAt: '',
+    return { id: uid, uid, name: uid.startsWith('other:') ? `Unfiled · ${owner}` : `Resolving fiber · ${owner}`, path: '', originId: owner, status: '', createdAt: '',
       effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
   }
   private reconcile(): void {
@@ -345,7 +352,7 @@ export class Overview {
       const card = file.uid ? known.get(file.uid) : undefined
       const key = docKey(file.host ?? '', file.fullPath, card?.originId ?? 'local', card?.fiberDir)
       const parsed = parseDocKey(key)!
-      const uid = file.uid ?? `other:${parsed.owner}`
+      const uid = file.uid && !this.missingCards.has(file.uid) ? file.uid : `other:${parsed.owner}`
       const receipt: Receipt = { ...file, fullPath: parsed.path, key, uid, owner: parsed.owner, host: parsed.owner }
       let documents = byUid.get(uid)
       if (!documents) { documents = new Map(); byUid.set(uid, documents) }
@@ -382,6 +389,19 @@ export class Overview {
     }
     this.marks = overviewHostMarks([...this.fleetHosts, ...known.values()].flatMap(h => typeof h === 'string' ? [h] : [h.originId, ...(h.mirroredOrigins ?? [])]).concat([...this.folios.values()].flatMap(f => f.receipts.map(r => r.owner))))
     this.render()
+    this.resolveFolios()
+  }
+
+  private resolveFolios(): void {
+    if (this.disposed) return
+    const candidates = [...this.folios.values()].filter(f => f.provisional && !f.uid.startsWith('other:') && !this.attemptedCards.has(f.uid))
+      .sort((a, b) => (a.thumb ? this.distance(a.thumb) : 0) - (b.thumb ? this.distance(b.thumb) : 0))
+    for (const folio of candidates.slice(0, Math.max(0, 4 - this.cardLoads.size))) {
+      this.attemptedCards.add(folio.uid)
+      const pending = this.loadCard(folio.card)
+      this.cardLoads.set(folio.uid, pending)
+      void pending.finally(() => { this.cardLoads.delete(folio.uid); if (!this.disposed) this.reconcile() })
+    }
   }
 
   private createFolio(uid: string, card: KanbanCard): Folio {
@@ -468,7 +488,50 @@ export class Overview {
     const legend = [...this.marks].map(([host, mark]) => node('span', 'ws-overview-hostmark', `${mark} ${host}`))
     this.legend.replaceChildren(...legend)
     if (!this.status.textContent || this.status.textContent.startsWith('No ')) text(this.status, this.folios.size ? grouped.some(([, rows]) => rows.some(matches)) ? '' : 'No work matches Find.' : 'No receipts in the last 30 days. Open a fiber to keep it here this session.')
+    this.paintSelection()
     this.schedule()
+  }
+
+  private candidates(): HTMLButtonElement[] {
+    return [...this.ribbon.querySelectorAll<HTMLButtonElement>('.ws-overview-rib'),
+      ...this.groupsEl.querySelectorAll<HTMLButtonElement>('.ws-overview-folio')].filter(el => !el.closest('[hidden]'))
+  }
+  private paintSelection(): void {
+    for (const el of this.el.querySelectorAll('.ws-key-selected')) el.classList.remove('ws-key-selected')
+    if (this.selection && this.candidates().includes(this.selection)) this.selection.classList.add('ws-key-selected')
+  }
+  private moveSelection(intent: KeyIntent): void {
+    const candidates = this.candidates()
+    if (!candidates.length) return
+    const current = this.selection && candidates.includes(this.selection) ? this.selection : null
+    let next = current ?? candidates.find(el => el.classList.contains('ws-overview-folio')) ?? candidates[0]
+    if (intent === 'open') { current?.click(); return }
+    if (intent === 'first' || intent === 'last') {
+      const folios = candidates.filter(el => el.classList.contains('ws-overview-folio'))
+      next = (intent === 'first' ? folios[0] : folios.at(-1)) ?? next
+    } else if (current) {
+      const rect = current.getBoundingClientRect()
+      const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2
+      const horizontal = intent === 'left' || intent === 'right'
+      const forward = intent === 'right' || intent === 'down'
+      const isRibbon = this.ribbon.contains(current)
+      const ranked = candidates.filter(el => el !== current && (!horizontal || this.ribbon.contains(el) === isRibbon)).map(el => {
+        const r = el.getBoundingClientRect()
+        const dx = r.left + r.width / 2 - x, dy = r.top + r.height / 2 - y
+        return { el, primary: (horizontal ? dx : dy) * (forward ? 1 : -1), cross: Math.abs(horizontal ? dy : dx) }
+      }).filter(p => p.primary > 1).sort((a, b) => (a.primary + a.cross * 3) - (b.primary + b.cross * 3))
+      next = ranked[0]?.el ?? current
+    }
+    this.selection = next
+    this.paintSelection()
+    next.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+  }
+  private readonly keydown = (event: KeyboardEvent): void => {
+    if (!this.visible || blockingDialogOpen()) return
+    const intent = keyIntent(event, 'overview')
+    if (!intent || intent === 'help') return
+    event.preventDefault()
+    this.moveSelection(intent)
   }
   private renderRibbon(): void {
     const documents = new Map<DocKey, Receipt>()
@@ -525,14 +588,14 @@ export class Overview {
     const controller = new AbortController(); this.cardControllers.add(controller)
     const timeout = setTimeout(() => controller.abort(), 25000)
     try {
-      const response = await fetch(`${fiberDocUrl(this.opts.shuttleBase, uidOf(fallback))}?body=true&origin=${encodeURIComponent(fallback.originId)}`, { signal: controller.signal })
-      if (!response.ok) return fallback
-      const entry = parseCompositeFeed(await response.json()).entries[0]
-      if (!entry) return fallback
+      const entry = await readFiber(this.opts.shuttleBase, uidOf(fallback), fallback.originId, controller.signal)
       const card = cardFromCompositeEntry(entry)
       if (!this.disposed) this.fetchedCards.set(uidOf(fallback), card)
       return card
-    } catch { return fallback }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Fiber not found on ')) this.missingCards.add(uidOf(fallback))
+      return fallback
+    }
     finally { clearTimeout(timeout); this.cardControllers.delete(controller) }
   }
 

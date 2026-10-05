@@ -1,12 +1,11 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
-import { MOBILE_MEDIA } from '../mobile.js'
-import { parseCompositeFeed } from '../KanbanComposite.js'
+import { readFiber } from './fiberSource.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
-import { fiberDocUrl, renderMarkdown, showToast } from '../utils.js'
+import { renderMarkdown, showToast } from '../utils.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
@@ -54,19 +53,13 @@ export class Workspace {
   private disposed = false
   private routeEpoch = 0
   private lastBoardRoute: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
-  private dockVisible = false
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
-  private readonly phone = window.matchMedia(MOBILE_MEDIA)
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.origin = opts.origin()
-    this.history = new WorkspaceHistory(route => { void this.applyRoute(route) }, open => {
-      if (open) this.openDock(false)
-      else this.closeDock(false)
-    })
+    this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
-    this.dock.onCloseRequest = () => this.closeDock()
     this.overview = new Overview({
       shuttleBase: opts.shuttleBase,
       cards: opts.cards,
@@ -79,12 +72,8 @@ export class Workspace {
       switcherCards: () => this.overview.orderedCards(),
       onSelect: key => this.select(key),
       onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
-      onConversation: () => this.dockVisible ? this.closeDock() : this.openDock(),
-      onEscapeLayer: () => {
-        if (!this.dockVisible) return false
-        if (!this.dock.handleEscape()) this.closeDock()
-        return true
-      },
+      workerPill: card => this.dock.workerPillFor(card),
+      onEscapeLayer: () => this.current ? this.dock.bandFor(this.current.card).handleEscape() : false,
       onChannel: card => this.open(card, this.origin),
       buildProse: doc => this.prose(doc.key),
       onRefreshProse: async doc => {
@@ -97,40 +86,13 @@ export class Workspace {
     root.append(this.reader.el)
     this.history.start()
     document.addEventListener('visibilitychange', this.visibility)
-    this.phone.addEventListener('change', this.syncDockHistory)
   }
 
   get isActive(): boolean { return this.reader.isActive }
-  get dockOpen(): boolean { return this.dockVisible }
-
-  openDock(history = true): void {
-    if (!this.current || !this.isActive || this.dockVisible) return
-    this.dockVisible = true
-    this.dock.open(this.current.card)
-    this.reader.mountDock(this.dock.el)
-    if (history && this.phone.matches) this.history.setDock(true)
-    // The composer takes the keyboard on a desk; a phone sheet takes focus
-    // itself, so opening it raises no keyboard over the controls.
-    const composer = this.phone.matches ? null : this.dock.el.querySelector<HTMLElement>('textarea')
-    ;(composer ?? this.dock.el).focus({ preventScroll: true })
-  }
-
-  closeDock(history = true): void {
-    if (!this.dockVisible) return
-    this.dockVisible = false
-    this.dock.close()
-    this.reader.mountDock(null, this.isActive)
-    if (history) this.history.setDock(false)
-  }
-
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
     this.startPrompt = { card, failure }
-    this.open(card)
-  }
-
-  private readonly syncDockHistory = (): void => {
-    this.history.setDock(this.dockVisible && this.phone.matches)
+    this.open(card, this.opts.origin(), this.ensure(card).channel.documents[0].key)
   }
 
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey): void {
@@ -177,6 +139,7 @@ export class Workspace {
     if (!state) return document.createElement('div')
     this.proseRevisions.set(key, this.proseRevision(state))
     const page = buildFiberProse(state.card, state.channel, {
+      controls: state.channel.uid.startsWith('other:') ? undefined : this.dock.bandFor(state.card).el,
       shuttleBase: this.opts.shuttleBase,
       onSelect: key => this.select(key),
       onFiber: id => { void this.openFiber(id, state.card.originId) },
@@ -223,7 +186,6 @@ export class Workspace {
   private async applyRoute(route: WorkspaceRoute): Promise<void> {
     const epoch = ++this.routeEpoch
     if (route.kind === 'overview') {
-      this.closeDock(false)
       const hash = route.hash ?? window.location.hash
       const view = VIEW_HASHES[hash]
       this.reader.hide(view !== 'board')
@@ -243,7 +205,6 @@ export class Workspace {
         status: '', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
       })
     }
-    if (this.current !== state) this.closeDock(false)
     this.current = state
     if (this.origin === 'Board') this.lastBoardRoute = route
     // The sidebar and switcher list the overview's rows, so a direct entry reads them too.
@@ -259,8 +220,9 @@ export class Workspace {
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
       this.startPrompt = null
-      this.openDock()
-      this.dock.openStartPrompt(prompt.card, prompt.failure)
+      const band = this.dock.bandFor(prompt.card)
+      band.openStartPrompt(prompt.card, prompt.failure)
+      if (!window.matchMedia('(max-width: 600px)').matches) band.el.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true })
     }
     await this.load(state)
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
@@ -287,7 +249,7 @@ export class Workspace {
     this.refreshProse(state)
     this.reader.show(ch, state.selected, this.origin, state.card, animate)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: state.selected }
-    if (this.dockVisible) this.dock.syncRuntime(state.card)
+    this.dock.syncRuntime(state.card)
   }
   private select(key: DocKey): void {
     const state = this.current
@@ -322,10 +284,7 @@ export class Workspace {
     const known = this.opts.cards().find(c => c.id === id && c.originId === owner) ?? this.opts.cards().find(c => c.id === id || c.uid === id)
     if (known) { this.open(known, this.origin); return }
     try {
-      const res = await fetch(`${fiberDocUrl(this.opts.shuttleBase, id)}?body=true&origin=${encodeURIComponent(owner)}`, { signal: AbortSignal.timeout(25000) })
-      if (!res.ok) throw new Error('Owner did not answer')
-      const entry = parseCompositeFeed(await res.json()).entries[0]
-      if (!entry) throw new Error('Fiber not found')
+      const entry = await readFiber(this.opts.shuttleBase, id, owner)
       if (!this.disposed && epoch === this.routeEpoch) this.open(cardFromCompositeEntry(entry), this.origin)
     } catch { showToast(`Couldn’t open ${id} on ${owner}`, 'error') }
   }
@@ -343,6 +302,12 @@ export class Workspace {
     return this.receiptsRead
   }
   private load(state: ChannelState): Promise<void> {
+    if (state.channel.uid.startsWith('other:')) {
+      state.loaded = true
+      state.channel.body = `Files sent on ${state.channel.owner} without a filed fiber.`
+      this.rebuild(state)
+      return Promise.resolve()
+    }
     const key = channelId(state.channel.uid, state.channel.owner)
     const pending = this.loads.get(key)
     if (pending) return pending
@@ -351,10 +316,7 @@ export class Workspace {
       const timeout = window.setTimeout(() => controller.abort(), 25000)
       const receiptRead = this.readReceipts()
       try {
-        const res = await fetch(`${fiberDocUrl(this.opts.shuttleBase, state.card.id)}?body=true&origin=${encodeURIComponent(state.card.originId)}`, { cache: 'no-store', signal: controller.signal })
-        if (!res.ok) throw new Error(res.status === 404 ? `Fiber not found on ${state.card.originId}` : `${state.card.originId} is unreachable`)
-        const data = await res.json() as { fibers?: Array<{ fiber?: { body?: string; outcome?: string } }> }
-        const entry = parseCompositeFeed(data).entries[0]
+        const entry = await readFiber(this.opts.shuttleBase, state.card.id, state.channel.owner, controller.signal)
         if (entry) {
           // Body reads carry document metadata; the composite feed owns live workers.
           const live = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner) ?? state.card
@@ -365,9 +327,7 @@ export class Workspace {
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
           state.card = metadata
         }
-        const fiber = data.fibers?.[0]?.fiber
-        if (!fiber) throw new Error(`Fiber not found on ${state.card.originId}`)
-        state.channel = { ...state.channel, body: fiber.body ?? '', outcome: fiber.outcome ?? state.card.outcome }
+        state.channel = { ...state.channel, body: entry.fiber.body ?? '', outcome: entry.fiber.outcome ?? state.card.outcome }
         state.loaded = true
         state.error = undefined
       } catch (error) {
@@ -392,7 +352,9 @@ export class Workspace {
     }
     const provisional = state.routedFile ? parseDocKey(state.routedFile) : null
     const links = provisional ? [...state.links, { path: provisional.path, owner: provisional.owner }] : state.links
-    const sent = this.receipts.filter(f => f.uid === (card.uid ?? card.id)).map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
+    const receipts = state.channel.uid.startsWith('other:') ? this.overview.unfiledReceipts(state.channel.uid)
+      : this.receipts.filter(f => f.uid === (card.uid ?? card.id))
+    const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
       sent, links, previous: before,
@@ -420,10 +382,8 @@ export class Workspace {
     this.routeEpoch++
     this.stopTimer()
     document.removeEventListener('visibilitychange', this.visibility)
-    this.phone.removeEventListener('change', this.syncDockHistory)
     this.history.dispose()
-    this.closeDock(false)
-    this.dock.onCloseRequest = null
+    this.dock.reset()
     this.reader.dispose()
     this.overview.dispose()
   }

@@ -66,6 +66,7 @@ export function buildFiberProse(
   channel: Channel,
   opts: {
     shuttleBase: string
+    controls?: HTMLElement
     onSelect: (key: DocKey) => void
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
@@ -109,7 +110,7 @@ export function buildFiberProse(
   }
   installBodyFileLinks(body, opts.onFile)
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
-  article.append(header, title, body)
+  article.append(header, title, ...(opts.controls ? [opts.controls] : []), body)
 
   const files = channel.documents.map((doc, index) => ({ doc, index })).filter(({ doc }) => doc.kind !== 'fiber')
   if (files.length) {

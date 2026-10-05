@@ -1,40 +1,11 @@
-/* The reader owns the slot; the dock owns only its controls. */
-.ws-dock-slot {
-  flex: none;
-  width: 400px;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border-left: var(--ws-line-width) solid var(--ws-hairline);
-  background: var(--ws-paper);
-  scrollbar-width: thin;
-  scrollbar-color: var(--ws-hairline) transparent;
-}
-.ws-dock-slot:empty { display: none; }
-.ws-with-dock .ws-stage { min-width: 0; }
-.ws-conversation-agent {
-  font: var(--ws-small-size) var(--ws-mono);
-  color: var(--ws-agent);
-}
-/* The worker dot speaks the Desk's pigments: cobalt while the machine works,
-   gold when it waits on you or has its hand up, an empty ring with no worker. */
-.ws-worker-dot {
-  flex: none;
-  box-sizing: border-box;
-  width: var(--ws-dot-size);
-  height: var(--ws-dot-size);
-  border: var(--ws-line-width) solid var(--ws-ink-muted);
-  border-radius: 50%;
-}
-.ws-worker-aloft { background: var(--ws-agent); border-color: var(--ws-agent); }
-.ws-worker-waiting { background: var(--ws-owed); border-color: var(--ws-owed); }
-.ws-worker-attention { background: var(--ws-owed); border-color: var(--ws-owed); box-shadow: 0 0 0 2px var(--ws-paper), 0 0 0 3px var(--ws-owed); }
+/* Inline controls at the top of the fiber's own page. */
 .ws-dock {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  padding: var(--ws-inset);
+  padding: 0 0 var(--ws-inset);
+  margin-bottom: var(--ws-inset);
+  border-bottom: var(--ws-line-width) solid var(--ws-hairline);
   color: var(--ws-ink);
   background: var(--ws-paper);
   font: var(--ws-chrome-size)/1.45 var(--ws-mono);
@@ -56,17 +27,6 @@
 .ws-dock :is(button, input, select, textarea):not(.kbn-card-worker) { color: inherit; }
 .ws-dock button { cursor: pointer; }
 .ws-dock :disabled { opacity: .55; cursor: default; }
-.ws-dock-header {
-  display: flex;
-  align-items: center;
-  gap: var(--ws-small-gap);
-}
-.ws-dock-header h2 {
-  flex: 1;
-  margin: 0;
-  font: var(--ws-section-size)/1.2 var(--ws-serif);
-}
-.ws-dock .ws-dock-close { padding: 0; width: var(--ctl-h); font-size: var(--ws-title-size); }
 .ws-dock-worker {
   position: relative;
   display: flex;
@@ -77,29 +37,8 @@
   border-bottom: var(--ws-line-width) solid var(--ws-hairline);
 }
 .ws-dock-status { min-width: 0; font: var(--ws-small-size) var(--ws-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
-/* The open-conversation action is the Desk card's own worker pill, with its
-   pigments, at the dock's control height. */
-.ws-dock .kbn-card-worker {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  height: auto;
-  min-height: var(--ctl-h);
-  padding: 0 10px;
-  border: var(--ws-line-width) solid transparent;
-  border-radius: var(--ws-control-radius);
-  color: var(--ws-agent);
-  background: color-mix(in srgb, var(--ws-agent) 10%, transparent);
-  font: var(--ws-small-size) var(--ws-mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-decoration: none;
-  animation: none;
-}
-.ws-dock .kbn-card-worker:hover { border-color: currentColor; }
-.ws-dock .kbn-card-worker-waiting { color: var(--ws-owed); background: color-mix(in srgb, var(--ws-owed) 16%, transparent); }
-.ws-dock .kbn-card-worker-attention { color: var(--ws-red); background: color-mix(in srgb, var(--ws-red) 14%, transparent); }
+/* Worker pills inherit the Desk's states and pigments without recolouring. */
+.ws-dock .kbn-card-worker { min-height: var(--ctl-h); display: inline-flex; align-items: center; }
 .ws-dock .kbn-detail-directive:focus-visible { outline: none; }
 .ws-dock .kbn-detail-app-guide {
   margin: var(--ws-inset) 0;
@@ -287,23 +226,6 @@
 .ws-dock .kbn-ctl-history-empty { margin: 0; padding: 4px 0 8px; color: var(--ws-ink-muted); font: italic var(--ws-chrome-size) var(--ws-serif); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-dock-slot {
-    position: fixed;
-    bottom: 0;
-    right: 0;
-    left: 0;
-    z-index: calc(var(--ws-reader-layer) + 3);
-    width: auto;
-    max-height: calc(100dvh - 64px);
-    overflow-y: auto;
-    border: var(--ws-line-width) solid var(--ws-hairline);
-    border-bottom: none;
-    border-radius: var(--ws-radius) var(--ws-radius) 0 0;
-    padding-bottom: env(safe-area-inset-bottom);
-    /* The sheet dims the inert reader behind it. */
-    box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--ws-ink) 22%, transparent);
-  }
-  .ws-conversation-agent { display: none; }
   .ws-dock { --ctl-h: var(--ws-phone-target); }
   .ws-dock :is(.kbn-ctl-menu-item, .kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
   .ws-dock .kbn-ctl-image { width: 80px; height: 80px; }

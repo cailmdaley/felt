@@ -7,7 +7,7 @@ export type WorkspaceRoute =
 
 const OVERVIEW_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
-interface RouteState { depth: number; base: boolean; baseHash: string; dock?: boolean }
+interface RouteState { depth: number; base: boolean; baseHash: string }
 type StateObject = Record<string, unknown>
 
 function encode(value: string): string {
@@ -52,9 +52,9 @@ function stateObject(value: unknown): StateObject {
 function readRouteState(value: unknown): RouteState | null {
   const entry = stateObject(value)[STATE_KEY]
   if (!entry || typeof entry !== 'object') return null
-  const { depth, base, baseHash, dock } = entry as Partial<RouteState>
+  const { depth, base, baseHash } = entry as Partial<RouteState>
   return Number.isInteger(depth) && depth! >= 0 && typeof base === 'boolean' && typeof baseHash === 'string'
-    ? { depth: depth!, base, baseHash, dock: dock === true }
+    ? { depth: depth!, base, baseHash }
     : null
 }
 
@@ -62,7 +62,7 @@ function withRouteState(value: unknown, routeState: RouteState): StateObject {
   return { ...stateObject(value), [STATE_KEY]: routeState }
 }
 
-/** URL-backed channel navigation, independent of same-URL sheet history entries. */
+/** URL-backed channel navigation and return to the originating view. */
 export class WorkspaceHistory {
   private readonly onRoute: (route: WorkspaceRoute) => void
   private started = false
@@ -73,28 +73,10 @@ export class WorkspaceHistory {
   private baseHash = ''
   private pendingOwnPop: string | null = null
   private queuedEnter: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
-  private dock = false
-  private queuedDock = false
   private queuedLeave = false
-  private readonly onDock: (open: boolean) => void
 
-  constructor(onRoute: (route: WorkspaceRoute) => void, onDock: (open: boolean) => void = () => {}) {
+  constructor(onRoute: (route: WorkspaceRoute) => void) {
     this.onRoute = onRoute
-    this.onDock = onDock
-  }
-
-  /** Phone conversation sheets borrow one same-address entry from the channel. */
-  setDock(open: boolean): void {
-    if (this.current?.kind !== 'channel') return
-    if (this.pendingOwnPop !== null) { this.queuedDock = open; return }
-    if (open === this.dock) return
-    this.dock = open
-    if (open) {
-      window.history.pushState(withRouteState(window.history.state, { depth: this.depth, base: this.base, baseHash: this.baseHash, dock: true }), '', this.currentHash)
-    } else {
-      this.pendingOwnPop = this.currentHash
-      window.history.back()
-    }
   }
 
   start(): void {
@@ -113,7 +95,6 @@ export class WorkspaceHistory {
     this.current = route
     this.adoptDepth(window.history.state, route, this.currentHash)
     this.onRoute(route)
-    if (readRouteState(window.history.state)?.dock) { this.dock = true; this.onDock(true) }
   }
 
   enter(uid: string, owner: string, doc?: DocKey): void {
@@ -121,12 +102,6 @@ export class WorkspaceHistory {
     const route: Extract<WorkspaceRoute, { kind: 'channel' }> = { kind: 'channel', uid, owner, ...(doc === undefined ? {} : { doc }) }
     if (this.pendingOwnPop !== null) {
       this.queuedEnter = route
-      return
-    }
-    if (this.dock) {
-      this.setDock(false)
-      this.queuedEnter = route
-      this.onDock(false)
       return
     }
     const nextDepth = this.depth + 1
@@ -160,31 +135,24 @@ export class WorkspaceHistory {
     if (this.current?.kind !== 'channel') return
     const route: WorkspaceRoute = { ...this.current, doc }
     const hash = formatRoute(route)
-    window.history.replaceState(withRouteState(window.history.state, { depth: this.depth, base: this.base, baseHash: this.baseHash, dock: this.dock }), '', hash)
+    window.history.replaceState(withRouteState(window.history.state, { depth: this.depth, base: this.base, baseHash: this.baseHash }), '', hash)
     this.current = route
     this.currentHash = hash
   }
 
   leave(): void {
     if (this.current?.kind !== 'channel') return
-    if (this.pendingOwnPop !== null) { this.queuedLeave = true; this.queuedDock = false; return }
+    if (this.pendingOwnPop !== null) { this.queuedLeave = true; return }
     if (this.base && this.depth > 0) {
-      const depth = this.depth + (this.dock ? 1 : 0)
+      const depth = this.depth
       const destination = this.baseHash
       const overview: WorkspaceRoute = { kind: 'overview', hash: destination }
       this.pendingOwnPop = destination
-      if (this.dock) { this.dock = false; this.onDock(false) }
       window.history.go(-depth)
       this.current = overview
       this.currentHash = destination
       this.depth = 0
       this.onRoute(overview)
-      return
-    }
-    if (this.dock) {
-      this.setDock(false)
-      this.onDock(false)
-      this.leave()
       return
     }
     window.history.replaceState(withRouteState(window.history.state, { depth: 0, base: true, baseHash: OVERVIEW_HASH }), '', OVERVIEW_HASH)
@@ -204,7 +172,6 @@ export class WorkspaceHistory {
     this.started = false
     this.pendingOwnPop = null
     this.queuedEnter = null
-    this.queuedDock = false
   }
 
   private ensureStarted(): void {
@@ -235,22 +202,15 @@ export class WorkspaceHistory {
       if (this.queuedLeave) {
         this.queuedLeave = false
         this.queuedEnter = null
-        this.queuedDock = false
         this.leave()
         return
       }
       const queued = this.queuedEnter
       this.queuedEnter = null
       if (queued) this.enter(queued.uid, queued.owner, queued.doc)
-      const dock = this.queuedDock
-      this.queuedDock = false
-      if (dock) this.setDock(true)
       return
     }
 
-    const dock = readRouteState(state)?.dock === true
-    if (dock !== this.dock) { this.dock = dock; this.onDock(dock) }
-    // Same-address pops unwind conversation sheets without reloading channels.
     if (hash === this.currentHash) {
       if (route) {
         this.current = route

@@ -1,4 +1,5 @@
 import type { WorkspaceDocument, DocKey } from './documents.js'
+import { keyIntent, shouldForwardDocumentKey, surfaceBindings } from '../keymap.js'
 import {
   buildFileViewer, disposeFileViewer, loadFileViewerOnce, resumeFileViewer, suspendFileViewer,
   type FileViewerState,
@@ -36,7 +37,7 @@ const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
 /** HTML documents forward workspace chords without changing their own navigation. */
 export function withWorkspaceKeyBridge(html: string): string {
   // Install after report load handlers so its document/window dialogs get first refusal.
-  const bridge = `<script data-shuttle-workspace-bridge>window.addEventListener('load',function(){window.setTimeout(function(){window.addEventListener('keydown',function(e){if(e.defaultPrevented)return;var arrow=/^Arrow(Left|Right|Up|Down)$/.test(e.key);if((e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&arrow)||e.key==='Escape'){e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey},'*')}})},0)},{once:true});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(function(intent,forward,bindings){window.addEventListener('load',function(){window.setTimeout(function(){window.addEventListener('keydown',function(e){if(!forward(e)||!intent(e,'reader',bindings,function(target){return !forward({target:target,defaultPrevented:false})}))return;e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey,repeat:e.repeat},'*')})},0)},{once:true})})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)});</script>`
   const head = /<head\b[^>]*>/i
   return head.test(html) ? html.replace(head, (tag) => tag + bridge) : bridge + html
 }
@@ -499,15 +500,15 @@ export class DocumentHost {
     if (!event.source || !frames || ![...frames].some((frame) => frame.contentWindow === event.source)) return
     const data = event.data as Record<string, unknown> | null
     if (!data || data.type !== 'shuttle-workspace-key') return
-    const key = data.key
-    const arrow = typeof key === 'string' && /^Arrow(Left|Right|Up|Down)$/.test(key)
-    if (key !== 'Escape' && !(arrow && data.altKey === true && !data.ctrlKey && !data.metaKey && !data.shiftKey)) return
-    // Bubble through the reader's existing keyboard handler, never a second route.
-    this.track.dispatchEvent(new KeyboardEvent('keydown', {
-      key: key as string, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
-      metaKey: data.metaKey === true, shiftKey: data.shiftKey === true,
+    if (typeof data.key !== 'string' || state?.frame.doc.kind !== 'html') return
+    const forwarded = new KeyboardEvent('keydown', {
+      key: data.key, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
+      metaKey: data.metaKey === true, shiftKey: data.shiftKey === true, repeat: data.repeat === true,
       bubbles: true, cancelable: true,
-    }))
+    })
+    if (!keyIntent(forwarded, 'reader')) return
+    // Bubble through the same app handler; keys never focus a document.
+    this.track.dispatchEvent(forwarded)
   }
 }
 

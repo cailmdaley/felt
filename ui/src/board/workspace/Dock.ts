@@ -387,14 +387,11 @@ export interface DockOptions {
 }
 
 /**
- * The conversation dock: everything a channel carries that is not a document.
- * The worker's state and the way into its real conversation head it; below
- * sit the composer, the live meeting transcript, the folded settings, session
- * history and the verdicts. The reader owns mounting, layout and dismissal.
+ * The fiber page's control band: worker, composer, meeting, folded settings,
+ * session history and verdicts, followed by the fiber's prose.
  */
 export class Dock {
-  /** Called when the dock asks to be closed (× or a verdict). */
-  onCloseRequest: (() => void) | null = null
+  private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
   private card: KanbanCard | null = null
   private searchDebounce: number | null = null
@@ -419,7 +416,6 @@ export class Dock {
   private freshButton: HTMLButtonElement | null = null
   private epoch = 0
   private readonly timers = new Set<number>()
-  private composerDirty: (() => boolean) | null = null
   private readonly shuttleBase: string
   private readonly onSaved: () => void
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
@@ -471,14 +467,6 @@ export class Dock {
     // opening targets without replacing the textarea or settings fields.
     this.card = { ...card }
     const view = this.card
-    const header = document.createElement('header')
-    header.className = 'ws-dock-header'
-    const title = document.createElement('h2')
-    title.textContent = 'Conversation'
-    const close = ctlButton('×', 'ws-dock-close')
-    close.setAttribute('aria-label', 'Close conversation')
-    close.addEventListener('click', () => this.close())
-    header.append(title, close)
     // The worker line: the way into the real conversation, then who and where.
     const worker = document.createElement('div')
     worker.className = 'ws-dock-worker'
@@ -486,7 +474,7 @@ export class Dock {
     this.statusPill.className = 'ws-dock-status'
     this.statusPill.textContent = workerLine(card)
     worker.append(this.statusPill)
-    this.el.append(header, worker)
+    this.el.append(worker)
     this.guidance = document.createElement('p')
     this.guidance.className = 'kbn-detail-app-guide'
     this.el.append(this.guidance)
@@ -494,15 +482,23 @@ export class Dock {
     this.syncRuntime(view)
   }
 
-  /** Ask to be put away. The draft, images and settings stay with the card,
-   *  so reopening the same channel's dock finds them as they were. */
-  close(): void {
-    this.dismissPopovers()
-    this.onCloseRequest?.()
+  /** Identity-keyed bands preserve drafts and folded controls across channels. */
+  bandFor(card: KanbanCard): Dock {
+    const key = JSON.stringify([card.originId, card.uid ?? card.id])
+    let band = this.bands.get(key)
+    if (!band) {
+      band = new Dock(this.shuttleBase, this.onSaved, this.onTransition, this.onOpenWorker,
+        { meeting: this.meeting ?? undefined, workerPhase: this.workerPhase })
+      this.bands.set(key, band)
+    }
+    band.open(card)
+    return band
   }
 
-  /** Forget the card and its controls. */
+  /** Forget the cards and their controls. */
   reset(): void {
+    for (const band of this.bands.values()) band.reset()
+    this.bands.clear()
     this.clear()
   }
 
@@ -528,7 +524,6 @@ export class Dock {
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
     this.composerSend = null
-    this.composerDirty = null
     this.composerError = null
     this.freshButton = null
     this.root?.replaceChildren()
@@ -631,6 +626,7 @@ export class Dock {
   /** Repaint the open card's transcript and Meeting verb from the board's
    *  current meeting. */
   syncMeeting(): void {
+    for (const band of this.bands.values()) band.syncMeeting()
     this.meetingPaint?.()
     const pane = this.transcriptPane
     const card = this.transcriptCard
@@ -654,20 +650,20 @@ export class Dock {
    * same destination under a mouse or a finger (see `terminalWorkerPill`).
    * An app worker's destination follows the conversation backend.
    */
+  workerPillFor(card: KanbanCard): HTMLElement | null {
+    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
+      const state = workerVariant(card)
+      return appWorkerLink(card, state === 'aloft' ? '' : `kbn-card-worker-${state}`)
+    }
+    return card.tmuxSession ? terminalWorkerPill(card, {
+      phase: this.workerPhase(card), openWorker: this.onOpenWorker,
+    }) : null
+  }
+
   private buildWorkerPill(card: KanbanCard): HTMLElement | null {
     this.workerPillCard = card
-    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
-      const workerState = workerVariant(card)
-      return appWorkerLink(card, `kbn-detail-aloft${workerState === 'aloft' ? '' : ` kbn-card-worker-${workerState}`}`)
-    }
-    if (card.tmuxSession) {
-      return this.workerMenu(terminalWorkerPill(card, {
-        classes: 'kbn-detail-aloft',
-        phase: this.workerPhase(card),
-        openWorker: this.onOpenWorker,
-      }), card)
-    }
-    return null
+    const pill = this.workerPillFor(card)
+    return pill && card.tmuxSession ? this.workerMenu(pill, card) : pill
   }
 
   private workerPillState(card: KanbanCard): string {
@@ -696,6 +692,7 @@ export class Dock {
    * other than the open one is ignored.
    */
   syncRuntime(card: KanbanCard | null): void {
+    for (const band of this.bands.values()) band.syncRuntime(card)
     if (!card || !this.isOpen || !this.statusPill || this.card?.id !== card.id || this.card.originId !== card.originId) return
     if (this.card) {
       for (const key of ['workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status'] as const) {
@@ -718,6 +715,7 @@ export class Dock {
   }
 
   refreshConversationOpening(): void {
+    for (const band of this.bands.values()) band.refreshConversationOpening()
     this.syncRuntime(this.workerPillCard)
     this.root?.querySelectorAll('.kbn-ctl-history').forEach((history) => {
       history.dispatchEvent(new Event(CONVERSATION_OPENING_CHANGED))
@@ -796,7 +794,7 @@ export class Dock {
     const discard = ctlButton('Discard', 'kbn-ctl-discard')
     const temper = ctlButton('Temper', 'kbn-ctl-temper')
     for (const [btn, target] of [[discard, 'composted'], [temper, 'tempered']] as const) {
-      btn.addEventListener('click', () => { this.close(); this.onTransition(card, target) })
+      btn.addEventListener('click', () => this.onTransition(card, target))
     }
     foot.append(errorEl, statusEl, discard, temper)
     body.append(settings, ...(history ? [history] : []), foot)
@@ -913,7 +911,6 @@ export class Dock {
     foot.append(sends)
 
     this.composerSend = send
-    this.composerDirty = () => message.value !== composed.text
     this.composerError = err
     this.freshButton = fresh
     const pending = this.pendingStartPrompt
@@ -1749,13 +1746,10 @@ export class Dock {
   }
 
   /**
-   * Return to the refreshed board after dispatch. A phone gets the same
-   * session anchor the board renders for any other live worker; opening it
-   * from here would bypass that real anchor tap and race the refresh.
+   * Refresh worker metadata after dispatch and open a terminal on desktop.
+   * On a phone the real worker anchor remains the opening gesture.
    */
   private finishRequeue(card: KanbanCard, tmuxSession?: string): void {
-    // Text written during the send belongs to the next turn, not this one.
-    if (!this.composerDirty?.()) this.close()
     this.onSaved()
     if (tmuxSession && !coarsePointer()) {
       this.onOpenWorker?.(tmuxSession, card.originId)
@@ -2094,7 +2088,6 @@ export class Dock {
         project_dir: card.shuttleProjectDir,
         disabled: true,
       }, 'Promote')
-      this.close()
       this.onSaved()
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? String(err)
