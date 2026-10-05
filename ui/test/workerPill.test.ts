@@ -148,7 +148,7 @@ describe('the terminal worker pill under a finger', () => {
   })
 
   for (const [deviceName, device] of [['phone', PHONE_PORTRAIT], ['iPad', IPAD_PORTRAIT]] as const) {
-    it(`gives the fiber page worker pill a 44px touch target on ${deviceName}`, () => {
+    it(`gives the reader navbar worker pill a 44px touch target on ${deviceName}`, () => {
       useDevice(device)
       const phoneMedia = DOCK_CSS.match(
         /@media\s*\(max-width:\s*700px\),\s*\(max-height:\s*500px\)\s*and\s*\(pointer:\s*coarse\)\s*\{([\s\S]*)\n\}\s*$/,
@@ -157,8 +157,7 @@ describe('the terminal worker pill under a finger', () => {
 
       expect(fiberPill.classes).toContain('kbn-card-worker')
       expect(declarationsFor('.ws-dock', phoneMedia)).toMatch(/--ctl-h:\s*var\(--ws-phone-target\)/)
-      expect(declarationsFor('.ws-dock .kbn-card-worker', DOCK_CSS)).toMatch(/min-height:\s*var\(--ctl-h\)/)
-      expect(coarseDeclarations(fiberPill, DOCK_CSS).get('min-height')).toBe('var(--ws-phone-target)')
+      expect(DOCK_CSS).not.toContain('.ws-dock .kbn-card-worker {')
       expect(coarseDeclarations(fiberPill, READER_CSS).get('min-height')).toBe('var(--ws-phone-target)')
       expect(TOKENS_CSS).toMatch(/--ws-phone-target:\s*44px/)
     })

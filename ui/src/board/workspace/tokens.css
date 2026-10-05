@@ -28,6 +28,7 @@
     0 28px 64px -14px color-mix(in srgb, var(--kbn-ink) 28%, transparent);
   --ws-mask: var(--kbn-ink);
   --ws-agent: var(--kbn-agent);
+  --ws-verdict: var(--kbn-tempered);
   --ws-red: var(--ws-owed);
 
   --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);

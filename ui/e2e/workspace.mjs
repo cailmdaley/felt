@@ -122,10 +122,10 @@ test('Fiber composer isolates keys; settings and history use mocked daemon', asy
   await p.getByText('History', { exact: true }).click()
 })
 
-test('Body embed appears once in channel and its channel link opens report', async p => {
+test('Fiber contents replace the duplicate file list and select the newest report', async p => {
   await open(p); await choose(p, 'Constitution')
-  assert.equal(await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^calibration-report$/ }).count(), 1)
-  await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^calibration-report$/ }).click()
+  assert.equal(await selected(p).locator('.ws-prose-documents').count(), 0)
+  await selected(p).locator('.ws-prose-contents button').filter({ hasText: /report/ }).click()
   await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === 'calibration-report')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
 })
@@ -167,6 +167,7 @@ test('Overview media thumbnails show duration and a paused first video frame', a
   await audioCard.scrollIntoViewIfNeeded()
   await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-audio')].some(t => /\d+:\d\d/.test(t.textContent)))
   assert.match(await audioCard.innerText(), /\d+:\d\d/)
+  assert.doesNotMatch(await audioCard.locator('.ws-overview-thumb').innerText(), /tone\.mp3/, 'ribbon caption owns the filename')
   const videoCard = p.locator('.ws-overview-ribbon button').filter({ hasText: 'test.mp4' })
   await videoCard.scrollIntoViewIfNeeded()
   await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-video video')].some(v => v.readyState >= 2 && v.videoWidth > 0 && v.paused))
@@ -200,14 +201,16 @@ test('Text, markdown, code, image, archive and missing-file cause', async p => {
 for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pauses away and parking without auto-resume`, async p => {
   await open(p); await choose(p, `tone.${format}`)
   const audio = p.getByRole('tabpanel', { name: `tone.${format}`, exact: true, includeHidden: true }).locator('audio')
-  await audio.waitFor()
+  await audio.waitFor({ state: 'attached' })
   await audio.evaluate(a => { window.__audio = a })
   await p.evaluate(() => document.activeElement?.blur())
   await p.keyboard.press('Space')
+  assert.ok(await audio.evaluate(a => a.paused), 'Space retains its reader meaning')
+  await p.keyboard.press('p')
   await poll(p, () => window.__audio && !window.__audio.paused && window.__audio.currentTime > 0)
-  await p.keyboard.press('Space')
-  assert.ok(await audio.evaluate(a => a.paused), 'Space must toggle native playback')
-  await p.keyboard.press('Space')
+  await p.keyboard.press('p')
+  assert.ok(await audio.evaluate(a => a.paused), 'p toggles native playback')
+  await p.keyboard.press('p')
   await poll(p, () => !window.__audio.paused)
   assert.equal(await p.locator('audio').evaluateAll(as => as.filter(a => !a.paused).length), 1)
   await poll(p, () => [...document.querySelectorAll('audio')].some(e => !e.paused && e.currentTime > 0))
@@ -224,6 +227,42 @@ for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pa
   await audio.evaluate(a => { window.__audioParkedTime = a.currentTime })
   await open(p, `tone.${format}`)
   assert.ok(await audio.evaluate(a => a.paused && a === window.__audio && a.currentTime === window.__audioParkedTime))
+})
+
+test('Audio waveform, transport, comparison, keep-position and keyboard guards', async p => {
+  await open(p); await choose(p, 'tone.mp3')
+  await poll(p, () => document.querySelector('.ws-selected audio')?.readyState >= 1)
+  await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')
+  const audio = selected(p).locator('audio')
+  await audio.evaluate(a => { a.currentTime = 0.2 })
+  await selected(p).getByRole('combobox', { name: 'Playback rate' }).selectOption('1.25')
+  assert.equal(await audio.evaluate(a => a.playbackRate), 1.25)
+  const waveform = selected(p).getByRole('slider', { name: 'Playback position' })
+  const rect = await waveform.boundingBox()
+  await p.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2)
+  assert.ok(await audio.evaluate(a => Math.abs(a.currentTime - a.duration / 2) < 0.2))
+  await p.mouse.move(rect.x + rect.width * 0.2, rect.y + rect.height / 2)
+  assert.match(await selected(p).locator('.ws-audio-hover').innerText(), /\d+:\d\d/)
+  const other = selected(p).locator('.ws-audio-compare button').filter({ hasText: 'tone.wav' })
+  assert.ok(await other.count())
+  await selected(p).getByRole('checkbox', { name: 'Keep position' }).check()
+  const position = await audio.evaluate(a => a.currentTime)
+  await other.click()
+  await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === 'tone.wav')
+  await poll(p, position => Math.abs(document.querySelector('.ws-selected audio').currentTime - position) < 0.2, position)
+  assert.ok(await selected(p).locator('audio').evaluate(a => a.paused))
+  await selected(p).getByRole('checkbox', { name: 'Keep position' }).uncheck()
+  await selected(p).getByRole('button', { name: 'Play', exact: true }).click()
+  await poll(p, () => !document.querySelector('.ws-selected audio').paused)
+  await selected(p).getByRole('button', { name: 'Pause', exact: true }).click()
+  await selected(p).locator('audio').evaluate(a => { a.currentTime = 0 })
+  await p.keyboard.press('.')
+  assert.ok(await selected(p).locator('audio').evaluate(a => a.currentTime > 0))
+  await p.keyboard.press(',')
+  assert.equal(await selected(p).locator('audio').evaluate(a => a.currentTime), 0)
+  await p.keyboard.press('?')
+  await p.getByText('Audio: play / pause', { exact: true }).waitFor()
+  await p.keyboard.press('Escape')
 })
 
 for (const format of ['mp4', 'webm']) test(`Video ${format} plays and seeks native fixture`, async p => {
@@ -423,20 +462,18 @@ test('Desk slash opens the same constitution picker without opening reader; Esca
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
 })
 
-// Say-it-once checks are scoped to the selected page and its chrome. Tabs,
-// the constitution switcher/title and the in-constitution document list repeat
-// names intentionally: they select/navigate. The navbar and control-band pills
-// are two conversation actions, not two passive worker summaries. Expanded
-// settings may repeat values in editable controls; the folded summary is their
-// single passive home. Parked/receded pages and the inert Desk aren't a second
-// readable screen, so global text counts would enforce the wrong contract.
+// Say-it-once checks cover the selected page and its chrome. Tabs and the
+// constitution switcher repeat names as navigation actions. The desktop fiber
+// title is a reading anchor; the phone uses only the navbar name. Expanded
+// settings may repeat values in editable controls. Parked/receded pages and
+// the inert Desk are not a second readable screen.
 const inventory = []
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
   test(`Say it once: ${device} fiber, media, PDF and unsupported metadata`, async p => {
     await open(p); await choose(p, 'Constitution')
     const header = selected(p).locator('.ws-prose-header')
-    assert.equal((await header.innerText()).trim().toLowerCase(), 'closed', 'fiber header carries status alone')
+    assert.equal((await header.innerText()).trim().toLowerCase(), 'awaiting your review', 'fiber kicker uses the Desk state')
     assert.equal(await header.locator(':scope > *').count(), 1)
     const settings = selected(p).locator('.kbn-detail-controls-toggle')
     assert.equal(await settings.getAttribute('aria-expanded'), 'false')
@@ -458,11 +495,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       return text.join(' ')
     })
     assert.doesNotMatch(passive, /claude-opus|\bhigh\b|umber-workstation|\/fixture-store\/workspace/, 'launch metadata has no passive home outside settings')
-    const worker = selected(p).locator('.ws-dock-worker')
-    const pillCount = await worker.locator('.kbn-card-worker').count()
-    assert.ok(pillCount <= 1, 'band has at most one shared conversation action')
-    assert.equal(await worker.locator(':scope > *').count(), pillCount, 'no passive worker-line duplicate when there is no worker')
-    assert.doesNotMatch(await worker.innerText(), /claude-opus|umber-workstation|fixture-store/)
+    assert.equal(await selected(p).locator('.kbn-card-worker,.ws-dock-worker').count(), 0, 'navbar owns the only conversation control')
+    assert.equal(await selected(p).locator('.ws-fiber-prose > h1:visible').count(), device === 'phone' ? 0 : 1, 'desktop title is the adopted reading anchor; phone navbar owns the name')
     const navbar = p.locator('.ws-worker-pill')
     assert.doesNotMatch(await navbar.innerText(), /claude-opus|umber-workstation|fixture-store/)
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /changed 47m ago/i, 'fiber time comes from modified_at, not updated_at or receipts')
@@ -471,12 +505,27 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     // Expanded editable values are an action exception, not passive duplicates.
     await settings.click()
     assert.ok(await selected(p).getByRole('combobox', { name: 'Agent', exact: true }).isVisible())
+    await capture('settings-expanded')
     await settings.click()
+    await selected(p).getByText('History', { exact: true }).click()
+    await selected(p).locator('.kbn-ctl-session-list > li').last().waitFor()
+    await capture('history-expanded')
+    await selected(p).getByText('History', { exact: true }).click()
+    await choose(p, 'calibration-report')
+    await reportReady(p)
+    await capture('report')
+    await choose(p, 'Constitution')
     for (const [state, label] of [['media', 'tone.mp3'], ['pdf', 'response.pdf'], ['unsupported', 'archive.zip']]) {
       await choose(p, label)
       if (state === 'media') {
         await poll(p, () => document.querySelector('.ws-selected audio')?.readyState >= 1)
-        assert.equal(await selected(p).locator('progress').count(), 0, 'native transport owns playback position')
+        await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')
+        assert.equal(await selected(p).locator('.ws-audio-waveform').count(), 1, 'the listening instrument owns position controls')
+        await capture('audio-paused')
+        await selected(p).getByRole('button', { name: 'Play', exact: true }).click()
+        await poll(p, () => document.querySelector('.ws-selected audio')?.currentTime > 0.2)
+        await capture('audio-playing')
+        await selected(p).getByRole('button', { name: 'Pause', exact: true }).click()
       }
       if (state === 'pdf') await selected(p).locator('iframe').waitFor()
       if (state === 'unsupported') await selected(p).getByRole('link', { name: 'Download', exact: true }).waitFor()
@@ -499,9 +548,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.locator('.kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     assert.match((await navbar.innerText()).trim(), /^aloft$/i, 'navbar names state, not agent')
     await choose(p, 'Constitution')
-    const remoteWorker = selected(p).locator('.ws-dock-worker')
-    assert.match((await remoteWorker.innerText()).trim(), /^aloft$/i)
-    assert.equal(await remoteWorker.locator('.kbn-card-worker').count(), 1)
+    assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1)
     assert.ok((await cadence.innerText()).trim(), 'standing cadence lives in the settings line')
@@ -511,6 +558,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       return copy.textContent
     })
     assert.ok(!outsideSettings.includes(await cadence.innerText()), 'cadence is not repeated outside its editable settings')
+    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await p.locator('[data-view="shelf"]').click()
+    await p.locator('.ws-overview-folio').first().waitFor()
+    await p.screenshot({ path: resolve(shots, `${device}-overview.png`) })
 
     async function capture(state) {
       await mkdir(shots, { recursive: true })

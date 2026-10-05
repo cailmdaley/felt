@@ -36,6 +36,8 @@ export interface FileViewerOptions {
   kind?: 'html' | 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'other'
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
+  /** Captioned previews keep the filename outside the miniature page. */
+  thumbnailLabel?: boolean
   /** Inactive viewers read once for a preview, without periodic subscriptions. */
   active?: boolean
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
@@ -43,6 +45,8 @@ export interface FileViewerOptions {
   onState?: (state: FileViewerState) => void
   /** Paint paper until load rather than a loading message. */
   quietLoading?: boolean
+  /** Listening controls use the same native element and lifecycle as video. */
+  decorateAudio?: (audio: HTMLAudioElement) => () => void
 }
 
 /**
@@ -133,7 +137,8 @@ export function buildFileViewer(
 
   const iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
-  iframe.src = src
+  iframe.src = `${src}#navpanes=0&view=FitH`
+  iframe.style.background = 'var(--ws-paper)'
   iframe.title = basename(fullPath)
   wrap.append(iframe, veil)
 
@@ -244,7 +249,9 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   page.append(media)
   wrap.append(page)
   media.src = src
+  const disposeAudio = media instanceof HTMLAudioElement ? options.decorateAudio?.(media) : undefined
   viewerDisposers.set(wrap, () => {
+    disposeAudio?.()
     disposed = true
     controller.abort()
     media.pause()
@@ -295,7 +302,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
   }
   const glyph = document.createElement('div')
   glyph.className = 'kbn-thumbnail-glyph'
-  glyph.textContent = `${{ audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]}\n${basename(path)}`
+  glyph.textContent = `${{ audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]}${options.thumbnailLabel === false ? '' : `\n${basename(path)}`}`
   wrap.append(glyph)
   let native: HTMLMediaElement | null = null
   if (kind === 'image') {
