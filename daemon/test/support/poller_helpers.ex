@@ -65,7 +65,15 @@ defmodule Shuttle.Test.PollerHelpers do
         restart: :temporary
       })
 
-    poller_refs = Enum.reject([pid, Keyword.get(opts, :name)], &is_nil/1)
+    # A watcher names its poller by the registered atom or the pid (Poller's
+    # `self_ref`), so those are the only names this cleanup can match.
+    name = Keyword.get(opts, :name)
+
+    unless is_nil(name) or is_atom(name) do
+      raise ArgumentError, "start_poller!/1 takes an atom :name, got #{inspect(name)}"
+    end
+
+    poller_refs = Enum.reject([pid, name], &is_nil/1)
     on_exit(fn -> stop_watchers_of(poller_refs) end)
 
     {:ok, pid}
@@ -79,10 +87,20 @@ defmodule Shuttle.Test.PollerHelpers do
     end
   end
 
+  # A watcher that exits before answering is already gone; one that does not
+  # answer would be left running, so that fails the test.
   defp watcher_poller(watcher) do
     :sys.get_state(watcher, 5_000).poller
   catch
-    :exit, _ -> nil
+    :exit, {:noproc, _} ->
+      nil
+
+    :exit, reason ->
+      if Process.alive?(watcher) do
+        raise "watcher #{inspect(watcher)} did not report its poller: #{inspect(reason)}"
+      end
+
+      nil
   end
 
   @doc "The suite-wide heartbeat path test Pollers write when a test names none."
