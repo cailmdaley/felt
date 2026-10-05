@@ -21,6 +21,8 @@ const channel = (card: KanbanCard): Channel => ({
 
 let viewport: { wide: boolean; phone: boolean }
 let storage: Map<string, string>
+let reduced: boolean
+const scrollCurrent = vi.fn()
 let readers: Reader[]
 let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
@@ -50,15 +52,19 @@ function disposeReader(reader: Reader): void {
 }
 
 function rowNames(reader: Reader): string[] {
-  return [...reader.el.querySelectorAll<HTMLElement>('.ws-channel-row .ws-channel-name')].map((row) => row.textContent ?? '')
+  const list = reader.el.querySelector('.ws-switcher') ?? reader.el.querySelector('.ws-sidebar')!
+  return [...list.querySelectorAll<HTMLElement>('.ws-channel-row .ws-channel-name')].map((row) => row.textContent ?? '')
 }
 
 beforeEach(() => {
   viewport = { wide: false, phone: false }
+  reduced = false
+  scrollCurrent.mockClear()
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollCurrent })
   storage = new Map()
   readers = []
   listedCards = [beta, alpha, gamma]
-  onChannel.mockClear()
+  onChannel.mockReset()
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => storage.get(key) ?? null,
     setItem: (key: string, value: string) => storage.set(key, value),
@@ -66,7 +72,7 @@ beforeEach(() => {
     clear: () => storage.clear(),
   })
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: query === SIDEBAR_MEDIA ? viewport.wide : query === MOBILE_MEDIA ? viewport.phone : false,
+    matches: query === SIDEBAR_MEDIA ? viewport.wide : query === MOBILE_MEDIA ? viewport.phone : query === '(prefers-reduced-motion: reduce)' ? reduced : false,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   }))
@@ -214,6 +220,52 @@ describe('Reader channel sidebar', () => {
     reader.refreshChannels()
     expect(find.value).toBe('a')
     expect(rowNames(reader)).toEqual(['Gamma', 'Alpha'])
+  })
+
+  it.each([false, true])('marks exactly one owner+UID row through repeated constitution steps (reduced motion %s)', reduce => {
+    reduced = reduce
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const reader = makeReader(alpha)
+    onChannel.mockImplementation(next => reader.show(channel(next), fiberKey(next), 'Board', next))
+    const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar input')!
+    find.value = 'Alpha'; find.dispatchEvent(new Event('input'))
+    scrollCurrent.mockClear()
+    const steps: Array<[string, boolean, KanbanCard]> = [['j', false, gamma], ['k', false, alpha], ['k', false, beta], ['ArrowDown', true, alpha], ['ArrowDown', true, gamma], ['ArrowUp', true, alpha]]
+    for (const [key, altKey, expected] of steps) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, altKey, bubbles: true, cancelable: true }))
+      const rows = [...reader.el.querySelectorAll<HTMLElement>('.ws-sidebar [aria-current="true"]')]
+      expect(rows).toHaveLength(1)
+      expect(rows[0].dataset.channelUid).toBe(expected.uid)
+      expect(rows[0].dataset.channelOwner).toBe(expected.originId)
+      expect(reader.el.querySelector('.ws-channel-title')?.textContent).toBe(expected.name)
+      expect(scrollCurrent).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'nearest', behavior: reduce ? 'instant' : 'smooth' })
+    }
+    expect(find.value).toBe('')
+    expect(scrollCurrent).toHaveBeenCalledTimes(steps.length)
+    find.focus(); find.value = 'a'; find.dispatchEvent(new Event('input'))
+    const row = reader.el.querySelector('.ws-sidebar [aria-current="true"]')
+    scrollCurrent.mockClear()
+    reader.show(channel(alpha), fiberKey(alpha), 'Board', { ...alpha, outcome: 'Polling metadata' })
+    reader.refreshChannels()
+    expect(document.activeElement).toBe(find)
+    expect(find.value).toBe('a')
+    expect(reader.el.querySelector('.ws-sidebar [aria-current="true"]')).toBe(row)
+    expect(scrollCurrent).not.toHaveBeenCalled()
+    find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(onChannel).toHaveBeenLastCalledWith(beta)
+    onChannel.mockReset()
+  })
+
+  it('marks owner identity even for equal UIDs and a channel absent from the overview list', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const other = { ...alpha, originId: 'host-other', name: 'Other Alpha' }
+    listedCards = [alpha, alpha]
+    const reader = makeReader(alpha)
+    reader.show(channel(other), fiberKey(other), 'Board', other)
+    const selected = [...reader.el.querySelectorAll<HTMLElement>('.ws-sidebar [aria-current="true"]')]
+    expect(selected).toHaveLength(1)
+    expect(selected[0].dataset.channelOwner).toBe('host-other')
+    expect(reader.el.querySelectorAll('.ws-sidebar .ws-channel-row')).toHaveLength(2)
   })
 
   it('steps constitutions in sidebar order with j/k, even when the card feed differs', () => {

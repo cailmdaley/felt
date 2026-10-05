@@ -4,6 +4,7 @@ export interface ConstitutionPickerOptions {
   cards(): KanbanCard[]
   files?(card: KanbanCard): string[]
   current?(card: KanbanCard): boolean
+  revealCurrent?: boolean
   onOpen(card: KanbanCard): void
 }
 
@@ -14,6 +15,9 @@ export class ConstitutionPicker {
   private readonly list = document.createElement('div')
   private previous: HTMLElement | null = null
   private popup = false
+  private selected: string | null = null
+  private revealed: string | null = null
+  private readonly rows = new Map<string, { el: HTMLButtonElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard }>()
   private readonly opts: ConstitutionPickerOptions
   constructor(opts: ConstitutionPickerOptions) {
     this.opts = opts
@@ -47,27 +51,54 @@ export class ConstitutionPicker {
     if (restore && this.previous?.isConnected) this.previous.focus({ preventScroll: true })
     this.previous = null
   }
-  refresh(): void {
-    const top = this.list.scrollTop
-    const query = this.find.value.trim().toLowerCase()
-    const rows = this.opts.cards().filter(card => !query || [card.name, card.path, ...(this.opts.files?.(card) ?? [])].some(v => v.toLowerCase().includes(query)))
-    this.list.replaceChildren(...rows.map(card => {
-      const row = document.createElement('button')
-      row.type = 'button'; row.className = 'ws-channel-row'
-      row.setAttribute('aria-label', card.name)
-      row.setAttribute('aria-current', String(this.opts.current?.(card) ?? false))
-      row.title = card.outcome ?? card.path
-      const name = document.createElement('span')
-      name.className = 'ws-channel-name'; name.textContent = card.name
-      const owner = document.createElement('small'); owner.textContent = card.originId
-      row.append(name, owner)
-      row.addEventListener('click', () => { this.close(); this.opts.onOpen(card) })
-      return row
-    }))
-    this.list.scrollTop = top
-    const current = this.list.querySelector<HTMLElement>('[aria-current="true"]')
-    if (current && (current.offsetTop < this.list.scrollTop || current.offsetTop + current.offsetHeight > this.list.scrollTop + this.list.clientHeight)) {
-      this.list.scrollTop = Math.max(0, current.offsetTop - this.list.clientHeight / 3)
+  refresh(reveal = true): void {
+    const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
+    const cards = [...new Map(this.opts.cards().map(card => [identity(card), card])).values()]
+    const current = cards.find(card => this.opts.current?.(card))
+    const selected = current ? identity(current) : null
+    let query = this.find.value.trim().toLowerCase()
+    const matches = (card: KanbanCard): boolean => !query || [card.name, card.path, ...(this.opts.files?.(card) ?? [])].some(v => v.toLowerCase().includes(query))
+    // A navigation choice supersedes sidebar Find only when it hides that choice;
+    // the visible indicator and Enter's first filtered match must agree.
+    if (selected !== this.selected && current && this.opts.revealCurrent && !matches(current)) {
+      this.find.value = ''; query = ''
+    }
+    this.selected = selected
+    const visible = cards.filter(matches)
+    const keys = new Set(visible.map(identity))
+    for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.rows.delete(key) }
+    let cursor = this.list.firstChild
+    for (const card of visible) {
+      const key = identity(card)
+      let row = this.rows.get(key)
+      if (!row) {
+        const el = document.createElement('button')
+        el.type = 'button'; el.className = 'ws-channel-row'
+        const name = document.createElement('span'); name.className = 'ws-channel-name'
+        const owner = document.createElement('small')
+        el.append(name, owner)
+        row = { el, name, owner, card }
+        const record = row
+        el.addEventListener('click', () => { this.close(); this.opts.onOpen(record.card) })
+        this.rows.set(key, row)
+      }
+      row.card = card
+      row.el.dataset.channelUid = card.uid ?? card.id
+      row.el.dataset.channelOwner = card.originId
+      row.el.setAttribute('aria-label', card.name)
+      row.el.setAttribute('aria-current', String(key === selected))
+      row.el.title = card.outcome ?? card.path
+      if (row.name.textContent !== card.name) row.name.textContent = card.name
+      if (row.owner.textContent !== card.originId) row.owner.textContent = card.originId
+      if (row.el !== cursor) this.list.insertBefore(row.el, cursor)
+      cursor = row.el.nextSibling
+    }
+    if (reveal && selected && selected !== this.revealed) {
+      const row = this.rows.get(selected)
+      if (row) {
+        row.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+        this.revealed = selected
+      }
     }
   }
   private readonly keydown = (event: KeyboardEvent): void => {

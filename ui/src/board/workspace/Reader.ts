@@ -69,6 +69,7 @@ export class Reader {
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
+  private currentCard: KanbanCard | null = null
   private selected: DocKey | null = null
   private expanded = false
   private active = false
@@ -116,12 +117,16 @@ export class Reader {
     this.stage.append(this.track)
     this.sidebar.setAttribute('aria-label', 'Constitutions')
     const pickerOptions = {
-      cards: () => this.opts.switcherCards?.() ?? this.opts.cards(),
+      cards: () => {
+        const cards = this.opts.switcherCards?.() ?? this.opts.cards()
+        const current = this.currentCard
+        return current && !cards.some(card => (card.uid ?? card.id) === (current.uid ?? current.id) && card.originId === current.originId) ? [...cards, current] : cards
+      },
       files: opts.files,
       current: (card: KanbanCard) => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
       onOpen: (card: KanbanCard) => { this.closeMenu(); this.opts.onChannel(card) },
     }
-    this.sidebarPicker = new ConstitutionPicker(pickerOptions)
+    this.sidebarPicker = new ConstitutionPicker({ ...pickerOptions, revealCurrent: true })
     this.picker = new ConstitutionPicker(pickerOptions)
     this.sidebarPicker.el.style.display = 'contents'
     this.sidebar.append(this.sidebarPicker.el)
@@ -161,6 +166,7 @@ export class Reader {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
     this.channel = channel
+    this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
     const arriving = !this.active
     this.active = true
@@ -493,11 +499,11 @@ export class Reader {
     this.sidebarToggle.setAttribute('aria-expanded', String(shown))
     this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
     this.sidebar.inert = !shown
-    if (shown) this.fillSidebar()
+    this.sidebarPicker.refresh(shown)
   }
   /** Rows refresh in place; the list keeps its scroll and the find its text. */
   private fillSidebar(): void {
-    this.sidebarPicker.refresh()
+    this.sidebarPicker.refresh(this.sidebarShown)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
     this.keyboardModality()
