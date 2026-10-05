@@ -238,10 +238,11 @@
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-dock { --ctl-h: var(--ws-phone-target); }
-  .ws-dock-body { grid-template-columns: minmax(0, 1fr) auto; }
+  /* Settings, History and the fiber's ⋯ share the one folded row. */
+  .ws-dock-body { grid-template-columns: minmax(0, 1fr) auto auto; }
   .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
   .ws-dock .kbn-ctl-composer:not(:focus-within, .kbn-ctl-composer-draft) .kbn-ctl-composer-foot { grid-column: 1; grid-row: auto; }
-  .ws-dock .kbn-ctl-foot { grid-column: 1 / -1; }
+  .ws-dock .kbn-ctl-foot { grid-column: 3; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--ws-label-size); }
   .ws-dock :is(.kbn-ctl-menu-item, .kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
   .ws-dock .kbn-ctl-image { width: 80px; height: 80px; }
@@ -249,12 +250,6 @@
   .ws-dock :is(input, select, textarea) { font-size: var(--ws-prose-size); }
   .ws-dock .kbn-ctl-image-remove { width: var(--ws-phone-target); height: var(--ws-phone-target); }
 }
-
-/* The fiber's worker pill: the sidebar card's own plate, on its own row. */
-.ws-dock-body > .ws-worker-pill { grid-column: 1 / -1; display: flex; justify-content: flex-start; }
-.ws-dock-body > .ws-worker-pill[hidden] { display: none; }
-.ws-dock .ws-worker-pill .ws-worker-control { padding: 0 10px; border: var(--ws-line-width) solid var(--ws-hairline) !important; border-radius: 999px; background: var(--ws-paper); }
-.ws-dock .ws-worker-pill .ws-worker-control:hover { background: var(--ws-hover); }
 
 /* The agent and effort lists, opened as anchored popovers under their select. */
 .ws-dock .ws-select-picker {
@@ -308,5 +303,10 @@
   .ws-dock .kbn-ctl-verdict .kbn-ctl-btn, .ws-dock .kbn-ctl-verdict-menu summary, .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn { min-height: 44px; min-width: 44px; }
   /* Two verbs take their own row, so the resting composer keeps its prompt legible. */
   .ws-dock .kbn-ctl-composer:has(.kbn-ctl-secondary) .kbn-ctl-composer-foot { grid-column: 1 / -1 !important; grid-row: auto !important; }
+  /* The field is underlined beside the microphone; its verbs sit beneath, unruled. */
+  .ws-dock .kbn-ctl-composer { border-bottom: 0; row-gap: 0; }
+  .ws-dock .kbn-detail-directive { min-height: var(--ws-phone-target); padding-block: 10px; border-bottom: var(--ws-line-width) solid var(--ws-hairline); }
+  .ws-dock .kbn-ctl-composer:focus-within .kbn-detail-directive { border-bottom-color: var(--ws-ink); }
+  .ws-dock .kbn-ctl-composer .kbn-ctl-composer-foot { justify-content: flex-end; padding: 8px 0 0; }
 }
 

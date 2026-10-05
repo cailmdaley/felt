@@ -12,6 +12,7 @@ const render = vi.hoisted(() => ({
   suspend: vi.fn(), resume: vi.fn(), once: vi.fn(), dispose: vi.fn(), refresh: vi.fn(async () => {}),
 }))
 vi.mock('../FileViewerPanel.js', () => ({
+  readThumbnailMetadata: vi.fn(async () => {}),
   buildFileViewer: vi.fn((_base, path, owner, frame, text, options) => {
     const viewer = document.createElement('div')
     viewer.dataset.path = path

@@ -97,14 +97,41 @@ describe('Reader channel sidebar', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 60000 }
     listedCards = [working]
-    const target = document.createElement('button'), open = vi.fn()
-    target.addEventListener('click', open)
-    const reader = makeReader(working, undefined, () => target)
+    const open = vi.fn()
+    let target = document.createElement('button')
+    // Each call builds a fresh pill, as the dock does; the sidebar's is the last one built.
+    const reader = makeReader(working, undefined, () => {
+      target = document.createElement('button')
+      target.addEventListener('click', open)
+      return target
+    })
     expect(reader.el.querySelector('.ws-sidebar .ws-worker-control')).toBe(target)
     expect(target.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
     expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1 m')
     expect(target.dataset.part).toBe('act')
     target.click()
+    expect(open).toHaveBeenCalledOnce()
+  })
+  it("draws the card's own worker pill bare at the head's right end, before the page count", () => {
+    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 34 * 60000 }
+    listedCards = [working]
+    const open = vi.fn()
+    const reader = makeReader(working, undefined, () => {
+      const pill = document.createElement('button')
+      pill.className = 'kbn-card-worker'
+      pill.addEventListener('click', open)
+      return pill
+    })
+    const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
+    expect(head.hidden).toBe(false)
+    expect(head.dataset.part).toBe('act')
+    expect(head.nextElementSibling?.classList.contains('ws-head-position')).toBe(true)
+    const control = head.querySelector<HTMLElement>('.ws-worker-control')!
+    expect(control.dataset.workerState).toBe('aloft')
+    expect(control.querySelector('.ws-worker-dot')).not.toBeNull()
+    expect(control.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
+    expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34 m')
+    control.click()
     expect(open).toHaveBeenCalledOnce()
   })
   it('binds retained sidebar roots only while active and visible, through revisions, filtering and hide/show', () => {
@@ -119,14 +146,15 @@ describe('Reader channel sidebar', () => {
     expect(row.dataset.part).toBe('sidebar-card')
     expect(row.hasAttribute('data-ws-theme-boundary')).toBe(true)
     expect(reader.el.hasAttribute('data-ws-theme-boundary')).toBe(true)
-    expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(2)
-    for (const part of ['tab-strip', 'tab', 'thumbnail', 'thumbnail-face', 'page-sheet', 'page-sheet-panel']) {
+    // The running head sits on the veil: there are no chrome plates to theme.
+    expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(0)
+    for (const part of ['tab-strip', 'tab', 'tab-preview', 'page-sheet', 'page-sheet-panel']) {
       expect(reader.el.querySelector(`[data-part="${part}"]`)).not.toBeNull()
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
     expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
     expect(reader.el.querySelector('.ws-nav-verdicts')?.getAttribute('data-act')).toBe('verdict')
-    expect(reader.el.querySelector('.ws-navbar .ws-worker-pill, .ws-navbar .kbn-card-worker')).toBeNull()
+    expect(reader.el.querySelector<HTMLElement>('.ws-navbar .ws-head-worker')?.hidden).toBe(true)
     const revised = { ...alpha, outcome: 'A new result' }
     listedCards = [revised, beta]
     reader.refreshChannels()
@@ -200,8 +228,9 @@ describe('Reader channel sidebar', () => {
     const wide = makeReader()
     const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
-    expect(wideToggle.textContent).toBe('▥ Constitutions')
-    expect(wideToggle.title).toBe('Constitutions (s or ⌘\\)')
+    expect(wideToggle.textContent).toBe('')
+    expect(wideToggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(wideToggle.title).toBe('Constitutions · s')
     expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
     disposeReader(wide)
 
