@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestExtractBinariesRequiresBothCLIExecutables(t *testing.T) {
@@ -53,16 +51,11 @@ func TestUpdatePairIsCurrentRequiresMatchingSiblingShuttle(t *testing.T) {
 [ "$1" = "--version" ] || exit 2
 printf 'shuttle version build-b\n'
 `
-	if err := os.WriteFile(shuttlePath, []byte(shuttle), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	linkScript(t, shuttlePath, shuttle)
 	if a.updatePairIsCurrent(feltPath, "1.2.3", "v1.2.3", "build-a") {
 		t.Fatal("felt with a mismatched shuttle build was considered up to date")
 	}
-	shuttle = strings.ReplaceAll(shuttle, "build-b", "build-a")
-	if err := os.WriteFile(shuttlePath, []byte(shuttle), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	linkScript(t, shuttlePath, strings.ReplaceAll(shuttle, "build-b", "build-a"))
 	if !a.updatePairIsCurrent(feltPath, "1.2.3", "v1.2.3", "build-a") {
 		t.Fatal("matching felt/shuttle pair was not considered up to date")
 	}
@@ -107,7 +100,7 @@ func TestRefuseHomebrewUpdateUsesBrewPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := probingApp(t)
-	sysenvtest.FakeCommand(t, a.env, "brew", "printf '%s\\n' \"$BREW_PREFIX\"\n")
+	fakeCommand(t, a.env, "brew", "printf '%s\\n' \"$BREW_PREFIX\"\n")
 	a.env.Set("BREW_PREFIX", prefix)
 	if err := a.refuseHomebrewUpdate(binary); err == nil || !strings.Contains(err.Error(), "brew upgrade felt") {
 		t.Fatalf("Homebrew-prefix felt update error = %v", err)

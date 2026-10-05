@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
-	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestPluginPromotionLockSerializesTransactions(t *testing.T) {
@@ -78,27 +77,9 @@ func testFeltExecutable(t *testing.T) string {
 	return path
 }
 
-func testRepoRoot(t *testing.T) string {
-	t.Helper()
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for {
-		if _, statErr := os.Stat(filepath.Join(root, ".claude-plugin", "marketplace.json")); statErr == nil {
-			return root
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			t.Fatal("repository root not found")
-		}
-		root = parent
-	}
-}
-
 func TestValidatePluginCandidateChecksGenerationAndExecutable(t *testing.T) {
 	t.Parallel()
-	root := testRepoRoot(t)
+	root := repoRoot(t)
 	if err := validatePluginCandidate(root, testFeltExecutable(t)); err != nil {
 		t.Fatalf("repository candidate should validate: %v", err)
 	}
@@ -138,7 +119,7 @@ func TestCaptureNativeInstallationUsesCurrentCLIJSONShapes(t *testing.T) {
 	}
 
 	env, _ := testEnv(t)
-	sysenvtest.FakeCommand(t, env, "codex", `if [ "$1" = plugin ] && [ "$2" = marketplace ]; then
+	fakeCommand(t, env, "codex", `if [ "$1" = plugin ] && [ "$2" = marketplace ]; then
   printf '%s\n' '{"marketplaces":[{"name":"cailmdaley-felt","root":"/tmp/felt-current","marketplaceSource":{"sourceType":"github","source":"cailmdaley/felt"}}]}'
 elif [ "$1" = plugin ] && [ "$2" = list ]; then
   printf '%s\n' '{"installed":[{"pluginId":"felt@cailmdaley-felt"}]}'
@@ -156,7 +137,7 @@ func TestStagePluginCandidateCopiesOnlyValidatedPayload(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
 	home := homeOf(t, env)
-	root := testRepoRoot(t)
+	root := repoRoot(t)
 	candidate, err := testApp(t, env).stagePluginCandidate(root, testFeltExecutable(t))
 	if err != nil {
 		t.Fatalf("stagePluginCandidate: %v", err)
@@ -452,7 +433,7 @@ func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testi
 		t.Fatal(err)
 	}
 
-	root := testRepoRoot(t)
+	root := repoRoot(t)
 	installFakeGitForPluginAcquisition(t, f.env, root)
 	f.env.Set("FELT_BIN", testFeltExecutable(t))
 	f.env.Set("FELT_TEST_GIT_FAIL", "1")
@@ -533,7 +514,7 @@ func TestParseRemoteMarketplaceRef(t *testing.T) {
 func installFakeGitForPluginAcquisition(t *testing.T, env *sysenv.Env, source string) string {
 	t.Helper()
 	log := filepath.Join(t.TempDir(), "git.log")
-	sysenvtest.FakeCommand(t, env, "git", `#!/bin/sh
+	fakeCommand(t, env, "git", `#!/bin/sh
 last=""
 for arg do last="$arg"; done
 printf '%s\n' "$*" >> "$FELT_TEST_GIT_LOG"
@@ -559,7 +540,7 @@ func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
 	env, _ := testEnv(t)
 	home := homeOf(t, env)
 	a := testApp(t, env)
-	root := testRepoRoot(t)
+	root := repoRoot(t)
 	gitLog := installFakeGitForPluginAcquisition(t, env, root)
 	env.Set("FELT_BIN", testFeltExecutable(t))
 
@@ -619,7 +600,7 @@ func TestRemoteMarketplaceAcquisitionFailureCleansUpAndDoesNotInstall(t *testing
 	if err := os.WriteFile(filepath.Join(stale, "partial"), []byte("crash debris"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	root := testRepoRoot(t)
+	root := repoRoot(t)
 	installFakeGitForPluginAcquisition(t, env, root)
 	env.Set("FELT_TEST_GIT_FAIL", "1")
 	env.Set("FELT_BIN", testFeltExecutable(t))

@@ -6,8 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestClaudePluginMaintenanceEnvironmentIsChildOnly(t *testing.T) {
@@ -48,7 +46,7 @@ func TestHarnessRunnerScopesBareModeToClaudePluginCommands(t *testing.T) {
 	script := `printf '%s|%s|%s|%s\n' "$*" "$CLAUDE_CODE_SIMPLE" "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "$DISABLE_AUTOUPDATER" >> "$FAKE_MAINTENANCE_LOG"
 `
 	for _, bin := range []string{"claude", "codex"} {
-		sysenvtest.FakeCommand(t, env, bin, script)
+		fakeCommand(t, env, bin, script)
 	}
 	a := testApp(t, env)
 	for _, call := range [][]string{{"claude", "plugin", "list", "--json"}, {"claude", "--version"}, {"codex", "plugin", "list"}} {

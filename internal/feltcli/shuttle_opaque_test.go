@@ -7,11 +7,6 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-func seedShuttleFiber(t *testing.T, storage *felt.Storage, id string, block map[string]any) {
-	t.Helper()
-	seedFiber(t, storage, id, "", "", block, nil)
-}
-
 func TestFeltEditLeavesShuttleFacetOpaque(t *testing.T) {
 	t.Parallel()
 	dir, storage := newStore(t)

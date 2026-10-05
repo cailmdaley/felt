@@ -11,59 +11,6 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-// newCrossStoreFixture builds the loom shape: an enclosing store, a project
-// whose `.felt` is a symlink into a subdirectory of it, and fibers on both
-// sides — including a same-slug pair (`debug` here, `ai-futures/portolan/debug`
-// out there) so every test exercises the case that used to misresolve.
-func newCrossStoreFixture(t *testing.T) (loomProj, subProj string) {
-	t.Helper()
-	tmp := t.TempDir()
-
-	loomProj = filepath.Join(tmp, "loom")
-	loom := felt.NewStorage(loomProj)
-	if err := loom.Init(); err != nil {
-		t.Fatalf("loom init: %v", err)
-	}
-	writeFixtureFelt(t, loom, "ai-futures/portolan/debug", "Portolan debug")
-	tagged := &felt.Felt{ID: "ai-futures/portolan/charted", Name: "Charted", Tags: []string{"decision"}, Status: felt.StatusOpen, CreatedAt: time.Now()}
-	if err := loom.Write(tagged); err != nil {
-		t.Fatalf("write tagged fiber: %v", err)
-	}
-	writeFixtureFelt(t, loom, "commons", "Commons")
-
-	content := filepath.Join(loomProj, ".felt", "ai-futures", "felt")
-	if err := os.MkdirAll(content, 0755); err != nil {
-		t.Fatalf("mkdir substore content: %v", err)
-	}
-	subProj = filepath.Join(tmp, "project")
-	if err := os.MkdirAll(subProj, 0755); err != nil {
-		t.Fatalf("mkdir project: %v", err)
-	}
-	if err := os.Symlink(content, filepath.Join(subProj, ".felt")); err != nil {
-		t.Fatalf("symlink substore: %v", err)
-	}
-	sub := felt.NewStorage(subProj)
-	writeFixtureFelt(t, sub, "debug", "Local debug")
-	writeFixtureFelt(t, sub, "notes/runbook", "Runbook")
-	return loomProj, subProj
-}
-
-func writeFixtureFelt(t *testing.T, s *felt.Storage, id, name string) {
-	t.Helper()
-	if err := s.Write(&felt.Felt{ID: id, Name: name, Status: felt.StatusOpen, CreatedAt: time.Now()}); err != nil {
-		t.Fatalf("write %s: %v", id, err)
-	}
-}
-
-func loomRoot(t *testing.T, subProj string) string {
-	t.Helper()
-	root, _, ok := felt.NewStorage(subProj).EnclosingStore()
-	if !ok {
-		t.Fatalf("fixture project is not a substore")
-	}
-	return root
-}
-
 // TestShowReachesEnclosingStore: a substore is a lens, not a fence — an id
 // that names one real fiber out there is shown, not refused.
 func TestShowReachesEnclosingStore(t *testing.T) {
@@ -495,40 +442,6 @@ func TestNestFromViewLeavesExactOutsideLinkAlone(t *testing.T) {
 	if !strings.Contains(got.Body, "[[ai-futures/portolan/charted]]") {
 		t.Fatalf("nest rewrote a link to the enclosing store's fiber:\n%s", got.Body)
 	}
-}
-
-// writeConsumer writes a loom fiber whose inputs name from, once with an
-// input id and once without: an entry with `from:` is a data-flow edge either
-// way.
-func writeConsumer(t *testing.T, s *felt.Storage, id, from string) {
-	t.Helper()
-	f := &felt.Felt{ID: id, Name: id, Status: felt.StatusOpen, CreatedAt: time.Now()}
-	if err := f.SetExtraField("inputs", []map[string]any{
-		{"id": "catalog", "from": from},
-		{"from": from},
-	}); err != nil {
-		t.Fatalf("SetExtraField: %v", err)
-	}
-	if err := s.Write(f); err != nil {
-		t.Fatalf("write %s: %v", id, err)
-	}
-}
-
-func inputFroms(t *testing.T, s *felt.Storage, id string) []string {
-	t.Helper()
-	f, err := s.Read(id)
-	if err != nil {
-		t.Fatalf("read %s: %v", id, err)
-	}
-	var froms []string
-	for _, item := range f.ExtraFields["inputs"].Content {
-		for i := 0; i+1 < len(item.Content); i += 2 {
-			if item.Content[i].Value == "from" {
-				froms = append(froms, item.Content[i+1].Value)
-			}
-		}
-	}
-	return froms
 }
 
 // TestNestFromViewRewritesOutsideInputs: nest and unnest run inside a view

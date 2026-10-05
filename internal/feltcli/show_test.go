@@ -3,33 +3,11 @@ package feltcli
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
-
-// writeBrokenFiber plants a fiber dir whose `<slug>.md` holds the given raw
-// bytes, bypassing storage so unparseable frontmatter can reach disk.
-func writeBrokenFiber(t *testing.T, dir, slug string, content []byte) {
-	t.Helper()
-	badDir := filepath.Join(dir, ".felt", slug, slug)
-	if err := os.MkdirAll(badDir, 0755); err != nil {
-		t.Fatalf("MkdirAll %s fiber dir: %v", slug, err)
-	}
-	if err := os.WriteFile(filepath.Join(badDir, slug+".md"), content, 0644); err != nil {
-		t.Fatalf("WriteFile %s fiber: %v", slug, err)
-	}
-}
-
-func mustShowExtra(t *testing.T, f *felt.Felt, key string, value any) {
-	t.Helper()
-	if err := f.SetExtraField(key, value); err != nil {
-		t.Fatalf("SetExtraField(%s): %v", key, err)
-	}
-}
 
 func TestShowBodyIncludesStartLine(t *testing.T) {
 	t.Parallel()
@@ -458,15 +436,6 @@ func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
 	if !strings.Contains(out, "Refs:     project/question, project/analysis/sub/method, missing") {
 		t.Fatalf("show refs mismatch:\n%s", out)
 	}
-}
-
-func mustParseTime(t *testing.T, value string) time.Time {
-	t.Helper()
-	ts, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		t.Fatalf("parse time %q: %v", value, err)
-	}
-	return ts
 }
 
 func TestShowFieldRefusesJSON(t *testing.T) {

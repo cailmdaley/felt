@@ -1,9 +1,14 @@
 package feltcli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -46,13 +51,73 @@ func homeOf(t *testing.T, env *sysenv.Env) string {
 	return home
 }
 
+// fakeCommand is sysenvtest.FakeCommand with each distinct script written
+// once per test binary and linked into env's bin. macOS assesses every new
+// executable file on its first exec — about half a second, queued
+// machine-wide, so dozens of fresh fakes in parallel tests cost seconds each
+// — and a link to a file it has already assessed skips that. A fake reads
+// anything test-specific (a log path, a state directory) from env.
+func fakeCommand(t *testing.T, env *sysenv.Env, name, script string) string {
+	t.Helper()
+	path := filepath.Join(sysenvtest.FakeBin(t, env), name)
+	linkScript(t, path, script)
+	return path
+}
+
+// linkScript makes path a link to the shared, read-only file holding script
+// (run under /bin/sh when it has no "#!" line), replacing whatever is there.
+func linkScript(t *testing.T, path, script string) {
+	t.Helper()
+	if !strings.HasPrefix(script, "#!") {
+		script = "#!/bin/sh\n" + script
+	}
+	shared := sharedScript(t, script)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var sharedScripts struct {
+	sync.Mutex
+	paths map[string]string // script → file
+}
+
+func sharedScript(t *testing.T, script string) string {
+	t.Helper()
+	sharedScripts.Lock()
+	defer sharedScripts.Unlock()
+	if path, ok := sharedScripts.paths[script]; ok {
+		return path
+	}
+	dir := filepath.Join(testScratch, "fakes")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(script))
+	path := filepath.Join(dir, hex.EncodeToString(sum[:12]))
+	// Read-only, so a write through one test's link fails loudly instead of
+	// changing every other test's fake.
+	if err := os.WriteFile(path, []byte(script), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if sharedScripts.paths == nil {
+		sharedScripts.paths = map[string]string{}
+	}
+	sharedScripts.paths[script] = path
+	return path
+}
+
 // fakeCallLog fakes name first on env's PATH with a script that appends each
 // invocation's arguments, one line per call, to a log and then runs body
 // (exiting 0 unless body exits first). It returns a reader of the log.
 func fakeCallLog(t *testing.T, env *sysenv.Env, name, body string) func() string {
 	t.Helper()
 	log := filepath.Join(t.TempDir(), name+"-calls.log")
-	sysenvtest.FakeCommand(t, env, name, "echo \"$@\" >> '"+log+"'\n"+body+"exit 0\n")
+	env.Set("FAKE_CALL_LOG_"+name, log)
+	fakeCommand(t, env, name, "echo \"$@\" >> \"$FAKE_CALL_LOG_"+name+"\"\n"+body+"exit 0\n")
 	return func() string {
 		b, _ := os.ReadFile(log)
 		return string(b)

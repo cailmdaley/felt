@@ -11,7 +11,7 @@ func TestPluginGenerationMarkerBindsSameVersionPayloadChanges(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
 	a := testApp(t, env)
-	root := testRepoRoot(t)
+	root := repoRoot(t)
 	one := filepath.Join(t.TempDir(), "one")
 	two := filepath.Join(t.TempDir(), "two")
 	for _, destination := range []string{one, two} {
@@ -41,7 +41,7 @@ func TestPluginGenerationMarkerLivesInsideHarnessPayload(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
 	a := testApp(t, env)
-	root := testRepoRoot(t)
+	root := repoRoot(t)
 	candidate := filepath.Join(t.TempDir(), "candidate")
 	for _, name := range []string{".claude-plugin", "claude-plugin"} {
 		if err := copyTree(filepath.Join(root, name), filepath.Join(candidate, name)); err != nil {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -44,8 +45,8 @@ func newRemoteSetupFixture(t *testing.T, harness string) *remoteSetupFixture {
 		t.Fatal(err)
 	}
 	f.source = f.remotePayload(t, "one")
-	felt := sysenvtest.FakeCommand(t, env, "felt", "exit 0\n")
-	sysenvtest.FakeCommand(t, env, "git", `#!/bin/sh
+	felt := fakeCommand(t, env, "felt", "exit 0\n")
+	fakeCommand(t, env, "git", `#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
 if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then
@@ -64,9 +65,9 @@ if [ "$is_clone" = 1 ]; then
 fi
 `)
 	if harness == "claude" {
-		sysenvtest.FakeCommand(t, env, "claude", claudeSetupFake)
+		fakeCommand(t, env, "claude", claudeSetupFake)
 	} else {
-		sysenvtest.FakeCommand(t, env, "codex", codexSetupFake)
+		fakeCommand(t, env, "codex", codexSetupFake)
 	}
 	sysenvtest.OnlyPath(env)
 	env.Set("FELT_BIN", felt)
@@ -79,10 +80,21 @@ fi
 	return f
 }
 
+// remotePayload is the felt checkout the fake git clones for generation: the
+// repository's plugin payload with generation.txt naming it. A generation's
+// checkout is built once per test binary and only ever read.
 func (f *remoteSetupFixture) remotePayload(t *testing.T, generation string) string {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "checkout")
-	sourceRoot := testRepoRoot(t)
+	remotePayloads.Lock()
+	defer remotePayloads.Unlock()
+	if root, ok := remotePayloads.roots[generation]; ok {
+		return root
+	}
+	root, err := os.MkdirTemp(testScratch, "payload-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceRoot := repoRoot(t)
 	for _, name := range []string{".claude-plugin", "claude-plugin"} {
 		if err := copyTree(filepath.Join(sourceRoot, name), filepath.Join(root, name)); err != nil {
 			t.Fatal(err)
@@ -91,7 +103,16 @@ func (f *remoteSetupFixture) remotePayload(t *testing.T, generation string) stri
 	if err := os.WriteFile(filepath.Join(root, "claude-plugin", "generation.txt"), []byte(generation), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if remotePayloads.roots == nil {
+		remotePayloads.roots = map[string]string{}
+	}
+	remotePayloads.roots[generation] = root
 	return root
+}
+
+var remotePayloads struct {
+	sync.Mutex
+	roots map[string]string // generation → checkout
 }
 
 // nativeFakePrologue is the shell prologue both harness fakes share.

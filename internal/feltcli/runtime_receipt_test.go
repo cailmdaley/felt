@@ -83,7 +83,7 @@ func TestBundleFromManifestRejectsWrongAndStaleBundles(t *testing.T) {
 func TestCollectFeltReceiptUsesResolvedExecutable(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
-	bin := sysenvtest.FakeCommand(t, env, "felt", "printf '9.8.7 (abc, built now)\\n'\n")
+	bin := fakeCommand(t, env, "felt", "printf '9.8.7 (abc, built now)\\n'\n")
 	env.Set("FELT_BIN", bin)
 	env.Set("PATH", filepath.Dir(bin))
 	got := testApp(t, env).collectFeltReceipt()
@@ -176,7 +176,7 @@ func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
 	if err := os.WriteFile(list, []byte(listJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sysenvtest.FakeCommand(t, env, "codex", "cat \"$RECEIPT_PLUGIN_LIST\"\n")
+	fakeCommand(t, env, "codex", "cat \"$RECEIPT_PLUGIN_LIST\"\n")
 	env.Set("RECEIPT_PLUGIN_LIST", list)
 
 	bundles := a.collectCodexBundle()
@@ -191,7 +191,7 @@ func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
 func TestCollectCodexBundleOmitsIntentionalSingleHarnessInstall(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
-	sysenvtest.FakeCommand(t, env, "codex", "printf '%s\\n' '{\"installed\":[]}'\n")
+	fakeCommand(t, env, "codex", "printf '%s\\n' '{\"installed\":[]}'\n")
 	if bundles := testApp(t, env).collectCodexBundle(); len(bundles) != 0 {
 		t.Fatalf("unconfigured Codex without Felt = %#v, want omitted", bundles)
 	}
@@ -210,7 +210,7 @@ enabled = true
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	sysenvtest.FakeCommand(t, env, "codex", "printf '%s\\n' '{\"installed\":[]}'\n")
+	fakeCommand(t, env, "codex", "printf '%s\\n' '{\"installed\":[]}'\n")
 	bundles := testApp(t, env).collectCodexBundle()
 	if len(bundles) != 1 || bundles[0].Status != receiptMissing {
 		t.Fatalf("configured but absent Codex Felt = %#v, want one missing bundle", bundles)
@@ -495,7 +495,7 @@ func TestReceiptBundleInspectionSaysHowEnablementWasEstablished(t *testing.T) {
 				}
 			}
 			for name, body := range c.bin {
-				sysenvtest.FakeCommand(t, env, name, body+"\n")
+				fakeCommand(t, env, name, body+"\n")
 			}
 			sysenvtest.OnlyPath(env)
 

@@ -94,25 +94,6 @@ func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
 	}
 }
 
-// repoRoot walks up from the test's working directory until it finds go.mod.
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not find repo root (no go.mod)")
-		}
-		dir = parent
-	}
-}
-
 // pluginSkillsRoot returns the claude-plugin/skills directory.
 func pluginSkillsRoot(t *testing.T) string {
 	t.Helper()

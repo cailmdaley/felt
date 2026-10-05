@@ -38,36 +38,34 @@ func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, w
 func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 	t.Parallel()
 	for _, h := range nativeHarnesses {
-		t.Run(h.name, func(t *testing.T) {
-			t.Parallel()
-			f := newRemoteSetupFixture(t, h.name)
-			if err := h.install(f.a, f.remote); err != nil {
-				t.Fatalf("baseline remote %s setup: %v", h.name, err)
-			}
-			if got := f.currentGeneration(t); got != "one" {
-				t.Fatalf("baseline generation = %q, want one", got)
-			}
+		for _, tamper := range []string{"stale", "alter", "missing-marker"} {
+			t.Run(h.name+"/"+tamper, func(t *testing.T) {
+				t.Parallel()
+				f := newRemoteSetupFixture(t, h.name)
+				if err := h.install(f.a, f.remote); err != nil {
+					t.Fatalf("baseline remote %s setup: %v", h.name, err)
+				}
+				if got := f.currentGeneration(t); got != "one" {
+					t.Fatalf("baseline generation = %q, want one", got)
+				}
 
-			for _, tamper := range []string{"stale", "alter", "missing-marker"} {
-				// serial: each tamper mode is a step on the shared fixture f.
-				t.Run(tamper, func(t *testing.T) {
-					f.setGeneration(t, "poisoned-"+tamper)
-					f.env.Set("FAKE_NATIVE_TAMPER", tamper)
-					t.Cleanup(func() { f.env.Unset("FAKE_NATIVE_TAMPER") })
-					err := h.install(f.a, f.remote+"#"+tamper)
-					assertRefusedBeforeCommit(t, f, err, "one")
-				})
-			}
+				f.setGeneration(t, "poisoned-"+tamper)
+				f.env.Set("FAKE_NATIVE_TAMPER", tamper)
+				err := h.install(f.a, f.remote+"#"+tamper)
+				assertRefusedBeforeCommit(t, f, err, "one")
 
-			// With the lie removed the same source promotes and verifies cleanly.
-			f.setGeneration(t, "honest")
-			if err := h.install(f.a, f.remote+"#honest"); err != nil {
-				t.Fatalf("honest retry after refused caches: %v", err)
-			}
-			if got := f.currentGeneration(t); got != "honest" {
-				t.Fatalf("post-retry generation = %q, want honest", got)
-			}
-		})
+				// With the lie removed the same source promotes and verifies
+				// cleanly after the refusal.
+				f.env.Unset("FAKE_NATIVE_TAMPER")
+				f.setGeneration(t, "honest")
+				if err := h.install(f.a, f.remote+"#honest"); err != nil {
+					t.Fatalf("honest retry after refused %s cache: %v", tamper, err)
+				}
+				if got := f.currentGeneration(t); got != "honest" {
+					t.Fatalf("post-retry generation = %q, want honest", got)
+				}
+			})
+		}
 	}
 }
 
