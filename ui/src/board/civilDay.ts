@@ -191,7 +191,7 @@ export function sameCivilDue(cardDue: string | undefined, next: string | null): 
 // ── Durations ────────────────────────────────────────────────────────────────
 // Not a civil-day concern — a span has no zone. It lives here because this is
 // the module every time-facing surface already imports, views and the
-// conversation dock alike.
+// fiber page alike.
 
 /**
  * A span of minutes as `2h 05m` / `47m`.

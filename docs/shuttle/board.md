@@ -12,12 +12,12 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 | `3` | **Board** | What the work produced |
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
-`?view=chronicle` (or `shelf`) deep-links a view.
+`#/desk`, `#/chronicle`, and `#/board` deep-link the views.
+A channel uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
 !!! note "The tab named Board, and the board"
     Hotkey `3` is titled **Board** for the reader. Internally it is the
-    *shelf* — the view id, the storage keys and the module names all say
-    `shelf`, and `?view=shelf` is what deep-links it. This page uses "the
+    *shelf* in the view registry; `?view=shelf` also deep-links it. This page uses "the
     board" for the whole surface at `:4000` and "the Board tab" for the third
     view.
 
@@ -86,17 +86,19 @@ it dateless.
 ### Gestures
 
 Two gestures carry different meanings. **Drag-and-drop** advances the card's
-state. **Modal buttons** give you another worker on the same run.
+state.
+**The fiber page's controls** give you another worker on the same run.
 
 Drag-to-tempered acts by kind: on a standing role it accepts and re-arms, on a
 pinned role it accepts and re-parks to the strip, on a oneshot it writes the
 terminus. The outcome stays: the last run's digest is the card's headline until
 the next run writes its own.
 
-Beyond the columns the Desk offers a fiber and file viewer, Stash and Capture
-dialogs, and Attach. Each card's panel folds a drawer under its title: a message
-box with New session and Resume, the next launch's agent, effort, session and
-kind, the card's due day and parent, and Temper / Discard.
+Opening a Desk card enters its document channel.
+The fiber's own page carries a compact control band above the outcome: worker pill, message box with New session, Resume and Meeting, folded settings and session history, and Temper / Discard.
+The message box starts at one line and grows on focus or with a draft.
+Settings include the next launch's agent, effort, surface and kind, plus the card's due day and parent.
+The Desk also offers Stash and Capture dialogs and Attach.
 
 Images pasted or dropped into the message box wait there as thumbnails, each
 with a × to remove it: PNG, JPEG, GIF or WebP, at most 10 MB each, 8 per send
@@ -149,29 +151,29 @@ data while Chronicle is closed.
 
 ## Board — what the work produced
 
-Hotkey `3`. Every file a worker pushed with `shuttle send-file <path> [path...]` in the last 30 days,
-laid out on a canvas as cards that render their own contents: the report
-renders inside its frame, the plot draws, the page is the thing itself rather
-than a link to it. A list of filenames is an index of work; a wall of rendered
-pages is the work, and you find the one you want by recognising it.
+Hotkey `3` opens a contact sheet of fiber channels with documents sent in the last 30 days.
+A ribbon shows the twelve latest documents across the fleet.
+Below it, each fiber has a folio with a live thumbnail, name, outcome, document count and host marks.
+Recent work, Projects and Hosts regroup the sheet; Find filters names, paths and filenames.
+Thumbnails load near the viewport under a shared budget and cannot run scripts.
+Confirmed missing fibers' documents gather under **Unfiled** on their byte-owning host; an unreachable owner does not count as a missing fiber.
 
-- **A card is two layers.** The face — name, fiber, age, kind — is synchronous
-  and is the card's resting state, never a skeleton. The body — the iframe, the
-  image, the page — mounts when the card nears the viewport and is taken down
-  again when the canvas carries more live bodies than it can afford.
-- **Cards are handles, never factories.** Every gesture rearranges the canvas;
-  nothing on a card makes another card. Drag the header to move it, the corner
-  to resize, the ✶ to hold it in place, the body to make the frame live.
-- **Nothing overlaps, except a pile** — one fiber's work gathered by the fiber
-  lens.
-- **Reading happens in the Reader.** The ↗ sends a file to one overlay window
-  with its own tab strip, because shuttle runs as a dock web-app where every
-  `window.open` would otherwise become a separate window.
+Opening a folio or receipt enters the reader: one selected page, inert receded neighbours, and a tab strip for the channel.
+The fiber page anchors its body, embedded files, opened body links and sent documents.
+Repeated sends of the same owner/path are one page with multiple receipts.
+Selection, channel changes, metadata polls and the optional Channels sidebar preserve retained document instances and reading position.
+The navbar's worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel.
+The Channels sidebar starts closed and remembers an explicit choice.
+On phones, previous/next controls sit in a thumb bar, and browser Back returns to the originating view.
 
-The feed is `/api/v1/sent-files/all` (with a `/composite` sibling that fans in
-every host a hub aggregates — the **fleet**), which reads the host's event
-stream. A host with no event stream shows an empty canvas — see
-[Telemetry](telemetry.md).
+Bare reader keys work outside editable fields: h/l or left/right step pages; j/k or down/up scroll about three lines; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+g/G or Home/End select first/last pages, J/K step channels, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
+The tablist keeps one Tab stop and moves focus with its selected tab.
+HTML documents get first refusal on their own keys; native PDF and media viewers keep their controls.
+`?` shows the shared keyboard help.
+
+The receipt feed is `/api/v1/sent-files/all/composite`, which combines each host's event stream.
+A host without an event stream contributes no receipts — see [Telemetry](telemetry.md).
 
 ## The board is optional, and the bundle is its own artifact
 

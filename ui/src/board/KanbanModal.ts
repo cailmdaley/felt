@@ -1011,7 +1011,7 @@ export class KanbanModal {
    * force-dispatch path (the same one the dock's "New session ▸"
    * uses): a single fresh POST /api/v1/dispatch with `force: true, ad_hoc:
    * true` and no message — drag carries no directive (resume-previous and
-   * "talk first" intent live in the conversation dock). force bypasses status /
+   * "talk first" intent live on the fiber page). force bypasses status /
    * enabled / review_state / schedule / validity gates, so closed (tempered or
    * composted), paused, awaiting-review, and dormant-standing cards all
    * fire a worker immediately — no waiting on the 15s poller; the dispatch
@@ -1213,7 +1213,7 @@ export class KanbanModal {
    * a second write would race it into a 409 already_running.
    *
    * A drag carries no message and always starts fresh; resuming and saying
-   * something first live in the conversation dock, where they are chosen on
+   * something first live on the fiber page, where they are chosen on
    * purpose. `fresh` is stamped explicitly rather than left to the daemon's
    * auto-decide, which would resume a transcript that died dirty.
    *

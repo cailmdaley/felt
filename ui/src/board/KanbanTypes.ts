@@ -114,7 +114,7 @@ export interface KanbanCard {
    * `shuttle.runtime.dispatched_at` — the INSTANT the owning daemon launched
    * the most recent worker. Rides the composite feed inside felt's `shuttle`
    * map (felt serializes the whole block), so no daemon change was needed to
-   * surface it. Opens the conversation dock's session-window line.
+   * surface it. Opens the fiber page's session-window line.
    */
   dispatchedAt?: string
   /**
@@ -149,13 +149,13 @@ export interface KanbanCard {
   /**
    * `shuttle.effort` — reasoning-effort axis (a harness-native token, e.g.
    * `high`, `xhigh`, `max`). Absent resolves to the agent registry's concrete
-   * default. Drives the effort select in the conversation dock's agent picker.
+   * default. Drives the effort select in the fiber page's agent picker.
    */
   shuttleEffort?: string
   /**
    * `shuttle.chrome` — browser-automation axis (claude harness only). Present
    * (true) when the block enables `--chrome`; drives the chrome toggle in the
-   * conversation dock's agent picker.
+   * fiber page's agent picker.
    */
   shuttleChrome?: boolean
 
@@ -174,7 +174,7 @@ export interface KanbanCard {
   /**
    * `shuttle.kind` — `oneshot` (default), `standing`, or `pinned`. Present
    * iff the fiber has a shuttle block. Drives the kind segmented control in
-   * the conversation dock and reveals the schedule/tz row when standing. A
+   * the fiber page and reveals the schedule/tz row when standing. A
    * resting (`status:active`, not running) pinned fiber classifies onto the
    * Pinned strip; a running one shows live in Now via the worker override.
    */
