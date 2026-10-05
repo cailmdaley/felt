@@ -118,7 +118,9 @@
   --ws-chrome-size: 15px;
   --ws-prose-size: 18px;
   --ws-section-size: 21px;
-  --ws-lede-size: 24px;
+  /* The outcome under a fiber's title: a step above the prose it introduces, on every screen. */
+  --ws-lede-size: calc(1.2 * var(--ws-prose-size));
+  --ws-lede-leading: 1.4;
   --ws-heading-size: 34px;
   --ws-prose-width: 760px;
   --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
