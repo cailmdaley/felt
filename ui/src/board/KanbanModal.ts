@@ -51,8 +51,8 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
-import { dispatchFailureMessage, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
+import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
+import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
@@ -88,6 +88,16 @@ import {
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
+
+function registryDefaultAgent(raw: unknown): string | null {
+  if (!Array.isArray(raw)) return null
+  for (const value of raw) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+    const record = value as Record<string, unknown>
+    if (record.default === true && typeof record.id === 'string') return record.id
+  }
+  return null
+}
 
 interface KanbanModalOptions {
   /**
@@ -346,6 +356,7 @@ export class KanbanModal {
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
       openDetail: (card) => this.openDocumentChannel(card),
+      getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
@@ -2063,6 +2074,7 @@ export class KanbanModal {
       const sig = this.computeResponseSignature(data)
       const wasFirstRender = this.lastResponse === null
       this.lastResponse = data
+      this.ensureFleetDefaultAgents(data)
       if (!wasFirstRender && sig === this.lastResponseSig) {
         // The Desk skips an identical-payload re-render, but a temporal view
         // still gets its poll: its content moves with the clock (and with
@@ -2187,6 +2199,7 @@ export class KanbanModal {
 
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
+    this.ensureFleetDefaultAgents(data)
     this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
       this.lastResponse = data
@@ -2377,6 +2390,26 @@ export class KanbanModal {
     })
   }
 
+  private ensureFleetDefaultAgents(data: KanbanResponse): void {
+    for (const card of boardCards(data)) {
+      if (!isAgentCard(card) || !card.shuttleAgent) continue
+      const origin = card.originId
+      if (this.fleetDefaultAgents.has(origin) || this.fleetDefaultAgentLoads.has(origin)) continue
+      this.fleetDefaultAgentLoads.add(origin)
+      void daemonFetch(`${this.shuttleBase}/api/v1/agents?origin=${encodeURIComponent(origin)}`)
+        .then(async (response) => {
+          if (!response.ok) return
+          const agent = registryDefaultAgent(await response.json())
+          if (!agent) return
+          const fallback = this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT
+          this.fleetDefaultAgents.set(origin, agent)
+          if (agent !== fallback && this.lastResponse && this.container) this.render(this.lastResponse)
+        })
+        .catch(() => {})
+        .finally(() => this.fleetDefaultAgentLoads.delete(origin))
+    }
+  }
+
   private captureScrollSnapshot(): KanbanScrollSnapshot | null {
     if (!this.body) return null
 
@@ -2415,6 +2448,8 @@ export class KanbanModal {
 
   /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
+  private readonly fleetDefaultAgents = new Map<string, string>()
+  private readonly fleetDefaultAgentLoads = new Set<string>()
   /**
    * A response that arrived while a temporal view was up, waiting for the Desk
    * to be visible again. The Desk is `display:none` behind a view, and every

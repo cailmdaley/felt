@@ -1087,6 +1087,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.kbn-cluster-item-agent-name {
+  flex: 0 0 auto;
+  color: var(--kbn-agent);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
 /* "wakes Aug 12" — the return date on a snoozed card. Mono and faint: it's a
    fact to glance at, never the thing you read first. */
 .kbn-cluster-item-wakes {
