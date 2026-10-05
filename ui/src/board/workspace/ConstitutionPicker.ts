@@ -12,12 +12,15 @@ export interface ConstitutionPickerOptions {
   onRow?(el: HTMLElement, card: KanbanCard): void
   onRemove?(el: HTMLElement): void
   onOpen(card: KanbanCard): void
+  /** A field the picker reads instead of its own (the board bar's Find), heard only while `active`. */
+  find?: HTMLInputElement
+  active?(): boolean
 }
 
 /** Shared constitution rows and Find behavior for the sidebar and floating picker. */
 export class ConstitutionPicker {
   readonly el = document.createElement('div')
-  readonly find = document.createElement('input')
+  readonly find: HTMLInputElement
   private readonly list = document.createElement('div')
   private previous: HTMLElement | null = null
   private popup = false
@@ -29,18 +32,24 @@ export class ConstitutionPicker {
   private readonly opts: ConstitutionPickerOptions
   constructor(opts: ConstitutionPickerOptions) {
     this.opts = opts
-    this.find.className = 'ws-channel-find'
-    this.find.type = 'search'
-    this.find.placeholder = 'Find a constitution'
-    this.find.setAttribute('aria-label', 'Find a constitution')
+    this.find = opts.find ?? document.createElement('input')
     this.list.className = 'ws-channel-list'
-    this.el.append(this.find, this.list)
-    this.find.addEventListener('input', () => this.refresh())
+    if (opts.find) this.el.append(this.list)
+    else {
+      this.find.className = 'ws-channel-find'
+      this.find.type = 'search'
+      this.find.placeholder = 'Find a constitution'
+      this.find.setAttribute('aria-label', 'Find a constitution')
+      this.el.append(this.find, this.list)
+    }
+    this.find.addEventListener('input', () => { if (this.listening) this.refresh() })
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
   }
+  /** An own field always listens; a shared one only while the picker is the one it serves. */
+  private get listening(): boolean { return !this.opts.find || (this.opts.active?.() ?? true) }
   focus(): void {
-    if (!this.el.contains(document.activeElement)) this.previous = document.activeElement as HTMLElement | null
+    if (!this.el.contains(document.activeElement) && document.activeElement !== this.find) this.previous = document.activeElement as HTMLElement | null
     this.refresh()
     this.find.focus({ preventScroll: true })
   }
@@ -142,7 +151,8 @@ export class ConstitutionPicker {
     }
   }
   private readonly keydown = (event: KeyboardEvent): void => {
-    if (!this.el.isConnected || !this.el.contains(event.target as Node) || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey) return
+    const mine = this.el.contains(event.target as Node) || (event.target === this.find && this.listening)
+    if (!this.el.isConnected || !mine || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey) return
     if (event.key === 'Escape') this.close(true)
     else if (event.key === 'Enter' && event.target === this.find) {
       if (event.repeat) return
@@ -151,7 +161,7 @@ export class ConstitutionPicker {
     event.preventDefault(); event.stopImmediatePropagation()
   }
   private readonly outside = (event: PointerEvent): void => {
-    if (this.isOpen && !this.el.contains(event.target as Node)) this.close()
+    if (this.isOpen && !this.el.contains(event.target as Node) && event.target !== this.find) this.close()
   }
   dispose(): void {
     document.removeEventListener('keydown', this.keydown, true)

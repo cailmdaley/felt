@@ -198,6 +198,12 @@ export class KanbanModal {
    * Desk by `syncViewChrome`, since a lens is a Desk posture.
    */
   private lensSlotEl: HTMLDivElement | null = null
+  /** The bar's Find: one field on every view (constitutions; the Board's folios; the reader's sidebar). */
+  private findEl: HTMLInputElement | null = null
+  /** The bar's centre while the reader is open: its map of pages. */
+  private readerSlotEl: HTMLDivElement | null = null
+  /** The bar's right end while the reader is open: its page count, before Settings. */
+  private positionSlotEl: HTMLDivElement | null = null
   /**
    * Wrapper around the three Desk surfaces (Now + Pinned + Resting).
    * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
@@ -511,7 +517,12 @@ export class KanbanModal {
       },
       onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
       dock: this.dock,
+      find: this.findEl ?? undefined,
+      focusFind: () => this.focusFind(),
+      onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
+    this.readerSlotEl?.append(this.workspace.reader.barIndex)
+    this.positionSlotEl?.append(this.workspace.reader.barPosition)
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
@@ -562,6 +573,7 @@ export class KanbanModal {
       this.resizeRaf = null
       this.expandOutcomesToFillSpace()
       this.placeVeil()
+      this.placeReader()
     })
   }
 
@@ -624,10 +636,12 @@ export class KanbanModal {
     })
     this.viewHostEl = document.createElement('div')
     this.viewHostEl.className = 'kbn-view-host'
-    this.body.append(this.tabsEl, this.dragHorizonEl, this.deskEl, this.viewHostEl)
+    this.body.append(this.dragHorizonEl, this.deskEl, this.viewHostEl)
     this.syncViewChrome()
 
-    this.container.append(this.bannerEl, this.body, this.liveEl)
+    // The bar stands outside the body: the body goes inert under the reader,
+    // and the bar stays live above it, in the same place on every view.
+    this.container.append(this.tabsEl, this.bannerEl, this.body, this.liveEl)
 
     // Crossing 700px changes what the Desk IS, not just how it is painted: the
     // Now triad becomes a pager with a folio strip, and the two bands grow fold
@@ -649,7 +663,29 @@ export class KanbanModal {
     this.workspace?.open(card)
   }
 
+  /** Focus the bar's Find, where the bar carries one (the phone's bottom bar does not). */
+  private focusFind(): boolean {
+    const find = this.findEl
+    if (!find || !find.getClientRects().length) return false
+    find.focus({ preventScroll: true })
+    find.select()
+    return true
+  }
+
+  /** The reader starts beneath the bar, so the bar's top row is the reader's too. */
+  private placeReader(): void {
+    if (!this.container || !this.tabsEl) return
+    const bar = this.tabsEl.getBoundingClientRect()
+    this.container.style.setProperty('--kbn-bar-bottom', `${Math.max(0, Math.round(bar.bottom - this.container.getBoundingClientRect().top))}px`)
+    // How far the map's tiles reach below the bar: the pages start clear of them.
+    const map = this.readerSlotEl?.getBoundingClientRect()
+    this.container.style.setProperty('--kbn-bar-overhang', `${map?.height ? Math.max(0, Math.ceil(map.bottom - bar.bottom)) : 0}px`)
+  }
+
   private showWorkspace(active: boolean): void {
+    this.container?.classList.toggle('kbn-reader-open', active)
+    if (active) this.placeReader()
+    else if (this.findEl) { this.findEl.value = ''; this.workspace?.closeFind() }
     if (this.body) {
       this.body.inert = active
       if (active) this.body.setAttribute('aria-hidden', 'true')
@@ -742,12 +778,41 @@ export class KanbanModal {
       strip.append(tab)
     }
 
-    // The lens slot closes the row on the right (`margin-left: auto`). Empty
-    // until a render finds live cycles — and empty it takes no space, so the
-    // strip is exactly the tab row it was.
+    // Find follows the tabs: one field every view shares.
+    const find = document.createElement('label')
+    find.className = 'kbn-viewtabs-find'
+    this.findEl = document.createElement('input')
+    this.findEl.type = 'search'
+    this.findEl.placeholder = 'Find a constitution'
+    this.findEl.setAttribute('aria-label', 'Find a constitution')
+    this.findEl.addEventListener('focus', () => this.workspace?.find(this.activeViewId === 'shelf'))
+    this.findEl.addEventListener('input', () => this.workspace?.find(this.activeViewId === 'shelf'))
+    this.findEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      e.preventDefault(); e.stopPropagation()
+      this.workspace?.closeFind()
+      this.findEl?.blur()
+    })
+    const findKey = document.createElement('span')
+    findKey.className = 'kbn-viewtab-hotkey kbn-viewtabs-find-key'
+    findKey.textContent = '/'
+    findKey.setAttribute('aria-hidden', 'true')
+    find.append(this.findEl, findKey)
+    strip.append(find)
+
+    // The centre is each view's own: the Desk's cycle lens chips, held to the
+    // right of it, or the reader's map of pages. It always takes the room
+    // between Find and Settings, so Settings never moves between views.
+    const centre = document.createElement('div')
+    centre.className = 'kbn-viewtabs-centre'
     this.lensSlotEl = document.createElement('div')
     this.lensSlotEl.className = 'kbn-viewtabs-lens'
-    strip.append(this.lensSlotEl)
+    this.readerSlotEl = document.createElement('div')
+    this.readerSlotEl.className = 'kbn-viewtabs-reader'
+    centre.append(this.readerSlotEl, this.lensSlotEl)
+    this.positionSlotEl = document.createElement('div')
+    this.positionSlotEl.className = 'kbn-viewtabs-position'
+    strip.append(centre, this.positionSlotEl)
 
     // Settings rides the same row as the pages without being one of them. It
     // is deliberately NOT a tab: the tabs are windows onto the work, and
@@ -776,6 +841,12 @@ export class KanbanModal {
    * a stray click or repeated hotkey never tears a view down and back up.
    */
   private setView(id: BoardViewId, navigate = true): void {
+    // With the reader open the bar marks the view it came from: that tab, or
+    // its key, closes the reader back to it; any other switches and closes.
+    if (navigate && this.workspace?.isActive && id === this.activeViewId) {
+      this.workspace.returnToOrigin()
+      return
+    }
     if (navigate && this.workspace) {
       if (id === 'shelf') this.workspace.showBoard()
       else this.workspace.suspend(id)
@@ -1015,6 +1086,9 @@ export class KanbanModal {
     this.bannerEl = null
     this.tabsEl = null
     this.lensSlotEl = null
+    this.findEl = null
+    this.readerSlotEl = null
+    this.positionSlotEl = null
     this.deskEl = null
     this.viewHostEl = null
     this.activeView = null
@@ -2603,6 +2677,11 @@ export class KanbanModal {
     }
     if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
+    // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too.
+    if (this.activeViewId === 'chronicle' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
+      e.preventDefault(); e.stopPropagation()
+      return
+    }
     if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
       if (intent === 'conversation') {
@@ -2615,7 +2694,8 @@ export class KanbanModal {
       if (intent === 'find') {
         const filter = [...this.deskEl!.querySelectorAll<HTMLInputElement>('input[type="search"], input[data-card-filter]')]
           .find(input => !input.closest('[hidden],[inert]') && input.getClientRects().length > 0)
-        if (filter) filter.focus({ preventScroll: true })
+        if (this.focusFind()) { /* The bar's Find serves every view. */ }
+        else if (filter) filter.focus({ preventScroll: true })
         else this.workspace?.findConstitution()
         e.preventDefault(); e.stopPropagation()
         return

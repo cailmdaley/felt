@@ -29,6 +29,12 @@ export interface WorkspaceOptions {
   /** A history entry addressed a board view or channel origin; switch to it without pushing. */
   onView?(view: WorkspaceView): void
   dock: Dock
+  /** The board bar's Find field, shared by every view on the desktop. */
+  find?: HTMLInputElement
+  /** Focus the board bar's Find; false where the bar has none (the phone). */
+  focusFind?(): boolean
+  /** Expand has taken, or given back, the whole window. */
+  onExpand?(expanded: boolean): void
 }
 interface ChannelState {
   card: KanbanCard
@@ -48,6 +54,8 @@ const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chroni
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
+/** The sidebar's Read lately group holds this many constitutions. */
+const READ_LATELY = 8
 
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
 export class Workspace {
@@ -56,6 +64,8 @@ export class Workspace {
   readonly dock: Dock
   private readonly verdicts = new Verdicts()
   private readonly picker: ConstitutionPicker
+  /** The list the board bar's Find hangs beneath itself; the phone, without that field, uses `picker`. */
+  private readonly barPicker: ConstitutionPicker
   private readonly themes: ChannelThemes
   private readonly root: HTMLElement
   private readonly depth: WorkspaceDepth
@@ -64,6 +74,8 @@ export class Workspace {
   private readonly channels = new Map<string, ChannelState>()
   private readonly proseRevisions = new Map<DocKey, string>()
   private current: ChannelState | null = null
+  /** Constitutions opened in this session, most recent first. */
+  private readLately: string[] = []
   private column: SidebarEntry[] | null = null
   private origin = 'Board'
   private readonly receipts = new Map<string, { files: ShelfFile[]; etag?: string }>()
@@ -89,31 +101,36 @@ export class Workspace {
       themes: this.themes,
       cards: opts.cards,
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
-      onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh() },
+      onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() },
+      focusFind: () => opts.focusFind?.() ?? false,
     })
-    this.picker = new ConstitutionPicker({
+    const pickerOptions = {
       cards: () => {
         const ordered = this.overview.orderedCards()
         return [...ordered, ...opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
       },
-      files: card => this.overview.fileNames(card),
-      onOpen: card => this.open(card, 'Desk', undefined, this.overview.hasMetadata(card), false),
-    })
+      files: (card: KanbanCard) => this.overview.fileNames(card),
+      onOpen: (card: KanbanCard) => {
+        if (opts.find) opts.find.value = ''
+        this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.overview.hasMetadata(card), false)
+      },
+    }
+    this.picker = new ConstitutionPicker(pickerOptions)
+    this.barPicker = new ConstitutionPicker({ ...pickerOptions, find: opts.find, active: () => this.barPicker.isOpen })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
-      sidebarBand: card => this.column?.find(entry => cardIdentity(entry.card) === cardIdentity(card))?.band,
+      sidebarBand: card => this.sidebarGroup(card),
       files: card => this.overview.fileNames(card),
+      find: opts.find,
+      onFind: () => opts.focusFind?.() ?? false,
+      onExpand: expanded => opts.onExpand?.(expanded),
       onSelect: key => this.select(key),
       onCrossing: travel => this.depth.cross(travel),
-      onReturn: () => {
-        if (this.origin === 'Board') this.lastBoardRoute = null
-        if (this.current) this.opts.onReturnCard?.(this.current.card)
-        this.history.leave()
-      },
+      onReturn: () => this.returnToOrigin(),
       workerPill: card => this.dock.workerPillFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
@@ -135,6 +152,29 @@ export class Workspace {
   }
 
   get isActive(): boolean { return this.reader.isActive }
+  /**
+   * The board bar's Find, routed by what it serves now: the open sidebar's
+   * list in the reader, the sheet's folios on the Board, and otherwise a
+   * list of constitutions hung beneath the field.
+   */
+  find(board: boolean): void {
+    const input = this.opts.find
+    if (!input) return
+    if (this.isActive && this.reader.sidebarVisible) return
+    if (!this.isActive && board) { this.overview.setQuery(input.value); return }
+    if (!this.barPicker.isOpen) this.barPicker.show(this.root, input)
+    else this.barPicker.refresh()
+    this.overview.refresh()
+  }
+  /** Close the Find's list, if it hangs open. */
+  closeFind(): void { this.barPicker.close() }
+  /** Return from the reader to the view it was opened from, as Escape does. */
+  returnToOrigin(): void {
+    if (!this.isActive) return
+    if (this.origin === 'Board') this.lastBoardRoute = null
+    if (this.current) this.opts.onReturnCard?.(this.current.card)
+    this.history.leave()
+  }
   /** Opens over the Desk without navigating or waking the reader. */
   findConstitution(): void {
     this.picker.show(this.root)
@@ -154,17 +194,35 @@ export class Workspace {
       this.reader.captureSidebar(this.column ?? [])
     }
     this.origin = origin
+    const id = cardIdentity(card)
+    // Entering the reader brings a constitution to the front of Read lately;
+    // stepping within it keeps the list still, so j and k walk a fixed order.
+    if (!this.isActive || !this.readLately.includes(id)) this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin))
   }
 
+  /**
+   * The sidebar is one grouped list wherever the reader was opened from:
+   * Awaiting review and Working in the Desk's own order, then the
+   * constitutions read lately, most recent first.
+   */
   private sidebarCards(): KanbanCard[] {
-    if (this.column) {
-      const live = new Map(this.opts.cards().map(card => [cardIdentity(card), card]))
-      return this.column.map(entry => live.get(cardIdentity(entry.card)) ?? entry.card)
-    }
-    return this.origin === 'Board' ? this.overview.orderedCards() : this.overview.recentCards()
+    const cards = this.opts.cards()
+    const review = cards.filter(card => fiberPageColumn(card) === 'awaitingReview')
+    const working = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const listed = new Set([...review, ...working].map(cardIdentity))
+    const live = new Map(cards.map(card => [cardIdentity(card), card]))
+    const read = this.readLately.flatMap(id => {
+      const card = live.get(id) ?? this.channels.get(id)?.card
+      return card && !listed.has(id) ? [card] : []
+    }).slice(0, READ_LATELY)
+    return [...review, ...working, ...read]
+  }
+  private sidebarGroup(card: KanbanCard): string {
+    const column = fiberPageColumn(card)
+    return column === 'awaitingReview' ? 'Awaiting review' : column === 'inFlight' ? 'Working' : 'Read lately'
   }
 
   mountOverview(host: HTMLElement): void {
@@ -312,6 +370,7 @@ export class Workspace {
   private async applyRoute(route: WorkspaceRoute): Promise<void> {
     const epoch = ++this.routeEpoch
     this.picker.close()
+    this.barPicker.close()
     if (route.kind === 'overview') {
       const hash = route.hash ?? window.location.hash
       const view = VIEW_HASHES[hash] ?? this.history.originView
@@ -595,6 +654,7 @@ export class Workspace {
     this.dock.setVerdictQueue(undefined)
     this.dock.reset()
     this.picker.dispose()
+    this.barPicker.dispose()
     this.reader.dispose()
     this.overview.dispose()
     this.themes.dispose()

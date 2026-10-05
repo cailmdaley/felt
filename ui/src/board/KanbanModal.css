@@ -269,10 +269,11 @@
   gap: 6px;
   padding: 0 2px 4px;
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
-  /* Pulls the page up under the row — `.kbn-body`'s 10px gap is spacing
-     between *sections*, and the tabs are a label for what follows, not a
-     section of their own. */
-  margin-bottom: -4px;
+  /* The bar stands above the body, in the body's own gutters; the body's
+     top padding is the space beneath it. */
+  margin: 6px 12px 0;
+  position: relative;
+  z-index: 6;
 }
 .kbn-viewtab {
   appearance: none;
@@ -779,6 +780,7 @@
 .kbn-viewtabs-lens {
   margin-left: auto;
   min-width: 0;
+  flex: 0 1 auto;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -791,6 +793,35 @@
 }
 .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; }
 
+/* Find follows the tabs: a field in the tabs' hairline, its key set as a keycap. */
+.kbn-viewtabs-find {
+  flex: 0 1 220px; min-width: 120px; position: relative; display: flex; align-items: center; box-sizing: border-box; height: 26px;
+  margin-left: 6px; border: 1px solid rgba(122, 111, 92, 0.28); border-radius: 4px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.kbn-viewtabs-find:hover { border-color: rgba(122, 111, 92, 0.45); }
+.kbn-viewtabs-find:focus-within { border-color: rgba(122, 111, 92, 0.6); background: rgba(251, 246, 233, 0.6); }
+.kbn-viewtabs-find input {
+  flex: 1; min-width: 0; height: 100%; padding: 0 6px 0 9px; border: 0; outline: none; background: transparent;
+  font: calc(14px * var(--kbn-type-scale, 1))/1 var(--font-serif, 'EB Garamond', Georgia, serif); color: var(--kbn-ink);
+}
+.kbn-viewtabs-find input::placeholder { color: var(--kbn-ink-faint); }
+.kbn-viewtabs-find input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.kbn-viewtabs-find-key { margin-right: 5px; font-family: var(--font-mono, 'IBM Plex Mono', monospace); font-size: calc(13px * 0.68 * var(--kbn-type-scale, 1)); }
+.kbn-viewtabs-find:focus-within .kbn-viewtabs-find-key { visibility: hidden; }
+/* The centre belongs to the view: the Desk's lens chips, at its right end, or
+   the reader's map of pages. It always spans Find to Settings, so the gear
+   stands still across views. */
+.kbn-viewtabs-centre { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; align-items: center; position: relative; }
+/* The reader's map hangs from the bar's top edge, its tiles level with the
+   tabs, and overhangs into the reader's top margin below. */
+.kbn-viewtabs-reader { display: none; position: absolute; left: 0; right: 0; top: calc(-1 * var(--ws-tile-air, 4px)); }
+.kbn-viewtabs-position { display: none; flex: none; margin-left: 12px; }
+.kbn-reader-open .kbn-viewtabs { z-index: calc(var(--ws-reader-layer, 9000) + 2); }
+.kbn-reader-open .kbn-viewtabs-reader, .kbn-reader-open .kbn-viewtabs-position { display: block; }
+.kbn-reader-open .kbn-viewtabs-lens { display: none !important; }
+/* Expand takes the whole window; the bar steps aside until it is restored. */
+.kbn-reader-expanded .kbn-viewtabs { visibility: hidden; }
 /* The settings gear closes the strip past the lens. Not a tab, and shaped so:
    no keycap, no name, a square of chrome rather than a page you can be on. It
    is iron gall like every other piece of machinery here, and it never takes a
@@ -2328,6 +2359,9 @@
     font-size: calc(11.5px * var(--kbn-type-scale, 1));
   }
   .kbn-viewtab-hotkey { display: none; }
+  /* The phone's bar is its bottom nav; the reader covers it and keeps its own bars. */
+  .kbn-viewtabs-find, .kbn-viewtabs-reader, .kbn-viewtabs-position { display: none !important; }
+  .kbn-reader-open .kbn-viewtabs { z-index: 20; }
   .kbn-modal .kbn-body-veiled > .kbn-view-host { top: 0; bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
   .kbn-viewtabs-lens {
     display: block;

@@ -122,20 +122,21 @@ describe('Desk keyboard selection', () => {
     press('k'); press('Enter')
     expect(window.location.hash).toContain('child-uid')
   })
-  it('carries the same navigable flight column into the reader, without hidden queue members', () => {
+  it('opens the reader on one grouped sidebar, and keeps the flight column for the cards that fly', () => {
     press('j'); press('h'); press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['head-uid', 'working'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['review', 'head-uid', 'working'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Awaiting review', 'Working'])
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     expect(document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued-list')!.hidden).toBe(false)
     expect(inside.workspace.isActive).toBe(false)
     expect(inside.workspaceColumn(head).map(entry => entry.card.uid ?? entry.card.id)).toEqual(['head-uid', 'child-uid', 'working'])
   })
-  it('includes expanded queue members in the reader column', () => {
+  it('keeps the grouped sidebar whether or not a queue is expanded on the Desk', () => {
     press('j'); press('h')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['head-uid', 'child-uid', 'working'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['review', 'head-uid', 'working'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')

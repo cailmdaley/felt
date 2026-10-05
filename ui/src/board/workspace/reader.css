@@ -1,5 +1,8 @@
+/* On the desktop the reader starts beneath the board's bar, which carries its
+   map of pages; the map overhangs the bar, and the pages start clear of it. */
 .ws-reader {
-  position: fixed; inset: 0; z-index: var(--ws-reader-layer);
+  --ws-stage-top: calc(var(--kbn-bar-overhang, 0px) + var(--ws-stage-gap));
+  position: fixed; inset: 0; top: var(--kbn-bar-bottom, 0px); z-index: var(--ws-reader-layer);
   display: flex; flex-direction: column; min-width: 0;
   background: transparent; color: var(--ws-ink);
   font: var(--ws-chrome-size)/1.45 var(--ws-serif);
@@ -36,17 +39,10 @@
 .ws-mono, .ws-labelbar, .ws-receipts, .ws-position {
   font-family: var(--ws-mono); letter-spacing: var(--ws-mono-tracking);
 }
-/* The running head: one row on the veil, no plates. The lead says where you
-   are (the return and the fiber's name), the centre which page (the map's
-   tiles), and the trail who is working and how far along the run you are.
-   Names and verbs in the serif. The lead yields its name before the centre
-   shrinks below its floor; the centre scrolls rather than push either end. */
-.ws-navbar {
-  display: grid; grid-template-columns: minmax(0, auto) minmax(var(--ws-head-index-floor), 1fr) auto;
-  align-items: center; column-gap: var(--ws-head-span); height: var(--ws-head-height);
-  padding: var(--ws-head-top) var(--ws-head-end) 0 var(--ws-head-start);
-  background: transparent; position: relative; z-index: 3; flex: none;
-}
+/* Expand takes the whole window: no bar above, no sidebar beside. */
+.ws-reader.ws-expand-mode { top: 0; --ws-stage-top: var(--ws-stage-gap); }
+/* The phone's top bar (back, name, worker dot); the desktop has no head of its own. */
+.ws-navbar { display: none; background: transparent; position: relative; z-index: 3; flex: none; }
 .ws-nav-lead { display: flex; align-items: baseline; min-width: 0; gap: var(--ws-head-gap); }
 .ws-return, .ws-channel-title, .ws-sidebar-toggle {
   height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border-radius: var(--ws-control-radius);
@@ -58,11 +54,13 @@
 }
 .ws-return:hover, .ws-channel-title:hover { color: var(--ws-ink) !important; background: var(--ws-hover); }
 .ws-channel-title::after { content: ' ▾'; font-size: var(--ws-small-size); color: var(--ws-ink-muted); }
-/* The constitutions glyph is the sidebar's handle: its left edge is the sidebar's. */
+/* The constitutions glyph tops the sidebar, under the bar at the left; with
+   the sidebar hidden it floats there alone. */
 .ws-sidebar-toggle {
-  flex: none; align-self: center; display: grid; place-items: center; width: var(--ws-control-height); padding: 0;
-  margin-left: calc((var(--ws-control-height) - 16px) / -2); color: var(--ws-ink-muted) !important;
+  position: absolute; z-index: 4; left: calc(var(--ws-inset) - (var(--ws-control-height) - 16px) / 2); top: var(--ws-stage-top);
+  display: grid; place-items: center; width: var(--ws-control-height); padding: 0; color: var(--ws-ink-muted) !important;
 }
+.ws-expand-mode .ws-sidebar-toggle { display: none; }
 .ws-sidebar-toggle svg { fill: none; stroke: currentColor; stroke-width: var(--ws-line-width); }
 .ws-sidebar-toggle .ws-toggle-column { fill: currentColor; stroke: none; opacity: 0; }
 .ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
@@ -158,7 +156,7 @@
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-channel-row[aria-current='true'] { background: var(--ws-paper); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent), 0 6px 12px color-mix(in srgb, var(--ws-ink) 12%, transparent); }
 /* The column travels as cards; the current slip reaches toward the reading stage. */
-.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-stage-top) var(--ws-inset) 0; position: relative; z-index: 2; }
+.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: calc(var(--ws-stage-top) + var(--ws-control-height) + var(--ws-small-gap)) var(--ws-inset) 0; position: relative; z-index: 2; }
 .ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
 /* The sidebar's edge resizes it: a hairline that darkens under the pointer, the keyboard or a drag. */
 .ws-sidebar-handle {
@@ -256,9 +254,9 @@
 .ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); z-index: 2; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-reader { --ws-stage-inset: 0px; --ws-stage-top: 0px; --ws-prose-padding: 24px 16px 48px; --ws-lede-size: 20px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
+  .ws-reader { top: 0; --ws-stage-inset: 0px; --ws-stage-top: 0px; --ws-prose-padding: 24px 16px 48px; --ws-lede-size: 20px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
-  .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; column-gap: 0; height: auto; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
+  .ws-navbar { display: grid; grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; column-gap: 0; height: auto; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
   /* Phone neighbours are flat sheets beside the page, seen only while a swipe or crossing carries them in. */

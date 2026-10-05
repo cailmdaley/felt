@@ -44,6 +44,12 @@ export interface ReaderOptions {
   pickerCards?(): KanbanCard[]
   sidebarBand?(card: KanbanCard): string | undefined
   files?(card: KanbanCard): string[]
+  /** The board bar's Find field: on the desktop it filters the open sidebar. */
+  find?: HTMLInputElement
+  /** Summon the board bar's Find (desktop), in place of the phone's switcher. */
+  onFind?(): boolean
+  /** Expand has taken, or given back, the whole window. */
+  onExpand?(expanded: boolean): void
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -94,10 +100,10 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly position = element('span', 'ws-position')
-  /** The page count, at the head's right end. */
-  private readonly headPosition = element('span', 'ws-position ws-head-position')
-  /** The head's centre: the map of tiles, the selected one over the page's centre. */
-  private readonly headIndex = element('div', 'ws-head-index')
+  /** The page count the board bar carries before its settings, on the desktop. */
+  readonly barPosition = element('span', 'ws-position ws-head-position')
+  /** The map the board bar carries at its centre on the desktop: the tiles, the selected one over the page's centre. */
+  readonly barIndex = element('div', 'ws-head-index')
   /** The phone's sense of place: one tick per page along the bottom bar's top edge. */
   private readonly ticks = element('div', 'ws-page-ticks')
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
@@ -166,17 +172,20 @@ export class Reader {
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
-    this.lead.append(this.sidebarToggle, this.returnButton, this.title)
-    this.headPosition.setAttribute('aria-hidden', 'true')
+    this.lead.append(this.returnButton, this.title)
+    this.barPosition.setAttribute('aria-hidden', 'true')
     this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
     this.headWorker.hidden = true
     const trail = element('div', 'ws-nav-trail')
-    trail.append(this.headWorker, this.headPosition)
-    this.headIndex.dataset.part = 'page-band'
-    this.headIndex.append(this.tabs.el)
+    trail.append(this.headWorker, this.barPosition)
+    this.barIndex.dataset.part = 'page-band'
+    this.barIndex.append(this.tabs.el, this.tabs.tip)
+    // The phone's top bar: back, the fiber's name, the worker's dot. The desktop
+    // draws no head of its own: the board's bar adopts the map and the count,
+    // which otherwise wait here, unseen.
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
-    this.navbar.append(this.lead, this.headIndex, trail, this.tabs.tip)
+    this.navbar.append(this.lead, this.barIndex, trail)
     this.ticks.setAttribute('aria-hidden', 'true')
     this.prev = button('ws-thumb-button', '', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '', () => this.step(1), 'Next document')
@@ -215,6 +224,7 @@ export class Reader {
     }
     this.sidebarPicker = new ConstitutionPicker({
       ...pickerOptions, cards: sidebarCards, revealCurrent: true,
+      find: opts.find, active: () => this.active && this.sidebarShown,
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
       onRow: (el, card) => {
         this.sidebarRows.set(el, card)
@@ -239,7 +249,7 @@ export class Reader {
     column.append(this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column)
-    this.el.append(this.veil, this.navbar, main, thumb, this.announcement, this.pageSheet.el)
+    this.el.append(this.veil, this.navbar, this.sidebarToggle, main, thumb, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -275,13 +285,15 @@ export class Reader {
     this.applySidebarWidth()
   }
 
+  /** Whether the sidebar's list is on screen, where the board bar's Find filters it. */
+  get sidebarVisible(): boolean { return this.active && this.sidebarShown }
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
-    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu(); this.pageSheet.hide() }
+    if (switching) { this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
     const arrivals = this.receipts.observe(channel, ready)
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
@@ -306,7 +318,9 @@ export class Reader {
     this.paint(!switching && !reordered && animate)
     this.renderSidebar()
     if (arriving) this.setSidebarVisible(this.sidebarShown)
-    if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
+    // A keyboard switch gives focus a home on the new channel: its selected tile
+    // on the desktop, the top bar's back control on the phone.
+    if (switching && this.keyboardInput) (this.phone.matches ? this.returnButton : this.tabs.buttons.find(tab => tab.tabIndex === 0) ?? this.returnButton).focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
 
@@ -330,6 +344,7 @@ export class Reader {
     this.cancelSwipe()
     this.cancelResize?.()
     this.setSidebarVisible(false, animate)
+    if (this.expanded) this.setExpanded(false)
     this.active = false
     this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
@@ -456,10 +471,10 @@ export class Reader {
     this.tabs.fresh(fresh)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
-    this.position.textContent = this.headPosition.textContent = `${index + 1} / ${ch.documents.length}`
+    this.position.textContent = this.barPosition.textContent = `${index + 1} / ${ch.documents.length}`
     // Held at the widest count, so stepping from 9 to 10 never moves the index.
     const digits = 2 * String(ch.documents.length).length + 3
-    this.headPosition.style.minWidth = `calc(${digits}ch + ${digits} * var(--ws-mono-tracking))`
+    this.barPosition.style.minWidth = `calc(${digits}ch + ${digits} * var(--ws-mono-tracking))`
     this.paintTicks(index, ch.documents.length)
     const doc = ch.documents[index]
     if (doc) {
@@ -576,7 +591,9 @@ export class Reader {
     const target = Math.round(docked ? gap - (centre - selectedWidth / 2) : W / 2 - centre)
     // The index holds the selected tile over the page's centre, or as near it as its slot allows.
     const tile = this.tabs.selectedWidth / 2 + this.measure('index-fade', 40)
-    const focus = this.stage.offsetLeft + target + centre - this.tabs.el.offsetLeft
+    // The map rides the board bar, outside the reader, so the page's centre is measured on screen.
+    const column = this.stage.parentElement?.getBoundingClientRect().left ?? 0
+    const focus = column + target + centre - this.tabs.el.getBoundingClientRect().left
     this.tabs.setFocus(Math.max(Math.min(tile, this.tabs.el.clientWidth / 2), Math.min(Math.max(this.tabs.el.clientWidth / 2, this.tabs.el.clientWidth - tile), focus)))
     if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
@@ -606,10 +623,17 @@ export class Reader {
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
     this.tabs.mark(index, false)
   }
+  /** Expand takes the whole window: the board bar and the sidebar step aside until it is restored. */
   private toggleExpand(): void {
     this.cancelResize?.()
-    this.expanded = !this.expanded
+    this.setExpanded(!this.expanded)
     this.paint(true)
+  }
+  private setExpanded(expanded: boolean): void {
+    this.expanded = expanded
+    this.el.classList.toggle('ws-expand-mode', expanded)
+    this.opts.onExpand?.(expanded)
+    this.renderSidebar()
   }
   private resizeStart(e: PointerEvent, frame: DocumentFrame, side: 'left' | 'right'): void {
     if (this.phone.matches || this.expanded || frame.doc.key !== this.selected || e.button !== 0) return
@@ -721,6 +745,7 @@ export class Reader {
     if (this.menu && !this.menu.contains(e.target as Node) && !this.menuAnchor?.contains(e.target as Node)) this.closeMenu()
   }
   private openSwitcher(): void {
+    if (!this.phone.matches && this.opts.onFind?.()) return
     if (this.sidebarShown) { this.sidebarPicker.focus(); return }
     if (this.picker.isOpen) { this.picker.close(); return }
     this.closeMenu()
@@ -754,7 +779,7 @@ export class Reader {
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
   private get sidebarShown(): boolean {
-    return !this.phone.matches && (this.sidebarChoice ?? this.wide.matches)
+    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? this.wide.matches)
   }
   /**
    * Opening or closing the sidebar is one coordinated motion: the column
@@ -956,7 +981,8 @@ export class Reader {
     }
     else if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'find') {
-      if (this.sidebarShown) this.sidebarPicker.focus()
+      if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
+      else if (this.sidebarShown) this.sidebarPicker.focus()
       else if (this.picker.isOpen) this.picker.focus()
       else this.openSwitcher()
     }
