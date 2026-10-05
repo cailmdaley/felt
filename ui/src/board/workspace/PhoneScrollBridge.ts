@@ -1,0 +1,2 @@
+/** Report scroll telemetry crosses opaque origins; the host validates the selected frame's source. */
+export const workspaceScrollBridge = `<script data-shuttle-workspace-scroll>(function(){var queued=false,y=0;document.addEventListener('scroll',function(e){var pane=e.target;y=pane===document?window.scrollY:pane.scrollTop;if(!Number.isFinite(y)||queued)return;queued=true;requestAnimationFrame(function(){queued=false;parent.postMessage({type:'shuttle-workspace-scroll',y:Math.max(0,y)},'*')})},true)})();</script>`

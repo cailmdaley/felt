@@ -15,6 +15,7 @@ import { buildCardPaper } from '../KanbanSurfaces.js'
 import { overviewHostMarks } from './Overview.js'
 import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { workspaceMeasure } from './measures.js'
+import { installBarSwipe, PhoneTopbar } from './PhoneGestures.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -77,6 +78,10 @@ export class Reader {
   private readonly returnButton: HTMLButtonElement
   private readonly conversation = element('div', 'ws-worker-pill')
   private readonly position = element('span', 'ws-position')
+  private readonly pageTitle = element('span', 'ws-thumb-title')
+  private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
+  private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
+  private readonly stopSwipe: () => void
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
   private readonly next: HTMLButtonElement
@@ -139,7 +144,10 @@ export class Reader {
       if (doc) this.openMenu(doc, thumbMenu)
     }, 'Document menu')
     const thumb = element('div', 'ws-thumbbar')
-    thumb.append(this.prev, this.position, this.next, thumbMenu)
+    const pageChoice = button('ws-page-choice', '', () => {}, 'Choose a page')
+    pageChoice.append(this.pageTitle, this.arrivalSummary, this.position)
+    thumb.append(this.prev, pageChoice, this.next, thumbMenu)
+    this.stopSwipe = installBarSwipe(thumb, () => this.active && this.phone.matches, delta => this.step(delta))
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -173,6 +181,7 @@ export class Reader {
       onRefreshProse: opts.onRefreshProse,
       onSelect: key => opts.onSelect(key),
       onFrame: frame => this.prepareFrame(frame),
+      onScroll: (key, y) => this.topbar.scroll(key, y),
     })
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
@@ -303,6 +312,13 @@ export class Reader {
     this.tabs.fresh(this.seen.observe(ch, this.selected ?? '', this.channelReady))
     this.tabs.mark(index, animate)
     this.position.textContent = `${index + 1} / ${ch.documents.length}`
+    const doc = ch.documents[index]
+    if (doc) {
+      const metadata = documentLabelMetadata(doc, ch.labels[index], ch.owner)
+      this.pageTitle.textContent = doc.kind === 'fiber' ? ch.labels[index] : metadata.title
+      this.arrivalSummary.textContent = metadata.summary
+      this.topbar.select(doc.key)
+    }
     this.prev.disabled = index <= 0
     this.next.disabled = index >= ch.documents.length - 1
     const announcement = `${ch.labels[index]}, ${index + 1} of ${ch.documents.length}`
@@ -671,6 +687,7 @@ export class Reader {
   dispose(): void {
     this.cancelResize?.()
     this.closeMenu()
+    this.stopSwipe()
     this.observer?.disconnect()
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)

@@ -9,6 +9,7 @@ import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
+import { workspaceScrollBridge } from './PhoneScrollBridge.js'
 
 export interface DocumentFrame {
   el: HTMLElement
@@ -51,7 +52,7 @@ export function withWorkspaceKeyBridge(html: string): string {
   for (let base; (base = bases.exec(html));) {
     if (base.index >= insertion) insertion = base.index + base[0].length
   }
-  return html.slice(0, insertion) + bridge + html.slice(insertion)
+  return html.slice(0, insertion) + bridge + workspaceScrollBridge + html.slice(insertion)
 }
 
 /** Stable frames, a fleet-wide live-document budget, and selected-only polling. */
@@ -68,6 +69,8 @@ export class DocumentHost {
     buildProse: (doc: WorkspaceDocument) => HTMLElement
     onSelect: (key: DocKey) => void
     onFrame?: (frame: DocumentFrame) => void
+    /** Selected document scroll, including report-owned nested panes. */
+    onScroll?: (key: DocKey, y: number) => void
     /** The controller owns fetching fiber bodies; it calls updateProse on success. */
     onRefreshProse?: (doc: WorkspaceDocument) => void | Promise<void>
   }
@@ -467,7 +470,10 @@ export class DocumentHost {
       scroller.scrollTop = state.scroll.y
       scroller.scrollLeft = state.scroll.x
     })
-    const save = () => this.saveScroll(state)
+    const save = () => {
+      this.saveScroll(state)
+      if (state.active) this.options.onScroll?.(state.frame.doc.key, scroller.scrollTop)
+    }
     state.readScroll = () => ({ x: scroller.scrollLeft, y: scroller.scrollTop })
     scroller.addEventListener('scroll', save, { passive: true })
     state.stopScroll = () => scroller.removeEventListener('scroll', save)
@@ -527,6 +533,10 @@ export class DocumentHost {
     const frames = state?.frame.viewer?.querySelectorAll('iframe')
     if (!event.source || !frames || ![...frames].some((frame) => frame.contentWindow === event.source)) return
     const data = event.data as Record<string, unknown> | null
+    if (data?.type === 'shuttle-workspace-scroll' && state?.frame.doc.kind === 'html') {
+      if (typeof data.y === 'number' && Number.isFinite(data.y) && data.y >= 0) this.options.onScroll?.(state.frame.doc.key, data.y)
+      return
+    }
     if (!data || data.type !== 'shuttle-workspace-key') return
     if (typeof data.key !== 'string' || state?.frame.doc.kind !== 'html') return
     const forwarded = new KeyboardEvent('keydown', {
