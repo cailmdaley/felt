@@ -18,7 +18,6 @@ import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pas
 import { fiberPageColumn } from './fiberPageState.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
-import { workerPlate } from './workerPlate.js'
 import './tokens.css'
 import './dock.css'
 
@@ -407,7 +406,6 @@ export class Dock {
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
-  private workerPaint: (() => void) | null = null
   private guidance: HTMLElement | null = null
   private dismissMeeting: (() => boolean) | null = null
   private dismissParent: (() => boolean) | null = null
@@ -541,7 +539,6 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.workerPillCard = this.transcriptCard = null
-    this.workerPaint = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -703,7 +700,6 @@ export class Dock {
     this.historySync?.()
     this.composerPaint?.()
     this.actPaint?.()
-    this.workerPaint?.()
     for (const [button, blocked] of this.blockedDispatches) {
       if (blocked.worker === workerIdentity(card)) continue
       button.disabled = false
@@ -742,22 +738,6 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    // The fiber's worker, drawn as the sidebar card draws it: the pill that
-    // opens the real conversation, with its state and elapsed time.
-    const worker = document.createElement('div')
-    worker.className = 'ws-worker-pill'
-    worker.dataset.part = 'act'; worker.dataset.act = 'worker'
-    this.workerPaint = () => {
-      const focused = worker.contains(document.activeElement)
-      const pill = this.workerPillFor(card)
-      worker.replaceChildren(...(pill ? [workerPlate(card, pill)] : []))
-      worker.hidden = !pill
-      if (focused) worker.querySelector<HTMLElement>('.kbn-card-worker')?.focus({ preventScroll: true })
-    }
-    this.workerPaint()
-    const clock = window.setInterval(() => this.workerPaint?.(), 30000)
-    this.composerDisposers.push(() => window.clearInterval(clock))
-    body.append(worker)
     if (shuttleManaged) body.append(this.buildComposer(card))
     body.append(this.buildTranscriptPane(card))
 

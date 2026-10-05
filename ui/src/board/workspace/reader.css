@@ -80,18 +80,13 @@
 .ws-head-worker .ws-worker-state { font: inherit; }
 .ws-head-worker .ws-worker-elapsed { font: var(--ws-small-size)/1 var(--ws-mono); letter-spacing: 0; }
 .ws-head-position { color: var(--ws-ink-muted); font-size: var(--ws-small-size); letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ws-worker-pill { flex: none; white-space: nowrap; }
-.ws-worker-pill .ws-worker-control {
-  display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; height: 36px;
-  color: var(--ws-ink); border: 0; background: transparent; animation: none;
-  text-transform: none; letter-spacing: 0; white-space: nowrap;
-}
 .ws-worker-state { font: var(--ws-label-size)/1.2 var(--ws-serif); }
 .ws-worker-elapsed { font: var(--ws-small-size)/1.4 var(--ws-mono); }
+/* A dot is too small for ink-mixed pigments: working is the machine's own cobalt, waiting the undiluted gold. */
 .ws-worker-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ws-machine); flex: none; }
 .ws-worker-control[data-worker-state='waiting'] .ws-worker-dot,
 .ws-worker-control[data-worker-state='attention'] .ws-worker-dot,
-.ws-worker-control[data-worker-state='blocked'] .ws-worker-dot { background: var(--ws-owed); }
+.ws-worker-control[data-worker-state='blocked'] .ws-worker-dot { background: var(--ws-fresh); }
 .ws-worker-control[data-worker-state='no worker'] .ws-worker-dot { background: var(--ws-ink-muted); }
 .ws-turn-active .ws-worker-dot { animation: ws-worker-breathe 2.4s ease-in-out infinite; }
 @keyframes ws-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
@@ -269,7 +264,7 @@
 .ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); z-index: 2; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-reader { --ws-stage-inset: 0px; --ws-prose-padding: 24px 16px 48px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
+  .ws-reader { --ws-stage-inset: 0px; --ws-prose-padding: 24px 16px 48px; --ws-lede-size: 20px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; column-gap: 0; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
@@ -312,8 +307,9 @@
   /* While the keyboard is up the field owns the screen; the page bar would sit under Safari's input accessory. */
   .ws-reader:has(.ws-content :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"]), [contenteditable="true"]):focus) .ws-thumbbar { display: none; }
 }
+/* Under a finger the head's worker control is a full target, as the pill was. */
 @media (pointer: coarse) {
-  .ws-worker-pill .kbn-card-worker { min-height: var(--ws-phone-target); display: inline-flex; align-items: center; }
+  .ws-navbar .ws-head-worker .kbn-card-worker { min-height: var(--ws-phone-target); }
 }
 @media (prefers-reduced-motion: reduce) {
   .ws-track, .ws-page { transition: none !important; }

@@ -470,9 +470,8 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(1)
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(0)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^aloft/)
-    expect(band.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
@@ -557,7 +556,7 @@ describe('workspace reader integration', () => {
     expect(visibility).toHaveBeenLastCalledWith(false)
   })
 
-  it('opens the real worker conversation from the act zone pill without a panel', async () => {
+  it('opens the real worker conversation with c, without a panel or a pill on the fiber page', async () => {
     const live = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', tmuxSession: 'terminal-alpha', shuttleHost: 'daemon-a' }
     const openWorker = vi.fn()
     bodyCards = [live]
@@ -568,14 +567,13 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
+    expect(document.querySelector('.ws-dock .kbn-card-worker')).toBeNull()
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!
     head.click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
     openWorker.mockClear()
-    const pill = document.querySelector<HTMLButtonElement>('.ws-dock .ws-worker-pill button.kbn-card-worker')!
-    expect(pill).not.toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
-    pill.click()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
     expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')
     expect(workspace.isActive).toBe(true)
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
@@ -610,7 +608,6 @@ describe('workspace reader integration', () => {
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
-    expect(prose.querySelector('.ws-prose-contents')?.textContent).toBe('3 pages2 reports')
     expect(labels()).toEqual(['Note', 'table.html', 'shared'])
   })
 

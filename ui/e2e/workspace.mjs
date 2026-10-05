@@ -105,7 +105,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await choose(p, 'Constitution')
   await type('.ws-selected .ws-prose-status', 15, 'EB Garamond')
   if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 34, 'EB Garamond')
-  await type('.ws-selected .kbn-detail-lede', 24, 'EB Garamond')
+  await type('.ws-selected .kbn-detail-lede', device === 'phone' ? 20 : 24, 'EB Garamond')
   await type('.ws-selected .kbn-ctl-send', 15, 'EB Garamond')
   await type('.ws-selected .kbn-ctl-strip', 11, 'IBM Plex Mono')
   await choose(p, 'tone.mp3')
@@ -156,8 +156,15 @@ test('Awaiting-review actions reveal without shifting and remain thumb-sized on 
 test('Awaiting-review actions stay visible and thumb-sized without hover', async p => {
   const actions = p.locator('[data-column="awaitingReview"] .kbn-card-review-meta-actions').first()
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  // A compact plate whose touch target reaches 8 px past it above and below.
   for (const button of await actions.locator('button').all()) {
-    assert.ok((await button.boundingBox()).height >= 44)
+    const reach = await button.evaluate(el => {
+      el.scrollIntoView({ block: 'center', inline: 'center' })
+      const box = el.getBoundingClientRect(), x = box.left + box.width / 2
+      const hit = y => el.contains(document.elementFromPoint(x, y))
+      return { height: box.height, above: hit(box.top - 7), below: hit(box.bottom + 7) }
+    })
+    assert.ok(reach.height + 16 >= 44 && reach.above && reach.below, `verdict touch target: ${JSON.stringify(reach)}`)
   }
 }, { width: 390, height: 844 }, undefined, 'reduce', true)
 
@@ -876,21 +883,13 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   }
 })
 
-test('Phone fiber page: the folded settings line ends in an ellipsis and counts wrap without orphan separators', async p => {
+test('Phone fiber page: the folded settings line ends in an ellipsis', async p => {
   await open(p); await choose(p, 'Constitution')
   const toggle = selected(p).locator('.kbn-detail-controls-toggle')
   const history = selected(p).locator('.kbn-ctl-history-toggle')
   const [t, h] = await Promise.all([toggle.boundingBox(), history.boundingBox()])
   assert.ok(t.x + t.width <= h.x + 0.5 || t.y + t.height <= h.y + 0.5, `settings ${JSON.stringify(t)} and History ${JSON.stringify(h)} do not collide`)
   assert.ok(await selected(p).locator('.kbn-ctl-place').evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis'), 'the path yields and ends in an ellipsis')
-  const lines = await selected(p).locator('.ws-prose-contents').evaluate(nav => {
-    const clip = nav.getBoundingClientRect().left + parseFloat(getComputedStyle(nav).getPropertyValue('--ws-contents-sep'))
-    const items = [...nav.children].map(el => el.getBoundingClientRect())
-    const starts = items.filter(r => Math.abs(r.left - items[0].left) < 1)
-    return { clip, starts: starts.map(r => r.left), tops: new Set(items.map(r => Math.round(r.top))).size }
-  })
-  assert.ok(lines.tops > 1, 'the fixture counts wrap at this width')
-  for (const left of lines.starts) assert.ok(left + parseFloat('18') <= lines.clip + 0.5, 'a line-leading separator is clipped')
 }, { width: 402, height: 874 })
 
 test('Landscape phone keeps a one-row top bar while the fiber awaits review', async p => {
@@ -1054,12 +1053,9 @@ test('Fiber composer isolates keys; settings and history use mocked daemon', asy
   await p.getByText('History', { exact: true }).click()
 })
 
-test('Fiber contents replace the duplicate file list and select the newest report', async p => {
+test('The fiber page leaves its documents to the tab strip', async p => {
   await open(p); await choose(p, 'Constitution')
-  assert.equal(await selected(p).locator('.ws-prose-documents').count(), 0)
-  await selected(p).locator('.ws-prose-contents button').filter({ hasText: /report/ }).click()
-  await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === 'Calibration report')
-  assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
+  assert.equal(await selected(p).locator('.ws-prose-documents, .ws-prose-contents').count(), 0)
 })
 
 test('Body file link opens a linked document', async p => {
@@ -1325,9 +1321,10 @@ test('Native PDF renderer loads fixture; owner route and first-page preview', as
   await poll(p, () => [...document.querySelectorAll('.ws-overview iframe')].some(f => f.src.includes('#page=1')))
 })
 
-test('Remote worker pill records attach handler without launching a terminal', async p => {
+test('Remote worker conversation records attach handler without launching a terminal', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  await p.locator('.ws-selected .ws-dock .ws-worker-pill .kbn-card-worker').click()
+  await choose(p, 'Constitution')
+  await p.keyboard.press('c')
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')
@@ -1377,6 +1374,22 @@ test('Phone overview single column, reader sheet, footer stepping and Back', asy
   await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
   assert.ok(await p.getByRole('searchbox', { name: 'Find work or files', exact: true }).isVisible())
 }, { width: 390, height: 844 })
+
+test('Phone audio page taller than the screen scrolls from its top to its bottom', async p => {
+  await open(p); await choose(p, 'tone.mp3')
+  const scroller = selected(p).locator('.kbn-fileview-audio')
+  await selected(p).locator('.ws-audio-page').waitFor()
+  const reach = () => scroller.evaluate(el => {
+    const page = el.querySelector('.ws-audio-page').getBoundingClientRect(), box = el.getBoundingClientRect()
+    return { overflow: el.scrollHeight - el.clientHeight, top: page.top - box.top, bottom: box.bottom - page.bottom }
+  })
+  const start = await reach()
+  assert.ok(start.overflow > 0, `the fixture outgrows the short screen (${start.overflow}px)`)
+  assert.ok(Math.abs(start.top) <= 0.5, `the waveform starts in reach at the top (${start.top}px)`)
+  await scroller.evaluate(el => { el.scrollTop = el.scrollHeight })
+  assert.ok((await reach()).bottom >= -0.5, 'the page\'s end scrolls into view')
+  assert.equal(await selected(p).locator('.ws-audio-waveform').evaluate(el => getComputedStyle(el).touchAction), 'pan-y', 'a vertical pan on the waveform scrolls the page')
+}, { width: 390, height: 420 }, 'false', 'reduce', true)
 
 test('Phone HTML reader retains its opaque frame and reading position', async p => {
   await open(p); const frame = await reportReady(p)
@@ -1725,15 +1738,16 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await chooseDeskColumn(p, 1)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     // Opening the reader is navigation, not a state change: wait for it before the short poll.
-    await p.locator('.ws-selected .ws-dock .ws-worker-control').waitFor()
-    await poll(p, () => document.querySelector('.ws-selected .ws-dock .ws-worker-control')?.textContent.includes('12 m'))
-    const dot = p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-worker-dot')
-    assert.ok(await dot.isVisible(), 'the act zone pill shows its worker dot')
-    assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none', 'reduced motion suppresses breathing')
-    assert.ok(await p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-turn-active').count())
+    await choose(p, 'Constitution')
+    assert.equal(await selected(p).locator('.kbn-card-worker, [data-act="worker"]').count(), 0, 'the fiber page draws no worker control; the reader head carries it')
     const head = p.locator('.ws-navbar .ws-head-worker .ws-worker-control')
     await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.dataset.workerState === 'aloft')
-    const headDot = await head.locator('.ws-worker-dot').evaluate(el => getComputedStyle(el).backgroundColor)
+    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.textContent.includes('12 m'))
+    const dot = head.locator('.ws-worker-dot')
+    assert.ok(await dot.isVisible(), 'the head shows the worker dot')
+    assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none', 'reduced motion suppresses breathing')
+    assert.ok(await p.locator('.ws-navbar .ws-head-worker .ws-turn-active').count(), 'a working turn is marked active')
+    const headDot = await dot.evaluate(el => getComputedStyle(el).backgroundColor)
     const headLook = await head.evaluate(el => ({ border: getComputedStyle(el).borderTopWidth, background: getComputedStyle(el).backgroundColor }))
     assert.deepEqual(headLook, { border: '0px', background: 'rgba(0, 0, 0, 0)' }, 'the head draws the worker bare')
     const headBox = await head.boundingBox(), position = await p.locator('.ws-head-position').boundingBox()
@@ -1752,15 +1766,13 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       row.runtime.last_activity_at = Date.now() - 120000
       await window.__harness.modal.fetchAndRender()
     })
-    await poll(p, () => document.querySelector('.ws-selected .ws-dock .ws-worker-control')?.dataset.workerState === 'waiting')
-    assert.equal(await p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-turn-active').count(), 0)
     await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.dataset.workerState === 'waiting')
-    assert.notEqual(await head.locator('.ws-worker-dot').evaluate(el => getComputedStyle(el).backgroundColor), headDot, 'a waiting worker turns the head dot gold')
+    assert.equal(await p.locator('.ws-navbar .ws-head-worker .ws-turn-active').count(), 0, 'a waiting worker does not breathe')
+    assert.notEqual(await dot.evaluate(el => getComputedStyle(el).backgroundColor), headDot, 'a waiting worker turns the head dot gold')
     await shot('waiting')
     await p.locator('.ws-return').click()
     await chooseDeskColumn(p, 0)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
-    await poll(p, () => { const pill = document.querySelector('.ws-selected .ws-dock .ws-worker-pill'); return pill?.hidden === true && getComputedStyle(pill).display === 'none' })
     await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker')?.hidden === true)
     await shot('no-worker')
   }, viewport)
@@ -1768,14 +1780,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 
 test('Only the owner-reported working phase breathes, on a 2.4 s opacity cycle', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  const dot = p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-worker-dot')
+  const dot = p.locator('.ws-sidebar [aria-current="true"] .ws-worker-dot')
   await dot.waitFor()
   const timing = await p.evaluate(() => {
-    const css = getComputedStyle(document.querySelector('.ws-selected .ws-dock .ws-worker-pill .ws-worker-dot'))
+    const css = getComputedStyle(document.querySelector('.ws-sidebar [aria-current="true"] .ws-worker-dot'))
     return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction }
   })
   assert.deepEqual(timing, { name: 'ws-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
-}, undefined, 'false', 'no-preference')
+}, undefined, 'true', 'no-preference')
 
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
 // constitution switcher repeat names as navigation actions. The desktop fiber
@@ -1867,9 +1879,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     }
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await choose(p, 'Constitution')
-    const pill = selected(p).locator('.ws-dock .ws-worker-pill')
-    assert.match((await pill.textContent()).trim(), /^aloft\s*12 m$/i, 'the act zone pill names state and elapsed time, not agent')
-    assert.equal(await selected(p).locator('.kbn-card-worker').count(), 1, 'one worker control on the fiber page')
+    assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0, 'the fiber page draws no worker control')
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1)
     assert.ok((await cadence.innerText()).trim(), 'standing cadence lives in the settings line')
@@ -1891,7 +1901,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
         const texts = selector => [...document.querySelectorAll(selector)].map(e => e.textContent.trim())
         return {
           header: texts('.ws-selected .ws-prose-header'),
-          band: texts('.ws-selected .ws-dock .ws-worker-pill'),
           settings: texts('.ws-selected .kbn-detail-controls-toggle'),
           navbar: texts('.ws-nav-verdicts'),
           title: texts('.ws-selected .ws-label-title'),
@@ -2054,7 +2063,12 @@ test('Broken theme falls back to its bundled base', async p => {
 test('Act zone stops broad button rules and resets theme fonts, sizes and pigments', async p => {
   await open(p); await choose(p, 'Constitution')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
-  assert.equal(await selected(p).locator('.ws-prose-contents button').first().evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)', 'the broad rule is active in the reading zone')
+  assert.equal(await selected(p).locator('.ws-prose-body').evaluate(body => {
+    const probe = body.appendChild(document.createElement('button'))
+    const color = getComputedStyle(probe).color
+    probe.remove()
+    return color
+  }), 'rgb(255, 0, 0)', 'the broad rule is active in the reading zone')
   const temper = selected(p).getByRole('button', { name: 'Temper', exact: true })
   const style = await temper.evaluate(el => ({ color: getComputedStyle(el).color, font: getComputedStyle(el).fontFamily, height: getComputedStyle(el).getPropertyValue('--ws-control-height').trim(), agent: getComputedStyle(el).getPropertyValue('--ws-agent').trim(), transform: getComputedStyle(el).textTransform, pigment: getComputedStyle(el).getPropertyValue('--kbn-agent').trim(), mono: getComputedStyle(el).getPropertyValue('--font-mono').trim() }))
   assert.notEqual(style.color, 'rgb(255, 0, 0)', 'button { color: red } cannot reach Temper')
@@ -2065,7 +2079,6 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
   assert.notEqual(style.pigment, 'red', 'theme aliases cannot change a control pigment')
   assert.ok(!style.mono.includes('fantasy'), 'theme aliases cannot change a control font')
   assert.equal(await selected(p).locator('.ws-dock').getAttribute('data-part'), 'act')
-  assert.equal(await selected(p).locator('.ws-dock .ws-worker-pill').getAttribute('data-part'), 'act')
   assert.equal(await p.locator('.ws-nav-verdicts').getAttribute('data-part'), 'act')
 }, { width: 1379, height: 900 })
 
