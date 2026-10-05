@@ -73,12 +73,7 @@
   background-color: var(--ws-paper);
 }
 
-[data-part="fiber-header"] {
-  background-color: var(--ws-paper);
-  background-image:
-    repeating-linear-gradient(32deg, transparent 0 43px, var(--ws-rhumb) 43px 44px),
-    repeating-linear-gradient(148deg, transparent 0 43px, var(--ws-rhumb) 43px 44px);
-}
+[data-part="fiber-header"] { background-color: var(--ws-paper); }
 
 [data-part="fiber-title"] { color: var(--ws-ink); }
 [data-part="fiber-title"]::after {
