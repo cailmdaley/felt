@@ -16,6 +16,10 @@ import { openStash, openCapture, openSettings } from './forms/mountForms.js'
 const shuttleBase =
   (import.meta.env.VITE_SHUTTLE_BASE as string | undefined) ?? ''
 
+// index.html preloads the webfonts' stylesheet so nothing waits on it; apply it.
+const webfonts = document.getElementById('webfonts')
+if (webfonts instanceof HTMLLinkElement) webfonts.rel = 'stylesheet'
+
 const host = document.getElementById('app')
 if (!host) throw new Error('#app host element is missing')
 
