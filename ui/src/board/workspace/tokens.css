@@ -42,7 +42,13 @@
   --ws-mono-tracking: 0.08em;
 
   --ws-crossing: 280ms;
-  --ws-veil-time: 180ms;
+  --ws-veil-time: var(--ws-crossing);
+  --ws-desk-scale: 0.94;
+  --ws-desk-opacity: 0.72;
+  --ws-desk-pointer-drift: 8px;
+  --ws-page-pointer-drift: 3px;
+  --ws-desk-crossing-drift: 6px;
+  --ws-desk-travel-fraction: 0.012;
   --ws-settle: translateY(6px) scale(0.985);
   --ws-ease: ease;
   --ws-receded-scale: 0.94;

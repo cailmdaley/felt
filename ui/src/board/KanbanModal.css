@@ -327,13 +327,18 @@
   color: #BC4538;
 }
 
-/* The Desk wrapper is a toggle handle, not a box: `display: contents` keeps
-   the three surfaces as direct flex items of `.kbn-body`, so their gaps,
-   `flex: 1` and percentage heights resolve as if the wrapper were not
-   there. Switching to a temporal view sets `display: none` here
-   inline, which hides the subtree without rebuilding it. */
+/* One live Desk layer can recede beneath the reader or contact sheet. */
 .kbn-desk {
-  display: contents;
+  display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0;
+  transform-origin: center 40%;
+  transition: transform var(--ws-crossing, 280ms) var(--ws-ease, ease), opacity var(--ws-crossing, 280ms) var(--ws-ease, ease);
+}
+.kbn-workspace-raised .kbn-desk {
+  transform: translate3d(var(--ws-desk-x, 0px), var(--ws-desk-y, 0px), 0) scale(var(--ws-desk-scale));
+  opacity: var(--ws-desk-opacity);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-desk { transition: none; }
 }
 
 /* ── Section layout: Now → Pinned → Resting ──────────────────────────────── */

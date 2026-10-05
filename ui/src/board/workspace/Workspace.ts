@@ -9,6 +9,7 @@ import { renderMarkdown, showToast } from '../utils.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
+import { WorkspaceDepth } from './Depth.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { Overview } from './Overview.js'
 import { WorkspaceHistory, type WorkspaceRoute } from './route.js'
@@ -44,6 +45,7 @@ export class Workspace {
   readonly dock: Dock
   private readonly picker: ConstitutionPicker
   private readonly root: HTMLElement
+  private readonly depth: WorkspaceDepth
   private readonly opts: WorkspaceOptions
   private readonly history: WorkspaceHistory
   private readonly channels = new Map<string, ChannelState>()
@@ -62,6 +64,7 @@ export class Workspace {
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.root = root
+    this.depth = new WorkspaceDepth(root)
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
@@ -85,6 +88,7 @@ export class Workspace {
       switcherCards: () => this.overview.orderedCards(),
       files: card => this.overview.fileNames(card),
       onSelect: key => this.select(key),
+      onCrossing: travel => this.depth.cross(travel),
       onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
       workerPill: card => this.dock.workerPillFor(card),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
@@ -124,10 +128,14 @@ export class Workspace {
 
   mountOverview(host: HTMLElement): void {
     if (this.overview.el.parentElement !== host) host.append(this.overview.el)
+    this.depth.setActive(true)
     this.overview.setVisible(!this.isActive)
     this.overview.refresh()
   }
-  hideOverview(): void { this.overview.setVisible(false) }
+  hideOverview(): void {
+    this.overview.setVisible(false)
+    this.depth.setActive(this.isActive)
+  }
 
   /** View keys park the reader; Board restores its last unreturned channel. */
   suspend(view: 'desk' | 'chronicle'): void {
@@ -219,6 +227,7 @@ export class Workspace {
       if (view === 'board') this.lastBoardRoute = null
       if (view) this.opts.onView?.(view)
       this.overview.setVisible(view === 'board')
+      this.depth.setActive(view === 'board')
       this.opts.onVisibility(false)
       this.stopTimer()
       return
@@ -245,6 +254,7 @@ export class Workspace {
     const selectionVersion = state.selectionVersion
     if (route.doc) state.selected = route.doc
     this.opts.onVisibility(true)
+    this.depth.setActive(true)
     this.show(state)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
@@ -438,5 +448,6 @@ export class Workspace {
     this.picker.dispose()
     this.reader.dispose()
     this.overview.dispose()
+    this.depth.dispose()
   }
 }

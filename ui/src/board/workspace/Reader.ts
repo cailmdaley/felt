@@ -15,6 +15,7 @@ export interface ReaderOptions {
   buildProse(doc: WorkspaceDocument): HTMLElement
   onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
   onSelect(key: DocKey): void
+  onCrossing?(travel: number): void
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
   onEscapeLayer?(): boolean
@@ -52,6 +53,8 @@ export class Reader {
   private arrival = 0
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
+  private readonly parallax = element('div', 'ws-parallax')
+  private trackX = 0
   readonly host: DocumentHost
   private readonly opts: ReaderOptions
   private readonly tabs: TabStrip
@@ -117,7 +120,8 @@ export class Reader {
     thumb.append(this.prev, this.position, this.next, thumbMenu)
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
-    this.stage.append(this.track)
+    this.parallax.append(this.track)
+    this.stage.append(this.parallax)
     this.sidebar.setAttribute('aria-label', 'Constitutions')
     const pickerOptions = {
       cards: () => {
@@ -223,7 +227,7 @@ export class Reader {
     this.el.classList.remove('ws-arriving', 'ws-veil-held')
     if (!animate || this.motion.matches || this.el.classList.contains('ws-dormant')) { settle(); return }
     this.el.classList.add('ws-departing')
-    this.departure = setTimeout(settle, this.measure('veil-time', 180))
+    this.departure = setTimeout(settle, this.measure('crossing', 280))
   }
   /** The veil fades in while the stage settles up; over the Board's veil only the stage moves. */
   private arrive(veilHeld: boolean): void {
@@ -373,7 +377,10 @@ export class Reader {
       if (sel) centre = x + width / 2
       x += width + gap
     })
-    this.track.style.transform = `translateX(${Math.round(W / 2 - centre)}px)`
+    const target = Math.round(W / 2 - centre)
+    if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
+    this.trackX = target
+    this.track.style.transform = `translateX(${target}px)`
   }
   private readonly relayout = (): void => {
     this.renderSidebar()

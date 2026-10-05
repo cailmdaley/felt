@@ -33,7 +33,9 @@
   font: 400 var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking);
   color: var(--ws-ink-faint);
 }
-.ws-overview-inner { max-width: var(--overview-width); margin: 0 auto; padding: 0 var(--overview-gutter) 80px; }
+.ws-overview-inner { max-width: var(--overview-width); margin: 0 auto; padding: 0 var(--overview-gutter) 80px; animation: ws-overview-rise var(--ws-crossing) var(--ws-ease); transform: translate3d(var(--ws-page-x, 0px), var(--ws-page-y, 0px), 0); }
+@keyframes ws-overview-rise { from { opacity: 0; transform: var(--ws-settle); } }
+@media (prefers-reduced-motion: reduce) { .ws-overview-inner { animation: none; transform: none; } }
 
 .ws-overview-masthead {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
