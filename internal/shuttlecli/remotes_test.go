@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // remoteFixture is one row of daemon/test/fixtures/remotes/expected.json — the shared
@@ -57,7 +59,7 @@ func TestShuttleRemotesPathUsesShuttleConfigLocation(t *testing.T) {
 	t.Setenv("SHUTTLE_REMOTES_FILE", "")
 	t.Setenv("FELT_REMOTES_FILE", filepath.Join(t.TempDir(), "felt-remotes.json"))
 
-	got, err := shuttleRemotesPath()
+	got, err := testApp(t).shuttleRemotesPath()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +96,7 @@ func TestRemotesFixtureParity(t *testing.T) {
 			}
 			t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
 
-			doc, err := loadRemotesFile()
+			doc, err := testApp(t).loadRemotesFile()
 			if err != nil {
 				t.Fatalf("loadRemotesFile: %v", err)
 			}
@@ -174,7 +176,7 @@ func TestRemotesFixtureRejected(t *testing.T) {
 			t.Fatalf("%s: %v", fixture, err)
 		}
 		t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
-		_, err := loadRemotesFile()
+		_, err := testApp(t).loadRemotesFile()
 		if err == nil {
 			t.Errorf("%s loaded; want a refusal of %s.%s", fixture, want.Remote, want.Field)
 			continue
@@ -214,7 +216,7 @@ func TestConfiguredRemotes_Resolution(t *testing.T) {
 
 	// Missing file → empty, no error. A host with no fleet is a valid host.
 	t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(dir, "absent.json"))
-	got, err := configuredRemotes()
+	got, err := testApp(t).configuredRemotes()
 	if err != nil {
 		t.Fatalf("missing file should not error: %v", err)
 	}
@@ -228,7 +230,7 @@ func TestConfiguredRemotes_Resolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SHUTTLE_REMOTES_FILE", bad)
-	if _, err := configuredRemotes(); err == nil {
+	if _, err := testApp(t).configuredRemotes(); err == nil {
 		t.Fatal("malformed file should error")
 	} else if !strings.Contains(err.Error(), bad) {
 		t.Fatalf("error should name the path, got %q", err)
@@ -240,7 +242,7 @@ func TestConfiguredRemotes_Resolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SHUTTLE_REMOTES_FILE", good)
-	got, err = configuredRemotes()
+	got, err = testApp(t).configuredRemotes()
 	if err != nil {
 		t.Fatalf("configuredRemotes: %v", err)
 	}
@@ -257,7 +259,7 @@ func TestConfiguredRemotes_DropsDisabled(t *testing.T) {
 	  {"name":"off","port":4002,"enabled":false}
 	]}`)
 
-	got, err := configuredRemotes()
+	got, err := testApp(t).configuredRemotes()
 	if err != nil {
 		t.Fatalf("configuredRemotes: %v", err)
 	}
@@ -304,7 +306,7 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			writeRemotes(t, tc.body)
-			_, err := loadRemotesFile()
+			_, err := testApp(t).loadRemotesFile()
 			if err == nil {
 				t.Fatalf("want error containing %q, got none", tc.want)
 			}
@@ -322,10 +324,10 @@ func TestSaveRemotes_RoundTrip(t *testing.T) {
 	t.Setenv("SHUTTLE_REMOTES_FILE", path)
 
 	doc := remotesFile{Remotes: []remoteSpec{{Name: "a", Port: 4001}}}
-	if err := saveRemotes(doc); err != nil {
+	if err := testApp(t).saveRemotes(doc); err != nil {
 		t.Fatalf("saveRemotes: %v", err)
 	}
-	reloaded, err := loadRemotesFile()
+	reloaded, err := testApp(t).loadRemotesFile()
 	if err != nil {
 		t.Fatalf("loadRemotesFile: %v", err)
 	}
@@ -336,7 +338,7 @@ func TestSaveRemotes_RoundTrip(t *testing.T) {
 		t.Errorf("version = %d, want 1", reloaded.Version)
 	}
 
-	if err := saveRemotes(remotesFile{}); err != nil {
+	if err := testApp(t).saveRemotes(remotesFile{}); err != nil {
 		t.Fatalf("saveRemotes(empty): %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -356,11 +358,11 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	  {"name":"hub-a","port":4001,"checkout":"/srv/felt","auth":"interactive",
 	   "ssh_flags":["-o","ClearAllForwardings=yes"],"build_ui":false}]}`)
 
-	doc, err := loadRemotesFileRaw()
+	doc, err := testApp(t).loadRemotesFileRaw()
 	if err != nil {
 		t.Fatalf("loadRemotesFileRaw: %v", err)
 	}
-	if err := saveRemotes(doc); err != nil {
+	if err := testApp(t).saveRemotes(doc); err != nil {
 		t.Fatalf("saveRemotes: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -373,7 +375,7 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 		}
 	}
 
-	reloaded, err := loadRemotesFileRaw()
+	reloaded, err := testApp(t).loadRemotesFileRaw()
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -384,7 +386,7 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	// Absent means "this host builds its own UI", and the sparse file says so by
 	// omitting the key rather than writing true.
 	doc.Remotes[0].BuildUI = nil
-	if err := saveRemotes(doc); err != nil {
+	if err := testApp(t).saveRemotes(doc); err != nil {
 		t.Fatalf("saveRemotes(absent): %v", err)
 	}
 	raw, _ = os.ReadFile(path)
@@ -401,6 +403,17 @@ func writeRemotes(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	t.Setenv("SHUTTLE_REMOTES_FILE", path)
+	return path
+}
+
+// writeRemotesIn writes body as env's fleet file.
+func writeRemotesIn(t testing.TB, env *sysenv.Env, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "remotes.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("SHUTTLE_REMOTES_FILE", path)
 	return path
 }
 
@@ -502,15 +515,15 @@ func TestNormalizeRemotes_TunnelManagerDefaultFollowsTheTransport(t *testing.T) 
 			useHostGOOS(t, goos)
 			writeRemotes(t, `[{"name":"meshnode","url":"https://meshnode.example.ts.net"},
 			  {"name":"hub-a","port":4001}]`)
-			doc, err := loadRemotesFile()
+			doc, err := testApp(t).loadRemotesFile()
 			if err != nil {
 				t.Fatalf("loadRemotesFile: %v", err)
 			}
 			if got := doc.Remotes[0].tunnelOpts().Manager; got != "none" {
 				t.Errorf("portless remote manager = %q, want none", got)
 			}
-			if got := doc.Remotes[1].tunnelOpts().Manager; got != defaultTunnelManager() {
-				t.Errorf("port remote manager = %q, want %q", got, defaultTunnelManager())
+			if got := doc.Remotes[1].tunnelOpts().Manager; got != testApp(t).defaultTunnelManager() {
+				t.Errorf("port remote manager = %q, want %q", got, testApp(t).defaultTunnelManager())
 			}
 			// And nothing portless ever reaches the installer.
 			if specs := resolveManagedTunnelSpecs(doc); len(specs) != 1 || specs[0].Name != "hub-a" {

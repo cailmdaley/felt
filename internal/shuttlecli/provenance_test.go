@@ -184,7 +184,7 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 	})
 	cache := t.TempDir()
 	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", cache)
-	_, destination, err := transcriptCachePath(provenanceSession)
+	_, destination, err := testApp(t).transcriptCachePath(provenanceSession)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestCompositeFiberRuntimePendingRequiresMissingSession(t *testing.T) {
 	daemonStub(t, map[string]http.HandlerFunc{
 		"/api/v1/fibers/composite": jsonBody(`{"fibers":[{"fiber":{"id":"01UID","slug":"remote/name","shuttle":{"runtime":{"dispatched_at":"2026-08-23T18:00:00Z"}}}}]}`),
 	})
-	if !compositeFiberRuntimePending("remote/name") {
+	if !testApp(t).compositeFiberRuntimePending("remote/name") {
 		t.Fatal("remote dispatched_at without session_uuid should be pending")
 	}
 }
@@ -510,7 +510,7 @@ func TestMaterialize_LocalWithoutPathIsAnErrorNotAbsence(t *testing.T) {
 		Transcript: TranscriptReceipt{Availability: "available_local"},
 	}}
 	dir := t.TempDir()
-	path, err := materializeFiberTranscripts("f", "01UID", rows, dir)
+	path, err := testApp(t).materializeFiberTranscripts("f", "01UID", rows, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

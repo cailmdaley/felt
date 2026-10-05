@@ -68,7 +68,7 @@ func writeCommit(t *testing.T, payload map[string]any) {
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	if err := runCommitHook(bytes.NewReader(raw)); err != nil {
+	if err := testApp(t).runCommitHook(bytes.NewReader(raw)); err != nil {
 		t.Fatalf("runCommitHook: %v", err)
 	}
 }
@@ -337,7 +337,7 @@ func TestCommitDegenerateInput(t *testing.T) {
 		`{"hook_event_name":"PostToolUse","tool_name":"Bash"}`,
 		`{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git commit"},"cwd":"/nonexistent/path"}`,
 	} {
-		if err := runCommitHook(strings.NewReader(in)); err != nil {
+		if err := testApp(t).runCommitHook(strings.NewReader(in)); err != nil {
 			t.Fatalf("runCommitHook(%q) = %v, want nil", in, err)
 		}
 	}

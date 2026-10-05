@@ -29,11 +29,11 @@ func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
 	goBinShuttle := filepath.Join(home, "go", "bin", "shuttle")
 	writeShuttleVersion(t, goBinShuttle, "build-old")
 
-	receipt := collectShuttleBinaryReceiptAt(currentPath, "build-current", home, pathDir, "")
-	if receipt.ResolvedPath != resolveBinaryPath(currentTarget) || receipt.Build != "build-current" {
+	receipt := testApp(t).collectShuttleBinaryReceiptAt(currentPath, "build-current", home, pathDir, "")
+	if receipt.ResolvedPath != testApp(t).resolveBinaryPath(currentTarget) || receipt.Build != "build-current" {
 		t.Fatalf("running binary receipt = %+v", receipt)
 	}
-	if receipt.HookResolution != resolveBinaryPath(pathShuttle) || receipt.HooksWouldPickIt {
+	if receipt.HookResolution != testApp(t).resolveBinaryPath(pathShuttle) || receipt.HooksWouldPickIt {
 		t.Fatalf("PATH should shadow the running binary in hook resolution: %+v", receipt)
 	}
 	if len(receipt.Executables) != 2 {
@@ -45,8 +45,8 @@ func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
 		}
 	}
 
-	fallback := collectShuttleBinaryReceiptAt(currentPath, "build-current", home, "", "")
-	if fallback.HookResolution != resolveBinaryPath(currentPath) || !fallback.HooksWouldPickIt {
+	fallback := testApp(t).collectShuttleBinaryReceiptAt(currentPath, "build-current", home, "", "")
+	if fallback.HookResolution != testApp(t).resolveBinaryPath(currentPath) || !fallback.HooksWouldPickIt {
 		t.Fatalf("hook fallback should select the running binary: %+v", fallback)
 	}
 }
@@ -89,7 +89,7 @@ func TestCollectDaemonReceiptUsesListenerResolutionError(t *testing.T) {
 	if err := os.WriteFile(hostFile, []byte("{malformed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := collectDaemonReceipt()
+	got := testApp(t).collectDaemonReceipt()
 	if got.Status != receiptMismatch || !strings.Contains(got.Repair, hostFile) || strings.Contains(got.Repair, "<nil>") {
 		t.Fatalf("daemon listener repair = %+v, want the host-file resolution error", got)
 	}
@@ -122,7 +122,7 @@ func TestBootingDaemonSuppressesHostMismatchAndRestartAdvice(t *testing.T) {
 		Repair: "Shuttle daemon is still booting; retry when /api/v1/version reports ready:true",
 		Listen: "tcp://127.0.0.1:4000", HostClass: "shared-multi-user",
 	}
-	host := collectHostReceiptWhenReady(daemon)
+	host := testApp(t).collectHostReceiptWhenReady(daemon)
 	if host.Status != receiptBooting || host.Repair != daemon.Repair || host.Listen != "" || len(host.Problems) != 0 {
 		t.Fatalf("host receipt should defer listener checks until readiness: %+v", host)
 	}
@@ -161,7 +161,7 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			}))
 			defer server.Close()
 			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			got := collectDaemonReceipt()
+			got := testApp(t).collectDaemonReceipt()
 			if got.Status != tc.want {
 				t.Fatalf("daemon receipt = %#v, want status %q", got, tc.want)
 			}

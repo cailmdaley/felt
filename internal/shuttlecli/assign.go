@@ -23,12 +23,12 @@ type assignOptions struct {
 	json          string
 }
 
-var assignOpts assignOptions
-
-var assignCmd = &cobra.Command{
-	Use:   "assign <fiber>",
-	Short: "Assign roles and collaborators to a fiber",
-	Long: `Stores role-to-collaborator membership without changing the fiber's status
+func (a *app) assignCmd() *cobra.Command {
+	var assignOpts assignOptions
+	assignCmd := &cobra.Command{
+		Use:   "assign <fiber>",
+		Short: "Assign roles and collaborators to a fiber",
+		Long: `Stores role-to-collaborator membership without changing the fiber's status
 or shuttle runtime state. --role and --collaborator accept names, paths under
 roles/, or intrinsic UIDs. Repeat either flag to add several roles or
 collaborators. Collaborators resolve to direct children of roles/<role>.
@@ -42,32 +42,38 @@ Use --json-assignment for an atomic replacement with an object mapping role
 slugs to collaborator slug arrays. An empty array assigns the role alone. Use
 --clear to remove the whole assignment. Patching adds membership and preserves
 other roles and collaborators; it does not change worker lifecycle settings.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, ref, err := shuttleResolveFiberRef(args[0], true)
-		if err != nil {
-			return err
-		}
-		f, unlock, err := lockAndReloadFiber(st, f)
-		if err != nil {
-			return err
-		}
-		defer unlock()
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, ref, err := a.shuttleResolveFiberRef(args[0], true)
+			if err != nil {
+				return err
+			}
+			f, unlock, err := lockAndReloadFiber(st, f)
+			if err != nil {
+				return err
+			}
+			defer unlock()
 
-		changed, err := applyCollaborationFlags(cmd, assignOpts, f, st)
-		if err != nil {
-			return err
-		}
-		if !changed {
-			return fmt.Errorf("assign: pass --role, --collaborator, --clear, or --json-assignment")
-		}
-		f.Touch(time.Now())
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
-		fmt.Printf("updated collaboration for %s%s\n", args[0], ref.Location())
-		return nil
-	},
+			changed, err := applyCollaborationFlags(cmd, assignOpts, f, st)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return fmt.Errorf("assign: pass --role, --collaborator, --clear, or --json-assignment")
+			}
+			f.Touch(time.Now())
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+			fmt.Fprintf(a.env.Stdout, "updated collaboration for %s%s\n", args[0], ref.Location())
+			return nil
+		},
+	}
+	assignCmd.Flags().StringArrayVar(&assignOpts.roles, "role", nil, "Role profile name, path, or intrinsic UID (repeatable)")
+	assignCmd.Flags().StringArrayVar(&assignOpts.collaborators, "collaborator", nil, "Collaborator profile name, path, or intrinsic UID (repeatable)")
+	assignCmd.Flags().BoolVar(&assignOpts.clear, "clear", false, "Remove the whole collaboration assignment")
+	assignCmd.Flags().StringVar(&assignOpts.json, "json-assignment", "", "Replace collaboration from a role-to-collaborator JSON object")
+	return assignCmd
 }
 
 func applyCollaborationFlags(cmd *cobra.Command, o assignOptions, f *felt.Felt, st *felt.Storage) (bool, error) {
@@ -420,12 +426,4 @@ func profilePaths(profiles []*felt.Felt) string {
 		paths[i] = f.ID
 	}
 	return strings.Join(paths, ", ")
-}
-
-func init() {
-	assignCmd.Flags().StringArrayVar(&assignOpts.roles, "role", nil, "Role profile name, path, or intrinsic UID (repeatable)")
-	assignCmd.Flags().StringArrayVar(&assignOpts.collaborators, "collaborator", nil, "Collaborator profile name, path, or intrinsic UID (repeatable)")
-	assignCmd.Flags().BoolVar(&assignOpts.clear, "clear", false, "Remove the whole collaboration assignment")
-	assignCmd.Flags().StringVar(&assignOpts.json, "json-assignment", "", "Replace collaboration from a role-to-collaborator JSON object")
-	addShuttleCommand(assignCmd)
 }

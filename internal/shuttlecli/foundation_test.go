@@ -46,11 +46,11 @@ func TestResolveOwnHost_Precedence(t *testing.T) {
 	t.Setenv("SHUTTLE_HOST", "envhost")
 
 	// Explicit flag wins over everything.
-	if got, err := resolveOwnHost("flaghost"); err != nil || got != "flaghost" {
+	if got, err := testApp(t).resolveOwnHost("flaghost"); err != nil || got != "flaghost" {
 		t.Fatalf("flag should win: got %q err %v", got, err)
 	}
 	// No flag → SHUTTLE_HOST env wins over the host file.
-	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+	if got, err := testApp(t).resolveOwnHost(""); err != nil || got != "envhost" {
 		t.Fatalf("env should win over host file: got %q err %v", got, err)
 	}
 }
@@ -61,7 +61,7 @@ func TestResolveOwnHost_EnvBeatsFile(t *testing.T) {
 	withOwnHost(t, "filehost")
 	t.Setenv("SHUTTLE_HOST", "envhost")
 
-	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+	if got, err := testApp(t).resolveOwnHost(""); err != nil || got != "envhost" {
 		t.Fatalf("env should beat file: got %q err %v", got, err)
 	}
 }
@@ -73,7 +73,7 @@ func TestResolveOwnHost_EnvBeatsFile(t *testing.T) {
 func TestResolveOwnHost_FileBeatsHostname(t *testing.T) {
 	withOwnHost(t, "candide")
 
-	got, err := resolveOwnHost("")
+	got, err := testApp(t).resolveOwnHost("")
 	if err != nil {
 		t.Fatalf("resolveOwnHost: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestResolveOwnHost_DaemonDown_HostFileOnly(t *testing.T) {
 	}
 	t.Setenv("SHUTTLE_HOST_FILE", path)
 
-	got, err := resolveOwnHost("")
+	got, err := testApp(t).resolveOwnHost("")
 	if err != nil {
 		t.Fatalf("resolveOwnHost with daemon down: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestResolveOwnHost_DaemonDown_HostFileOnly(t *testing.T) {
 	}
 
 	fiber := shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "candide"})
-	if err := ensureOwnedHere(fiber, "f"); err != nil {
+	if err := testApp(t).ensureOwnedHere(fiber, "f"); err != nil {
 		t.Fatalf("ownership-guarded local write should succeed with daemon down and host-file identity: %v", err)
 	}
 }
@@ -128,11 +128,10 @@ func TestResolveOwnHost_HostnameNormalized(t *testing.T) {
 	t.Setenv("SHUTTLE_HOST", "")
 	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "host"))
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "  Studio-Air.home  ", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := testApp(t)
+	a.osHostname = func() (string, error) { return "  Studio-Air.home  ", nil }
 
-	got, err := resolveOwnHost("")
+	got, err := a.resolveOwnHost("")
 	if err != nil {
 		t.Fatalf("resolveOwnHost: %v", err)
 	}
@@ -150,11 +149,10 @@ func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "host")
 	t.Setenv("SHUTTLE_HOST_FILE", path)
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "Studio-Air.home", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := testApp(t)
+	a.osHostname = func() (string, error) { return "Studio-Air.home", nil }
 
-	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+	if got, err := a.resolveOwnHost(""); err != nil || got != "studio-air" {
 		t.Fatalf("first resolve: got %q err %v", got, err)
 	}
 
@@ -167,8 +165,8 @@ func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
 	}
 
 	// Second resolve must come from the file, not the hostname syscall.
-	osHostname = func() (string, error) { return "renamed-by-dhcp.local", nil }
-	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+	a.osHostname = func() (string, error) { return "renamed-by-dhcp.local", nil }
+	if got, err := a.resolveOwnHost(""); err != nil || got != "studio-air" {
 		t.Fatalf("second resolve should read the seeded file: got %q err %v", got, err)
 	}
 }
@@ -184,11 +182,10 @@ func TestResolveOwnHost_SeedNeverCreatesDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "dot-shuttle")
 	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(dir, "host"))
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "Studio-Air.home", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := testApp(t)
+	a.osHostname = func() (string, error) { return "Studio-Air.home", nil }
 
-	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+	if got, err := a.resolveOwnHost(""); err != nil || got != "studio-air" {
 		t.Fatalf("resolve must still succeed without seeding: got %q err %v", got, err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -204,7 +201,7 @@ func TestResolveOwnHost_EnvDoesNotSeed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "host")
 	t.Setenv("SHUTTLE_HOST_FILE", path)
 
-	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+	if got, err := testApp(t).resolveOwnHost(""); err != nil || got != "envhost" {
 		t.Fatalf("env tier: got %q err %v", got, err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -224,11 +221,10 @@ func TestResolveOwnHost_UnwritableSeedStillResolves(t *testing.T) {
 	}
 	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(blocker, "host"))
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "Somewhere.Local", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := testApp(t)
+	a.osHostname = func() (string, error) { return "Somewhere.Local", nil }
 
-	if got, err := resolveOwnHost(""); err != nil || got != "somewhere" {
+	if got, err := a.resolveOwnHost(""); err != nil || got != "somewhere" {
 		t.Fatalf("unwritable seed must not break resolution: got %q err %v", got, err)
 	}
 }
@@ -237,16 +233,19 @@ func TestResolveOwnHost_UnwritableSeedStillResolves(t *testing.T) {
 // write: it creates the directory, persists $SHUTTLE_HOST (the implicit seed
 // never does), and never replaces an identity the file already holds.
 func TestSeedOwnHost(t *testing.T) {
-	prev := osHostname
-	osHostname = func() (string, error) { return "Studio-Air.home", nil }
-	t.Cleanup(func() { osHostname = prev })
+	hostname := func() (string, error) { return "Studio-Air.home", nil }
+	seedOwnHost := func(t *testing.T) (string, hostSource, bool, error) {
+		a := testApp(t)
+		a.osHostname = hostname
+		return a.seedOwnHost()
+	}
 
 	t.Run("env value is persisted and the directory created", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "dot-shuttle", "host")
 		t.Setenv("SHUTTLE_HOST_FILE", path)
 		t.Setenv("SHUTTLE_HOST", "  alias-host ")
 
-		id, source, seeded, err := seedOwnHost()
+		id, source, seeded, err := seedOwnHost(t)
 		if err != nil || id != "alias-host" || source != hostSourceEnv || !seeded {
 			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
 		}
@@ -260,7 +259,7 @@ func TestSeedOwnHost(t *testing.T) {
 		t.Setenv("SHUTTLE_HOST_FILE", path)
 		t.Setenv("SHUTTLE_HOST", "")
 
-		id, source, seeded, err := seedOwnHost()
+		id, source, seeded, err := seedOwnHost(t)
 		if err != nil || id != "studio-air" || source != hostSourceHostname || !seeded {
 			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
 		}
@@ -274,7 +273,7 @@ func TestSeedOwnHost(t *testing.T) {
 		t.Setenv("SHUTTLE_HOST_FILE", path)
 		t.Setenv("SHUTTLE_HOST", "alias-host")
 
-		id, source, seeded, err := seedOwnHost()
+		id, source, seeded, err := seedOwnHost(t)
 		if err != nil || id != "chosen-name" || source != hostSourceFile || seeded {
 			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
 		}
@@ -291,11 +290,11 @@ func TestEnsureOwnedHere(t *testing.T) {
 		return shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": host})
 	}
 
-	if err := ensureOwnedHere(mk("macbook"), "f"); err != nil {
+	if err := testApp(t).ensureOwnedHere(mk("macbook"), "f"); err != nil {
 		t.Fatalf("fiber owned by this host should pass: %v", err)
 	}
 
-	err := ensureOwnedHere(mk("cineca"), "f")
+	err := testApp(t).ensureOwnedHere(mk("cineca"), "f")
 	if err == nil {
 		t.Fatal("fiber owned by another host should be refused")
 	}
@@ -303,10 +302,10 @@ func TestEnsureOwnedHere(t *testing.T) {
 		t.Fatalf("expected ownerMismatchError, got %T: %v", err, err)
 	}
 
-	if err := ensureOwnedHere(mk(""), "f"); err != nil {
+	if err := testApp(t).ensureOwnedHere(mk(""), "f"); err != nil {
 		t.Fatalf("host-less block should fail open (legacy): %v", err)
 	}
-	if err := ensureOwnedHere(shuttleFeltWithBlock(t, nil), "f"); err != nil {
+	if err := testApp(t).ensureOwnedHere(shuttleFeltWithBlock(t, nil), "f"); err != nil {
 		t.Fatalf("pure note (no block) should pass: %v", err)
 	}
 }
@@ -323,8 +322,8 @@ func TestOwnerMismatchNamesItsSource(t *testing.T) {
 
 	t.Run("file tier names the file", func(t *testing.T) {
 		withOwnHost(t, "macbook")
-		msg := ensureOwnedHere(fiber(), "f").Error()
-		if !strings.Contains(msg, hostConfigFilePath()) {
+		msg := testApp(t).ensureOwnedHere(fiber(), "f").Error()
+		if !strings.Contains(msg, testApp(t).hostConfigFilePath()) {
 			t.Fatalf("file-sourced identity should name the file: %s", msg)
 		}
 	})
@@ -332,11 +331,11 @@ func TestOwnerMismatchNamesItsSource(t *testing.T) {
 	t.Run("env tier names the env var", func(t *testing.T) {
 		withOwnHost(t, "macbook")
 		t.Setenv("SHUTTLE_HOST", "laptop")
-		msg := ensureOwnedHere(fiber(), "f").Error()
+		msg := testApp(t).ensureOwnedHere(fiber(), "f").Error()
 		if !strings.Contains(msg, "$SHUTTLE_HOST") {
 			t.Fatalf("env-sourced identity should name the env var: %s", msg)
 		}
-		if strings.Contains(msg, hostConfigFilePath()) {
+		if strings.Contains(msg, testApp(t).hostConfigFilePath()) {
 			t.Fatalf("env-sourced identity must not blame the overridden file: %s", msg)
 		}
 	})
@@ -353,12 +352,11 @@ func TestEnsureOwnedHere_UnresolvableIdentityFailsLoud(t *testing.T) {
 	t.Setenv("SHUTTLE_HOST", "")
 	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "does-not-exist"))
 
-	prevHostname := osHostname
-	osHostname = func() (string, error) { return "", fmt.Errorf("forced failure: no OS hostname") }
-	t.Cleanup(func() { osHostname = prevHostname })
+	a := testApp(t)
+	a.osHostname = func() (string, error) { return "", fmt.Errorf("forced failure: no OS hostname") }
 
 	fiber := shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "candide"})
-	err := ensureOwnedHere(fiber, "f")
+	err := a.ensureOwnedHere(fiber, "f")
 	if err == nil {
 		t.Fatal("unresolvable own-host identity against an owned fiber must refuse the write, not fall through")
 	}
@@ -427,13 +425,13 @@ func TestParseOptionalBool(t *testing.T) {
 
 func TestResolveProjectDirFlag(t *testing.T) {
 	dir := t.TempDir()
-	if got, err := resolveProjectDirFlag(dir); err != nil || got != dir {
+	if got, err := testApp(t).resolveProjectDirFlag(dir); err != nil || got != dir {
 		t.Fatalf("existing dir should resolve: got %q err %v", got, err)
 	}
-	if _, err := resolveProjectDirFlag(""); err == nil {
+	if _, err := testApp(t).resolveProjectDirFlag(""); err == nil {
 		t.Fatal("empty project-dir must error")
 	}
-	if _, err := resolveProjectDirFlag(dir + "/does-not-exist"); err == nil {
+	if _, err := testApp(t).resolveProjectDirFlag(dir + "/does-not-exist"); err == nil {
 		t.Fatal("nonexistent project-dir must error")
 	}
 	// A regular file is not a directory.
@@ -441,7 +439,7 @@ func TestResolveProjectDirFlag(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := resolveProjectDirFlag(file); err == nil {
+	if _, err := testApp(t).resolveProjectDirFlag(file); err == nil {
 		t.Fatal("a file path must error (not a directory)")
 	}
 }

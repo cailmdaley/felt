@@ -2,37 +2,23 @@ package shuttlecli
 
 import (
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/sysenv"
-	"github.com/spf13/cobra"
 )
-
-func addShuttleCommand(command *cobra.Command) {
-	switch command.Name() {
-	case "agents":
-		command.GroupID = groupAgents
-	case "daemon", "host", "remotes", "tunnels", "version":
-		command.GroupID = groupHosts
-	default:
-		command.GroupID = groupOperations
-	}
-	rootCmd.AddCommand(command)
-}
 
 // shuttleResolveFiber resolves a fiber id or path in the selected store. Full
 // reads preserve the body for write operations; metadata-only reads serve
 // address and status lookups.
-func shuttleResolveFiber(query string, full bool) (*felt.Felt, *felt.Storage, error) {
-	f, storage, _, err := shuttleResolveFiberRef(query, full)
+func (a *app) shuttleResolveFiber(query string, full bool) (*felt.Felt, *felt.Storage, error) {
+	f, storage, _, err := a.shuttleResolveFiberRef(query, full)
 	return f, storage, err
 }
 
-func shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, felt.Ref, error) {
-	root, err := felt.ProjectRoot(sysenv.OS(), changeDir)
+func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt.Storage, felt.Ref, error) {
+	root, err := felt.ProjectRoot(a.env, a.dir)
 	if err != nil {
 		return nil, nil, felt.Ref{}, err
 	}
 	storage := felt.NewStorage(root)
-	ref, err := felt.ResolveRef(storage, felt.CommandScope(sysenv.OS(), root, changeDir), query)
+	ref, err := felt.ResolveRef(storage, felt.CommandScope(a.env, root, a.dir), query)
 	if err != nil {
 		return nil, nil, felt.Ref{}, err
 	}

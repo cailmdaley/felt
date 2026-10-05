@@ -2,7 +2,6 @@ package shuttlecli
 
 import (
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -46,15 +45,15 @@ func errFiberWithoutUID(fiberID string) error {
 	return fmt.Errorf("fiber %s has no intrinsic ULID id, so it has no worker session name — run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter", fiberID)
 }
 
-// tmuxSessionExists / killTmuxSession are func vars so tests can stub tmux
-// without shelling out to a real server. The `=` prefix tells tmux to match the
-// session name exactly (not as a pattern).
-var tmuxSessionExists = func(sessionName string) bool {
-	return exec.Command("tmux", "has-session", "-t", "="+sessionName).Run() == nil
+// tmuxHasSession and tmuxKillSession back app.tmuxSessionExists and
+// app.killTmuxSession. The `=` prefix tells tmux to match the session name
+// exactly (not as a pattern).
+func (a *app) tmuxHasSession(sessionName string) bool {
+	return a.env.Command("tmux", "has-session", "-t", "="+sessionName).Run() == nil
 }
 
-var killTmuxSession = func(session string) error {
-	return exec.Command("tmux", "kill-session", "-t", session).Run()
+func (a *app) tmuxKillSession(session string) error {
+	return a.env.Command("tmux", "kill-session", "-t", session).Run()
 }
 
 // shuttleSessionULID matches the uid a worker session name embeds:
@@ -82,11 +81,11 @@ func isShuttleTmuxSessionName(sessionName string) bool {
 	return fiberUIDFromTmuxSession(sessionName) != ""
 }
 
-// liveTmuxSessions returns the set of live shuttle worker session names — the
-// running side of status/ps. A func var so tests stub the tmux server; an absent
-// or empty server yields the empty set (status still renders, every row idle).
-var liveTmuxSessions = func() map[string]bool {
-	out, err := exec.Command("tmux", "ls", "-F", "#{session_name}").Output()
+// tmuxLiveWorkerSessions returns the set of live shuttle worker session names —
+// the running side of status/ps (app.liveTmuxSessions). An absent or empty
+// server yields the empty set (status still renders, every row idle).
+func (a *app) tmuxLiveWorkerSessions() map[string]bool {
+	out, err := a.env.Command("tmux", "ls", "-F", "#{session_name}").Output()
 	if err != nil {
 		return map[string]bool{}
 	}

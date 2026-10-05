@@ -268,7 +268,7 @@ func TestFetchComposite_ParsesSampleResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
+	c, err := testApp(t).fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
 	if err != nil {
 		t.Fatalf("fetchCompositeFrom: %v", err)
 	}
@@ -299,7 +299,7 @@ func TestFetchComposite_ErrorOnNon200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
+	_, err := testApp(t).fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
 	if err == nil {
 		t.Fatal("expected error on 500, got nil")
 	}

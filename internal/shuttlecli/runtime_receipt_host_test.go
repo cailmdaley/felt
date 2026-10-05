@@ -441,7 +441,7 @@ func TestEvaluateHost(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := evaluateHost(tc.ev)
+			got := testApp(t).evaluateHost(tc.ev)
 			if got.Status != tc.status {
 				t.Fatalf("status = %s, want %s (%+v)", got.Status, tc.status, got)
 			}
@@ -472,7 +472,7 @@ func TestEvaluateHostReportsPrivateTailnetSocket(t *testing.T) {
 	}
 	defer listener.Close()
 
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -504,7 +504,7 @@ func TestGatherHostEvidenceReportsConfiguredTailnetSocket(t *testing.T) {
 	}
 	t.Setenv("SHUTTLE_REMOTES_FILE", fleet)
 
-	got := gatherHostEvidence()
+	got := testApp(t).gatherHostEvidence()
 	if got.tailscaleSocket != path || got.tailscaleConfigError != "" ||
 		got.tailnetSocketEvidence == nil || !got.tailnetSocketEvidence.Private ||
 		!slices.Equal(got.tailnetRemoteNames, []string{"hub-a"}) {
@@ -520,13 +520,13 @@ func TestGatherHostEvidencePreservesMalformedRemotesFileError(t *testing.T) {
 	}
 	t.Setenv("SHUTTLE_REMOTES_FILE", fleet)
 
-	ev := gatherHostEvidence()
+	ev := testApp(t).gatherHostEvidence()
 	if ev.remotesConfigError == "" || ev.tailscaleSocket != "" {
 		t.Fatalf("malformed remotes file evidence = %+v", ev)
 	}
 
 	listen := "unix:///tmp/shuttle.sock"
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "single-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/tmp/shuttle.sock"},
@@ -540,7 +540,7 @@ func TestGatherHostEvidencePreservesMalformedRemotesFileError(t *testing.T) {
 
 func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 	listen := "unix:///srv/s/sock/daemon.sock"
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -555,7 +555,7 @@ func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 		t.Fatalf("daemon/fleet socket mismatch receipt = %+v", got)
 	}
 
-	got = evaluateHost(hostEvidence{
+	got = testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -570,7 +570,7 @@ func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 
 func TestEvaluateHostReportsUnreadyTailnetBridge(t *testing.T) {
 	listen := "unix:///srv/s/sock/daemon.sock"
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -608,7 +608,7 @@ func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *tes
 			Path: path, Exists: true, Socket: true, OwnerOK: true,
 			BadAncestor: "no ancestor directory owned by the daemon uid blocks traversal by other users",
 		}
-		got := evaluateHost(ev)
+		got := testApp(t).evaluateHost(ev)
 		if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "not confined to a private directory") {
 			t.Fatalf("unconfined LocalAPI socket receipt = %+v", got)
 		}
@@ -619,7 +619,7 @@ func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *tes
 		ev.httpsProxy = "localhost:1055"
 		ev.tailscaleSocket = "/run/tailscaled.sock"
 		ev.tailscaleConfigError = "defaults.https_proxy and defaults.tailscale_socket are mutually exclusive"
-		got := evaluateHost(ev)
+		got := testApp(t).evaluateHost(ev)
 		if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "mutually exclusive") {
 			t.Fatalf("conflicting dial defaults receipt = %+v", got)
 		}
@@ -643,13 +643,13 @@ func TestInspectTailnetSocketPrivateDirectoryBoundary(t *testing.T) {
 	}
 	defer listener.Close()
 
-	if got := inspectTailnetSocket(path, os.Geteuid()); got.Private {
+	if got := testApp(t).inspectTailnetSocket(path, os.Geteuid()); got.Private {
 		t.Fatalf("traversable parent reported private: %+v", got)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got := inspectTailnetSocket(path, os.Geteuid()); !got.Private {
+	if got := testApp(t).inspectTailnetSocket(path, os.Geteuid()); !got.Private {
 		t.Fatalf("private parent not recognized: %+v", got)
 	}
 }
@@ -680,7 +680,7 @@ func TestInspectTailnetSocketRejectsACLGrantedTraversal(t *testing.T) {
 		t.Fatalf("ACL changed the directory mode to %04o", mode)
 	}
 
-	got := inspectTailnetSocket(path, os.Geteuid())
+	got := testApp(t).inspectTailnetSocket(path, os.Geteuid())
 	if got.Private || !strings.Contains(got.BadAncestor, "ACL") {
 		t.Fatalf("ACL-accessible socket directory was reported private: %+v", got)
 	}
@@ -688,7 +688,7 @@ func TestInspectTailnetSocketRejectsACLGrantedTraversal(t *testing.T) {
 
 func TestInspectTailnetSocketDistinguishesMissingFileSymlinkAndRegularFile(t *testing.T) {
 	dir := shortPrivateTempDir(t)
-	missing := inspectTailnetSocket(filepath.Join(dir, "missing.sock"), os.Geteuid())
+	missing := testApp(t).inspectTailnetSocket(filepath.Join(dir, "missing.sock"), os.Geteuid())
 	if missing.Exists || missing.Error == "" {
 		t.Fatalf("missing socket evidence = %+v", missing)
 	}
@@ -697,7 +697,7 @@ func TestInspectTailnetSocketDistinguishesMissingFileSymlinkAndRegularFile(t *te
 	if err := os.WriteFile(regular, []byte("not a socket"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := inspectTailnetSocket(regular, os.Geteuid()); !got.Exists || got.Socket || got.Symlink {
+	if got := testApp(t).inspectTailnetSocket(regular, os.Geteuid()); !got.Exists || got.Socket || got.Symlink {
 		t.Fatalf("regular file evidence = %+v", got)
 	}
 
@@ -711,10 +711,10 @@ func TestInspectTailnetSocketDistinguishesMissingFileSymlinkAndRegularFile(t *te
 	if err := os.Symlink(socketPath, link); err != nil {
 		t.Fatal(err)
 	}
-	if got := inspectTailnetSocket(link, os.Geteuid()); !got.Symlink || got.Socket {
+	if got := testApp(t).inspectTailnetSocket(link, os.Geteuid()); !got.Symlink || got.Socket {
 		t.Fatalf("symlink evidence = %+v", got)
 	}
-	if got := inspectTailnetSocket(socketPath, os.Geteuid()); !got.Socket || !got.Private {
+	if got := testApp(t).inspectTailnetSocket(socketPath, os.Geteuid()); !got.Socket || !got.Private {
 		t.Fatalf("unix socket evidence = %+v", got)
 	}
 }
@@ -749,7 +749,7 @@ func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := evaluateHost(hostEvidence{
+			got := testApp(t).evaluateHost(hostEvidence{
 				settings: settings, daemonClass: "shared-multi-user", daemonListen: listen, daemonPeerGate: "uid",
 				daemonPeerGateUID: &tc.uid, daemonPeerGateUIDSource: tc.source,
 			})
@@ -763,7 +763,7 @@ func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
 // Negative control: remove the missing-source/value switch case and this daemon can look healthy.
 func TestEvaluateHost_UidGateWithoutUidMismatches(t *testing.T) {
 	listen := "tcp://127.0.0.1:4000"
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
 		},
@@ -779,7 +779,7 @@ func TestEvaluateHost_UidGateWithoutUidMismatches(t *testing.T) {
 func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
 	listen := "tcp://127.0.0.1:4000"
 	callerUID := os.Geteuid()
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
 		},
@@ -816,7 +816,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	}
 	daemonTCP := []rawListener{{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000}}
 
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings:                settings,
 		users:                   &one,
 		listenFrom:              "ss",
@@ -841,7 +841,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	}
 
 	exposedListen := "tcp://127.0.0.1:4000"
-	exposed := evaluateHost(hostEvidence{
+	exposed := testApp(t).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "exposed", Listen: exposedListen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
 		},
@@ -853,7 +853,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 		t.Fatalf("exposed TCP must not receive the shared-host gate exemption: %+v", exposed)
 	}
 
-	got = evaluateHost(hostEvidence{
+	got = testApp(t).evaluateHost(hostEvidence{
 		settings:                settings,
 		users:                   &one,
 		listenFrom:              "ss",
@@ -878,7 +878,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 // TestEvaluateHost_OneRepairPerRemedy — each listener is its own problem, but
 // two daemon listeners share one repair, and each role words its own.
 func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
-	got := evaluateHost(hostEvidence{
+	got := testApp(t).evaluateHost(hostEvidence{
 		settings:    hostSettings{Class: "exposed", Listen: "unix:///srv/s.sock", listen: listenAddr{"unix", "/srv/s.sock"}},
 		listenFrom:  "ss",
 		daemonPorts: []int{4000},

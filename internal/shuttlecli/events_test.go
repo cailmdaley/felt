@@ -31,7 +31,7 @@ func TestEventRotationUnderConcurrentWriters(t *testing.T) {
 			go func() {
 				defer done.Done()
 				start.Wait()
-				if err := appendEventLine(path, "{\"type\":\"stop\"}\n"); err != nil {
+				if err := testApp(t).appendEventLine(path, "{\"type\":\"stop\"}\n"); err != nil {
 					t.Error(err)
 				}
 			}()

@@ -156,7 +156,7 @@ func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T
 		options.SSHSocket != "/tmp/ssh agent.sock" {
 		t.Fatalf("migrated supervisor options = %+v", options)
 	}
-	rendered, err := renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
+	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T)
 		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
 		SSHSocket: "/tmp/agent.sock",
 	}
-	current, err := renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
+	current, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +552,7 @@ func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
 		SSHSocket: "/tmp/agent.sock", TmuxTmpdir: "/tmp/tmux operator",
 		CodexSocket: "/tmp/codex.sock", CodexHome: "/tmp/codex home",
 	}
-	rendered, err := renderSupervisorTemplate("Linux", string(template), options, old)
+	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(template), options, old)
 	if err != nil {
 		t.Fatal(err)
 	}

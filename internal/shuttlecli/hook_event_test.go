@@ -51,7 +51,7 @@ func writeEvent(t *testing.T, payload map[string]any) {
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	if err := runEventHook(bytes.NewReader(raw)); err != nil {
+	if err := testApp(t).runEventHook(bytes.NewReader(raw)); err != nil {
 		t.Fatalf("runEventHook: %v", err)
 	}
 }
@@ -524,7 +524,7 @@ func TestEventDegenerateInput(t *testing.T) {
 	t.Setenv("SHUTTLE_EVENTS_FILE", path)
 
 	for _, in := range []string{"", "   ", "not json", "{", `{"hook_event_name":`, `[]`, `"a string"`, `{"hook_event_name":123}`} {
-		if err := runEventHook(strings.NewReader(in)); err != nil {
+		if err := testApp(t).runEventHook(strings.NewReader(in)); err != nil {
 			t.Fatalf("runEventHook(%q) = %v, want nil", in, err)
 		}
 	}
@@ -631,7 +631,7 @@ func TestEventHookHelperProcess(t *testing.T) {
 	if os.Getenv("SHUTTLE_EVENT_HELPER") != "1" {
 		return
 	}
-	_ = runEventHook(os.Stdin)
+	_ = testApp(t).runEventHook(os.Stdin)
 	os.Exit(0)
 }
 
@@ -823,10 +823,8 @@ func TestEventGoldenParity(t *testing.T) {
 	// Freeze everything the line would otherwise pick up from the machine.
 	base := time.UnixMilli(1753900000000).UTC()
 	tick := 0
-	oldNow, oldRand := eventNow, eventRand
-	t.Cleanup(func() { eventNow, eventRand = oldNow, oldRand })
-	eventNow = func() time.Time { return base.Add(time.Duration(tick) * time.Second) }
-	eventRand = func() int { return 1000 + tick }
+	now := func() time.Time { return base.Add(time.Duration(tick) * time.Second) }
+	rand := func() int { return 1000 + tick }
 	// A generic host id: the fixture is tracked, and a real machine name in it
 	// is exactly the thing this change removed from the rest of the tree.
 	t.Setenv("SHUTTLE_HOST", "hub-a")
@@ -838,7 +836,9 @@ func TestEventGoldenParity(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		line, ok := renderEventLine(bytes.NewReader(raw))
+		a := testApp(t)
+		a.eventNow, a.eventRand = now, rand
+		line, ok := a.renderEventLine(bytes.NewReader(raw))
 		if !ok {
 			t.Fatalf("payload recorded nothing: %v", ev.payload)
 		}

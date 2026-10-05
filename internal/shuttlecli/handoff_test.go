@@ -145,11 +145,11 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
 
 	// Explicit different fiber: the argument wins, caller is not exiting.
-	path, self, err := resolveHandoffPath("sibling")
+	path, self, err := testApp(t).resolveHandoffPath("sibling")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(sibling): %v", err)
 	}
-	if !samePath(path, storage.Path("sibling")) {
+	if !testApp(t).samePath(path, storage.Path("sibling")) {
 		t.Fatalf("path = %q, want sibling's %q — ambient SHUTTLE_FIBER_PATH overrode the explicit argument", path, storage.Path("sibling"))
 	}
 	if self {
@@ -157,7 +157,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 	}
 
 	// Self-handoff: env path is authoritative, self=true.
-	path, self, err = resolveHandoffPath("own")
+	path, self, err = testApp(t).resolveHandoffPath("own")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(own): %v", err)
 	}
@@ -167,7 +167,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 
 	// Resolution failure: falls back to the env path (the pre-existing
 	// daemon-worker behavior), still self.
-	path, self, err = resolveHandoffPath("no-such-fiber")
+	path, self, err = testApp(t).resolveHandoffPath("no-such-fiber")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(no-such-fiber): %v", err)
 	}
@@ -191,7 +191,7 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 	chdir(t, dir)
 	// "nested-card" fuzzily resolves to parent/nested-card but is not its exact
 	// id — ambiguity, env wins.
-	path, self, err := resolveHandoffPath("nested-card")
+	path, self, err := testApp(t).resolveHandoffPath("nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(nested-card): %v", err)
 	}
@@ -199,17 +199,17 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 		t.Fatalf("fuzzy mismatch: path=%q self=%v, want env path %q self=true", path, self, storage.Path("own"))
 	}
 	// The exact nested id is honored as a sibling handoff.
-	path, self, err = resolveHandoffPath("parent/nested-card")
+	path, self, err = testApp(t).resolveHandoffPath("parent/nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(parent/nested-card): %v", err)
 	}
-	if !samePath(path, storage.Path("parent/nested-card")) || self {
+	if !testApp(t).samePath(path, storage.Path("parent/nested-card")) || self {
 		t.Fatalf("exact nested id: path=%q self=%v, want sibling path self=false", path, self)
 	}
 
 	// No felt store in cwd at all: resolution errors, env fallback, self=true.
 	chdir(t, t.TempDir())
-	path, self, err = resolveHandoffPath("parent/nested-card")
+	path, self, err = testApp(t).resolveHandoffPath("parent/nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath outside store: %v", err)
 	}

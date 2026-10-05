@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,18 +24,18 @@ type ReceiptShuttleExecutable struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func collectShuttleBinaryReceipt() ReceiptShuttleBinary {
+func (a *app) collectShuttleBinaryReceipt() ReceiptShuttleBinary {
 	executable, _ := os.Executable()
-	home, _ := os.UserHomeDir()
-	build := rootCmd.Version
+	home, _ := a.env.UserHomeDir()
+	build := versionLine
 	if build == "" {
 		build = Version
 	}
-	return collectShuttleBinaryReceiptAt(executable, build, home, os.Getenv("PATH"), os.Getenv("SHUTTLE_BIN"))
+	return a.collectShuttleBinaryReceiptAt(executable, build, home, a.env.Getenv("PATH"), a.env.Getenv("SHUTTLE_BIN"))
 }
 
-func collectShuttleBinaryReceiptAt(executable, build, home, pathValue, override string) ReceiptShuttleBinary {
-	resolved := resolveBinaryPath(executable)
+func (a *app) collectShuttleBinaryReceiptAt(executable, build, home, pathValue, override string) ReceiptShuttleBinary {
+	resolved := a.resolveBinaryPath(executable)
 	receipt := ReceiptShuttleBinary{
 		ResolvedPath: resolved,
 		Build:        build,
@@ -53,27 +52,27 @@ func collectShuttleBinaryReceiptAt(executable, build, home, pathValue, override 
 		if !isExecutable(candidate) {
 			continue
 		}
-		candidate = resolveBinaryPath(candidate)
+		candidate = a.resolveBinaryPath(candidate)
 		if seen[candidate] {
 			continue
 		}
 		seen[candidate] = true
-		candidateBuild, errText := shuttleExecutableBuild(candidate)
+		candidateBuild, errText := a.shuttleExecutableBuild(candidate)
 		receipt.Executables = append(receipt.Executables, ReceiptShuttleExecutable{
 			Path: candidate, Build: candidateBuild, Shadowing: candidateBuild != "" && candidateBuild != build, Error: errText,
 		})
 	}
 	if selected := hookShuttleResolution(home, pathValue, override); selected != "" {
-		receipt.HookResolution = resolveBinaryPath(selected)
+		receipt.HookResolution = a.resolveBinaryPath(selected)
 		receipt.HooksWouldPickIt = receipt.HookResolution == resolved
 	}
 	return receipt
 }
 
-func shuttleExecutableBuild(path string) (string, string) {
+func (a *app) shuttleExecutableBuild(path string) (string, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	output, err := a.env.CommandContext(ctx, path, "--version").CombinedOutput()
 	if err != nil {
 		return "", fmt.Sprintf("--version failed: %s", strings.TrimSpace(string(output)))
 	}
@@ -104,11 +103,11 @@ func hookShuttleResolution(home, pathValue, override string) string {
 	return ""
 }
 
-func resolveBinaryPath(path string) string {
+func (a *app) resolveBinaryPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if absolute, err := filepath.Abs(path); err == nil {
+	if absolute, err := a.env.Abs(path); err == nil {
 		path = absolute
 	}
 	if real, err := filepath.EvalSymlinks(path); err == nil {

@@ -10,6 +10,8 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
+// serial: feltcli's embedded ls and show print to the process stdout, which
+// captureStdout swaps.
 func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 	dir, storage := newStore(t)
 	fiber := &felt.Felt{
@@ -33,7 +35,10 @@ func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	listJSON, err := runCommand(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle")
+	var err error
+	listJSON := captureStdout(t, func() {
+		_, err = runCommand(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle")
+	})
 	if err != nil {
 		t.Fatalf("shuttle ls: %v", err)
 	}
@@ -45,7 +50,9 @@ func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 		t.Fatalf("shuttle ls JSON differs from golden\nwant:\n%s\ngot:\n%s", golden, listJSON)
 	}
 
-	showJSON, err := runCommand(t, dir, "show", "work/task", "--json")
+	showJSON := captureStdout(t, func() {
+		_, err = runCommand(t, dir, "show", "work/task", "--json")
+	})
 	if err != nil {
 		t.Fatalf("shuttle show: %v", err)
 	}

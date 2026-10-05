@@ -5,9 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"math/rand"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -36,10 +33,11 @@ import (
 // Recording is silent and never blocks a tool call. The command also offers
 // queued peer context on supported Claude and Codex hooks through runEventAndMessageHook.
 
-var hookEventCmd = &cobra.Command{
-	Use:   "event",
-	Short: "Record one harness hook event on the host-local activity stream",
-	Long: `Reads any hook payload from stdin and appends one JSON line to the
+func (a *app) hookEventCmd() *cobra.Command {
+	hookEventCmd := &cobra.Command{
+		Use:   "event",
+		Short: "Record one harness hook event on the host-local activity stream",
+		Long: `Reads any hook payload from stdin and appends one JSON line to the
 host-local event stream (SHUTTLE_EVENTS_FILE, else $SHUTTLE_DATA_DIR/events.jsonl,
 else ~/.shuttle/events.jsonl). The shuttle daemon tails that stream to rank
 in-flight workers by idle time and to render the sent-files trail on each card.
@@ -51,10 +49,12 @@ and creates the directory; SHUTTLE_EVENTS=off disables recording outright.
 Exits 0 on every path, including malformed input. Supported Claude and Codex hooks
 offer queued peer messages as additionalContext; Stop never wakes the session.
 SHUTTLE_MESSAGES=off disables mailbox registration and delivery.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runEventAndMessageHook(os.Stdin, os.Stdout)
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runEventAndMessageHook(a.env.Stdin, a.env.Stdout)
+		},
+	}
+	return hookEventCmd
 }
 
 // eventTypes maps harness hook names to the snake_case `type` the Elixir
@@ -77,12 +77,6 @@ var eventTypes = map[string]string{
 // the maintainer's file to 23 MB. Both readers keep working: WaitingTracker
 // never looks at toolInput, and SentFiles needs only `files`, which survives.
 const eventMaxLineBytes = 8 << 10
-
-// Injection points for the golden-file test: production never reassigns them.
-var (
-	eventNow  = time.Now
-	eventRand = func() int { return rand.Intn(32768) }
-)
 
 type eventHookInput struct {
 	HookEventName  string `json:"hook_event_name"`
@@ -226,22 +220,22 @@ func countBackgroundTasks(raw json.RawMessage) int {
 // runEventHook decodes the payload, renders the line, and appends it. Every
 // failure — unparseable stdin, unknown event name, disabled stream, unwritable
 // file — returns nil without output.
-func runEventHook(stdin io.Reader) error {
-	line, ok := renderEventLine(stdin)
+func (a *app) runEventHook(stdin io.Reader) error {
+	line, ok := a.renderEventLine(stdin)
 	if !ok {
 		return nil
 	}
-	path, enabled := eventsSink()
+	path, enabled := a.eventsSink()
 	if !enabled {
 		return nil
 	}
-	_ = appendEventLine(path, line)
+	_ = a.appendEventLine(path, line)
 	return nil
 }
 
 // renderEventLine builds the newline-terminated JSONL line for a payload, or
 // ok=false when the payload records nothing.
-func renderEventLine(stdin io.Reader) (string, bool) {
+func (a *app) renderEventLine(stdin io.Reader) (string, bool) {
 	var input eventHookInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return "", false
@@ -255,20 +249,20 @@ func renderEventLine(stdin io.Reader) (string, bool) {
 	if sessionID == "" {
 		sessionID = "unknown"
 	}
-	timestamp := eventNow().UnixMilli()
-	origin, err := resolveOwnHost("")
+	timestamp := a.eventNow().UnixMilli()
+	origin, err := a.resolveOwnHost("")
 	if err != nil {
 		origin = ""
 	}
 
 	line := eventLine{
-		ID:          sessionID + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(eventRand()),
+		ID:          sessionID + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
 		Timestamp:   timestamp,
 		Type:        eventType,
 		SessionID:   sessionID,
 		CWD:         input.CWD,
-		TmuxSession: currentTmuxSession(),
-		Harness:     harnessFor(input.TranscriptPath),
+		TmuxSession: a.currentTmuxSession(),
+		Harness:     a.harnessFor(input.TranscriptPath),
 		OriginName:  origin,
 	}
 	if eventType == "user_prompt_submit" && machinePrompt(input.Prompt) {
@@ -389,16 +383,16 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 // and reading it costs nothing). Otherwise ask tmux, but only inside tmux and
 // only for a second: this runs on the PreToolUse hot path, and a wedged tmux
 // server must not stall the agent.
-func currentTmuxSession() string {
-	if s := strings.TrimSpace(os.Getenv("SHUTTLE_TMUX_SESSION")); s != "" {
+func (a *app) currentTmuxSession() string {
+	if s := strings.TrimSpace(a.env.Getenv("SHUTTLE_TMUX_SESSION")); s != "" {
 		return s
 	}
-	if os.Getenv("TMUX") == "" {
+	if a.env.Getenv("TMUX") == "" {
 		return ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "#S").Output()
+	out, err := a.env.CommandContext(ctx, "tmux", "display-message", "-p", "#S").Output()
 	if err != nil {
 		return ""
 	}

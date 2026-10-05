@@ -6,12 +6,11 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
-	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // resolveShuttleJSON decorates mapping-valued Shuttle facets for a Shuttle JSON
 // view. It loads the agent registry only when the result contains a facet.
-func resolveShuttleJSON(felts ...*felt.Felt) error {
+func (a *app) resolveShuttleJSON(felts ...*felt.Felt) error {
 	hasFacet := false
 	for _, f := range felts {
 		if shuttle.HasFacet(f) {
@@ -22,7 +21,7 @@ func resolveShuttleJSON(felts ...*felt.Felt) error {
 	if !hasFacet {
 		return nil
 	}
-	reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
+	reg, err := shuttle.LoadAgentRegistry(a.env)
 	if err != nil {
 		return fmt.Errorf("loading agent registry: %w", err)
 	}

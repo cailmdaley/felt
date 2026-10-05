@@ -10,13 +10,12 @@ import (
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
-// withStubbedLiveSessions replaces the liveTmuxSessions func var with a fixed set
-// and restores it on cleanup.
-func withStubbedLiveSessions(t *testing.T, live map[string]bool) {
+// withStubbedLiveSessions is an app whose tmux server reports exactly live.
+func withStubbedLiveSessions(t *testing.T, live map[string]bool) *app {
 	t.Helper()
-	prev := liveTmuxSessions
-	liveTmuxSessions = func() map[string]bool { return live }
-	t.Cleanup(func() { liveTmuxSessions = prev })
+	a := testApp(t)
+	a.liveTmuxSessions = func() map[string]bool { return live }
+	return a
 }
 
 // seedShuttleRoleUID seeds a shuttle role with an explicit intrinsic uid (persisted
@@ -72,9 +71,9 @@ func TestShuttleStatus_JSONRowsAndStates(t *testing.T) {
 
 	runner := mustRead(t, storage, "proj/runner")
 	liveSession := shuttleTmuxSessionName(runner.ID, runner.UID)
-	withStubbedLiveSessions(t, map[string]bool{liveSession: true})
+	a := withStubbedLiveSessions(t, map[string]bool{liveSession: true})
 
-	out, err := runCommand(t, dir, "status", "--json")
+	out, _, err := executeApp(t, a, dir, "status", "--json")
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -109,9 +108,9 @@ func TestShuttleStatus_JSONRowsAndStates(t *testing.T) {
 func TestShuttleStatus_TableRendersAndExcludesNotes(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
-	withStubbedLiveSessions(t, map[string]bool{})
+	a := withStubbedLiveSessions(t, map[string]bool{})
 
-	out, err := runCommand(t, dir, "status")
+	out, _, err := executeApp(t, a, dir, "status")
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -129,9 +128,9 @@ func TestShuttleStatus_TableHidesClosedByDefault(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "live", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "done", felt.StatusClosed, oneshot(), nil)
-	withStubbedLiveSessions(t, map[string]bool{})
+	a := withStubbedLiveSessions(t, map[string]bool{})
 
-	out, err := runCommand(t, dir, "status")
+	out, _, err := executeApp(t, a, dir, "status")
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -159,9 +158,9 @@ func TestShuttleStatus_TableHidesClosedByDefault(t *testing.T) {
 func TestShuttleStatus_IncludeOrphans(t *testing.T) {
 	dir, _ := newStore(t)
 	// A live shuttle session that maps to no shuttle: facet in the store.
-	withStubbedLiveSessions(t, map[string]bool{"ghost-01KTHDNZS287ZSSG8X8V59XKW9-shuttle": true})
+	a := withStubbedLiveSessions(t, map[string]bool{"ghost-01KTHDNZS287ZSSG8X8V59XKW9-shuttle": true})
 
-	out, err := runCommand(t, dir, "status", "--include-orphans", "--json")
+	out, _, err := executeApp(t, a, dir, "status", "--include-orphans", "--json")
 	if err != nil {
 		t.Fatalf("status: %v\n%s", err, out)
 	}
@@ -187,9 +186,9 @@ func TestShuttlePs_AttributesOwner(t *testing.T) {
 	seedShuttleRoleUID(t, storage, "proj/worker", "01KTHDNZS287ZSSG8X8V59XKW2", felt.StatusActive, oneshot())
 	f := mustRead(t, storage, "proj/worker")
 	session := shuttleTmuxSessionName(f.ID, f.UID)
-	withStubbedLiveSessions(t, map[string]bool{session: true})
+	a := withStubbedLiveSessions(t, map[string]bool{session: true})
 
-	out, err := runCommand(t, dir, "ps", "--json")
+	out, _, err := executeApp(t, a, dir, "ps", "--json")
 	if err != nil {
 		t.Fatalf("ps: %v\n%s", err, out)
 	}
@@ -204,9 +203,9 @@ func TestShuttlePs_AttributesOwner(t *testing.T) {
 
 func TestShuttlePs_Empty(t *testing.T) {
 	dir, _ := newStore(t)
-	withStubbedLiveSessions(t, map[string]bool{})
+	a := withStubbedLiveSessions(t, map[string]bool{})
 
-	out, err := runCommand(t, dir, "ps")
+	out, _, err := executeApp(t, a, dir, "ps")
 	if err != nil {
 		t.Fatalf("ps: %v\n%s", err, out)
 	}
@@ -314,7 +313,7 @@ func TestListShuttleFibersAcrossStores_DedupsByUID(t *testing.T) {
 	// A distinct fiber only in store B.
 	seedShuttleRoleUID(t, storageB, "only-b", "01ONLYBUID00000000000000001", felt.StatusActive, oneshot())
 
-	entries, err := listShuttleFibersAcrossStores([]string{dirA, dirB})
+	entries, err := testApp(t).listShuttleFibersAcrossStores([]string{dirA, dirB})
 	if err != nil {
 		t.Fatalf("listShuttleFibersAcrossStores: %v", err)
 	}
@@ -335,19 +334,17 @@ func TestListShuttleFibersAcrossStores_DedupsByUID(t *testing.T) {
 func TestShuttleStores_Precedence(t *testing.T) {
 	// changeDir wins: an explicit -C / --store scopes to that single store.
 	dir, _ := newStore(t)
-	prevCD := changeDir
-	t.Cleanup(func() { changeDir = prevCD })
-	changeDir = dir
-	got, err := shuttleStores()
+	a := testApp(t)
+	a.dir = dir
+	got, err := a.shuttleStores()
 	if err != nil || len(got) != 1 || got[0] != dir {
 		t.Fatalf("with -C, shuttleStores = %v (%v), want [%s]", got, err, dir)
 	}
 
 	// No -C: SHUTTLE_STORES wins over the registry file.
-	changeDir = ""
 	t.Setenv("SHUTTLE_STORES", "/store/a,/store/b,/store/a")
 	t.Setenv("SHUTTLE_STORES_FILE", "/nonexistent/should/be/ignored.json")
-	got, err = shuttleStores()
+	got, err = testApp(t).shuttleStores()
 	if err != nil {
 		t.Fatalf("shuttleStores: %v", err)
 	}
@@ -362,7 +359,7 @@ func TestShuttleStores_Precedence(t *testing.T) {
 		t.Fatalf("write registry: %v", err)
 	}
 	t.Setenv("SHUTTLE_STORES_FILE", regPath)
-	got, err = shuttleStores()
+	got, err = testApp(t).shuttleStores()
 	if err != nil {
 		t.Fatalf("shuttleStores: %v", err)
 	}
@@ -379,13 +376,11 @@ func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRoleUID(t, storage, "proj/deep/task", "01ADDRUID000000000000000001", felt.StatusActive, oneshot())
 
-	prevCD := changeDir
-	t.Cleanup(func() { changeDir = prevCD })
-	changeDir = "" // no -C: must fall through to the configured stores
+	// No -C: resolution falls through to the configured stores.
 	t.Setenv("SHUTTLE_STORES", dir)
 
 	for _, q := range []string{"task", "proj/deep/task"} {
-		f, err := shuttleAddressFiber(q)
+		f, err := testApp(t).shuttleAddressFiber(q)
 		if err != nil {
 			t.Fatalf("shuttleAddressFiber(%q): %v", q, err)
 		}
@@ -397,7 +392,7 @@ func TestShuttleAddressFiber_FromAnywhere(t *testing.T) {
 		}
 	}
 
-	if _, err := shuttleAddressFiber("no-such-fiber"); err == nil {
+	if _, err := testApp(t).shuttleAddressFiber("no-such-fiber"); err == nil {
 		t.Fatal("expected an error for an unresolvable query")
 	}
 }
@@ -432,7 +427,7 @@ func TestCanonicalFiberID_SubstoreSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	entries, err := listShuttleFibers(root)
+	entries, err := testApp(t).listShuttleFibers(root)
 	if err != nil {
 		t.Fatalf("listShuttleFibers: %v", err)
 	}
@@ -464,7 +459,7 @@ func TestListShuttleFibers_SkipsNotesAndMalformed(t *testing.T) {
 		t.Fatalf("Write bad: %v", err)
 	}
 
-	entries, err := listShuttleFibers(dir)
+	entries, err := testApp(t).listShuttleFibers(dir)
 	if err != nil {
 		t.Fatalf("listShuttleFibers: %v", err)
 	}

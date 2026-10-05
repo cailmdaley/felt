@@ -229,10 +229,9 @@ func TestCollectTmuxServerReceiptFailsOnlyOnDaemonBorn(t *testing.T) {
 		{tmuxOriginAbsent, receiptHealthy},
 	} {
 		t.Run(tc.origin, func(t *testing.T) {
-			restore := stubTmuxOrigin(tmuxOriginReport{Origin: tc.origin, ServerPID: "22457"})
-			defer restore()
+			a := stubTmuxOrigin(t, tmuxOriginReport{Origin: tc.origin, ServerPID: "22457"})
 
-			rec := collectTmuxServerReceipt()
+			rec := a.collectTmuxServerReceipt()
 			if rec == nil {
 				t.Fatal("expected a tmux-server receipt on darwin")
 			}
@@ -255,10 +254,9 @@ func TestRuntimeReceiptSurfacesDaemonBornTmuxServer(t *testing.T) {
 		t.Skip("the tmux-server receipt is macOS-only")
 	}
 
-	restore := stubTmuxOrigin(tmuxOriginReport{Origin: tmuxOriginDaemonBorn, ServerPID: "22457"})
-	defer restore()
+	a := stubTmuxOrigin(t, tmuxOriginReport{Origin: tmuxOriginDaemonBorn, ServerPID: "22457"})
 
-	status, repair := combineDoctorReceiptStatus(receiptHealthy, collectTmuxServerReceipt().Status)
+	status, repair := combineDoctorReceiptStatus(receiptHealthy, a.collectTmuxServerReceipt().Status)
 	if status != receiptMismatch {
 		t.Fatalf("combined status %s, want %s", status, receiptMismatch)
 	}
@@ -293,8 +291,10 @@ func TestTmuxRepairDoesNotReplaceAnotherComponentsRepair(t *testing.T) {
 
 }
 
-func stubTmuxOrigin(report tmuxOriginReport) func() {
-	prev := detectTmuxOrigin
-	detectTmuxOrigin = func() tmuxOriginReport { return report }
-	return func() { detectTmuxOrigin = prev }
+// stubTmuxOrigin is an app whose tmux server reports report.
+func stubTmuxOrigin(t *testing.T, report tmuxOriginReport) *app {
+	t.Helper()
+	a := testApp(t)
+	a.detectTmuxOrigin = func() tmuxOriginReport { return report }
+	return a
 }

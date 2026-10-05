@@ -67,16 +67,16 @@ func mustRead(t *testing.T, storage *felt.Storage, id string) *felt.Felt {
 	return f
 }
 
-// withStubbedTmux replaces the tmux func vars; returns a pointer to the slice of
-// killed session names. `live` is the set of session names reported as existing.
-func withStubbedTmux(t *testing.T, live map[string]bool) *[]string {
+// withStubbedTmux is an app whose tmux probes answer from live (the set of
+// session names reported as existing) and record each kill in the returned
+// slice instead of reaching a tmux server.
+func withStubbedTmux(t *testing.T, live map[string]bool) (*app, *[]string) {
 	t.Helper()
-	prevExists, prevKill := tmuxSessionExists, killTmuxSession
+	a := testApp(t)
 	killed := &[]string{}
-	tmuxSessionExists = func(name string) bool { return live[name] }
-	killTmuxSession = func(name string) error { *killed = append(*killed, name); return nil }
-	t.Cleanup(func() { tmuxSessionExists = prevExists; killTmuxSession = prevKill })
-	return killed
+	a.tmuxSessionExists = func(name string) bool { return live[name] }
+	a.killTmuxSession = func(name string) error { *killed = append(*killed, name); return nil }
+	return a, killed
 }
 
 func oneshot() map[string]any {
@@ -128,9 +128,9 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 	seedShuttleRole(t, storage, "proj/task", felt.StatusActive, oneshot(), nil)
 	f0 := mustRead(t, storage, "proj/task")
 	live := shuttleTmuxSessionName(f0.ID, f0.UID)
-	killed := withStubbedTmux(t, map[string]bool{live: true})
+	a, killed := withStubbedTmux(t, map[string]bool{live: true})
 
-	if out, err := runCommand(t, dir, "pause", "proj/task"); err != nil {
+	if out, _, err := executeApp(t, a, dir, "pause", "proj/task"); err != nil {
 		t.Fatalf("pause: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "proj/task")
@@ -146,9 +146,9 @@ func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	f := mustRead(t, storage, "task")
-	killed := withStubbedTmux(t, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
+	a, killed := withStubbedTmux(t, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
 
-	if out, err := runCommand(t, dir, "pause", "task", "--no-kill"); err != nil {
+	if out, _, err := executeApp(t, a, dir, "pause", "task", "--no-kill"); err != nil {
 		t.Fatalf("pause --no-kill: %v\n%s", err, out)
 	}
 	if len(*killed) != 0 {
@@ -701,11 +701,10 @@ func TestShuttleAccept_DaemonThatDoesNotAnswerInTimeIsNotUnreachable(t *testing.
 	defer close(release)
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	prev := daemonLifecycleTimeout
-	daemonLifecycleTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { daemonLifecycleTimeout = prev })
+	a := testApp(t)
+	a.daemonLifecycleTimeout = 200 * time.Millisecond
 
-	out, err := runCommand(t, dir, "accept", "f")
+	out, _, err := executeApp(t, a, dir, "accept", "f")
 	if err == nil {
 		t.Fatalf("an unanswered accept reported success:\n%s", out)
 	}

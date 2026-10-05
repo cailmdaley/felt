@@ -51,9 +51,6 @@ func messageTargetDaemonWithOrigins(t *testing.T, sessions []messaging.Session, 
 
 func isolateMessageFiberStore(t *testing.T, store string) {
 	t.Helper()
-	previousDir := changeDir
-	changeDir = ""
-	t.Cleanup(func() { changeDir = previousDir })
 	t.Setenv("SHUTTLE_STORES", store)
 	t.Setenv("SHUTTLE_STORES_FILE", filepath.Join(t.TempDir(), "stores.json"))
 	t.Setenv("SHUTTLE_AGENTS_FILE", filepath.Join(t.TempDir(), "agents.json"))
@@ -78,7 +75,7 @@ func writeMessageTargetFiberWithID(t *testing.T, id, uid string, block map[strin
 }
 
 func TestResolveMessageTargetCanonicalAddress(t *testing.T) {
-	got, err := resolveMessageTarget("shuttle://node/claude-code/native-id")
+	got, err := testApp(t).resolveMessageTarget("shuttle://node/claude-code/native-id")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +125,7 @@ func TestResolveMessageTargetBareSessionAmbiguityNamesCandidates(t *testing.T) {
 		{Address: "shuttle://node-b/codex/session-42", Fiber: "work/two"},
 	}, nil)
 
-	_, err := resolveMessageTarget("session-42")
+	_, err := testApp(t).resolveMessageTarget("session-42")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
 		!strings.Contains(err.Error(), "shuttle://node-a/claude/session-42") ||
 		!strings.Contains(err.Error(), "shuttle://node-b/codex/session-42") {
@@ -145,7 +142,7 @@ func TestResolveMessageTargetBareSessionUsesLedgerAndNormalizesHarness(t *testin
 		Fiber:   "work/worker",
 	}})
 
-	got, err := resolveMessageTarget(messageTargetSession)
+	got, err := testApp(t).resolveMessageTarget(messageTargetSession)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +161,7 @@ func TestResolveMessageTargetAmbiguityCombinesDiscoveryAndLedger(t *testing.T) {
 		Harness: "codex",
 	}})
 
-	_, err := resolveMessageTarget("session-42")
+	_, err := testApp(t).resolveMessageTarget("session-42")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
 		!strings.Contains(err.Error(), "shuttle://live-node/claude/session-42") ||
 		!strings.Contains(err.Error(), "shuttle://ledger-node/codex/session-42") {
@@ -193,7 +190,7 @@ func TestResolveMessageTargetFiberPathSlugAndUID(t *testing.T) {
 
 	for _, target := range []string{"work/worker", "worker", messageTargetFiberUID} {
 		t.Run(target, func(t *testing.T) {
-			got, err := resolveMessageTarget(target)
+			got, err := testApp(t).resolveMessageTarget(target)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -216,7 +213,7 @@ func TestResolveMessageTargetFiberRequiresLedgerEvidence(t *testing.T) {
 	isolateMessageFiberStore(t, store)
 	messageTargetDaemon(t, nil, nil)
 
-	_, err := resolveMessageTarget("work/worker")
+	_, err := testApp(t).resolveMessageTarget("work/worker")
 	if err == nil || !strings.Contains(err.Error(), "no session-ledger pairing") {
 		t.Fatalf("expected missing ledger evidence error, got %v", err)
 	}
@@ -243,7 +240,7 @@ func TestResolveMessageTargetCodexAppUsesPeerThreadAddress(t *testing.T) {
 	}})
 
 	for _, target := range []string{"work/worker", transcriptID, threadID} {
-		got, err := resolveMessageTarget(target)
+		got, err := testApp(t).resolveMessageTarget(target)
 		if err != nil {
 			t.Fatalf("resolve %q: %v", target, err)
 		}
@@ -273,7 +270,7 @@ func TestResolveMessageTargetCodexAppUsesLedgerThreadID(t *testing.T) {
 		ThreadID: threadID, Host: "worker-node", Harness: "codex", At: 2, Kind: "claim",
 	}})
 
-	got, err := resolveMessageTarget("work/worker")
+	got, err := testApp(t).resolveMessageTarget("work/worker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +289,7 @@ func TestResolveMessageTargetFiberWithoutRuntimeSessionIsClear(t *testing.T) {
 	isolateMessageFiberStore(t, store)
 	messageTargetDaemon(t, nil, nil)
 
-	_, err := resolveMessageTarget("work/worker")
+	_, err := testApp(t).resolveMessageTarget("work/worker")
 	if err == nil || !strings.Contains(err.Error(), "no recorded worker session") || !strings.Contains(err.Error(), "session_uuid") {
 		t.Fatalf("expected missing worker-session error, got %v", err)
 	}
@@ -301,7 +298,7 @@ func TestResolveMessageTargetFiberWithoutRuntimeSessionIsClear(t *testing.T) {
 func TestResolveMessageTargetNotFound(t *testing.T) {
 	messageTargetDaemon(t, nil, nil)
 	isolateMessageFiberStore(t, "")
-	_, err := resolveMessageTarget("unknown-target")
+	_, err := testApp(t).resolveMessageTarget("unknown-target")
 	if err == nil || !strings.Contains(err.Error(), "unknown-target") || !strings.Contains(err.Error(), "did not match") {
 		t.Fatalf("expected not-found error, got %v", err)
 	}
@@ -326,7 +323,7 @@ func TestResolveMessageTargetCanUseLedgerWhenDiscoveryFails(t *testing.T) {
 	})
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	got, err := resolveMessageTarget(messageTargetSession)
+	got, err := testApp(t).resolveMessageTarget(messageTargetSession)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +344,7 @@ func TestResolveMessageTargetRejectsFiberSlugAcrossStores(t *testing.T) {
 	isolateMessageFiberStore(t, first+","+second)
 	messageTargetDaemon(t, nil, nil)
 
-	_, err := resolveMessageTarget("review")
+	_, err := testApp(t).resolveMessageTarget("review")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
 		!strings.Contains(err.Error(), filepath.Base(first)) || !strings.Contains(err.Error(), filepath.Base(second)) {
 		t.Fatalf("expected both store candidates %q and %q, got %q", first, second, err)
@@ -362,7 +359,7 @@ func TestResolveMessageTargetRefusesGuessedFiberSlug(t *testing.T) {
 	isolateMessageFiberStore(t, store)
 	messageTargetDaemon(t, nil, nil)
 
-	_, err := resolveMessageTarget("proj/typo/worker")
+	_, err := testApp(t).resolveMessageTarget("proj/typo/worker")
 	if err == nil || !strings.Contains(err.Error(), "guessed") || !strings.Contains(err.Error(), "worker") {
 		t.Fatalf("expected guessed fiber refusal, got %v", err)
 	}
@@ -395,7 +392,7 @@ func TestResolveMessageTargetPrefersNewestLedgerOverStaleRuntime(t *testing.T) {
 		},
 	})
 
-	address, err := resolveMessageTarget("work/worker")
+	address, err := testApp(t).resolveMessageTarget("work/worker")
 	if err != nil || address != "shuttle://new-node/claude/new-session" {
 		t.Fatalf("expected the ledger's newest worker, got %q, %v", address, err)
 	}
@@ -432,7 +429,7 @@ func TestResolveMessageTargetRefusesWhenOwningLedgerIsNotFresh(t *testing.T) {
 				Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
 			}}, origins)
 
-			_, err := resolveMessageTarget("work/worker")
+			_, err := testApp(t).resolveMessageTarget("work/worker")
 			if err == nil || !strings.Contains(err.Error(), `host "new-node"`) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected refusal for a %s owning-host ledger, got %v", tc.name, err)
 			}
@@ -462,7 +459,7 @@ func TestResolveMessageTargetRefusesCodexTranscriptWithoutThread(t *testing.T) {
 		},
 	})
 
-	_, err := resolveMessageTarget("work/worker")
+	_, err := testApp(t).resolveMessageTarget("work/worker")
 	if err == nil || !strings.Contains(err.Error(), "thread id is not yet known") ||
 		!strings.Contains(err.Error(), "new-transcript") || !strings.Contains(err.Error(), "explicit shuttle:// address") {
 		t.Fatalf("expected Codex transcript refusal, got %v", err)
@@ -484,7 +481,7 @@ func TestResolveMessageTargetIgnoresEmptyBackfillRow(t *testing.T) {
 		{Fiber: "work/worker", UID: messageTargetFiberUID, Host: "worker-node", Harness: "codex", At: 2, Kind: "dispatch"},
 	})
 
-	got, err := resolveMessageTarget("work/worker")
+	got, err := testApp(t).resolveMessageTarget("work/worker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +507,7 @@ func TestResolveMessageTargetFiberFailsClosedWhenLedgerUnavailable(t *testing.T)
 	})
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	_, err := resolveMessageTarget("work/worker")
+	_, err := testApp(t).resolveMessageTarget("work/worker")
 	if err == nil || !strings.Contains(err.Error(), "session ledger is unavailable") ||
 		!strings.Contains(err.Error(), "ledger unavailable") {
 		t.Fatalf("expected ledger-unavailable refusal, got %v", err)
@@ -535,7 +532,7 @@ func TestResolveMessageTargetRejectsBareIDThatNamesSessionAndFiber(t *testing.T)
 		Host: "worker-node", Harness: "claude-code", At: 1, Kind: "dispatch",
 	}})
 
-	_, err := resolveMessageTarget("session-42")
+	_, err := testApp(t).resolveMessageTarget("session-42")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
 		!strings.Contains(err.Error(), "shuttle://session-node/claude/session-42") ||
 		!strings.Contains(err.Error(), "fiber session-42") {
@@ -555,12 +552,12 @@ func TestResolveMessageTargetAmbiguousSlugListsFullPaths(t *testing.T) {
 	isolateMessageFiberStore(t, store)
 	messageTargetDaemon(t, nil, nil)
 
-	_, err := resolveMessageTarget("data")
+	_, err := testApp(t).resolveMessageTarget("data")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") ||
 		!strings.Contains(err.Error(), "fiber science/cmbx/data") || !strings.Contains(err.Error(), "fiber science/lensing/data") {
 		t.Fatalf("expected both full paths, got %v", err)
 	}
-	if _, err := shuttleAddressFiber("data"); err == nil || !strings.Contains(err.Error(), "science/cmbx/data") || !strings.Contains(err.Error(), "science/lensing/data") {
+	if _, err := testApp(t).shuttleAddressFiber("data"); err == nil || !strings.Contains(err.Error(), "science/cmbx/data") || !strings.Contains(err.Error(), "science/lensing/data") {
 		t.Fatalf("address fiber lookup did not list candidates: %v", err)
 	}
 }
@@ -585,7 +582,7 @@ func TestResolveMessageTargetUniqueNestedSlugResolvesLikeFullPath(t *testing.T) 
 	}})
 	want := "shuttle://worker-node/claude/" + messageTargetSession
 	for _, target := range []string{"science/cmbx/sims/glass/6x2pt-mocks", "6x2pt-mocks", "glass/6x2pt-mocks"} {
-		got, err := resolveMessageTarget(target)
+		got, err := testApp(t).resolveMessageTarget(target)
 		if err != nil || got != want {
 			t.Fatalf("%s resolved to %q, %v; want %q", target, got, err, want)
 		}

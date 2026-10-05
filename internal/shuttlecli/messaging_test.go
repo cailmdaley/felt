@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -66,21 +65,23 @@ func TestReadMessageRequestFrameReturnsAtNewline(t *testing.T) {
 }
 
 func TestBuildAttachmentOnlyMessage(t *testing.T) {
-	oldFiles, oldID, oldFrom, oldFile := messageOpts.attachments, messageOpts.id, messageOpts.from, messageOpts.file
-	t.Cleanup(func() {
-		messageOpts.attachments, messageOpts.id, messageOpts.from, messageOpts.file = oldFiles, oldID, oldFrom, oldFile
-	})
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "bytes.bin")
 	want := []byte{0, 255, 10, 128}
 	if err := os.WriteFile(path, want, 0600); err != nil {
 		t.Fatal(err)
 	}
-	messageOpts.attachments, messageOpts.id, messageOpts.from, messageOpts.file = []string{path}, "file-only", "sender", ""
-	args := []string{"shuttle://host/codex/id"}
-	if err := shuttleMessageCmd.Args(shuttleMessageCmd, args); err != nil {
+	a := newApp(testEnv(t))
+	var opts messageOptions
+	cmd := a.messageCmd(&opts)
+	if err := cmd.ParseFlags([]string{"--attach", path, "--message-id", "file-only", "--from", "sender"}); err != nil {
 		t.Fatal(err)
 	}
-	request, err := buildMessageRequest(strings.NewReader(""), args, &messageOpts)
+	args := []string{"shuttle://host/codex/id"}
+	if err := cmd.Args(cmd, args); err != nil {
+		t.Fatal(err)
+	}
+	request, err := a.buildMessageRequest(strings.NewReader(""), args, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,11 +91,9 @@ func TestBuildAttachmentOnlyMessage(t *testing.T) {
 }
 
 func TestBuildMessageRequestContextOnlyOptOut(t *testing.T) {
-	oldWake, oldContextOnly := messageOpts.wake, messageOpts.contextOnly
-	t.Cleanup(func() { messageOpts.wake, messageOpts.contextOnly = oldWake, oldContextOnly })
-	messageOpts.wake, messageOpts.contextOnly = true, true
-
-	request, err := buildMessageRequest(strings.NewReader("please read"), []string{"shuttle://host/codex/id"}, &messageOpts)
+	t.Parallel()
+	opts := messageOptions{wake: true, contextOnly: true}
+	request, err := newApp(testEnv(t)).buildMessageRequest(strings.NewReader("please read"), []string{"shuttle://host/codex/id"}, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,11 +103,9 @@ func TestBuildMessageRequestContextOnlyOptOut(t *testing.T) {
 }
 
 func TestBuildMessageRequestDefaultsToWake(t *testing.T) {
-	oldWake, oldContextOnly := messageOpts.wake, messageOpts.contextOnly
-	t.Cleanup(func() { messageOpts.wake, messageOpts.contextOnly = oldWake, oldContextOnly })
-	messageOpts.wake, messageOpts.contextOnly = true, false
-
-	request, err := buildMessageRequest(strings.NewReader("please act"), []string{"shuttle://host/codex/id"}, &messageOpts)
+	t.Parallel()
+	opts := messageOptions{wake: true}
+	request, err := newApp(testEnv(t)).buildMessageRequest(strings.NewReader("please act"), []string{"shuttle://host/codex/id"}, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,22 +115,16 @@ func TestBuildMessageRequestDefaultsToWake(t *testing.T) {
 }
 
 func TestMessageCobraWakeFlags(t *testing.T) {
-	oldWake, oldContextOnly := messageOpts.wake, messageOpts.contextOnly
-	wakeFlag := shuttleMessageCmd.Flags().Lookup("wake")
-	contextOnlyFlag := shuttleMessageCmd.Flags().Lookup("context-only")
-	oldWakeChanged, oldContextOnlyChanged := wakeFlag.Changed, contextOnlyFlag.Changed
-	t.Cleanup(func() {
-		messageOpts.wake, messageOpts.contextOnly = oldWake, oldContextOnly
-		_ = shuttleMessageCmd.Flags().Set("wake", strconv.FormatBool(oldWake))
-		_ = shuttleMessageCmd.Flags().Set("context-only", strconv.FormatBool(oldContextOnly))
-		wakeFlag.Changed, contextOnlyFlag.Changed = oldWakeChanged, oldContextOnlyChanged
-	})
+	t.Parallel()
+	a := newApp(testEnv(t))
+	var opts messageOptions
+	cmd := a.messageCmd(&opts)
 
-	wake, err := shuttleMessageCmd.Flags().GetBool("wake")
+	wake, err := cmd.Flags().GetBool("wake")
 	if err != nil {
 		t.Fatal(err)
 	}
-	contextOnly, err := shuttleMessageCmd.Flags().GetBool("context-only")
+	contextOnly, err := cmd.Flags().GetBool("context-only")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,10 +132,10 @@ func TestMessageCobraWakeFlags(t *testing.T) {
 		t.Fatalf("unexpected message flag defaults: wake=%t context-only=%t", wake, contextOnly)
 	}
 
-	if err := shuttleMessageCmd.Flags().Set("context-only", "true"); err != nil {
+	if err := cmd.Flags().Set("context-only", "true"); err != nil {
 		t.Fatal(err)
 	}
-	request, err := buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"}, &messageOpts)
+	request, err := a.buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"}, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,13 +143,13 @@ func TestMessageCobraWakeFlags(t *testing.T) {
 		t.Fatal("--context-only should produce a context-only request")
 	}
 
-	if err := shuttleMessageCmd.Flags().Set("context-only", "false"); err != nil {
+	if err := cmd.Flags().Set("context-only", "false"); err != nil {
 		t.Fatal(err)
 	}
-	if err := shuttleMessageCmd.Flags().Set("wake", "false"); err != nil {
+	if err := cmd.Flags().Set("wake", "false"); err != nil {
 		t.Fatal(err)
 	}
-	request, err = buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"}, &messageOpts)
+	request, err = a.buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"}, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +183,7 @@ func TestPostMessageNarrowsWakeReceiptStages(t *testing.T) {
 			}))
 			defer server.Close()
 			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			receipt, err := postMessage(request)
+			receipt, err := testApp(t).postMessage(request)
 			if calls != 1 {
 				t.Fatalf("message retried automatically: %d", calls)
 			}
@@ -221,32 +212,18 @@ func TestMessageExitFollowsReceiptEvidence(t *testing.T) {
 }
 
 func TestMessageHelpDocumentsReceiptExitStatuses(t *testing.T) {
+	t.Parallel()
+	long := newApp(testEnv(t)).shuttleMessageCmd().Long
 	for _, detail := range []string{"sending <message-id> to <resolved address>", "If interrupted, retry with", "Exit 0 means accepted, submitted, queued, or", "exit 1 means rejected, unknown"} {
-		if !strings.Contains(shuttleMessageCmd.Long, detail) {
+		if !strings.Contains(long, detail) {
 			t.Errorf("message help omits %q", detail)
 		}
 	}
 }
 
 func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
-	oldID, oldFile, oldFrom := messageOpts.id, messageOpts.file, messageOpts.from
-	oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON := messageOpts.wake, messageOpts.contextOnly, messageOpts.local, messageOpts.requestJSON, jsonOutput
-	oldIn, oldOut, oldErr := shuttleMessageCmd.InOrStdin(), shuttleMessageCmd.OutOrStdout(), shuttleMessageCmd.ErrOrStderr()
-	oldAttachments := messageOpts.attachments
-	t.Cleanup(func() {
-		messageOpts.id, messageOpts.file, messageOpts.from = oldID, oldFile, oldFrom
-		messageOpts.wake, messageOpts.contextOnly, messageOpts.local, messageOpts.requestJSON, jsonOutput = oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON
-		messageOpts.attachments = oldAttachments
-		shuttleMessageCmd.SetIn(oldIn)
-		shuttleMessageCmd.SetOut(oldOut)
-		shuttleMessageCmd.SetErr(oldErr)
-	})
-	messageOpts.id, messageOpts.file, messageOpts.from = "msg-interrupted", "", "test sender"
-	messageOpts.wake, messageOpts.contextOnly, messageOpts.local, messageOpts.requestJSON, jsonOutput = true, false, false, false, false
+	t.Parallel()
 	var stderr synchronizedMessageBuffer
-	shuttleMessageCmd.SetIn(strings.NewReader(""))
-	shuttleMessageCmd.SetOut(io.Discard)
-	shuttleMessageCmd.SetErr(&stderr)
 
 	// The alias resolves before the announcement, so the printed and posted
 	// address is the canonical one the retry and its dedup hash will use.
@@ -267,9 +244,16 @@ func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: messaging.StatusAccepted, Transport: "peer"})
 	}))
 	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
+	env := testEnv(t)
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	var opts messageOptions
+	cmd := newApp(env).messageCmd(&opts)
+	opts.id, opts.from = "msg-interrupted", "test sender"
+	cmd.SetIn(strings.NewReader(""))
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(&stderr)
 
-	if err := shuttleMessageCmd.RunE(shuttleMessageCmd, []string{input, "hello"}); err != nil {
+	if err := cmd.RunE(cmd, []string{input, "hello"}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(stderr.String(), "sending msg-interrupted to "+address+"\n") {
@@ -319,7 +303,7 @@ func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
 			}))
 			defer server.Close()
 			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			receipt, err := postMessage(request)
+			receipt, err := testApp(t).postMessage(request)
 			if calls != 1 {
 				t.Fatalf("unexpected fallback or retry: %d calls", calls)
 			}
@@ -382,7 +366,7 @@ func TestPostMessagePreservesRequestAndReceipt(t *testing.T) {
 	defer server.Close()
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	got, err := postMessage(want)
+	got, err := testApp(t).postMessage(want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +383,7 @@ func TestPostMessageReturnsNon2xxReceipt(t *testing.T) {
 	defer server.Close()
 	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	receipt, err := postMessage(messaging.Request{MessageID: "msg-1", Address: "shuttle://host/codex/id"})
+	receipt, err := testApp(t).postMessage(messaging.Request{MessageID: "msg-1", Address: "shuttle://host/codex/id"})
 	if err == nil {
 		t.Fatal("expected non-2xx error")
 	}
@@ -417,7 +401,7 @@ func TestPostMessageDiscardsUncorrelatedReceipts(t *testing.T) {
 			}))
 			defer server.Close()
 			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			receipt, err := postMessage(messaging.Request{MessageID: "requested", Address: "shuttle://host/codex/requested"})
+			receipt, err := testApp(t).postMessage(messaging.Request{MessageID: "requested", Address: "shuttle://host/codex/requested"})
 			if err == nil || !reflect.DeepEqual(receipt, messaging.Receipt{}) {
 				t.Fatalf("unrelated receipt retained: %#v, %v", receipt, err)
 			}
@@ -428,10 +412,10 @@ func TestPostMessageDiscardsUncorrelatedReceipts(t *testing.T) {
 func TestResolveMessageSenderIsReplyAddress(t *testing.T) {
 	t.Setenv("SHUTTLE_HOST", "sender")
 	t.Setenv("CODEX_THREAD_ID", "thread/id")
-	if got := resolveMessageSender(""); got != "shuttle://sender/codex/thread%2Fid" {
+	if got := testApp(t).resolveMessageSender(""); got != "shuttle://sender/codex/thread%2Fid" {
 		t.Fatalf("sender = %q", got)
 	}
-	if got := resolveMessageSender("explicit"); got != "explicit" {
+	if got := testApp(t).resolveMessageSender("explicit"); got != "explicit" {
 		t.Fatalf("explicit sender = %q", got)
 	}
 }
@@ -443,11 +427,11 @@ func TestResolveMessageSenderFromClaudeCodeSession(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 	t.Setenv("CLAUDE_SESSION_ID", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "f95c9363-1fc8-4d7c-bdb2-7910930a47e7")
-	if got := resolveMessageSender(""); got != "shuttle://sender/claude/f95c9363-1fc8-4d7c-bdb2-7910930a47e7" {
+	if got := testApp(t).resolveMessageSender(""); got != "shuttle://sender/claude/f95c9363-1fc8-4d7c-bdb2-7910930a47e7" {
 		t.Fatalf("sender = %q", got)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	if got := resolveMessageSender(""); got != "external" {
+	if got := testApp(t).resolveMessageSender(""); got != "external" {
 		t.Fatalf("sender outside a harness = %q", got)
 	}
 }
@@ -475,7 +459,7 @@ func TestResolveMessageSenderFromPiSession(t *testing.T) {
 			t.Setenv("CLAUDE_SESSION_ID", "")
 			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.claude)
 			t.Setenv("PI_SESSION_ID", tc.piID)
-			if got := resolveMessageSender(""); got != tc.want {
+			if got := testApp(t).resolveMessageSender(""); got != tc.want {
 				t.Fatalf("sender = %q, want %q", got, tc.want)
 			}
 		})

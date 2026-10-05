@@ -90,11 +90,11 @@ func shuttleNonEmpty(s, fallback string) string {
 // resolveProjectDirFlag expands and validates a --project-dir value: $ENV and ~
 // expansion, absolute resolution, and an existence + is-directory check, so an
 // install fails loud here rather than at dispatch on a non-existent cwd.
-func resolveProjectDirFlag(raw string) (string, error) {
+func (a *app) resolveProjectDirFlag(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", fmt.Errorf("--project-dir is required")
 	}
-	abs, err := expandUserPath(os.ExpandEnv(raw))
+	abs, err := a.expandUserPath(os.ExpandEnv(raw))
 	if err != nil {
 		return "", fmt.Errorf("resolving project dir %q: %w", raw, err)
 	}

@@ -28,7 +28,7 @@ func TestCheckHostDrift(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := shuttleFeltWithBlock(t, map[string]any{"agent": "claude-sonnet", "host": tc.host})
-			issues := checkHostDrift([]*felt.Felt{f})
+			issues := testApp(t).checkHostDrift([]*felt.Felt{f})
 			if tc.warn {
 				if len(issues) != 1 {
 					t.Fatalf("host %q: got %d issues, want 1", tc.host, len(issues))
@@ -52,7 +52,7 @@ func TestCheckHostDriftIgnoresNonShuttleFibers(t *testing.T) {
 	withOwnHost(t, "studio-air")
 
 	f := shuttleFeltWithBlock(t, nil)
-	if issues := checkHostDrift([]*felt.Felt{f}); len(issues) != 0 {
+	if issues := testApp(t).checkHostDrift([]*felt.Felt{f}); len(issues) != 0 {
 		t.Fatalf("unexpected issues %v", issues)
 	}
 }

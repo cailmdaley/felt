@@ -52,12 +52,12 @@ func TestResolveRemotes_SharedFixtures(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := normalizeRemotes(&doc); err != nil {
+			if err := testApp(t).normalizeRemotes(&doc); err != nil {
 				t.Fatal(err)
 			}
 
 			got := []resolvedRemoteRow{}
-			for _, r := range resolveRemotes(doc, fixture.Discovered) {
+			for _, r := range testApp(t).resolveRemotes(doc, fixture.Discovered) {
 				got = append(got, resolvedRemoteRow{Name: r.Name, URL: r.URL, Source: r.Source, SSH: r.SSH, Port: r.Port})
 			}
 			if !reflect.DeepEqual(got, fixture.Resolved) {
@@ -72,10 +72,10 @@ func TestAdmitDiscovered_TakesDocumentDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := normalizeRemotes(&doc); err != nil {
+	if err := testApp(t).normalizeRemotes(&doc); err != nil {
 		t.Fatal(err)
 	}
-	got := admitDiscovered(doc, []discoveredPeer{{Name: "hub-a", URL: "https://hub-a.example.ts.net"}})
+	got := testApp(t).admitDiscovered(doc, []discoveredPeer{{Name: "hub-a", URL: "https://hub-a.example.ts.net"}})
 	if len(got) != 1 {
 		t.Fatalf("got %+v", got)
 	}
@@ -111,7 +111,7 @@ func TestRemotesList_ShowsDiscoveredPeersWithSource(t *testing.T) {
 	]}`)
 
 	out := captureStdout(t, func() {
-		if err := remotesListCmd.RunE(remotesListCmd, nil); err != nil {
+		if err := testApp(t).remotesListCmd().RunE(testApp(t).remotesListCmd(), nil); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -129,7 +129,7 @@ func TestRemotesList_ShowsDiscoveredPeersWithSource(t *testing.T) {
 		}
 	}
 
-	remotes, err := resolvedRemotes()
+	remotes, err := testApp(t).resolvedRemotes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestRemotesList_DaemonUnreachableListsConfiguredOnly(t *testing.T) {
 	writeRemotes(t, `{"version":1,"remotes":[{"name":"hub-n","port":4005}]}`)
 
 	out := captureStdout(t, func() {
-		if err := remotesListCmd.RunE(remotesListCmd, nil); err != nil {
+		if err := testApp(t).remotesListCmd().RunE(testApp(t).remotesListCmd(), nil); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -165,11 +165,11 @@ func TestRouteOwnerForCommand_AcceptsDiscoveredPeer(t *testing.T) {
 	  {"name":"hub-a","url":"https://hub-a.example.ts.net"}
 	]}`)
 
-	owner, err := routeOwnerForCommand(reopenCmd, []string{"some-fiber"}, "hub-a")
+	owner, err := testApp(t).routeOwnerForCommand(testApp(t).reopenCmd(), []string{"some-fiber"}, "hub-a")
 	if err != nil || owner != "hub-a" {
 		t.Fatalf("routeOwnerForCommand = %q, %v; want hub-a", owner, err)
 	}
-	if _, err := routeOwnerForCommand(reopenCmd, []string{"some-fiber"}, "hub-z"); err == nil ||
+	if _, err := testApp(t).routeOwnerForCommand(testApp(t).reopenCmd(), []string{"some-fiber"}, "hub-z"); err == nil ||
 		!strings.Contains(err.Error(), "nor a discovered tailnet peer") {
 		t.Fatalf("unknown host should be refused, got %v", err)
 	}
@@ -178,11 +178,11 @@ func TestRouteOwnerForCommand_AcceptsDiscoveredPeer(t *testing.T) {
 func TestDoctor_WarnsWhenDiscoveryIsUnavailable(t *testing.T) {
 	serveDiscovery(t, `{"enabled":true,"state":"unavailable","via":"cli","error":"tailscale CLI not found","peers":[]}`)
 
-	daemon := collectDaemonReceipt()
+	daemon := testApp(t).collectDaemonReceipt()
 	if daemon.Discovery == nil || daemon.Discovery.State != "unavailable" {
 		t.Fatalf("receipt discovery = %+v", daemon.Discovery)
 	}
-	out := captureStdout(t, func() { printDiscoveryReceipt(daemon.Discovery) })
+	out := captureStdout(t, func() { testApp(t).printDiscoveryReceipt(daemon.Discovery) })
 	if !strings.Contains(out, "warning: tailnet discovery unavailable (tailscale CLI not found)") ||
 		!strings.Contains(out, "running on remotes.json alone") {
 		t.Fatalf("doctor line = %q", out)
@@ -220,34 +220,34 @@ func withDefaultTailscaleSocket(t *testing.T, listen bool) string {
 func TestEffectiveTailscaleSocket(t *testing.T) {
 	t.Run("default applies when nothing is configured", func(t *testing.T) {
 		want := withDefaultTailscaleSocket(t, true)
-		path, source, err := effectiveTailscaleSocket(nil)
+		path, source, err := testApp(t).effectiveTailscaleSocket(nil)
 		if err != nil || path != want || source != socketSourceDefault {
 			t.Fatalf("got %q %q %v, want %q default", path, source, err, want)
 		}
 	})
 	t.Run("an explicit value wins", func(t *testing.T) {
 		withDefaultTailscaleSocket(t, true)
-		path, source, err := effectiveTailscaleSocket(&remoteDefaults{TailscaleSocket: "/run/ts/tailscaled.sock"})
+		path, source, err := testApp(t).effectiveTailscaleSocket(&remoteDefaults{TailscaleSocket: "/run/ts/tailscaled.sock"})
 		if err != nil || path != "/run/ts/tailscaled.sock" || source != socketSourceConfigured {
 			t.Fatalf("got %q %q %v", path, source, err)
 		}
 	})
 	t.Run("system turns the default off", func(t *testing.T) {
 		withDefaultTailscaleSocket(t, true)
-		path, source, err := effectiveTailscaleSocket(&remoteDefaults{TailscaleSocket: "system"})
+		path, source, err := testApp(t).effectiveTailscaleSocket(&remoteDefaults{TailscaleSocket: "system"})
 		if err != nil || path != "" || source != socketSourceSystem {
 			t.Fatalf("got %q %q %v", path, source, err)
 		}
 	})
 	t.Run("a proxy suppresses the default", func(t *testing.T) {
 		withDefaultTailscaleSocket(t, true)
-		if path, source, _ := effectiveTailscaleSocket(&remoteDefaults{HTTPSProxy: "localhost:1055"}); path != "" || source != "" {
+		if path, source, _ := testApp(t).effectiveTailscaleSocket(&remoteDefaults{HTTPSProxy: "localhost:1055"}); path != "" || source != "" {
 			t.Fatalf("got %q %q", path, source)
 		}
 	})
 	t.Run("absent when no socket exists", func(t *testing.T) {
 		withDefaultTailscaleSocket(t, false)
-		if path, source, _ := effectiveTailscaleSocket(nil); path != "" || source != "" {
+		if path, source, _ := testApp(t).effectiveTailscaleSocket(nil); path != "" || source != "" {
 			t.Fatalf("got %q %q", path, source)
 		}
 	})
@@ -259,7 +259,7 @@ func TestEffectiveTailscaleSocket(t *testing.T) {
 		if err := os.WriteFile(path, nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		got, refused := defaultTailscaleSocketCheck()
+		got, refused := testApp(t).defaultTailscaleSocketCheck()
 		if got != "" || !strings.Contains(refused, "not a Unix socket") {
 			t.Fatalf("got %q, refused %q", got, refused)
 		}
@@ -270,14 +270,14 @@ func TestEffectiveTailscaleSocket(t *testing.T) {
 		if err := os.Chmod(local, 0o775); err != nil {
 			t.Fatal(err)
 		}
-		got, refused := defaultTailscaleSocketCheck()
+		got, refused := testApp(t).defaultTailscaleSocketCheck()
 		if got != "" || !strings.Contains(refused, local) || !strings.Contains(refused, "group- or other-writable") {
 			t.Fatalf("got %q, refused %q", got, refused)
 		}
-		if socket, source, _ := effectiveTailscaleSocket(nil); socket != "" || source != "" {
+		if socket, source, _ := testApp(t).effectiveTailscaleSocket(nil); socket != "" || source != "" {
 			t.Fatalf("a refused default must not be used: %q %q", socket, source)
 		}
-		host := evaluateHost(gatherHostEvidence())
+		host := testApp(t).evaluateHost(testApp(t).gatherHostEvidence())
 		if !strings.HasPrefix(host.TailscaleSocketRefused, path+": ") || !strings.Contains(strings.Join(host.Problems, "\n"), "not trusted") {
 			t.Fatalf("doctor must report the refusal: %+v", host)
 		}
@@ -291,7 +291,7 @@ func TestDefaultTailscaleSocket_LiteralPath(t *testing.T) {
 		if err := os.Chmod(local, 0o777); err != nil {
 			t.Fatal(err)
 		}
-		if got, refused := defaultTailscaleSocketCheck(); got != "" || !strings.Contains(refused, local+": mode 0777") {
+		if got, refused := testApp(t).defaultTailscaleSocketCheck(); got != "" || !strings.Contains(refused, local+": mode 0777") {
 			t.Fatalf("got %q, refused %q", got, refused)
 		}
 	})
@@ -309,17 +309,17 @@ func TestDefaultTailscaleSocket_LiteralPath(t *testing.T) {
 		if err := os.Symlink(filepath.Join(protected, "state"), state); err != nil {
 			t.Fatal(err)
 		}
-		if got, refused := defaultTailscaleSocketCheck(); got != "" || refused != state+" is a symlink" {
+		if got, refused := testApp(t).defaultTailscaleSocketCheck(); got != "" || refused != state+" is a symlink" {
 			t.Fatalf("got %q, refused %q", got, refused)
 		}
 	})
 	t.Run("is Linux-only", func(t *testing.T) {
 		withDefaultTailscaleSocket(t, true)
 		useHostGOOS(t, "darwin")
-		if got, refused := defaultTailscaleSocketCheck(); got != "" || refused != "default socket is Linux-only" {
+		if got, refused := testApp(t).defaultTailscaleSocketCheck(); got != "" || refused != "default socket is Linux-only" {
 			t.Fatalf("got %q, refused %q", got, refused)
 		}
-		if socket, source, _ := effectiveTailscaleSocket(nil); socket != "" || source != "" {
+		if socket, source, _ := testApp(t).effectiveTailscaleSocket(nil); socket != "" || source != "" {
 			t.Fatalf("macOS must not use the default: %q %q", socket, source)
 		}
 	})
@@ -329,25 +329,25 @@ func TestSystemSocket_SurvivesLoadListAndDoctor(t *testing.T) {
 	withDefaultTailscaleSocket(t, true)
 	writeRemotes(t, `{"version":1,"defaults":{"tailscale_socket":"system"},"remotes":[{"name":"hub-a","url":"https://hub-a.example.ts.net"}]}`)
 
-	doc, err := loadRemotesFile()
+	doc, err := testApp(t).loadRemotesFile()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if doc.Defaults == nil || doc.Defaults.TailscaleSocket != "system" {
 		t.Fatalf("normalized defaults lost the sentinel: %+v", doc.Defaults)
 	}
-	if socket, source, _ := effectiveTailscaleSocket(doc.Defaults); socket != "" || source != socketSourceSystem {
+	if socket, source, _ := testApp(t).effectiveTailscaleSocket(doc.Defaults); socket != "" || source != socketSourceSystem {
 		t.Fatalf("effective = %q (%q), want system", socket, source)
 	}
 	out := captureStdout(t, func() {
-		if err := remotesListCmd.RunE(remotesListCmd, nil); err != nil {
+		if err := testApp(t).remotesListCmd().RunE(testApp(t).remotesListCmd(), nil); err != nil {
 			t.Fatal(err)
 		}
 	})
 	if strings.Contains(out, "LocalAPI socket") {
 		t.Fatalf("list must not claim a socket under \"system\":\n%s", out)
 	}
-	ev := gatherHostEvidence()
+	ev := testApp(t).gatherHostEvidence()
 	if ev.tailscaleSocket != "" || ev.tailscaleSocketSource != socketSourceSystem || len(ev.tailnetRemoteNames) != 0 {
 		t.Fatalf("doctor evidence = %q (%q), bridges expected for %v", ev.tailscaleSocket, ev.tailscaleSocketSource, ev.tailnetRemoteNames)
 	}
@@ -364,13 +364,13 @@ func TestDuplicateHTTPSAuthority_FollowsTheEffectiveSocket(t *testing.T) {
 
 	withDefaultTailscaleSocket(t, false)
 	writeFixture()
-	if _, err := loadRemotesFile(); err != nil {
+	if _, err := testApp(t).loadRemotesFile(); err != nil {
 		t.Fatalf("without a private socket both entries are valid: %v", err)
 	}
 
 	withDefaultTailscaleSocket(t, true)
 	writeFixture()
-	if _, err := loadRemotesFile(); err == nil || !strings.Contains(err.Error(), "duplicate https authority") {
+	if _, err := testApp(t).loadRemotesFile(); err == nil || !strings.Contains(err.Error(), "duplicate https authority") {
 		t.Fatalf("with the default socket in effect the duplicate must be refused, got %v", err)
 	}
 }
@@ -380,7 +380,7 @@ func TestRemotesList_ShowsEffectiveSocketAndSource(t *testing.T) {
 	writeRemotes(t, `{"version":1,"remotes":[{"name":"hub-a","url":"https://hub-a.example.ts.net"}]}`)
 
 	out := captureStdout(t, func() {
-		if err := remotesListCmd.RunE(remotesListCmd, nil); err != nil {
+		if err := testApp(t).remotesListCmd().RunE(testApp(t).remotesListCmd(), nil); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -389,7 +389,7 @@ func TestRemotesList_ShowsEffectiveSocketAndSource(t *testing.T) {
 	}
 
 	writeRemotes(t, `{"version":1,"defaults":{"tailscale_socket":"system"},"remotes":[]}`)
-	if _, err := loadRemotesFile(); err != nil {
+	if _, err := testApp(t).loadRemotesFile(); err != nil {
 		t.Fatalf("\"system\" must validate: %v", err)
 	}
 }
@@ -398,14 +398,14 @@ func TestHostReceipt_ReportsDefaultSocketAndSource(t *testing.T) {
 	socket := withDefaultTailscaleSocket(t, true)
 	writeRemotes(t, `{"version":1,"remotes":[{"name":"hub-a","url":"https://hub-a.example.ts.net"}]}`)
 
-	ev := gatherHostEvidence()
+	ev := testApp(t).gatherHostEvidence()
 	if ev.tailscaleSocket != socket || ev.tailscaleSocketSource != socketSourceDefault {
 		t.Fatalf("evidence socket = %q (%q), want %q (default)", ev.tailscaleSocket, ev.tailscaleSocketSource, socket)
 	}
 	if len(ev.tailnetRemoteNames) != 1 || ev.tailnetRemoteNames[0] != "hub-a" {
 		t.Fatalf("https remotes expecting a bridge = %v", ev.tailnetRemoteNames)
 	}
-	host := evaluateHost(ev)
+	host := testApp(t).evaluateHost(ev)
 	if host.TailscaleSocket != socket || host.TailscaleSocketSource != socketSourceDefault {
 		t.Fatalf("receipt socket = %q (%q)", host.TailscaleSocket, host.TailscaleSocketSource)
 	}
@@ -433,7 +433,7 @@ func TestDefaultTailscaleSocket_FleetLayouts(t *testing.T) {
 			if err := os.Chmod(path, 0o666); err != nil {
 				t.Fatal(err)
 			}
-			if got, refused := defaultTailscaleSocketCheck(); got != path || refused != "" {
+			if got, refused := testApp(t).defaultTailscaleSocketCheck(); got != path || refused != "" {
 				t.Fatalf("got %q, refused %q", got, refused)
 			}
 		})

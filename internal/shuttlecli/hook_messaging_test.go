@@ -21,7 +21,7 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 		t.Helper()
 		b, _ := json.Marshal(eventHookInput{HookEventName: name, SessionID: "s", TranscriptPath: filepath.Join(home, ".claude", "projects", "p", "s.jsonl")})
 		var out bytes.Buffer
-		if err := runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
+		if err := testApp(t).runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
 			t.Fatal(err)
 		}
 		return out.String()
@@ -60,7 +60,7 @@ func TestEventHookOffersCodexMailbox(t *testing.T) {
 	t.Setenv("SHUTTLE_EVENTS", "off")
 	t.Setenv("SHUTTLE_HOST", "host")
 	var out bytes.Buffer
-	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"SessionStart","session_id":"s","model":"gpt-6","cwd":"/work"}`), &out)
+	_ = testApp(t).runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"SessionStart","session_id":"s","model":"gpt-6","cwd":"/work"}`), &out)
 	if out.Len() != 0 || !messaging.MailboxAvailable(sysenv.OS(), "codex", "s", "host") {
 		t.Fatal("Codex hook failed to register a mailbox")
 	}
@@ -69,7 +69,7 @@ func TestEventHookOffersCodexMailbox(t *testing.T) {
 		t.Fatalf("send: %+v %v", receipt, err)
 	}
 	out.Reset()
-	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"UserPromptSubmit","session_id":"s","model":"gpt-6"}`), &out)
+	_ = testApp(t).runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"UserPromptSubmit","session_id":"s","model":"gpt-6"}`), &out)
 	if !bytes.Contains(out.Bytes(), []byte("peer context")) {
 		t.Fatalf("Codex context missing: %s", out.String())
 	}
@@ -88,7 +88,7 @@ func TestEventHookOffersPiMailboxOnlyOnPrompt(t *testing.T) {
 			CWD:            "/project",
 			TranscriptPath: filepath.Join(t.TempDir(), "session.jsonl"),
 		})
-		if err := runEventAndMessageHook(bytes.NewReader(payload), &out); err != nil {
+		if err := testApp(t).runEventAndMessageHook(bytes.NewReader(payload), &out); err != nil {
 			t.Fatal(err)
 		}
 		return out.String()
@@ -119,7 +119,7 @@ func TestEventHookDoesNotClassifyUnknownPayloadAsCodex(t *testing.T) {
 	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
 	t.Setenv("SHUTTLE_EVENTS", "off")
 	var out bytes.Buffer
-	_ = runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"PreToolUse","session_id":"s"}`), &out)
+	_ = testApp(t).runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"PreToolUse","session_id":"s"}`), &out)
 	if out.Len() != 0 || messaging.MailboxAvailable(sysenv.OS(), "codex", "s", "") {
 		t.Fatal("unidentified hook registered a Codex mailbox")
 	}
@@ -134,14 +134,14 @@ func TestClaudeHookHonorsCustomConfigDirectory(t *testing.T) {
 	input := eventHookInput{HookEventName: "SessionStart", SessionID: "custom-session", TranscriptPath: filepath.Join(config, "projects", "workspace", "custom-session.jsonl")}
 	b, _ := json.Marshal(input)
 	var out bytes.Buffer
-	if err := runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
+	if err := testApp(t).runEventAndMessageHook(bytes.NewReader(b), &out); err != nil {
 		t.Fatal(err)
 	}
 	if !messaging.MailboxAvailable(sysenv.OS(), "claude", input.SessionID, "host") || messaging.MailboxAvailable(sysenv.OS(), "codex", input.SessionID, "host") {
 		t.Fatal("custom Claude config registered the wrong harness")
 	}
 	input.TranscriptPath = filepath.Join(config+"-unrelated", "projects", "workspace", "custom-session.jsonl")
-	if messageHookHarness(input) != "" {
+	if testApp(t).messageHookHarness(input) != "" {
 		t.Fatal("unrelated transcript inherited Claude identity")
 	}
 }

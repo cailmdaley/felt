@@ -49,7 +49,7 @@ func TestStatePathFixtureParity(t *testing.T) {
 					t.Setenv(file.EnvVar, *c.Env)
 				}
 				want := strings.NewReplacer("<data_dir>", sf.DataDir, "<leaf>", file.Leaf).Replace(c.Expect)
-				got, explicit := shuttleStatePath(file.EnvVar, file.Leaf)
+				got, explicit := testApp(t).shuttleStatePath(file.EnvVar, file.Leaf)
 				if got != want {
 					t.Fatalf("%s=%v: got %q, want %q", file.EnvVar, c.Env, got, want)
 				}

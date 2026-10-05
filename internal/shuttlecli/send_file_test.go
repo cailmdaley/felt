@@ -31,7 +31,7 @@ func sendFileTestEnv(t *testing.T) (string, string) {
 
 func TestSendFilesRecordsExplicitDelivery(t *testing.T) {
 	sink, artifact := sendFileTestEnv(t)
-	files, err := sendFiles([]string{artifact, artifact}, "")
+	files, err := testApp(t).sendFiles([]string{artifact, artifact}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSendFilesFailuresNeverRecord(t *testing.T) {
 			case "unwritable":
 				t.Setenv("SHUTTLE_EVENTS_FILE", artifact+"/events.jsonl")
 			}
-			if _, err := sendFiles(paths, ""); err == nil {
+			if _, err := testApp(t).sendFiles(paths, ""); err == nil {
 				t.Fatal("expected error")
 			}
 			if _, err := os.Stat(sink); !os.IsNotExist(err) {
@@ -93,7 +93,7 @@ func TestSendFilesLedgerAndExplicitSession(t *testing.T) {
 	if err := os.WriteFile(os.Getenv("SHUTTLE_SESSIONS_FILE"), []byte(ledger), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sendFiles([]string{artifact}, ""); err != nil {
+	if _, err := testApp(t).sendFiles([]string{artifact}, ""); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(sink)
@@ -125,7 +125,7 @@ func TestSendFilesIdentityPrecedence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			files, err := sendFiles([]string{relative}, tc.explicit)
+			files, err := testApp(t).sendFiles([]string{relative}, tc.explicit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +151,7 @@ func TestSendFilesRejectsFIFOWithoutBlocking(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := make(chan error, 1)
-	go func() { _, err := sendFiles([]string{fifo}, "test-session"); result <- err }()
+	go func() { _, err := testApp(t).sendFiles([]string{fifo}, "test-session"); result <- err }()
 	select {
 	case err := <-result:
 		if err == nil {
