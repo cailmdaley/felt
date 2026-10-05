@@ -5,6 +5,7 @@ import { card } from './testFixtures.js'
 import { Dock } from './workspace/Dock.js'
 import { Reader } from './workspace/Reader.js'
 import type { Channel } from './workspace/documents.js'
+import { saveClaudeOpening } from './conversationOpening.js'
 
 const worker = (over: Partial<KanbanCard> = {}): KanbanCard => card({
   id: 'debug', uid: 'debug-uid', originId: 'host-a', status: 'active',
@@ -72,6 +73,40 @@ describe('the shared navbar and inline worker pill', () => {
     navbar.click()
     inline.click()
     expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a'], ['shuttle-debug', 'host-a']])
+  })
+
+  it("updates the inline and navbar destinations when Claude's opening preference changes", () => {
+    const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
+    saveClaudeOpening('terminal')
+    const band = dock.bandFor(live)
+    show(live)
+    expect(band.el.querySelector('.kbn-card-worker')?.tagName).toBe('BUTTON')
+    expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')?.tagName).toBe('BUTTON')
+
+    saveClaudeOpening('app')
+    dock.refreshConversationOpening()
+    show(live)
+    const inline = band.el.querySelector<HTMLAnchorElement>('.kbn-card-worker')!
+    const navbar = reader.el.querySelector<HTMLAnchorElement>('.ws-worker-pill .kbn-card-worker')!
+    expect(inline.tagName).toBe('A')
+    expect(navbar.tagName).toBe('A')
+    expect(inline.href).toBe('claude://claude.ai/code/session_test')
+    expect(navbar.href).toBe(inline.href)
+  })
+
+  it('drops both shared pills when the worker leaves its session', () => {
+    const live = worker({ runtimePhase: 'waiting' })
+    const band = dock.bandFor(live)
+    show(live)
+    expect(band.el.querySelector('.kbn-card-worker')).not.toBeNull()
+    expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')).not.toBeNull()
+
+    const departed = worker({ tmuxSession: undefined, workerAgent: undefined, runtimePhase: undefined, status: 'closed' })
+    dock.syncRuntime(departed)
+    current = departed
+    show(departed)
+    expect(band.el.querySelector('.kbn-card-worker')).toBeNull()
+    expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')).toBeNull()
   })
 
   it('repaints Waiting as Aloft in both locations and suppresses phase outside In flight', () => {

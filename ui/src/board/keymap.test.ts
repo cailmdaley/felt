@@ -37,6 +37,28 @@ describe('shared keyboard table', () => {
     child.setAttribute('contenteditable', 'false')
     expect(keyIntent(event('j', {}, child), 'reader')).toBe('scrollDown')
   })
+  it('gives native activation and composite navigation controls first refusal', () => {
+    const button = document.createElement('button')
+    for (const key of ['Enter', ' ']) expect(shouldForwardDocumentKey(event(key, {}, button))).toBe(false)
+
+    const radioGroup = document.createElement('div')
+    radioGroup.setAttribute('role', 'radiogroup')
+    const radio = document.createElement('div')
+    radio.setAttribute('role', 'radio')
+    radioGroup.append(radio)
+    expect(shouldForwardDocumentKey(event('ArrowRight', {}, radio))).toBe(false)
+    const menu = document.createElement('div')
+    menu.setAttribute('role', 'menu')
+    const menuItem = document.createElement('div')
+    menuItem.setAttribute('role', 'menuitem')
+    menu.append(menuItem)
+    expect(shouldForwardDocumentKey(event('ArrowDown', {}, menuItem))).toBe(false)
+
+    const input = document.createElement('input')
+    input.setAttribute('contenteditable', 'false')
+    expect(keyIntent(event('j', {}, input), 'reader')).toBeNull()
+    expect(shouldForwardDocumentKey(event('j', {}, input))).toBe(false)
+  })
   it('recognizes editable targets from another document realm', () => {
     const frame = document.createElement('iframe')
     document.body.append(frame)

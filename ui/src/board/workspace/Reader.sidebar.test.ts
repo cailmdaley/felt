@@ -186,12 +186,43 @@ describe('Reader channel sidebar', () => {
     expect(rowNames(reader)).toEqual(['Gamma', 'Alpha'])
   })
 
-  it('switches focus-ring modality from keyboard to pointer input', () => {
+  it('leaves activation keys to focused controls while keeping native Reader modality', () => {
     const reader = makeReader()
-    expect(reader.el.classList.contains('ws-keyboard')).toBe(false)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
-    expect(reader.el.classList.contains('ws-keyboard')).toBe(true)
+    const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
+    for (const key of ['Enter', ' ']) {
+      toggle.focus()
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      toggle.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+      expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
+      expect(reader.el.classList.contains('ws-keyboard')).toBe(true)
+    }
     document.dispatchEvent(new Event('pointerdown', { bubbles: true }))
     expect(reader.el.classList.contains('ws-keyboard')).toBe(false)
+  })
+
+  it('shares arrow navigation with TabStrip without double-stepping focus or selection', () => {
+    const reader = makeReader()
+    const base = channel(alpha)
+    const first = base.documents[0]
+    const second = { ...first, key: 'fiber:host-a:second', name: 'Second' }
+    const pages: Channel = { ...base, documents: [first, second], labels: ['Note', 'Second'] }
+    reader.show(pages, first.key, 'Desk', alpha)
+    const tabs = [...reader.el.querySelectorAll<HTMLButtonElement>('.ws-tab')]
+    expect(tabs).toHaveLength(2)
+    tabs[0].focus()
+
+    const right = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+    tabs[0].dispatchEvent(right)
+    expect(right.defaultPrevented).toBe(true)
+    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs[1])
+    expect(reader.el.classList.contains('ws-keyboard')).toBe(true)
+
+    const left = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })
+    tabs[1].dispatchEvent(left)
+    expect(left.defaultPrevented).toBe(true)
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(tabs[0])
   })
 })
