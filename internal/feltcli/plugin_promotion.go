@@ -816,6 +816,7 @@ func (a *app) currentFeltExecutable() (string, error) {
 	if configured := a.env.Getenv("FELT_BIN"); configured != "" {
 		return configured, nil
 	}
+	// The running binary is this process's own, whatever env says.
 	path, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("locating felt executable: %w", err)

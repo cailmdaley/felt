@@ -31,6 +31,7 @@ then moves the agent integrations to the matching tag so hooks and skills stay
 in step with the binary: the Claude Code plugin whenever the claude CLI is on
 PATH, and the Codex and pi integrations where felt is already installed.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// update replaces the binary this process is running.
 			feltPath, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("locating current felt binary: %w", err)
