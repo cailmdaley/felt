@@ -250,7 +250,7 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
-  it('owner-routes file mtimes in Unix seconds for embeds and body links, keeping selection on reorder', async () => {
+  it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input)
@@ -262,7 +262,8 @@ describe('workspace reader integration', () => {
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
-    expect(document.querySelectorAll('.ws-tab')[1].getAttribute('aria-label')).toBe('table.html')
+    const order = [...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))
+    expect(order.indexOf('table.html')).toBeGreaterThan(order.indexOf('Report'))
     const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
     expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
     document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
@@ -596,14 +597,15 @@ describe('workspace reader integration', () => {
 
     workspace.open(orderedCards[1])
     await flush()
-    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
+    // Each channel orders its declarations as its own body does.
+    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
     expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('shared')
     const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
     expect(prose.querySelector('.ws-prose-contents')?.textContent).toBe('3 pages2 reports')
-    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
+    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
   })
 
   it('uses the shared Reader keymap for single-step tab roving focus', async () => {

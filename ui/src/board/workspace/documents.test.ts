@@ -120,7 +120,7 @@ describe('buildChannel', () => {
     expect(channel.documents[2].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
   })
 
-  it('sorts deliveries by latest activity while retaining receipt history', () => {
+  it('orders declarations by body, then deliveries by first send, while retaining receipt history', () => {
     const first = buildChannel({
       ...base,
       embeds: [{ path: 'second.html' }, { path: 'first.html' }],
@@ -141,10 +141,10 @@ describe('buildChannel', () => {
       previous: first,
     })
     expect(first.documents.map((document) => document.name)).toEqual([
-      'A channel', 'later.pdf', 'earlier.pdf', 'first.html', 'second.html',
+      'A channel', 'second.html', 'first.html', 'earlier.pdf', 'later.pdf',
     ])
     expect(second.documents.map((document) => document.name)).toEqual([
-      'A channel', 'arrival.txt', 'later.pdf', 'earlier.pdf', 'first.html', 'new-report.html',
+      'A channel', 'new-report.html', 'first.html', 'earlier.pdf', 'later.pdf', 'arrival.txt',
     ])
     expect(second.documents.find((document) => document.name === 'later.pdf')?.provenance)
       .toEqual([
@@ -170,7 +170,7 @@ describe('selection and labels', () => {
     const declared = buildChannel({ ...base, embeds: [{ path: 'reports/report.html' }, { path: 'notes.md' }] })
     expect(defaultSelection(declared)).toBe(declared.documents.find(d => d.name === 'report.html')?.key)
     const sent = buildChannel({ ...base, embeds: [{ path: 'notes.md' }], sent: [{ path: 'sent/report.html', time: 10 }] })
-    expect(defaultSelection(sent)).toBe(sent.documents[1].key)
+    expect(defaultSelection(sent)).toBe(sent.documents.find(d => d.name === 'report.html')?.key)
     const withoutReport = buildChannel({ ...base, embeds: [{ path: 'notes.md' }] })
     expect(defaultSelection(withoutReport)).toBe(withoutReport.documents[0].key)
   })

@@ -600,12 +600,13 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
       return response
     }
   })
+  const sendOrder = await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label')))
   await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
   await open(p)
   await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__filmReport))
-  assert.equal(await film.locator('.ws-tab').nth(1).getAttribute('aria-label'), 'Field note')
+  assert.deepEqual(await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), sendOrder, 'a re-send marks its tab fresh without moving it')
   if (process.env.WORKSPACE_SHOTS) {
     await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-desktop.png` })
@@ -626,6 +627,7 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
 for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals move only their tab and folio (${reducedMotion})`, async p => {
   await open(p); await reportReady(p)
   await report(p).evaluate(f => { window.__arrivalReport = f.contentWindow })
+  const sendOrder = await p.locator('.ws-tabs .ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label')))
   await p.evaluate(() => {
     window.__receiptAnimations = []
     const animate = Element.prototype.animate
@@ -646,7 +648,7 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
   })
   await p.clock.fastForward(15001)
   await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
-  assert.equal(await p.locator('.ws-tabs .ws-tab').nth(1).getAttribute('aria-label'), 'Field note')
+  assert.deepEqual(await p.locator('.ws-tabs .ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), sendOrder, 'tabs keep send order through a re-send')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
   const tabs = await p.evaluate(() => window.__receiptAnimations.filter(a => a.tab))
