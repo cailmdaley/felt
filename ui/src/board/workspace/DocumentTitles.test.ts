@@ -43,3 +43,13 @@ it('reads a title again when a stat validator stays put but the bytes change', (
   expect(cacheDocumentTitle('host:/digest.md', '/digest.md', '# Kept', digest).title).toBe('Kept')
   expect(cacheDocumentTitle('host:/digest.md', '/digest.md', '# Not reread', digest).title).toBe('Kept')
 })
+
+it('versions a long body by its head and length, extracting the same title', () => {
+  const tail = 'x'.repeat(1024 * 1024)
+  const report = `<title>Long report</title><p>Opening</p>${tail}`
+  expect(cacheDocumentTitle('host:/long.html', '/long.html', report).title).toBe('Long report')
+  expect(cacheDocumentTitle('host:/long.html', '/long.html', report).title).toBe('Long report')
+  expect(cacheDocumentTitle('host:/long.html', '/long.html', `<title>Retitled</title><p>Opening</p>${tail}`).title).toBe('Retitled')
+  const bytes = new TextEncoder().encode('# Binary head\n' + 'y'.repeat(200_000))
+  expect(cacheDocumentTitle('host:/long.md', '/long.md', new TextDecoder().decode(bytes)).title).toBe('Binary head')
+})

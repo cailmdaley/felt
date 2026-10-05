@@ -110,17 +110,25 @@ export function extractDocumentTitle(path: string, source: string | Uint8Array):
   return { preview: '' }
 }
 
+/** Titles and previews are read from a document's head, so its version is too. */
+const VERSION_HEAD = 65536
+
 /**
  * A source arrives from the thumbnail's own read; extraction is once per
- * identity and content version: the digest ETag, else a hash of the source,
- * since a stat validator can stay put while the bytes change.
+ * identity and content version: the digest ETag, else a hash of the source's
+ * first 64 KiB and its length, since a stat validator can stay put while the
+ * bytes change. A whole body is never hashed in full.
  */
 export function cacheDocumentTitle(key: string, path: string, source: string | Uint8Array, etag?: string): DocumentTitle {
-  let hash = 2166136261
-  if (!provesContent(etag)) {
-    for (let i = 0; i < source.length; i++) hash = Math.imul(hash ^ (typeof source === 'string' ? source.charCodeAt(i) : source[i]), 16777619)
+  let content: string
+  if (provesContent(etag)) content = etag
+  else {
+    let hash = 2166136261
+    const end = Math.min(source.length, VERSION_HEAD)
+    for (let i = 0; i < end; i++) hash = Math.imul(hash ^ (typeof source === 'string' ? source.charCodeAt(i) : source[i]), 16777619)
+    content = `${etag ?? ''}|${source.length}|${hash >>> 0}`
   }
-  const version = JSON.stringify([key, provesContent(etag) ? etag : `${etag ?? ''}|${hash}`])
+  const version = JSON.stringify([key, content])
   const next = versions.get(version) ?? { ...extractDocumentTitle(path, source), etag }
   versions.set(version, next)
   if (versions.size > 512) versions.delete(versions.keys().next().value!)
