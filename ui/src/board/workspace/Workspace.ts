@@ -88,6 +88,7 @@ export class Workspace {
   }
 
   get isActive(): boolean { return this.reader.isActive }
+  get dockOpen(): boolean { return this.dockVisible }
 
   openDock(history = true): void {
     if (!this.current || !this.isActive || this.dockVisible) return
@@ -95,7 +96,10 @@ export class Workspace {
     this.dock.open(this.current.card)
     this.reader.mountDock(this.dock.el)
     if (history && this.phone.matches) this.history.setDock(true)
-    this.dock.el.querySelector<HTMLElement>('button,a,textarea')?.focus({ preventScroll: true })
+    // The composer takes the keyboard on a desk; a phone sheet takes focus
+    // itself, so opening it raises no keyboard over the controls.
+    const composer = this.phone.matches ? null : this.dock.el.querySelector<HTMLElement>('textarea')
+    ;(composer ?? this.dock.el).focus({ preventScroll: true })
   }
 
   closeDock(history = true): void {

@@ -1,6 +1,7 @@
 import './tokens.css'
 import './reader.css'
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
+import { workerVariant } from '../appConversation.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
@@ -34,6 +35,9 @@ function button(cls: string, text: string, action: () => void, label = text): HT
 }
 
 /** A single stage whose identity-keyed pages stay attached across channels. */
+/** The Conversation button's reading of the worker, matching the Desk's pill. */
+const WORKER_WORDS = { aloft: 'working', waiting: 'waiting on you', attention: 'needs attention', none: 'no worker' } as const
+
 export class Reader {
   readonly el = element('section', 'ws-reader ws-dormant')
   readonly track = element('div', 'ws-track')
@@ -149,11 +153,12 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
-    const state = card?.runtimePhase ?? card?.workerState ?? card?.status ?? 'open'
-    const dot = element('span', `ws-state-dot ws-state-${state}`)
+    const worker = card && hasLiveWorker(card) ? workerVariant(card) : 'none'
+    const state = WORKER_WORDS[worker]
+    const dot = element('span', `ws-worker-dot ws-worker-${worker}`)
     const agent = card?.workerAgent ?? card?.shuttleAgent ?? ''
     this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'), element('span', 'ws-conversation-agent', agent))
-    this.conversation.title = `${agent} · ${state}`
+    this.conversation.title = `${agent ? `${agent} · ` : ''}${state}`
     this.conversation.setAttribute('aria-label', `Conversation${agent ? ` · ${agent}` : ''} · ${state}`)
     this.tabs.render(channel.labels)
     this.host.setChannel(channel.documents, selected)
@@ -456,6 +461,10 @@ export class Reader {
       this.renderSidebar(); this.layout(false)
       return
     }
+    // A field in the dock keeps its own editing keys (⌥← moves by word);
+    // only Escape unwinds from there.
+    const target = e.target instanceof HTMLElement ? e.target : null
+    if (e.key !== 'Escape' && target && this.dockSlot.contains(target) && target.matches('input,textarea,select,[contenteditable]')) return
     if (this.handleKey(e.key, e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {
       e.preventDefault(); e.stopImmediatePropagation()
     }

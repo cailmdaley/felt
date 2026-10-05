@@ -95,13 +95,13 @@ describe('workspace reader integration', () => {
     expect(dataFrame.doc.provenance.some(p => p.kind === 'link')).toBe(true)
     expect(dataFrame.el.classList.contains('ws-selected')).toBe(true)
     document.querySelector<HTMLButtonElement>('.ws-conversation')!.click()
-    expect(workspace.dock.isOpen).toBe(true)
+    expect(workspace.dockOpen).toBe(true)
     expect(document.querySelector('.ws-dock-slot')?.contains(workspace.dock.el)).toBe(true)
     expect(document.querySelector('.kbn-detail-overlay')).toBeNull()
   })
 
   it('narrows and re-centres the stage without replacing the selected iframe or its window', async () => {
-    Object.defineProperty(workspace.reader.stage, 'clientWidth', { configurable: true, get: () => workspace.dock.isOpen ? 1040 : 1440 })
+    Object.defineProperty(workspace.reader.stage, 'clientWidth', { configurable: true, get: () => workspace.dockOpen ? 1040 : 1440 })
     Object.defineProperty(workspace.reader.stage, 'clientHeight', { configurable: true, value: 848 })
     workspace.open(cards[0])
     await flush()
@@ -125,6 +125,22 @@ describe('workspace reader integration', () => {
     expect(document.activeElement).toBe(document.querySelector('.ws-conversation'))
   })
 
+  it('keeps a draft across closing and reopening the dock, and leaves its keys to the field', async () => {
+    workspace.open({ ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
+    await flush()
+    workspace.openDock()
+    const textarea = workspace.dock.el.querySelector('textarea')!
+    expect(document.activeElement).toBe(textarea)
+    textarea.value = 'half a thought'
+    const selected = document.querySelector('.ws-selected')
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    expect(document.querySelector('.ws-selected')).toBe(selected)
+    workspace.closeDock()
+    workspace.openDock()
+    expect(workspace.dock.el.querySelector('textarea')).toBe(textarea)
+    expect(textarea.value).toBe('half a thought')
+  })
+
   it('Escape unwinds reader popovers, dock popovers, dock, expand and return in that order', async () => {
     workspace.open(cards[0])
     await flush()
@@ -134,12 +150,12 @@ describe('workspace reader integration', () => {
     document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!.click()
     escape()
     expect(document.querySelector('.ws-menu')).toBeNull()
-    expect(workspace.dock.isOpen).toBe(true)
+    expect(workspace.dockOpen).toBe(true)
     const popover = vi.spyOn(workspace.dock, 'handleEscape').mockReturnValueOnce(true).mockReturnValue(false)
     escape()
-    expect(workspace.dock.isOpen).toBe(true)
+    expect(workspace.dockOpen).toBe(true)
     escape()
-    expect(workspace.dock.isOpen).toBe(false)
+    expect(workspace.dockOpen).toBe(false)
     expect(document.querySelector('.ws-selected.ws-expanded')).not.toBeNull()
     escape()
     expect(document.querySelector('.ws-selected.ws-expanded')).toBeNull()
@@ -155,7 +171,7 @@ describe('workspace reader integration', () => {
     workspace.openStartPrompt(managed, { reason: 'arm_refused', needs: 'project_dir', host: 'host-a', message: 'Choose a project directory.' })
     await flush()
     expect(workspace.isActive).toBe(true)
-    expect(workspace.dock.isOpen).toBe(true)
+    expect(workspace.dockOpen).toBe(true)
     expect(window.location.hash).toContain('alpha@host-a')
     expect(workspace.dock.el.querySelector('.kbn-start-prompt')?.textContent).toContain('Project directory on host-a')
     expect(fetch).not.toHaveBeenCalledWith(expect.stringContaining('/dispatch'), expect.anything())
@@ -172,7 +188,7 @@ describe('workspace reader integration', () => {
     const route = window.location.hash
     const nextBack = (): Promise<void> => new Promise(resolve => { window.addEventListener('popstate', () => resolve(), { once: true }); window.history.back() })
     await nextBack()
-    expect(workspace.dock.isOpen).toBe(false)
+    expect(workspace.dockOpen).toBe(false)
     expect(workspace.isActive).toBe(true)
     expect(window.location.hash).toBe(route)
     expect(document.querySelector('.ws-selected iframe')).toBe(iframe)

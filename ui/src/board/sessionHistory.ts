@@ -405,6 +405,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
 
   const load = async (): Promise<void> => {
     let records: SessionRecord[] = []
+    let unread = false
     try {
       const res = await fetch(
         `${ctx.shuttleBase}/api/v1/sessions/composite?since_ms=0&uid=${encodeURIComponent(ctx.uid)}`,
@@ -413,12 +414,18 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
         const parsed = parseSessions(await res.json(), { host: '', records: [] })
         origins = parsed.origins ?? {}
         records = parsed.records
-      }
+      } else unread = true
     } catch {
-      /* no ledger: an empty history */
+      unread = true
     }
     const sessions = fiberSessions(records, ctx.uid)
-    count.textContent = String(sessions.length)
+    count.textContent = unread ? '' : String(sessions.length)
+    if (sessions.length === 0) {
+      const empty = document.createElement('p')
+      empty.className = 'kbn-ctl-history-empty'
+      empty.textContent = unread ? 'The session ledger did not answer.' : 'No sessions recorded yet.'
+      body.append(empty)
+    }
     const shown = sessions.slice(0, SESSIONS_SHOWN)
     draw(shown)
     const rest = sessions.slice(SESSIONS_SHOWN)

@@ -5,6 +5,8 @@
   --ws-ink-muted: #536f89;
   --ws-hairline: rgba(36, 74, 114, 0.24);
   --ws-red: #b23a2a;
+  --ws-agent: var(--kbn-agent);
+  --ws-owed: var(--kbn-owed);
   --ws-hover: rgba(36, 74, 114, 0.05);
   --ws-fill: rgba(36, 74, 114, 0.09);
   --ws-grid: rgba(36, 74, 114, 0.055);

@@ -31,10 +31,6 @@
   border: var(--ws-line-width) solid var(--ws-hairline) !important;
   background: var(--ws-paper) !important; border-radius: var(--ws-control-radius); white-space: nowrap;
 }
-.ws-state-dot { width: var(--ws-dot-size); height: var(--ws-dot-size); border-radius: 50%; border: var(--ws-line-width) solid var(--ws-ink); flex: none; }
-.ws-state-running, .ws-state-working, .ws-state-active { background: var(--ws-ink); }
-.ws-state-attention, .ws-state-blocked { background: var(--ws-red); border-color: var(--ws-red); }
-.ws-state-closed { background: var(--ws-ink-muted); opacity: var(--ws-receded-opacity); }
 .ws-tabs {
   display: flex; gap: var(--ws-tab-gap); overflow-x: auto; scrollbar-width: none;
   min-width: 0; position: relative; padding: 0 var(--ws-tab-gap);

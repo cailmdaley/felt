@@ -273,10 +273,19 @@ describe('the composer takes pasted images', () => {
     expect(textarea().value).toBe('')
   })
 
-  it('revokes every thumbnail URL when the panel closes', () => {
-    paste(textarea(), [png('one.png'), png('two.png')])
+  it('keeps the draft and its images when the dock is put away', () => {
+    paste(textarea(), [png('one.png')])
+    textarea().value = 'half a thought'
     closeSpy.mockRestore()
     panel.close()
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    expect(textarea().value).toBe('half a thought')
+    expect(chips()).toHaveLength(1)
+  })
+
+  it('revokes every thumbnail URL when the dock forgets its card', () => {
+    paste(textarea(), [png('one.png'), png('two.png')])
+    panel.reset()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-2')
   })

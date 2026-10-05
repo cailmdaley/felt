@@ -75,7 +75,7 @@ export interface SessionWindow {
 
 /**
  * The session window: when the last worker launched, when it handed off, and
- * how long it held the fiber — the right-hand reading on the drawer's strip.
+ * how long it held the fiber — the right-hand reading on the settings strip.
  *
  *   14:02 → 17:38 · 3h 36m            — a clean, concluded run (✓ beside it)
  *   Aug 4 14:02 → 17:38 · 3h 36m      — the same run, days ago
@@ -154,7 +154,7 @@ function placedByDue(card: Pick<KanbanCard, 'shuttleKind' | 'status'>): boolean 
 }
 
 /**
- * What the drawer's folded strip says about a card, as data — the strip is a
+ * What the folded settings strip says about a card, as data — the strip is a
  * reading of the fiber, not a label for the controls under it.
  *
  *   claude-fable medium · pinned · ada-workstation:~/dev/felt   Sep 26 01:38 → 02:40 · 1h 2m ✓
@@ -204,7 +204,7 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
 }
 
 /** {@link stripFacts} drawn: the facts on the left, the run window on the
- *  right — or on a line of its own where the panel is too narrow for both. */
+ *  right — or on a line of its own where the dock is too narrow for both. */
 function buildStrip(card: KanbanCard): HTMLElement {
   const facts = stripFacts(card)
   const strip = document.createElement('span')
@@ -372,6 +372,14 @@ interface AgentRecord {
   alias_of?: string | null
 }
 
+/** Who works this channel and where, beside the worker pill. */
+function workerLine(card: KanbanCard): string {
+  const agent = card.workerAgent ?? card.shuttleAgent
+  const where = card.shuttleHost ?? card.originId
+  const who = agent ? `${agent} on ${where}` : where
+  return hasLiveWorker(card) ? who : `${who} · no worker`
+}
+
 export interface DockOptions {
   meeting?: MeetingJoinControl
   /** Whether the Desk draws this card's worker phase (it does in flight). */
@@ -439,6 +447,7 @@ export class Dock {
     if (!this.root) {
       this.root = document.createElement('div')
       this.root.className = 'ws-dock'
+      this.root.tabIndex = -1
     }
     return this.root
   }
@@ -469,11 +478,15 @@ export class Dock {
     const close = ctlButton('×', 'ws-dock-close')
     close.setAttribute('aria-label', 'Close conversation')
     close.addEventListener('click', () => this.close())
+    header.append(title, close)
+    // The worker line: the way into the real conversation, then who and where.
+    const worker = document.createElement('div')
+    worker.className = 'ws-dock-worker'
     this.statusPill = document.createElement('span')
     this.statusPill.className = 'ws-dock-status'
-    this.statusPill.textContent = card.status
-    header.append(title, this.statusPill, close)
-    this.el.append(header)
+    this.statusPill.textContent = workerLine(card)
+    worker.append(this.statusPill)
+    this.el.append(header, worker)
     this.guidance = document.createElement('p')
     this.guidance.className = 'kbn-detail-app-guide'
     this.el.append(this.guidance)
@@ -481,17 +494,27 @@ export class Dock {
     this.syncRuntime(view)
   }
 
+  /** Ask to be put away. The draft, images and settings stay with the card,
+   *  so reopening the same channel's dock finds them as they were. */
   close(): void {
-    const wasOpen = this.isOpen
+    this.dismissPopovers()
+    this.onCloseRequest?.()
+  }
+
+  /** Forget the card and its controls. */
+  reset(): void {
     this.clear()
-    if (wasOpen) this.onCloseRequest?.()
+  }
+
+  private dismissPopovers(): void {
+    this.dismissConversation?.()
+    this.dismissMeeting?.()
+    this.dismissParent?.()
   }
 
   private clear(): void {
     this.epoch++
-    this.dismissConversation?.()
-    this.dismissMeeting?.()
-    this.dismissParent?.()
+    this.dismissPopovers()
     this.dismissConversation = this.dismissMeeting = this.dismissParent = null
     for (const dispose of this.composerDisposers.splice(0)) dispose()
     if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
@@ -573,7 +596,7 @@ export class Dock {
         else if (e.key === 'Tab') dismiss()
       })
       menu.addEventListener('focusout', e => { if (e.relatedTarget && !menu.contains(e.relatedTarget as Node)) dismiss() })
-      this.el.querySelector('.ws-dock-header')!.append(menu)
+      this.el.querySelector('.ws-dock-worker')!.append(menu)
       pill.setAttribute('aria-expanded', 'true')
       items[0].focus()
     }, true)
@@ -667,9 +690,9 @@ export class Dock {
   }
 
   /**
-   * Repaint the header's worker pill from a fresher copy of the open card —
+   * Repaint the worker pill from a fresher copy of the open card —
    * the board calls this after every poll, so the pill follows the worker
-   * between Waiting, Aloft and Blocked while the panel stays open. A card
+   * between Waiting, Aloft and Blocked while the dock stays open. A card
    * other than the open one is ignored.
    */
   syncRuntime(card: KanbanCard | null): void {
@@ -681,7 +704,7 @@ export class Dock {
       card = this.card
     }
     this.workerPillCard = card
-    this.statusPill.textContent = card.status
+    this.statusPill.textContent = workerLine(card)
     this.paintGuidance(card)
     const key = this.workerPillState(card)
     if (key === this.workerPillKey) return
@@ -1295,7 +1318,7 @@ export class Dock {
 
     // Schedule + tz commit on blur and Enter — `input` would patch mid-typed
     // cron fragments. This is ALSO where a promotion to Standing lands, which
-    // is why the guard reads the kind chosen in the panel rather than the
+    // is why the guard reads the kind chosen in the dock rather than the
     // wire's: confirming the cron IS the act of promoting.
     const commitSchedule = (): void => {
       if (abandoningPromotion) {
@@ -1400,7 +1423,7 @@ export class Dock {
     })
     const dueRow = field(label, input, clear)
     // Present only while the board places the card by due — it follows a
-    // kind changed in this drawer.
+    // kind changed in these settings.
     dueRow.hidden = !placedByDue(card)
     watch((view) => {
       dueRow.hidden = !placedByDue(view)
@@ -1558,7 +1581,7 @@ export class Dock {
   }
 
   /**
-   * Open the panel on a card whose start was refused for want of a project
+   * Open the dock on a card whose start was refused for want of a project
    * directory, with the composer's inline prompt already showing.
    */
   openStartPrompt(card: KanbanCard, body: DispatchFailureBody): void {
@@ -1936,8 +1959,8 @@ export class Dock {
   /**
    * The save choreography every live edit shares: clear the error, show
    * "Saving…", run the write, then either fade a "Saved" pill after a beat or
-   * surface the failure verbatim in `errorEl`. The panel stays open through
-   * every outcome — live edits don't close the inspector. Returns true on
+   * surface the failure verbatim in `errorEl`. The dock stays open through
+   * every outcome — live edits don't close the dock. Returns true on
    * success so the caller can advance its local baseline.
    */
   private async withSaveStatus(
@@ -1951,7 +1974,7 @@ export class Dock {
     statusEl.classList.add('kbn-detail-save-status-saving')
     try {
       await write()
-      // Refresh the kanban so the change shows up on the board. The panel
+      // Refresh the kanban so the change shows up on the board. The dock
       // stays open — the user may want to keep editing.
       this.onSaved()
       statusEl.textContent = 'Saved'
@@ -1977,7 +2000,7 @@ export class Dock {
   }
 
   /**
-   * Fetch the daemon's full fiber index once per panel-open (`GET
+   * Fetch the daemon's full fiber index once per dock opening (`GET
    * /api/v1/fibers`, ids + names only). The parent picker filters it
    * client-side per keystroke — the index is a few hundred rows, so one
    * fetch plus pure filtering replaces a per-keystroke round trip.
@@ -1992,7 +2015,7 @@ export class Dock {
   }
 
   /**
-   * Parent-picker search: one daemon index fetch per panel-open, then the
+   * Parent-picker search: one daemon index fetch per dock opening, then the
    * shared `filterParentCandidates` rule per keystroke.
    */
   private async searchParents(
@@ -2193,6 +2216,3 @@ export class Dock {
     })
   }
 }
-
-export const formatSessionWindow = sessionWindow
-export const formatDrawerMeta = stripFacts
