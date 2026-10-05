@@ -2027,8 +2027,8 @@
 .kbn-card-worker:focus-visible { outline: 1px dashed var(--kbn-you); outline-offset: 2px; }
 .kbn-card-worker .ws-worker-dot {
   --worker-dot: var(--kbn-agent);
-  /* An empty box's baseline is its foot, so the dot rides the text's baseline and centres on its x-height. */
-  align-self: baseline; position: relative; top: -0.04em; flex: none; width: 7px; height: 7px; border-radius: 50%;
+  display: inline-block; vertical-align: middle; position: relative; top: -0.06em; margin-right: var(--worker-gap);
+  width: 7px; height: 7px; border-radius: 50%;
   background: var(--worker-dot);
   box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--worker-dot) 18%, transparent);
 }

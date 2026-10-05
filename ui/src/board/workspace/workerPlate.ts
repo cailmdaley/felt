@@ -37,8 +37,11 @@ export function workerPlate(card: KanbanCard, target: HTMLElement | null, phase 
     span.textContent = text
     return span
   }
+  // The dot rides inside the state's line box, so it centres on the word's x-height in any font.
   const dot = part('ws-worker-dot')
   dot.setAttribute('aria-hidden', 'true')
-  plate.replaceChildren(dot, part('ws-worker-state', facts.state), part('ws-worker-elapsed', facts.elapsed ?? ''), ...(via ? [part('ws-worker-via', via)] : []))
+  const state = part('ws-worker-state', facts.state)
+  state.prepend(dot)
+  plate.replaceChildren(state, part('ws-worker-elapsed', facts.elapsed ?? ''), ...(via ? [part('ws-worker-via', via)] : []))
   return plate
 }

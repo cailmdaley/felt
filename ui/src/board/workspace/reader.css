@@ -82,6 +82,7 @@
   height: var(--ws-control-height); margin: 0 calc(-1 * var(--ws-small-gap)); padding: 0 var(--ws-small-gap);
   border: 0; border-radius: var(--ws-control-radius); color: var(--ws-ink-soft); line-height: var(--ws-control-height);
 }
+.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker > * { line-height: var(--ws-control-height); }
 .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker:hover { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-head-worker { min-width: 8.5em; justify-content: flex-end; }
 /* In the reader the dot takes the room's own pigments. */
@@ -271,10 +272,12 @@
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
   .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
-  .ws-head-worker :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { display: none; }
+  .ws-head-worker :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
+  /* The phone's top bar keeps the dot alone: the word's text is set at no size around it. */
+  .ws-reader .ws-navbar .ws-head-worker .ws-worker-state { display: inline-flex; font-size: 0; line-height: 0; }
   .ws-head-worker { min-width: 0; }
   .ws-head-worker[hidden] { display: none; }
-  .ws-head-worker .ws-worker-dot { width: 9px; height: 9px; align-self: center; top: 0; }
+  .ws-head-worker .ws-worker-dot { width: 9px; height: 9px; margin: 0; top: 0; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
   /* One chevron drawing for back and stepping: a drawn stroke in ink, legible at 44 px. */
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
