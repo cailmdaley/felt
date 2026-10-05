@@ -11,7 +11,7 @@ beforeEach(() => {
   frames = []
   reduced = false; fine = true
   vi.stubGlobal('matchMedia', (query: string) => ({
-    get matches() { return query.includes('reduced-motion') ? reduced : fine },
+    get matches() { return query.includes('reduced-motion') ? reduced : query === '(pointer: fine)' ? fine : false },
     addEventListener: vi.fn(), removeEventListener: vi.fn(),
   }))
   vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => { frames.push(fn); return frames.length })

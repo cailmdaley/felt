@@ -10,6 +10,7 @@ import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey,
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
+import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { Overview } from './Overview.js'
 import { WorkspaceHistory, type WorkspaceRoute } from './route.js'
@@ -19,6 +20,8 @@ export interface WorkspaceOptions {
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
+  deskColumn?(card: KanbanCard): SidebarEntry[]
+  onReturnCard?(card: KanbanCard): void
   /** A history entry addressed one of the board's views; switch to it without pushing. */
   onView?(view: WorkspaceView): void
   dock: Dock
@@ -51,6 +54,7 @@ export class Workspace {
   private readonly channels = new Map<string, ChannelState>()
   private readonly proseRevisions = new Map<DocKey, string>()
   private current: ChannelState | null = null
+  private column: SidebarEntry[] | null = null
   private origin = 'Board'
   private readonly receipts = new Map<string, { files: ShelfFile[]; etag?: string }>()
   private readonly receiptsRead = new Map<string, Promise<void>>()
@@ -80,16 +84,22 @@ export class Workspace {
         return [...ordered, ...opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
       },
       files: card => this.overview.fileNames(card),
-      onOpen: card => this.open(card, 'Desk', undefined, this.overview.hasMetadata(card)),
+      onOpen: card => this.open(card, 'Desk', undefined, this.overview.hasMetadata(card), false),
     })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
-      switcherCards: () => this.overview.orderedCards(),
+      switcherCards: () => this.sidebarCards(),
+      pickerCards: () => this.overview.orderedCards(),
+      sidebarBand: card => this.column?.find(entry => cardIdentity(entry.card) === cardIdentity(card))?.band,
       files: card => this.overview.fileNames(card),
       onSelect: key => this.select(key),
       onCrossing: travel => this.depth.cross(travel),
-      onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
+      onReturn: () => {
+        if (this.origin === 'Board') this.lastBoardRoute = null
+        if (this.current) this.opts.onReturnCard?.(this.current.card)
+        this.history.leave()
+      },
       workerPill: card => this.dock.workerPillFor(card),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
@@ -119,11 +129,25 @@ export class Workspace {
     this.open(card, this.opts.origin(), this.ensure(card).channel.documents[0].key)
   }
 
-  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true): void {
+  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
+    const outsideColumn = this.isActive && this.column && !this.column.some(entry => cardIdentity(entry.card) === cardIdentity(card))
+    if (!this.isActive || origin !== this.origin || outsideColumn || !fromDeskColumn) {
+      const column = fromDeskColumn && !outsideColumn && origin === 'Desk' ? this.opts.deskColumn?.(card) : undefined
+      this.column = column?.length ? column : null
+      this.reader.captureSidebar(this.column ?? [])
+    }
     this.origin = origin
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected)
+  }
+
+  private sidebarCards(): KanbanCard[] {
+    if (this.column) {
+      const live = new Map(this.opts.cards().map(card => [cardIdentity(card), card]))
+      return this.column.map(entry => live.get(cardIdentity(entry.card)) ?? entry.card)
+    }
+    return this.origin === 'Board' ? this.overview.orderedCards() : this.overview.recentCards()
   }
 
   mountOverview(host: HTMLElement): void {
@@ -319,6 +343,8 @@ export class Workspace {
     this.history.select(key)
   }
   private async openFiber(id: string, owner: string): Promise<void> {
+    this.column = null
+    this.reader.captureSidebar([])
     const epoch = this.routeEpoch
     const known = this.opts.cards().find(c => (c.id === id || c.uid === id) && c.originId === owner)
       ?? this.opts.cards().find(c => c.uid === id)

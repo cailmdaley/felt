@@ -9,6 +9,10 @@ import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
+import { buildCardPaper } from '../KanbanSurfaces.js'
+import { overviewHostMarks } from './Overview.js'
+import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
+import { workspaceMeasure } from './measures.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -23,6 +27,8 @@ export interface ReaderOptions {
   cards(): KanbanCard[]
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
+  pickerCards?(): KanbanCard[]
+  sidebarBand?(card: KanbanCard): string | undefined
   files?(card: KanbanCard): string[]
 }
 
@@ -40,7 +46,7 @@ function button(cls: string, text: string, action: () => void, label = text): HT
   return b
 }
 
-/** The viewport at which desktop sidebar layout is available. */
+/** The viewport at which the desktop sidebar defaults open. */
 export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
 
@@ -82,7 +88,8 @@ export class Reader {
   private sidebar = element('aside', 'ws-sidebar')
   private readonly sidebarPicker: ConstitutionPicker
   private readonly picker: ConstitutionPicker
-  /** The persisted choice; absent, the sidebar is closed. */
+  private readonly sidebarFlight: SidebarFlight
+  /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
   private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
@@ -123,17 +130,22 @@ export class Reader {
     this.parallax.append(this.track)
     this.stage.append(this.parallax)
     this.sidebar.setAttribute('aria-label', 'Constitutions')
+    const withCurrent = (cards: KanbanCard[]): KanbanCard[] => {
+      const current = this.currentCard
+      return current && !cards.some(card => (card.uid ?? card.id) === (current.uid ?? current.id) && card.originId === current.originId) ? [...cards, current] : cards
+    }
+    const sidebarCards = (): KanbanCard[] => withCurrent(this.opts.switcherCards?.() ?? this.opts.cards())
     const pickerOptions = {
-      cards: () => {
-        const cards = this.opts.switcherCards?.() ?? this.opts.cards()
-        const current = this.currentCard
-        return current && !cards.some(card => (card.uid ?? card.id) === (current.uid ?? current.id) && card.originId === current.originId) ? [...cards, current] : cards
-      },
+      cards: () => withCurrent(this.opts.pickerCards?.() ?? sidebarCards()),
       files: opts.files,
       current: (card: KanbanCard) => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
       onOpen: (card: KanbanCard) => { this.closeMenu(); this.opts.onChannel(card) },
     }
-    this.sidebarPicker = new ConstitutionPicker({ ...pickerOptions, revealCurrent: true })
+    this.sidebarPicker = new ConstitutionPicker({
+      ...pickerOptions, cards: sidebarCards, revealCurrent: true,
+      renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
+    })
+    this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
     this.sidebarPicker.el.style.display = 'contents'
     this.sidebar.append(this.sidebarPicker.el)
@@ -190,6 +202,7 @@ export class Reader {
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && animate)
     this.renderSidebar()
+    if (arriving) this.sidebarFlight.setVisible(this.sidebarShown)
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
@@ -210,6 +223,7 @@ export class Reader {
    */
   hide(animate = false): void {
     this.cancelResize?.()
+    this.sidebarFlight.setVisible(false, animate)
     this.active = false
     this.closeMenu()
     this.el.inert = true
@@ -275,6 +289,8 @@ export class Reader {
     this.layout(animate)
   }
   private prepareFrame(frame: DocumentFrame): void {
+    frame.el.classList.toggle('ws-text-page', ['fiber', 'text', 'markdown', 'code'].includes(frame.doc.kind))
+    frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
     frame.el.setAttribute('role', 'tabpanel')
     frame.el.setAttribute('aria-label', frame.doc.name)
     const glyph = element('span', 'ws-kind-glyph')
@@ -313,7 +329,7 @@ export class Reader {
   }
 
   private measure(name: string, fallback: number): number {
-    return parseFloat(getComputedStyle(this.el).getPropertyValue(`--ws-${name}`)) || fallback
+    return workspaceMeasure(this.el, name, fallback)
   }
   private preferredWidth(doc: WorkspaceDocument, max: number, height: number): number {
     if (this.phone.matches) return max
@@ -381,6 +397,21 @@ export class Reader {
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
     this.track.style.transform = `translateX(${target}px)`
+    // Fade the visible margin, not an outer edge already clipped off-screen.
+    for (const doc of ch.documents) {
+      const frame = this.host.get(doc.key)
+      if (!frame || doc.key === this.selected) continue
+      const width = parseFloat(frame.el.style.width)
+      const before = frame.el.classList.contains('ws-before')
+      const scale = this.measure('receded-scale', 0.94)
+      const left = target + parseFloat(frame.el.style.left) + (before ? width * (1 - scale) : 0)
+      const right = left + width * scale
+      const visible = Math.max(0, Math.min(W, right) - Math.max(0, left))
+      const edge = Math.min(100, Math.max(0, before ? -left : right - W) / (width * scale) * 100)
+      const end = Math.min(100, edge + visible / (width * scale) * this.measure('neighbour-fade', 45))
+      frame.el.style.setProperty('--ws-neighbour-edge', `${edge}%`)
+      frame.el.style.setProperty('--ws-neighbour-fade-end', `${end}%`)
+    }
   }
   private readonly relayout = (): void => {
     this.renderSidebar()
@@ -489,19 +520,38 @@ export class Reader {
     this.closeMenu()
     this.picker.show(this.el, this.title)
   }
+  /** The source column is captured before the live Desk starts receding. */
+  captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
+  private sidebarCard(card: KanbanCard): HTMLElement {
+    const face = buildCardPaper(card)
+    face.classList.add('ws-constitution-card')
+    face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
+    const meta = element('div', 'kbn-card-meta')
+    const host = element('small', 'ws-channel-owner')
+    const marks = overviewHostMarks(this.opts.cards().map(row => row.originId).concat(card.originId))
+    host.textContent = `${marks.get(card.originId) ?? '○'} ${card.originId}`
+    host.title = card.originId
+    meta.append(host)
+    const pill = this.opts.workerPill?.(card)
+    if (pill) meta.append(pill)
+    face.append(meta)
+    return face
+  }
   /** Re-list the channel rows after the overview's order changes. */
   refreshChannels(): void {
     if (this.active && this.sidebarShown) this.fillSidebar()
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
   private get sidebarShown(): boolean {
-    return !this.phone.matches && (this.sidebarChoice ?? false)
+    return !this.phone.matches && (this.sidebarChoice ?? this.wide.matches)
   }
   private toggleSidebar(): void {
     this.sidebarChoice = !this.sidebarShown
     try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
     this.closeMenu()
+    if (!this.sidebarShown) this.sidebarFlight.setVisible(false)
     this.renderSidebar(); this.layout(false)
+    if (this.sidebarShown) this.sidebarFlight.setVisible(true)
   }
   private renderSidebar(): void {
     const shown = this.sidebarShown
@@ -510,6 +560,8 @@ export class Reader {
     this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
     this.sidebar.inert = !shown
     this.sidebarPicker.refresh(shown)
+    this.sidebarFlight.refresh()
+    if (!shown) this.sidebarFlight.setVisible(false, false)
   }
   /** Rows refresh in place; the list keeps its scroll and the find its text. */
   private fillSidebar(): void {
@@ -606,6 +658,7 @@ export class Reader {
     this.tabs.dispose()
     this.picker.dispose()
     this.sidebarPicker.dispose()
+    this.sidebarFlight.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)

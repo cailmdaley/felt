@@ -20,6 +20,11 @@ export class DeskKeyboard {
   dispose(): void { this.root.removeEventListener('click', this.onClick, true) }
   get selection(): DeskAddress | null { return this.selected }
 
+  /** The reader's column is exactly the Desk's navigable order, including expanded queues. */
+  columnFor(address: DeskAddress): HTMLElement[] {
+    return this.regions().find(region => region.some(el => matches(el, address))) ?? []
+  }
+
   /** Restore focus without adding every card to the tab sequence. */
   focusSelection(): boolean {
     const el = this.node()

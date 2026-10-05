@@ -1,8 +1,12 @@
+import { workspaceMeasure } from './measures.js'
+import { MOBILE_MEDIA } from '../mobile.js'
+
 /** One receding Desk beneath both workspace surfaces; pointer work sleeps between events. */
 export class WorkspaceDepth {
   private readonly root: HTMLElement
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly fine = window.matchMedia('(pointer: fine)')
+  private readonly phone = window.matchMedia(MOBILE_MEDIA)
   private active = false
   private frame = 0
   private crossingTimer: ReturnType<typeof setTimeout> | null = null
@@ -17,6 +21,7 @@ export class WorkspaceDepth {
     window.addEventListener('blur', this.leave)
     this.motion.addEventListener('change', this.preference)
     this.fine.addEventListener('change', this.preference)
+    this.phone.addEventListener('change', this.preference)
   }
   setActive(active: boolean): void {
     this.active = active
@@ -24,7 +29,7 @@ export class WorkspaceDepth {
     if (!active) this.reset()
   }
   private measure(name: string, fallback: number): number {
-    return parseFloat(getComputedStyle(this.root).getPropertyValue(`--ws-${name}`)) || fallback
+    return workspaceMeasure(this.root, name, fallback)
   }
   /** Page travel is shared as a tiny, bounded counter-motion in the world below. */
   cross(travel: number): void {
@@ -39,7 +44,7 @@ export class WorkspaceDepth {
       this.schedule()
     }, this.measure('crossing', 280))
   }
-  private get enabled(): boolean { return this.active && this.fine.matches && !this.motion.matches }
+  private get enabled(): boolean { return this.active && this.fine.matches && !this.motion.matches && !this.phone.matches }
   private readonly pointer = (event: PointerEvent): void => {
     if (!this.enabled || event.pointerType === 'touch') return
     this.x = Math.max(-1, Math.min(1, event.clientX / window.innerWidth * 2 - 1))
@@ -74,5 +79,6 @@ export class WorkspaceDepth {
     window.removeEventListener('blur', this.leave)
     this.motion.removeEventListener('change', this.preference)
     this.fine.removeEventListener('change', this.preference)
+    this.phone.removeEventListener('change', this.preference)
   }
 }

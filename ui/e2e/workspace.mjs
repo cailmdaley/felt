@@ -11,11 +11,11 @@ const browser = await chromium.launch({ executablePath: chrome, headless: true,
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 const name = 'Calibrate the shear response'
 const tests = []
-const test = (name, run, viewport) => tests.push({ name, run, viewport })
+const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce') => tests.push({ name, run, viewport, sidebarChoice, reducedMotion })
 const selected = p => p.locator('.ws-page.ws-selected')
 const tab = (p, label) => p.getByRole('tab', { name: label, exact: true })
 async function open(p, expected = 'calibration-report') {
-  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click()
   await tab(p, 'calibration-report').waitFor()
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === label, expected)
 }
@@ -88,8 +88,10 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   assert.ok(await iframe.evaluate(f => f.contentWindow === window.__reportWindow && f.contentWindow.__sentinel === 'kept' && f.contentDocument.querySelector('#report-identity').textContent === window.__reportIdentity))
 })
 
-test('j/k step constitutions in the switcher order', async p => {
-  await open(p)
+test('j/k step constitutions in Board folio order', async p => {
+  await p.locator('[data-view="shelf"]').click()
+  await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
+  await reportReady(p)
   await p.locator('.ws-channel-title').click()
   const rows = p.locator('.ws-switcher .ws-channel-row')
   const names = await rows.locator('.ws-channel-name').allTextContents()
@@ -101,6 +103,52 @@ test('j/k step constitutions in the switcher order', async p => {
   await p.keyboard.press('k')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[0])
 })
+
+test('Wide reader takes the Desk column as cards, steps visibly, and returns selection to the current card', async p => {
+  const column = p.locator('[data-column="awaitingReview"]')
+  const names = await column.locator('.kbn-card > .kbn-card-header .kbn-card-name').allTextContents()
+  await open(p)
+  const sidebar = p.locator('.ws-sidebar').first()
+  assert.ok(await sidebar.isVisible(), 'wide desktop defaults open')
+  assert.deepEqual(await sidebar.locator('.ws-channel-name').allTextContents(), names)
+  assert.equal(await sidebar.locator('.kbn-card').count(), names.length, 'sidebar uses the Desk paper renderer')
+  assert.equal(await column.locator('.ws-sidebar-source').count(), names.length)
+  const raised = await p.locator('.kbn-desk').evaluate(e => ({ transform: getComputedStyle(e).transform, filter: getComputedStyle(e).filter }))
+  assert.match(raised.transform, /0\.94/)
+  assert.match(raised.filter, /saturate\(0\.25\)/)
+  await p.keyboard.press('j')
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
+  const current = sidebar.locator('.ws-channel-row[aria-current="true"]')
+  assert.equal(await current.locator('.ws-channel-name').innerText(), names[1])
+  assert.ok(await current.evaluate(e => e.getBoundingClientRect().right > e.closest('.ws-sidebar').getBoundingClientRect().right), 'selected card reaches beyond the column')
+  await p.keyboard.press('Escape')
+  assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
+  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), names[1])
+}, undefined, null)
+
+test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p => {
+  const entering = await p.evaluate(name => {
+    const card = [...document.querySelectorAll('.kbn-desk .kbn-card')].find(card => card.textContent.includes(name))
+    const rect = card.getBoundingClientRect()
+    card.click()
+    const ghost = document.querySelector('.ws-sidebar-flight .ws-channel-row')
+    const animation = ghost?.getAnimations()[0]
+    return { source: { left: rect.left, top: rect.top }, frames: animation?.effect.getKeyframes(), duration: animation?.effect.getTiming().duration }
+  }, name)
+  assert.equal(entering.duration, 280)
+  assert.ok(entering.frames.every(frame => 'transform' in frame && 'opacity' in frame && !('filter' in frame)))
+  await p.waitForTimeout(70)
+  await p.locator('.ws-sidebar-toggle').click()
+  await p.waitForTimeout(330)
+  assert.equal(await p.locator('.ws-sidebar-flight').count(), 0)
+  assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
+  await p.locator('.ws-sidebar-toggle').click()
+  await p.waitForTimeout(330)
+  assert.ok(await p.locator('.ws-sidebar-source').count())
+  await p.locator('.ws-return').click()
+  await p.waitForTimeout(330)
+  assert.equal(await p.locator('.ws-sidebar-source,.ws-card-travelling,.ws-sidebar-flight').count(), 0)
+}, undefined, null, 'no-preference')
 
 test('Fiber composer isolates keys; settings and history use mocked daemon', async p => {
   await open(p); await choose(p, 'Constitution')
@@ -264,7 +312,7 @@ test('Native PDF renderer loads fixture; owner route and first-page preview', as
 })
 
 test('Remote worker pill records attach handler without launching a terminal', async p => {
-  await p.locator('.kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await p.locator('.ws-worker-pill .kbn-card-worker').click()
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
@@ -346,8 +394,10 @@ test('Reader slash opens constitution picker; Escape restores focus and Enter ch
   assert.equal(await picker.count(), 0)
 })
 
-test('Sidebar current row follows repeated j/k, Alt navigation and browser Back immediately', async p => {
-  await open(p)
+test('Sidebar current card follows Board folio j/k, Alt navigation and browser Back immediately', async p => {
+  await p.locator('[data-view="shelf"]').click()
+  await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
+  await reportReady(p)
   await p.locator('.ws-channel-title').focus()
   await p.keyboard.press('c')
   const sidebar = p.locator('.ws-sidebar')
@@ -496,7 +546,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /basalt-login-02/, 'foreign document owner remains in label')
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
-    await p.locator('.kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     assert.match((await navbar.innerText()).trim(), /^aloft$/i, 'navbar names state, not agent')
     await choose(p, 'Constitution')
     const remoteWorker = selected(p).locator('.ws-dock-worker')
@@ -539,9 +589,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 const started = performance.now()
 let passed = 0
 try {
-  for (const { name, run, viewport } of tests) {
+  for (const { name, run, viewport, sidebarChoice, reducedMotion } of tests) {
     const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
-      reducedMotion: 'reduce', locale: 'en-GB', timezoneId: 'Europe/Paris' })
+      reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
     const page = await context.newPage()
     page.setDefaultTimeout(2000)
     const errors = []
@@ -549,6 +599,9 @@ try {
     let failure
     try {
       await page.clock.install({ time: new Date('2026-10-04T14:00:00Z') })
+      if (sidebarChoice !== null) await page.addInitScript(choice => {
+        if (window === window.top) localStorage.setItem('shuttle:workspace:sidebar', choice)
+      }, sidebarChoice)
       await page.goto(url)
       await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor()
       await run(page)

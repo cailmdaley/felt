@@ -148,7 +148,7 @@
 }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-overview { --overview-gutter: 16px; --overview-ribbon-width: 138px; --overview-ribbon-height: 96px; }
+  .ws-overview { --overview-gutter: 16px; --overview-ribbon-width: 138px; --overview-ribbon-height: 96px; background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .ws-overview-inner { padding-bottom: 48px; }
   .ws-overview-masthead { padding: 18px 0 12px; gap: 10px; }
   .ws-overview-heading h1 { font-size: 34px; }

@@ -336,6 +336,7 @@
 .kbn-workspace-raised .kbn-desk {
   transform: translate3d(var(--ws-desk-x, 0px), var(--ws-desk-y, 0px), 0) scale(var(--ws-desk-scale));
   opacity: var(--ws-desk-opacity);
+  filter: var(--ws-desk-filter);
 }
 @media (prefers-reduced-motion: reduce) {
   .kbn-desk { transition: none; }

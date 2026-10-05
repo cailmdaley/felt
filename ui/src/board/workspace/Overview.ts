@@ -396,6 +396,12 @@ export class Overview {
   }
   /** Find never truncates keyboard channel order. */
   orderedCards(): KanbanCard[] { this.resolveFolios(); return [...this.order] }
+  /** Notes and external entry points use Recent work, independent of the sheet's lens. */
+  recentCards(): KanbanCard[] {
+    return [...this.folios.values()].sort((a, b) =>
+      DAY_GROUPS.indexOf(a.recent as typeof DAY_GROUPS[number]) - DAY_GROUPS.indexOf(b.recent as typeof DAY_GROUPS[number])
+      || b.latest - a.latest || compare(a.uid, b.uid) || compare(a.card.originId, b.card.originId)).map(folio => folio.card)
+  }
   /** Receipt metadata already held by the sheet; searching never reads fiber bodies. */
   fileNames(card: KanbanCard): string[] {
     return this.folios.get(uidOf(card))?.receipts.flatMap(r => [r.basename, r.fullPath]) ?? []

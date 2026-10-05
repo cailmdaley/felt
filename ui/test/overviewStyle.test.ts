@@ -14,7 +14,7 @@ describe('Overview style contracts', () => {
     for (const token of [...css.matchAll(/var\((--(?:ws|overview)-[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
     expect(css).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(/i)
     expect(css).not.toMatch(/\.ws-reader|\.ws-stage/)
-    for (const [, selector] of css.matchAll(/([^{}]+)\{[^{}]*\}/g)) if (!selector.trim().startsWith('@')) expect(selector).toContain('.ws-overview')
+    for (const [, selector] of css.matchAll(/([^{}]+)\{[^{}]*\}/g)) if (!selector.trim().startsWith('@') && selector.trim() !== 'from') expect(selector).toContain('.ws-overview')
   })
   it('keeps phone folios single-column with right thumbnails, scrolling ribbon, and 44px controls', () => {
     expect(css).toContain('@media (max-width: 700px), (max-height: 500px) and (pointer: coarse)')
@@ -40,7 +40,7 @@ describe('workspace palette follows the Desk', () => {
     expect(colours.length).toBeGreaterThan(10)
     for (const [, name, value] of colours) {
       expect(value, name).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(/i)
-      expect(value, name).toMatch(/var\(--kbn-/)
+      expect(value, name).toMatch(/var\(--(?:kbn|ws)-/)
     }
   })
   it('declares the shared materials beside the pigments, and the Desk uses them', () => {
@@ -62,7 +62,10 @@ describe('workspace palette follows the Desk', () => {
     expect(tokens).toMatch(/--ws-veil:\s*color-mix\(in srgb, var\(--kbn-parchment\) 42%, transparent\)/)
     const blurred = [...`${reader}\n${css}`.matchAll(/([^{}]+)\{[^{}]*backdrop-filter:\s*var\(--ws-veil-filter\)/g)].map(m => m[1].trim())
     expect(blurred).toEqual(['.ws-veil', '.ws-overview'])
-    expect(reader).toMatch(/\.ws-page\.ws-receded \.ws-sheet\s*\{[^}]*box-shadow: none/)
+    expect(reader).toMatch(/\.ws-page\.ws-receded \.ws-sheet\s*\{[^}]*box-shadow: var\(--ws-shadow-low\)/)
+    expect(tokens).toContain('--ws-desk-filter: saturate(0.25) brightness(1.04)')
+    expect(reader).toMatch(/\.ws-page\.ws-receded\.ws-before\s*\{[^}]*mask-image: linear-gradient/)
+    expect(reader).toMatch(/\.ws-page\.ws-receded\.ws-after\s*\{[^}]*mask-image: linear-gradient/)
     expect(reader).toMatch(/\.ws-sheet\s*\{[^}]*box-shadow: var\(--ws-float\)/)
     for (const sheet of [reader, css]) expect(sheet).toMatch(/prefers-reduced-transparency: reduce[^]*backdrop-filter: none/)
   })

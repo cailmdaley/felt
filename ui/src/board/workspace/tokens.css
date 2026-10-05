@@ -22,7 +22,8 @@
   /* The vellum veil: the Desk's parchment, thinned so the Desk shows through
      soft and unreadable under a blur. */
   --ws-veil: color-mix(in srgb, var(--kbn-parchment) 42%, transparent);
-  --ws-veil-filter: blur(9px) saturate(1.05) brightness(1.02);
+  --ws-veil-filter: blur(9px);
+  --ws-desk-filter: saturate(0.25) brightness(1.04);
   /* Paper elevation: contact, middle distance, and ambient light on the Desk. */
   --ws-shadow-contact: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent);
   --ws-shadow-mid: 0 12px 24px -8px color-mix(in srgb, var(--ws-ink) 22%, transparent);
@@ -49,10 +50,19 @@
   --ws-page-pointer-drift: 3px;
   --ws-desk-crossing-drift: 6px;
   --ws-desk-travel-fraction: 0.012;
+  --ws-desk-x: 0px;
+  --ws-desk-y: 0px;
+  --ws-page-x: 0px;
+  --ws-page-y: 0px;
+  --ws-strip-h: var(--ws-control-height);
   --ws-settle: translateY(6px) scale(0.985);
   --ws-ease: ease;
   --ws-receded-scale: 0.94;
   --ws-receded-opacity: 0.55;
+  --ws-receded-text-opacity: 0.42;
+  --ws-neighbour-fade: 45%;
+  --ws-neighbour-edge: 0%;
+  --ws-neighbour-fade-end: var(--ws-neighbour-fade);
   --ws-gap: 24px;
   --ws-inset: 12px;
   --ws-tab-floor: 90px;
@@ -94,7 +104,14 @@
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  --ws-sidebar-width: 240px;
+  --ws-sidebar-width: 280px;
+  --ws-sidebar-overflow: 32px;
+  --ws-sidebar-pull: 18px;
+  --ws-sidebar-lift: -2px;
+  --ws-sidebar-bottom: 40px;
+  --ws-sidebar-card-gap: 12px;
+  --ws-sidebar-outcome-lines: 2;
+  --ws-sidebar-outcome-size: 14px;
   --ws-row-size: 16px;
   --ws-html-width: 1040px;
   --ws-pdf-width: 900px;
