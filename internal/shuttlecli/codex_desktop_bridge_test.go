@@ -327,6 +327,9 @@ func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
 	t.Parallel()
 	h := newBridgeHarness(t)
 	h.input.Close()
+	// Native must have started: a bridge that timed out before exec would also
+	// exit and clean up.
+	h.native(t)
 	h.wait(t)
 	h.clean(t)
 	if strings.Contains(h.stderr.String(), "context canceled") {
