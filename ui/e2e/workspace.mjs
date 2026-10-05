@@ -1081,6 +1081,10 @@ test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters fil
   await title.focus()
   await p.keyboard.press('c')
   assert.ok(await sidebar.isVisible())
+  for (const page of await p.locator('.ws-page.ws-receded.ws-before').all()) {
+    assert.equal(await page.evaluate(el => getComputedStyle(el).clipPath), 'inset(0px 100% 0px 0px)', 'left neighbours are masked behind the sidebar')
+  }
+  assert.notEqual(await p.locator('.ws-page.ws-receded.ws-after').first().evaluate(el => getComputedStyle(el).maskImage), 'none', 'right neighbour keeps its edge fade')
   assert.equal(await p.getByRole('button', { name: 'Hide constitutions', exact: true }).getAttribute('aria-expanded'), 'true')
   await title.focus()
   await p.keyboard.press('/')

@@ -199,6 +199,8 @@
 .ws-sidebar-flight .ws-constitution-card { overflow: hidden; pointer-events: none; transition: none; }
 .ws-sidebar-flight .ws-flight-current { background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light); }
 .ws-with-sidebar .ws-sidebar { display: flex; }
+/* The left context page stays under the column; only the right edge peeks into the stage. */
+.ws-with-sidebar .ws-page.ws-receded.ws-before { clip-path: inset(0 100% 0 0); pointer-events: none; }
 .ws-sidebar-toggle { flex: none; height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important; font-size: var(--ws-label-size) !important; text-transform: uppercase; white-space: nowrap; }
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
