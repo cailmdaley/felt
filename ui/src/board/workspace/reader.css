@@ -80,8 +80,10 @@
 }
 .ws-reader .ws-navbar .ws-head-worker .ws-worker-control:hover { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-head-worker .ws-worker-dot { align-self: center; width: 7px; height: 7px; }
-.ws-head-worker .ws-worker-state { font: inherit; }
-.ws-head-worker .ws-worker-elapsed { font: var(--ws-small-size)/1 var(--ws-mono); letter-spacing: 0; }
+/* Widths held for the longest state (attention) and a minutes count, so a
+   state change never moves the index beside it. */
+.ws-head-worker .ws-worker-state { font: inherit; min-width: 3.6em; }
+.ws-head-worker .ws-worker-elapsed { min-width: 4ch; font: var(--ws-small-size)/1 var(--ws-mono); font-variant-numeric: tabular-nums; letter-spacing: 0; }
 .ws-worker-state { font: var(--ws-label-size)/1.2 var(--ws-serif); }
 .ws-worker-elapsed { font: var(--ws-small-size)/1.4 var(--ws-mono); }
 /* A dot is too small for ink-mixed pigments: working is the machine's own cobalt, waiting the undiluted gold. */
@@ -97,6 +99,8 @@
 @media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
 .ws-nav-verdicts { flex: none; margin-left: var(--ws-small-gap); }
 .ws-nav-verdicts[hidden] { display: none; }
+/* The protected plate resets every property, visibility too, so it is held by name. */
+.ws-nav-verdicts-held, .ws-nav-verdicts-held * { visibility: hidden; }
 .ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: baseline; gap: 2px; }
 .ws-review-plate { font: var(--ws-label-size)/1.2 var(--ws-serif); }
 /* In the head the verdicts are verbs in their pigments, plated only under the pointer. */
@@ -193,6 +197,7 @@
 .ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; }
 .ws-sidebar .ws-channel-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-paper); border-color: var(--ws-ink-faint); transform: translateY(var(--ws-sidebar-lift)); }
+@media (prefers-reduced-motion: reduce) { .ws-sidebar .ws-constitution-card:hover:not([aria-current='true']) { transform: none; } }
 .ws-sidebar .ws-constitution-card[aria-current='true'] {
   background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink);
   transform: translate(var(--ws-sidebar-pull), var(--ws-sidebar-lift));

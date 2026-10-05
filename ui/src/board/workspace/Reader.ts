@@ -1,7 +1,7 @@
 import './tokens.css'
 import './reader.css'
-import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
-import { fiberPageColumn } from './fiberPageState.js'
+import type { KanbanCard } from '../KanbanTypes.js'
+import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -417,22 +417,26 @@ export class Reader {
     if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
     this.swipeWatchdog = null
   }
-  /** Temper and Discard ride the navbar while the fiber awaits review; the
-   *  fiber page carries its own pair in the act zone, and the phone's page
-   *  sheet carries one beside its heading. */
+  /** Temper and Discard ride the navbar for every fiber still without a
+   *  verdict, and the phone's page sheet carries the same pair. On the fiber
+   *  page of a fiber awaiting review the act zone leads with its own pair, so
+   *  the head's keeps its place, unseen, and nothing beside it moves. */
   private paintVerdicts(): void {
     const card = this.currentCard
-    const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview'
-    // The pair is built once per reviewing fiber, so a repaint never swaps
-    // the buttons under the pointer or the focus.
-    const key = review && card ? JSON.stringify([card.originId, card.uid ?? card.id, card.path, card.status, card.tempered, card.workerState, card.tmuxSession]) : null
+    const reachable = !!card && verdictReachable(card)
+    // The pair is built once per fiber and lifecycle, so a repaint never
+    // swaps the buttons under the pointer or the focus.
+    const key = reachable && card ? JSON.stringify([card.originId, card.uid ?? card.id, card.path, card.status, card.tempered, card.workerState, card.tmuxSession]) : null
     if (key !== this.verdictKey) {
       this.verdictKey = key
       const navbar = key && card ? this.opts.verdictPlate?.(card) ?? null : null
       this.verdicts.replaceChildren(...(navbar ? [navbar] : []))
       this.pageSheet.setActions(key && card ? this.opts.verdictPlate?.(card) ?? null : null)
     }
-    this.verdicts.hidden = !key || !this.verdicts.firstChild || this.document?.kind === 'fiber'
+    this.verdicts.hidden = !key || !this.verdicts.firstChild
+    const actZoneLeads = !!card && this.document?.kind === 'fiber' && fiberPageColumn(card) === 'awaitingReview'
+    this.verdicts.classList.toggle('ws-nav-verdicts-held', actZoneLeads)
+    this.verdicts.inert = actZoneLeads
   }
   /** Repaint the head's worker control from the current card, keeping its focus. */
   private paintWorker(): void {
@@ -868,7 +872,7 @@ export class Reader {
     }
     if (this.tabs.handleIntent(intent)) return true
     if (intent === 'temper' || intent === 'discard') {
-      if (!this.currentCard || fiberPageColumn(this.currentCard) !== 'awaitingReview') return false
+      if (!this.currentCard || !verdictReachable(this.currentCard)) return false
       this.opts.onVerdict?.(intent === 'temper' ? 'tempered' : 'composted')
     }
     else if (intent === 'compose') this.opts.onCompose?.()

@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
+import { frames, layoutShift, unexpected } from './layoutShift.mjs'
 
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 await access(chrome)
@@ -125,7 +126,13 @@ test('Awaiting-review actions reveal without shifting and remain thumb-sized on 
   const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
   const actions = review.locator('.kbn-card-review-meta-actions')
   assert.equal(await drafts.locator('.kbn-card-review-meta-actions').count(), 0)
-  assert.equal(await flight.locator('.kbn-card-review-meta-actions').count(), 0)
+  // Work in flight reveals the same pair on hover, so a card can be cleared from the Desk.
+  const flightActions = flight.locator('.kbn-card-review-meta-actions').first()
+  assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await flight.locator('.kbn-card').first().hover()
+  assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '1')
+  assert.deepEqual(await flightActions.locator('button').allTextContents(), ['Temper', 'Discard'])
+  await p.mouse.move(0, 0)
   assert.equal(await actions.locator('button').count(), 2)
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
   const before = await actions.evaluate(el => {
@@ -175,6 +182,9 @@ test('Awaiting-review actions stay visible and thumb-sized without hover', async
     assert.equal(reach.plate, 28, 'the plate reads compact')
     assert.equal(reach.meta, 28, 'the touch reach does not grow the meta row')
   }
+  // Without hover, in-flight cards keep their meta row to the worker.
+  await chooseDeskColumn(p, 1)
+  assert.equal(await p.locator('[data-column="inFlight"] .kbn-card-review-meta-actions').first().evaluate(el => getComputedStyle(el).display), 'none')
 }, { width: 390, height: 844 }, undefined, 'reduce', true)
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
@@ -819,7 +829,7 @@ test('Review plate reaches verdicts from a delivery and leaves the fiber page it
   await open(p)
   const plate = p.locator('.ws-nav-verdicts .ws-review-plate')
   await plate.waitFor()
-  assert.equal(await plate.getAttribute('aria-label'), 'Awaiting review')
+  assert.equal(await plate.getAttribute('aria-label'), 'Verdict')
   await choose(p, 'Constitution')
   assert.ok(!await plate.isVisible(), 'the fiber page carries its own pair')
   assert.ok(await selected(p).locator('.kbn-ctl-verdict').isVisible())
@@ -892,12 +902,6 @@ async function anchoredInView(p, panel, trigger, label) {
 }
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Fiber page popovers open anchored and inside the viewport: ${device}`, async p => {
   await open(p); await choose(p, 'Constitution')
-  const mic = selected(p).locator('.kbn-ctl-meet-btn')
-  if (await mic.count()) {
-    await mic.click()
-    await anchoredInView(p, selected(p).locator('.kbn-ctl-meet .kbn-ctl-menu'), mic, 'Meeting menu')
-    await p.keyboard.press('Escape')
-  }
   await selected(p).locator('.kbn-detail-controls-toggle').click()
   for (const name of ['Effort', 'Agent']) {
     const control = selected(p).locator(`select[aria-label="${name}"]`)
@@ -1050,6 +1054,28 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   await p.clock.runFor(1)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
   assert.equal((await posts()).length, 1)
+})
+
+test('Temper reaches drafts and work in flight from the head and t, through the undo queue', async p => {
+  await chooseDeskColumn(p, 0)
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
+  await choose(p, 'Constitution')
+  assert.ok(await p.locator('.ws-nav-verdicts .kbn-ctl-temper').isVisible(), 'a draft carries the pair in the head')
+  await p.keyboard.press('t')
+  await p.locator('.ws-verdict-toast').waitFor()
+  await p.keyboard.press('z')
+  await poll(p, () => !document.querySelector('.ws-verdict-toast'))
+  await p.locator('.ws-return').click()
+  await chooseDeskColumn(p, 1)
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await choose(p, 'Constitution')
+  // A live worker asks once at the gesture; declining queues nothing.
+  const asked = []
+  p.once('dialog', dialog => { asked.push(dialog.message()); void dialog.dismiss() })
+  await p.locator('.ws-nav-verdicts .kbn-ctl-temper').click()
+  assert.equal(asked.length, 1, 'tempering a live worker asks first')
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
 })
 
 test('Pending verdicts on two fibers commit independently', async p => {
@@ -2268,6 +2294,146 @@ for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']
     assert.equal(await p.locator('[data-part="page-sheet-panel"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()), await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()))
   }, { width: 390, height: 844 })
 }
+
+// Nothing moves when you touch it (design.md, "Motion, input and focus"). Each
+// step records every visible box, applies one interaction, and fails on any
+// box that moved or resized beyond 0.5 px outside the touched control and its
+// intended dependants. A new surface joins these before it lands.
+async function still(p, label, act, { allow = [], ...options } = {}) {
+  const shifts = await layoutShift(p, { regions: ['body'], act, allow, ...options })
+  assert.deepEqual(shifts, [], `${label} moved something: ${JSON.stringify(shifts, null, 1)}`)
+}
+const repaint = p => p.evaluate(() => window.__harness.modal.fetchAndRender())
+const flipWorker = p => p.evaluate(async () => {
+  const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
+  row.runtime.phase = row.runtime.phase === 'waiting' ? 'working' : 'waiting'
+  row.runtime.last_activity_at = Date.now() - 120000
+  await window.__harness.modal.fetchAndRender()
+})
+
+// `r` focuses the composer where it stands; a field out of view scrolls its
+// page only as far as its top, so the kicker stays whole.
+async function composerKeyStaysPut(p) {
+  await p.evaluate(() => document.activeElement?.blur())
+  await still(p, 'r focusing a visible composer', () => p.keyboard.press('r'))
+  await p.evaluate(() => document.activeElement?.blur())
+  await selected(p).locator('.ws-prose-body').evaluate(body => {
+    const tall = document.createElement('div'); tall.className = 'e2e-tall'; tall.style.height = '3000px'; body.append(tall)
+    body.closest('.ws-prose-scroll').scrollTop = 900
+  })
+  await p.keyboard.press('r')
+  await frames(p)
+  const seen = await selected(p).evaluate(page => {
+    const scroller = page.querySelector('.ws-prose-scroll'), view = scroller.getBoundingClientRect()
+    const field = page.querySelector('.kbn-detail-directive').getBoundingClientRect()
+    const kicker = page.querySelector('.ws-prose-status').getBoundingClientRect()
+    return { focused: document.activeElement?.classList.contains('kbn-detail-directive'), fieldInView: field.top >= view.top && field.bottom <= view.bottom, kickerWhole: kicker.top >= view.top, scrollTop: scroller.scrollTop }
+  })
+  assert.deepEqual(seen, { focused: true, fieldInView: true, kickerWhole: true, scrollTop: 0 }, 'r brings an off-screen composer in from the page top')
+  await selected(p).locator('.e2e-tall').evaluate(tall => tall.remove())
+}
+
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the act zone (${device})`, async p => {
+  const phone = device === 'phone'
+  // The phone's page bar steps aside while a field holds the keyboard; the
+  // stage grows beneath, and only offscreen neighbours re-centre in it.
+  const keyboard = phone ? { allow: ['.ws-thumbbar', '.ws-page:not(.ws-selected)'], positionsOnly: true } : {}
+  await open(p); await choose(p, 'Constitution')
+  const dock = '.ws-selected .ws-dock'
+  const field = p.locator(`${dock} .kbn-detail-directive`)
+  await field.scrollIntoViewIfNeeded()
+  await still(p, 'focusing the composer', () => field.click(), keyboard)
+  await still(p, 'typing a word', () => p.keyboard.type('Rerun'))
+  const above = ['.ws-navbar', '.ws-selected .ws-prose-status', '.ws-selected .kbn-ctl-verdict']
+  const before = await field.boundingBox()
+  assert.ok(unexpected(await layoutShift(p, { regions: above, act: () => p.keyboard.type(' the masks with the corrected weights, then compare the null spectra at high ell against the previous run') })).length === 0, 'wrapped text moves nothing above the field')
+  const grown = await field.boundingBox()
+  assert.ok(grown.height > before.height && Math.abs(grown.y - before.y) <= 0.5, `wrapped text grows the field downward: ${JSON.stringify({ before, grown })}`)
+  await field.fill('')
+  assert.equal((await field.boundingBox()).height, before.height, 'an emptied field returns to its resting height')
+  await still(p, 'blurring the composer', () => p.evaluate(() => document.activeElement.blur()), keyboard)
+  if (!phone) await composerKeyStaysPut(p)
+  if (!phone) for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard', '.kbn-ctl-meet-switch', '.kbn-ctl-resume', '.kbn-ctl-secondary', '.kbn-detail-controls-toggle', '.kbn-ctl-history-toggle']) {
+    await still(p, `hovering ${control}`, () => p.locator(`${dock} ${control}`).first().hover(), { allow: [`${dock} ${control}`] })
+  }
+  // Meeting trades the composer's verbs, inside the composer, on its row.
+  for (const state of ['on', 'off']) await still(p, `turning Meeting ${state}`, () => p.locator(`${dock} .kbn-ctl-meet-switch`).click(), { allow: [`${dock} .kbn-ctl-composer`] })
+  await still(p, 'a poll repaint', () => repaint(p))
+  await p.locator(`${dock} .kbn-detail-controls-toggle`).click()
+  if (!phone) {
+    await still(p, 'opening the Effort list', () => p.locator(`${dock} select[aria-label="Effort"]`).click(), { allow: ['.ws-select-picker'] })
+    await p.keyboard.press('Escape')
+  }
+  await p.locator('.ws-return').click()
+  await chooseDeskColumn(p, 1)
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await choose(p, 'Constitution')
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control'], settle: 100 })
+  // In flight, the head carries the verdict and the act zone draws none.
+  assert.equal(await p.locator(`${dock} :is(.kbn-ctl-temper, .kbn-ctl-discard, .kbn-ctl-verdict-menu)`).count(), 0, 'the fiber page leaves an in-flight verdict to the head')
+  if (!phone) assert.ok(await p.locator('.ws-nav-verdicts .kbn-ctl-temper').isVisible(), 'the head carries Temper in flight')
+}, viewport)
+
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the head, label bar and sidebar (${device})`, async p => {
+  await open(p); await reportReady(p)
+  for (const control of ['.ws-return', '.ws-channel-title', '.ws-nav-verdicts .kbn-ctl-temper', '.ws-selected .ws-expand-button']) {
+    await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
+  }
+  await still(p, 'hovering a tab', () => p.locator('.ws-tab').nth(3).hover(), { settle: 600 })
+  await p.mouse.move(viewport.width / 2, viewport.height - 4)
+  await still(p, 'opening the document menu', () => p.locator('.ws-selected .ws-menu-button').click(), { allow: ['[popover]', '.ws-menu'] })
+  await p.keyboard.press('Escape')
+  await still(p, 'opening the switcher', () => p.locator('.ws-channel-title').click(), { allow: ['[popover]', 'dialog'] })
+  await p.keyboard.press('Escape')
+  // Selecting a page crosses the tabs; the head's other parts hold.
+  assert.deepEqual(unexpected(await layoutShift(p, { regions: ['.ws-navbar'], act: () => p.keyboard.press('Alt+ArrowRight'), allow: ['.ws-tabs'], settle: 400 })), [], 'selecting a page')
+  await still(p, 'a poll repaint', () => repaint(p))
+  await p.keyboard.press('s')
+  await p.locator('.ws-sidebar .kbn-card').nth(1).waitFor()
+  await p.waitForTimeout(400)
+  await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover())
+  await still(p, 'a sidebar poll repaint', () => repaint(p))
+  // A worker starting on a fiber that awaits review keeps the head's verdict
+  // pair in place, so neither the index nor the pair moves; the index only
+  // yields room at its far end to the worker control.
+  await choose(p, 'calibration-report')
+  await still(p, 'a worker starting under review', () => p.evaluate(async () => {
+    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
+    row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', last_activity_at: Date.now(), started_at: Date.now() - 60000 }
+    await window.__harness.modal.fetchAndRender()
+  }), { regions: ['.ws-navbar'], allow: ['.ws-head-worker', '.ws-nav-trail'], positionsOnly: true, settle: 100 })
+  assert.ok(await p.locator('.ws-nav-verdicts .kbn-ctl-temper').isVisible(), 'a live worker under review keeps the head pair')
+  await choose(p, 'Constitution')
+  await composerKeyStaysPut(p)
+  await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
+}, viewport)
+
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and the Board (${device})`, async p => {
+  const phone = device === 'phone'
+  await p.waitForTimeout(phone ? 600 : 0)
+  for (const [index, column] of ['drafts', 'inFlight', 'awaitingReview'].entries()) {
+    await chooseDeskColumn(p, index)
+    const card = p.locator(`[data-column="${column}"] .kbn-card`).first()
+    if (phone) { await p.waitForTimeout(400); continue }
+    // Under reduced motion a hovered card does not lift.
+    await still(p, `hovering a ${column} card`, () => card.hover())
+    await p.mouse.move(1, 1)
+    await p.waitForTimeout(200)
+  }
+  if (!phone) await still(p, 'j selecting a card (the verdict reveal)', () => p.keyboard.press('j'))
+  await still(p, 'a Desk poll repaint', () => repaint(p))
+  // The pill's word grows into the meta row's empty spacer; nothing visible moves.
+  await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.kbn-card-meta-spacer'], settle: 100 })
+  if (phone) return
+  await p.locator('[data-view="shelf"]').click()
+  await p.locator('.ws-overview-folio').first().waitFor()
+  await p.waitForTimeout(400)
+  const folio = p.locator('.ws-overview-folio').first()
+  const box = await folio.boundingBox()
+  await still(p, 'hovering a folio', () => p.mouse.move(box.x + box.width / 2, box.y + box.height / 2), { allow: ['.ws-overview-folio:hover'], settle: 200 })
+  await still(p, 'a Board poll repaint', () => repaint(p))
+  await still(p, 'summoning Find', () => p.keyboard.press('/'))
+}, viewport)
 
 const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(process.env.E2E_ONLY).test(test.name))
 const started = performance.now()
