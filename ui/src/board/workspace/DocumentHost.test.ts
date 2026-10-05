@@ -28,7 +28,7 @@ const doc = (n: number, owner = 'host-a'): WorkspaceDocument => ({
 const docs = Array.from({ length: 18 }, (_, n) => doc(n))
 let track: HTMLElement
 let host: DocumentHost
-const onSelect = vi.fn(), onFrame = vi.fn(), buildProse = vi.fn(() => document.createElement('div'))
+const onSelect = vi.fn(), onFrame = vi.fn(), onScroll = vi.fn(), buildProse = vi.fn(() => document.createElement('div'))
 beforeEach(() => {
   vi.clearAllMocks()
   render.calls = []
@@ -36,7 +36,7 @@ beforeEach(() => {
   document.body.replaceChildren()
   track = document.createElement('div')
   document.body.append(track)
-  host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame })
+  host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame, onScroll })
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
 })
 afterEach(() => { host.dispose(); vi.unstubAllGlobals() })
@@ -262,6 +262,36 @@ describe('stable document frames', () => {
     for (const call of render.calls) await ready(call)
     // Ready notifications from evicted generations cannot resurrect a viewer.
     expect(host.get(docs[0].key)!.viewer).toBeNull()
+  })
+
+  it('emits active-only scroll hooks from validated bridge events and local prose', async () => {
+    host.setChannel(docs.slice(0, 2), docs[0].key)
+    const call = render.calls.find(call => call.path === docs[0].path)!
+    const iframe = document.createElement('iframe')
+    call.viewer.append(iframe)
+    const bridge = connectDocumentFrame(iframe, () => {})
+    call.frame!(iframe, false)
+    const send = (source: Window | null, data: unknown): void => { window.dispatchEvent(new MessageEvent('message', { source, data })) }
+    send(window, envelope('scroll', { x: 0, y: 80 }))
+    send(iframe.contentWindow, { ...envelope('scroll', { x: 0, y: 80 }), version: 2 })
+    send(iframe.contentWindow, envelope('scroll', { x: 0, y: Infinity }))
+    expect(onScroll).not.toHaveBeenCalled()
+    send(iframe.contentWindow, envelope('scroll', { x: 0, y: 80 }))
+    expect(onScroll).toHaveBeenCalledExactlyOnceWith(docs[0].key, 80)
+    host.select(docs[1].key)
+    send(iframe.contentWindow, envelope('scroll', { x: 0, y: 90 }))
+    expect(onScroll).toHaveBeenCalledOnce()
+    const prose = { ...docs[0], key: 'fiber:host-a:note', kind: 'fiber' as const }
+    host.setChannel([prose, docs[1]], prose.key)
+    const pane = host.get(prose.key)!.viewer!
+    pane.scrollTop = 120
+    pane.dispatchEvent(new Event('scroll'))
+    expect(onScroll).toHaveBeenLastCalledWith(prose.key, 120)
+    host.select(docs[1].key)
+    pane.scrollTop = 130
+    pane.dispatchEvent(new Event('scroll'))
+    expect(onScroll).toHaveBeenCalledTimes(2)
+    bridge.dispose()
   })
 
   it('restores iframe scroll on remount and reconnects the listener on live replacement', async () => {

@@ -50,6 +50,8 @@ export class DocumentHost {
     shuttleBase: string
     buildProse: (doc: WorkspaceDocument) => HTMLElement
     onSelect: (key: DocKey) => void
+    /** Active-document positions, including restoration, from local or validated bridge scrolls. */
+    onScroll?: (key: DocKey, y: number) => void
     onFrame?: (frame: DocumentFrame) => void
     /** The controller owns fetching fiber bodies; it calls updateProse on success. */
     onRefreshProse?: (doc: WorkspaceDocument) => void | Promise<void>
@@ -456,7 +458,10 @@ export class DocumentHost {
       scroller.scrollTop = state.scroll.y
       scroller.scrollLeft = state.scroll.x
     })
-    const save = () => this.saveScroll(state)
+    const save = (): void => {
+      this.saveScroll(state)
+      if (state.active) this.options.onScroll?.(state.frame.doc.key, state.scroll.y)
+    }
     state.readScroll = () => ({ x: scroller.scrollLeft, y: scroller.scrollTop })
     scroller.addEventListener('scroll', save, { passive: true })
     state.stopScroll = () => scroller.removeEventListener('scroll', save)
@@ -475,6 +480,7 @@ export class DocumentHost {
     state.stopScroll = bridge.subscribeScroll(position => {
       state.scroll = position
       this.saveScroll(state)
+      if (state.active) this.options.onScroll?.(state.frame.doc.key, position.y)
     })
   }
 
