@@ -602,7 +602,9 @@ export class Overview {
   private createThumbnail(key: string, file: Receipt | undefined, fallback: string): Thumbnail {
     const el = node('div', 'ws-overview-thumb')
     el.setAttribute('aria-hidden', 'true'); el.inert = true
-    const face = node('div', 'ws-overview-thumb-face', file?.basename ?? fallback)
+    const kind = file ? documentKind(file.fullPath) : 'fiber'
+    const glyph = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
+    const face = node('div', 'ws-overview-thumb-face', `${glyph} ${file?.basename ?? fallback}`)
     el.append(face)
     const thumb: Thumbnail = { key, el, file, state: 'idle', near: false, lastVisible: 0, generation: 0 }
     this.thumbnails.set(key, thumb); this.observer?.observe(el)
