@@ -1,6 +1,5 @@
 import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
-import { conversationActions } from '../conversationMenu.js'
-import { claudeOpening, CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
+import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../../forms/meetingApi.js'
@@ -402,10 +401,7 @@ export class Dock {
   private meetingPaint: (() => void) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
-  private workerPill: HTMLElement | null = null
   private workerPillCard: KanbanCard | null = null
-  private workerContainer: HTMLElement | null = null
-  private workerPillKey = ''
   private guidance: HTMLElement | null = null
   private dismissMeeting: (() => boolean) | null = null
   private dismissParent: (() => boolean) | null = null
@@ -489,10 +485,6 @@ export class Dock {
     // opening targets without replacing the textarea or settings fields.
     this.card = { ...card }
     const view = this.card
-    // The worker line is only the shared action pill into its conversation.
-    this.workerContainer = document.createElement('div')
-    this.workerContainer.className = 'ws-dock-worker'
-    this.el.append(this.workerContainer)
     this.guidance = document.createElement('p')
     this.guidance.className = 'kbn-detail-app-guide'
     this.el.append(this.guidance)
@@ -536,8 +528,7 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.workerPillCard = this.transcriptCard = null
-    this.workerPill = this.workerContainer = this.transcriptPane = this.guidance = null
-    this.workerPillKey = ''
+    this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
@@ -565,61 +556,6 @@ export class Dock {
     this.guidance.textContent = target.guidance
   }
 
-  /** A dock-local menu: no portal, global Escape listener or sheet claim. */
-  private workerMenu(pill: HTMLElement, card: KanbanCard): HTMLElement {
-    const actions = conversationActions(card.sessionLink, atDesktop(navigator.userAgent, coarsePointer()),
-      card.tmuxSession && this.onOpenWorker ? () => this.onOpenWorker?.(card.tmuxSession!, card.shuttleHost) : undefined)
-    if (actions.length < 2) return pill
-    pill.setAttribute('aria-haspopup', 'menu')
-    pill.setAttribute('aria-expanded', 'false')
-    // terminalWorkerPill also supplies a portal context-menu listener. Capture
-    // here keeps the same alternatives within the reader's Escape stack.
-    pill.addEventListener('contextmenu', e => {
-      e.preventDefault()
-      e.stopImmediatePropagation()
-      this.dismissConversation?.()
-      const menu = document.createElement('div')
-      menu.className = 'kbn-conversation-menu kbn-ctl-menu'
-      menu.setAttribute('role', 'menu')
-      menu.setAttribute('aria-label', 'Open conversation in')
-      const dismiss = (): boolean => {
-        menu.remove()
-        pill.setAttribute('aria-expanded', 'false')
-        this.dismissConversation = null
-        if (pill.isConnected) pill.focus()
-        return true
-      }
-      this.dismissConversation = dismiss
-      const items = actions.map(action => {
-        const item = document.createElement(action.href ? 'a' : 'button')
-        item.className = 'kbn-ctl-menu-item'
-        item.setAttribute('role', 'menuitem')
-        item.tabIndex = -1
-        item.textContent = action.label
-        if (item instanceof HTMLAnchorElement) {
-          item.href = action.href!
-          if (action.href!.startsWith('https:')) { item.target = '_blank'; item.rel = 'noopener noreferrer' }
-        } else (item as HTMLButtonElement).type = 'button'
-        item.addEventListener('click', e => { e.stopPropagation(); action.run?.(); dismiss() })
-        return item
-      })
-      menu.append(...items)
-      menu.addEventListener('keydown', e => {
-        const at = items.indexOf(document.activeElement as HTMLAnchorElement | HTMLButtonElement)
-        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
-          e.preventDefault()
-          const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (at + (e.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
-          items[next].focus()
-        } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dismiss() }
-        else if (e.key === 'Tab') dismiss()
-      })
-      menu.addEventListener('focusout', e => { if (e.relatedTarget && !menu.contains(e.relatedTarget as Node)) dismiss() })
-      this.el.querySelector('.ws-dock-worker')!.append(menu)
-      pill.setAttribute('aria-expanded', 'true')
-      items[0].focus()
-    }, true)
-    return pill
-  }
   private buildTranscriptPane(card: KanbanCard): HTMLElement {
     const pane = document.createElement('section')
     pane.className = 'kbn-detail-transcript'
@@ -683,40 +619,10 @@ export class Dock {
     }) : null
   }
 
-  private buildWorkerPill(card: KanbanCard): HTMLElement | null {
-    this.workerPillCard = card
-    const pill = this.workerPillFor(card)
-    return pill && card.tmuxSession ? this.workerMenu(pill, card) : pill
-  }
-
-  private workerPillState(card: KanbanCard): string {
-    return JSON.stringify([
-      card.workerSurface ?? card.shuttleSurface ?? null,
-      card.sessionUuid ?? null,
-      card.tmuxSession ?? null,
-      card.sessionLink ?? null,
-      card.desktopLink ?? null,
-      card.workerAgent ?? card.shuttleAgent ?? null,
-      card.shuttleHost ?? null,
-      card.shuttleProjectDir ?? null,
-      card.runtimePhase ?? null,
-      card.lastActivityAt ?? null,
-      card.launchError ?? null,
-      this.workerPhase(card),
-      workerVariant(card),
-      claudeOpening(),
-    ])
-  }
-
-  /**
-   * Repaint the worker pill from a fresher copy of the open card —
-   * the board calls this after every poll, so the pill follows the worker
-   * between Waiting, Aloft and Blocked while the dock stays open. A card
-   * other than the open one is ignored.
-   */
+  /** Refresh controls without replacing drafts or folded fields. */
   syncRuntime(card: KanbanCard | null): void {
     for (const band of this.bands.values()) band.syncRuntime(card)
-    if (!card || !this.card || !this.workerContainer ||
+    if (!card || !this.card ||
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
@@ -739,15 +645,6 @@ export class Dock {
     }
     this.workerPillCard = card
     this.paintGuidance(card)
-    const key = this.workerPillState(card)
-    if (key === this.workerPillKey) return
-    this.workerPillKey = key
-    this.dismissConversation?.()
-    const next = this.buildWorkerPill(card)
-    if (this.workerPill && next) this.workerPill.replaceWith(next)
-    else if (next) this.workerContainer.append(next)
-    else this.workerPill?.remove()
-    this.workerPill = next
   }
 
   refreshConversationOpening(): void {

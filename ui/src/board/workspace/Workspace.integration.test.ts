@@ -230,10 +230,10 @@ describe('workspace reader integration', () => {
     workspace.open(cards[0])
     await flush()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
-    const title = article.querySelector('h1')!
+    const header = article.querySelector('header')!
     const band = article.querySelector<HTMLElement>('.ws-dock')!
     const outcome = article.querySelector<HTMLElement>('.kbn-detail-lede')!
-    expect(title.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(header.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(band.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
@@ -331,7 +331,8 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(band.querySelector('.kbn-card-worker')?.textContent).toBe('Aloft')
+    expect(band.querySelector('.kbn-card-worker')).toBeNull()
+    expect(document.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('Aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     button('New session').click()

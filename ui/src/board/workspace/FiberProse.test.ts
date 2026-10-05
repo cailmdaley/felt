@@ -49,7 +49,7 @@ describe('fiber prose', () => {
     expect(pane.querySelector('header')?.textContent).toBe('active')
     expect(pane.querySelector('.ws-prose-status')?.textContent).toBe('active')
     expect(pane.querySelector('.ws-prose-agent, .ws-prose-host')).toBeNull()
-    expect(pane.querySelector('h1')?.textContent).toBe('Task')
+    expect(pane.querySelector('h1')).toBeNull()
     expect(pane.querySelector('iframe')).toBeNull()
     expect(pane.querySelectorAll('.ws-prose-documents button')).toHaveLength(1)
     pane.querySelector<HTMLButtonElement>('.ws-prose-documents button')!.click()

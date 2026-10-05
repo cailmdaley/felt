@@ -84,8 +84,6 @@ export function buildFiberProse(
     status.textContent = card.status
     header.append(status)
   }
-  const title = document.createElement('h1')
-  title.textContent = channel.name
   const body = document.createElement('div')
   body.className = 'ws-prose-body'
   body.innerHTML = renderFiberMarkdown(channel.body, channel.outcome ?? card.outcome ?? '', {
@@ -105,7 +103,7 @@ export function buildFiberProse(
   }
   installBodyFileLinks(body, opts.onFile)
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
-  article.append(header, title, ...(opts.controls ? [opts.controls] : []), body)
+  article.append(header, ...(opts.controls ? [opts.controls] : []), body)
 
   const files = channel.documents.map((doc, index) => ({ doc, index })).filter(({ doc }) => doc.kind !== 'fiber')
   if (files.length) {
