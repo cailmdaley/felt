@@ -509,8 +509,11 @@ export class Reader {
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
+    // Alt chords never bypass editable/native control guards; command shortcuts may.
+    const forward = shouldForwardDocumentKey(e)
+    if (e.altKey && !forward) return
     // Native controls own activation and composite navigation; the managed tablist uses our shared intents.
-    if (!this.tabs.el.contains(e.target as Node) && !shouldForwardDocumentKey(e) && !e.altKey && !e.metaKey && !e.ctrlKey) return
+    if (!this.tabs.el.contains(e.target as Node) && !forward && !e.metaKey && !e.ctrlKey) return
     const intent = keyIntent(e, 'reader')
     if (intent && this.handleIntent(intent, e.repeat)) {
       e.preventDefault(); e.stopImmediatePropagation()

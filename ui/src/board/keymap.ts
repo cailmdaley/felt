@@ -16,7 +16,7 @@ const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): Ke
 export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-pinned', '.kbn-section-stash'] as const
 
 /** The binding table is also the help overlay's source; surfaces consume intents,
- * not physical keys. Alt-arrows are reader chords and bypass the typing guard. */
+ * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */
 export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
     bind(['/'], 'find', 'Find a card or constitution'),
@@ -70,7 +70,7 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   bindings = surfaceBindings, editable = isEditableTarget): KeyIntent | null {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return null
   const command = event.metaKey || event.ctrlKey
-  if (!command && !event.altKey && editable(event.target)) return null
+  if ((event.altKey || !command) && editable(event.target)) return null
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null

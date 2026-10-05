@@ -21,12 +21,12 @@ describe('shared keyboard table', () => {
   it.each(['1', '2', '3', ',', 'Tab'])('leaves chassis key %s alone', key => {
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event(key), surface)).toBeNull()
   })
-  it.each(['input', 'textarea', 'select'])('ignores typing in %s but allows reader Alt-arrows', tag => {
+  it.each(['input', 'textarea', 'select'])('ignores typing in %s, including reader Alt-arrows', tag => {
     const field = document.createElement(tag)
     expect(keyIntent(event('j', {}, field), 'desk')).toBeNull()
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event('/', {}, field), surface)).toBeNull()
     expect(shouldForwardDocumentKey(event('/', {}, field))).toBe(false)
-    expect(keyIntent(event('ArrowRight', { altKey: true }, field), 'reader')).toBe('next')
+    expect(keyIntent(event('ArrowRight', { altKey: true }, field), 'reader')).toBeNull()
     expect(shouldForwardDocumentKey(event('ArrowRight', { altKey: true }, field))).toBe(false)
   })
   it('guards nested contenteditable nodes and non-editable islands', () => {
@@ -36,8 +36,10 @@ describe('shared keyboard table', () => {
     editable.append(child)
     expect(keyIntent(event('j', {}, child), 'reader')).toBeNull()
     expect(shouldForwardDocumentKey(event('j', {}, child))).toBe(false)
+    expect(keyIntent(event('ArrowDown', { altKey: true }, child), 'reader')).toBeNull()
     child.setAttribute('contenteditable', 'false')
     expect(keyIntent(event('j', {}, child), 'reader')).toBe('nextChannel')
+    expect(keyIntent(event('ArrowDown', { altKey: true }, child), 'reader')).toBe('nextChannel')
   })
   it('gives native activation and composite navigation controls first refusal', () => {
     const button = document.createElement('button')
