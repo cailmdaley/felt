@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer } from './FileViewerPanel.js'
+import { envelope } from './workspace/DocumentBridge.js'
+const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
+afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals() })
 
 const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), recover: null as null | (() => void), stop: vi.fn() }))
 vi.mock('./LiveFileRefresh.js', () => ({ watchLiveFile: vi.fn((_url, content, error, options) => {
@@ -29,6 +32,8 @@ describe('workspace file viewer hooks', () => {
     expect(initial.srcdoc).toContain('<script>bridge()</script>')
     expect(onState).not.toHaveBeenCalled()
     initial.dispatchEvent(new Event('load'))
+    expect(onState).not.toHaveBeenCalled()
+    ready(initial)
     expect(onFrame).toHaveBeenCalledWith(initial, false)
     expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
 
@@ -36,8 +41,7 @@ describe('workspace file viewer hooks', () => {
     const next = viewer.querySelectorAll('iframe')[1]
     expect(viewer.querySelector('iframe')).toBe(initial)
     expect(initial.srcdoc).toContain('First')
-    next.contentWindow!.scrollTo = vi.fn()
-    next.dispatchEvent(new Event('load'))
+    ready(next)
     expect(viewer.querySelector('iframe')).toBe(next)
     expect(onFrame).toHaveBeenLastCalledWith(next, true)
   })
@@ -45,8 +49,9 @@ describe('workspace file viewer hooks', () => {
   it('reports a stale HTML copy and ignores late staging events after disposal', () => {
     const onState = vi.fn()
     const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onState })
+    document.body.append(viewer)
     watch.content!('First')
-    viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
+    ready(viewer.querySelector('iframe')!)
     const error = new Error('offline')
     watch.error!(error)
     expect(onState).toHaveBeenLastCalledWith({ status: 'error', error, hasContent: true })
@@ -55,7 +60,7 @@ describe('workspace file viewer hooks', () => {
     const staging = viewer.querySelectorAll('iframe')[1]
     disposeFileViewer(viewer)
     onState.mockClear()
-    staging.dispatchEvent(new Event('load'))
+    ready(staging)
     expect(onState).not.toHaveBeenCalled()
     expect(watch.stop).toHaveBeenCalledOnce()
   })
@@ -65,14 +70,13 @@ describe('workspace file viewer hooks', () => {
     const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onState })
     document.body.append(viewer)
     watch.content!('First')
-    viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
+    ready(viewer.querySelector('iframe')!)
     watch.error!(new Error('offline'))
     watch.content!('Changed')
     watch.recover!()
     expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error' }))
     const staged = viewer.querySelectorAll('iframe')[1]
-    staged.contentWindow!.scrollTo = vi.fn()
-    staged.dispatchEvent(new Event('load'))
+    ready(staged)
     expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
   })
 

@@ -1,0 +1,140 @@
+import { keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
+
+export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
+const PROTOCOL = 'shuttle-document'
+const VERSION = 1
+export type ScrollPosition = { x: number; y: number }
+export type DocumentKey = { key: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; repeat?: boolean }
+export type DocumentMessage = { protocol: typeof PROTOCOL; version: typeof VERSION; type: string; payload: Record<string, unknown> }
+export function envelope(type: string, payload: Record<string, unknown> = {}): DocumentMessage {
+  return { protocol: PROTOCOL, version: VERSION, type, payload }
+}
+export function documentMessage(data: unknown): data is DocumentMessage {
+  if (!data || typeof data !== 'object') return false
+  const message = data as DocumentMessage
+  return message.protocol === PROTOCOL && message.version === VERSION && typeof message.type === 'string'
+    && !!message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)
+}
+
+/** This function is serialized, so every dependency arrives as an argument. */
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, protocol: string, version: number): void {
+  let active = false
+  let scroller: HTMLElement | null = null
+  const send = (type: string, payload: Record<string, unknown> = {}): void => parent.postMessage({ protocol, version, type, payload }, '*')
+  const resolveScroller = (): HTMLElement | null => {
+    if (scroller?.isConnected) return scroller
+    const root = document.scrollingElement as HTMLElement | null
+    if (root && root.scrollHeight > root.clientHeight + 1) return (scroller = root)
+    const nested = [...document.querySelectorAll<HTMLElement>('body *')].filter(el =>
+      el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(el).overflowY))
+    return (scroller = nested.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0] ?? root)
+  }
+  const position = (): void => {
+    const el = resolveScroller()
+    send('scroll', { x: el?.scrollLeft ?? 0, y: el?.scrollTop ?? 0 })
+  }
+  const pause = (): void => { for (const media of document.querySelectorAll<HTMLMediaElement>('audio,video')) media.pause() }
+  window.addEventListener('message', event => {
+    const data = event.data
+    if (event.source !== parent || !data || data.protocol !== protocol || data.version !== version || !data.payload) return
+    const payload = data.payload
+    if (data.type === 'active' && typeof payload.active === 'boolean') {
+      active = payload.active
+      if (!active) { pause(); position() }
+    } else if (data.type === 'pause') pause()
+    else if (data.type === 'restore' && Number.isFinite(payload.x) && Number.isFinite(payload.y)) {
+      const el = resolveScroller()
+      el?.scrollTo({ left: Math.max(0, payload.x), top: Math.max(0, payload.y), behavior: 'instant' })
+      position()
+    } else if (data.type === 'scroll' && active) {
+      const key = payload.intent
+      if (!['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp'].includes(key)) return
+      const el = resolveScroller()
+      if (!el) return
+      const up = ['scrollUp', 'halfUp', 'pageUp'].includes(key)
+      const line = parseFloat(getComputedStyle(el).lineHeight) || 24
+      const amount = key.startsWith('half') ? el.clientHeight / 2 : key.startsWith('page') ? el.clientHeight : 3 * line
+      el.scrollBy({ top: (up ? -1 : 1) * amount,
+        behavior: payload.instant === true || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+    }
+  })
+  document.addEventListener('scroll', position, { capture: true, passive: true })
+  document.addEventListener('play', event => {
+    const media = event.target as HTMLMediaElement
+    if (!['AUDIO', 'VIDEO'].includes(media.tagName)) return
+    if (!active) { media.pause(); return }
+    for (const other of document.querySelectorAll<HTMLMediaElement>('audio,video')) if (other !== media) other.pause()
+    send('media')
+  }, true)
+  // Delegation prepares dynamically inserted links too. In-page anchors stay local.
+  document.addEventListener('click', event => {
+    const link = (event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement | null
+    if (!link || link.hasAttribute('download') || link.getAttribute('href')?.startsWith('#')) return
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+  }, true)
+  window.addEventListener('load', () => {
+    window.setTimeout(() => {
+      if (!active) pause()
+      send('ready', { media: !!document.querySelector('audio,video') })
+      // Report handlers installed at load get first refusal.
+      window.addEventListener('keydown', event => {
+        if (!forward(event) || !intent(event, 'reader', bindings, target => !forward({ target, defaultPrevented: false } as KeyboardEvent))) return
+        event.preventDefault()
+        send('key', { key: event.key, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
+          shiftKey: event.shiftKey, repeat: event.repeat })
+      })
+    }, 0)
+  }, { once: true })
+}
+
+/** Inject after the doctype/base so standalone fragments keep standards mode. */
+export function withWorkspaceKeyBridge(html: string): string {
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
+  let insertion = 0
+  const doctype = /<!doctype\b[^>]*>/i.exec(html)
+  if (doctype) insertion = doctype.index + doctype[0].length
+  const head = /<head\b[^>]*>/i.exec(html)
+  if (head) insertion = Math.max(insertion, head.index + head[0].length)
+  const bases = /<base\b[^>]*>/ig
+  for (let base; (base = bases.exec(html));) if (base.index >= insertion) insertion = base.index + base[0].length
+  return html.slice(0, insertion) + bridge + html.slice(insertion)
+}
+
+export interface FrameBridge {
+  position: ScrollPosition
+  command(type: string, payload?: Record<string, unknown>): void
+  subscribeScroll(listener: (position: ScrollPosition) => void): () => void
+  dispose(): void
+}
+const bridges = new WeakMap<HTMLIFrameElement, FrameBridge>()
+export function frameBridge(frame: HTMLIFrameElement): FrameBridge | undefined { return bridges.get(frame) }
+
+/** Opaque origins cannot authenticate by origin; only this top-frame Window can speak. */
+export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message: DocumentMessage) => void): FrameBridge {
+  const listeners = new Set<(position: ScrollPosition) => void>()
+  const bridge: FrameBridge = {
+    position: { x: 0, y: 0 },
+    command: (type, payload = {}) => frame.contentWindow?.postMessage(envelope(type, payload), '*'),
+    subscribeScroll: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    dispose: () => { window.removeEventListener('message', onMessage); listeners.clear(); bridges.delete(frame) },
+  }
+  const onMessage = (event: MessageEvent): void => {
+    if (!event.source || event.source !== frame.contentWindow || !documentMessage(event.data)) return
+    const message = event.data
+    if (message.type === 'scroll') {
+      const { x, y } = message.payload
+      if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) return
+      bridge.position = { x: Math.max(0, x), y: Math.max(0, y) }
+      for (const listener of listeners) listener(bridge.position)
+    }
+    receive(message)
+  }
+  bridges.set(frame, bridge)
+  window.addEventListener('message', onMessage)
+  return bridge
+}
+export function scrollHtmlViewer(viewer: HTMLElement, intent: KeyIntent, instant: boolean): void {
+  const frame = viewer.querySelector('iframe')
+  if (frame) frameBridge(frame)?.command('scroll', { intent, instant })
+}

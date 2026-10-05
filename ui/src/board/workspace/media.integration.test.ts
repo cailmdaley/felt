@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer, suspendFileViewer, resumeFileViewer } from '../FileViewerPanel.js'
 import { DocumentHost } from './DocumentHost.js'
+import { envelope } from './DocumentBridge.js'
 import type { WorkspaceDocument } from './documents.js'
 
 vi.mock('../LiveFileRefresh.js', () => ({
@@ -77,17 +78,21 @@ describe('native media documents', () => {
     const report = viewer('/listening-room.html')
     const iframe = report.querySelector('iframe')!
     await vi.waitFor(() => expect(iframe.srcdoc).toContain('Listening room'))
-    const embedded = document.createElement('audio')
-    iframe.contentDocument!.body.append(embedded)
-    iframe.dispatchEvent(new Event('load'))
+    const command = vi.spyOn(iframe.contentWindow!, 'postMessage')
+    const send = (type: string) => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: envelope(type) }))
+    send('ready')
+    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: true }), '*')
     const native = viewer('/song.mp3').querySelector('audio')!
-    await embedded.play(); expect(embedded.paused).toBe(false)
-    await native.play(); expect(embedded.paused).toBe(true)
-    await embedded.play(); expect(native.paused).toBe(true)
-    embedded.currentTime = .3
-    suspendFileViewer(report); expect(embedded.paused).toBe(true)
+    await native.play()
+    expect(command).toHaveBeenLastCalledWith(envelope('pause'), '*')
+    send('media')
+    expect(native.paused).toBe(true)
+    suspendFileViewer(report)
+    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: false }), '*')
+    send('media')
+    expect(command).toHaveBeenLastCalledWith(envelope('pause'), '*')
     resumeFileViewer(report)
-    expect(embedded.paused).toBe(true); expect(embedded.currentTime).toBe(.3)
+    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: true }), '*')
   })
 
   it('keeps the element through receding and parking and takes Space without stealing typing', async () => {
