@@ -286,7 +286,7 @@ interface Segmented<T extends string> {
   set(value: T): void
   setDisabled(disabled: boolean): void
   /** Called after the user picks a DIFFERENT value. */
-  onPick(fn: (value: T) => void): void
+  onPick(fn: (value: T, keyboard: boolean) => void): void
 }
 
 function segmented<T extends string>(
@@ -299,7 +299,8 @@ function segmented<T extends string>(
   el.setAttribute('role', 'radiogroup')
   el.setAttribute('aria-label', name)
   let value = initial
-  const listeners: Array<(value: T) => void> = []
+  const listeners: Array<(value: T, keyboard: boolean) => void> = []
+  let keyboardPick = false
   const buttons = options.map(([v, label]) => {
     const btn = document.createElement('button')
     btn.type = 'button'
@@ -311,7 +312,7 @@ function segmented<T extends string>(
       e.stopPropagation()
       if (value === v) return
       paint(v)
-      for (const fn of listeners) fn(v)
+      for (const fn of listeners) fn(v, keyboardPick)
     })
     return btn
   })
@@ -333,7 +334,8 @@ function segmented<T extends string>(
     const next = buttons[(at + step + buttons.length) % buttons.length]
     if (next.disabled) return
     next.focus()
-    next.click()
+    keyboardPick = true
+    try { next.click() } finally { keyboardPick = false }
   })
   el.append(...buttons)
   return {
@@ -414,6 +416,8 @@ export class Dock {
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
   private savesPending = 0
+  private saveTail: Promise<void> = Promise.resolve()
+  private settingStep: { key: string; run: () => void; timer: number } | null = null
   private readonly blockedDispatches = new Map<HTMLButtonElement, { worker: string; label: string; error: HTMLElement }>()
   private epoch = 0
   private readonly timers = new Set<number>()
@@ -453,6 +457,20 @@ export class Dock {
     const timer = window.setTimeout(() => { this.timers.delete(timer); fn() }, ms)
     this.timers.add(timer)
     return timer
+  }
+
+  /** Keyboard stepping settles before writing; direct edits commit immediately. */
+  private deferSetting(key: string, run: () => void, keyboard: boolean): void {
+    const pending = this.settingStep
+    if (pending) {
+      window.clearTimeout(pending.timer)
+      this.timers.delete(pending.timer)
+      this.settingStep = null
+      if (pending.key !== key) pending.run()
+    }
+    if (!keyboard) { run(); return }
+    const timer = this.later(() => { this.settingStep = null; run() }, 150)
+    this.settingStep = { key, run, timer }
   }
 
   get isOpen(): boolean { return this.card !== null }
@@ -527,6 +545,8 @@ export class Dock {
     this.freshButton = null
     this.settingsSync = null
     this.historySync = null
+    this.settingStep = null
+    this.savesPending = 0
     this.blockedDispatches.clear()
     this.root?.replaceChildren()
   }
@@ -787,7 +807,7 @@ export class Dock {
     const reseeders: Array<() => void> = []
     const reseed = (fn: () => void): void => { reseeders.push(fn) }
     this.settingsSync = (view) => {
-      if (ledger.contains(document.activeElement) || this.savesPending) return
+      if (ledger.contains(document.activeElement) || this.savesPending || this.settingStep) return
       for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleSurface', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'inheritedProjectDir'] as const) {
         Object.assign(card, { [key]: view[key] })
       }
@@ -1331,8 +1351,9 @@ export class Dock {
     // targets a surface where things are at rest; this control edits a field
     // and says nothing about now. So it posts the reshape alone, and the read
     // model places the card.
-    const commitKind = (value: ShuttleKind): void => {
-      if (value === baseline.kind) return
+    let kindRevision = 0
+    const commitKind = (value: ShuttleKind, revision: number): void => {
+      if (value === baseline.kind && !this.savesPending) return
       if (value === 'standing') {
         errorEl.style.display = 'none'
         statusEl.textContent = '↵ to save'
@@ -1348,6 +1369,7 @@ export class Dock {
         // A refused write puts the control back on what the wire says, so
         // the next click on the same choice retries it.
         () => {
+          if (revision !== kindRevision) return
           kind.set(baseline.kind)
           cronRow.hidden = baseline.kind !== 'standing'
         },
@@ -1358,7 +1380,8 @@ export class Dock {
      *  staged but uncommitted, so the cron field's blur doesn't commit on the
      *  way out. */
     let abandoningPromotion = false
-    kind.onPick((value) => {
+    kind.onPick((value, keyboard) => {
+      const revision = ++kindRevision
       cronRow.hidden = value !== 'standing'
       if (value === 'standing') {
         if (!cronInput.value.trim()) cronInput.value = '0 9 * * 1-5'
@@ -1367,7 +1390,7 @@ export class Dock {
         cronInput.focus()
         cronInput.select()
       }
-      commitKind(value)
+      this.deferSetting('kind', () => commitKind(value, revision), keyboard)
     })
     for (const btn of kind.buttons) {
       // Backing OUT of an uncommitted promotion must write nothing, and the
@@ -1447,9 +1470,10 @@ export class Dock {
   ): HTMLElement {
     const col = document.createElement('div')
     col.className = 'kbn-ctl-fields'
-    const livePatch = (changes: { parentId?: string | null; due?: string | null }, onCommitted: () => void): void => {
+    const livePatch = (changes: { parentId?: string | null; due?: string | null }, onCommitted: () => void, onFailed?: () => void): void => {
       void this.livePatch(card, changes, statusEl, errorEl).then((ok) => {
         if (ok) onCommitted()
+        else onFailed?.()
       })
     }
 
@@ -1458,6 +1482,8 @@ export class Dock {
     // in every negative-offset zone (see civilDay.ts). The bare `YYYY-MM-DD`
     // the input wants is also what goes back on the wire.
     let current = dueCivilDay(card.due) ?? null
+    let intended = current
+    let revision = 0
     const input = document.createElement('input')
     input.type = 'date'
     input.className = 'kbn-ctl-input kbn-ctl-date'
@@ -1474,12 +1500,18 @@ export class Dock {
     paint()
 
     const commit = (next: string | null): void => {
-      if ((next ?? '') === (current ?? '')) return
+      if ((next ?? '') === (intended ?? '')) return
+      intended = next
+      const request = ++revision
       livePatch({ due: next }, () => {
         current = next
-        input.value = next ?? ''
-        paint()
+        if (request === revision) { input.value = next ?? ''; paint() }
         reflect({ due: next ?? undefined })
+      }, () => {
+        if (request !== revision) return
+        intended = current
+        input.value = current ?? ''
+        paint()
       })
     }
     // `change`, not `input`: a native picker fires `input` per keystroke of a
@@ -1499,7 +1531,7 @@ export class Dock {
     })
     col.append(dueRow)
     reseed(() => {
-      current = dueCivilDay(card.due) ?? null
+      current = intended = dueCivilDay(card.due) ?? null
       input.value = current ?? ''
       paint()
     })
@@ -1515,12 +1547,14 @@ export class Dock {
    */
   private buildParentPicker(
     card: KanbanCard,
-    livePatch: (changes: { parentId: string | null }, onCommitted: () => void) => void,
+    livePatch: (changes: { parentId: string | null }, onCommitted: () => void, onFailed?: () => void) => void,
     swallow: (el: HTMLElement) => void,
     reseed: (fn: () => void) => void,
   ): HTMLElement {
     const segments = card.id.split('/')
     let parentId: string | null = segments.length > 1 ? segments.slice(0, -1).join('/') : null
+    let intended = parentId
+    let revision = 0
 
     const wrap = document.createElement('div')
     wrap.className = 'kbn-detail-parent-wrap'
@@ -1532,7 +1566,7 @@ export class Dock {
       shown.textContent = parentId ?? '—'
       shown.title = parentId ? `Parent: ${parentId}` : 'Top level'
     }
-    reseed(() => { parentId = card.id.includes('/') ? card.id.slice(0, card.id.lastIndexOf('/')) : null; paint() })
+    reseed(() => { intended = parentId = card.id.includes('/') ? card.id.slice(0, card.id.lastIndexOf('/')) : null; paint() })
     paint()
 
     const search = document.createElement('input')
@@ -1575,10 +1609,14 @@ export class Dock {
     const onPick = (result: FiberSearchResult): void => {
       closeSearch()
       shown.focus()
-      if (result.id === parentId) return
+      if (result.id === intended) return
+      intended = result.id
+      const request = ++revision
       livePatch({ parentId: result.id }, () => {
         parentId = result.id
-        paint()
+        if (request === revision) paint()
+      }, () => {
+        if (request === revision) { intended = parentId; paint() }
       })
     }
     const openDropdown = (): void => {
@@ -1971,8 +2009,10 @@ export class Dock {
       chrome: chromeToggle.checked,
       surface: surface.value,
     }
-    const sync = (axes: AgentAxes): void => {
-      current = axes
+    let intended = { ...landed }
+    let revision = 0
+    const axisRequests: Partial<Record<keyof AgentAxes, number>> = {}
+    const paint = (axes: AgentAxes): AgentAxes => {
       if (axes.agent && ![...agentSelect.options].some(option => option.value === axes.agent)) {
         agentSelect.prepend(new Option(`${axes.agent} (custom)`, axes.agent))
       }
@@ -1980,20 +2020,44 @@ export class Dock {
       syncDependents(selectedAgent(), axes.effort)
       chromeToggle.checked = axes.chrome && !chromeToggle.disabled
       surface.set(isCodexAgent(recordFor(selectedAgent())) ? axes.surface : 'cli')
-      landed = { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked, surface: surface.value }
+      return { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked, surface: surface.value }
+    }
+    const sync = (axes: AgentAxes): void => {
+      landed = paint(axes)
+      intended = { ...landed }
     }
     const commit = (axis: keyof AgentAxes): void => {
       const axes: AgentAxes = { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked, surface: surface.value }
       const patch: Partial<AgentAxes> = axis === 'agent'
-        ? Object.fromEntries(Object.entries(axes).filter(([key, value]) => value !== landed[key as keyof AgentAxes]))
+        ? Object.fromEntries(Object.entries(axes).filter(([key, value]) => value !== intended[key as keyof AgentAxes]))
         : { [axis]: axes[axis] }
       if (!Object.keys(patch).length) return
+      intended = axes
+      const request = ++revision
+      const keys = Object.keys(patch) as Array<keyof AgentAxes>
+      for (const key of keys) axisRequests[key] = request
       void onCommit(patch).then((ok) => {
         if (ok) landed = { ...landed, ...patch }
-        else sync(landed)
+        else {
+          // Restore only refused axes that have no newer intent behind them.
+          for (const key of keys) if (axisRequests[key] === request) Object.assign(intended, { [key]: landed[key] })
+          intended = paint(intended)
+        }
       })
     }
 
+    let keyboardChange = false
+    for (const select of [agentSelect, effortSelect]) {
+      select.addEventListener('keydown', event => {
+        keyboardChange = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
+      })
+      select.addEventListener('pointerdown', () => { keyboardChange = false })
+      select.addEventListener('blur', () => { keyboardChange = false })
+    }
+    const scheduleCommit = (axis: keyof AgentAxes, keyboard = keyboardChange): void => {
+      keyboardChange = false
+      this.deferSetting(axis, () => commit(axis), keyboard)
+    }
     agentSelect.addEventListener('change', () => {
       // New agent: select and persist its concrete default effort, re-gate
       // chrome, and pick the session a fresh task on that agent would get —
@@ -2002,12 +2066,12 @@ export class Dock {
       chromeToggle.checked = chromeToggle.checked && !chromeToggle.disabled
       const rec = recordFor(selectedAgent())
       if (!isCodexAgent(rec)) surface.set('cli')
-      else if (!isCodexAgent(recordFor(current.agent))) surface.set(defaultSurface(rec))
-      commit('agent')
+      else if (!isCodexAgent(recordFor(intended.agent))) surface.set(defaultSurface(rec))
+      scheduleCommit('agent')
     })
-    effortSelect.addEventListener('change', () => commit('effort'))
-    chromeToggle.addEventListener('change', () => commit('chrome'))
-    surface.onPick(() => commit('surface'))
+    effortSelect.addEventListener('change', () => scheduleCommit('effort'))
+    chromeToggle.addEventListener('change', () => scheduleCommit('chrome', false))
+    surface.onPick((_, keyboard) => scheduleCommit('surface', keyboard))
     return sync
   }
 
@@ -2034,49 +2098,51 @@ export class Dock {
   }
 
   /**
-   * The save choreography every live edit shares: clear the error, show
-   * "Saving…", run the write, then either fade a "Saved" pill after a beat or
-   * surface the failure verbatim in `errorEl`. The dock stays open through
+   * One write queue per band serializes all settings mutations. Each write
+   * clears the error, shows "Saving…", then fades "Saved" or surfaces its
+   * failure verbatim in `errorEl`. The dock stays open through
    * every outcome — live edits don't close the dock. Returns true on
    * success so the caller can advance its local baseline.
    */
-  private async withSaveStatus(
+  private withSaveStatus(
     statusEl: HTMLElement,
     errorEl: HTMLElement,
     write: () => Promise<void>,
   ): Promise<boolean> {
+    const epoch = this.epoch
     this.savesPending++
-    errorEl.style.display = 'none'
-    statusEl.textContent = 'Saving…'
-    statusEl.classList.remove('kbn-detail-save-status-saved')
-    statusEl.classList.add('kbn-detail-save-status-saving')
-    try {
-      await write()
-      // Refresh the kanban so the change shows up on the board. The dock
-      // stays open — the user may want to keep editing.
-      this.onSaved()
-      statusEl.textContent = 'Saved'
-      statusEl.classList.remove('kbn-detail-save-status-saving')
-      statusEl.classList.add('kbn-detail-save-status-saved')
-      this.later(() => {
-        // Fade the "Saved" indicator after a beat if nothing else has
-        // overwritten it in the meantime.
-        if (statusEl.textContent === 'Saved') {
-          statusEl.textContent = ''
-          statusEl.classList.remove('kbn-detail-save-status-saved')
-        }
-      }, 1500)
-      return true
-    } catch (err: unknown) {
-      const msg = (err as { message?: string })?.message ?? String(err)
-      errorEl.textContent = msg
-      errorEl.style.display = ''
-      statusEl.textContent = ''
-      statusEl.classList.remove('kbn-detail-save-status-saving')
-      return false
-    } finally {
-      this.savesPending--
-    }
+    const result = this.saveTail.then(async () => {
+      if (epoch !== this.epoch) return false
+      errorEl.style.display = 'none'
+      statusEl.textContent = 'Saving…'
+      statusEl.classList.remove('kbn-detail-save-status-saved')
+      statusEl.classList.add('kbn-detail-save-status-saving')
+      try {
+        await write()
+        this.onSaved()
+        if (epoch !== this.epoch) return false
+        statusEl.textContent = 'Saved'
+        statusEl.classList.remove('kbn-detail-save-status-saving')
+        statusEl.classList.add('kbn-detail-save-status-saved')
+        this.later(() => {
+          if (statusEl.textContent === 'Saved') {
+            statusEl.textContent = ''
+            statusEl.classList.remove('kbn-detail-save-status-saved')
+          }
+        }, 1500)
+        return true
+      } catch (err: unknown) {
+        if (epoch !== this.epoch) return false
+        const msg = (err as { message?: string })?.message ?? String(err)
+        errorEl.textContent = msg
+        errorEl.style.display = ''
+        statusEl.textContent = ''
+        statusEl.classList.remove('kbn-detail-save-status-saving')
+        return false
+      }
+    }).finally(() => { if (epoch === this.epoch) this.savesPending-- })
+    this.saveTail = result.then(() => {})
+    return result
   }
 
   /**
@@ -2276,6 +2342,10 @@ export class Dock {
             origin,
             parent: changes.parentId ?? null,
           })
+          // The successful nest confirms this address before the next queued write.
+          // Polls reconcile the remaining path metadata without replacing the band.
+          const slug = fiberId.split('/').at(-1)!
+          card.id = changes.parentId ? `${changes.parentId}/${slug}` : slug
         }
 
         // `due:` — the same door every other due write on the board knocks on:

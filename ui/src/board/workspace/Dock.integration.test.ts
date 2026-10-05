@@ -13,6 +13,11 @@ const task = (patch: Partial<KanbanCard> = {}): KanbanCard => card({
   shuttleEffort: 'medium', shuttleHost: 'owner', ...patch,
 })
 const flush = async (): Promise<void> => { for (let i = 0; i < 30; i++) await Promise.resolve() }
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(yes => { resolve = yes })
+  return { promise, resolve }
+}
 const response = (body: unknown = {}, status = 200): Response => new Response(JSON.stringify(body), { status })
 let dock: Dock
 let band: Dock
@@ -48,6 +53,140 @@ describe('Dock dispatch recovery', () => {
     expect(verb.disabled).toBe(false)
     expect(verb.textContent).toBe(name)
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
+  })
+})
+
+describe('Dock settings queue', () => {
+  it('serializes agent, shape and due writes and keeps the last selected values', async () => {
+    const pending: Array<ReturnType<typeof deferred<Response>>> = []
+    vi.mocked(fetch).mockImplementation(async () => {
+      const write = deferred<Response>(); pending.push(write); return write.promise
+    })
+    change('Effort', 'low')
+    button('Pinned').click()
+    change('Effort', 'high')
+    button('One-shot').click()
+    const due = band.el.querySelector<HTMLInputElement>('input[type="date"]')!
+    due.value = '2026-10-15'; due.dispatchEvent(new Event('change'))
+    due.value = '2026-10-16'; due.dispatchEvent(new Event('change'))
+    await flush()
+    expect(writes()).toHaveLength(1)
+    for (let i = 0; i < 6; i++) {
+      pending[i].resolve(response())
+      await flush()
+      expect(writes()).toHaveLength(Math.min(i + 2, 6))
+    }
+    expect(writes().map(write => write.effort ?? write.kind ?? write.due)).toEqual([
+      'low', 'pinned', 'high', 'oneshot', '2026-10-15', '2026-10-16',
+    ])
+    expect(select('Effort').value).toBe('high')
+    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('One-shot')
+    expect(due.value).toBe('2026-10-16')
+  })
+
+  it('keeps independent band queues and cancels unstarted writes when a band is reset', async () => {
+    const first = deferred<Response>()
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      if (String(url).endsWith('/agents')) return response(agents)
+      return JSON.parse(String(options?.body)).fiber === 'a/task' ? first.promise : response()
+    })
+    change('Effort', 'low')
+    button('Pinned').click()
+    const other = dock.bandFor(task({ id: 'a/other', uid: 'other-uid' }))
+    await flush()
+    const effort = other.el.querySelector<HTMLSelectElement>('[aria-label="Effort"]')!
+    effort.value = 'high'; effort.dispatchEvent(new Event('change'))
+    await flush()
+    expect(writes()).toHaveLength(2)
+    expect(writes()[1]).toMatchObject({ fiber: 'a/other', effort: 'high' })
+    band.reset()
+    first.resolve(response())
+    await flush()
+    expect(writes()).toHaveLength(2)
+    expect(writes().some(write => write.action === 'reshape')).toBe(false)
+  })
+
+  it('queues a rapid agent reversal and does not roll back newer intent when an earlier write fails', async () => {
+    const first = deferred<Response>()
+    vi.mocked(fetch).mockReturnValueOnce(first.promise).mockResolvedValue(response())
+    change('Agent', 'codex-luna')
+    change('Agent', 'codex-sol')
+    await flush()
+    expect(writes()).toHaveLength(1)
+    first.resolve(response({ error: 'refused' }, 422))
+    await flush()
+    expect(writes()).toHaveLength(2)
+    expect(writes()[1]).toMatchObject({ agent: 'codex-sol', effort: 'medium' })
+    expect(select('Agent').value).toBe('codex-sol')
+    expect(select('Effort').value).toBe('medium')
+  })
+
+  it('rolls back a refused agent without overwriting a newer effort choice', async () => {
+    const first = deferred<Response>()
+    vi.mocked(fetch).mockReturnValueOnce(first.promise).mockResolvedValue(response())
+    change('Agent', 'codex-luna')
+    change('Effort', 'high')
+    first.resolve(response({ error: 'refused' }, 422))
+    await flush()
+    expect(select('Agent').value).toBe('codex-sol')
+    expect(select('Effort').value).toBe('high')
+    expect(writes()[1]).toEqual({ action: 'set-agent', origin: 'owner', fiber: 'a/task', effort: 'high' })
+  })
+
+  it('serializes a parent reversal and addresses queued edits at the confirmed new parent', async () => {
+    const first = deferred<Response>()
+    vi.mocked(fetch).mockImplementation(async (_url, options) => {
+      if (!options?.method) return response({ fibers: [
+        { fiber: { id: 'a', name: 'A' } }, { fiber: { id: 'a/b', name: 'B' } },
+      ] })
+      return writes().length === 1 ? first.promise : response()
+    })
+    const pick = async (id: string): Promise<void> => {
+      band.el.querySelector<HTMLButtonElement>('.kbn-ctl-parent')!.click()
+      const search = band.el.querySelector<HTMLInputElement>('.kbn-detail-parent-input')!
+      search.value = id; search.dispatchEvent(new Event('focus'))
+      await flush()
+      const option = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-detail-parent-option')]
+        .find(option => option.querySelector('.kbn-detail-parent-option-id')?.textContent === id)!
+      option.click()
+    }
+    await pick('a/b')
+    const due = band.el.querySelector<HTMLInputElement>('input[type="date"]')!
+    due.value = '2026-10-16'; due.dispatchEvent(new Event('change'))
+    await pick('a')
+    await flush()
+    expect(writes()).toHaveLength(1)
+    first.resolve(response())
+    await flush()
+    expect(writes()).toEqual([
+      { fiber_id: 'a/task', origin: 'owner', parent: 'a/b' },
+      { fiber_id: 'a/b/task', origin: 'owner', due: '2026-10-16' },
+      { fiber_id: 'a/b/task', origin: 'owner', parent: 'a' },
+    ])
+    expect(band.el.querySelector('.kbn-ctl-parent')?.textContent).toBe('a')
+  })
+
+  it('debounces keyboard stepping before it enters the same per-band write queue', async () => {
+    vi.useFakeTimers()
+    const step = (group: string, key: string): void => {
+      band.el.querySelector<HTMLElement>(`[aria-label="${group}"] [aria-checked="true"]`)!
+        .dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    }
+    step('Session', 'ArrowRight'); step('Session', 'ArrowRight'); step('Session', 'ArrowRight')
+    expect(writes()).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(writes()).toEqual([{ action: 'set-agent', origin: 'owner', fiber: 'a/task', surface: 'app' }])
+    select('Effort').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    change('Effort', 'low')
+    select('Effort').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    change('Effort', 'high')
+    expect(writes()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(writes().at(-1)).toEqual({ action: 'set-agent', origin: 'owner', fiber: 'a/task', effort: 'high' })
+    step('Kind', 'ArrowLeft'); step('Kind', 'ArrowRight')
+    expect(writes()).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(writes()).toHaveLength(2)
   })
 })
 
