@@ -470,6 +470,33 @@ describe('Overview news, visits and graduated density', () => {
     expect(folio('alpha').classList.contains('ws-overview-unseen')).toBe(true)
     expect(overview.el.querySelector<HTMLDetailsElement>('.ws-overview-latest')?.open).toBe(false)
   })
+  it('caps first-visit changes at eight and scrolls the overflow line to the folio sheet', async () => {
+    cards = Array.from({ length: 12 }, (_, i) => card({ id: `fiber-${i}`, uid: `fiber-${i}`, originId: 'host-a', name: `Fiber ${i}` }))
+    feed.files = cards.map((c, i) => receipt(c.uid!, `/reports/${i}.html`, now() - i * 1000))
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })))
+    await refresh()
+
+    const rows = [...overview.el.querySelectorAll<HTMLElement>('.ws-overview-change')]
+    expect(rows.map(row => row.dataset.uid)).toEqual(cards.slice(0, 8).map(c => c.uid))
+    expect(overview.el.querySelector('.ws-overview-changes-more')?.textContent).toBe('and 4 more below')
+    const sheet = overview.el.querySelector<HTMLElement>('.ws-overview-groups')!
+    sheet.scrollIntoView = vi.fn()
+    overview.el.querySelector<HTMLButtonElement>('.ws-overview-changes-more')!.click()
+    expect(sheet.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
+  })
+  it('keeps every needs-you change above the eight-row cap on a later visit', async () => {
+    cards = Array.from({ length: 13 }, (_, i) => card({ id: `fiber-${i}`, uid: `fiber-${i}`, originId: 'host-a',
+      name: `Fiber ${i}`, status: i < 10 ? 'closed' : 'open' }))
+    reset(now() - 3600000)
+    feed.files = cards.map((c, i) => receipt(c.uid!, `/reports/${i}.html`, now() - i * 1000))
+    await refresh()
+
+    const rows = [...overview.el.querySelectorAll<HTMLElement>('.ws-overview-change')]
+    expect(rows).toHaveLength(10)
+    expect(rows.map(row => row.dataset.uid)).toEqual(cards.slice(0, 10).map(c => c.uid))
+    expect(rows.every(row => row.dataset.needsYou === 'true')).toBe(true)
+    expect(overview.el.querySelector('.ws-overview-changes-more')?.textContent).toBe('and 3 more below')
+  })
   it('preserves a visit through an early reload, advances after thirty seconds or on internal departure', async () => {
     const previous = now() - 3 * 3600000
     reset(previous); await refresh()

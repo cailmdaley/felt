@@ -25,6 +25,7 @@ export interface OverviewOptions {
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
 const RECEIPT_OVERLAP_MS = 60000
+const MAX_CHANGE_ROWS = 8
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
 const SEEN_STORAGE = 'shuttle.workspace.overview.seen'
@@ -199,6 +200,7 @@ export class Overview {
   private readonly inner = node('div', 'ws-overview-inner')
   private readonly summary = node('div', 'ws-overview-summary')
   private readonly changesEl = node('div', 'ws-overview-changes')
+  private readonly changesMore = button('ws-overview-changes-more')
   private readonly changesEmpty = node('p', 'ws-overview-changes-empty', 'Nothing new since you were here.')
   private readonly changeRows = new Map<string, ChangeRow>()
   private readonly stamps = new Map<string, ChangeStamp>()
@@ -284,6 +286,9 @@ export class Overview {
     const latestHeading = node('summary', '', 'Latest files')
     this.latest.append(latestHeading, this.ribbon)
     this.latest.addEventListener('toggle', this.schedule)
+    this.changesMore.addEventListener('click', () => this.groupsEl.scrollIntoView?.({
+      block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+    }))
     const controls = node('div', 'ws-overview-controls')
     this.lensGroup.setAttribute('role', 'radiogroup')
     this.lensGroup.setAttribute('aria-label', 'Group documents')
@@ -766,6 +771,13 @@ export class Overview {
   }
 
   private renderChanges(changes: Change[], matches: (change: Change) => boolean): void {
+    const matching = changes.filter(matches)
+    const needsYouCount = matching.filter(change => change.priority < 2).length
+    const visible = matching.slice(0, Math.max(MAX_CHANGE_ROWS, needsYouCount))
+    const visibleUids = new Set(visible.map(change => change.uid))
+    const overflow = matching.length - visible.length
+    text(this.changesMore, `and ${overflow} more below`)
+    this.changesMore.hidden = overflow === 0
     const keep = new Set(changes.map(c => c.uid))
     for (const [uid, row] of this.changeRows) if (!keep.has(uid)) {
       for (const item of row.thumbs.values()) this.removeThumbnail(item.thumb)
@@ -793,7 +805,7 @@ export class Overview {
       text(row.name, change.card.name); text(row.summary, changeSummary(change)); text(row.outcome, change.card.outcome ?? '')
       row.open.title = change.card.path
       row.el.dataset.needsYou = String(change.priority < 2)
-      row.el.hidden = !matches(change); row.el.inert = row.el.hidden
+      row.el.hidden = !visibleUids.has(change.uid); row.el.inert = row.el.hidden
       const documents = change.receipts.slice(0, 4)
       const keys = new Set(documents.map(r => r.key))
       for (const [key, item] of row.thumbs) if (!keys.has(key)) {
@@ -816,12 +828,12 @@ export class Overview {
       text(row.more, `+${change.receipts.length - documents.length}`)
       place(row.documents, [...documents.map(r => row!.thumbs.get(r.key)!.el), ...(change.receipts.length > 4 ? [row.more] : [])])
     }
-    place(this.changesEl, changes.map(c => this.changeRows.get(c.uid)!.el))
+    place(this.changesEl, [...visible.map(c => this.changeRows.get(c.uid)!.el), ...(overflow ? [this.changesMore] : [])])
     for (const row of this.changeRows.values()) {
       if (this.visible && this.el.isConnected) this.opts.themes?.bind(row.el, row.change.card)
       else this.opts.themes?.unbind(row.el)
     }
-    this.changesEmpty.hidden = changes.some(matches)
+    this.changesEmpty.hidden = matching.length > 0
     text(this.changesEmpty, changes.length ? 'No changes match Find.' : this.previousVisit ? 'Nothing new since you were here.' : 'No deliveries in the last 30 days.')
   }
 
