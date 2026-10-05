@@ -254,7 +254,7 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
-    if (this.currentCard) this.opts.themes?.bind(this.el, this.currentCard)
+    if (this.currentCard) this.opts.themes?.bind(this.el, this.currentCard, 'reader')
     const arriving = !this.active
     this.active = true
     if (arriving) this.arrive(origin === 'Board')

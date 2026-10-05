@@ -1629,6 +1629,25 @@ test('Night Chart text and protected control pigments meet AA on dark paper', as
   console.log(`CONTRAST Night Chart ${Math.min(...contrasts.map(c => c.ratio)).toFixed(2)}:1 minimum across ${contrasts.length} text samples`)
 })
 
+test('Overview and sidebar never fan out theme.css probes; folios reuse the reader ETag cache', async p => {
+  const themeReads = async () => (await records(p)).filter(r => r.url.includes('/api/v1/file?') && decodeURIComponent(r.url).includes('/theme.css'))
+  await p.locator('[data-view="shelf"]').click()
+  await p.locator('.ws-overview-folio').first().waitFor()
+  await p.waitForTimeout(100)
+  assert.equal((await themeReads()).length, 0, 'cold overview uses bundled themes only')
+  await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  assert.equal((await themeReads()).length, 1, 'only the open reader loads custom CSS')
+  await p.clock.fastForward(16000)
+  await poll(p, () => window.__harness.requests.some(r => decodeURIComponent(r.url).includes('calibration-report/theme.css') && r.headers?.['if-none-match']))
+  const count = (await themeReads()).length
+  await p.locator('.ws-return').click()
+  await p.locator('.ws-overview-folio').first().waitFor()
+  await p.clock.fastForward(16000)
+  assert.equal((await themeReads()).length, count, 'overview does not revalidate any custom theme')
+  assert.equal(await p.locator('.ws-overview-folio').filter({ hasText: name }).evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '1', 'reader-loaded theme survives on the folio')
+})
+
 test('Theme refresh uses ETag on the ordinary cadence, not on selection frames', async p => {
   await open(p); await choose(p, 'Constitution')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
