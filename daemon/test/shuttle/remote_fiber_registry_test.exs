@@ -1,5 +1,6 @@
 defmodule Shuttle.RemoteFiberRegistryTest do
-  use ExUnit.Case
+  # group: Shuttle.TailnetPeers keeps its peers in an ETS table named after the module, which Remotes.configured/0 reads when :remotes is unset
+  use ExUnit.Case, async: true, group: :tailnet_peers
 
   alias Shuttle.Remote
   alias Shuttle.RemoteFiberRegistry
@@ -133,7 +134,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
 
   describe "feeds/0 with no registry running" do
     test "returns an empty map for graceful degradation" do
-      assert RemoteFiberRegistry.feeds(:reg_absent_name) == %{}
+      assert RemoteFiberRegistry.feeds(:rfr_absent_name) == %{}
     end
   end
 
@@ -144,8 +145,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_happy,
-           remotes: [candide()],
+           name: :rfr_happy,
+           remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
            auto_poll: false,
            store_dir: dir}
@@ -169,8 +170,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_single_refresh,
-           remotes: [candide()],
+           name: :rfr_single_refresh,
+           remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
            auto_poll: false,
            store_dir: dir}
@@ -202,7 +203,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_blip,
+           name: :rfr_blip,
            remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
            auto_poll: false,
@@ -230,7 +231,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_garbage,
+           name: :rfr_garbage,
            remotes: [candide()],
            client: MockClient,
            auto_poll: false,
@@ -250,8 +251,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_empty,
-           remotes: [candide()],
+           name: :rfr_empty,
+           remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
            auto_poll: false,
            store_dir: dir}
@@ -277,7 +278,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_304, remotes: [remote], client: MockClient, auto_poll: false, store_dir: dir}
+           name: :rfr_304, remotes: [remote], client: MockClient, auto_poll: false, store_dir: dir}
         )
 
       # First fetch: 200, stores the feed AND the etag.
@@ -308,7 +309,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_etag_change,
+           name: :rfr_etag_change,
            remotes: [candide()],
            client: MockClient,
            auto_poll: false,
@@ -346,7 +347,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_304_cache,
+           name: :rfr_304_cache,
            remotes: [remote],
            client: MockClient,
            auto_poll: false,
@@ -388,7 +389,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_cold_keep,
+           name: :rfr_cold_keep,
            remotes: [remote],
            client: MockClient,
            auto_poll: false,
@@ -433,7 +434,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_cache_meta,
+           name: :rfr_cache_meta,
            remotes: [candide()],
            client: MockClient,
            auto_poll: false,
@@ -463,7 +464,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_async,
+           name: :rfr_async,
            remotes: [candide(poll_interval_ms: 60_000)],
            client: MockClient,
            tick_interval_ms: 5,
@@ -485,7 +486,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_time_stale,
+           name: :rfr_time_stale,
            remotes: [remote],
            client: MockClient,
            auto_poll: false,
@@ -512,7 +513,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_sustained_fail,
+           name: :rfr_sustained_fail,
            remotes: [remote],
            client: MockClient,
            auto_poll: false,
@@ -548,7 +549,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_fast_recover,
+           name: :rfr_fast_recover,
            remotes: [remote],
            client: MockClient,
            auto_poll: false,
@@ -576,7 +577,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       pid =
         start_supervised!(
           {RemoteFiberRegistry,
-           name: :reg_never_polled,
+           name: :rfr_never_polled,
            remotes: [candide()],
            client: MockClient,
            auto_poll: false,
@@ -595,20 +596,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       File.mkdir_p!(dir)
       path = Path.join(dir, "remotes.json")
 
-      prev_file = System.get_env("SHUTTLE_REMOTES_FILE")
-      prev_remotes = Application.get_env(:shuttle, :remotes)
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
-      Application.delete_env(:shuttle, :remotes)
-
-      on_exit(fn ->
-        File.rm_rf(dir)
-        if prev_file, do: System.put_env("SHUTTLE_REMOTES_FILE", prev_file)
-        if prev_file == nil, do: System.delete_env("SHUTTLE_REMOTES_FILE")
-
-        if prev_remotes == nil,
-          do: Application.delete_env(:shuttle, :remotes),
-          else: Application.put_env(:shuttle, :remotes, prev_remotes)
-      end)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.delete_app_env(:remotes)
+      on_exit(fn -> File.rm_rf(dir) end)
 
       {:ok, path: path}
     end

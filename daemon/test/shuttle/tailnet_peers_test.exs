@@ -1,26 +1,12 @@
 defmodule Shuttle.TailnetPeersTest do
-  use ExUnit.Case, async: false
-  import Shuttle.Test.EnvHelpers
+  # group: Shuttle.TailnetPeers keeps its peers in an ETS table named after the module, which Remotes.configured/0 reads when :remotes is unset
+  use ExUnit.Case, async: true, group: :tailnet_peers
 
   alias Shuttle.Remote
   alias Shuttle.Remotes
   alias Shuttle.TailnetPeers
 
   @fixture_dir Path.expand("../fixtures/tailnet_peers", __DIR__)
-
-  setup do
-    prev_file = System.get_env("SHUTTLE_REMOTES_FILE")
-    prev_env = Application.get_env(:shuttle, :remotes)
-    prev_socket = Application.get_env(:shuttle, :tailscale_socket)
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_REMOTES_FILE", prev_file)
-      restore_app_env(:remotes, prev_env)
-      restore_app_env(:tailscale_socket, prev_socket)
-    end)
-
-    :ok
-  end
 
   describe "parity with the Go resolver" do
     # internal/shuttlecli/remotes_discovery_test.go reads the same fixtures and
@@ -100,8 +86,8 @@ defmodule Shuttle.TailnetPeersTest do
 
   describe "run_round/2 fallback" do
     setup do
-      Application.delete_env(:shuttle, :remotes)
-      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
+      Shuttle.Test.Env.delete_app_env(:remotes)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
       :ok
     end
 
@@ -131,14 +117,14 @@ defmodule Shuttle.TailnetPeersTest do
 
     test "defaults.discover false disables the round" do
       file = write_remotes(%{"defaults" => %{"discover" => false}, "remotes" => []})
-      System.put_env("SHUTTLE_REMOTES_FILE", file)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", file)
 
       report = TailnetPeers.run_round([], read_status: fn -> flunk("discovery is off") end)
       assert report.state == "disabled"
     end
 
     test "application config is the whole fleet" do
-      Application.put_env(:shuttle, :remotes, [])
+      Shuttle.Test.Env.put_app_env(:remotes, [])
       report = TailnetPeers.run_round([], read_status: fn -> flunk("discovery is off") end)
       assert report.state == "disabled"
     end
@@ -158,8 +144,8 @@ defmodule Shuttle.TailnetPeersTest do
 
   describe "the process" do
     setup do
-      Application.delete_env(:shuttle, :remotes)
-      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
+      Shuttle.Test.Env.delete_app_env(:remotes)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
       :ok
     end
 
@@ -201,18 +187,8 @@ defmodule Shuttle.TailnetPeersTest do
 
   describe "LocalAPI status" do
     setup do
-      prev_home = Application.get_env(:shuttle, :tailscale_home)
-      prev_cli = Application.get_env(:shuttle, :tailscale_cli_locations)
-      prev_os = Application.get_env(:shuttle, :os_type)
-
-      on_exit(fn ->
-        restore_app_env(:tailscale_home, prev_home)
-        restore_app_env(:tailscale_cli_locations, prev_cli)
-        restore_app_env(:os_type, prev_os)
-      end)
-
-      Application.delete_env(:shuttle, :remotes)
-      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
+      Shuttle.Test.Env.delete_app_env(:remotes)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
       :ok
     end
 
@@ -220,7 +196,7 @@ defmodule Shuttle.TailnetPeersTest do
     test "reads the status over the configured socket", %{tmp_dir: tmp_dir} do
       socket = Path.join(short_dir(tmp_dir), "ts.sock")
       fake_localapi(socket)
-      Application.put_env(:shuttle, :tailscale_socket, socket)
+      Shuttle.Test.Env.put_app_env(:tailscale_socket, socket)
 
       assert {:ok, status, "localapi"} = TailnetPeers.read_status()
       assert status["BackendState"] == "Running"
@@ -240,9 +216,9 @@ defmodule Shuttle.TailnetPeersTest do
 
       File.chmod!(state, 0o700)
       fake_localapi(Path.join(state, "tailscaled.sock"))
-      Application.delete_env(:shuttle, :tailscale_socket)
-      Application.put_env(:shuttle, :tailscale_home, home)
-      Application.put_env(:shuttle, :os_type, {:unix, :linux})
+      Shuttle.Test.Env.delete_app_env(:tailscale_socket)
+      Shuttle.Test.Env.put_app_env(:tailscale_home, home)
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :linux})
 
       assert {:ok, %{"BackendState" => "Running"}, "localapi"} = TailnetPeers.read_status()
     end
@@ -252,8 +228,8 @@ defmodule Shuttle.TailnetPeersTest do
       cli = Path.join(tmp_dir, "tailscale")
       File.write!(cli, "#!/bin/sh\necho '{}'\n")
       File.chmod!(cli, 0o644)
-      Application.delete_env(:shuttle, :tailscale_socket)
-      Application.put_env(:shuttle, :tailscale_cli_locations, [cli])
+      Shuttle.Test.Env.delete_app_env(:tailscale_socket)
+      Shuttle.Test.Env.put_app_env(:tailscale_cli_locations, [cli])
 
       assert TailnetPeers.tailscale_cli() == nil
       assert {:error, "cli", "no executable tailscale CLI found"} = TailnetPeers.read_status()
@@ -269,8 +245,8 @@ defmodule Shuttle.TailnetPeersTest do
       )
 
       File.chmod!(cli, 0o755)
-      Application.delete_env(:shuttle, :tailscale_socket)
-      Application.put_env(:shuttle, :tailscale_cli_locations, [cli])
+      Shuttle.Test.Env.delete_app_env(:tailscale_socket)
+      Shuttle.Test.Env.put_app_env(:tailscale_cli_locations, [cli])
 
       assert {:ok, %{"BackendState" => "Stopped"}, "cli"} = TailnetPeers.read_status()
     end
@@ -278,8 +254,8 @@ defmodule Shuttle.TailnetPeersTest do
 
   describe "failures stay inside the round" do
     setup do
-      Application.delete_env(:shuttle, :remotes)
-      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
+      Shuttle.Test.Env.delete_app_env(:remotes)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, "absent.json"))
       :ok
     end
 

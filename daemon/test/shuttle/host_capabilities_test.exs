@@ -1,4 +1,5 @@
 defmodule Shuttle.HostCapabilitiesTest do
+  # sync: the cache test writes the global {HostCapabilities, :browser_capable} persistent_term that every owner-feed request reads; needs cached_browser_capable? to take its cache key
   use ExUnit.Case, async: false
 
   alias Shuttle.HostCapabilities

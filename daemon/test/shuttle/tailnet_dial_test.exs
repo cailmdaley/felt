@@ -1,4 +1,5 @@
 defmodule Shuttle.TailnetDialTest do
+  # sync: Bridge's acceptor is a bare spawn_monitor (lib/shuttle/tailnet_dial/bridge.ex:53), so the connection Tasks it starts read tailnet_dial_test_cacerts and the in-flight ceiling globally; needs the acceptor to adopt the Bridge's Shuttle.Env.callers()
   use ExUnit.Case, async: false
   import ExUnit.CaptureLog
   alias Shuttle.Remote
