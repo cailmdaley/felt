@@ -508,7 +508,7 @@ export class DocumentHost {
 
   /** Audio keys do not take Space away from the reader. */
   private readonly onMediaKey = (event: KeyboardEvent): void => {
-    if (!this.selected || !['p', ',', '.'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || (event.key === 'p' && event.repeat)) return
+    if (!this.selected || !['p', ',', '>'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || (event.key === 'p' && event.repeat)) return
     const state = this.frames.get(this.selected)
     if (!state?.active || state.frame.el.closest('[inert]') || blockingDialogOpen() || this.track.closest('.ws-reader')?.querySelector('.ws-menu')) return
     const intent = keyIntent(event, 'reader')

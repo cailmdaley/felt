@@ -2591,6 +2591,13 @@ export class KanbanModal {
     if (this.handleViewHotkey(e)) return
     if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
+      if (intent === 'conversation') {
+        const address = this.deskKeyboard?.selection
+        const card = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
+        if (card) this.dock.openConversation(card)
+        e.preventDefault(); e.stopPropagation()
+        return
+      }
       if (intent === 'find') {
         const filter = [...this.deskEl!.querySelectorAll<HTMLInputElement>('input[type="search"], input[data-card-filter]')]
           .find(input => !input.closest('[hidden],[inert]') && input.getClientRects().length > 0)

@@ -63,7 +63,7 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
       return querySelectorAll(selector)
     }
   })
-  for (const [down, up] of [['ArrowDown', 'ArrowUp']]) {
+  for (const [down, up] of [['ArrowDown', 'ArrowUp'], ['d', 'u']]) {
     await iframe.evaluate(f => f.contentWindow.scrollTo(0, 0))
     await p.keyboard.press(down)
     await poll(p, () => window.__reportWindow.scrollY > 0)
@@ -217,6 +217,65 @@ test('Review plate reaches verdicts from a delivery and leaves the fiber page it
   await choose(p, 'calibration-report')
   await plate.getByRole('button', { name: 'Temper', exact: true }).click()
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+})
+
+test('Verdict keys delay writes, guard typing, undo, and commit after leaving the reader', async p => {
+  await open(p)
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  const posts = async () => (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
+  await p.keyboard.press('r')
+  assert.equal(await tab(p, 'Constitution').getAttribute('aria-selected'), 'true')
+  const composer = selected(p).locator('textarea.kbn-detail-directive')
+  assert.ok(await composer.evaluate(el => el === document.activeElement))
+  await composer.press('t'); await composer.press('x')
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  await p.locator('.ws-channel-title').focus()
+  for (const init of [{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }]) {
+    await p.evaluate(init => document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', bubbles: true, ...init })), init)
+  }
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  await p.keyboard.press('t')
+  assert.match(await p.locator('.ws-verdict-toast').innerText(), /Tempered Calibrate the shear response · Undo z/)
+  assert.equal((await posts()).length, 0)
+  await p.clock.runFor(5999)
+  assert.equal((await posts()).length, 0)
+  await p.keyboard.press('z')
+  await p.clock.runFor(1)
+  assert.equal((await posts()).length, 0)
+  await p.keyboard.press('x')
+  await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
+  await p.clock.runFor(6000)
+  assert.equal((await posts()).length, 0)
+  await p.keyboard.press('x')
+  await p.locator('.ws-return').click()
+  await p.clock.runFor(5999)
+  assert.equal((await posts()).length, 0)
+  await p.clock.runFor(1)
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+  assert.equal((await posts()).length, 1)
+})
+
+test('Pending verdicts on two fibers commit independently', async p => {
+  await open(p)
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  await p.keyboard.press('t')
+  await p.locator('.ws-return').click()
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Mask validation notes' }).click()
+  await p.locator('.ws-channel-title').waitFor()
+  await p.keyboard.press('x')
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 2)
+  await p.clock.runFor(6000)
+  await poll(p, () => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length === 2)
+})
+
+test('Conversation dot-key uses the pill destination in reader and selected Desk card', async p => {
+  const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
+  await remote.click()
+  await p.keyboard.press('.')
+  await poll(p, () => window.__harness.events.filter(e => e.type === 'open-worker').length === 1)
+  await p.locator('.ws-return').click()
+  await p.keyboard.press('.')
+  await poll(p, () => window.__harness.events.filter(e => e.type === 'open-worker').length === 2)
 })
 
 test('Fiber composer isolates keys; settings and history use mocked daemon', async p => {
@@ -373,7 +432,7 @@ test('Audio waveform, transport, comparison, keep-position and keyboard guards',
   await poll(p, () => !document.querySelector('.ws-selected audio').paused)
   await selected(p).getByRole('button', { name: 'Pause', exact: true }).click()
   await selected(p).locator('audio').evaluate(a => { a.currentTime = 0 })
-  await p.keyboard.press('.')
+  await p.keyboard.press('>')
   assert.ok(await selected(p).locator('audio').evaluate(a => a.currentTime > 0))
   await p.keyboard.press(',')
   assert.equal(await selected(p).locator('audio').evaluate(a => a.currentTime), 0)

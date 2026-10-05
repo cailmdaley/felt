@@ -26,6 +26,9 @@ export interface ReaderOptions {
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
   verdictPlate?(card: KanbanCard): HTMLElement
+  onVerdict?(verdict: 'tempered' | 'composted'): void
+  onCompose?(): void
+  onConversation?(card: KanbanCard): void
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
@@ -624,7 +627,15 @@ export class Reader {
       return true
     }
     if (this.tabs.handleIntent(intent)) return true
-    if (intent === 'sidebar') this.toggleSidebar()
+    if (intent === 'temper' || intent === 'discard') {
+      if (!this.currentCard || fiberPageColumn(this.currentCard) !== 'awaitingReview') return false
+      this.opts.onVerdict?.(intent === 'temper' ? 'tempered' : 'composted')
+    }
+    else if (intent === 'compose') this.opts.onCompose?.()
+    else if (intent === 'conversation') {
+      if (this.currentCard) this.opts.onConversation?.(this.currentCard)
+    }
+    else if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'find') {
       if (this.sidebarShown) this.sidebarPicker.focus()
       else if (this.picker.isOpen) this.picker.focus()

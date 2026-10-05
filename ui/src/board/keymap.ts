@@ -1,5 +1,5 @@
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward'
+export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'undoVerdict' | 'compose' | 'conversation'
 export interface KeyBinding {
   keys: readonly string[]
   intent: KeyIntent
@@ -23,7 +23,8 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['h', 'ArrowLeft'], 'left', 'Previous column / region'), bind(['l', 'ArrowRight'], 'right', 'Next column / region'),
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
-    bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape', 'u'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
+    bind(['.'], 'conversation', 'Open selected conversation'),
+    bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
     bind(['/'], 'find', 'Find work or files'),
@@ -34,7 +35,12 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   reader: [
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind([','], 'audioBack', 'Audio: back 5 seconds'),
-    bind(['.'], 'audioForward', 'Audio: forward 5 seconds'),
+    bind(['>'], 'audioForward', 'Audio: forward 5 seconds'),
+    bind(['.'], 'conversation', 'Open conversation'),
+    bind(['r'], 'compose', 'Focus composer on the fiber page'),
+    bind(['t'], 'temper', 'Temper awaiting review (6 s undo)'),
+    bind(['x'], 'discard', 'Discard awaiting review (6 s undo)'),
+    bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
     bind(['c'], 'sidebar', 'Toggle constitution sidebar'),
     bind(['/'], 'find', 'Find a constitution or file'),
     { ...bind(['\\'], 'sidebar', 'Toggle constitution sidebar'), command: true },
@@ -77,7 +83,7 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
-  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar'].includes(binding.intent)) return null
+  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'temper', 'discard', 'undoVerdict', 'compose', 'conversation'].includes(binding.intent)) return null
   return binding.intent
 }
 

@@ -1,5 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
+import { Verdicts, type Verdict } from './Verdicts.js'
+import { fiberPageColumn } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
@@ -47,6 +49,7 @@ export class Workspace {
   readonly reader: Reader
   readonly overview: Overview
   readonly dock: Dock
+  private readonly verdicts = new Verdicts()
   private readonly picker: ConstitutionPicker
   private readonly root: HTMLElement
   private readonly depth: WorkspaceDepth
@@ -103,6 +106,9 @@ export class Workspace {
       },
       workerPill: card => this.dock.workerPillFor(card),
       verdictPlate: card => this.dock.verdictPlateFor(card),
+      onVerdict: verdict => this.deferVerdict(verdict),
+      onCompose: () => this.focusComposer(),
+      onConversation: card => { this.dock.openConversation(card) },
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),
@@ -186,6 +192,27 @@ export class Workspace {
       documents: this.current.channel.documents.map(doc => doc.kind === 'fiber' ? { ...doc, modifiedAt: card.modifiedAt } : doc),
     }
     this.show(this.current)
+  }
+
+  private deferVerdict(verdict: Verdict): void {
+    const state = this.current
+    if (!state?.metadataKnown || fiberPageColumn(state.card) !== 'awaitingReview') return
+    this.verdicts.queue(state.card, verdict, () => {
+      // A worker may start during the undo window; never stop it from a stale review.
+      const card = this.opts.cards().find(card => (card.uid ?? card.id) === state.channel.uid && card.originId === state.channel.owner) ?? state.card
+      if (fiberPageColumn(card) !== 'awaitingReview') {
+        showToast(`${card.name} no longer awaits review; verdict not written`, 'error')
+        return
+      }
+      this.dock.verdict(card, verdict)
+    })
+  }
+  private focusComposer(): void {
+    const state = this.current
+    if (!state) return
+    const key = state.channel.documents[0]?.key
+    if (key) this.select(key)
+    this.controls(state)?.el.querySelector<HTMLTextAreaElement>('.kbn-detail-directive')?.focus({ preventScroll: true })
   }
 
   private controls(state: ChannelState | null): Dock | undefined {
@@ -496,6 +523,7 @@ export class Workspace {
     this.stopTimer()
     document.removeEventListener('visibilitychange', this.visibility)
     this.history.dispose()
+    this.verdicts.dispose()
     this.dock.reset()
     this.picker.dispose()
     this.reader.dispose()

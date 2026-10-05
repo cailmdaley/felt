@@ -626,6 +626,14 @@ export class Dock {
     }) : null
   }
 
+  /** Keyboard opening activates the exact destination used by the worker pill. */
+  openConversation(card: KanbanCard): boolean {
+    const pill = this.workerPillFor(card)
+    if (!pill?.matches('a[href],button')) return false
+    pill.click()
+    return true
+  }
+
   /** Both verdict surfaces delegate to the board's lifecycle choke point. */
   verdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
     this.onTransition(card, target)
