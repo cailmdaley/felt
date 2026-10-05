@@ -1,95 +1,94 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KanbanModal } from './KanbanModal'
-import type { KanbanCard, KanbanResponse } from './KanbanTypes'
-import { card } from './testFixtures'
-import { saveClaudeOpening } from './conversationOpening'
+import type { KanbanCard } from './KanbanTypes.js'
+import { card } from './testFixtures.js'
+import { Dock } from './workspace/Dock.js'
+import { Reader } from './workspace/Reader.js'
+import type { Channel } from './workspace/documents.js'
 
-interface BoardState {
-  body: HTMLElement | null
-  deskEl: HTMLElement | null
-  lastResponse: KanbanResponse | null
-  dock: { el: HTMLElement; open(card: KanbanCard): void; reset(): void; refreshConversationOpening(): void }
-  render(data: KanbanResponse): void
-  teardownState(): void
-}
-
-const response = (columns: Partial<KanbanResponse['now']>): KanbanResponse => ({
-  now: { drafts: [], inFlight: [], awaitingReview: [], ...columns },
-  timeline: { past: [], futureDated: [] },
-  stash: [], pinned: [], folded: [], cycles: [], originStaleness: {}, staleness: {},
-}) as unknown as KanbanResponse
-
-const worker = (over: Partial<KanbanCard>): KanbanCard => card({
-  id: 'debug',
-  status: 'active',
-  tmuxSession: 'shuttle-debug',
-  lastActivityAt: Date.now() - 5 * 60_000,
+const worker = (over: Partial<KanbanCard> = {}): KanbanCard => card({
+  id: 'debug', uid: 'debug-uid', originId: 'host-a', status: 'active',
+  tmuxSession: 'shuttle-debug', shuttleHost: 'host-a', workerAgent: 'codex-sol',
   ...over,
 })
+const channel = (current: KanbanCard): Channel => {
+  const uid = current.uid ?? current.id
+  const key = `fiber:${current.originId}:${uid}`
+  return {
+    uid, owner: current.originId, name: current.name,
+    documents: [{ key, owner: current.originId, path: '/note.md', name: current.name, kind: 'fiber', provenance: [{ kind: 'fiber' }] }],
+    labels: ['Note'], body: '',
+  }
+}
 
-const pill = (): HTMLElement | null => document.querySelector<HTMLElement>('.kbn-detail-aloft')
-const openDock = (c: KanbanCard): void => { state.dock.open(c); document.body.append(state.dock.el) }
-
-let board: KanbanModal
-let state: BoardState
+let dock: Dock
+let reader: Reader
+let openWorker: ReturnType<typeof vi.fn>
+let current: KanbanCard
 
 beforeEach(() => {
   const saved = new Map<string, string>()
-  vi.stubGlobal('localStorage', {
-    getItem: (key: string) => saved.get(key) ?? null,
-    setItem: (key: string, value: string) => saved.set(key, value),
-  })
+  vi.stubGlobal('localStorage', { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => saved.set(key, value) })
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })))
-  board = new KanbanModal({ shuttleBase: 'https://daemon.example', onOpenWorker: vi.fn() })
-  state = board as unknown as BoardState
-  state.body = document.createElement('div')
-  state.deskEl = document.createElement('div')
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')))
+  openWorker = vi.fn()
+  current = worker()
+  dock = new Dock('https://daemon.example', vi.fn(), undefined, openWorker, {
+    workerPhase: card => card.status === 'active',
+  })
+  reader = new Reader({
+    shuttleBase: 'https://daemon.example', buildProse: () => document.createElement('div'),
+    onRefreshProse: vi.fn(), onSelect: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(),
+    cards: () => [current], workerPill: card => dock.workerPillFor(card),
+  })
+  document.body.append(reader.el)
 })
 
 afterEach(() => {
-  state.dock.reset()
-  state.teardownState()
+  dock.reset()
+  reader.dispose()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
-  document.body.innerHTML = ''
+  document.body.replaceChildren()
 })
 
-describe('the conversation dock follows its worker', () => {
-  it("updates an already open dock's pill when its opening preference changes", () => {
-    const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
-    state.lastResponse = response({ inFlight: [live] })
-    openDock(live)
-    expect(pill()?.tagName).toBe('BUTTON')
-    saveClaudeOpening('app')
-    ;state.dock.refreshConversationOpening()
-    expect(pill()?.tagName).toBe('A')
-    expect((pill() as HTMLAnchorElement).href).toBe('claude://claude.ai/code/session_test')
-  })
-  it('repaints a Waiting pill as Aloft when a poll reports the worker working', () => {
-    const waiting = worker({ runtimePhase: 'waiting' })
-    state.lastResponse = response({ inFlight: [waiting] })
-    openDock(waiting)
-    expect(pill()?.textContent).toBe('Waiting')
+function show(currentCard: KanbanCard): void {
+  const doc = channel(currentCard).documents[0]
+  reader.show(channel(currentCard), doc.key, 'Desk', currentCard)
+}
 
-    state.render(response({ inFlight: [worker({ runtimePhase: 'working', lastActivityAt: Date.now() })] }))
-    expect(pill()?.textContent).toBe('Aloft')
-    expect(document.querySelectorAll('.kbn-detail-aloft')).toHaveLength(1)
-  })
+describe('the shared navbar and inline worker pill', () => {
+  it('opens the actual owner terminal and uses the same pill builder in the fiber band', () => {
+    const currentCard = worker()
+    const band = dock.bandFor(currentCard)
+    const inline = band.el.querySelector<HTMLElement>('.kbn-card-worker')!
+    show(currentCard)
+    const navbar = reader.el.querySelector<HTMLElement>('.ws-worker-pill .kbn-card-worker')!
 
-  it('shows the phase only where the Desk does: in flight', () => {
-    const waiting = worker({ runtimePhase: 'waiting' })
-    state.lastResponse = response({ awaitingReview: [waiting] })
-    openDock(waiting)
-    expect(pill()?.textContent).toBe('Aloft')
+    expect(inline.tagName).toBe('BUTTON')
+    expect(navbar.tagName).toBe('BUTTON')
+    expect(inline.className).toBe(navbar.className)
+    expect(inline.textContent).toBe(navbar.textContent)
+    navbar.click()
+    inline.click()
+    expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a'], ['shuttle-debug', 'host-a']])
   })
 
-  it('drops the pill when the worker goes away', () => {
-    const waiting = worker({ runtimePhase: 'waiting' })
-    state.lastResponse = response({ inFlight: [waiting] })
-    openDock(waiting)
-    state.render(response({ awaitingReview: [worker({ tmuxSession: undefined, runtimePhase: undefined })] }))
-    expect(pill()).toBeNull()
+  it('repaints Waiting as Aloft in both locations and suppresses phase outside In flight', () => {
+    const waiting = worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 })
+    const band = dock.bandFor(waiting)
+    show(waiting)
+    expect(band.el.querySelector('.kbn-card-worker')?.textContent).toBe('Waiting')
+    expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('Waiting')
+
+    current = worker({ runtimePhase: 'working', lastActivityAt: Date.now() })
+    dock.syncRuntime(current)
+    show(current)
+    expect(band.el.querySelector('.kbn-card-worker')?.textContent).toBe('Aloft')
+    expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('Aloft')
+
+    const review = worker({ status: 'closed', runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 })
+    show(review)
+    expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('Aloft')
   })
 })

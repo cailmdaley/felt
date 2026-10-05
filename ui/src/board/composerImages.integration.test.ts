@@ -273,7 +273,7 @@ describe('the composer takes pasted images', () => {
   })
 
   it('retains a draft and image chips in its owner+uid band across channel switches', () => {
-    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster' })
+    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
     const firstBand = panel.bandFor(task)
     document.body.append(firstBand.el)
     const input = firstBand.el.querySelector<HTMLTextAreaElement>('textarea')!
