@@ -298,6 +298,11 @@ export function workspaceExample(now: number): WorkspaceExample {
     const path = parsed.searchParams.get('path') ?? ''
     const owner = parsed.searchParams.get('origin') || WORKSPACE_HOST
     const found = fileMap.get(key(owner, path))
+    if (parsed.pathname.endsWith('/file-info')) {
+      return new Response(JSON.stringify(found
+        ? { exists: true, size: found.body.size, modified_at: Math.floor(now / 1000) }
+        : { exists: false }), { headers: { 'Content-Type': 'application/json' } })
+    }
     if (!found) return new Response(null, { status: 404, statusText: 'Not Found' })
     const headers = new Headers({ 'Content-Type': found.mime, 'Content-Length': String(found.body.size) })
     return new Response(method.toUpperCase() === 'HEAD' ? null : found.body, { status: 200, headers })
