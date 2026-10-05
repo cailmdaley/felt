@@ -39,9 +39,11 @@
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
+import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
+import type { SidebarEntry } from './workspace/SidebarFlight.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
@@ -50,8 +52,8 @@ import type {
   KanbanResponse,
 } from './KanbanTypes.js'
 import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
-import { dispatchFailureMessage, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { COLUMN_TITLES, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
+import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
+import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
@@ -87,6 +89,16 @@ import {
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
+
+function registryDefaultAgent(raw: unknown): string | null {
+  if (!Array.isArray(raw)) return null
+  for (const value of raw) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+    const record = value as Record<string, unknown>
+    if (record.default === true && typeof record.id === 'string') return record.id
+  }
+  return null
+}
 
 interface KanbanModalOptions {
   /**
@@ -247,7 +259,6 @@ export class KanbanModal {
   private dragAutoScrollFrame: number | null = null
   private dragAutoScrollVelocity = 0
   private bannerTimer: number | null = null
-  private hasClaimedInitialFocus = false
   /** Lightweight auto-poll while mounted. 15s default. */
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
@@ -319,9 +330,8 @@ export class KanbanModal {
     this.dock = new Dock(
       this.shuttleBase,
       () => { void this.fetchAndRender() },
-      // Temper / Discard route through the same optimistic path as the inline
-      // card buttons and drags — instant relocation, background commit, reconcile.
-      (card, target) => this.transition(card, target),
+      // Expired verdicts enter the optimistic lifecycle path exactly once.
+      (card, target) => this.transition(card, target, { verdictCommitted: true }),
       this.openWorkerAfterGesture,
       {
         meeting: {
@@ -345,6 +355,7 @@ export class KanbanModal {
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
       openDetail: (card) => this.openDocumentChannel(card),
+      getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
@@ -489,6 +500,12 @@ export class KanbanModal {
       cards: () => this.workspaceCards(),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
+      deskColumn: card => this.workspaceColumn(card),
+      onReturnCard: card => {
+        this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+        this.workspaceReturnFocus = null
+        this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
+      },
       onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
       dock: this.dock,
     })
@@ -651,6 +668,18 @@ export class KanbanModal {
       : cardStillOwned ? Array.from(this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []).find(el => el.dataset.fiberId === address.id || el.dataset.fiberId === address.head)
       : this.tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')
     target?.focus({ preventScroll: true })
+  }
+
+  /** The reader takes the opened card's actual drawn region, preserving the flight seam. */
+  private workspaceColumn(card: KanbanCard): SidebarEntry[] {
+    const sources = this.deskKeyboard?.columnFor({ uid: card.uid ?? card.id, origin: card.originId }) ?? []
+    const cards = new Map(this.workspaceCards().map(row => [JSON.stringify([row.originId, row.uid ?? row.id]), row]))
+    return sources.flatMap(source => {
+      const card = cards.get(JSON.stringify([source.dataset.cardOrigin, source.dataset.cardUid]))
+      if (!card) return []
+      const band = source.closest('.kbn-flight-band')?.querySelector('.kbn-flight-caption')?.textContent ?? undefined
+      return [{ card, band, source }]
+    })
   }
 
   /** Drawn Desk order, followed by undrawn folded and chronological cards. */
@@ -991,7 +1020,6 @@ export class KanbanModal {
     this.viewFallbackSig = null
     this.lastFetchFailed = false
     this.dragSourceId = null
-    this.hasClaimedInitialFocus = false
     this.stopDragAutoScroll()
     if (this.bannerTimer !== null) {
       window.clearTimeout(this.bannerTimer)
@@ -1044,40 +1072,27 @@ export class KanbanModal {
      *    a second `applyOptimisticTransition` would lift the card from its NEW
      *    surface and re-place it, and re-derive nothing useful.
      */
-    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean } = {},
+    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean; verdictCommitted?: boolean } = {},
   ): void {
     const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
-    // A verdict on a card with a LIVE worker kills that worker (commitTransition
-    // → killWorkerIfRunning), and it did so silently — one click on Compost and
-    // a running session was gone, while "New session", which destroys less,
-    // asked first. Confirm the destructive one too. Gated on `hasWorkerToStop`, so
-    // the overwhelmingly common case (a verdict on a finished run) stays a
-    // single click. This is the choke point for every path — the card's inline
-    // buttons, the dock's Temper / Discard, and a drag onto the column —
-    // so one guard covers all three.
-    if ((target === 'tempered' || target === 'composted') && hasWorkerToStop(card)) {
-      const verb = target === 'tempered' ? 'temper' : 'discard'
-      const ok = window.confirm(
-        `“${card.name}” has a live worker. This stops it — ${verb} anyway?`,
-      )
-      if (!ok) {
-        this.announce(`Left ${card.name} running.`)
-        return
-      }
-    }
-
-    // Use the server's placement from the last response — that's the source
-    // of truth for which column the card is in. Re-deriving from card fields
-    // here is a footgun: column classification depends on `shuttle.enabled`,
-    // `idea` tag, `tempered`, standing-role review state, etc. — anything
-    // the local rule misses (or drifts from the server) silently no-ops the
-    // drag with a snap-back.
+    // Server placement, or the gesture's pre-paint basis, determines a no-op.
+    // A same-column verdict must not authorize a delayed write after reopening.
     const fromKind = findCardColumn(basis, card.id)
     if (fromKind === target) {
-      // Dropped back onto the column it already lives in — a no-op, but say so
-      // rather than letting the drag feel ignored.
       this.showBanner(`“${card.name}” is already in ${COLUMN_TITLES[target]}.`, 'info')
       this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
+      return
+    }
+    if ((target === 'tempered' || target === 'composted') && this.workspace && !opts.verdictCommitted) {
+      this.workspace.queueVerdict(card, target)
+      return
+    }
+    // A verdict stops the card's worker (commitTransition → killWorkerIfRunning).
+    // In the workspace, Workspace.queueVerdict asks at gesture time and refuses
+    // an expired verdict whose card gained an unconfirmed worker, so a committed
+    // verdict arrives here already authorized. Without a workspace, ask now.
+    if ((target === 'tempered' || target === 'composted') && !opts.verdictCommitted && !confirmWorkerStop(card, target)) {
+      this.announce(`Left ${card.name} running.`)
       return
     }
 
@@ -1429,7 +1444,8 @@ export class KanbanModal {
     this.gestureDepth += 1
     try {
       const unfolded = clearQueueEdge(before, fiberId)
-      const painted = drop.column
+      // Verdict placement waits for the shared undo window; unqueuing is independent.
+      const painted = drop.column && drop.column !== 'tempered' && drop.column !== 'composted'
         ? (applyOptimisticTransition(unfolded, fiberId, drop.column) ?? unfolded)
         : unfolded
       if (painted) this.applyResponse(painted)
@@ -1480,8 +1496,8 @@ export class KanbanModal {
         dependsOnShape: undefined,
       }
       if (drop.column) {
-        // Already painted, and `before` is where the card actually came from.
-        this.transition(released, drop.column, { basis: before, skipOptimistic: true })
+        // Non-verdict drops are painted; verdicts remain on their source surface.
+        this.transition(released, drop.column, { basis: before, skipOptimistic: drop.column !== 'tempered' && drop.column !== 'composted' })
         return
       }
       if (drop.horizon !== undefined) {
@@ -2044,6 +2060,7 @@ export class KanbanModal {
       const sig = this.computeResponseSignature(data)
       const wasFirstRender = this.lastResponse === null
       this.lastResponse = data
+      this.ensureFleetDefaultAgents(data)
       if (!wasFirstRender && sig === this.lastResponseSig) {
         // The Desk skips an identical-payload re-render, but a temporal view
         // still gets its poll: its content moves with the clock (and with
@@ -2168,6 +2185,7 @@ export class KanbanModal {
 
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
+    this.ensureFleetDefaultAgents(data)
     this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
       this.lastResponse = data
@@ -2238,7 +2256,6 @@ export class KanbanModal {
 
     this.restoreScrollSnapshot(scrollSnapshot)
     this.deskKeyboard?.refresh(true)
-    this.claimInitialFocus()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
     // Expand line-clamp on outcomes in now-section columns with spare
@@ -2342,20 +2359,24 @@ export class KanbanModal {
     }
   }
 
-  private claimInitialFocus(): void {
-    if (this.hasClaimedInitialFocus || !this.body) return
-    // Nothing to claim while a temporal view is up — the Desk's column heads
-    // are hidden, so focusing one would be a silent no-op that also burns the
-    // one-shot flag.
-    if (this.activeViewId !== 'desk') return
-
-    this.hasClaimedInitialFocus = true
-    window.requestAnimationFrame(() => {
-      if (!this.body) return
-      const active = document.activeElement
-      if (active instanceof HTMLElement && this.container?.contains(active)) return
-      this.body.querySelector<HTMLElement>('.kbn-col-head')?.focus({ preventScroll: true })
-    })
+  private ensureFleetDefaultAgents(data: KanbanResponse): void {
+    for (const card of boardCards(data)) {
+      if (!isAgentCard(card) || !card.shuttleAgent) continue
+      const origin = card.originId
+      if (this.fleetDefaultAgents.has(origin) || this.fleetDefaultAgentLoads.has(origin)) continue
+      this.fleetDefaultAgentLoads.add(origin)
+      void daemonFetch(`${this.shuttleBase}/api/v1/agents?origin=${encodeURIComponent(origin)}`)
+        .then(async (response) => {
+          if (!response.ok) return
+          const agent = registryDefaultAgent(await response.json())
+          if (!agent) return
+          const fallback = this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT
+          this.fleetDefaultAgents.set(origin, agent)
+          if (agent !== fallback && this.lastResponse && this.container) this.render(this.lastResponse)
+        })
+        .catch(() => {})
+        .finally(() => this.fleetDefaultAgentLoads.delete(origin))
+    }
   }
 
   private captureScrollSnapshot(): KanbanScrollSnapshot | null {
@@ -2396,6 +2417,8 @@ export class KanbanModal {
 
   /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
+  private readonly fleetDefaultAgents = new Map<string, string>()
+  private readonly fleetDefaultAgentLoads = new Set<string>()
   /**
    * A response that arrived while a temporal view was up, waiting for the Desk
    * to be visible again. The Desk is `display:none` behind a view, and every
@@ -2572,6 +2595,13 @@ export class KanbanModal {
     if (this.handleViewHotkey(e)) return
     if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
+      if (intent === 'conversation') {
+        const address = this.deskKeyboard?.selection
+        const card = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
+        if (card) this.dock.openConversation(card)
+        e.preventDefault(); e.stopPropagation()
+        return
+      }
       if (intent === 'find') {
         const filter = [...this.deskEl!.querySelectorAll<HTMLInputElement>('input[type="search"], input[data-card-filter]')]
           .find(input => !input.closest('[hidden],[inert]') && input.getClientRects().length > 0)

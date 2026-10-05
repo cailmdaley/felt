@@ -1,0 +1,13 @@
+.ws-fiber-prose .ws-prose-header { border: 0; margin: 0 0 8px; padding: 0; font: var(--ws-label-size)/1.3 var(--ws-serif); font-variant-caps: all-small-caps; letter-spacing: .06em; }
+.ws-fiber-prose > h1 { font-size: var(--ws-heading-size); margin-bottom: 20px; }
+.ws-fiber-prose .kbn-detail-lede { background: transparent; padding-block: 0; font-size: var(--ws-lede-size); margin: 0 0 20px; }
+.ws-prose-contents { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 0 20px; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.5 var(--ws-mono); }
+.ws-reader .ws-prose-contents button { padding: 4px 0; font: inherit !important; }
+.ws-prose-contents button::before { content: '·'; margin-right: 6px; }
+.ws-prose-contents button:hover { color: var(--ws-ink); text-decoration: underline; }
+.ws-fiber-prose > .ws-prose-body { border-top: 1px solid var(--ws-hairline); padding-top: 20px; }
+.ws-fiber-prose > .ws-dock { border: 0; margin: 0; padding-bottom: 20px; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-fiber-prose > h1 { display: none; }
+  .ws-reader .ws-prose-contents button { min-height: 44px; }
+}

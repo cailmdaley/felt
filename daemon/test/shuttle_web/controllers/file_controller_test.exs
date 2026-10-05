@@ -14,6 +14,8 @@ defmodule ShuttleWeb.FileControllerTest do
   import Phoenix.ConnTest
 
   @endpoint ShuttleWeb.Endpoint
+  @sandbox_policy "sandbox allow-scripts allow-popups " <>
+                    "allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms"
 
   describe "local serve" do
     test "200 with bytes + content-type for an existing absolute path" do
@@ -37,6 +39,166 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert conn.status == 200
       assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
+    end
+
+    # The router decodes path segments before matching, so every spelling that
+    # reaches FileController must carry the policy too.
+    @tag :tmp_dir
+    test "sandboxes percent-encoded spellings of the file routes", %{tmp_dir: dir} do
+      path = Path.join(dir, "probe.xml")
+      File.write!(path, "<x:script xmlns:x='http://www.w3.org/1999/xhtml'>1</x:script>")
+      query = "path=#{URI.encode_www_form(path)}"
+      asset = String.trim_leading(path, "/")
+
+      for url <- [
+            "/api/v1/fil%65?#{query}",
+            "/%61pi/v1/file?#{query}",
+            "/api/v%31/file?#{query}",
+            "/api/v1/file-asset%73/local/#{asset}"
+          ] do
+        conn = get(api_conn(), url)
+
+        assert conn.status == 200, url
+        assert conn.resp_body =~ "x:script", url
+        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy], url
+        assert get_resp_header(conn, "x-content-type-options") == ["nosniff"], url
+      end
+    end
+
+    # Negative control: omitting the document sandbox policy makes these checks go red.
+    @tag :tmp_dir
+    test "sandboxes local HTML document responses without CORS access", %{tmp_dir: dir} do
+      for {extension, accept} <- [
+            {"html", "text/html"},
+            {"htm", "text/html"},
+            {"HTML", "text/html"},
+            {"xhtml", "application/xhtml+xml"}
+          ] do
+        path = Path.join(dir, "report.#{extension}")
+        body = "<script>window.open('popup.html')</script>"
+        File.write!(path, body)
+
+        conn =
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", accept)
+          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+        assert conn.status == 200
+        assert conn.resp_body == body
+        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
+    end
+
+    @tag :tmp_dir
+    test "sandboxes a sibling HTML asset opened from an opaque report", %{tmp_dir: dir} do
+      report_path = Path.join(dir, "report.html")
+      popup_path = Path.join(dir, "popup.html")
+      File.write!(report_path, ~s(<a href="popup.html" target="_blank">open</a>))
+      body = "<script>window.opener.location = 'https://example.invalid'</script>"
+      File.write!(popup_path, body)
+
+      report_url = URI.parse("http://127.0.0.1" <> file_asset_url("local", report_path))
+      sibling_url = report_url |> URI.merge("popup.html") |> Map.fetch!(:path)
+      assert sibling_url == file_asset_url("local", popup_path)
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/html")
+        |> get(sibling_url)
+
+      assert conn.status == 200
+      assert conn.resp_body == body
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+    end
+
+    @tag :tmp_dir
+    test "sandboxes SVG and compressed SVG responses without CORS access", %{tmp_dir: dir} do
+      body = "<svg><script>window.open('popup.html')</script></svg>"
+
+      for extension <- ["svg", "svgz"] do
+        path = Path.join(dir, "report.#{extension}")
+        File.write!(path, body)
+
+        conn =
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", "image/svg+xml")
+          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+        assert conn.status == 200
+        assert conn.resp_body == body
+        assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
+        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
+    end
+
+    @tag :tmp_dir
+    @tag :file_security
+    test "sandboxes PDFs, media and images without changing their content types", %{tmp_dir: dir} do
+      for {extension, accept, content_type} <- [
+            {"pdf", "application/pdf", "application/pdf"},
+            {"mp4", "video/mp4", "video/mp4"},
+            {"png", "image/png", "image/png"}
+          ] do
+        path = Path.join(dir, "asset.#{extension}")
+        File.write!(path, "representation")
+
+        conn =
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", accept)
+          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+        assert conn.status == 200
+        assert get_resp_header(conn, "content-type") |> List.first() =~ content_type
+        assert_file_security(conn)
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
+    end
+
+    @tag :tmp_dir
+    test "serves a sibling asset to an opaque report origin without ACAO", %{tmp_dir: dir} do
+      report_dir = Path.join(dir, "report")
+      report_path = Path.join(report_dir, "index.html")
+      css_path = Path.join(report_dir, "foo.css")
+      File.mkdir_p!(report_dir)
+      File.write!(report_path, ~s(<link rel="stylesheet" href="foo.css">))
+      File.write!(css_path, "body { color: red; }")
+
+      report_url = URI.parse("http://127.0.0.1" <> file_asset_url("local", report_path))
+      sibling_url = report_url |> URI.merge("foo.css") |> Map.fetch!(:path)
+      assert sibling_url == file_asset_url("local", css_path)
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/css")
+        |> get(sibling_url)
+
+      assert conn.status == 200
+      assert conn.resp_body == "body { color: red; }"
+      assert get_resp_header(conn, "content-type") |> List.first() =~ "text/css"
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+    end
+
+    @tag :tmp_dir
+    test "404 for a missing sibling asset from an opaque report origin", %{tmp_dir: dir} do
+      path = Path.join([dir, "report", "missing.css"])
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/css")
+        |> get(file_asset_url("local", path))
+
+      assert conn.status == 404
+      assert %{"error" => "file not found"} = json_response(conn, 404)
+      assert get_resp_header(conn, "access-control-allow-origin") == []
     end
 
     test "uses browser media types for common audio and video extensions" do
@@ -385,6 +547,185 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
+  describe "file security boundary" do
+    for extension <- ~w(html xml rss atom svg svgz unknown pdf mp3), route <- [:file, :asset] do
+      @tag :tmp_dir
+      @tag :file_security
+      test "sandboxes local #{extension} bytes on #{route}", %{tmp_dir: dir} do
+        path = Path.join(dir, "document.#{unquote(extension)}")
+        body = "representation"
+        File.write!(path, body)
+        url = file_url(unquote(route), "local", path)
+
+        conn = local_conn() |> put_req_header("origin", "null") |> get(url)
+
+        assert conn.status == 200
+        assert conn.resp_body == body
+        assert_file_security(conn)
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
+
+      @tag :file_security
+      test "sandboxes relayed #{extension} bytes on #{route} without trusting owner headers" do
+        headers = [
+          {"content-security-policy", "sandbox allow-scripts allow-same-origin"},
+          {"x-content-type-options", "unsafe"},
+          {"access-control-allow-origin", "null"}
+        ]
+
+        stub_forward("file-owner", "http://localhost:4001", {
+          :ok,
+          200,
+          headers,
+          "application/octet-stream",
+          "remote representation"
+        })
+
+        path = "/project/document.#{unquote(extension)}"
+        conn = get(api_conn(), file_url(unquote(route), "file-owner", path))
+
+        assert conn.status == 200
+        assert conn.resp_body == "remote representation"
+        assert_file_security(conn)
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+
+        assert StubGetFileClient.last().url ==
+                 "http://localhost:4001/api/v1/file?path=#{URI.encode_www_form(path)}"
+      end
+    end
+
+    for route <- [:file, :asset] do
+      @tag :tmp_dir
+      @tag :file_security
+      test "retains file security on local HEAD, 206, 304 and 416 on #{route}", %{tmp_dir: dir} do
+        path = Path.join(dir, "data.xml")
+        File.write!(path, "0123456789")
+        url = file_url(unquote(route), "local", path)
+        first = get(api_conn(), url)
+        [etag] = get_resp_header(first, "etag")
+
+        responses = [
+          {head(api_conn(), url), 200},
+          {api_conn() |> put_req_header("range", "bytes=1-3") |> get(url), 206},
+          {api_conn() |> put_req_header("if-none-match", etag) |> get(url), 304},
+          {api_conn() |> put_req_header("range", "bytes=99-") |> get(url), 416}
+        ]
+
+        for {conn, status} <- responses do
+          assert conn.status == status
+          assert_file_security(conn)
+        end
+      end
+
+      @tag :file_security
+      test "retains file security on relayed 206, 304, 404 and 416 on #{route}" do
+        url = file_url(unquote(route), "file-owner", "/remote.xml")
+        stub_forward("file-owner", "http://localhost:4001", {:ok, 200, [], "text/xml", ""})
+
+        for status <- [206, 304, 404, 416] do
+          StubGetFileClient.set_response({:ok, status, [], "text/xml", ""})
+
+          conn = get(api_conn(), url)
+          assert conn.status == status
+          assert_file_security(conn)
+        end
+      end
+
+      @tag :file_security
+      test "retains file security on relay failures on #{route}" do
+        stub_forward("file-owner", "http://localhost:4001", {:error, :econnrefused})
+        conn = get(api_conn(), file_url(unquote(route), "file-owner", "/remote.xml"))
+        assert conn.status == 502
+        assert_file_security(conn)
+      end
+    end
+
+    @tag :tmp_dir
+    @tag :file_security
+    test "retains file security on missing and invalid paths", %{tmp_dir: dir} do
+      for {url, status} <- [
+            {"/api/v1/file", 400},
+            {"/api/v1/file?path=", 400},
+            {"/api/v1/file?path=relative.xml", 400},
+            {file_url(:file, "local", Path.join(dir, "missing.xml")), 404},
+            {file_asset_url("local", Path.join(dir, "missing.xml")), 404},
+            {file_asset_url("local", dir), 404},
+            {"/api/v1/file-assets/local", 400}
+          ] do
+        conn = get(api_conn(), url)
+        assert conn.status == status
+        assert_file_security(conn)
+      end
+    end
+
+    @tag :file_security
+    test "retains file security on CORS errors and preflight before the controller" do
+      for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
+        forbidden = local_conn() |> put_req_header("origin", "null") |> post(url)
+        assert forbidden.status == 403
+        assert_file_security(forbidden)
+
+        preflight = options(local_conn(), url)
+        assert preflight.status == 204
+        assert_file_security(preflight)
+      end
+    end
+
+    @tag :file_security
+    test "retains file security when endpoint parsing raises" do
+      for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
+        {400, headers, _body} =
+          assert_error_sent(400, fn ->
+            api_conn() |> post(url, "{")
+          end)
+
+        assert List.keyfind(headers, "content-security-policy", 0) ==
+                 {"content-security-policy", @sandbox_policy}
+
+        assert List.keyfind(headers, "x-content-type-options", 0) ==
+                 {"x-content-type-options", "nosniff"}
+      end
+    end
+
+    @tag :file_security
+    test "retains file security when query decoding raises" do
+      {400, headers, _body} =
+        assert_error_sent(400, fn ->
+          get(api_conn(), "/api/v1/file?path=%FF")
+        end)
+
+      assert List.keyfind(headers, "content-security-policy", 0) ==
+               {"content-security-policy", @sandbox_policy}
+
+      assert List.keyfind(headers, "x-content-type-options", 0) ==
+               {"x-content-type-options", "nosniff"}
+    end
+
+    @tag :file_security
+    test "retains file security on booting responses before the controller" do
+      Shuttle.Readiness.begin_boot()
+      on_exit(fn -> Shuttle.Readiness.mark_ready() end)
+
+      for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
+        conn = get(api_conn(), url)
+        assert conn.status == 503
+        assert_file_security(conn)
+      end
+    end
+
+    @tag :tmp_dir
+    @tag :file_security
+    test "sandboxes every API response but not the board page", %{tmp_dir: dir} do
+      conn = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(dir)}")
+      assert conn.status == 200
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+
+      conn = get(api_conn(), "/")
+      assert get_resp_header(conn, "content-security-policy") == []
+    end
+  end
+
   describe "bounded file I/O" do
     @tag :tmp_dir
     test "large ranges use file offsets and a metadata ETag without reading the whole file", %{
@@ -561,6 +902,64 @@ defmodule ShuttleWeb.FileControllerTest do
                "http://localhost:4001/api/v1/file?path=%2Fabs%2Fon%2Fcandide.png"
     end
 
+    test "forwards relative report assets through the owner's existing /file route" do
+      stub_forward("candide", "http://localhost:4001", {:ok, 200, "text/css", "body {}"})
+
+      conn = get(api_conn(), file_asset_url("candide", "/project/report/foo.css"))
+
+      assert conn.status == 200
+      assert conn.resp_body == "body {}"
+      assert get_resp_header(conn, "content-type") == ["text/css"]
+
+      assert StubGetFileClient.last().url ==
+               "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport%2Ffoo.css"
+    end
+
+    test "sandboxes remote HTML even when the owner omits CSP" do
+      body = "<script>window.open('popup.html')</script>"
+      stub_forward("candide", "http://localhost:4001", {:ok, 200, "text/html", body})
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/html")
+        |> get("/api/v1/file?path=%2Fproject%2Freport.html&origin=candide")
+
+      assert conn.status == 200
+      assert conn.resp_body == body
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+
+      assert StubGetFileClient.last().url ==
+               "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport.html"
+    end
+
+    test "does not relay an unsafe remote CSP or ACAO" do
+      body = "<script>window.open('popup.html')</script>"
+
+      headers = [
+        {"content-security-policy", "sandbox allow-scripts allow-same-origin"},
+        {"access-control-allow-origin", "null"}
+      ]
+
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 200, headers, "text/html", body}
+      )
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/html")
+        |> get("/api/v1/file?path=%2Fproject%2Freport.html&origin=candide")
+
+      assert conn.status == 200
+      assert conn.resp_body == body
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+    end
+
     test "forwards conditional headers and relays a remote 304 with its validators" do
       etag = ~s(W/"remote-file")
 
@@ -586,6 +985,7 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert conn.status == 304
       assert conn.resp_body == ""
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
       assert get_resp_header(conn, "etag") == [etag]
       assert get_resp_header(conn, "last-modified") == [last_modified]
       assert get_resp_header(conn, "cache-control") == ["public, max-age=300"]
@@ -765,6 +1165,29 @@ defmodule ShuttleWeb.FileControllerTest do
       assert conn.status == 502
       assert %{"error" => _} = json_response(conn, 502)
     end
+  end
+
+  defp assert_file_security(conn) do
+    assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+    assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+  end
+
+  defp file_url(:file, origin, path),
+    do: "/api/v1/file?#{URI.encode_query(%{"path" => path, "origin" => origin})}"
+
+  defp file_url(:asset, origin, path), do: file_asset_url(origin, path)
+
+  defp file_asset_url(origin, path) do
+    encoded_origin = URI.encode(origin, fn char -> URI.char_unreserved?(char) end)
+
+    encoded_path =
+      path
+      |> String.split("/", trim: true)
+      |> Enum.map_join("/", fn segment ->
+        URI.encode(segment, fn char -> URI.char_unreserved?(char) end)
+      end)
+
+    "/api/v1/file-assets/#{encoded_origin}/#{encoded_path}"
   end
 
   defp tmp_path(ext),

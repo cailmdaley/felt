@@ -18,7 +18,7 @@ describe('shared keyboard table', () => {
       }
     }
   }
-  it.each(['1', '2', '3', ',', 'Tab'])('leaves chassis key %s alone', key => {
+  it.each(['1', '2', '3', 'Tab'])('leaves chassis key %s alone', key => {
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event(key), surface)).toBeNull()
   })
   it.each(['input', 'textarea', 'select'])('ignores typing in %s, including reader Alt-arrows', tag => {
@@ -79,6 +79,23 @@ describe('shared keyboard table', () => {
   it.each([{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }, { altKey: true }])('ignores composing/modifier bare keys %j', init => {
     expect(keyIntent(event('j', init), 'desk')).toBeNull()
   })
+  it.each(['t', 'x', 'r', '.', 'z'])('guards action key %s against fields, IME, modifiers and repeat', key => {
+    const input = document.createElement('textarea')
+    expect(keyIntent(event(key, {}, input), 'reader')).toBeNull()
+    for (const init of [{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }, { altKey: true }, { repeat: true }]) {
+      expect(keyIntent(event(key, init), 'reader')).toBeNull()
+    }
+  })
+  it('reserves u for half-page up and dot for conversation on every reader page', () => {
+    expect(keyIntent(event('u'), 'desk')).toBeNull()
+    expect(keyIntent(event('u'), 'reader')).toBe('halfUp')
+    expect(keyIntent(event('.'), 'reader')).toBe('conversation')
+    expect(keyIntent(event(']'), 'reader')).toBe('audioForward')
+    expect(keyIntent(event('['), 'reader')).toBe('audioBack')
+    expect(keyIntent(event('p'), 'reader')).toBe('audioPlay')
+    expect(keyIntent(event('>'), 'reader')).toBeNull()
+    expect(keyIntent(event(','), 'reader')).toBeNull()
+  })
   it('gives document handlers first refusal', () => {
     const e = event('j')
     e.preventDefault()
@@ -94,6 +111,6 @@ describe('shared keyboard table', () => {
   })
   it('allows held movement, not repeated activation or dismissal', () => {
     expect(keyIntent(event('j', { repeat: true }), 'desk')).toBe('down')
-    for (const key of ['Enter', 'o', '?', 'Escape', 'u']) expect(keyIntent(event(key, { repeat: true }), 'desk')).toBeNull()
+    for (const key of ['Enter', 'o', '?', 'Escape', '.']) expect(keyIntent(event(key, { repeat: true }), 'desk')).toBeNull()
   })
 })

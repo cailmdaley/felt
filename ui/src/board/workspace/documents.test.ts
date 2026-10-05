@@ -78,7 +78,7 @@ describe('buildChannel', () => {
       name: 'report.html', kind: 'html',
       provenance: [{ kind: 'embed', title: 'Results' }],
     })
-    expect(channel.labels).toEqual(['Note', 'task'])
+    expect(channel.labels).toEqual(['Note', 'Results'])
     expect(channel.documents[0].path).toBe('/store/project/task/task.md')
   })
 
@@ -120,7 +120,7 @@ describe('buildChannel', () => {
     expect(channel.documents[2].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
   })
 
-  it('sorts new deliveries by first arrival while retaining prior page order and receipts', () => {
+  it('sorts deliveries by latest activity while retaining receipt history', () => {
     const first = buildChannel({
       ...base,
       embeds: [{ path: 'second.html' }, { path: 'first.html' }],
@@ -141,10 +141,10 @@ describe('buildChannel', () => {
       previous: first,
     })
     expect(first.documents.map((document) => document.name)).toEqual([
-      'A channel', 'second.html', 'first.html', 'earlier.pdf', 'later.pdf',
+      'A channel', 'later.pdf', 'earlier.pdf', 'first.html', 'second.html',
     ])
     expect(second.documents.map((document) => document.name)).toEqual([
-      'A channel', 'first.html', 'earlier.pdf', 'later.pdf', 'new-report.html', 'arrival.txt',
+      'A channel', 'arrival.txt', 'later.pdf', 'earlier.pdf', 'first.html', 'new-report.html',
     ])
     expect(second.documents.find((document) => document.name === 'later.pdf')?.provenance)
       .toEqual([
@@ -168,9 +168,9 @@ describe('buildChannel', () => {
 describe('selection and labels', () => {
   it('starts at a declared report, then any delivered report, otherwise prose', () => {
     const declared = buildChannel({ ...base, embeds: [{ path: 'reports/report.html' }, { path: 'notes.md' }] })
-    expect(defaultSelection(declared)).toBe(declared.documents[1].key)
+    expect(defaultSelection(declared)).toBe(declared.documents.find(d => d.name === 'report.html')?.key)
     const sent = buildChannel({ ...base, embeds: [{ path: 'notes.md' }], sent: [{ path: 'sent/report.html', time: 10 }] })
-    expect(defaultSelection(sent)).toBe(sent.documents[2].key)
+    expect(defaultSelection(sent)).toBe(sent.documents[1].key)
     const withoutReport = buildChannel({ ...base, embeds: [{ path: 'notes.md' }] })
     expect(defaultSelection(withoutReport)).toBe(withoutReport.documents[0].key)
   })

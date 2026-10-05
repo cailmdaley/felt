@@ -59,6 +59,7 @@
   /* NOW, AND WHAT IS OWED. The now-thread, a due date, a worker with its hand
      up, the drag band. Gold is the board's "attend to this, at this time". */
   --kbn-owed: #9A7B35;
+  --kbn-owed-ink: color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-ink) 30%);
   --kbn-owed-bright: #C49333;
 
   /* THE VERDICT — and the ONE meaning verdigris keeps. A fiber tempered, and
@@ -327,13 +328,19 @@
   color: #BC4538;
 }
 
-/* The Desk wrapper is a toggle handle, not a box: `display: contents` keeps
-   the three surfaces as direct flex items of `.kbn-body`, so their gaps,
-   `flex: 1` and percentage heights resolve as if the wrapper were not
-   there. Switching to a temporal view sets `display: none` here
-   inline, which hides the subtree without rebuilding it. */
+/* One live Desk layer can recede beneath the reader or contact sheet. */
 .kbn-desk {
-  display: contents;
+  display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0;
+  transform-origin: center 40%;
+  transition: transform var(--ws-crossing, 280ms) var(--ws-ease, ease), opacity var(--ws-crossing, 280ms) var(--ws-ease, ease);
+}
+.kbn-workspace-raised .kbn-desk {
+  transform: translate3d(var(--ws-desk-x, 0px), var(--ws-desk-y, 0px), 0) scale(var(--ws-desk-scale));
+  opacity: var(--ws-desk-opacity);
+  filter: var(--ws-desk-filter);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-desk { transition: none; }
 }
 
 /* ── Section layout: Now → Pinned → Resting ──────────────────────────────── */
@@ -1080,6 +1087,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.kbn-cluster-item-agent-name {
+  flex: 0 0 auto;
+  color: var(--kbn-agent);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
 /* "wakes Aug 12" — the return date on a snoozed card. Mono and faint: it's a
    fact to glance at, never the thing you read first. */
 .kbn-cluster-item-wakes {
@@ -1349,10 +1364,19 @@
 }
 .kbn-flight-caption {
   margin: 0 0 6px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  font-weight: 400;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(15px * var(--kbn-type-scale, 1));
+  font-weight: 500;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.06em;
   color: var(--kbn-ink-muted);
+}
+.kbn-flight-band[data-flight-band="needsYou"] .kbn-flight-caption {
+  color: var(--kbn-owed-ink);
+}
+.kbn-flight-band[data-flight-band="needsYou"] .kbn-card {
+  border-left: 3px solid var(--kbn-owed);
 }
 .kbn-flight-band + .kbn-flight-band {
   margin-top: 4px;
@@ -2175,6 +2199,15 @@
   gap: 4px;
   align-items: center;
   flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.kbn-card-awaitingReview:hover .kbn-card-review-meta-actions,
+.kbn-card-awaitingReview:focus-within .kbn-card-review-meta-actions,
+.kbn-card-awaitingReview.kbn-key-selected .kbn-card-review-meta-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 .kbn-review-meta-btn {
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
@@ -2183,6 +2216,20 @@
 }
 .kbn-review-meta-btn:hover {
   opacity: 1;
+}
+@media (hover: none) {
+  .kbn-card-review-meta-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .kbn-card-review-meta-actions .kbn-review-meta-btn {
+    height: 44px;
+    min-width: 44px;
+    padding: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-card-review-meta-actions { transition: none; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2233,67 +2280,69 @@
       env(safe-area-inset-left, 0px);
   }
   .kbn-body {
-    padding: 4px 8px calc(12px + env(safe-area-inset-bottom, 0px));
+    padding: 4px 8px 69px;
     gap: 8px;
   }
 
-  /* ── View tabs: a run of pages, scrolled ───────────────────────────────
-     The tabs plus the cycle lens will not sit in 390px, and wrapping them
-     into two rows spends the fold on chrome. So the row scrolls, and the
-     keycaps go: a hotkey glyph is an instruction you cannot follow on a
-     device with no keyboard. The lens chips give up their auto-margin and
-     simply follow the last tab — pushed to a far right edge you have to
-     scroll to, they would read as lost rather than as trailing. */
+  /* The three views stay together at the bottom; the Desk's cycle chips get
+     their own scrollport between them and Settings, never passing underneath
+     the gear. The bar is opaque so scrolling pages cannot show through it. */
   .kbn-viewtabs {
+    position: fixed;
+    z-index: 20;
+    inset: auto env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+    box-sizing: border-box;
+    min-height: calc(57px + env(safe-area-inset-bottom, 0px));
+    align-items: center;
     flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
+    overflow: visible;
     gap: 4px;
-    padding-bottom: 6px;
-    margin-bottom: -2px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    margin: 0;
+    border-top: 1px solid rgba(196, 147, 51, 0.32);
+    border-bottom: 0;
+    background: var(--kbn-parchment);
   }
-  .kbn-viewtabs::-webkit-scrollbar { display: none; }
-  /* Trimmed until all five names fit a 390px strip. The row still scrolls —
-     that is the insurance for a narrower phone and for a bigger type scale —
-     but a strip you have to scroll to discover that a fifth view EXISTS is a
-     strip that hides a view: "BOARD" cut off mid-word at the right edge reads
-     as a rendering fault, not as an invitation. Six pixels of padding a side
-     is the whole cost of never seeing that again. */
   .kbn-viewtab {
     flex: 0 0 auto;
+    box-sizing: border-box;
+    min-height: var(--ws-phone-target, 44px);
     padding: 7px 9px;
     letter-spacing: 0.08em;
     font-size: calc(11.5px * var(--kbn-type-scale, 1));
   }
   .kbn-viewtab-hotkey { display: none; }
+  .kbn-modal .kbn-body-veiled > .kbn-view-host { top: 0; bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
   .kbn-viewtabs-lens {
+    display: block;
+    flex: 1 1 0;
+    min-width: 0;
     margin-left: 4px;
-    flex: 0 0 auto;
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
-  /* The row scrolls on a phone, and a control that scrolls out of sight is a
-     control that is not there. So the gear is stuck to the right edge and the
-     tabs pass under it: it is the one thing on this strip you reach for
-     without already knowing where the strip has been scrolled to. The paper
-     wash is what keeps a tab from showing through as it slides beneath. */
+  .kbn-viewtabs-lens::-webkit-scrollbar { display: none; }
+  .kbn-viewtabs-lens .kbn-lensbar {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    width: max-content;
+    min-width: 100%;
+  }
+  .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 0 auto; }
   .kbn-viewtabs-settings {
-    position: sticky;
-    right: 0;
+    position: static;
+    box-sizing: border-box;
     margin-left: 6px;
-    /* 44px, in px rather than em: an em box here is a function of the type
-       scale, and at the default 1.18 the entry point to the whole settings
-       sheet came out at 39px — under the threshold, on the device the sheet
-       is for. A touch target is a physical measurement; it does not scale
-       with the typography. */
-    width: 44px;
-    height: 44px;
+    width: var(--ws-phone-target, 44px);
+    height: var(--ws-phone-target, 44px);
+    min-height: var(--ws-phone-target, 44px);
+    padding: 0;
     font-size: calc(15px * var(--kbn-type-scale, 1));
-    background:
-      linear-gradient(to right, rgba(237, 226, 206, 0) 0%, #EDE2CE 45%, #EDE2CE 100%);
+    background: none;
     border-color: rgba(122, 111, 92, 0.34);
-    padding-left: 6px;
-    background-clip: padding-box;
   }
 
   /* ── The folio strip ───────────────────────────────────────────────────
@@ -2602,16 +2651,15 @@
      in landscape those move to the left and right edges, which is exactly
      where the notch and the rounded corners now are. */
   .kbn-body {
-    padding: 2px 10px 6px;
+    padding: 2px 10px 55px;
     gap: 6px;
   }
 
-  /* The view strip earns its place — it is the only way to reach Chronicle
-     and the board — but it does not need to be a button bar. Trimmed to a
-     header rule of page names, still a comfortable target because the row's
-     own height, not its padding, is what a thumb lands on. */
+  /* The bottom bar stays within thumb reach. Its three view names keep 44px
+     targets while the surrounding padding tightens to suit the short screen. */
   .kbn-viewtabs {
-    padding-bottom: 2px;
+    min-height: calc(49px + env(safe-area-inset-bottom, 0px));
+    padding: 2px 10px calc(2px + env(safe-area-inset-bottom, 0px));
     gap: 3px;
   }
   .kbn-viewtab {

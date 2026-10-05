@@ -5,6 +5,7 @@ import type { Channel, WorkspaceDocument } from './documents.js'
 import { DocumentHost, withWorkspaceKeyBridge } from './DocumentHost.js'
 import { Reader } from './Reader.js'
 import { buildChannel } from './documents.js'
+import { connectDocumentFrame, envelope } from './DocumentBridge.js'
 
 const render = vi.hoisted(() => ({
   calls: [] as Array<{ viewer: HTMLElement; path: string; owner: string; options: FileViewerOptions; frame?: (frame: HTMLIFrameElement, refreshed: boolean) => void; text?: (pane: HTMLElement) => void }>,
@@ -27,7 +28,7 @@ const doc = (n: number, owner = 'host-a'): WorkspaceDocument => ({
 const docs = Array.from({ length: 18 }, (_, n) => doc(n))
 let track: HTMLElement
 let host: DocumentHost
-const onSelect = vi.fn(), onFrame = vi.fn(), buildProse = vi.fn(() => document.createElement('div'))
+const onSelect = vi.fn(), onFrame = vi.fn(), onScroll = vi.fn(), buildProse = vi.fn(() => document.createElement('div'))
 beforeEach(() => {
   vi.clearAllMocks()
   render.calls = []
@@ -35,7 +36,7 @@ beforeEach(() => {
   document.body.replaceChildren()
   track = document.createElement('div')
   document.body.append(track)
-  host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame })
+  host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame, onScroll })
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
 })
 afterEach(() => { host.dispose(); vi.unstubAllGlobals() })
@@ -91,6 +92,22 @@ describe('say it once label bars', () => {
 })
 
 describe('stable document frames', () => {
+  it('owns an audio poster per frame and updates its fallback from the native duration', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    const audioDoc: WorkspaceDocument = { ...docs[0], kind: 'audio', path: '/song.wav' }
+    host.setChannel([audioDoc], audioDoc.key)
+    const frame = host.get(audioDoc.key)!
+    const poster = frame.sheet.querySelector('.ws-media-poster')!
+    expect(poster.textContent).toContain('♪')
+    const audio = document.createElement('audio')
+    Object.defineProperty(audio, 'duration', { value: 75 })
+    const dispose = render.calls[0].options.decorateAudio!(audio)
+    audio.dispatchEvent(new Event('loadedmetadata'))
+    expect(poster.textContent).toContain('1:15')
+    expect(poster.classList.contains('ws-media-poster-ready')).toBe(false)
+    dispose()
+  })
+
   it('creates placeholders, mounts just selection and neighbours, and never reparents on reorder', async () => {
     host.setChannel(docs.slice(0, 5), docs[2].key)
     expect(track.children).toHaveLength(5)
@@ -224,13 +241,31 @@ describe('stable document frames', () => {
     expect([...track.children].filter((el) => el.querySelector('[data-path]'))).toHaveLength(10)
     expect(frame.viewer).toBeNull()
     expect(render.dispose).toHaveBeenCalledWith(first.viewer)
-    expect(frame.el.parentElement).toBe(track)
+    expect(frame.el.parentElement).toBeNull()
+    expect(host.get(docs[0].key)).toBeUndefined()
+    expect(track.children).toHaveLength(10)
     host.setChannel([docs[0]], docs[0].key)
     const restored = render.calls.at(-1)!
     restored.text!(restored.viewer)
     expect(restored.viewer.scrollTop).toBe(317)
-    expect(host.get(docs[0].key)).toBe(frame)
-    expect(frame.viewer).not.toBe(first.viewer)
+    expect(host.get(docs[0].key)).not.toBe(frame)
+    expect(host.get(docs[0].key)!.viewer).not.toBe(first.viewer)
+  })
+
+  it('charges heavy HTML two slots and bounds off-channel frame metadata with the LRU', async () => {
+    for (let n = 0; n < 30; n++) {
+      const document = doc(n)
+      host.setChannel([document], document.key)
+      const call = render.calls.at(-1)!
+      call.options.onWeight!(2)
+      await ready(call)
+    }
+    expect(track.children).toHaveLength(5)
+    expect(host.get(doc(0).key)).toBeUndefined()
+    expect(host.get(doc(29).key)!.viewer).not.toBeNull()
+    host.setChannel([doc(0)], doc(0).key)
+    expect(host.get(doc(0).key)!.viewer).not.toBeNull()
+    expect(track.children.length).toBeLessThanOrEqual(6)
   })
 
   it('evicts by recency within a long channel without dropping selection or neighbours', async () => {
@@ -245,25 +280,56 @@ describe('stable document frames', () => {
     expect(host.get(docs[0].key)!.viewer).toBeNull()
   })
 
+  it('emits active-only scroll hooks from validated bridge events and local prose', async () => {
+    host.setChannel(docs.slice(0, 2), docs[0].key)
+    const call = render.calls.find(call => call.path === docs[0].path)!
+    const iframe = document.createElement('iframe')
+    call.viewer.append(iframe)
+    const bridge = connectDocumentFrame(iframe, () => {})
+    call.frame!(iframe, false)
+    const send = (source: Window | null, data: unknown): void => { window.dispatchEvent(new MessageEvent('message', { source, data })) }
+    send(window, envelope('scroll', { x: 0, y: 80 }))
+    send(iframe.contentWindow, { ...envelope('scroll', { x: 0, y: 80 }), version: 2 })
+    send(iframe.contentWindow, envelope('scroll', { x: 0, y: Infinity }))
+    expect(onScroll).not.toHaveBeenCalled()
+    send(iframe.contentWindow, envelope('scroll', { x: 0, y: 80 }))
+    expect(onScroll).toHaveBeenCalledExactlyOnceWith(docs[0].key, 80)
+    host.select(docs[1].key)
+    send(iframe.contentWindow, envelope('scroll', { x: 0, y: 90 }))
+    expect(onScroll).toHaveBeenCalledOnce()
+    const prose = { ...docs[0], key: 'fiber:host-a:note', kind: 'fiber' as const }
+    host.setChannel([prose, docs[1]], prose.key)
+    const pane = host.get(prose.key)!.viewer!
+    pane.scrollTop = 120
+    pane.dispatchEvent(new Event('scroll'))
+    expect(onScroll).toHaveBeenLastCalledWith(prose.key, 120)
+    host.select(docs[1].key)
+    pane.scrollTop = 130
+    pane.dispatchEvent(new Event('scroll'))
+    expect(onScroll).toHaveBeenCalledTimes(2)
+    bridge.dispose()
+  })
+
   it('restores iframe scroll on remount and reconnects the listener on live replacement', async () => {
     sessionStorage.setItem('shuttle:workspace:scroll:' + docs[0].key, JSON.stringify({ x: 4, y: 160 }))
     host.setChannel([docs[0]], docs[0].key)
     const call = render.calls[0]
     const iframe = document.createElement('iframe')
     call.viewer.append(iframe)
-    const scrollTo = vi.fn()
-    iframe.contentWindow!.scrollTo = scrollTo
+    const firstBridge = connectDocumentFrame(iframe, () => {})
+    const post = vi.spyOn(iframe.contentWindow!, 'postMessage')
     call.frame!(iframe, false)
-    expect(scrollTo).toHaveBeenCalledWith(4, 160)
-    Object.defineProperty(iframe.contentWindow, 'scrollY', { value: 245, configurable: true })
-    iframe.contentWindow!.dispatchEvent(new Event('scroll'))
+    expect(post).toHaveBeenCalledWith(envelope('restore', { x: 4, y: 160 }), '*')
+    window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: envelope('scroll', { x: 4, y: 245 }) }))
     expect(JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + docs[0].key)!).y).toBe(245)
     const next = document.createElement('iframe')
     call.viewer.append(next)
-    next.contentWindow!.scrollTo = vi.fn()
+    const nextBridge = connectDocumentFrame(next, () => {})
+    const nextPost = vi.spyOn(next.contentWindow!, 'postMessage')
     call.frame!(next, true)
-    expect(next.contentWindow!.scrollTo).not.toHaveBeenCalled()
+    expect(nextPost).not.toHaveBeenCalled()
     await ready(call)
+    firstBridge.dispose(); nextBridge.dispose()
   })
 
   it('selects receded pages only, uses host-aware identity, and disposes the retained viewers', () => {
@@ -387,7 +453,7 @@ describe('refresh and failure states', () => {
 })
 
 describe('report scrolling', () => {
-  it('caches the HTML report scroller and re-resolves detached replacements', () => {
+  it('sends HTML scrolling commands without reading the report DOM', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
     vi.stubGlobal('requestAnimationFrame', () => 1)
@@ -402,41 +468,19 @@ describe('report scrolling', () => {
       reader.show(channel, report.key, 'Board')
       const iframe = document.createElement('iframe')
       reader.host.get(report.key)!.viewer!.append(iframe)
-      const content = iframe.contentDocument!
-      const makeScroller = () => {
-        const element = content.createElement('main')
-        element.style.overflowY = 'auto'
-        Object.defineProperties(element, {
-          clientHeight: { configurable: true, value: 200 },
-          clientWidth: { configurable: true, value: 600 },
-          scrollHeight: { configurable: true, value: 1200 },
-        })
-        const scrollBy = vi.fn()
-        Object.defineProperty(element, 'scrollBy', { configurable: true, value: scrollBy })
-        return { element, scrollBy }
-      }
-      const pressDown = () => reader.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
-      const first = makeScroller()
-      content.body.append(first.element)
-      const querySelectorAll = vi.spyOn(content, 'querySelectorAll')
-      pressDown()
-      pressDown()
-      expect(querySelectorAll.mock.calls.filter(([selector]) => selector === 'body *')).toHaveLength(1)
-      expect(first.scrollBy).toHaveBeenCalledTimes(2)
-
-      first.element.remove()
-      const replacement = makeScroller()
-      content.body.append(replacement.element)
-      pressDown()
-      expect(querySelectorAll.mock.calls.filter(([selector]) => selector === 'body *')).toHaveLength(2)
-      expect(first.scrollBy).toHaveBeenCalledTimes(2)
-      expect(replacement.scrollBy).toHaveBeenCalledOnce()
+      const bridge = connectDocumentFrame(iframe, () => {})
+      const post = vi.spyOn(iframe.contentWindow!, 'postMessage')
+      reader.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+      expect(post).toHaveBeenLastCalledWith(envelope('scroll', { intent: 'scrollDown', instant: false }), '*')
+      reader.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', repeat: true, bubbles: true, cancelable: true }))
+      expect(post).toHaveBeenLastCalledWith(envelope('scroll', { intent: 'scrollDown', instant: true }), '*')
+      bridge.dispose()
     } finally { reader.dispose() }
   })
 })
 
 describe('document keyboard bridge', () => {
-  it('lets document and report load-time window handlers consume Escape before forwarding', async () => {
+  it('lets report handlers consume synthetic Escape without forwarding untrusted input', async () => {
     const iframe = document.createElement('iframe')
     document.body.append(iframe)
     const win = iframe.contentWindow!
@@ -445,7 +489,7 @@ describe('document keyboard bridge', () => {
     const markup = document.createElement('div')
     markup.innerHTML = withWorkspaceKeyBridge('<html><head></head><body>Report</body></html>')
     const script = markup.querySelector('script')!.textContent!
-    new Function('window', 'parent', script)(win, { postMessage })
+    new Function('window', 'parent', 'document', script)(win, { postMessage }, report)
     let documentDialog = true, windowDialog = true
     report.addEventListener('keydown', e => { if (documentDialog && e.key === 'Escape') e.preventDefault() })
     win.addEventListener('load', () => {
@@ -453,6 +497,7 @@ describe('document keyboard bridge', () => {
     }, { once: true })
     win.dispatchEvent(new Event('load'))
     await new Promise(resolve => setTimeout(resolve, 0))
+    postMessage.mockClear()
     const press = (key: string, altKey = false) => report.body.dispatchEvent(new KeyboardEvent('keydown', { key, altKey, bubbles: true, cancelable: true }))
     press('Escape')
     expect(postMessage).not.toHaveBeenCalled()
@@ -461,17 +506,16 @@ describe('document keyboard bridge', () => {
     expect(postMessage).not.toHaveBeenCalled()
     windowDialog = false
     press('Escape')
-    expect(postMessage).toHaveBeenCalledOnce()
-    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ key: 'Escape' }), '*')
+    expect(postMessage).not.toHaveBeenCalled()
     press('ArrowRight', true)
-    expect(postMessage).toHaveBeenCalledTimes(2)
+    expect(postMessage).not.toHaveBeenCalled()
     iframe.remove()
   })
 
   it('adds the script in head without changing document content', () => {
     const html = withWorkspaceKeyBridge('<html><head><title>Report</title></head><body>Data</body></html>')
     expect(html).toContain('<head><script data-shuttle-workspace-bridge>')
-    expect(html).toContain("type:'shuttle-workspace-key'")
+    expect(html).toContain('"shuttle-document",1')
     expect(html).toContain('function keyIntent(event, surface')
     expect(html).toContain('<body>Data</body>')
   })
@@ -486,31 +530,23 @@ describe('document keyboard bridge', () => {
 
   it('forwards only valid chords from the selected viewer source, never parked or foreign frames', () => {
     host.setChannel(docs.slice(0, 2), docs[0].key)
-    const selected = document.createElement('iframe')
-    const receded = document.createElement('iframe')
-    host.get(docs[0].key)!.viewer!.append(selected)
-    host.get(docs[1].key)!.viewer!.append(receded)
+    const selected = render.calls.find(call => call.path === docs[0].path)!.options.onDocumentKey!
+    const receded = render.calls.find(call => call.path === docs[1].path)!.options.onDocumentKey!
     const keydown = vi.fn()
     track.addEventListener('keydown', keydown)
-    const send = (source: Window | null, data: Record<string, unknown>) => window.dispatchEvent(new MessageEvent('message', { source, data }))
-    const arrow = { type: 'shuttle-workspace-key', key: 'ArrowRight', altKey: true }
-    send(receded.contentWindow, arrow)
-    send(window, arrow)
-    send(selected.contentWindow, { ...arrow, altKey: false })
+    const arrow = { key: 'ArrowRight', altKey: true }
+    receded(arrow)
+    selected({ ...arrow, altKey: false })
     expect(keydown).toHaveBeenCalledOnce()
-    expect(keydown.mock.calls[0][0].key).toBe('ArrowRight')
-    expect(keydown.mock.calls[0][0].altKey).toBe(false)
-    send(selected.contentWindow, { ...arrow, ctrlKey: true })
-    send(selected.contentWindow, { ...arrow, key: 'Delete' })
+    selected({ ...arrow, ctrlKey: true })
+    selected({ ...arrow, key: 'Delete' })
     expect(keydown).toHaveBeenCalledOnce()
-    send(selected.contentWindow, arrow)
+    selected(arrow)
     expect(keydown).toHaveBeenCalledTimes(2)
-    expect(keydown.mock.calls[1][0].key).toBe('ArrowRight')
-    expect(keydown.mock.calls[1][0].altKey).toBe(true)
-    send(selected.contentWindow, { type: 'shuttle-workspace-key', key: 'Escape' })
+    selected({ key: 'Escape' })
     expect(keydown).toHaveBeenCalledTimes(3)
     host.parkAll()
-    send(selected.contentWindow, arrow)
+    selected(arrow)
     expect(keydown).toHaveBeenCalledTimes(3)
   })
 })

@@ -16,6 +16,10 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
       assert "start" in FiberDocuments.kanban_fields()
     end
 
+    test "projects the constitution's bundled channel theme" do
+      assert "theme" in FiberDocuments.kanban_fields()
+    end
+
     test "still projects the fields the board has always needed" do
       fields = FiberDocuments.kanban_fields()
       for f <- ~w(id uid name status tags due shuttle path report_path), do: assert(f in fields)

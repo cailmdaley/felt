@@ -31,8 +31,8 @@ Declare a companion in the body with an `:::{embed}` directive:
 ```
 
 Paths resolve relative to the fiber's directory. Absolute paths also work.
-The Board reader lists declared files on the fiber page and opens each as a
-separate document; the directive itself does not appear in the rendered prose.
+The Board reader lists declared files in the constitution's page tabs and opens each as a separate document.
+The directive itself does not appear in the rendered prose.
 A `:title:` option supplies the document's label.
 
 | Extension | Board reader |
@@ -87,6 +87,23 @@ machine.
 shuttle workers follow a shape for these reports — current state, standing
 findings, open questions, pointers to depth — rewritten whole each session.
 See [Optional: report.html](../shuttle/constitutions.md#optional-reporthtml).
+
+## References between pages
+
+A report can refer to a file already in its constitution's pages, whether the file was embedded or sent.
+In HTML, use a relative link such as `<a href="./take.mp3">Listen to the take</a>` or name the file in `<code>take.mp3</code>`.
+In markdown, use `[Listen to the take](./take.mp3)` or a code span such as `take.mp3`.
+Plain text panes also recognize filenames in backticks.
+
+The reader makes these references page links: clicking selects the file in the same reader, updating its tabs and address through the normal navigation path.
+Relative links resolve from the source document's directory on its owning host.
+A bare filename in code, or in a link's text, must be unique across the constitution's pages; a path in code resolves from the source directory instead.
+Ambiguous filenames stay unlinked, and external URLs keep their own navigation.
+
+Audio references also have an inline ▸ button.
+It plays the channel's audio-page element without leaving the report, changes to ❙❙ while playing, and shows progress as a hairline.
+Press it again to pause.
+Only one recording plays at a time; changing pages or leaving the reader pauses inline playback.
 
 ## Sent files (shuttle only)
 

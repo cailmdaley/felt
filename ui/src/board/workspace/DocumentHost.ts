@@ -1,12 +1,18 @@
 import type { WorkspaceDocument, DocKey } from './documents.js'
-import { keyIntent, shouldForwardDocumentKey, surfaceBindings } from '../keymap.js'
+import { DOCUMENT_KEY_INTENTS, keyIntent } from '../keymap.js'
+import { frameBridge, type DocumentKey } from './DocumentBridge.js'
+export { withWorkspaceKeyBridge } from './DocumentBridge.js'
 import {
-  buildFileViewer, disposeFileViewer, loadFileViewerOnce, resumeFileViewer, suspendFileViewer,
+  buildFileViewer, disposeFileViewer, loadFileViewerOnce, playFileViewerAudio, resumeFileViewer, suspendFileViewer,
   type FileViewerState,
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
 import { fileBytesUrl } from '../utils.js'
+import { cacheDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
+import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
+import { createMediaPoster, type MediaPoster } from './MediaPoster.js'
+import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
 
 export interface DocumentFrame {
   el: HTMLElement
@@ -30,39 +36,34 @@ type FrameState = {
   notice: HTMLElement | null
   controller: AbortController | null
   revision: number
+  transferTime: number | null
+  weight: number
+  references: ReferenceSurface | null
+  referenceCandidates: string[]
+  poster: MediaPoster | null
+  stopVideoPoster: (() => void) | null
 }
 
 const RETAIN = 10
 const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
 
-/** HTML documents forward workspace chords without changing their own navigation. */
-export function withWorkspaceKeyBridge(html: string): string {
-  // Install after report load handlers so its document/window dialogs get first refusal.
-  const bridge = `<script data-shuttle-workspace-bridge>(function(intent,forward,bindings){window.addEventListener('load',function(){window.setTimeout(function(){window.addEventListener('keydown',function(e){if(!forward(e)||!intent(e,'reader',bindings,function(target){return !forward({target:target,defaultPrevented:false})}))return;e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey,repeat:e.repeat},'*')})},0)},{once:true})})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)});</script>`
-  let insertion = 0
-  const doctype = /<!doctype\b[^>]*>/i.exec(html)
-  if (doctype) insertion = doctype.index + doctype[0].length
-  const head = /<head\b[^>]*>/i.exec(html)
-  if (head) insertion = Math.max(insertion, head.index + head[0].length)
-  const bases = /<base\b[^>]*>/ig
-  for (let base; (base = bases.exec(html));) {
-    if (base.index >= insertion) insertion = base.index + base[0].length
-  }
-  return html.slice(0, insertion) + bridge + html.slice(insertion)
-}
-
 /** Stable frames, a fleet-wide live-document budget, and selected-only polling. */
 export class DocumentHost {
   private readonly frames = new Map<DocKey, FrameState>()
   private readonly live = new Map<DocKey, FrameState>()
+  private readonly audioPages = new Map<HTMLAudioElement, AudioPage>()
   private documents: WorkspaceDocument[] = []
   private selected: DocKey | null = null
+  private inlineAudio: { source: DocKey; target: DocKey } | null = null
   private disposed = false
+  private readonly stopTitles: () => void
   private readonly track: HTMLElement
   private readonly options: {
     shuttleBase: string
     buildProse: (doc: WorkspaceDocument) => HTMLElement
     onSelect: (key: DocKey) => void
+    /** Active-document positions, including restoration, from local or validated bridge scrolls. */
+    onScroll?: (key: DocKey, y: number) => void
     onFrame?: (frame: DocumentFrame) => void
     /** The controller owns fetching fiber bodies; it calls updateProse on success. */
     onRefreshProse?: (doc: WorkspaceDocument) => void | Promise<void>
@@ -71,7 +72,7 @@ export class DocumentHost {
   constructor(track: HTMLElement, options: DocumentHost['options']) {
     this.track = track
     this.options = options
-    window.addEventListener('message', this.onMessage)
+    this.stopTitles = watchDocumentTitles(() => this.refreshReferences())
     document.addEventListener('keydown', this.onMediaKey, true)
   }
 
@@ -82,12 +83,16 @@ export class DocumentHost {
   setChannel(documents: WorkspaceDocument[], selected: DocKey): void {
     if (this.disposed) return
     this.documents = documents
+    if (this.inlineAudio && !documents.some(doc => doc.key === this.inlineAudio?.target)) this.stopInlineAudio()
     for (const doc of documents) {
       const state = this.frames.get(doc.key) ?? this.create(doc)
       // Provenance and labels can change without touching the live document.
       state.frame.doc = doc
     }
     this.select(selected)
+    this.refreshReferences()
+    for (const page of this.audioPages.values()) page.updateDocuments(documents)
+    this.pruneFrames()
   }
 
   select(key: DocKey): void {
@@ -96,6 +101,13 @@ export class DocumentHost {
     if (index < 0) {
       this.parkAll()
       return
+    }
+    if (key !== this.selected) this.stopInlineAudio()
+    const previous = this.selected ? this.frames.get(this.selected) : undefined
+    const oldAudio = previous?.frame.viewer?.querySelector('audio')
+    const target = this.frames.get(key)!
+    if (key !== this.selected && target.frame.doc.kind === 'audio' && oldAudio && keepAudioPosition() && this.documents.some(d => d.key === this.selected)) {
+      target.transferTime = oldAudio.currentTime
     }
     this.selected = key
     const current = new Set(this.documents.map((doc) => doc.key))
@@ -125,12 +137,31 @@ export class DocumentHost {
       this.mount(state)
       this.live.delete(id)
       this.live.set(id, state)
+      this.transferAudioPosition(state)
     }
-    while (this.live.size > RETAIN) {
-      const victim = [...this.live.keys()].find((id) => !visible.includes(id))
+    this.enforceBudget(visible)
+  }
+
+  private enforceBudget(visible = this.visibleKeys()): void {
+    while ([...this.live.values()].reduce((sum, state) => sum + state.weight, 0) > RETAIN) {
+      const victim = [...this.live.keys()].find(id => !visible.includes(id))
       if (victim === undefined) break
       this.evict(this.live.get(victim)!)
       this.live.delete(victim)
+    }
+    this.pruneFrames()
+  }
+  private visibleKeys(): DocKey[] {
+    const index = this.documents.findIndex(doc => doc.key === this.selected)
+    return index < 0 ? [] : [...this.documents.slice(Math.max(0, index - 1), index + 2).map(doc => doc.key), ...(this.inlineAudio ? [this.inlineAudio.target] : [])]
+  }
+  /** Current-channel placeholders give the filmstrip its geometry, not retained state. */
+  private pruneFrames(): void {
+    const current = new Set(this.documents.map(doc => doc.key))
+    for (const [key, state] of this.frames) {
+      if (current.has(key) || this.live.has(key)) continue
+      state.frame.el.remove()
+      this.frames.delete(key)
     }
   }
 
@@ -140,8 +171,10 @@ export class DocumentHost {
     if (this.disposed || !state || state.frame.doc.kind !== 'fiber' || !state.frame.viewer) return
     this.saveScroll(state)
     state.stopScroll?.()
+    state.references?.dispose()
     state.frame.content.replaceChildren(element)
     state.frame.viewer = element
+    this.bindReferences(state, element)
     state.loaded = true
     this.clearNotice(state)
     this.bindScroller(state, element)
@@ -171,6 +204,7 @@ export class DocumentHost {
   }
 
   parkAll(): void {
+    this.stopInlineAudio()
     this.selected = null
     this.documents = []
     for (const state of this.frames.values()) {
@@ -190,7 +224,7 @@ export class DocumentHost {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    window.removeEventListener('message', this.onMessage)
+    this.stopTitles()
     document.removeEventListener('keydown', this.onMediaKey, true)
     for (const state of this.frames.values()) {
       this.evict(state)
@@ -206,17 +240,23 @@ export class DocumentHost {
     el.dataset.key = doc.key
     const sheet = document.createElement('div')
     sheet.className = 'ws-sheet'
+    sheet.dataset.part = 'page-frame'
     const content = document.createElement('div')
     content.className = 'ws-content'
     const label = document.createElement('div')
     label.className = 'ws-labelbar'
-    sheet.append(content, label)
+    label.dataset.part = 'label-bar'
+    const poster = doc.kind === 'audio' || doc.kind === 'video' ? createMediaPoster(doc.kind) : null
+    sheet.append(content)
+    if (poster) sheet.append(poster.el)
+    sheet.append(label)
     el.append(sheet)
     const frame: DocumentFrame = { el, sheet, content, label, doc, viewer: null }
     const state: FrameState = {
       frame, pending: null, loaded: false, active: false, initialSuspended: false,
       scroll: readScroll(doc.key), readScroll: null, stopScroll: null,
-      notice: null, controller: null, revision: 0,
+      notice: null, controller: null, revision: 0, transferTime: null, weight: 1, references: null, referenceCandidates: [],
+      poster, stopVideoPoster: null,
     }
     this.placeholder(state)
     el.addEventListener('click', event => {
@@ -245,12 +285,14 @@ export class DocumentHost {
       state.frame.viewer = prose
       state.loaded = true
       this.bindScroller(state, prose)
+      this.bindReferences(state, prose)
     } else {
       this.buildViewer(state, false)
     }
   }
 
   private buildViewer(state: FrameState, replacement: boolean): void {
+    state.stopVideoPoster?.()
     state.revision++
     const revision = state.revision
     if (state.pending) {
@@ -276,7 +318,35 @@ export class DocumentHost {
         quietLoading: true,
         active: state.active,
         kind: doc.kind === 'fiber' ? undefined : doc.kind,
-        transformHtml: withWorkspaceKeyBridge,
+        decorateAudio: audio => {
+          const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
+            (peaks, duration) => {
+              if (!this.disposed && state.revision === revision) state.poster?.setAudio(peaks, duration)
+            })
+          this.audioPages.set(audio, page)
+          page.updateDocuments(this.documents)
+          const changed = (): void => this.updateReferencePlayback()
+          const events = ['play', 'pause', 'ended', 'timeupdate', 'durationchange', 'loadedmetadata']
+          for (const event of events) audio.addEventListener(event, changed)
+          return () => {
+            for (const event of events) audio.removeEventListener(event, changed)
+            page.dispose(); this.audioPages.delete(audio)
+          }
+        },
+        decorateText: pane => this.bindReferences(state, pane),
+        resolveReferences: candidates => {
+          state.referenceCandidates = candidates
+          queueMicrotask(() => this.updateReferencePlayback())
+          return referenceTargets(candidates, state.frame.doc, this.documents)
+        },
+        onReferenceIntent: (type, candidate) => this.referenceIntent(state, type, candidate),
+        onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
+        onDocumentKey: key => this.forwardKey(state, key),
+        onWeight: weight => queueMicrotask(() => {
+          if (this.disposed || state.revision !== revision) return
+          state.weight = weight
+          this.enforceBudget()
+        }),
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
           if (this.disposed || state.revision !== revision) return
@@ -297,6 +367,25 @@ export class DocumentHost {
       state.frame.content.replaceChildren(viewer)
       state.frame.viewer = viewer
     }
+    this.watchVideoPoster(state, viewer)
+  }
+
+  private watchVideoPoster(state: FrameState, viewer: HTMLElement): void {
+    const video = viewer.querySelector('video')
+    const poster = state.poster
+    if (!video || !poster) return
+    const stop = (): void => {
+      video.removeEventListener('loadeddata', capture)
+      video.removeEventListener('canplay', capture)
+      if (state.stopVideoPoster === stop) state.stopVideoPoster = null
+    }
+    const capture = (): void => {
+      if (poster.captureVideo(video)) stop()
+    }
+    state.stopVideoPoster = stop
+    video.addEventListener('loadeddata', capture)
+    video.addEventListener('canplay', capture)
+    capture()
   }
 
   private viewerState(state: FrameState, viewer: HTMLElement, result: FileViewerState): void {
@@ -323,7 +412,8 @@ export class DocumentHost {
     state.loaded = true
     state.initialSuspended = false
     this.clearNotice(state)
-    if (!state.active) suspendFileViewer(viewer)
+    this.transferAudioPosition(state)
+    if (!state.active && this.inlineAudio?.target !== state.frame.doc.key) suspendFileViewer(viewer)
   }
 
   private setActive(state: FrameState, active: boolean): void {
@@ -343,10 +433,13 @@ export class DocumentHost {
   }
 
   private evict(state: FrameState): void {
+    state.stopVideoPoster?.()
     this.saveScroll(state)
     state.revision++
     state.controller?.abort()
     state.controller = null
+    state.references?.dispose()
+    state.references = null
     state.stopScroll?.()
     state.stopScroll = null
     state.readScroll = null
@@ -447,7 +540,10 @@ export class DocumentHost {
       scroller.scrollTop = state.scroll.y
       scroller.scrollLeft = state.scroll.x
     })
-    const save = () => this.saveScroll(state)
+    const save = (): void => {
+      this.saveScroll(state)
+      if (state.active) this.options.onScroll?.(state.frame.doc.key, state.scroll.y)
+    }
     state.readScroll = () => ({ x: scroller.scrollLeft, y: scroller.scrollTop })
     scroller.addEventListener('scroll', save, { passive: true })
     state.stopScroll = () => scroller.removeEventListener('scroll', save)
@@ -455,18 +551,87 @@ export class DocumentHost {
 
   private bindFrameScroll(state: FrameState, iframe: HTMLIFrameElement, refreshed: boolean): void {
     state.stopScroll?.()
-    const win = iframe.contentWindow
-    if (!win) return
-    try {
-      if (!refreshed) win.scrollTo(state.scroll.x, state.scroll.y)
-      state.readScroll = () => ({ x: win.scrollX, y: win.scrollY })
-      const save = () => this.saveScroll(state)
-      win.addEventListener('scroll', save, { passive: true })
-      state.stopScroll = () => win.removeEventListener('scroll', save)
-    } catch {
-      // Browser-native PDF frames cannot expose their internal scroll offset.
+    const bridge = frameBridge(iframe)
+    if (!bridge) {
+      // Browser-native PDF frames keep their internal scroll state themselves.
       this.bindScroller(state, state.frame.content)
+      return
     }
+    if (!refreshed) bridge.command('restore', state.scroll)
+    state.readScroll = () => bridge.position
+    state.stopScroll = bridge.subscribeScroll(position => {
+      state.scroll = position
+      this.saveScroll(state)
+      if (state.active) this.options.onScroll?.(state.frame.doc.key, position.y)
+    })
+  }
+
+  private refreshReferences(): void {
+    if (this.disposed) return
+    for (const doc of this.documents) {
+      const state = this.frames.get(doc.key)
+      state?.references?.scan()
+      const frame = state?.frame.viewer?.querySelector('iframe')
+      if (frame) frameBridge(frame)?.command('references:scan')
+    }
+  }
+
+  private bindReferences(state: FrameState, root: HTMLElement): void {
+    state.references?.dispose()
+    const surface = referenceRuntime(root,
+      candidates => {
+        state.referenceCandidates = candidates
+        surface.resolve(referenceTargets(candidates, state.frame.doc, this.documents))
+        this.updateReferencePlayback()
+      },
+      (type, candidate) => this.referenceIntent(state, type, candidate), true)
+    state.references = surface
+    surface.scan()
+  }
+
+  private referenceIntent(state: FrameState, type: 'select' | 'play' | 'pause', candidate: string): void {
+    if (this.disposed || !state.active || state.frame.doc.key !== this.selected) return
+    const target = resolveChannelReference(candidate, state.frame.doc, this.documents)
+    if (!target) return
+    if (type === 'select') { this.options.onSelect(target.key); return }
+    if (target.kind !== 'audio') return
+    const audioState = this.frames.get(target.key)
+    if (!audioState) return
+    if (type === 'pause') {
+      audioState.frame.viewer?.querySelector('audio')?.pause()
+      this.updateReferencePlayback()
+      return
+    }
+    this.stopInlineAudio()
+    this.inlineAudio = { source: state.frame.doc.key, target: target.key }
+    this.mount(audioState)
+    this.live.delete(target.key); this.live.set(target.key, audioState)
+    if (audioState.frame.viewer) playFileViewerAudio(audioState.frame.viewer)
+    this.enforceBudget([...this.visibleKeys(), target.key])
+  }
+
+  private stopInlineAudio(): void {
+    if (!this.inlineAudio) return
+    const target = this.inlineAudio.target
+    this.inlineAudio = null
+    suspendFileViewer(this.frames.get(target)?.frame.viewer ?? null)
+    this.updateReferencePlayback()
+  }
+
+  private updateReferencePlayback(): void {
+    if (this.disposed || !this.selected) return
+    const state = this.frames.get(this.selected)
+    if (!state) return
+    const states = state.referenceCandidates.flatMap(candidate => {
+      const target = resolveChannelReference(candidate, state.frame.doc, this.documents)
+      if (target?.kind !== 'audio') return []
+      const audio = this.frames.get(target.key)?.frame.viewer?.querySelector('audio')
+      return [{ candidate, playing: !!audio && !audio.paused,
+        progress: audio && Number.isFinite(audio.duration) && audio.duration > 0 ? audio.currentTime / audio.duration : 0 }]
+    })
+    for (const playback of states) state.references?.playback(playback)
+    const frame = state.frame.viewer?.querySelector('iframe')
+    if (frame) frameBridge(frame)?.command('references:playback', { states })
   }
 
   private saveScroll(state: FrameState): void {
@@ -478,35 +643,38 @@ export class DocumentHost {
     }
   }
 
-  /** Space belongs to a selected media page, without changing the app keymap. */
+  private transferAudioPosition(state: FrameState): void {
+    const audio = state.frame.viewer?.querySelector('audio')
+    if (audio && audio.readyState >= 1 && state.transferTime !== null) {
+      seekAudio(audio, state.transferTime)
+      state.transferTime = null
+    }
+  }
+
+  /** Audio keys do not take Space away from the reader. */
   private readonly onMediaKey = (event: KeyboardEvent): void => {
-    if (!this.selected || event.key !== ' ' || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
+    if (!this.selected || !['p', '[', ']'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || (event.key === 'p' && event.repeat)) return
     const state = this.frames.get(this.selected)
     if (!state?.active || state.frame.el.closest('[inert]') || blockingDialogOpen() || this.track.closest('.ws-reader')?.querySelector('.ws-menu')) return
     const intent = keyIntent(event, 'reader')
-    if (intent !== 'pageDown' && intent !== 'pageUp') return
-    const media = state.frame.viewer?.querySelector('audio,video') as HTMLMediaElement | null
+    if (!intent || !['audioPlay', 'audioBack', 'audioForward'].includes(intent)) return
+    const media = state.frame.viewer?.querySelector('audio')
     if (!media) return
     event.preventDefault()
     event.stopImmediatePropagation()
-    if (media.paused) void media.play().catch(() => { /* Native controls remain available after a refused autoplay. */ })
-    else media.pause()
+    if (intent === 'audioPlay') toggleAudio(media)
+    else seekAudio(media, media.currentTime + (intent === 'audioBack' ? -5 : 5))
   }
 
-  private readonly onMessage = (event: MessageEvent): void => {
-    if (this.disposed || !this.selected) return
-    const state = this.frames.get(this.selected)
-    const frames = state?.frame.viewer?.querySelectorAll('iframe')
-    if (!event.source || !frames || ![...frames].some((frame) => frame.contentWindow === event.source)) return
-    const data = event.data as Record<string, unknown> | null
-    if (!data || data.type !== 'shuttle-workspace-key') return
-    if (typeof data.key !== 'string' || state?.frame.doc.kind !== 'html') return
+  private forwardKey(state: FrameState, data: DocumentKey): void {
+    if (this.disposed || state.frame.doc.key !== this.selected || !state.active || state.frame.doc.kind !== 'html') return
     const forwarded = new KeyboardEvent('keydown', {
       key: data.key, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
       metaKey: data.metaKey === true, shiftKey: data.shiftKey === true, repeat: data.repeat === true,
       bubbles: true, cancelable: true,
     })
-    if (!keyIntent(forwarded, 'reader')) return
+    const intent = keyIntent(forwarded, 'reader')
+    if (!intent || !DOCUMENT_KEY_INTENTS.includes(intent)) return
     // Bubble through the same app handler; keys never focus a document.
     this.track.dispatchEvent(forwarded)
   }

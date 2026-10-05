@@ -83,10 +83,8 @@ const textarea = (): HTMLTextAreaElement => composer.querySelector('textarea')!
 const chips = (): HTMLElement[] => [...composer.querySelectorAll<HTMLElement>('.kbn-ctl-image')]
 const error = (): HTMLElement => composer.querySelector<HTMLElement>('.kbn-detail-error:not(.kbn-ctl-images-error)')!
 const imageError = (): HTMLElement => composer.querySelector<HTMLElement>('.kbn-ctl-images-error')!
-const button = (label: string): HTMLButtonElement =>
-  [...composer.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === label)!
-const resume = (): HTMLButtonElement => button('Resume')
-const fresh = (): HTMLButtonElement => button('New session')
+const resume = (): HTMLButtonElement => composer.querySelector('.kbn-ctl-resume')!
+const fresh = (): HTMLButtonElement => composer.querySelector('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!
 
 describe('resuming while the daemon starts', () => {
   it('keeps the draft and permits only an explicit retry after a readiness rejection', async () => {

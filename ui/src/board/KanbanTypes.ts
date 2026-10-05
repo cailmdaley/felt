@@ -43,6 +43,8 @@ export interface KanbanCard {
   fiberDir?: string
   status: string
   outcome?: string
+  /** Bundled theme for this channel; Desk surfaces do not consume it. */
+  theme?: string
   due?: string
   tags?: string[]
   createdAt: string
@@ -100,6 +102,8 @@ export interface KanbanCard {
    * ordering. Absent for worker-less cards.
    */
   lastActivityAt?: number
+  /** Owner-observed launch instant of the current worker, epoch milliseconds. */
+  workerStartedAt?: number
   /**
    * True when the owning daemon is holding this fiber under boot quarantine — a
    * genuinely-fresh launch parked in `pending_launch`, awaiting

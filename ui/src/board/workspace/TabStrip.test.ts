@@ -2,6 +2,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { centeredScrollLeft, TAB_CROSSING_MS, TabStrip } from './TabStrip.js'
 import type { KeyIntent } from '../keymap.js'
+import { buildChannel } from './documents.js'
+import { cacheDocumentTitle } from './DocumentTitles.js'
 
 let strips: TabStrip[] = []
 afterEach(() => {
@@ -121,6 +123,33 @@ describe('TabStrip', () => {
     expect(strip.el.scrollLeft).toBe(195)
     expect(strip.el.classList.contains('ws-fade-l')).toBe(true)
     expect(strip.el.classList.contains('ws-fade-r')).toBe(true)
+  })
+
+  it('follows document identity through a title change and styles declared titles even when the words match the filename', () => {
+    const channel = buildChannel({ uid: 'u', owner: 'typography', name: 'Note', path: '/note.md', fiberDir: '/', body: '', embeds: [{ path: '/doc.html' }] })
+    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '', onHeight: vi.fn() })
+    strips.push(strip)
+    strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+    strip.mark(1, false)
+    const selected = strip.buttons[1]
+    cacheDocumentTitle(channel.documents[1].key, '/doc.html', '<title>doc.html</title>', 'same-words')
+    strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+    expect(selected.querySelector('.ws-tab-label')?.classList.contains('ws-tab-title')).toBe(true)
+    strip.render(['Note', 'Declared title'], channel.documents.map(d => d.key), channel)
+    expect(strip.buttons[1]).toBe(selected)
+    expect(selected.getAttribute('aria-selected')).toBe('true')
+    expect(selected.getAttribute('aria-label')).toBe('Declared title')
+  })
+
+  it('captions filmstrip faces once beneath the preview, including the fiber page', () => {
+    const channel = buildChannel({ uid: 'caption', owner: 'caption-host', name: 'A named fiber', path: '/fiber.md', fiberDir: '/', body: 'Preview prose', embeds: [{ path: '/song.mp3' }] })
+    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '', onHeight: vi.fn() })
+    strips.push(strip)
+    strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+    for (const button of strip.buttons) {
+      expect(button.querySelector('.ws-thumbnail-title')?.textContent ?? '').toBe('')
+      expect(button.querySelector('.ws-tab-label')?.textContent).toBeTruthy()
+    }
   })
 
   it('supports duplicate labels as distinct stable tabs and clears on dispose', () => {

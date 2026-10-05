@@ -19,15 +19,25 @@
   --ws-fresh: var(--kbn-owed-bright);
   --ws-owed: color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-ink-soft));
   --ws-focus: var(--kbn-you);
+  --ws-you: var(--kbn-you);
+  --ws-verdict: var(--kbn-tempered-ink);
   /* The vellum veil: the Desk's parchment, thinned so the Desk shows through
      soft and unreadable under a blur. */
   --ws-veil: color-mix(in srgb, var(--kbn-parchment) 42%, transparent);
-  --ws-veil-filter: blur(9px) saturate(1.05) brightness(1.02);
-  /* A page floats: one tight contact shadow and one long ambient one. */
-  --ws-float: 0 1px 2px color-mix(in srgb, var(--kbn-ink) 10%, transparent),
-    0 28px 64px -14px color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  --ws-veil-filter: blur(9px);
+  --ws-desk-filter: saturate(0.25) brightness(1.04);
+  /* Paper elevation: contact, middle distance, and ambient light on the Desk. */
+  --ws-shadow-contact: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent);
+  --ws-shadow-mid: 0 12px 24px -8px color-mix(in srgb, var(--ws-ink) 22%, transparent);
+  --ws-shadow-ambient: 0 36px 72px -16px color-mix(in srgb, var(--ws-ink) 32%, transparent);
+  --ws-paper-light: inset 0 1px 0 color-mix(in srgb, var(--ws-paper) 85%, white);
+  --ws-float: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-shadow-ambient);
+  --ws-shadow-low: 0 2px 5px color-mix(in srgb, var(--ws-ink) 10%, transparent);
+  --ws-chrome-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 8%, transparent),
+    0 8px 18px -6px color-mix(in srgb, var(--ws-ink) 18%, transparent);
   --ws-mask: var(--kbn-ink);
   --ws-agent: var(--kbn-agent);
+  --ws-verdict: var(--kbn-tempered);
   --ws-red: var(--ws-owed);
 
   --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
@@ -36,11 +46,26 @@
   --ws-mono-tracking: 0.08em;
 
   --ws-crossing: 280ms;
-  --ws-veil-time: 180ms;
+  --ws-veil-time: var(--ws-crossing);
+  --ws-desk-scale: 0.94;
+  --ws-desk-opacity: 0.72;
+  --ws-desk-pointer-drift: 8px;
+  --ws-page-pointer-drift: 3px;
+  --ws-desk-crossing-drift: 6px;
+  --ws-desk-travel-fraction: 0.012;
+  --ws-desk-x: 0px;
+  --ws-desk-y: 0px;
+  --ws-page-x: 0px;
+  --ws-page-y: 0px;
+  --ws-strip-h: var(--ws-control-height);
   --ws-settle: translateY(6px) scale(0.985);
   --ws-ease: ease;
   --ws-receded-scale: 0.94;
   --ws-receded-opacity: 0.55;
+  --ws-receded-text-opacity: 0.42;
+  --ws-neighbour-fade: 45%;
+  --ws-neighbour-edge: 0%;
+  --ws-neighbour-fade-end: var(--ws-neighbour-fade);
   --ws-gap: 24px;
   --ws-inset: 12px;
   --ws-tab-floor: 90px;
@@ -57,6 +82,10 @@
   --ws-control-radius: 7px;
   --ws-control-height: 32px;
   --ws-nav-height: 52px;
+  --ws-chrome-inset: 18px;
+  --ws-chrome-padding: 4px;
+  --ws-stage-inset: 28px;
+  --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
   --ws-label-height: 40px;
   --ws-thumb-height: 56px;
@@ -64,21 +93,28 @@
   --ws-parking-x: -20000px;
   --ws-small-gap: 6px;
 
-  --ws-chrome-size: 14px;
-  --ws-title-size: 19px;
-  --ws-label-size: 12px;
+  /* The shared type scale. Theme roots can override these documented tokens. */
   --ws-small-size: 11px;
-  --ws-heading-size: 30px;
-  --ws-section-size: 23px;
-  --ws-lede-size: 21px;
+  --ws-label-size: 15px;
+  --ws-chrome-size: 15px;
   --ws-prose-size: 18px;
+  --ws-section-size: 21px;
+  --ws-lede-size: 24px;
+  --ws-heading-size: 34px;
   --ws-prose-width: 760px;
   --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
 
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  --ws-sidebar-width: 240px;
+  --ws-sidebar-width: 280px;
+  --ws-sidebar-overflow: 32px;
+  --ws-sidebar-pull: 18px;
+  --ws-sidebar-lift: -2px;
+  --ws-sidebar-bottom: 40px;
+  --ws-sidebar-card-gap: 12px;
+  --ws-sidebar-outcome-lines: 2;
+  --ws-sidebar-outcome-size: 14px;
   --ws-row-size: 16px;
   --ws-html-width: 1040px;
   --ws-pdf-width: 900px;

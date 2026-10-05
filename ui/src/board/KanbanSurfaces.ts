@@ -60,6 +60,8 @@ import {
 import type { CycleLens } from './KanbanReadModel.js'
 import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, paintTranscript, seatMeetingHost, type MeetingRecord } from './meeting.js'
 
+export const FALLBACK_DEFAULT_AGENT = 'claude-opus'
+
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
   inFlight: 'In flight',
@@ -67,6 +69,26 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   tempered: 'Tempered',
   composted: 'Discarded',
   pinned: 'Pinned',
+}
+
+/** The same paper face in a Desk column, a folio, or a compact constitution card. */
+export function buildCardPaper(card: KanbanCard): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'kbn-card'
+  const header = document.createElement('div'); header.className = 'kbn-card-header'
+  const glyph = document.createElement('span')
+  glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
+  glyph.textContent = isAgentCard(card) ? '◐' : '✓'
+  const name = document.createElement('span'); name.className = 'kbn-card-name'; name.textContent = card.name
+  header.append(glyph, name)
+  const id = document.createElement('div'); id.className = 'kbn-card-id'; id.textContent = card.id
+  el.append(header, id)
+  if (card.outcome) {
+    const outcome = document.createElement('div'); outcome.className = 'kbn-card-outcome'
+    outcome.innerHTML = renderMarkdown(card.outcome)
+    el.append(outcome)
+  }
+  return el
 }
 
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
@@ -221,6 +243,8 @@ interface KanbanSurfaceRendererOptions {
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
+  /** Resolve the owning host's registry default for agent labels. */
+  getFleetDefaultAgent?: (origin: string) => string
   /** A card held still under the thumb — the touch reading of the drag. The
    *  renderer only reports the gesture and the element to hang a menu off; what
    *  it raises is the board's business. Omit to leave cards press-inert. */
@@ -299,6 +323,12 @@ export class KanbanSurfaceRenderer {
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.o = options
+  }
+
+  private agentName(card: KanbanCard): string | null {
+    if (!isAgentCard(card) || !card.shuttleAgent) return null
+    const fleetDefault = this.o.getFleetDefaultAgent?.(card.originId) ?? FALLBACK_DEFAULT_AGENT
+    return card.shuttleAgent === fleetDefault ? null : card.shuttleAgent
   }
 
   /** Render the Now surface: section header + 3-column board. `lens`, when a
@@ -713,9 +743,11 @@ export class KanbanSurfaceRenderer {
     name.className = 'kbn-pin-chip-name'
     name.textContent = card.name
 
+    const agentName = this.agentName(card)
     const hint = document.createElement('span')
     hint.className = 'kbn-pin-chip-hint'
-    hint.textContent = isAgent ? (card.shuttleAgent ?? 'agent') : 'me'
+    hint.textContent = isAgent ? (agentName ?? '') : 'me'
+    hint.hidden = isAgent && agentName === null
 
     el.append(dot, glyph, name, hint)
 
@@ -1253,6 +1285,7 @@ export class KanbanSurfaceRenderer {
   ): HTMLElement {
     const isStale = staleness?.status === 'stale'
     const sleeping = isSleepingOnSchedule(card)
+    const agentName = this.agentName(card)
     const el = document.createElement('div')
     el.className = isAgentCard(card) ? 'kbn-cluster-item kbn-cluster-item-agent' : 'kbn-cluster-item kbn-cluster-item-human'
     if (sleeping) el.classList.add('kbn-cluster-item-standing')
@@ -1262,7 +1295,7 @@ export class KanbanSurfaceRenderer {
     el.dataset.cardOrigin = card.originId
     el.title = card.name
     el.setAttribute('role', 'listitem')
-    el.setAttribute('aria-label', card.name)
+    el.setAttribute('aria-label', `${card.name}${agentName ? ` — ${agentName}` : ''}`)
 
     if (!isStale) this.installDraggable(el, card, false)
     this.installStackTarget(el, card)
@@ -1274,6 +1307,12 @@ export class KanbanSurfaceRenderer {
     title.className = 'kbn-cluster-item-title'
     title.textContent = card.name
     el.append(glyph, title)
+    if (agentName) {
+      const agent = document.createElement('span')
+      agent.className = 'kbn-cluster-item-agent-name'
+      agent.textContent = agentName
+      el.append(agent)
+    }
 
     // TWO WAYS OF COMING BACK, said differently on purpose.
     //
@@ -1723,8 +1762,9 @@ export class KanbanSurfaceRenderer {
     lensState: { dim?: boolean; ghost?: boolean } = {},
   ): HTMLElement {
     const isStale = originStaleness?.status === 'stale'
+    const agentName = this.agentName(card)
 
-    const el = document.createElement('div')
+    const el = buildCardPaper(card)
     el.className = `kbn-card kbn-card-${kind}${isStale ? ' kbn-card--stale' : ''}`
     if (lensState.dim) el.classList.add('kbn-card--lens-off')
     if (lensState.ghost) el.classList.add('kbn-card--lens-ghost')
@@ -1733,7 +1773,7 @@ export class KanbanSurfaceRenderer {
       ? ` — waiting on ${originStaleness.hostname ?? card.originId}, drag disabled`
       : ''
     const lensSuffix = lensState.ghost ? ' — resting, shown for this cycle' : ''
-    el.setAttribute('aria-label', `${card.name} — ${COLUMN_TITLES[kind]}${lensSuffix}${ariaSuffix}`)
+    el.setAttribute('aria-label', `${card.name}${agentName ? ` — ${agentName}` : ''} — ${COLUMN_TITLES[kind]}${lensSuffix}${ariaSuffix}`)
     // Touch has no drag-and-drop backend, and a draggable card fights the
     // finger that is trying to scroll past it. Holding the card still is the
     // touch path to the same transitions (`onCardLongPress`).
@@ -1762,40 +1802,13 @@ export class KanbanSurfaceRenderer {
     // held title, leaving a refused drag's tooltip stuck on the card.
     this.installStackTarget(el, card)
 
-    const headerRow = document.createElement('div')
-    headerRow.className = 'kbn-card-header'
-
-    const glyph = document.createElement('span')
-    glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
-    glyph.textContent = isAgentCard(card) ? '◐' : '✓'
-
-    // Clicking the title opens the document workspace reader. The fiber page
-    // carries its controls inline, and the worker pill opens the conversation.
-    const name = document.createElement('span')
-    name.className = 'kbn-card-name'
-    name.textContent = card.name
-
-    headerRow.append(glyph, name)
-    el.append(headerRow)
-
-    const idEl = document.createElement('div')
-    idEl.className = 'kbn-card-id'
-    idEl.textContent = card.id
-    el.append(idEl)
-
-    if (card.outcome) {
-      const outcome = document.createElement('div')
-      outcome.className = 'kbn-card-outcome'
-      outcome.innerHTML = renderMarkdown(card.outcome)
-      el.append(outcome)
-    }
-
     const meta = document.createElement('div')
     meta.className = 'kbn-card-meta'
 
     const actor = document.createElement('span')
     actor.className = `kbn-card-actor ${isAgentCard(card) ? 'kbn-card-actor-agent' : 'kbn-card-actor-human'}`
-    actor.textContent = isAgentCard(card) ? (card.shuttleAgent ?? 'agent') : 'me'
+    actor.textContent = isAgentCard(card) ? (agentName ?? '') : 'me'
+    actor.hidden = isAgentCard(card) && agentName === null
     meta.append(actor)
 
     if (card.due) {
@@ -1820,7 +1833,7 @@ export class KanbanSurfaceRenderer {
     // badge / held pill / worker pill are the RIGHT region, built further
     // down and collected into `rightChip` for the same reason.
     let reviewMetaActions: HTMLDivElement | undefined
-    if (!isStale) {
+    if (kind === 'awaitingReview' && !isStale) {
       reviewMetaActions = document.createElement('div')
       reviewMetaActions.className = 'kbn-card-review-meta-actions'
       const verdictBtn = (label: string, modifier: string, target: ColumnKind): HTMLButtonElement => {

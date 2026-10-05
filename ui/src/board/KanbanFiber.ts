@@ -19,6 +19,7 @@ export interface Fiber {
   createdAt: string; // ISO date from frontmatter
   body?: string;     // markdown body after frontmatter
   outcome?: string;  // outcome from frontmatter
+  theme?: string;    // bundled workspace theme from frontmatter
   closedAt?: string; // ISO date from frontmatter
   modifiedAt?: string; // file mtime felt reports as `modified_at`.
   due?: string;       // project-owned frontmatter `due:` for human-facing deadlines
@@ -239,6 +240,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     modifiedAt,
     outcome,
     body,
+    theme: typeof f.theme === 'string' && f.theme.trim() ? f.theme.trim() : undefined,
     due,
     start,
     horizon,

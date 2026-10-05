@@ -1,27 +1,48 @@
 import './tokens.css'
 import './reader.css'
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
+import { fiberPageColumn } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
-import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { scrollHtmlViewer } from './DocumentBridge.js'
+import { documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
+import { DocumentSeen } from './DocumentSeen.js'
+import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
+import type { ChannelThemes } from './ChannelThemes.js'
+import { buildCardPaper } from '../KanbanSurfaces.js'
+import { overviewHostMarks } from './Overview.js'
+import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
+import { workspaceMeasure } from './measures.js'
+import { workerPlate } from './workerPlate.js'
+import { ReceiptArrivals } from './receiptMotion.js'
+import { installBarSwipe, PhoneTopbar } from './PhoneGestures.js'
+import { PageSheet } from './PageSheet.js'
 
 export interface ReaderOptions {
   shuttleBase: string
+  themes?: ChannelThemes
   buildProse(doc: WorkspaceDocument): HTMLElement
   onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
   onSelect(key: DocKey): void
+  onCrossing?(travel: number): void
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
+  verdictPlate?(card: KanbanCard): HTMLElement
+  onVerdict?(verdict: 'tempered' | 'composted'): void
+  onCompose?(): void
+  onConversation?(card: KanbanCard): void
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
+  pickerCards?(): KanbanCard[]
+  sidebarBand?(card: KanbanCard): string | undefined
   files?(card: KanbanCard): string[]
 }
 
@@ -39,7 +60,7 @@ function button(cls: string, text: string, action: () => void, label = text): HT
   return b
 }
 
-/** The viewport at which desktop sidebar layout is available. */
+/** The viewport at which the desktop sidebar defaults open. */
 export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
 
@@ -52,23 +73,34 @@ export class Reader {
   private arrival = 0
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
+  private readonly parallax = element('div', 'ws-parallax')
+  private trackX = 0
   readonly host: DocumentHost
   private readonly opts: ReaderOptions
+  private readonly stopTitles: () => void
+  private readonly seen = new DocumentSeen()
+  private readonly receipts = new ReceiptArrivals()
+  private channelReady = false
   private readonly tabs: TabStrip
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
   private readonly trail: HTMLElement
   private keyboardInput = false
+  private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly conversation = element('div', 'ws-worker-pill')
   private readonly position = element('span', 'ws-position')
+  private readonly pageTitle = element('span', 'ws-thumb-title')
+  private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
+  private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
+  private readonly stopSwipe: () => void
+  private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
   private readonly next: HTMLButtonElement
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
-  private readonly reportScrollers = new WeakMap<Document, HTMLElement>()
   private channel: Channel | null = null
   private currentCard: KanbanCard | null = null
   private selected: DocKey | null = null
@@ -79,7 +111,10 @@ export class Reader {
   private sidebar = element('aside', 'ws-sidebar')
   private readonly sidebarPicker: ConstitutionPicker
   private readonly picker: ConstitutionPicker
-  /** The persisted choice; absent, the sidebar is closed. */
+  private readonly sidebarFlight: SidebarFlight
+  private readonly sidebarRows = new Map<HTMLElement, KanbanCard>()
+  private readonly flightRoots = new Set<HTMLElement>()
+  /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
   private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
@@ -89,22 +124,42 @@ export class Reader {
   private sizes: Record<string, number> = {}
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly phone = window.matchMedia(MOBILE_MEDIA)
+  private readonly workerClock: number
 
   constructor(opts: ReaderOptions) {
     this.opts = opts
+    this.workerClock = window.setInterval(() => { if (this.active) { this.paintWorker(); this.layoutNavbar() } }, 30000)
+    this.stopTitles = watchDocumentTitles(key => {
+      const ch = this.channel
+      if (!ch?.documents.some(d => d.key === key)) return
+      ch.labels = documentLabels(ch.documents, ch.labels[0] === 'Constitution')
+      this.tabs.render(ch.labels, ch.documents.map(d => d.key), ch)
+      if (this.active) this.paint(false)
+    })
     this.el.setAttribute('aria-label', 'Document reader')
+    this.el.dataset.wsThemeBoundary = ''
+    this.veil.dataset.part = 'veil'
+    this.conversation.dataset.part = 'act'
     this.el.inert = true
-    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
+    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), {
+      shuttleBase: opts.shuttleBase,
+      onHeight: height => this.el.style.setProperty('--ws-strip-h', `${height}px`),
+    })
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
     this.sidebarToggle.title = 'Constitutions (⌘\\)'
     this.lead = element('div', 'ws-nav-lead')
+    this.lead.dataset.part = 'chrome-plate'
     this.lead.append(this.returnButton, this.sidebarToggle, this.title)
     this.trail = element('div', 'ws-nav-trail')
     this.trail.append(this.conversation)
     this.navbar = element('nav', 'ws-navbar')
-    this.navbar.append(this.lead, this.tabs.el, this.trail)
+    this.navbar.dataset.part = 'phone-topbar'
+    const tabPlate = element('div', 'ws-nav-tabs')
+    tabPlate.dataset.part = 'chrome-plate'
+    tabPlate.append(this.tabs.el)
+    this.navbar.append(this.lead, tabPlate, this.trail)
     this.prev = button('ws-thumb-button', '‹', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '›', () => this.step(1), 'Next document')
     const thumbMenu = button('ws-thumb-button', '⋯', () => {
@@ -112,34 +167,54 @@ export class Reader {
       if (doc) this.openMenu(doc, thumbMenu)
     }, 'Document menu')
     const thumb = element('div', 'ws-thumbbar')
-    thumb.append(this.prev, this.position, this.next, thumbMenu)
+    thumb.dataset.part = 'phone-bottom-bar'
+    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
+    const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
+    pageChoice.setAttribute('aria-haspopup', 'dialog')
+    pageChoice.setAttribute('aria-expanded', 'false')
+    pageChoice.append(this.pageTitle, this.arrivalSummary, this.position)
+    thumb.append(this.prev, pageChoice, this.next, thumbMenu)
+    this.stopSwipe = installBarSwipe(thumb, () => this.active && this.phone.matches, delta => this.step(delta))
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
-    this.stage.append(this.track)
+    this.parallax.append(this.track)
+    this.stage.append(this.parallax)
     this.sidebar.setAttribute('aria-label', 'Constitutions')
+    const withCurrent = (cards: KanbanCard[]): KanbanCard[] => {
+      const current = this.currentCard
+      return current && !cards.some(card => (card.uid ?? card.id) === (current.uid ?? current.id) && card.originId === current.originId) ? [...cards, current] : cards
+    }
+    const sidebarCards = (): KanbanCard[] => withCurrent(this.opts.switcherCards?.() ?? this.opts.cards())
     const pickerOptions = {
-      cards: () => {
-        const cards = this.opts.switcherCards?.() ?? this.opts.cards()
-        const current = this.currentCard
-        return current && !cards.some(card => (card.uid ?? card.id) === (current.uid ?? current.id) && card.originId === current.originId) ? [...cards, current] : cards
-      },
+      cards: () => withCurrent(this.opts.pickerCards?.() ?? sidebarCards()),
       files: opts.files,
       current: (card: KanbanCard) => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
       onOpen: (card: KanbanCard) => { this.closeMenu(); this.opts.onChannel(card) },
     }
-    this.sidebarPicker = new ConstitutionPicker({ ...pickerOptions, revealCurrent: true })
+    this.sidebarPicker = new ConstitutionPicker({
+      ...pickerOptions, cards: sidebarCards, revealCurrent: true,
+      renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
+      onRow: (el, card) => {
+        this.sidebarRows.set(el, card)
+        if (this.active && this.sidebarShown) this.opts.themes?.bind(el, card)
+        else this.opts.themes?.unbind(el)
+      },
+      onRemove: el => { this.sidebarRows.delete(el); this.opts.themes?.unbind(el) },
+    })
+    this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
     this.sidebarPicker.el.style.display = 'contents'
     this.sidebar.append(this.sidebarPicker.el)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
-    this.el.append(this.veil, this.navbar, main, thumb, this.announcement)
+    this.el.append(this.veil, this.navbar, main, thumb, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
       onRefreshProse: opts.onRefreshProse,
       onSelect: key => opts.onSelect(key),
       onFrame: frame => this.prepareFrame(frame),
+      onScroll: (key, y) => this.topbar.scroll(key, y),
     })
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
@@ -150,6 +225,7 @@ export class Reader {
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
     this.wide.addEventListener('change', this.relayout)
+    this.el.addEventListener('workspace-theme-change', this.themeChanged)
     this.el.addEventListener('mousedown', e => {
       if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
     })
@@ -163,12 +239,16 @@ export class Reader {
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
-  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true): void {
+  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
-    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
+    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu(); this.pageSheet.hide() }
+    const arrivals = this.receipts.observe(channel, ready)
+    const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
+    this.channelReady = ready
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
+    if (this.currentCard) this.opts.themes?.bind(this.el, this.currentCard, 'reader')
     const arriving = !this.active
     this.active = true
     if (arriving) this.arrive(origin === 'Board')
@@ -178,12 +258,14 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
-    const pill = card ? this.opts.workerPill?.(card) : null
-    this.conversation.replaceChildren(...(pill ? [pill] : []))
-    this.tabs.render(channel.labels)
+    this.paintWorker()
+    this.tabs.setVisible(true)
+    this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
+    if (!switching) this.tabs.arrive(arrivals)
     this.host.setChannel(channel.documents, selected)
-    this.paint(!switching && animate)
+    this.paint(!switching && !reordered && animate)
     this.renderSidebar()
+    if (arriving) this.setSidebarVisible(this.sidebarShown)
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
@@ -204,7 +286,12 @@ export class Reader {
    */
   hide(animate = false): void {
     this.cancelResize?.()
+    this.setSidebarVisible(false, animate)
     this.active = false
+    this.sidebarPicker.refresh(false)
+    this.opts.themes?.unbind(this.el)
+    this.pageSheet.hide()
+    this.tabs.setVisible(false)
     this.closeMenu()
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
@@ -221,7 +308,7 @@ export class Reader {
     this.el.classList.remove('ws-arriving', 'ws-veil-held')
     if (!animate || this.motion.matches || this.el.classList.contains('ws-dormant')) { settle(); return }
     this.el.classList.add('ws-departing')
-    this.departure = setTimeout(settle, this.measure('veil-time', 180))
+    this.departure = setTimeout(settle, this.measure('crossing', 280))
   }
   /** The veil fades in while the stage settles up; over the Board's veil only the stage moves. */
   private arrive(veilHeld: boolean): void {
@@ -248,7 +335,20 @@ export class Reader {
   private step(delta: number): void {
     if (this.channel) this.selectIndex(this.channel.documents.findIndex(d => d.key === this.selected) + delta)
   }
+  private paintWorker(): void {
+    const card = this.currentCard
+    const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview' && this.document?.kind !== 'fiber'
+    const control = card ? review ? this.opts.verdictPlate?.(card) : workerPlate(card, this.opts.workerPill?.(card) ?? null) : null
+    const focused = this.conversation.contains(document.activeElement)
+      ? document.activeElement?.matches('.kbn-ctl-temper') ? '.kbn-ctl-temper'
+        : document.activeElement?.matches('.kbn-ctl-discard') ? '.kbn-ctl-discard' : '.kbn-card-worker' : null
+    this.conversation.classList.toggle('ws-worker-review', review)
+    this.conversation.dataset.act = review ? 'verdict' : 'worker'
+    this.conversation.replaceChildren(...(control ? [control] : []))
+    if (focused) this.conversation.querySelector<HTMLElement>(focused)?.focus({ preventScroll: true })
+  }
   private paint(animate: boolean): void {
+    this.paintWorker()
     const ch = this.channel
     if (!ch) return
     const index = ch.documents.findIndex(d => d.key === this.selected)
@@ -260,8 +360,19 @@ export class Reader {
       frame.el.classList.toggle('ws-expanded', doc.key === this.selected && this.expanded)
       this.fillLabel(frame, ch.labels[i])
     })
+    this.tabs.setCompact(this.expanded)
+    const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
+    this.tabs.fresh(fresh)
+    this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
     this.position.textContent = `${index + 1} / ${ch.documents.length}`
+    const doc = ch.documents[index]
+    if (doc) {
+      const metadata = documentLabelMetadata(doc, ch.labels[index], ch.owner)
+      this.pageTitle.textContent = doc.kind === 'fiber' ? ch.labels[index] : metadata.title
+      this.arrivalSummary.textContent = metadata.summary
+      this.topbar.select(doc.key)
+    }
     this.prev.disabled = index <= 0
     this.next.disabled = index >= ch.documents.length - 1
     const announcement = `${ch.labels[index]}, ${index + 1} of ${ch.documents.length}`
@@ -269,6 +380,9 @@ export class Reader {
     this.layout(animate)
   }
   private prepareFrame(frame: DocumentFrame): void {
+    frame.el.classList.toggle('ws-text-page', ['fiber', 'text', 'markdown', 'code'].includes(frame.doc.kind))
+    frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
+    if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') frame.el.classList.add('ws-media-page')
     frame.el.setAttribute('role', 'tabpanel')
     frame.el.setAttribute('aria-label', frame.doc.name)
     const glyph = element('span', 'ws-kind-glyph')
@@ -298,6 +412,7 @@ export class Reader {
     parts.title.hidden = doc.kind === 'fiber'
     parts.title.textContent = metadata.title
     parts.title.title = doc.path
+    parts.title.classList.toggle('ws-declared-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title))
     if (parts.provenance.title !== metadata.summary) {
       parts.provenance.textContent = metadata.summary
       parts.provenance.title = metadata.summary
@@ -307,7 +422,7 @@ export class Reader {
   }
 
   private measure(name: string, fallback: number): number {
-    return parseFloat(getComputedStyle(this.el).getPropertyValue(`--ws-${name}`)) || fallback
+    return workspaceMeasure(this.el, name, fallback)
   }
   private preferredWidth(doc: WorkspaceDocument, max: number, height: number): number {
     if (this.phone.matches) return max
@@ -322,7 +437,11 @@ export class Reader {
     return Math.min(max, width)
   }
   private layoutNavbar(): void {
-    if (this.phone.matches) { this.navbar.style.removeProperty('grid-template-columns'); return }
+    if (this.phone.matches) {
+      this.navbar.style.removeProperty('grid-template-columns')
+      this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
+      return
+    }
     const style = getComputedStyle(this.navbar)
     const gap = parseFloat(style.columnGap) || 12
     const padLeft = parseFloat(style.paddingLeft) || 12
@@ -349,7 +468,7 @@ export class Reader {
     if (!ch || !this.active) return
     const W = this.stage.clientWidth, H = this.stage.clientHeight
     if (!W || !H) return
-    const inset = this.measure('inset', 12), gap = this.measure('gap', 24)
+    const inset = this.measure('stage-inset', 28), gap = this.measure('gap', 24)
     const boxW = W - inset * 2, boxH = H - inset * 2
     if (!animate || this.motion.matches) {
       this.stage.classList.add('ws-instant')
@@ -371,9 +490,28 @@ export class Reader {
       if (sel) centre = x + width / 2
       x += width + gap
     })
-    this.track.style.transform = `translateX(${Math.round(W / 2 - centre)}px)`
+    const target = Math.round(W / 2 - centre)
+    if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
+    this.trackX = target
+    this.track.style.transform = `translateX(${target}px)`
+    // Fade the visible margin, not an outer edge already clipped off-screen.
+    for (const doc of ch.documents) {
+      const frame = this.host.get(doc.key)
+      if (!frame || doc.key === this.selected) continue
+      const width = parseFloat(frame.el.style.width)
+      const before = frame.el.classList.contains('ws-before')
+      const scale = this.measure('receded-scale', 0.94)
+      const left = target + parseFloat(frame.el.style.left) + (before ? width * (1 - scale) : 0)
+      const right = left + width * scale
+      const visible = Math.max(0, Math.min(W, right) - Math.max(0, left))
+      const edge = Math.min(100, Math.max(0, before ? -left : right - W) / (width * scale) * 100)
+      const end = Math.min(100, edge + visible / (width * scale) * this.measure('neighbour-fade', 45))
+      frame.el.style.setProperty('--ws-neighbour-edge', `${edge}%`)
+      frame.el.style.setProperty('--ws-neighbour-fade-end', `${end}%`)
+    }
   }
   private readonly relayout = (): void => {
+    if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.renderSidebar()
     this.layout(false)
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
@@ -432,7 +570,7 @@ export class Reader {
     this.closeMenu()
     if (same) return
     const menu = element('div', 'ws-menu')
-    menu.setAttribute('aria-label', 'Document actions')
+    menu.setAttribute('aria-label', 'Document and constitution actions')
     const url = doc.kind === 'fiber' ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of [['Open in new tab', false], ['Download', true]] as const) {
       const a = element('a', 'ws-menu-item', label)
@@ -452,7 +590,18 @@ export class Reader {
     for (const p of [...sends].reverse()) {
       if (p.kind === 'sent') receipts.append(element('div', '', `${new Date(p.time).toLocaleString()} · ${p.worker ?? ''} · ${p.session ?? ''}`))
     }
-    menu.append(receipts, element('code', 'ws-path', `${doc.owner}:${doc.path}`))
+    menu.append(receipts)
+    if (this.currentCard && this.opts.themes) {
+      const plain = button('ws-menu-item ws-plain-toggle', "Plain (drop this constitution's theme)", () => {
+        if (!this.currentCard) return
+        this.opts.themes!.togglePlain(this.currentCard)
+        this.syncPlainToggle(plain)
+      }, "Plain (drop this constitution's theme)")
+      plain.dataset.part = 'plain-toggle'
+      this.syncPlainToggle(plain)
+      menu.append(plain)
+    }
+    menu.append(element('code', 'ws-path', `${doc.owner}:${doc.path}`))
     this.el.append(menu)
     this.menu = menu
     this.menuAnchor = anchor
@@ -460,6 +609,15 @@ export class Reader {
     menu.style.left = `${Math.max(12, Math.min(window.innerWidth - menu.offsetWidth - 12, r.right - menu.offsetWidth))}px`
     menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 6)}px`
     if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
+  }
+  private syncPlainToggle(item?: HTMLButtonElement): void {
+    const toggle = item ?? this.menu?.querySelector<HTMLButtonElement>('[data-part="plain-toggle"]')
+    const card = this.currentCard
+    const themes = this.opts.themes
+    if (!toggle || !themes) return
+    // A stored Plain choice stays reachable even when no theme is declared, so it can be cleared.
+    toggle.hidden = !card || (!themes.hasTheme(card) && !themes.isPlain(card))
+    toggle.setAttribute('aria-pressed', String(!!card && themes.isPlain(card)))
   }
   private closeMenu(): boolean {
     if (this.picker.isOpen) { this.picker.close(); return true }
@@ -480,19 +638,43 @@ export class Reader {
     this.closeMenu()
     this.picker.show(this.el, this.title)
   }
+  /** The source column is captured before the live Desk starts receding. */
+  captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
+  private sidebarCard(card: KanbanCard): HTMLElement {
+    const face = buildCardPaper(card)
+    face.classList.add('ws-constitution-card')
+    face.dataset.part = 'sidebar-card'
+    face.dataset.wsThemeBoundary = ''
+    face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
+    const meta = element('div', 'kbn-card-meta')
+    const host = element('small', 'ws-channel-owner')
+    const marks = overviewHostMarks(this.opts.cards().map(row => row.originId).concat(card.originId))
+    host.textContent = `${marks.get(card.originId) ?? '○'} ${card.originId}`
+    host.title = card.originId
+    meta.append(host)
+    const pill = this.opts.workerPill?.(card)
+    if (pill) {
+      pill.dataset.part = 'act'; pill.dataset.act = 'worker'
+      meta.append(workerPlate(card, pill))
+    }
+    face.append(meta)
+    return face
+  }
   /** Re-list the channel rows after the overview's order changes. */
   refreshChannels(): void {
     if (this.active && this.sidebarShown) this.fillSidebar()
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
   private get sidebarShown(): boolean {
-    return !this.phone.matches && (this.sidebarChoice ?? false)
+    return !this.phone.matches && (this.sidebarChoice ?? this.wide.matches)
   }
   private toggleSidebar(): void {
     this.sidebarChoice = !this.sidebarShown
     try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
     this.closeMenu()
+    if (!this.sidebarShown) this.setSidebarVisible(false)
     this.renderSidebar(); this.layout(false)
+    if (this.sidebarShown) this.setSidebarVisible(true)
   }
   private renderSidebar(): void {
     const shown = this.sidebarShown
@@ -501,12 +683,30 @@ export class Reader {
     this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
     this.sidebar.inert = !shown
     this.sidebarPicker.refresh(shown)
+    this.sidebarFlight.refresh()
+    if (!shown) this.setSidebarVisible(false, false)
+  }
+  /** Travelling copies keep their channel's stylesheet until their own flight ends. */
+  private setSidebarVisible(visible: boolean, animate = true): void {
+    this.sidebarFlight.setVisible(visible, animate)
+    if (!this.opts.themes) return
+    for (const ghost of this.el.querySelectorAll<HTMLElement>('.ws-sidebar-flight .ws-channel-row')) {
+      if (this.flightRoots.has(ghost)) continue
+      const card = [...this.sidebarRows.values()].find(card => (card.uid ?? card.id) === ghost.dataset.channelUid && card.originId === ghost.dataset.channelOwner)
+      if (!card) continue
+      this.flightRoots.add(ghost); this.opts.themes.bind(ghost, card)
+      const flights = ghost.getAnimations().filter(animation => !('animationName' in animation) && !('transitionProperty' in animation))
+      void Promise.allSettled(flights.map(animation => animation.finished)).then(() => {
+        if (this.flightRoots.delete(ghost)) this.opts.themes?.unbind(ghost)
+      })
+    }
   }
   /** Rows refresh in place; the list keeps its scroll and the find its text. */
   private fillSidebar(): void {
     this.sidebarPicker.refresh(this.sidebarShown)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
+    if (this.pageSheet.isOpen) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
@@ -532,7 +732,15 @@ export class Reader {
       return true
     }
     if (this.tabs.handleIntent(intent)) return true
-    if (intent === 'sidebar') this.toggleSidebar()
+    if (intent === 'temper' || intent === 'discard') {
+      if (!this.currentCard || fiberPageColumn(this.currentCard) !== 'awaitingReview') return false
+      this.opts.onVerdict?.(intent === 'temper' ? 'tempered' : 'composted')
+    }
+    else if (intent === 'compose') this.opts.onCompose?.()
+    else if (intent === 'conversation') {
+      if (this.currentCard) this.opts.onConversation?.(this.currentCard)
+    }
+    else if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'find') {
       if (this.sidebarShown) this.sidebarPicker.focus()
       else if (this.picker.isOpen) this.picker.focus()
@@ -558,26 +766,8 @@ export class Reader {
     let scroller = viewer.querySelector<HTMLElement>('.ws-prose-scroll,.kbn-fileview-text')
     if (doc.kind === 'fiber') scroller = viewer.matches('.ws-prose-scroll') ? viewer : scroller
     if (doc.kind === 'html') {
-      try {
-        const frame = viewer.querySelector('iframe')
-        const content = frame?.contentDocument
-        if (!content) return
-        scroller = this.reportScrollers.get(content) ?? null
-        if (scroller && (!scroller.isConnected || scroller.ownerDocument !== content)) {
-          this.reportScrollers.delete(content)
-          scroller = null
-        }
-        if (!scroller) {
-          const root = content.scrollingElement as HTMLElement | null
-          if (root && root.scrollHeight > root.clientHeight + 1) scroller = root
-          else {
-            const nested = [...content.querySelectorAll<HTMLElement>('body *')].filter(el =>
-              el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(content.defaultView!.getComputedStyle(el).overflowY))
-            scroller = nested.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0] ?? null
-          }
-          if (scroller && content.readyState === 'complete') this.reportScrollers.set(content, scroller)
-        }
-      } catch { return }
+      scrollHtmlViewer(viewer, intent, this.motion.matches || repeat)
+      return
     }
     if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return
     const up = ['scrollUp', 'halfUp', 'pageUp'].includes(intent)
@@ -586,23 +776,32 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    this.opts.themes?.unbind(this.el)
     this.cancelResize?.()
     this.closeMenu()
+    this.stopSwipe()
+    this.pageSheet.dispose()
     this.observer?.disconnect()
+    window.clearInterval(this.workerClock)
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
     cancelAnimationFrame(this.arrival)
     if (this.departure !== null) clearTimeout(this.departure)
     this.wide.removeEventListener('change', this.relayout)
+    this.stopTitles()
     this.tabs.dispose()
     this.picker.dispose()
     this.sidebarPicker.dispose()
+    for (const ghost of this.flightRoots) this.opts.themes?.unbind(ghost)
+    this.flightRoots.clear()
+    this.sidebarFlight.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
     document.removeEventListener('pointerdown', this.pointerInput, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
+    this.el.removeEventListener('workspace-theme-change', this.themeChanged)
     this.el.remove()
   }
 }
