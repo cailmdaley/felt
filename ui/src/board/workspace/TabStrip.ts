@@ -4,6 +4,7 @@ import { extractEmbeds } from '../attachments.js'
 import { Thumbnail } from './Thumbnail.js'
 import { declaredTitle } from './DocumentTitles.js'
 import './tabs.css'
+import { ReceiptMotion } from './receiptMotion.js'
 
 export const TAB_CROSSING_MS = 280
 
@@ -42,6 +43,7 @@ export class TabStrip {
   private readonly onSelect: (index: number) => void
   private readonly onExpand: () => void
   private readonly motion: MediaQueryList | null
+  private readonly receiptMotion = new ReceiptMotion()
   private records: TabRecord[] = []
   private selectedIndex = -1
   private animationFrame: number | null = null
@@ -76,6 +78,11 @@ export class TabStrip {
 
   fresh(keys: ReadonlySet<string>): void {
     for (const { key, button } of this.records) button.classList.toggle('ws-tab-fresh', keys.has(key))
+  }
+
+  arrive(keys: ReadonlySet<string>): void {
+    if (!this.visible) return
+    for (const record of this.records) if (keys.has(record.key)) this.receiptMotion.tab(record.button)
   }
 
   setCompact(expanded: boolean): void {
@@ -213,6 +220,7 @@ export class TabStrip {
     if (this.disposed) return
     this.disposed = true
     this.cancelAnimation()
+    this.receiptMotion.dispose()
     this.el.removeEventListener('scroll', this.onScroll)
     window.removeEventListener('resize', this.onResize)
     this.motion?.removeEventListener('change', this.onMotionChange)

@@ -578,6 +578,7 @@ function toCard(
     workerSurface: entry.runtime?.surface ?? (tmuxSession ? 'cli' : undefined),
     workerAgent: entry.runtime?.agent,
     lastActivityAt,
+    workerStartedAt: runtime?.startedAt,
     held,
     heldSince,
     mirroredOrigins: entry.mirroredOrigins,

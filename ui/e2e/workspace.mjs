@@ -346,6 +346,48 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
 })
 
+for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals move only their tab and folio (${reducedMotion})`, async p => {
+  await open(p); await reportReady(p)
+  await report(p).evaluate(f => { window.__arrivalReport = f.contentWindow })
+  await p.evaluate(() => {
+    window.__receiptAnimations = []
+    const animate = Element.prototype.animate
+    Element.prototype.animate = function(frames, options) {
+      if (this.matches('.ws-tab,.ws-overview-folio')) window.__receiptAnimations.push({ tab: this.matches('.ws-tab'), frames, options })
+      return animate.call(this, frames, options)
+    }
+    const fetch = window.fetch
+    const delivery = Date.now() + 1000
+    window.fetch = async (...args) => {
+      const response = await fetch(...args)
+      if (!String(args[0]).includes('/api/v1/sent-files')) return response
+      const payload = await response.json()
+      const receipt = payload.files.find(file => file.fullPath.endsWith('/brief.md'))
+      if (receipt) payload.files.push({ ...receipt, timestamp: delivery, sessionId: 'arrival-receipt' })
+      return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
+    }
+  })
+  await p.clock.fastForward(15001)
+  await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
+  assert.equal(await p.locator('.ws-tabs .ws-tab').nth(1).getAttribute('aria-label'), 'Field note')
+  assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
+  assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
+  const tabs = await p.evaluate(() => window.__receiptAnimations.filter(a => a.tab))
+  assert.equal(tabs.length, reducedMotion === 'reduce' ? 0 : 1)
+  if (tabs.length) { assert.equal(tabs[0].options.duration, 280); assert.equal(tabs[0].options.easing, 'ease') }
+  await p.locator('.ws-return').click()
+  await p.locator('[data-view="shelf"]').click()
+  await poll(p, () => document.querySelector('.ws-overview-ribbon [title*="brief.md"]'))
+  if (reducedMotion !== 'reduce') await poll(p, () => window.__receiptAnimations.some(a => !a.tab))
+  const folios = await p.evaluate(() => window.__receiptAnimations.filter(a => !a.tab))
+  assert.equal(folios.length, reducedMotion === 'reduce' ? 0 : 1)
+  if (folios.length) {
+    assert.equal(folios[0].options.duration, 400)
+    assert.equal(folios[0].frames[1].transform, 'translateY(-4px)')
+    assert.notEqual(folios[0].frames[1].boxShadow, 'none')
+  }
+}, undefined, 'false', reducedMotion)
+
 test('j/k step constitutions in Board folio order', async p => {
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
@@ -407,6 +449,78 @@ test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p =
   await p.waitForTimeout(330)
   assert.equal(await p.locator('.ws-sidebar-source,.ws-card-travelling,.ws-sidebar-flight').count(), 0)
 }, undefined, null, 'no-preference')
+
+test('Review plate reaches verdicts from a delivery and leaves the fiber page its own row', async p => {
+  await open(p)
+  const plate = p.locator('.ws-review-plate')
+  await plate.waitFor()
+  assert.match(await plate.innerText(), /Awaiting review/)
+  await choose(p, 'Constitution')
+  assert.equal(await plate.count(), 0)
+  assert.ok(await selected(p).locator('.kbn-ctl-verdict').isVisible())
+  await choose(p, 'calibration-report')
+  await plate.getByRole('button', { name: 'Temper', exact: true }).click()
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+})
+
+test('Verdict keys delay writes, guard typing, undo, and commit after leaving the reader', async p => {
+  await open(p)
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  const posts = async () => (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
+  await p.keyboard.press('r')
+  assert.equal(await tab(p, 'Constitution').getAttribute('aria-selected'), 'true')
+  const composer = selected(p).locator('textarea.kbn-detail-directive')
+  assert.ok(await composer.evaluate(el => el === document.activeElement))
+  await composer.press('t'); await composer.press('x')
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  await p.locator('.ws-channel-title').focus()
+  for (const init of [{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }]) {
+    await p.evaluate(init => document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', bubbles: true, ...init })), init)
+  }
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  await p.keyboard.press('t')
+  assert.match(await p.locator('.ws-verdict-toast').innerText(), /Tempered Calibrate the shear response · Undo z/)
+  assert.equal((await posts()).length, 0)
+  await p.clock.runFor(5999)
+  assert.equal((await posts()).length, 0)
+  await p.keyboard.press('z')
+  await p.clock.runFor(1)
+  assert.equal((await posts()).length, 0)
+  await p.keyboard.press('x')
+  await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
+  await p.clock.runFor(6000)
+  assert.equal((await posts()).length, 0)
+  await p.keyboard.press('x')
+  await p.locator('.ws-return').click()
+  await p.clock.runFor(5999)
+  assert.equal((await posts()).length, 0)
+  await p.clock.runFor(1)
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+  assert.equal((await posts()).length, 1)
+})
+
+test('Pending verdicts on two fibers commit independently', async p => {
+  await open(p)
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  await p.keyboard.press('t')
+  await p.locator('.ws-return').click()
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Mask validation notes' }).click()
+  await p.locator('.ws-channel-title').waitFor()
+  await p.keyboard.press('x')
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 2)
+  await p.clock.runFor(6000)
+  await poll(p, () => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length === 2)
+})
+
+test('Conversation dot-key uses the pill destination in reader and selected Desk card', async p => {
+  const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
+  await remote.click()
+  await p.keyboard.press('.')
+  await poll(p, () => window.__harness.events.filter(e => e.type === 'open-worker').length === 1)
+  await p.locator('.ws-return').click()
+  await p.keyboard.press('.')
+  await poll(p, () => window.__harness.events.filter(e => e.type === 'open-worker').length === 2)
+})
 
 test('Fiber composer isolates keys; settings and history use mocked daemon', async p => {
   await open(p); await choose(p, 'Constitution')
@@ -618,7 +732,7 @@ test('Audio waveform, transport, comparison, keep-position and keyboard guards',
   await poll(p, () => !document.querySelector('.ws-selected audio').paused)
   await selected(p).getByRole('button', { name: 'Pause', exact: true }).click()
   await selected(p).locator('audio').evaluate(a => { a.currentTime = 0 })
-  await p.keyboard.press('.')
+  await p.keyboard.press('>')
   assert.ok(await selected(p).locator('audio').evaluate(a => a.currentTime > 0))
   await p.keyboard.press(',')
   assert.equal(await selected(p).locator('audio').evaluate(a => a.currentTime), 0)
@@ -851,6 +965,61 @@ test('Desk slash opens the same constitution picker without opening reader; Esca
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
 })
 
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+  test(`Worker plate and undo toast states: ${device}`, async p => {
+    const shot = async state => {
+      if (!process.env.WORKSPACE_SHOTS) return
+      await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+      await poll(p, () => !document.querySelector('.ws-selected .ws-body-status')?.textContent.includes('Loading'))
+      await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `verdict-${device}-${state}.png`) })
+    }
+    await open(p)
+    await p.locator('.ws-review-plate').waitFor()
+    if (device === 'phone') {
+      const sizes = await p.locator('.ws-review-plate button').evaluateAll(es => es.map(e => e.getBoundingClientRect().height))
+      assert.ok(sizes.every(height => height >= 44))
+    }
+    await shot('awaiting-review')
+    await p.keyboard.press('t')
+    await p.locator('.ws-verdict-toast').waitFor()
+    assert.equal(await p.locator('.ws-verdict-toasts').getAttribute('aria-live'), 'polite')
+    assert.equal(await p.locator('.ws-verdict-toast').evaluate(e => getComputedStyle(e).animationName), 'none')
+    await shot('toast')
+    await p.keyboard.press('z')
+    await p.locator('.ws-return').click()
+    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await poll(p, () => document.querySelector('.ws-worker-control')?.textContent.includes('12 m'))
+    const dot = p.locator('.ws-worker-pill .ws-worker-dot')
+    assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('.ws-worker-pill .ws-worker-dot')).animationName), 'none', 'reduced motion suppresses breathing')
+    assert.ok(await p.locator('.ws-worker-pill .ws-turn-active').count())
+    await shot('aloft')
+    await p.evaluate(async () => {
+      const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
+      row.runtime.phase = 'waiting'
+      row.runtime.last_activity_at = Date.now() - 120000
+      await window.__harness.modal.fetchAndRender()
+    })
+    await poll(p, () => document.querySelector('.ws-worker-control')?.dataset.workerState === 'waiting')
+    assert.equal(await p.locator('.ws-worker-pill .ws-turn-active').count(), 0)
+    await shot('waiting')
+    await p.locator('.ws-return').click()
+    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
+    await poll(p, () => document.querySelector('.ws-worker-control')?.dataset.workerState === 'no worker')
+    await shot('no-worker')
+  }, viewport)
+}
+
+test('Only the owner-reported working phase breathes, on a 2.4 s opacity cycle', async p => {
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  const dot = p.locator('.ws-worker-pill .ws-worker-dot')
+  await dot.waitFor()
+  const timing = await p.evaluate(() => {
+    const css = getComputedStyle(document.querySelector('.ws-worker-pill .ws-worker-dot'))
+    return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction }
+  })
+  assert.deepEqual(timing, { name: 'ws-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
+}, undefined, 'false', 'no-preference')
+
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
 // constitution switcher repeat names as navigation actions. The desktop fiber
 // title is a reading anchor; the phone uses only the navbar name. Expanded
@@ -935,7 +1104,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    assert.match((await navbar.innerText()).trim(), /^aloft$/i, 'navbar names state, not agent')
+    assert.match((await navbar.textContent()).trim(), /^aloft\s*12 m$/i, 'navbar names state and elapsed time, not agent; phone presents the dot')
     await choose(p, 'Constitution')
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')

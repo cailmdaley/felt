@@ -9,7 +9,7 @@ import { saveClaudeOpening } from './conversationOpening.js'
 
 const worker = (over: Partial<KanbanCard> = {}): KanbanCard => card({
   id: 'debug', uid: 'debug-uid', originId: 'host-a', status: 'active',
-  tmuxSession: 'shuttle-debug', shuttleHost: 'host-a', workerAgent: 'codex-sol', ...over,
+  workerState: 'running', tmuxSession: 'shuttle-debug', shuttleHost: 'host-a', workerAgent: 'codex-sol', ...over,
 })
 const channel = (current: KanbanCard): Channel => {
   const uid = current.uid ?? current.id
@@ -43,7 +43,7 @@ describe('the navbar owns the only worker control', () => {
   it('opens the owner terminal without repeating agent or worker state on the fiber', () => {
     const pill = show(worker())!
     expect(pill.tagName).toBe('BUTTON')
-    expect(pill.textContent).toBe('Aloft')
+    expect(pill.textContent).toBe('aloft')
     pill.click()
     expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a']])
   })
@@ -56,17 +56,17 @@ describe('the navbar owns the only worker control', () => {
   })
   it('drops the control when the worker leaves its session', () => {
     expect(show(worker())).not.toBeNull()
-    expect(show(worker({ tmuxSession: undefined, workerAgent: undefined, status: 'closed' }))).toBeNull()
+    expect(show(worker({ workerState: undefined, tmuxSession: undefined, workerAgent: undefined, status: 'closed' }))).toBeNull()
   })
   it('preserves the app conversation destination', () => {
     const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     const pill = show(worker({ tmuxSession: undefined, workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route,
       runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 })) as HTMLAnchorElement
-    expect(pill.textContent).toBe('Waiting'); expect(pill.href).toBe(route)
+    expect(pill.textContent).toBe('waiting'); expect(pill.href).toBe(route)
   })
-  it('follows runtime phase only in flight', () => {
-    expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('Waiting')
-    expect(show(worker({ runtimePhase: 'working', lastActivityAt: Date.now() }))?.textContent).toBe('Aloft')
-    expect(show(worker({ status: 'closed', runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('Aloft')
+  it('follows owner-observed runtime, ignoring stale phase without a worker', () => {
+    expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('waiting')
+    expect(show(worker({ runtimePhase: 'working', lastActivityAt: Date.now() }))?.textContent).toBe('aloft')
+    expect(show(worker({ workerState: undefined, status: 'closed', runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('no worker')
   })
 })

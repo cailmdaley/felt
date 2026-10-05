@@ -626,6 +626,43 @@ export class Dock {
     }) : null
   }
 
+  /** Keyboard opening activates the exact destination used by the worker pill. */
+  openConversation(card: KanbanCard): boolean {
+    const pill = this.workerPillFor(card)
+    if (!pill?.matches('a[href],button')) return false
+    pill.click()
+    return true
+  }
+
+  /** Both verdict surfaces delegate to the board's lifecycle choke point. */
+  verdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
+    this.onTransition(card, target)
+  }
+
+  verdictControlsFor(card: KanbanCard): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'kbn-ctl-verdict'
+    for (const [label, cls, target] of [
+      ['Temper', 'kbn-ctl-temper', 'tempered'],
+      ['Discard', 'kbn-ctl-discard', 'composted'],
+    ] as const) {
+      const control = ctlButton(label, cls)
+      control.addEventListener('click', () => this.verdict(card, target))
+      row.append(control)
+    }
+    return row
+  }
+
+  /** The floating verdict is reachable while reading any delivered page. */
+  verdictPlateFor(card: KanbanCard): HTMLElement {
+    const plate = document.createElement('div')
+    plate.className = 'ws-review-plate'
+    const state = document.createElement('span')
+    state.textContent = 'Awaiting review'
+    plate.append(state, this.verdictControlsFor(card))
+    return plate
+  }
+
   /** Refresh controls without replacing drafts or folded fields. */
   syncRuntime(card: KanbanCard | null): void {
     for (const band of this.bands.values()) band.syncRuntime(card)
@@ -762,13 +799,9 @@ export class Dock {
     }
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
-    const discard = ctlButton('Discard', 'kbn-ctl-discard')
-    const temper = ctlButton('Temper', 'kbn-ctl-temper')
-    for (const [btn, target] of [[discard, 'composted'], [temper, 'tempered']] as const) {
-      btn.addEventListener('click', () => this.onTransition(card, target))
-    }
-    const verdict = document.createElement('div')
-    verdict.className = 'kbn-ctl-verdict'
+    const verdict = this.verdictControlsFor(card)
+    const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
+    const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
     const menu = document.createElement('details')
     menu.className = 'kbn-ctl-verdict-menu'
     const more = document.createElement('summary')

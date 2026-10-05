@@ -11,6 +11,7 @@ import { docKey, parseDocKey, documentKind, documentLabels, type DocKey } from '
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import './tokens.css'
 import './overview.css'
+import { ReceiptMotion } from './receiptMotion.js'
 
 export interface OverviewOptions {
   shuttleBase: string
@@ -192,6 +193,7 @@ export class Overview {
   readonly el = node('div', 'ws-overview')
   private readonly opts: OverviewOptions
   private readonly stopTitles: () => void
+  private readonly receiptMotion = new ReceiptMotion()
   private readonly inner = node('div', 'ws-overview-inner')
   private readonly summary = node('div', 'ws-overview-summary')
   private readonly changesEl = node('div', 'ws-overview-changes')
@@ -479,6 +481,7 @@ export class Overview {
     this.disposed = true
     this.navigation++
     this.stopTitles()
+    this.receiptMotion.dispose()
     clearTimeout(this.retryTimer)
     this.request?.abort()
     for (const controller of this.cardControllers) controller.abort()
@@ -506,6 +509,7 @@ export class Overview {
       effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
   }
   private reconcile(): void {
+    const arrived: Folio[] = []
     const known = this.knownCards()
     this.observeChanges(known)
     for (const uid of known.keys()) { this.missingCards.delete(uid); this.cardRetries.delete(uid) }
@@ -527,6 +531,7 @@ export class Overview {
       const card = known.get(uid) ?? this.openedCards.get(uid) ?? this.fallback(uid, receipts[0]?.owner ?? 'local')
       const latest = receipts[0]?.timestamp ?? 0
       let folio = this.folios.get(uid)
+      const priorReceipts = folio?.receipts.map(r => [r.key, r.timestamp, r.sessionId])
       if (!folio) {
         folio = this.createFolio(uid, card)
         this.folios.set(uid, folio)
@@ -541,6 +546,7 @@ export class Overview {
         folio.project = projectOf(card)
         folio.host = card.originId
       }
+      if (priorReceipts && JSON.stringify(priorReceipts) !== JSON.stringify(receipts.map(r => [r.key, r.timestamp, r.sessionId]))) arrived.push(folio)
       folio.provisional = !known.has(uid)
       folio.card = card; folio.receipts = receipts
       this.updateFolio(folio)
@@ -551,6 +557,9 @@ export class Overview {
     }
     this.marks = overviewHostMarks([...this.fleetHosts, ...known.values()].flatMap(h => typeof h === 'string' ? [h] : [h.originId, ...(h.mirroredOrigins ?? [])]).concat([...this.folios.values()].flatMap(f => f.receipts.map(r => r.owner))))
     this.render()
+    if (this.visible && this.el.isConnected) {
+      for (const folio of arrived) if (!folio.el.hidden) this.receiptMotion.folio(folio.el)
+    }
     this.resolveFolios()
   }
 

@@ -103,7 +103,8 @@ describe('Desk keyboard selection', () => {
     press('l'); expect(selected()).toBe('resting')
     press('l'); expect(selected()).toBe('resting')
     press('h'); expect(selected()).toBe('pinned')
-    press('u'); expect(selected()).toBeUndefined()
+    press('u'); expect(selected()).toBe('pinned')
+    press('Escape'); expect(selected()).toBeUndefined()
   })
   it('treats a folded queue as one stop and expanded members as stops', () => {
     press('j'); press('h'); press('j'); expect(selected()).toBe('working')
