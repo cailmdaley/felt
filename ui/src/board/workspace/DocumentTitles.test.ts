@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { cacheDocumentTitle, extractDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { buildChannel, documentLabels, documentLabelMetadata } from './documents.js'
 
@@ -52,4 +52,14 @@ it('versions a long body by its head and length, extracting the same title', () 
   expect(cacheDocumentTitle('host:/long.html', '/long.html', `<title>Retitled</title><p>Opening</p>${tail}`).title).toBe('Retitled')
   const bytes = new TextEncoder().encode('# Binary head\n' + 'y'.repeat(200_000))
   expect(cacheDocumentTitle('host:/long.md', '/long.md', new TextDecoder().decode(bytes)).title).toBe('Binary head')
+})
+
+it('parses only the first 64 KiB of a large body for its title', () => {
+  const parse = vi.spyOn(DOMParser.prototype, 'parseFromString')
+  const report = `<title>Head only</title><h1>Opening</h1>${'<p>body</p>'.repeat(200_000)}`
+  expect(extractDocumentTitle('/big.html', report).title).toBe('Head only')
+  expect(parse).toHaveBeenCalledOnce()
+  expect(parse.mock.calls[0][0].length).toBeLessThanOrEqual(65536)
+  expect(extractDocumentTitle('/big.md', `# Markdown head\n${'z'.repeat(2_000_000)}`).title).toBe('Markdown head')
+  parse.mockRestore()
 })

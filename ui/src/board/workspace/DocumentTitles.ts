@@ -54,10 +54,17 @@ export function watchDocumentTitles(listener: (key: string) => void): () => void
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
+/** Titles and previews are read from a document's head, so it is all that is parsed or versioned. */
+const VERSION_HEAD = 65536
 const clean = (text: string): string => text.replace(/\0/g, '').replace(/\s+/g, ' ').trim().slice(0, 240)
 
-/** Cheap declared metadata only; compressed PDF objects and absent media tags fall back to filenames. */
-export function extractDocumentTitle(path: string, source: string | Uint8Array): Omit<DocumentTitle, 'etag'> {
+/**
+ * Cheap declared metadata only; compressed PDF objects and absent media tags
+ * fall back to filenames. Titles and previews live in a document's head, so
+ * only its first 64 KiB is ever parsed, whatever length of source arrives.
+ */
+export function extractDocumentTitle(path: string, whole: string | Uint8Array): Omit<DocumentTitle, 'etag'> {
+  const source = typeof whole === 'string' ? whole.slice(0, VERSION_HEAD) : whole.subarray(0, VERSION_HEAD)
   if (typeof source === 'string') {
     if (/\.html?$/i.test(path)) {
       const parsed = new DOMParser().parseFromString(source, 'text/html')
@@ -109,9 +116,6 @@ export function extractDocumentTitle(path: string, source: string | Uint8Array):
   }
   return { preview: '' }
 }
-
-/** Titles and previews are read from a document's head, so its version is too. */
-const VERSION_HEAD = 65536
 
 /**
  * A source arrives from the thumbnail's own read; extraction is once per
