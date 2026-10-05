@@ -5,13 +5,12 @@ defmodule Shuttle.SessionResumeTest do
   from each transcript, the `resume-<uuid>` tmux name, find-before-start, and
   the local vs remote (ssh) attach — with tmux, felt and kitty stubbed.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
 
   alias Shuttle.SessionResume
-  alias Shuttle.Test.StubPostClient
+  alias Shuttle.Test.{Env, StubPostClient}
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -160,28 +159,16 @@ defmodule Shuttle.SessionResumeTest do
       "SHUTTLE_SESSIONS_FILE" => ledger
     }
 
-    prior = Map.new(env, fn {key, _} -> {key, System.get_env(key)} end)
-    Enum.each(env, fn {key, value} -> System.put_env(key, value) end)
+    Enum.each(env, fn {key, value} -> Env.put_env(key, value) end)
 
     start_supervised!(Runner)
     start_supervised!(StubKitty)
-    Application.put_env(:shuttle, :session_resume_runner, Runner)
-    Application.put_env(:shuttle, :session_resume_live, fn -> [] end)
-    Application.put_env(:shuttle, :kitty_impl, StubKitty)
-    Application.put_env(:shuttle, :os_type, {:unix, :linux})
+    Env.put_app_env(:session_resume_runner, Runner)
+    Env.put_app_env(:session_resume_live, fn -> [] end)
+    Env.put_app_env(:kitty_impl, StubKitty)
+    Env.put_app_env(:os_type, {:unix, :linux})
 
-    on_exit(fn ->
-      File.rm_rf(root)
-      Application.delete_env(:shuttle, :session_resume_runner)
-      Application.delete_env(:shuttle, :session_resume_live)
-      Application.delete_env(:shuttle, :kitty_impl)
-      Application.delete_env(:shuttle, :os_type)
-
-      Enum.each(prior, fn
-        {key, nil} -> System.delete_env(key)
-        {key, value} -> System.put_env(key, value)
-      end)
-    end)
+    on_exit(fn -> File.rm_rf(root) end)
 
     {:ok, project: project}
   end
@@ -292,7 +279,7 @@ defmodule Shuttle.SessionResumeTest do
     end
 
     test "both routes answer 409" do
-      Application.put_env(:shuttle, :session_resume_live, fn -> [@codex] end)
+      Env.put_app_env(:session_resume_live, fn -> [@codex] end)
 
       for route <- ["/api/v1/attach", "/api/v1/sessions/resume"] do
         assert %{"error" => reason} =
@@ -371,15 +358,8 @@ defmodule Shuttle.SessionResumeTest do
 
     test "a remote session is started on its host, then attached over that host's ssh path" do
       StubPostClient.start!()
-      prior_client = Application.get_env(:shuttle, :write_forward_client)
-      prior_remotes = Application.get_env(:shuttle, :remotes)
-      Application.put_env(:shuttle, :write_forward_client, StubPostClient)
-      Application.put_env(:shuttle, :remotes, [%{name: "hub-a", port: 4001, ssh: "hub-a-login"}])
-
-      on_exit(fn ->
-        restore_app_env(:write_forward_client, prior_client)
-        restore_app_env(:remotes, prior_remotes)
-      end)
+      Env.put_app_env(:write_forward_client, StubPostClient)
+      Env.put_app_env(:remotes, [%{name: "hub-a", port: 4001, ssh: "hub-a-login"}])
 
       StubPostClient.set_response(
         {:ok, 200, Jason.encode!(%{"tmux_session" => "resume-" <> @pi, "created" => true})}

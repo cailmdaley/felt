@@ -1,5 +1,5 @@
 defmodule Shuttle.DispatcherTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Shuttle.Dispatcher
   alias Shuttle.Test.FiberUid
@@ -410,7 +410,7 @@ defmodule Shuttle.DispatcherTest do
 
   # The one darwin gate in `Shuttle.TmuxServer`, injectable so both branches run
   # on either platform.
-  defp set_os_type(os_type), do: Application.put_env(:shuttle, :os_type, os_type)
+  defp set_os_type(os_type), do: Shuttle.Test.Env.put_app_env(:os_type, os_type)
 
   # ── Setup ──
 
@@ -424,11 +424,10 @@ defmodule Shuttle.DispatcherTest do
     # bare CI environment it returns [] → `default_felt_store/0` is nil, and a
     # dispatch has no store to read the fiber from.
     # Pin a store here so store resolution is deterministic regardless of the
-    # host's felt config; delete on exit so the setting never leaks to other
-    # suites (the persistent_term cache in configured_stores/0 is keyed by the
-    # base config, so a differing base on the next suite recomputes cleanly).
-    prev_stores = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", "/tmp")
+    # host's felt config, in this test's scope (the persistent_term cache in
+    # configured_stores/0 is keyed by the base config, so a differing base in
+    # another test recomputes cleanly).
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", "/tmp")
 
     sessions_file =
       Path.join(
@@ -436,24 +435,12 @@ defmodule Shuttle.DispatcherTest do
         "shuttle-dispatcher-ledger-#{System.unique_integer([:positive])}.jsonl"
       )
 
-    prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
-    System.put_env("SHUTTLE_SESSIONS_FILE", sessions_file)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", sessions_file)
 
     start_supervised!(StubKitty)
-    Application.put_env(:shuttle, :kitty_impl, StubKitty)
+    Shuttle.Test.Env.put_app_env(:kitty_impl, StubKitty)
 
     on_exit(fn ->
-      if prev_stores,
-        do: System.put_env("SHUTTLE_STORES", prev_stores),
-        else: System.delete_env("SHUTTLE_STORES")
-
-      Application.delete_env(:shuttle, :kitty_impl)
-      Application.delete_env(:shuttle, :os_type)
-
-      if prev_sessions_file,
-        do: System.put_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file),
-        else: System.delete_env("SHUTTLE_SESSIONS_FILE")
-
       File.rm(sessions_file)
       File.rm(sessions_file <> ".1")
     end)
@@ -1596,8 +1583,7 @@ defmodule Shuttle.DispatcherTest do
     end
 
     test "the warm window is one application setting", ctx do
-      Application.put_env(:shuttle, :resume_warm_window_s, 10)
-      on_exit(fn -> Application.delete_env(:shuttle, :resume_warm_window_s) end)
+      Shuttle.Test.Env.put_app_env(:resume_warm_window_s, 10)
 
       assert {:previous, _} = intent(dispatched_fiber(ctx), 10)
       assert {:cold, _, _} = intent(dispatched_fiber(ctx), 11)
