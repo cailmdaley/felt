@@ -6,6 +6,7 @@ import {
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
 import { fileBytesUrl } from '../utils.js'
+import { cacheDocumentTitle } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 
 export interface DocumentFrame {
@@ -277,6 +278,7 @@ export class DocumentHost {
         active: state.active,
         kind: doc.kind === 'fiber' ? undefined : doc.kind,
         transformHtml: withWorkspaceKeyBridge,
+        onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
           if (this.disposed || state.revision !== revision) return

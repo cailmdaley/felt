@@ -1,4 +1,5 @@
 import { extractEmbeds, fileKind } from '../attachments.js'
+import { declaredTitle } from './DocumentTitles.js'
 
 export type DocKey = string
 
@@ -231,7 +232,7 @@ export function documentLabelMetadata(doc: WorkspaceDocument, label: string, cha
   const segments = [sent.length ? latest ? `sent ${age(latest.time)}` : 'sent · time unknown' : embed ? 'embedded' : 'linked from body']
   if (sent.length > 1) segments.push(`${sent.length} receipts`)
   if (doc.owner !== channelOwner) segments.push(doc.owner)
-  return { title: embed?.kind === 'embed' && embed.title ? embed.title : label, summary: segments.join(' · ') }
+  return { title: declaredTitle(doc.key)?.title ?? (embed?.kind === 'embed' && embed.title ? embed.title : label), summary: segments.join(' · ') }
 }
 
 export function defaultSelection(channel: Channel): DocKey {
@@ -262,6 +263,7 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
       return labels
     }
 
+    add(declaredTitle(document.key)?.title ?? '')
     const title = document.provenance.find(p => p.kind === 'embed' && p.title)
     if (title?.kind === 'embed') add(title.title ?? '')
     const parts = document.path.split('/').filter(Boolean)

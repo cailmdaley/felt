@@ -13,7 +13,7 @@ const name = 'Calibrate the shear response'
 const tests = []
 const test = (name, run, viewport) => tests.push({ name, run, viewport })
 const selected = p => p.locator('.ws-page.ws-selected')
-const displayLabel = label => label === 'calibration-report' ? 'Calibration report' : label
+const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label
 const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true })
 async function open(p, expected = 'calibration-report') {
   await p.locator('.kbn-card').filter({ hasText: name }).click()
@@ -100,6 +100,11 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
     assert.equal(await frame.getAttribute('tabindex'), '-1')
   }
   assert.ok(await p.locator('.ws-thumbnail-body').count() <= 16)
+  await poll(p, () => document.querySelector('.ws-tab-kind-html.ws-thumbnail-ready'))
+  assert.equal(await p.locator('.ws-tab-kind-html .ws-thumbnail-face').evaluate(el => getComputedStyle(el).visibility), 'hidden')
+  assert.equal(await p.locator('.ws-tab-kind-html .kbn-thumbnail-glyph').evaluate(el => getComputedStyle(el).display), 'none')
+  assert.ok(await tab(p, 'calibration-report').locator('.ws-tab-label').evaluate(el => el.classList.contains('ws-tab-title')))
+  assert.match(await tab(p, 'calibration-report').getAttribute('title'), /report\.html$/)
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0, 'first visits are quiet')
   await report(p).evaluate(f => { window.__filmReport = f.contentWindow })
   await p.locator('.ws-selected .ws-expand-button').click()
@@ -120,15 +125,23 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
   })
   await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
   await open(p)
-  await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'brief.md')
+  await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__filmReport))
-  assert.equal(await film.locator('.ws-tab').nth(1).getAttribute('aria-label'), 'brief.md')
+  assert.equal(await film.locator('.ws-tab').nth(1).getAttribute('aria-label'), 'Field note')
+  if (process.env.WORKSPACE_SHOTS) {
+    await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+    await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-desktop.png` })
+  }
+  await p.setViewportSize({ width: 390, height: 844 })
+  await poll(p, () => !document.querySelector('.ws-tabs').classList.contains('ws-strip-film'))
+  assert.equal(await film.locator('.ws-tab-thumb:visible').count(), 0)
+  if (process.env.WORKSPACE_SHOTS) {
+    await p.locator('.ws-tab-fresh').scrollIntoViewIfNeeded()
+    await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-phone.png` })
+  }
   await choose(p, 'brief.md')
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
-  await p.setViewportSize({ width: 390, height: 844 })
-  assert.ok(!await film.evaluate(el => el.classList.contains('ws-strip-film')))
-  assert.equal(await film.locator('.ws-tab-thumb:visible').count(), 0)
 })
 
 test('j/k step constitutions in the switcher order', async p => {
@@ -183,7 +196,7 @@ test('Body file link opens a linked document', async p => {
 test('Body wikilink opens a fiber absent from the card index', async p => {
   await open(p); await choose(p, 'Constitution')
   await selected(p).locator('.kbn-wikilink-live[data-fiber="research/workspace/method-note"]').click()
-  await p.getByText('The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.', { exact: true }).waitFor()
+  await selected(p).getByText('The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.', { exact: true }).waitFor()
 })
 
 test('Overview lenses, Find, exact receipt ribbon route and scroll restoration', async p => {
@@ -198,7 +211,7 @@ test('Overview lenses, Find, exact receipt ribbon route and scroll restoration',
   await find.fill('')
   await p.locator('.ws-overview').evaluate(e => { e.scrollTop = 120; window.__overviewScroll = e.scrollTop })
   assert.ok(await p.evaluate(() => window.__overviewScroll > 0), 'overview must actually scroll')
-  await p.locator('.ws-overview-ribbon button').filter({ hasText: 'brief.md' }).click()
+  await p.locator('.ws-overview-ribbon button[title*="brief.md"]').click()
   assert.equal(await tab(p, 'brief.md').getAttribute('aria-selected'), 'true')
   await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
   assert.ok(await p.locator('.ws-overview').evaluate(e => e.scrollTop === window.__overviewScroll))

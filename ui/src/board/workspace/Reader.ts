@@ -6,9 +6,10 @@ import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
-import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
 import { DocumentSeen } from './DocumentSeen.js'
+import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 
 export interface ReaderOptions {
@@ -55,6 +56,7 @@ export class Reader {
   readonly stage = element('div', 'ws-stage')
   readonly host: DocumentHost
   private readonly opts: ReaderOptions
+  private readonly stopTitles: () => void
   private readonly seen = new DocumentSeen()
   private channelReady = false
   private readonly tabs: TabStrip
@@ -95,6 +97,13 @@ export class Reader {
 
   constructor(opts: ReaderOptions) {
     this.opts = opts
+    this.stopTitles = watchDocumentTitles(key => {
+      const ch = this.channel
+      if (!ch?.documents.some(d => d.key === key)) return
+      ch.labels = documentLabels(ch.documents, ch.labels[0] === 'Constitution')
+      this.tabs.render(ch.labels, ch.documents.map(d => d.key), ch)
+      if (this.active) this.paint(false)
+    })
     this.el.setAttribute('aria-label', 'Document reader')
     this.el.inert = true
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), {
@@ -310,6 +319,7 @@ export class Reader {
     parts.title.hidden = doc.kind === 'fiber'
     parts.title.textContent = metadata.title
     parts.title.title = doc.path
+    parts.title.classList.toggle('ws-declared-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title))
     if (parts.provenance.title !== metadata.summary) {
       parts.provenance.textContent = metadata.summary
       parts.provenance.title = metadata.summary
@@ -606,6 +616,7 @@ export class Reader {
     cancelAnimationFrame(this.arrival)
     if (this.departure !== null) clearTimeout(this.departure)
     this.wide.removeEventListener('change', this.relayout)
+    this.stopTitles()
     this.tabs.dispose()
     this.picker.dispose()
     this.sidebarPicker.dispose()

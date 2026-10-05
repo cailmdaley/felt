@@ -136,6 +136,27 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
+  it('owner-routes file mtimes in Unix seconds for embeds and body links, keeping selection on reorder', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('table.html') ? 2000000000 : 1900000000 }))
+      return original(input, init)
+    })
+    workspace.open(cards[0]); await flush()
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    expect(document.querySelectorAll('.ws-tab')[1].getAttribute('aria-label')).toBe('table.html')
+    const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
+    expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
+    document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
+    document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!.click()
+    await flush()
+    const selectedKey = document.querySelector('.ws-selected')?.getAttribute('data-key')
+    expect(workspace.reader.host.get(selectedKey!)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
+  })
   it('loads receipts from each channel owner with conditional revalidation and last-good retention', async () => {
     const shared = [
       card({ id: 'work/shared', uid: 'shared-uid', name: 'Shared A', originId: 'host-a', fiberDir: '/notes/shared', path: 'work/shared/shared.md' }),

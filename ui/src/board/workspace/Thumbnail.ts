@@ -1,6 +1,7 @@
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { LOAD_POLICY } from '../views/shelfLoad.js'
-import { documentKind } from './documents.js'
+import { docKey, documentKind } from './documents.js'
+import { cacheDocumentTitle, declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import './thumbnail.css'
 
 export interface ThumbnailFile { fullPath: string; owner: string; basename: string }
@@ -69,6 +70,10 @@ export class Thumbnail {
   private timer?: ReturnType<typeof setTimeout>
   private generation = 0
   private readonly opts: ThumbnailOptions
+  private readonly face: HTMLElement
+  private readonly title: HTMLElement
+  private readonly preview: HTMLElement
+  private readonly stopTitles: () => void
 
   constructor(opts: ThumbnailOptions) {
     this.opts = opts; this.key = opts.key; this.file = opts.file
@@ -76,20 +81,39 @@ export class Thumbnail {
     this.el.className = `ws-thumbnail ${opts.className ?? ''}`
     this.el.setAttribute('aria-hidden', 'true'); this.el.inert = true
     const kind = opts.file ? documentKind(opts.file.fullPath) : 'fiber'
-    const face = document.createElement('div'); face.className = 'ws-thumbnail-face ws-overview-thumb-face'
-    face.textContent = `${{ fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]} ${opts.file?.basename ?? opts.fallback}`
-    this.el.append(face)
+    this.face = document.createElement('div'); this.face.className = 'ws-thumbnail-face ws-overview-thumb-face'
+    const glyph = document.createElement('span'); glyph.className = 'ws-thumbnail-kind'
+    glyph.textContent = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
+    this.title = document.createElement('strong'); this.title.className = 'ws-thumbnail-title'
+    this.preview = document.createElement('span'); this.preview.className = 'ws-thumbnail-preview'
+    this.face.append(this.title, this.preview, glyph)
+    this.el.append(this.face)
+    this.paintFace()
+    this.stopTitles = watchDocumentTitles(key => { if (key === this.documentKey) this.paintFace() })
     budget.thumbnails.add(this)
+  }
+  private get documentKey(): string | undefined { return this.file ? docKey(this.file.owner, this.file.fullPath, this.file.owner) : undefined }
+  setProse(prose: string, title: string): void { this.title.textContent = title; this.preview.textContent = prose.slice(0, 800) }
+  private paintFace(): void {
+    const metadata = this.documentKey ? declaredTitle(this.documentKey) : undefined
+    this.title.textContent = metadata?.title ?? this.file?.basename ?? ''
+    this.preview.textContent = metadata?.preview || (this.file ? '' : this.opts.fallback)
+    const name = this.body?.querySelector<HTMLElement>('.kbn-thumbnail-name')
+    if (name) {
+      name.textContent = metadata?.title ?? this.file?.basename ?? ''
+      name.classList.toggle('ws-thumbnail-declared-title', !!metadata?.title)
+    }
   }
   priority(): number { return this.opts.priority() }
   distance(): number { return this.opts.distance() }
   schedule(): void { budget.schedule() }
-  dispose(): void { budget.remove(this); this.unmount(); this.el.remove() }
+  dispose(): void { this.stopTitles(); budget.remove(this); this.unmount(); this.el.remove() }
   unmount(): void {
     this.generation++
     clearTimeout(this.timer); this.timer = undefined
     disposeFileViewer(this.body ?? null)
     this.body?.remove(); this.body = undefined; this.state = 'idle'
+    this.el.classList.remove('ws-thumbnail-ready')
   }
   scale(): void {
     if (!this.body) return
@@ -109,6 +133,7 @@ export class Thumbnail {
       if (this.generation !== generation || this.state !== 'loading') return
       clearTimeout(this.timer); this.timer = undefined
       this.state = ok ? 'live' : 'failed'
+      this.el.classList.toggle('ws-thumbnail-ready', ok)
       if (!ok) { disposeFileViewer(this.body ?? null); this.body?.remove(); this.body = undefined }
       this.scale(); budget.schedule()
     }
@@ -117,9 +142,13 @@ export class Thumbnail {
     this.body = buildFileViewer(this.opts.shuttleBase, file.fullPath, file.owner, undefined, undefined, {
       kind: kind === 'fiber' ? undefined : kind, thumbnail: true, active: false,
       onState: state => finish(state.status === 'ready'),
+      onThumbnailSource: (source, etag) => {
+        if (this.documentKey && this.generation === generation) cacheDocumentTitle(this.documentKey, file.fullPath, source, etag)
+      },
     })
     this.body.classList.add('ws-thumbnail-body', 'ws-overview-thumb-body')
     this.el.append(this.body)
+    this.paintFace()
     const img = this.body.querySelector('img')
     img?.addEventListener('load', () => {
       if (img.naturalWidth && img.naturalHeight) this.opts.onAspect?.(img.naturalWidth / img.naturalHeight)

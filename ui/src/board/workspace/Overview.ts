@@ -6,7 +6,8 @@ import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
 import { LOAD_POLICY } from '../views/shelfLoad.js'
 import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
-import { docKey, parseDocKey, type DocKey } from './documents.js'
+import { docKey, parseDocKey, documentKind, documentLabels, type DocKey } from './documents.js'
+import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import './tokens.css'
 import './overview.css'
 
@@ -154,6 +155,7 @@ interface Group { el: HTMLElement; grid: HTMLElement; count: HTMLElement }
 export class Overview {
   readonly el = node('div', 'ws-overview')
   private readonly opts: OverviewOptions
+  private readonly stopTitles: () => void
   private readonly inner = node('div', 'ws-overview-inner')
   private readonly summary = node('div', 'ws-overview-summary ws-overview-meta')
   private readonly legend = node('div', 'ws-overview-legend ws-overview-meta')
@@ -201,6 +203,7 @@ export class Overview {
 
   constructor(opts: OverviewOptions) {
     this.opts = opts
+    this.stopTitles = watchDocumentTitles(() => { if (!this.disposed) this.renderRibbon() })
     const lens = stored(LENS_STORAGE)
     if (lens === 'recent' || lens === 'projects' || lens === 'hosts') this.lens = lens
     const seen = stored(SEEN_STORAGE)
@@ -401,6 +404,7 @@ export class Overview {
     if (this.disposed) return
     this.disposed = true
     this.navigation++
+    this.stopTitles()
     clearTimeout(this.retryTimer)
     this.request?.abort()
     for (const controller of this.cardControllers) controller.abort()
@@ -659,6 +663,7 @@ export class Overview {
       if (!prior || receipt.timestamp > prior.timestamp || (receipt.timestamp === prior.timestamp && compare(receipt.uid, prior.uid) < 0)) documents.set(receipt.key, receipt)
     }
     const recent = [...documents.values()].sort((a, b) => b.timestamp - a.timestamp || compare(a.key, b.key)).slice(0, 12)
+    const labels = documentLabels(recent.map(r => ({ key: r.key, owner: r.owner, path: r.fullPath, name: r.basename, kind: documentKind(r.fullPath), provenance: [] })))
     const keep = new Set(recent.map(r => r.key))
     for (const [key, item] of this.ribbonItems) if (!keep.has(key)) {
       this.removeThumbnail(item.thumb); item.el.remove(); this.ribbonItems.delete(key)
@@ -681,7 +686,9 @@ export class Overview {
         })
       }
       item.receipt = receipt; item.thumb.file = receipt
-      text(item.label, receipt.basename); text(item.name, this.folios.get(receipt.uid)?.card.name ?? 'Other')
+      text(item.label, labels[recent.indexOf(receipt)])
+      item.label.classList.toggle('ws-overview-declared-title', !!declaredTitle(receipt.key)?.title)
+      text(item.name, this.folios.get(receipt.uid)?.card.name ?? 'Other')
       text(item.when, age(receipt.timestamp)); text(item.host, `${this.marks.get(receipt.owner) ?? '○'} ${receipt.owner}`)
       item.el.title = `${receipt.fullPath} — ${this.folios.get(receipt.uid)?.card.name ?? 'Other'}`
     }

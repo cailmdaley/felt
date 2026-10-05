@@ -2,6 +2,7 @@ import type { KeyIntent } from '../keymap.js'
 import type { Channel } from './documents.js'
 import { extractEmbeds } from '../attachments.js'
 import { Thumbnail } from './Thumbnail.js'
+import { declaredTitle } from './DocumentTitles.js'
 import './tabs.css'
 
 export const TAB_CROSSING_MS = 280
@@ -96,8 +97,11 @@ export class TabStrip {
     if (this.disposed) return
     if (labels.length === this.records.length && labels.every((label, index) => label === this.records[index].label && (!keys || keys[index] === this.records[index].key))) {
       if (channel) {
-        const prose = this.records.find(r => r.key === channel.documents[0]?.key)?.thumb?.el.querySelector('.ws-thumbnail-face')
-        if (prose) prose.textContent = `§\n${extractEmbeds(channel.body).body.slice(0, 400) || channel.outcome || channel.name}`
+        this.records.find(r => r.key === channel.documents[0]?.key)?.thumb?.setProse(extractEmbeds(channel.body).body || channel.outcome || '', channel.name)
+        this.records.forEach((record, index) => {
+          const doc = channel.documents[index]
+          record.button.querySelector('.ws-tab-label')?.classList.toggle('ws-tab-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title === record.label))
+        })
       }
       return
     }
@@ -138,14 +142,15 @@ export class TabStrip {
               this.mark(this.selectedIndex, false)
             },
           })
+          if (doc.kind === 'fiber') thumb.setProse(extractEmbeds(channel.body).body || channel.outcome || '', channel.name)
           button.replaceChildren(thumb.el)
         }
         let caption = button.querySelector<HTMLElement>('.ws-tab-label')
         if (!caption) { caption = document.createElement('span'); caption.className = 'ws-tab-label'; button.append(caption) }
         caption.textContent = label
-        caption.classList.toggle('ws-tab-title', doc.provenance.some(p => p.kind === 'embed' && p.title === label))
+        caption.classList.toggle('ws-tab-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title === label))
       } else button.textContent = label
-      button.title = label
+      button.title = channel ? channel.documents[index].path : label
       button.setAttribute('aria-label', label)
       return { key, label, button, thumb }
     })

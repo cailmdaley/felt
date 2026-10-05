@@ -72,7 +72,7 @@ beforeEach(() => {
   feed = { files: [], origins: receiptOrigins() }
   fetchMock = vi.fn(async (url: string) => url.includes('/sent-files/all/composite')
     ? new Response(JSON.stringify(feed), { status: 200 })
-    : new Response('', { status: 404 }))
+    : url.includes('/api/v1/file?') && /\.html/.test(decodeURIComponent(url)) ? new Response('<p>Preview text</p>') : new Response('', { status: 404 }))
   vi.stubGlobal('fetch', fetchMock)
   onOpen = vi.fn(); onOrder = vi.fn()
   overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onOrder })
@@ -318,10 +318,10 @@ describe('Overview stable lenses, visits, and DOM', () => {
 
   it('preserves mounted report-lead thumbnails through polls, Find, and hide/show, including sheet/ribbon scroll', async () => {
     feed.files = [receipt('alpha', '/notes/alpha/report.html', now() - 1000), receipt('alpha', '/notes/alpha/newest.html')]
-    await refresh(); activate()
+    await refresh(); activate(); await settle()
     const thumbnail = folio('alpha').querySelector('.ws-overview-thumb')!
     const iframe = thumbnail.querySelector('iframe')!
-    expect(iframe.src).toContain(encodeURIComponent('/notes/alpha/report.html'))
+    expect(iframe.srcdoc).toContain(encodeURIComponent('/notes/alpha/report.html'))
     expect(iframe.getAttribute('sandbox')).toBe('')
     expect(iframe.inert).toBe(true); expect(iframe.tabIndex).toBe(-1)
     iframe.dispatchEvent(new Event('load')); draw()
@@ -358,6 +358,7 @@ describe('Overview thumbnail budget and safe content', () => {
     expect(overview.el.querySelectorAll('iframe')).toHaveLength(4)
     expect(thumbs[5].querySelector('iframe')).not.toBeNull()
     for (let round = 0; round < 6; round++) {
+      await settle()
       for (const iframe of overview.el.querySelectorAll('iframe')) iframe.dispatchEvent(new Event('load'))
       draw()
       expect(overview.el.querySelectorAll('iframe').length).toBeLessThanOrEqual(16)
@@ -379,11 +380,11 @@ describe('Overview thumbnail budget and safe content', () => {
     // Inside the ring, below the visible sheet: near, never on screen.
     thumbs.forEach((el, i) => Object.defineProperty(el, 'getBoundingClientRect', { configurable: true, value: () => rect(820 + i, 10) }))
     Observer.current.deliver(thumbs); draw()
-    const loadAll = (): void => { for (const iframe of overview.el.querySelectorAll('iframe')) iframe.dispatchEvent(new Event('load')); draw() }
-    for (let round = 0; round < 8; round++) loadAll()
+    const loadAll = async (): Promise<void> => { await settle(); for (const iframe of overview.el.querySelectorAll('iframe')) iframe.dispatchEvent(new Event('load')); draw() }
+    for (let round = 0; round < 8; round++) await loadAll()
     const settled = [...overview.el.querySelectorAll('iframe')]
     expect(settled).toHaveLength(16)
-    for (let round = 0; round < 8; round++) { Observer.current.deliver(thumbs); loadAll() }
+    for (let round = 0; round < 8; round++) { Observer.current.deliver(thumbs); await loadAll() }
     expect([...overview.el.querySelectorAll("iframe")].filter(f => !settled.includes(f)).length).toBe(0)
   })
 

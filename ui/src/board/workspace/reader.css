@@ -104,6 +104,7 @@
 }
 .ws-kind-glyph { flex: none; color: var(--ws-ink-muted); }
 .ws-label-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font-size: var(--ws-label-size); }
+.ws-label-title.ws-declared-title { font: 19px/1.2 var(--ws-serif); letter-spacing: 0; }
 .ws-provenance { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-icon-button { width: var(--ws-control-height); height: var(--ws-control-height); flex: none; border-radius: var(--ws-control-radius); }
 .ws-icon-button:hover { background: var(--ws-hover); color: var(--ws-ink); }

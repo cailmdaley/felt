@@ -41,6 +41,8 @@ export interface FileViewerOptions {
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
   transformHtml?: (html: string) => string
   onState?: (state: FileViewerState) => void
+  /** Declared metadata shares the inert preview's source read. */
+  onThumbnailSource?: (source: string | Uint8Array, etag?: string) => void
   /** Paint paper until load rather than a loading message. */
   quietLoading?: boolean
 }
@@ -295,7 +297,11 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
   }
   const glyph = document.createElement('div')
   glyph.className = 'kbn-thumbnail-glyph'
-  glyph.textContent = `${{ audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]}\n${basename(path)}`
+  const kindMark = document.createElement('span'); kindMark.className = 'kbn-thumbnail-kind'
+  kindMark.textContent = { audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]
+  const name = document.createElement('span'); name.className = 'kbn-thumbnail-name'; name.textContent = basename(path)
+  const duration = document.createElement('span'); duration.className = 'kbn-thumbnail-duration'
+  glyph.append(kindMark, name, duration)
   wrap.append(glyph)
   let native: HTMLMediaElement | null = null
   if (kind === 'image') {
@@ -317,12 +323,26 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       frame.allow = "autoplay 'none'"
     }
     // Native PDF viewers need their plugin; the host makes the whole slot inert.
-    frame.addEventListener('load', () => {
-      if (kind === 'html') { finish(true); return }
-      void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => finish(res.ok)).catch(() => finish(false))
-    }, { once: true })
+    const loaded = (): void => {
+      if (kind === 'html' && !frame.hasAttribute('srcdoc')) return
+      frame.removeEventListener('load', loaded)
+      if (kind === 'html') finish(true)
+      else void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => finish(res.ok)).catch(() => finish(false))
+    }
+    frame.addEventListener('load', loaded)
     frame.addEventListener('error', () => finish(false), { once: true })
-    frame.src = kind === 'pdf' ? `${src}#page=1&view=FitH&toolbar=0` : src
+    if (kind === 'html') {
+      void fetch(src, { signal: controller.signal }).then(async res => {
+        if (!res.ok) throw new Error('Thumbnail unavailable')
+        const source = await res.text()
+        if (disposed) return
+        options.onThumbnailSource?.(source, res.headers.get('ETag') ?? undefined)
+        frame.srcdoc = htmlWithBase(source, src)
+      }).catch(() => finish(false))
+    } else {
+      frame.src = `${src}#page=1&view=FitH&toolbar=0`
+      if (options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
+    }
     wrap.append(frame)
   } else if (kind === 'audio' || kind === 'video') {
     const media = document.createElement(kind)
@@ -332,18 +352,20 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     media.tabIndex = -1
     media.addEventListener('play', () => media.pause())
     media.addEventListener('loadedmetadata', () => {
-      if (kind === 'audio' && Number.isFinite(media.duration)) glyph.textContent += `\n${formatMediaTime(media.duration)}`
+      if (Number.isFinite(media.duration)) duration.textContent = formatMediaTime(media.duration)
       finish(true)
     }, { once: true })
     media.addEventListener('error', () => finish(false), { once: true })
     if (media instanceof HTMLVideoElement) media.playsInline = true
     media.src = src
+    if (kind === 'audio' && options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
     wrap.append(media)
   } else if (kind === 'text') {
     void fetch(src, { signal: controller.signal }).then(async res => {
       if (!res.ok) throw new Error('Thumbnail unavailable')
       const source = await res.text()
       if (disposed) return
+      options.onThumbnailSource?.(source, res.headers.get('ETag') ?? undefined)
       const pre = document.createElement('pre')
       pre.inert = true
       pre.textContent = source.slice(0, 12000)
@@ -357,6 +379,26 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     if (native) { native.pause(); native.removeAttribute('src'); native.load() }
   })
   return wrap
+}
+
+/** Native viewers own their byte streams; metadata peeks stop after the first 64 KiB even if Range is ignored. */
+async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>): Promise<void> {
+  try {
+    const response = await fetch(src, { signal, headers: { Range: 'bytes=0-65535' } })
+    if (!response.ok || !response.body) return
+    const reader = response.body.getReader()
+    const bytes = new Uint8Array(65536)
+    let length = 0
+    try {
+      while (length < bytes.length) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        const part = chunk.value.subarray(0, bytes.length - length)
+        bytes.set(part, length); length += part.length
+      }
+    } finally { await reader.cancel() }
+    onSource(bytes.subarray(0, length), response.headers.get('ETag') ?? undefined)
+  } catch { /* Native playback and preview do not depend on metadata. */ }
 }
 
 function formatMediaTime(seconds: number): string {
@@ -442,6 +484,7 @@ function buildHtmlViewer(
     src,
     (html) => {
       if (disposed) return
+      options.onThumbnailSource?.(html)
       veil.classList.remove('kbn-fileview-loading-error')
       const withBase = htmlWithBase(html, src)
       const srcdoc = options.transformHtml?.(withBase) ?? withBase
@@ -555,6 +598,7 @@ function buildTextViewer(
   const stop = watchLiveFile(
     src,
     (text) => {
+      options.onThumbnailSource?.(text)
       const scrollTop = hasContent ? wrap.scrollTop : 0
       if (MARKDOWN_EXTS.has(ext)) {
         pane.classList.add('kbn-detail-prose')

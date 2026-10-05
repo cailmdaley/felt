@@ -10,12 +10,13 @@
 .ws-strip-film .ws-tab-thumb { display: block; height: 66px; flex: none; border-radius: 2px; border: 1px solid var(--ws-hairline); }
 .ws-strip-film .ws-tab[aria-selected='true'] { background: var(--ws-fill); box-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 20%, transparent), 0 5px 10px color-mix(in srgb, var(--ws-ink) 10%, transparent); }
 .ws-tab-label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 18px; }
-.ws-tab-label.ws-tab-title { font-family: var(--ws-serif); font-size: 14px; letter-spacing: 0; }
+.ws-tab-label.ws-tab-title { font-family: var(--ws-serif); font-size: 15px; letter-spacing: 0; }
 .ws-tab-thumb .ws-thumbnail-face { padding: 5px; font-size: 11px; }
 .ws-tab-kind-fiber .ws-thumbnail-face { display: block; text-align: left; white-space: pre-wrap; font: 11px/1.25 var(--ws-serif); color: var(--ws-ink-soft); }
 .ws-tab-thumb .kbn-thumbnail-image img { object-fit: contain; }
-.ws-tab-thumb .kbn-thumbnail-glyph { font-size: 14px; white-space: pre-line; padding: 4px; }
+.ws-tab-thumb .kbn-thumbnail-glyph { padding: 5px; }
 .ws-tab-kind-video video { opacity: 0; }
+.ws-tab-kind-video .kbn-thumbnail-glyph { display: flex !important; }
 .ws-tab-kind-audio audio { display: none; }
 .ws-tab-fresh { position: relative; }
 .ws-tab-fresh::after { position: absolute; top: 5px; right: 5px; margin: 0; box-shadow: 0 0 0 2px var(--ws-paper); }
