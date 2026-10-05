@@ -102,7 +102,7 @@
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   font-size: 10px;
   line-height: 1.6;
-  color: var(--ws-muted, #786b54);
+  color: var(--ws-ink-muted, #786b54);
   overflow-wrap: anywhere;
 }
 .kbn-media-kind { letter-spacing: .16em; }
@@ -115,12 +115,12 @@
 .kbn-fileview-audio audio {
   display: block;
   width: 100%;
-  border: 1px solid var(--ws-rule, #c6b38d);
+  border: 1px solid var(--ws-hairline, #c6b38d);
   border-radius: 28px;
-  background: #f0e6d0;
+  background: var(--ws-fill, #f0e6d0);
   color-scheme: light;
 }
-.kbn-fileview-audio audio::-webkit-media-controls-panel { background-color: #f0e6d0; }
+.kbn-fileview-audio audio::-webkit-media-controls-panel { background-color: var(--ws-fill, #f0e6d0); }
 .kbn-media-progress {
   display: block;
   width: calc(100% - 32px);
@@ -128,9 +128,9 @@
   margin: 26px 16px 0;
   border: 0;
   appearance: none;
-  background: var(--ws-rule, #c6b38d);
+  background: var(--ws-hairline, #c6b38d);
 }
-.kbn-media-progress::-webkit-progress-bar { background: var(--ws-rule, #c6b38d); }
+.kbn-media-progress::-webkit-progress-bar { background: var(--ws-hairline, #c6b38d); }
 .kbn-media-progress::-webkit-progress-value { background: var(--ws-ink, #342c20); }
 .kbn-media-progress::-moz-progress-bar { background: var(--ws-ink, #342c20); }
 .kbn-fileview-video { padding: 20px; }
@@ -160,7 +160,7 @@
   text-align: center;
   overflow-wrap: anywhere;
   font: 10px/1.8 var(--font-mono, 'IBM Plex Mono', monospace);
-  color: var(--ws-muted, #786b54);
+  color: var(--ws-ink-muted, #786b54);
 }
 .kbn-fileview-thumbnail iframe, .kbn-fileview-thumbnail pre { position: absolute; inset: 0; transform-origin: top left; border: 0; margin: 0; }
 .kbn-fileview-thumbnail pre { padding: 24px; white-space: pre-wrap; font: 14px/1.5 var(--font-mono, monospace); background: var(--ws-paper, #FBF6E9); }
