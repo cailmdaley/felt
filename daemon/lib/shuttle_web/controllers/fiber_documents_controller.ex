@@ -23,6 +23,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
       few hundred owned shuttle fibers. Omitted/unknown => unfiltered (every
       fiber, unowned included) — the content/search/graph readers, not the
       kanban feed.
+    * `fields=index` — keep only each fiber's `id`, `slug` and `name`, in the
+      same envelope: the wikilink and parent-picker index, a few percent of the
+      full listing's bytes. A daemon that ignores it answers the full rows,
+      which carry the same fields.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -40,23 +44,32 @@ defmodule ShuttleWeb.FiberDocumentsController do
     # remote viewers hit every 5s: serve it from the poller's in-memory cache
     # with a conditional-fetch etag. The body/content and non-shuttle variants
     # keep their direct `FiberDocuments.list/1` behavior.
-    if shuttle_only? and not with_body? do
-      serve_owner_feed(conn)
-    else
-      serve_direct(conn, with_body?, shuttle_only?)
+    cond do
+      shuttle_only? and not with_body? ->
+        serve_owner_feed(conn)
+
+      Map.get(params, "fields") == "index" ->
+        serve_direct(conn, false, shuttle_only?, &index_rows/1)
+
+      true ->
+        serve_direct(conn, with_body?, shuttle_only?, & &1)
     end
   end
 
-  defp serve_direct(conn, with_body?, shuttle_only?) do
+  defp serve_direct(conn, with_body?, shuttle_only?, shape) do
     case Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?) do
       {:ok, body} ->
-        json(conn, body)
+        json(conn, shape.(body))
 
       {:error, errors} ->
         conn
         |> put_status(:service_unavailable)
         |> json(%{error: "felt_list_failed", stores: errors})
     end
+  end
+
+  defp index_rows(%{fibers: entries} = body) do
+    %{body | fibers: Enum.map(entries, &%{fiber: Map.take(&1.fiber, ["id", "slug", "name"])})}
   end
 
   # The owner-only kanban feed, served ALWAYS from the poller's in-memory
