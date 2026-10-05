@@ -33,6 +33,7 @@
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { workshopExample } from './workshop-example.js'
+import { installWorkspaceNativeURLs, WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REMOTE, workspaceExample } from './workspace-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
@@ -53,10 +54,11 @@ import type {
 //   • status:closed + no `tempered`          → Awaiting review
 const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
-const docsExample = new URLSearchParams(window.location.search).get('example') === 'workshop'
-  ? workshopExample(now)
-  : null
-if (docsExample) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
+const example = new URLSearchParams(window.location.search).get('example')
+const docsExample = example === 'workshop' ? workshopExample(now) : null
+const workspaceFixture = example === 'workspace' ? workspaceExample(now) : null
+const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
+if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 const meetingScenario = new URLSearchParams(window.location.search).get('meeting')
 const MOCK_TAIL = [
@@ -1227,9 +1229,16 @@ const mockFleet = (host: string) => {
 }
 
 // ── Fetch stub: stand in for the daemon ──────────────────────────────────────
-const realFetch = window.fetch.bind(window)
+const realFetch = (window as unknown as { __harnessNativeFetch?: typeof fetch }).__harnessNativeFetch ?? window.fetch.bind(window)
+const mockRequests: Array<Record<string, unknown>> = []
+const mockHandlers: Array<Record<string, unknown>> = []
+const harnessEvents: Array<Record<string, unknown>> = []
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const request = { url, method, body: typeof init?.body === 'string' ? init.body : null }
+  mockRequests.push(request)
+  mockHandlers.push({ method, path: new URL(url, 'http://harness.invalid').pathname })
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   const body = (): Record<string, unknown> => {
     try {
@@ -1241,7 +1250,30 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const bodyOrigin = (): string => (body().origin as string) || LOCAL_HOST
 
   // The board's composite feed and the local-only meeting control plane.
-  if (url.includes('/api/v1/fibers/composite')) return json(docsExample?.feed ?? MOCK_FEED)
+  if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)
+  if (workspaceFixture && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
+    const id = decodeURIComponent(url.split('/api/v1/fibers/')[1].split('?')[0])
+    const row = workspaceFixture.feed.fibers.find(entry => (entry.fiber as Record<string, unknown>).id === id)
+    if (row) {
+      const fiber = row.fiber as Record<string, unknown>
+      return json({ fibers: [{ ...row, fiber: { ...fiber, body: workspaceFixture.bodies[id] ?? fiber.outcome ?? '' } }] })
+    }
+    if (id === 'research/workspace/method-note') {
+      return json({ fibers: [{
+        origin: WORKSPACE_HOST,
+        felt_store: '/fixture-store/workspace',
+        path: '.felt/research/workspace/method-note/method-note.md',
+        dir: '/fixture-store/workspace/.felt/research/workspace/method-note',
+        fiber: {
+          id, uid: '01KVBR6M1GJ0ZRM29956V023R3', name: 'Method note', status: 'closed',
+          outcome: 'The response correction uses independent simulations.',
+          body: workspaceFixture.bodies[id], tags: ['workspace'],
+          shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'claude-opus', project_dir: '/fixture-store/workspace' },
+        },
+      }] })
+    }
+    return json({ fibers: [] }, 404)
+  }
   if (docsExample && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
     const id = decodeURIComponent(url.split('/api/v1/fibers/')[1].split('?')[0])
     const row = docsExample.feed.fibers.find(row => row.fiber.id === id)
@@ -1254,13 +1286,15 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ fibers: [{ fiber: { body: MOCK_DIGEST_BODY, outcome: 'Digest delivered.' } }] })
   }
   if (url.includes('/api/v1/sent-files?')) {
-    if (docsExample) return json({ files: [] })
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
+    if (workspaceFixture) return json({ files: workspaceFixture.receipts.filter(file => file.uid === uid) })
+    if (docsExample) return json({ files: [] })
     return json({ files: uid === ULID.arxivDigest ? MOCK_DIGEST_SENT : [] })
   }
   // The parent picker's index: the feed's rows plus a sibling of the null-test
   // run, so its picker offers a parent before anything is typed.
   if (url.endsWith('/api/v1/fibers')) {
+    if (workspaceFixture) return json({ fibers: [...workspaceFixture.feed.fibers, { fiber: { id: 'research/workspace/method-note', name: 'Method note' } }] })
     if (docsExample) return json({ fibers: docsExample.feed.fibers })
     return json({ fibers: [...MOCK_FEED.fibers, { fiber: { id: 'work/spt3g_papers/bmodes-2d/null-suite', name: 'Null-test suite' } }] })
   }
@@ -1420,6 +1454,10 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ attached: true })
   }
   if (url.includes('/api/v1/sessions/composite')) {
+    if (workspaceFixture) {
+      const uid = new URL(url, 'http://harness').searchParams.get('uid')
+      return json({ host: workspaceFixture.host, records: workspaceFixture.sessions.filter(record => !uid || record.uid === uid), origins: workspaceFixture.feed.origins })
+    }
     if (docsExample) return json({ host: docsExample.feed.host, records: docsExample.sessions, origins: docsExample.feed.origins })
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     const records = [...MOCK_SESSIONS, ...APP_SESSIONS].filter((r) => !uid || r.uid === uid)
@@ -1427,12 +1465,14 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
 
   if (url.includes('/api/v1/sent-files/all/composite')) {
+    if (workspaceFixture) return json({ files: workspaceFixture.receipts, origins: workspaceFixture.feed.origins })
     if (docsExample) return json({ files: [], origins: docsExample.feed.origins })
     return json({ files: MOCK_SENT_FILES, origins: MOCK_ORIGINS })
   }
   // A text card's body. Images, pages and PDFs load by URL, not through
   // fetch, so offline they stay faces.
   if (url.includes('/api/v1/file')) {
+    if (workspaceFixture) return workspaceFixture.fileResponse(url, method)
     return new Response('# Daily digest\n\nThree cosmic-shear papers and one CMB-lensing cross-correlation.\n', {
       headers: { 'Content-Type': 'text/plain' },
     })
@@ -1495,10 +1535,13 @@ try {
       onMeetingResult: (message, tone) => showToast(message, tone),
       onMeetingStarted: () => { void modal.refreshMeeting() },
     }) },
-    onOpenWorker: (session) => { document.body.dataset.harnessTerminalSession = session },
+    onOpenWorker: (session, host) => {
+      document.body.dataset.harnessTerminalSession = session
+      harnessEvents.push({ type: 'open-worker', session, host: host ?? null })
+    },
     onSettingsClick: () => { void openSettings({ shuttleBase: '' }) },
     shuttleBase: '',
-    temporalFetchers: docsExample?.temporal ?? MOCK_TEMPORAL,
+    temporalFetchers: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
   })
 
   const host = document.createElement('div')
@@ -1519,8 +1562,12 @@ try {
   // range the board's cards live in.
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,
-    MOCK_FEED: docsExample?.feed ?? MOCK_FEED,
-    temporal: docsExample?.temporal ?? MOCK_TEMPORAL,
+    MOCK_FEED: workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED,
+    temporal: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
+    requests: mockRequests,
+    handlers: mockHandlers,
+    events: harnessEvents,
+    nativeFiles: nativeWorkspaceFiles,
     feedSpanMs: FEED_SPAN_MS,
     feedFromMs: now - FEED_SPAN_MS,
     feedToMs: now,
