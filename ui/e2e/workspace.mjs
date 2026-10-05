@@ -167,6 +167,7 @@ test('Overview media thumbnails show duration and a paused first video frame', a
   await audioCard.scrollIntoViewIfNeeded()
   await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-audio')].some(t => /\d+:\d\d/.test(t.textContent)))
   assert.match(await audioCard.innerText(), /\d+:\d\d/)
+  assert.doesNotMatch(await audioCard.locator('.ws-overview-thumb').innerText(), /tone\.mp3/, 'ribbon caption owns the filename')
   const videoCard = p.locator('.ws-overview-ribbon button').filter({ hasText: 'test.mp4' })
   await videoCard.scrollIntoViewIfNeeded()
   await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-video video')].some(v => v.readyState >= 2 && v.videoWidth > 0 && v.paused))

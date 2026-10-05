@@ -734,7 +734,7 @@ export class Overview {
     el.setAttribute('aria-hidden', 'true'); el.inert = true
     const kind = file ? documentKind(file.fullPath) : 'fiber'
     const glyph = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
-    const face = node('div', 'ws-overview-thumb-face', `${glyph} ${file?.basename ?? fallback}`)
+    const face = node('div', 'ws-overview-thumb-face', file && key.startsWith('ribbon:') ? glyph : `${glyph} ${file?.basename ?? fallback}`)
     el.append(face)
     const thumb: Thumbnail = { key, el, file, state: 'idle', near: false, lastVisible: 0, generation: 0 }
     this.thumbnails.set(key, thumb); this.observer?.observe(el)
@@ -822,6 +822,7 @@ export class Overview {
     thumb.body = buildFileViewer(this.opts.shuttleBase, file.fullPath, file.owner, undefined, undefined, {
       kind: kind === 'fiber' ? undefined : kind,
       thumbnail: true,
+      thumbnailLabel: !thumb.key.startsWith('ribbon:'),
       active: false,
       onState: state => { this.scaleThumbnails(); finish(state.status === 'ready') },
     })

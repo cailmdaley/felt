@@ -36,6 +36,8 @@ export interface FileViewerOptions {
   kind?: 'html' | 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'other'
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
+  /** Captioned previews keep the filename outside the miniature page. */
+  thumbnailLabel?: boolean
   /** Inactive viewers read once for a preview, without periodic subscriptions. */
   active?: boolean
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
@@ -300,7 +302,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
   }
   const glyph = document.createElement('div')
   glyph.className = 'kbn-thumbnail-glyph'
-  glyph.textContent = `${{ audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]}\n${basename(path)}`
+  glyph.textContent = `${{ audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]}${options.thumbnailLabel === false ? '' : `\n${basename(path)}`}`
   wrap.append(glyph)
   let native: HTMLMediaElement | null = null
   if (kind === 'image') {

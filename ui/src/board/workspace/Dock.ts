@@ -386,8 +386,8 @@ export interface DockOptions {
 }
 
 /**
- * The fiber page's control band: worker, composer, meeting, folded settings,
- * session history and verdicts, followed by the fiber's prose.
+ * The fiber page's act zone: state-shaped verdicts, composer, meeting,
+ * folded settings and session history. The navbar owns the worker control.
  */
 export class Dock {
   private readonly bands = new Map<string, Dock>()

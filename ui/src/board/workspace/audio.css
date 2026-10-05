@@ -30,6 +30,7 @@
 .ws-reader .ws-audio-compare button { width: 100%; display: flex; gap: 12px; justify-content: space-between; text-align: left; }
 .ws-audio-compare button > :first-child { min-width: 0; overflow-wrap: anywhere; }
 .ws-audio-duration { color: var(--ws-ink-muted); flex: none; font-variant-numeric: tabular-nums; }
+.ws-reader .ws-audio-page .ws-audio-play, .ws-audio-keep { font: 15px/1.4 var(--ws-serif) !important; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-audio-page { padding: 24px 12px; }
   .ws-audio-waveform { height: 180px; }
