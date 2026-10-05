@@ -45,14 +45,15 @@ export function installBarSwipe(bar: HTMLElement, enabled: () => boolean, step: 
   bar.addEventListener('pointermove', move)
   bar.addEventListener('pointerup', up)
   bar.addEventListener('pointercancel', cancel)
-  bar.addEventListener('lostpointercapture', cancel)
+  const lostCapture = (event: PointerEvent): void => { if (event.target === bar) cancel() }
+  bar.addEventListener('lostpointercapture', lostCapture)
   bar.addEventListener('click', click, true)
   window.addEventListener('keydown', escape, true)
   return () => {
     cancel()
     bar.removeEventListener('pointerdown', down); bar.removeEventListener('pointermove', move)
     bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', cancel)
-    bar.removeEventListener('lostpointercapture', cancel); bar.removeEventListener('click', click, true)
+    bar.removeEventListener('lostpointercapture', lostCapture); bar.removeEventListener('click', click, true)
     window.removeEventListener('keydown', escape, true)
   }
 }

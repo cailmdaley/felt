@@ -1,0 +1,30 @@
+.ws-page-sheet {
+  position: fixed; inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none;
+  margin: 0; padding: 0; border: 0; background: transparent; color: var(--ws-ink);
+}
+.ws-page-sheet::backdrop { background: color-mix(in srgb, var(--ws-ink) 30%, transparent); }
+.ws-page-sheet-panel {
+  position: absolute; bottom: 0; left: 0; right: 0; display: flex; flex-direction: column;
+  max-height: min(80dvh, 720px); padding: 0 16px env(safe-area-inset-bottom);
+  background: var(--ws-paper); border: 1px solid var(--ws-hairline); border-bottom: 0;
+  border-radius: 16px 16px 0 0; box-shadow: var(--ws-float);
+  transform: translateY(var(--ws-sheet-drag, 0px)); animation: ws-sheet-enter 180ms var(--ws-ease);
+}
+@keyframes ws-sheet-enter { from { transform: translateY(24px); opacity: 0; } }
+.ws-reader .ws-page-sheet-grabber { display: grid; place-items: center; width: 100%; height: 44px; flex: none; touch-action: none; }
+.ws-page-sheet-grabber::before { content: ''; width: 36px; height: 4px; border-radius: 2px; background: var(--ws-hairline); }
+.ws-page-sheet h2 { font: 24px/1.2 var(--ws-serif); margin: 0 0 12px; flex: none; }
+.ws-page-sheet-list { min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 12px; }
+.ws-reader .ws-page-sheet-row {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 12px;
+  width: 100%; min-height: 76px; padding: 10px 8px; border-top: 1px solid var(--ws-hairline-soft);
+  border-radius: 0; text-align: left; position: relative;
+}
+.ws-reader .ws-page-sheet-row[aria-current='page'] { background: var(--ws-fill); box-shadow: inset 2px 0 var(--ws-ink); }
+.ws-page-sheet-thumb { width: 56px; height: 56px; border: 1px solid var(--ws-hairline); }
+.ws-page-sheet-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ws-page-sheet-title { font: 19px/1.1 var(--ws-serif); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.ws-page-sheet-summary { font: 10px/1.4 var(--ws-mono); color: var(--ws-ink-muted); }
+.ws-page-sheet-fresh .ws-page-sheet-title::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--ws-fresh); vertical-align: middle; }
+@media (prefers-reduced-motion: reduce) { .ws-page-sheet-panel { animation: none; } }
+@media (prefers-reduced-transparency: reduce) { .ws-page-sheet::backdrop { background: var(--ws-ground); } }

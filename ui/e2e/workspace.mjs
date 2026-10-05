@@ -14,14 +14,18 @@ const tests = []
 const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce') => tests.push({ name, run, viewport, sidebarChoice, reducedMotion })
 const selected = p => p.locator('.ws-page.ws-selected')
 const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label
-const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true })
+const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true, includeHidden: true })
 async function open(p, expected = 'calibration-report') {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click()
-  await tab(p, 'calibration-report').waitFor()
+  await tab(p, 'calibration-report').waitFor({ state: 'attached' })
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(expected))
 }
 async function choose(p, label) {
-  await tab(p, label).click()
+  if (await p.locator('.ws-page-choice').isVisible()) {
+    await p.locator('.ws-page-choice').click()
+    await p.locator('.ws-page-sheet-row').filter({ has: p.locator('.ws-page-sheet-title', { hasText: displayLabel(label) }) }).click()
+    await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
+  } else await tab(p, label).click()
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
@@ -137,8 +141,10 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
   await poll(p, () => !document.querySelector('.ws-tabs').classList.contains('ws-strip-film'))
   assert.equal(await film.locator('.ws-tab-thumb:visible').count(), 0)
   if (process.env.WORKSPACE_SHOTS) {
-    await p.locator('.ws-tab-fresh').scrollIntoViewIfNeeded()
+    await p.locator('.ws-page-choice').click()
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-phone.png` })
+    await p.keyboard.press('Escape')
+    await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
   }
   await choose(p, 'brief.md')
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
@@ -415,13 +421,13 @@ test('Remote worker pill records attach handler without launching a terminal', a
   assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
 })
 
-test('Phone overview single column, reader tabs, footer stepping and Back', async p => {
+test('Phone overview single column, reader sheet, footer stepping and Back', async p => {
   await p.locator('[data-view="shelf"]').click()
   await poll(p, () => document.querySelectorAll('.ws-overview-folio:not([hidden])').length >= 2)
   const folios = await p.locator('.ws-overview-folio:visible').evaluateAll(es => es.map(e => e.getBoundingClientRect().x))
   assert.ok(folios.length > 1 && folios.every(x => Math.abs(x - folios[0]) < 2))
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
-  await tab(p, 'calibration-report').waitFor()
+  await tab(p, 'calibration-report').waitFor({ state: 'attached' })
   assert.ok(await p.locator('.ws-thumbbar').isVisible())
   await p.getByRole('button', { name: 'Next document', exact: true }).click()
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'false')
@@ -430,6 +436,87 @@ test('Phone overview single column, reader tabs, footer stepping and Back', asyn
   await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
   assert.ok(await p.getByRole('searchbox', { name: 'Find work or files' }).isVisible())
 }, { width: 390, height: 844 })
+
+for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
+  test(`Phone ${viewport.width}: edge-to-edge page, modal sheet choice, focus and browser Back`, async p => {
+    await open(p); await reportReady(p)
+    const geometry = await selected(p).evaluate(el => {
+      const rect = el.getBoundingClientRect(), sheet = getComputedStyle(el.querySelector('.ws-sheet'))
+      return { x: rect.x, width: rect.width, border: sheet.borderTopWidth, radius: sheet.borderRadius, shadow: sheet.boxShadow }
+    })
+    assert.equal(geometry.x, 0); assert.equal(geometry.width, viewport.width)
+    assert.equal(geometry.border, '0px'); assert.equal(geometry.radius, '0px'); assert.equal(geometry.shadow, 'none')
+    assert.equal(await p.locator('.ws-nav-tabs').isVisible(), false)
+    assert.equal(await selected(p).locator('.ws-labelbar').isVisible(), false)
+    assert.equal((await p.locator('.ws-thumbbar').boundingBox()).height, 56)
+    const url = p.url()
+    const opener = p.getByRole('button', { name: 'Choose a page', exact: true })
+    await opener.click()
+    const sheet = p.getByRole('dialog', { name: 'Pages in this constitution' })
+    await sheet.waitFor()
+    assert.equal(p.url(), url, 'sheet is a same-address history layer')
+    assert.equal(await sheet.locator('.ws-page-sheet-row').count(), await tab(p, 'Constitution').evaluate(t => t.parentElement.children.length))
+    assert.equal(await sheet.locator('[aria-current="page"] .ws-page-sheet-title').innerText(), 'Calibration report')
+    assert.match(await sheet.locator('[aria-current="page"] .ws-page-sheet-summary').innerText(), /sent 1m ago · 3 receipts/)
+    for (let i = 0; i < 22; i++) {
+      await p.keyboard.press('Tab')
+      assert.ok(await sheet.evaluate(el => el.contains(document.activeElement)), 'native modal keeps focus inside the sheet')
+    }
+    await p.keyboard.press('l')
+    assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true', 'sheet keys cannot step reader')
+    await p.goBack()
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    assert.equal(p.url(), url); assert.ok(await opener.evaluate(el => el === document.activeElement))
+    await opener.click()
+    await sheet.getByRole('button', { name: 'Field note', exact: true }).click()
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    assert.equal(await tab(p, 'brief.md').getAttribute('aria-selected'), 'true')
+    await opener.click(); await p.mouse.click(10, 10)
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    await opener.click()
+    const grabber = await sheet.getByRole('button', { name: 'Close pages' }).boundingBox()
+    await swipe(p, grabber.x + grabber.width / 2, grabber.y + 20, grabber.x + grabber.width / 2, grabber.y + 90)
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await poll(p, () => document.querySelector('.ws-reader')?.inert)
+  }, viewport)
+}
+
+test('Phone bar-only touch swipe steps, reverses and cancels; document vertical scroll only hides chrome', async p => {
+  await open(p); await reportReady(p)
+  const original = await selected(p).getAttribute('data-key')
+  const bar = await p.locator('.ws-thumbbar').boundingBox()
+  const y = bar.y + 22
+  await swipe(p, 220, y, 120, y + 4)
+  assert.notEqual(await selected(p).getAttribute('data-key'), original)
+  await swipe(p, 120, y, 220, y + 4)
+  assert.equal(await selected(p).getAttribute('data-key'), original)
+  await swipe(p, 220, y, 120, y, true)
+  assert.equal(await selected(p).getAttribute('data-key'), original)
+  await swipe(p, 5, y, 150, y)
+  assert.equal(await selected(p).getAttribute('data-key'), original, 'Safari edge-back starts are not claimed')
+  await swipe(p, 180, y, 184, y - 70)
+  assert.equal(await selected(p).getAttribute('data-key'), original, 'vertical bar pans are not pages')
+  await swipe(p, 190, 650, 194, 200)
+  assert.equal(await selected(p).getAttribute('data-key'), original, 'vertical report scroll is not a page gesture')
+  await poll(p, () => document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
+  await p.waitForTimeout(650) // Let the native touch fling settle before returning to the top.
+  await report(p).evaluate(frame => frame.contentWindow.scrollTo(0, 0))
+  await poll(p, () => !document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
+}, { width: 390, height: 844 })
+
+async function swipe(p, x, y, endX, endY, cancel = false) {
+  const cdp = await p.context().newCDPSession(p)
+  const point = (x, y) => [{ x, y, radiusX: 1, radiusY: 1 }]
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(x, y) })
+  for (let i = 1; i <= 6; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(x + (endX - x) * i / 6, y + (endY - y) * i / 6) })
+    await p.waitForTimeout(20)
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] })
+  await p.waitForTimeout(80)
+  await cdp.detach()
+}
 
 test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
   await open(p)
@@ -652,7 +739,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    assert.match((await navbar.innerText()).trim(), /^aloft$/i, 'navbar names state, not agent')
+    assert.match((await navbar.textContent()).trim(), /^aloft(?: · (?:terminal|browser))?$/i, 'navbar names state, not agent')
     await choose(p, 'Constitution')
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
@@ -698,6 +785,7 @@ let passed = 0
 try {
   for (const { name, run, viewport, sidebarChoice, reducedMotion } of tests) {
     const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
+      hasTouch: !!viewport && viewport.width <= 700, isMobile: !!viewport && viewport.width <= 700,
       reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
     const page = await context.newPage()
     page.setDefaultTimeout(2000)

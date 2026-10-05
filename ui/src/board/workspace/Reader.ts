@@ -16,6 +16,7 @@ import { overviewHostMarks } from './Overview.js'
 import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { workspaceMeasure } from './measures.js'
 import { installBarSwipe, PhoneTopbar } from './PhoneGestures.js'
+import { PageSheet } from './PageSheet.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -82,6 +83,7 @@ export class Reader {
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
   private readonly stopSwipe: () => void
+  private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
   private readonly next: HTMLButtonElement
@@ -144,7 +146,10 @@ export class Reader {
       if (doc) this.openMenu(doc, thumbMenu)
     }, 'Document menu')
     const thumb = element('div', 'ws-thumbbar')
-    const pageChoice = button('ws-page-choice', '', () => {}, 'Choose a page')
+    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
+    const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
+    pageChoice.setAttribute('aria-haspopup', 'dialog')
+    pageChoice.setAttribute('aria-expanded', 'false')
     pageChoice.append(this.pageTitle, this.arrivalSummary, this.position)
     thumb.append(this.prev, pageChoice, this.next, thumbMenu)
     this.stopSwipe = installBarSwipe(thumb, () => this.active && this.phone.matches, delta => this.step(delta))
@@ -174,7 +179,7 @@ export class Reader {
     this.sidebar.append(this.sidebarPicker.el)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
-    this.el.append(this.veil, this.navbar, main, thumb, this.announcement)
+    this.el.append(this.veil, this.navbar, main, thumb, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -207,7 +212,7 @@ export class Reader {
 
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
-    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
+    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu(); this.pageSheet.hide() }
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
     this.channel = channel
@@ -252,6 +257,7 @@ export class Reader {
     this.cancelResize?.()
     this.sidebarFlight.setVisible(false, animate)
     this.active = false
+    this.pageSheet.hide()
     this.tabs.setVisible(false)
     this.closeMenu()
     this.el.inert = true
@@ -309,7 +315,9 @@ export class Reader {
       this.fillLabel(frame, ch.labels[i])
     })
     this.tabs.setCompact(this.expanded)
-    this.tabs.fresh(this.seen.observe(ch, this.selected ?? '', this.channelReady))
+    const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
+    this.tabs.fresh(fresh)
+    this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
     this.position.textContent = `${index + 1} / ${ch.documents.length}`
     const doc = ch.documents[index]
@@ -452,6 +460,7 @@ export class Reader {
     }
   }
   private readonly relayout = (): void => {
+    if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.renderSidebar()
     this.layout(false)
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
@@ -606,6 +615,7 @@ export class Reader {
     this.sidebarPicker.refresh(this.sidebarShown)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
+    if (this.pageSheet.isOpen) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
@@ -688,6 +698,7 @@ export class Reader {
     this.cancelResize?.()
     this.closeMenu()
     this.stopSwipe()
+    this.pageSheet.dispose()
     this.observer?.disconnect()
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
