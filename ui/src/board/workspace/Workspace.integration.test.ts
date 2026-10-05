@@ -158,4 +158,54 @@ describe('workspace reader integration', () => {
     expect(window.location.hash).toContain('beta@host-b')
     expect(visibility).toHaveBeenCalledWith(true)
   })
+
+  it.fails('restores overview scroll after returning from a channel opened on the Board', async () => {
+    workspace.mountOverview(document.body)
+    workspace.showBoard()
+    await flush()
+    workspace.overview.opened(cards[0])
+    const overview = workspace.overview.el
+    overview.scrollTop = 432
+    overview.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"]')!.click()
+    await flush()
+    expect(workspace.reader.isActive).toBe(true)
+    expect(overview.hidden).toBe(true)
+
+    overview.scrollTop = 0
+    const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
+    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await returned
+    await flush()
+    expect(window.location.hash).toBe('#/board')
+    expect.soft(overview.hidden).toBe(false)
+    expect(overview.scrollTop).toBe(432)
+  })
+
+  it('resumes the last Board channel after Desk suspension, but not after an explicit return', async () => {
+    workspace.mountOverview(document.body)
+    workspace.showBoard()
+    await flush()
+    workspace.overview.opened(cards[0])
+    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"]')!.click()
+    await flush()
+    expect(workspace.reader.isActive).toBe(true)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+
+    workspace.suspend('desk')
+    expect(workspace.reader.isActive).toBe(false)
+    expect(window.location.hash).toBe('#/desk')
+    workspace.showBoard()
+    await flush()
+    expect(workspace.reader.isActive).toBe(true)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+
+    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await flush()
+    workspace.showBoard()
+    await flush()
+    expect(workspace.reader.isActive).toBe(false)
+    expect(workspace.overview.el.hidden).toBe(false)
+    expect(window.location.hash).toBe('#/board')
+  })
 })
