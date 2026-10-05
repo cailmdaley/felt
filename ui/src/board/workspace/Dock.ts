@@ -16,6 +16,9 @@ import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
 import { fiberPageColumn } from './fiberPageState.js'
+import { anchorPopover, type Release } from './anchoredPopover.js'
+import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
+import { workerPlate } from './workerPlate.js'
 import './tokens.css'
 import './dock.css'
 
@@ -404,6 +407,7 @@ export class Dock {
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
+  private workerPaint: (() => void) | null = null
   private guidance: HTMLElement | null = null
   private dismissMeeting: (() => boolean) | null = null
   private dismissParent: (() => boolean) | null = null
@@ -537,6 +541,7 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.workerPillCard = this.transcriptCard = null
+    this.workerPaint = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -555,6 +560,7 @@ export class Dock {
   }
 
   handleEscape(): boolean {
+    if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
     return Boolean(this.dismissConversation?.() || this.dismissMeeting?.() || this.dismissParent?.())
   }
@@ -669,14 +675,15 @@ export class Dock {
     return row
   }
 
-  /** The floating verdict is reachable while reading any delivered page. */
+  /** The compact verdict pair the navbar and the phone's page sheet carry
+   *  while the fiber awaits review, reachable from any page. */
   verdictPlateFor(card: KanbanCard): HTMLElement {
     const plate = document.createElement('div')
     plate.className = 'ws-review-plate'
     plate.dataset.part = 'act'; plate.dataset.act = 'verdict'
-    const state = document.createElement('span')
-    state.textContent = 'Awaiting review'
-    plate.append(state, this.verdictControlsFor(card))
+    plate.setAttribute('role', 'group')
+    plate.setAttribute('aria-label', 'Awaiting review')
+    plate.append(this.verdictControlsFor(card))
     return plate
   }
 
@@ -696,6 +703,7 @@ export class Dock {
     this.historySync?.()
     this.composerPaint?.()
     this.actPaint?.()
+    this.workerPaint?.()
     for (const [button, blocked] of this.blockedDispatches) {
       if (blocked.worker === workerIdentity(card)) continue
       button.disabled = false
@@ -705,6 +713,7 @@ export class Dock {
         blocked.error.style.display = 'none'
       }
       this.blockedDispatches.delete(button)
+      this.composerPaint?.()
     }
     this.workerPillCard = card
     this.paintGuidance(card)
@@ -733,6 +742,22 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
+    // The fiber's worker, drawn as the sidebar card draws it: the pill that
+    // opens the real conversation, with its state and elapsed time.
+    const worker = document.createElement('div')
+    worker.className = 'ws-worker-pill'
+    worker.dataset.part = 'act'; worker.dataset.act = 'worker'
+    this.workerPaint = () => {
+      const focused = worker.contains(document.activeElement)
+      const pill = this.workerPillFor(card)
+      worker.replaceChildren(...(pill ? [workerPlate(card, pill)] : []))
+      worker.hidden = !pill
+      if (focused) worker.querySelector<HTMLElement>('.kbn-card-worker')?.focus({ preventScroll: true })
+    }
+    this.workerPaint()
+    const clock = window.setInterval(() => this.workerPaint?.(), 30000)
+    this.composerDisposers.push(() => window.clearInterval(clock))
+    body.append(worker)
     if (shuttleManaged) body.append(this.buildComposer(card))
     body.append(this.buildTranscriptPane(card))
 
@@ -825,6 +850,12 @@ export class Dock {
     more.textContent = '⋯'; more.setAttribute('aria-label', 'Fiber actions')
     const choices = document.createElement('div'); choices.className = 'kbn-ctl-menu'
     menu.append(more, choices)
+    let release: Release | null = null
+    menu.addEventListener('toggle', () => {
+      release?.(); release = null
+      if (menu.open && menu.isConnected) release = anchorPopover(choices, more, { placement: 'below-end' })
+    })
+    this.composerDisposers.push(() => { release?.(); release = null })
     this.verdictMenu = menu
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
@@ -896,8 +927,11 @@ export class Dock {
     this.composerPaint = () => {
       const draft = fiberPageColumn(card) === 'drafts'
       const resumable = !draft && Boolean(card.sessionUuid)
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : 'Start ↵'
-      fresh.hidden = resumable
+      // A resumable session makes Resume the default verb; a fresh session
+      // stays beside it as the secondary verb (⌥↵).
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : resumable ? 'New session' : 'Start ↵'
+      fresh.classList.toggle('kbn-ctl-secondary', resumable)
+      fresh.title = resumable ? 'Start a new session (⌥↵)' : ''
       resume.hidden = !resumable
       message.placeholder = fiberPageColumn(card) === 'awaitingReview'
         ? resumable ? 'Reply and resume…' : 'Reply and start…'
@@ -1045,11 +1079,16 @@ export class Dock {
     menu.setAttribute('aria-label', 'Meeting kind')
     menu.hidden = true
 
-    function setOpen(open: boolean): void {
+    let release: Release | null = null
+    const setOpen = (open: boolean): void => {
+      if (open === !menu.hidden) return
       menu.hidden = !open
+      release?.(); release = null
+      if (open) release = anchorPopover(menu, opener, { placement: 'below-start' })
       opener.setAttribute('aria-expanded', String(open))
       wrap.classList.toggle('kbn-ctl-meet-open', open)
     }
+    this.composerDisposers.push(() => { release?.(); release = null })
 
     this.dismissMeeting = () => {
       if (menu.hidden) return false
@@ -1191,6 +1230,7 @@ export class Dock {
     effortSelect.className = 'kbn-ctl-select kbn-ctl-effort-select'
     effortSelect.setAttribute('aria-label', 'Effort')
     if (card.shuttleEffort) effortSelect.append(new Option(card.shuttleEffort, card.shuttleEffort))
+    this.composerDisposers.push(anchorSelect(agentSelect), anchorSelect(effortSelect))
 
     const chrome = ctlToggle('Chrome', 'kbn-ctl-chrome')
     chrome.input.id = 'kbn-detail-chrome'
@@ -1577,10 +1617,17 @@ export class Dock {
     dropdown.style.display = 'none'
     dropdown.setAttribute('role', 'listbox')
 
+    let release: Release | null = null
     const hideDropdown = (): void => {
+      release?.(); release = null
       dropdown.style.display = 'none'
       search.setAttribute('aria-expanded', 'false')
     }
+    const showDropdown = (): void => {
+      dropdown.style.display = ''
+      release ??= anchorPopover(dropdown, search, { placement: 'below-start', matchWidth: true })
+    }
+    this.composerDisposers.push(() => { release?.(); release = null })
     const closeSearch = (): void => {
       this.searchRenderToken++
       if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
@@ -1612,7 +1659,7 @@ export class Dock {
     }
     const openDropdown = (): void => {
       if (search.hidden) return
-      void this.searchParents(search.value.trim(), card.id, dropdown, onPick).then(() => {
+      void this.searchParents(search.value.trim(), card.id, dropdown, onPick, showDropdown).then(() => {
         if (dropdown.style.display !== 'none') search.setAttribute('aria-expanded', 'true')
       })
     }
@@ -2160,6 +2207,7 @@ export class Dock {
     excludeId: string,
     dropdown: HTMLElement,
     onSelect: (result: FiberSearchResult) => void,
+    reveal: () => void,
   ): Promise<void> {
     // Concurrent triggers (focus + debounced input) can resolve the shared
     // index promise in the same microtask batch — without a token the two
@@ -2177,7 +2225,7 @@ export class Dock {
         empty.className = 'kbn-detail-parent-option kbn-detail-parent-empty'
         empty.textContent = q ? 'No matches' : 'No fibers available'
         dropdown.append(empty)
-        dropdown.style.display = ''
+        reveal()
         return
       }
 
@@ -2202,10 +2250,10 @@ export class Dock {
         })
         dropdown.append(opt)
       }
-      dropdown.style.display = ''
+      reveal()
     } catch {
       dropdown.innerHTML = '<div class="kbn-detail-parent-option kbn-detail-parent-empty">Search failed</div>'
-      dropdown.style.display = ''
+      reveal()
     }
   }
 

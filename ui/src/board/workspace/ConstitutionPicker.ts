@@ -1,4 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
+import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ConstitutionPickerOptions {
   cards(): KanbanCard[]
@@ -20,6 +21,7 @@ export class ConstitutionPicker {
   private readonly list = document.createElement('div')
   private previous: HTMLElement | null = null
   private popup = false
+  private release: Release | null = null
   private selected: string | null = null
   private revealed: string | null = null
   private readonly rows = new Map<string, { el: HTMLElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard; revision: string }>()
@@ -46,13 +48,14 @@ export class ConstitutionPicker {
     this.popup = true
     this.el.className = 'ws-menu ws-switcher'
     host.append(this.el)
-    const rect = anchor?.getBoundingClientRect()
-    this.el.style.left = `${Math.max(12, Math.min(rect?.left ?? 12, window.innerWidth - this.el.offsetWidth - 12))}px`
-    this.el.style.top = `${(rect?.bottom ?? 48) + 6}px`
+    this.release?.()
+    if (anchor) this.release = anchorPopover(this.el, anchor, { placement: 'below-start', gap: 6, margin: 12 })
+    else { this.release = null; this.el.style.left = '12px'; this.el.style.top = '54px' }
     this.focus()
   }
   get isOpen(): boolean { return this.popup && this.el.isConnected }
   close(restore = false): void {
+    this.release?.(); this.release = null
     if (this.popup) this.el.remove()
     if (restore && this.previous?.isConnected) this.previous.focus({ preventScroll: true })
     this.previous = null

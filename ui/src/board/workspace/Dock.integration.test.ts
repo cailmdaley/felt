@@ -74,6 +74,40 @@ describe('Dock click boundary', () => {
   })
 })
 
+describe('anchored pickers', () => {
+  it('opens the effort list anchored under its select and commits a pick through the select', async () => {
+    band.el.querySelector<HTMLButtonElement>('.kbn-detail-controls-toggle')!.click()
+    const effort = select('Effort')
+    effort.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+    const list = band.el.querySelector<HTMLElement>('.ws-select-picker')!
+    expect(list.previousElementSibling).toBe(effort)
+    expect(list.style.position).toBe('fixed')
+    expect(list.hasAttribute('data-anchored')).toBe(true)
+    expect(effort.getAttribute('aria-expanded')).toBe('true')
+    expect([...list.querySelectorAll('[role="option"]')].map(o => o.textContent)).toEqual(['low', 'medium', 'high'])
+    expect(document.activeElement?.textContent).toBe('medium')
+    const changed = vi.fn(); effort.addEventListener('change', changed)
+    ;[...list.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(o => o.textContent === 'high')!.click()
+    expect(effort.value).toBe('high')
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(band.el.querySelector('.ws-select-picker')).toBeNull()
+    expect(document.activeElement).toBe(effort)
+  })
+  it('anchors the Meeting menu to its microphone and releases it on close', () => {
+    const control = { canJoin: () => true, current: () => null, join: vi.fn() }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const meetingBand = meetingDock.bandFor(task())
+    document.body.append(meetingBand.el)
+    const opener = meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!
+    opener.click()
+    const menu = meetingBand.el.querySelector<HTMLElement>('.kbn-ctl-meet .kbn-ctl-menu')!
+    expect([menu.hidden, menu.style.position, menu.hasAttribute('data-anchored')]).toEqual([false, 'fixed', true])
+    opener.click()
+    expect([menu.hidden, menu.style.position, menu.hasAttribute('data-anchored')]).toEqual([true, '', false])
+    meetingDock.reset()
+  })
+})
+
 describe('Dock booting dispatch rejection', () => {
   it.each(['New session', 'Resume'])('explains a 503 booting %s without consuming the draft or retrying', async name => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
@@ -124,7 +158,8 @@ describe('Dock dispatch recovery', () => {
     expect(verb.disabled).toBe(true)
     dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
     expect(verb.disabled).toBe(false)
-    expect(verb.textContent).toBe(label)
+    // The verb names the state it now stands in: a live session makes a fresh start the secondary "New session".
+    expect(verb.textContent).toBe(name === 'Resume' ? label : 'New session')
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
   })
 })
@@ -157,6 +192,20 @@ describe('state-shaped act zone', () => {
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
+  })
+  it.each([
+    ['drafts', { status: 'open' }, ['Launch ↵']],
+    ['pinned with a session', { status: 'active', shuttleKind: 'pinned', sessionUuid: 's' }, ['New session', 'Resume ↵']],
+    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session', 'Resume ↵']],
+    ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
+    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session', 'Resume ↵']],
+    ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
+  ] as const)('offers a sensible verb set: %s', (_name, patch, verbs) => {
+    band = dock.bandFor(task(patch as Partial<KanbanCard>))
+    const shown = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-sends button')].filter(b => !b.hidden)
+    expect(shown.map(b => b.textContent)).toEqual(verbs)
+    const fresh = shown[0]
+    expect(fresh.classList.contains('kbn-ctl-secondary')).toBe(verbs.length > 1)
   })
   it('Enter resumes the named session and Alt-Enter explicitly starts fresh', async () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))

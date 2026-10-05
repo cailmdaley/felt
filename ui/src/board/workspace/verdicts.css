@@ -9,7 +9,7 @@
   animation: ws-verdict-arrive 180ms ease;
 }
 .ws-verdict-toast button {
-  border: 0; border-bottom: 1px solid var(--ws-verdict); color: var(--ws-verdict); background: transparent;
+  border: 0; border-bottom: 1px solid var(--ws-hairline); color: var(--ws-ink); background: transparent;
   font: var(--ws-label-size)/1.4 var(--ws-serif); min-height: 36px; cursor: pointer;
 }
 .ws-verdict-toast button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
@@ -19,3 +19,19 @@
   .ws-verdict-toast button { min-height: 44px; min-width: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .ws-verdict-toast { animation: none; } }
+
+/* Verdict verbs wear their pigment wherever the workspace offers them (the
+   recipe and pigments live with the Desk's, in KanbanModal.css). */
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+  color: var(--verdict-ink); background: var(--verdict-tint); border-color: var(--verdict-edge) !important;
+}
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
+  color: var(--verdict-ink); background: var(--verdict-tint-strong); border-color: var(--verdict-pigment) !important;
+}
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):focus-visible {
+  outline: 2px solid var(--verdict-pigment); outline-offset: 2px;
+}
+.ws-verdict-word { color: var(--verdict-ink); }
+.ws-verdict-toast[data-verdict] { border-left: 3px solid var(--verdict-edge); }
+.ws-verdict-toast[data-verdict='tempered'] { --verdict-edge: color-mix(in srgb, var(--kbn-tempered) 55%, var(--ws-paper)); }
+.ws-verdict-toast[data-verdict='discarded'] { --verdict-edge: color-mix(in srgb, var(--kbn-discarded) 55%, var(--ws-paper)); }

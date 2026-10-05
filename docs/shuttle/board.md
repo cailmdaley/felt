@@ -107,7 +107,7 @@ app put an image beside it.
 <a id="attach"></a>
 ### Open a worker
 
-Worker pills on Desk cards, the reader navbar, and the fiber page open the worker's conversation. Fiber controls remain inline.
+Worker pills on Desk cards, the reader's sidebar cards, and the fiber page open the worker's conversation. Fiber controls remain inline.
 For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
 Claude sessions with Remote Control can open in the browser or Claude app, using your browser's preference in Settings.
 Codex app workers use their native desktop link, with remote-access guidance on mobile.
@@ -160,7 +160,7 @@ Opening a folio or receipt enters the reader: one selected page, inert receded n
 The fiber page anchors its body, embedded files, opened body links and sent documents.
 Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, metadata polls and the optional Constitutions sidebar preserve retained document instances and reading position.
-The navbar's state-only worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel.
+The fiber page's worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel. While a fiber awaits review, a compact Temper / Discard pair sits beside its name in the navbar on every delivered page (on the phone, beside the page sheet's heading).
 The fiber header shows status alone. Agent, effort, cadence, host and project directory belong to the folded settings line; the band's worker line is only its conversation action.
 Document label bars show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
@@ -169,6 +169,7 @@ On phones, previous/next controls sit in a thumb bar, and browser Back returns t
 
 Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions in sidebar order; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
+c (or .) opens the worker's conversation exactly as its pill does, on the Desk and in the reader; s (or ⌘\\) toggles the Constitutions sidebar.
 Alt-left/right step pages and Alt-down/up step constitutions, including while typing.
 A plain fiber reached by wikilink keeps the tab label **Note**.
 The tablist keeps one Tab stop and moves focus with its selected tab.

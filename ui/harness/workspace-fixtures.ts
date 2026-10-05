@@ -185,6 +185,7 @@ export function workspaceExample(now: number): WorkspaceExample {
           agent: 'claude-opus',
           effort: 'high',
           project_dir: project,
+          ...(fiber.id === WORKSPACE_ID ? { runtime: { session_uuid: 'c1a5e0d2-5b8f-4c1e-9a7e-2f3d4b5c6a71', dispatched_at: iso(-3 * 60 * minute), handed_off_at: iso(-2 * 60 * minute) } } : {}),
         },
       },
     }
