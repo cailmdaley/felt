@@ -74,7 +74,7 @@ export class Workspace {
       onSelect: key => this.select(key),
       onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
       workerPill: card => this.dock.workerPillFor(card),
-      onEscapeLayer: () => this.current ? this.dock.bandFor(this.current.card).handleEscape() : false,
+      onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),
       onRefreshProse: async doc => {
@@ -132,6 +132,9 @@ export class Workspace {
     this.show(this.current)
   }
 
+  private controls(state: ChannelState | null): Dock | undefined {
+    return state?.metadataKnown && !state.channel.uid.startsWith('other:') ? this.dock.bandFor(state.card) : undefined
+  }
   private proseRevision(state: ChannelState): string {
     return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.shuttleAgent, state.error, state.loaded, state.metadataKnown])
   }
@@ -140,7 +143,7 @@ export class Workspace {
     if (!state) return document.createElement('div')
     this.proseRevisions.set(key, this.proseRevision(state))
     const page = buildFiberProse(state.card, state.channel, {
-      controls: state.metadataKnown && !state.channel.uid.startsWith('other:') ? this.dock.bandFor(state.card).el : undefined,
+      controls: this.controls(state)?.el,
       shuttleBase: this.opts.shuttleBase,
       onSelect: key => this.select(key),
       onFiber: id => { void this.openFiber(id, state.card.originId) },

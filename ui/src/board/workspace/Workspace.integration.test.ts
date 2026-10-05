@@ -434,10 +434,15 @@ describe('workspace reader integration', () => {
     const originalFetch = fetch
     vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('/api/v1/fibers/cold?')
       ? new Promise<Response>(resolve => { deliver = resolve }) : originalFetch(url)))
+    const bandFor = vi.spyOn(workspace.dock, 'bandFor')
     window.history.replaceState(null, '', '#/board/cold@host-a')
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     expect(document.querySelector('.ws-selected .ws-dock')).toBeNull()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(bandFor).not.toHaveBeenCalled()
     deliver(fiberReadResponse(managed))
+    await flush()
+    workspace.open(managed)
     await flush()
     const band = document.querySelector<HTMLElement>('.ws-fiber-prose .ws-dock')!
     const textarea = band.querySelector<HTMLTextAreaElement>('textarea')!
