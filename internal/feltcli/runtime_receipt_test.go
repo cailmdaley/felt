@@ -6,9 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestCombineReceiptStatusRejectsFalseHealthy(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		felt       receiptStatus
@@ -25,6 +28,7 @@ func TestCombineReceiptStatusRejectsFalseHealthy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, _ := combineReceiptStatus(tt.felt, tt.bundle, tt.hooks, tt.generation)
 			if got != tt.want {
 				t.Fatalf("status = %q, want %q", got, tt.want)
@@ -37,9 +41,10 @@ func TestCombineReceiptStatusRejectsFalseHealthy(t *testing.T) {
 }
 
 func TestBundleFromManifestRejectsWrongAndStaleBundles(t *testing.T) {
-	oldVersion := Version
-	Version = "1.2.3"
-	t.Cleanup(func() { Version = oldVersion })
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
+	a.version = "1.2.3"
 
 	root := t.TempDir()
 	manifest := filepath.Join(root, ".codex-plugin", "plugin.json")
@@ -59,7 +64,7 @@ func TestBundleFromManifestRejectsWrongAndStaleBundles(t *testing.T) {
 		if err := os.WriteFile(manifest, []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		return bundleFromManifest("codex", manifest, "/source")
+		return a.bundleFromManifest("codex", manifest, "/source")
 	}
 	if got := write(`{"name":"felt","version":"1.2.3"}`); got.Status != receiptHealthy {
 		t.Fatalf("matching bundle = %#v, want healthy", got)
@@ -76,20 +81,19 @@ func TestBundleFromManifestRejectsWrongAndStaleBundles(t *testing.T) {
 }
 
 func TestCollectFeltReceiptUsesResolvedExecutable(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "felt")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '9.8.7 (abc, built now)\\n'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FELT_BIN", bin)
-	t.Setenv("PATH", dir)
-	got := collectFeltReceipt()
+	t.Parallel()
+	env, _ := testEnv(t)
+	bin := sysenvtest.FakeCommand(t, env, "felt", "printf '9.8.7 (abc, built now)\\n'\n")
+	env.Set("FELT_BIN", bin)
+	env.Set("PATH", filepath.Dir(bin))
+	got := testApp(t, env).collectFeltReceipt()
 	if got.Status != receiptHealthy || got.Path != bin || got.Version != "9.8.7" || got.Build != "9.8.7 (abc, built now)" {
 		t.Fatalf("resolved executable receipt = %#v", got)
 	}
 }
 
 func TestCollectFeltReceiptFlagsShadowedStaleCopy(t *testing.T) {
+	t.Parallel()
 	fresh, stale, twin := t.TempDir(), t.TempDir(), t.TempDir()
 	write := func(dir, build string) {
 		t.Helper()
@@ -100,10 +104,12 @@ func TestCollectFeltReceiptFlagsShadowedStaleCopy(t *testing.T) {
 	write(stale, "dev (0123456789ab)")
 	write(fresh, "dev (3e5bcef70529)")
 	write(twin, "dev (3e5bcef70529)")
-	t.Setenv("FELT_BIN", "")
+	env, _ := testEnv(t)
+	env.Set("FELT_BIN", "")
+	a := testApp(t, env)
 
-	t.Setenv("PATH", strings.Join([]string{stale, fresh, twin}, string(os.PathListSeparator)))
-	got := collectFeltReceipt()
+	env.Set("PATH", strings.Join([]string{stale, fresh, twin}, string(os.PathListSeparator)))
+	got := a.collectFeltReceipt()
 	if got.Status != receiptMismatch || got.Path != filepath.Join(stale, "felt") {
 		t.Fatalf("shadowing receipt = %#v, want mismatch resolved to the first copy", got)
 	}
@@ -112,13 +118,14 @@ func TestCollectFeltReceiptFlagsShadowedStaleCopy(t *testing.T) {
 	}
 
 	// Identical builds on PATH are redundant, not skewed.
-	t.Setenv("PATH", strings.Join([]string{fresh, twin}, string(os.PathListSeparator)))
-	if got := collectFeltReceipt(); got.Status != receiptHealthy || len(got.Shadowed) != 0 {
+	env.Set("PATH", strings.Join([]string{fresh, twin}, string(os.PathListSeparator)))
+	if got := a.collectFeltReceipt(); got.Status != receiptHealthy || len(got.Shadowed) != 0 {
 		t.Fatalf("identical copies receipt = %#v, want healthy", got)
 	}
 }
 
 func TestFeltBuildMatchesVersionSeparatesLocalRevisions(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		marker, build string
 		want          bool
@@ -136,11 +143,11 @@ func TestFeltBuildMatchesVersionSeparatesLocalRevisions(t *testing.T) {
 }
 
 func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
-	oldVersion := Version
-	Version = "dev"
-	t.Cleanup(func() { Version = oldVersion })
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
+	a.version = "dev"
+	home := homeOf(t, env)
 	source := filepath.Join(home, "source", "claude-plugin")
 	if err := os.MkdirAll(filepath.Join(source, ".codex-plugin"), 0o755); err != nil {
 		t.Fatal(err)
@@ -169,15 +176,10 @@ func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
 	if err := os.WriteFile(list, []byte(listJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	binDir := t.TempDir()
-	codex := filepath.Join(binDir, "codex")
-	if err := os.WriteFile(codex, []byte("#!/bin/sh\ncat \"$RECEIPT_PLUGIN_LIST\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("RECEIPT_PLUGIN_LIST", list)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	sysenvtest.FakeCommand(t, env, "codex", "cat \"$RECEIPT_PLUGIN_LIST\"\n")
+	env.Set("RECEIPT_PLUGIN_LIST", list)
 
-	bundles := collectCodexBundle()
+	bundles := a.collectCodexBundle()
 	if len(bundles) != 1 {
 		t.Fatalf("bundles = %#v, want one active bundle", bundles)
 	}
@@ -187,23 +189,18 @@ func TestCollectCodexBundleUsesActivePluginSourceNotCache(t *testing.T) {
 }
 
 func TestCollectCodexBundleOmitsIntentionalSingleHarnessInstall(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	binDir := t.TempDir()
-	codex := filepath.Join(binDir, "codex")
-	if err := os.WriteFile(codex, []byte("#!/bin/sh\nprintf '%s\\n' '{\"installed\":[]}'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	if bundles := collectCodexBundle(); len(bundles) != 0 {
+	t.Parallel()
+	env, _ := testEnv(t)
+	sysenvtest.FakeCommand(t, env, "codex", "printf '%s\\n' '{\"installed\":[]}'\n")
+	if bundles := testApp(t, env).collectCodexBundle(); len(bundles) != 0 {
 		t.Fatalf("unconfigured Codex without Felt = %#v, want omitted", bundles)
 	}
 }
 
 func TestCollectCodexBundleReportsConfiguredButAbsentInstall(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	configDir := filepath.Join(home, ".codex")
+	t.Parallel()
+	env, _ := testEnv(t)
+	configDir := filepath.Join(homeOf(t, env), ".codex")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -213,19 +210,15 @@ enabled = true
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	binDir := t.TempDir()
-	codex := filepath.Join(binDir, "codex")
-	if err := os.WriteFile(codex, []byte("#!/bin/sh\nprintf '%s\\n' '{\"installed\":[]}'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	bundles := collectCodexBundle()
+	sysenvtest.FakeCommand(t, env, "codex", "printf '%s\\n' '{\"installed\":[]}'\n")
+	bundles := testApp(t, env).collectCodexBundle()
 	if len(bundles) != 1 || bundles[0].Status != receiptMissing {
 		t.Fatalf("configured but absent Codex Felt = %#v, want one missing bundle", bundles)
 	}
 }
 
 func TestHookFilesCompatibleRequiresBothRuntimeBoundaries(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	hooks := filepath.Join(root, "hooks")
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
@@ -263,9 +256,10 @@ func TestHookFilesCompatibleRequiresBothRuntimeBoundaries(t *testing.T) {
 }
 
 func TestCodexHooksTrustedRequiresBothActiveBoundaryEntries(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	configDir := filepath.Join(home, ".codex")
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
+	configDir := filepath.Join(homeOf(t, env), ".codex")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -278,20 +272,22 @@ trusted_hash = "sha256:two"
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !codexHooksTrusted() {
+	if !a.codexHooksTrusted() {
 		t.Fatal("trusted active hook entries were not recognized")
 	}
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config[:len(config)-len("\n[hooks.state.\"felt@cailmdaley-felt:hooks/hooks.json:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:two\"\n")]), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if codexHooksTrusted() {
+	if a.codexHooksTrusted() {
 		t.Fatal("one missing trust entry was reported fully trusted")
 	}
 }
 
 func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
+	home := homeOf(t, env)
 	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -300,7 +296,7 @@ func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := collectGenerationReceipt(nil, ReceiptComponent{})
+	got := a.collectGenerationReceipt(nil, ReceiptComponent{})
 	if got.Status != receiptPartial {
 		t.Fatalf("pending promotion receipt = %#v, want partial", got)
 	}
@@ -314,8 +310,10 @@ func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
 }
 
 func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
+	home := homeOf(t, env)
 	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
 	activeRoot := filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")
 	loadedRoot := filepath.Join(home, "loaded", "felt")
@@ -364,7 +362,7 @@ func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T)
 	writeMarker(activeRoot, active)
 	writeMarker(loadedRoot, loaded)
 
-	got := collectGenerationReceipt([]ReceiptBundle{{Harness: "codex", Path: loadedRoot, Enabled: true, Status: receiptHealthy}}, ReceiptComponent{})
+	got := a.collectGenerationReceipt([]ReceiptBundle{{Harness: "codex", Path: loadedRoot, Enabled: true, Status: receiptHealthy}}, ReceiptComponent{})
 	if got.Status != receiptMismatch {
 		t.Fatalf("generation disagreement receipt = %#v, want mismatch", got)
 	}
@@ -374,8 +372,10 @@ func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T)
 }
 
 func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
+	home := homeOf(t, env)
 	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
 	activeRoot := filepath.Join(runtimeDir, pluginCurrentName, "claude-plugin")
 	if err := os.MkdirAll(filepath.Join(activeRoot, ".claude-plugin"), 0o755); err != nil {
@@ -403,7 +403,7 @@ func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T
 
 	// The same marker read by an executable of another build must not read as
 	// healthy: felt_build is bound to the executable the receipt resolved.
-	got := collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "9.9.9"})
+	got := a.collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "9.9.9"})
 	if got.Status != receiptMismatch {
 		t.Fatalf("felt_build skew receipt = %#v, want mismatch", got)
 	}
@@ -412,7 +412,7 @@ func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T
 	}
 
 	// A matching executable is not a mismatch.
-	got = collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "1.2.3"})
+	got = a.collectGenerationReceipt(nil, ReceiptComponent{Path: "/resolved/felt", Version: "1.2.3"})
 	if got.Status == receiptMismatch {
 		t.Fatalf("matching felt_build reported mismatch: %#v", got)
 	}
@@ -422,67 +422,69 @@ func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T
 // "inspection" field that bin/shuttle-deploy reads to tell a bundle the
 // harness confirmed from one whose enablement is unknown.
 func TestReceiptBundleInspectionSaysHowEnablementWasEstablished(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		bin     map[string]string // fake harness CLIs on PATH
 		files   map[string]string // files under HOME
-		collect func() []ReceiptBundle
+		collect func(*app) []ReceiptBundle
 		want    receiptInspection
 	}{
 		{
 			name:    "codex plugin list reports felt",
 			bin:     map[string]string{"codex": `printf '%s\n' '{"installed":[{"pluginId":"felt@cailmdaley-felt","name":"felt","marketplaceName":"cailmdaley-felt","version":"1.0.0","enabled":true}]}'`},
-			collect: collectCodexBundle,
+			collect: (*app).collectCodexBundle,
 			want:    inspectionConfirmed,
 		},
 		{
 			name:    "codex plugin list fails",
 			bin:     map[string]string{"codex": "exit 1"},
-			collect: collectCodexBundle,
+			collect: (*app).collectCodexBundle,
 			want:    inspectionUnknown,
 		},
 		{
 			name:    "codex config cannot be parsed",
 			files:   map[string]string{".codex/config.toml": "[plugins\n"},
-			collect: collectCodexBundle,
+			collect: (*app).collectCodexBundle,
 			want:    inspectionUnknown,
 		},
 		{
 			name:    "codex config enables felt that its list omits",
 			bin:     map[string]string{"codex": `printf '%s\n' '{"installed":[]}'`},
 			files:   map[string]string{".codex/config.toml": "[plugins.\"felt@cailmdaley-felt\"]\nenabled = true\n"},
-			collect: collectCodexBundle,
+			collect: (*app).collectCodexBundle,
 			want:    inspectionConfigured,
 		},
 		{
 			name:    "claude plugin list reports felt",
 			bin:     map[string]string{"claude": `printf '%s\n' '[{"id":"felt@cailmdaley-felt","version":"1.0.0","enabled":true}]'`},
-			collect: collectClaudeBundle,
+			collect: (*app).collectClaudeBundle,
 			want:    inspectionConfirmed,
 		},
 		{
 			name:    "claude plugin list fails",
 			bin:     map[string]string{"claude": "exit 1"},
-			collect: collectClaudeBundle,
+			collect: (*app).collectClaudeBundle,
 			want:    inspectionUnknown,
 		},
 		{
 			name:    "claude settings cannot be parsed",
 			files:   map[string]string{".claude/settings.json": "{"},
-			collect: collectClaudeBundle,
+			collect: (*app).collectClaudeBundle,
 			want:    inspectionUnknown,
 		},
 		{
 			name:    "claude settings enable felt without the claude CLI",
 			files:   map[string]string{".claude/settings.json": `{"enabledPlugins":{"felt@cailmdaley-felt":true}}`},
-			collect: collectClaudeBundle,
+			collect: (*app).collectClaudeBundle,
 			want:    inspectionConfigured,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
+			t.Parallel()
+			env, _ := testEnv(t)
+			home := homeOf(t, env)
 			for rel, contents := range c.files {
 				path := filepath.Join(home, rel)
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -492,15 +494,12 @@ func TestReceiptBundleInspectionSaysHowEnablementWasEstablished(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			binDir := t.TempDir()
 			for name, body := range c.bin {
-				if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
-					t.Fatal(err)
-				}
+				sysenvtest.FakeCommand(t, env, name, body+"\n")
 			}
-			t.Setenv("PATH", binDir+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin")
+			sysenvtest.OnlyPath(env)
 
-			bundles := c.collect()
+			bundles := c.collect(testApp(t, env))
 			if len(bundles) != 1 {
 				t.Fatalf("bundles = %#v, want one", bundles)
 			}

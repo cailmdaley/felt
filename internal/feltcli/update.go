@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -24,82 +23,81 @@ type ghRelease struct {
 	TagName string `json:"tag_name"`
 }
 
-func init() {
-	updateCmd.GroupID = groupAgents
-	rootCmd.AddCommand(updateCmd)
-}
-
-var updateCmd = &cobra.Command{
-	Use:   "update",
-	Short: "Update felt and shuttle to the latest release",
-	Long: `Replaces both CLI binaries from the latest GitHub release (a dev build asks first),
+func (a *app) updateCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "update",
+		Short: "Update felt and shuttle to the latest release",
+		Long: `Replaces both CLI binaries from the latest GitHub release (a dev build asks first),
 then moves the agent integrations to the matching tag so hooks and skills stay
 in step with the binary: the Claude Code plugin whenever the claude CLI is on
 PATH, and the Codex and pi integrations where felt is already installed.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		feltPath, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("locating current felt binary: %w", err)
-		}
-		if err := refuseHomebrewUpdate(feltPath); err != nil {
-			return err
-		}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			feltPath, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("locating current felt binary: %w", err)
+			}
+			if err := a.refuseHomebrewUpdate(feltPath); err != nil {
+				return err
+			}
 
-		// Get latest release tag from GitHub
-		latest, err := latestVersion()
-		if err != nil {
-			return fmt.Errorf("checking latest version: %w", err)
-		}
+			// Get latest release tag from GitHub
+			latest, err := latestVersion()
+			if err != nil {
+				return fmt.Errorf("checking latest version: %w", err)
+			}
 
-		current := Version
-		latestClean := strings.TrimPrefix(latest, "v")
+			current := a.version
+			latestClean := strings.TrimPrefix(latest, "v")
 
-		if updatePairIsCurrent(feltPath, current, latest, feltBuildVersion()) {
-			fmt.Printf("Already up to date (%s)\n", current)
-			return nil
-		}
-		if current == latestClean {
-			fmt.Printf("Repairing felt and shuttle pair at %s\n", current)
-		}
-
-		if current == "dev" {
-			fmt.Println("Running a dev build — cannot determine current version.")
-			fmt.Printf("Latest release is %s. Continue? [y/N] ", latest)
-			var answer string
-			fmt.Scanln(&answer)
-			if answer != "y" && answer != "Y" {
+			if a.updatePairIsCurrent(feltPath, current, latest, a.feltBuildVersion()) {
+				fmt.Fprintf(a.env.Stdout, "Already up to date (%s)\n", current)
 				return nil
 			}
-		} else if current != latestClean {
-			fmt.Printf("Updating %s → %s\n", current, latestClean)
-		}
+			if current == latestClean {
+				fmt.Fprintf(a.env.Stdout, "Repairing felt and shuttle pair at %s\n", current)
+			}
 
-		// Build asset name matching goreleaser template
-		assetName := fmt.Sprintf("felt_%s_%s.tar.gz", archiveOS(), archiveArch())
-		url := fmt.Sprintf("https://github.com/cailmdaley/felt/releases/download/%s/%s", latest, assetName)
+			if current == "dev" {
+				fmt.Fprintln(a.env.Stdout, "Running a dev build — cannot determine current version.")
+				fmt.Fprintf(a.env.Stdout, "Latest release is %s. Continue? [y/N] ", latest)
+				var answer string
+				fmt.Scanln(&answer)
+				if answer != "y" && answer != "Y" {
+					return nil
+				}
+			} else if current != latestClean {
+				fmt.Fprintf(a.env.Stdout, "Updating %s → %s\n", current, latestClean)
+			}
 
-		// Download
-		resp, err := http.Get(url)
-		if err != nil {
-			return fmt.Errorf("downloading release: %w", err)
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("download failed: %s (asset: %s)", resp.Status, assetName)
-		}
+			// Build asset name matching goreleaser template
+			assetName := fmt.Sprintf("felt_%s_%s.tar.gz", archiveOS(), archiveArch())
+			url := fmt.Sprintf("https://github.com/cailmdaley/felt/releases/download/%s/%s", latest, assetName)
 
-		binaries, err := extractBinaries(resp.Body)
-		if err != nil {
-			return fmt.Errorf("extracting CLI binaries: %w", err)
-		}
-		if err := replaceBinaryPair(feltPath, binaries); err != nil {
-			return fmt.Errorf("replacing felt and shuttle binaries: %w", err)
-		}
+			// Download
+			resp, err := http.Get(url)
+			if err != nil {
+				return fmt.Errorf("downloading release: %w", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				return fmt.Errorf("download failed: %s (asset: %s)", resp.Status, assetName)
+			}
 
-		fmt.Printf("Updated felt and shuttle to %s\n", latestClean)
-		refreshPluginAfterUpdate(defaultMarketplaceRef())
-		return nil
-	},
+			binaries, err := extractBinaries(resp.Body)
+			if err != nil {
+				return fmt.Errorf("extracting CLI binaries: %w", err)
+			}
+			if err := replaceBinaryPair(feltPath, binaries); err != nil {
+				return fmt.Errorf("replacing felt and shuttle binaries: %w", err)
+			}
+
+			fmt.Fprintf(a.env.Stdout, "Updated felt and shuttle to %s\n", latestClean)
+			a.refreshPluginAfterUpdate(a.defaultMarketplaceRef())
+			return nil
+		},
+	}
+	command.GroupID = groupAgents
+	return command
 }
 
 // refreshPluginAfterUpdate keeps both agent integrations in lockstep with the
@@ -109,33 +107,33 @@ PATH, and the Codex and pi integrations where felt is already installed.`,
 // errored — the binary update has already succeeded and shouldn't be undone
 // because a downstream integration step couldn't run (e.g. claude CLI missing,
 // network blip on marketplace fetch).
-func refreshPluginAfterUpdate(marketplaceRef string) {
-	if _, err := exec.LookPath("claude"); err != nil {
-		fmt.Println("Plugin refresh skipped: claude CLI not on PATH (run `felt setup claude` once it is).")
+func (a *app) refreshPluginAfterUpdate(marketplaceRef string) {
+	if _, err := a.env.LookPath("claude"); err != nil {
+		fmt.Fprintln(a.env.Stdout, "Plugin refresh skipped: claude CLI not on PATH (run `felt setup claude` once it is).")
 	} else {
-		fmt.Println()
-		fmt.Println("Refreshing Claude Code plugin...")
-		if err := installPluginViaCLI(marketplaceRef); err != nil {
-			fmt.Printf("Plugin refresh failed: %v\n", err)
-			fmt.Println("Rerun `felt setup claude` to retry.")
+		fmt.Fprintln(a.env.Stdout)
+		fmt.Fprintln(a.env.Stdout, "Refreshing Claude Code plugin...")
+		if err := a.installPluginViaCLI(marketplaceRef); err != nil {
+			fmt.Fprintf(a.env.Stdout, "Plugin refresh failed: %v\n", err)
+			fmt.Fprintln(a.env.Stdout, "Rerun `felt setup claude` to retry.")
 		}
 	}
-	refreshCodexSetupIfInstalled(marketplaceRef)
-	refreshPiSetupIfInstalled(marketplaceRef)
+	a.refreshCodexSetupIfInstalled(marketplaceRef)
+	a.refreshPiSetupIfInstalled(marketplaceRef)
 }
 
-func updatePairIsCurrent(feltPath, currentVersion, latestVersion, build string) bool {
-	return currentVersion == strings.TrimPrefix(latestVersion, "v") && siblingShuttleBuildMatches(feltPath, build)
+func (a *app) updatePairIsCurrent(feltPath, currentVersion, latestVersion, build string) bool {
+	return currentVersion == strings.TrimPrefix(latestVersion, "v") && a.siblingShuttleBuildMatches(feltPath, build)
 }
 
-func feltBuildVersion() string {
-	if rootCmd.Version != "" {
-		return rootCmd.Version
+func (a *app) feltBuildVersion() string {
+	if displayVersion != "" {
+		return displayVersion
 	}
-	return Version
+	return a.version
 }
 
-func siblingShuttleBuildMatches(feltPath, expectedBuild string) bool {
+func (a *app) siblingShuttleBuildMatches(feltPath, expectedBuild string) bool {
 	shuttlePath := filepath.Join(filepath.Dir(feltPath), "shuttle")
 	info, err := os.Stat(shuttlePath)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
@@ -143,7 +141,7 @@ func siblingShuttleBuildMatches(feltPath, expectedBuild string) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, shuttlePath, "--version").CombinedOutput()
+	output, err := a.env.CommandContext(ctx, shuttlePath, "--version").CombinedOutput()
 	if err != nil {
 		return false
 	}
@@ -152,9 +150,9 @@ func siblingShuttleBuildMatches(feltPath, expectedBuild string) bool {
 	return version == expectedBuild
 }
 
-func refuseHomebrewUpdate(path string) error {
+func (a *app) refuseHomebrewUpdate(path string) error {
 	resolved := filepath.Clean(path)
-	if absolute, err := filepath.Abs(resolved); err == nil {
+	if absolute, err := a.env.Abs(resolved); err == nil {
 		resolved = absolute
 	}
 	if real, err := filepath.EvalSymlinks(resolved); err == nil {
@@ -163,13 +161,13 @@ func refuseHomebrewUpdate(path string) error {
 	if strings.Contains(filepath.ToSlash(resolved), "/Cellar/") {
 		return homebrewUpdateError(resolved)
 	}
-	brew, err := exec.LookPath("brew")
+	brew, err := a.env.LookPath("brew")
 	if err != nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, brew, "--prefix").Output()
+	output, err := a.env.CommandContext(ctx, brew, "--prefix").Output()
 	if err != nil {
 		return nil
 	}
@@ -177,7 +175,7 @@ func refuseHomebrewUpdate(path string) error {
 	if real, err := filepath.EvalSymlinks(prefix); err == nil {
 		prefix = real
 	}
-	if prefix != "" && pathWithin(resolved, prefix) {
+	if prefix != "" && a.pathWithin(resolved, prefix) {
 		return homebrewUpdateError(resolved)
 	}
 	return nil
@@ -187,12 +185,12 @@ func homebrewUpdateError(path string) error {
 	return fmt.Errorf("felt at %s is managed by Homebrew; update it with `brew upgrade felt`", path)
 }
 
-func pathWithin(path, root string) bool {
-	pathAbs, err := filepath.Abs(path)
+func (a *app) pathWithin(path, root string) bool {
+	pathAbs, err := a.env.Abs(path)
 	if err != nil {
 		return false
 	}
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := a.env.Abs(root)
 	if err != nil {
 		return false
 	}

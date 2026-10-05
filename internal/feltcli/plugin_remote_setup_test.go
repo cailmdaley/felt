@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 // These tests deliberately exercise the setup entry points instead of the
@@ -12,8 +15,9 @@ import (
 // but it must never be handed a remote ref: felt has to acquire and validate
 // the payload first, then give both harnesses the one promoted path.
 type remoteSetupFixture struct {
+	env       *sysenv.Env
+	a         *app
 	home      string
-	bin       string
 	gitLog    string
 	nativeLog string
 	stateDir  string
@@ -25,27 +29,23 @@ type remoteSetupFixture struct {
 func newRemoteSetupFixture(t *testing.T, harness string) *remoteSetupFixture {
 	t.Helper()
 	root := t.TempDir()
+	env, _ := testEnv(t)
 	f := &remoteSetupFixture{
-		home:      filepath.Join(root, "home"),
-		bin:       filepath.Join(root, "bin"),
+		env:       env,
+		a:         testApp(t, env),
+		home:      homeOf(t, env),
 		gitLog:    filepath.Join(root, "git.log"),
 		nativeLog: filepath.Join(root, "native.log"),
 		stateDir:  filepath.Join(root, "native-state"),
 		failMark:  filepath.Join(root, "fail-once"),
 		remote:    "cailmdaley/felt",
 	}
-	if err := os.MkdirAll(f.bin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(f.home, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(f.stateDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	f.source = f.remotePayload(t, "one")
-	writeExecutable(t, filepath.Join(f.bin, "felt"), "#!/bin/sh\nexit 0\n")
-	writeExecutable(t, filepath.Join(f.bin, "git"), `#!/bin/sh
+	felt := sysenvtest.FakeCommand(t, env, "felt", "exit 0\n")
+	sysenvtest.FakeCommand(t, env, "git", `#!/bin/sh
 set -eu
 printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
 if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then
@@ -64,19 +64,18 @@ if [ "$is_clone" = 1 ]; then
 fi
 `)
 	if harness == "claude" {
-		writeExecutable(t, filepath.Join(f.bin, "claude"), claudeSetupFake)
+		sysenvtest.FakeCommand(t, env, "claude", claudeSetupFake)
 	} else {
-		writeExecutable(t, filepath.Join(f.bin, "codex"), codexSetupFake)
+		sysenvtest.FakeCommand(t, env, "codex", codexSetupFake)
 	}
-	t.Setenv("HOME", f.home)
-	t.Setenv("PATH", f.bin+string(os.PathListSeparator)+"/usr/bin:/bin")
-	t.Setenv("FELT_BIN", filepath.Join(f.bin, "felt"))
-	t.Setenv("FAKE_GIT_LOG", f.gitLog)
-	t.Setenv("FAKE_GIT_SOURCE", f.source)
-	t.Setenv("FAKE_NATIVE_LOG", f.nativeLog)
-	t.Setenv("FAKE_NATIVE_STATE", f.stateDir)
-	t.Setenv("FAKE_NATIVE_FAIL_MARK", f.failMark)
-	t.Setenv("FAKE_NATIVE_REMOTE", "cailmdaley/felt")
+	sysenvtest.OnlyPath(env)
+	env.Set("FELT_BIN", felt)
+	env.Set("FAKE_GIT_LOG", f.gitLog)
+	env.Set("FAKE_GIT_SOURCE", f.source)
+	env.Set("FAKE_NATIVE_LOG", f.nativeLog)
+	env.Set("FAKE_NATIVE_STATE", f.stateDir)
+	env.Set("FAKE_NATIVE_FAIL_MARK", f.failMark)
+	env.Set("FAKE_NATIVE_REMOTE", "cailmdaley/felt")
 	return f
 }
 
@@ -93,13 +92,6 @@ func (f *remoteSetupFixture) remotePayload(t *testing.T, generation string) stri
 		t.Fatal(err)
 	}
 	return root
-}
-
-func writeExecutable(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // nativeFakePrologue is the shell prologue both harness fakes share.
@@ -245,7 +237,7 @@ exit 0
 func (f *remoteSetupFixture) setGeneration(t *testing.T, generation string) {
 	t.Helper()
 	f.source = f.remotePayload(t, generation)
-	t.Setenv("FAKE_GIT_SOURCE", f.source)
+	f.env.Set("FAKE_GIT_SOURCE", f.source)
 }
 
 func (f *remoteSetupFixture) currentGeneration(t *testing.T) string {
@@ -292,10 +284,12 @@ func (f *remoteSetupFixture) assertNativeUsesCurrent(t *testing.T) {
 }
 
 func TestRemoteSetupUsesValidatedPromotion(t *testing.T) {
+	t.Parallel()
 	for _, h := range nativeHarnesses {
 		t.Run(h.name, func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, h.name)
-			if err := h.install(f.remote); err != nil {
+			if err := h.install(f.a, f.remote); err != nil {
 				t.Fatalf("first remote %s setup: %v", h.name, err)
 			}
 			if got := f.currentGeneration(t); got != "one" {
@@ -303,7 +297,7 @@ func TestRemoteSetupUsesValidatedPromotion(t *testing.T) {
 			}
 
 			f.setGeneration(t, "two")
-			if err := h.install(f.remote + "#second"); err != nil {
+			if err := h.install(f.a, f.remote+"#second"); err != nil {
 				t.Fatalf("repeated remote %s setup: %v", h.name, err)
 			}
 			if got := f.currentGeneration(t); got != "two" {
@@ -311,8 +305,8 @@ func TestRemoteSetupUsesValidatedPromotion(t *testing.T) {
 			}
 
 			f.setGeneration(t, "failed")
-			t.Setenv("FAKE_NATIVE_FAIL_ONCE", "1")
-			if err := h.install(f.remote + "#failed"); err == nil || !strings.Contains(err.Error(), "last known-good preserved") {
+			f.env.Set("FAKE_NATIVE_FAIL_ONCE", "1")
+			if err := h.install(f.a, f.remote+"#failed"); err == nil || !strings.Contains(err.Error(), "last known-good preserved") {
 				t.Fatalf("reported native failure = %v, want preserved-promotion error", err)
 			}
 			if got := f.currentGeneration(t); got != "two" {
@@ -331,8 +325,8 @@ func TestRemoteSetupUsesValidatedPromotion(t *testing.T) {
 // against both real code paths.
 var nativeHarnesses = []struct {
 	name    string
-	install func(string) error
+	install func(*app, string) error
 }{
-	{"claude", installPluginViaCLI},
-	{"codex", installCodexPluginViaCLI},
+	{"claude", (*app).installPluginViaCLI},
+	{"codex", (*app).installCodexPluginViaCLI},
 }

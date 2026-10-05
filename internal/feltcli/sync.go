@@ -7,30 +7,22 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
 const syncGitTimeout = 2 * time.Minute
 
-var syncPush bool
-
-func init() {
-	syncCmd.GroupID = groupStore
-	rootCmd.AddCommand(syncCmd)
-	syncCmd.Flags().BoolVar(&syncPush, "push", false, "Push the branch to its tracking branch after a successful merge")
-}
-
-var syncCmd = &cobra.Command{
-	Use:   "sync",
-	Short: "Merge the store's Git upstream; --push publishes committed work",
-	Long: `Fetches the tracking branch of the repository that holds the store and merges
+func (a *app) syncCmd() *cobra.Command {
+	var syncPush bool
+	command := &cobra.Command{
+		Use:   "sync",
+		Short: "Merge the store's Git upstream; --push publishes committed work",
+		Long: `Fetches the tracking branch of the repository that holds the store and merges
 it into the checked-out branch. A project .felt that is a symlink syncs the
 repository it points into.
 
@@ -41,27 +33,31 @@ or bisect in progress. Unstaged and untracked files stay put unless the merge
 would overwrite them, in which case Git stops it. A merge that conflicts is
 left for you to resolve and commit. --push then pushes the branch to its
 tracking branch.`,
-	Example: `  felt sync          before substantive work
+		Example: `  felt sync          before substantive work
   felt sync --push   after committing`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := felt.RequireStore(sysenv.OS(), changeDir)
-		if err != nil {
-			return err
-		}
-		storeRoot, err := filepath.EvalSymlinks(storage.Root())
-		if err != nil {
-			return fmt.Errorf("resolving felt store path %s: %w", storage.Root(), err)
-		}
-		return syncStore(cmd.Context(), storeRoot, syncPush, cmd.OutOrStdout())
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			storage, _, err := felt.RequireStore(a.env, a.dir)
+			if err != nil {
+				return err
+			}
+			storeRoot, err := filepath.EvalSymlinks(storage.Root())
+			if err != nil {
+				return fmt.Errorf("resolving felt store path %s: %w", storage.Root(), err)
+			}
+			return a.syncStore(cmd.Context(), storeRoot, syncPush, cmd.OutOrStdout())
+		},
+	}
+	command.GroupID = groupStore
+	command.Flags().BoolVar(&syncPush, "push", false, "Push the branch to its tracking branch after a successful merge")
+	return command
 }
 
-func syncStore(parent context.Context, storeRoot string, push bool, output io.Writer) error {
+func (a *app) syncStore(parent context.Context, storeRoot string, push bool, output io.Writer) error {
 	if parent == nil {
 		parent = context.Background()
 	}
-	git := func(args ...string) (string, error) { return runSyncGit(parent, storeRoot, args...) }
+	git := func(args ...string) (string, error) { return a.runSyncGit(parent, storeRoot, args...) }
 
 	if _, err := git("rev-parse", "--show-toplevel"); err != nil {
 		return fmt.Errorf("finding the felt store's Git root: %w", err)
@@ -166,11 +162,11 @@ func hasUnmergedIndex(git func(...string) (string, error)) bool {
 	return err == nil && strings.TrimSpace(files) != ""
 }
 
-func runSyncGit(parent context.Context, dir string, args ...string) (string, error) {
+func (a *app) runSyncGit(parent context.Context, dir string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(parent, syncGitTimeout)
 	defer cancel()
 	fullArgs := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, "git", fullArgs...)
+	cmd := a.env.CommandContext(ctx, "git", fullArgs...)
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output

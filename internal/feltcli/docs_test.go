@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 var retiredCommandPhrases = []string{
@@ -37,7 +39,7 @@ func TestGeneratedGuidanceAvoidsRetiredCommands(t *testing.T) {
 
 func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 	var visible []string
-	for _, cmd := range rootCmd.Commands() {
+	for _, cmd := range NewRootCmd(sysenv.New(t.TempDir(), nil)).Commands() {
 		if cmd.Hidden {
 			continue
 		}
@@ -78,7 +80,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 }
 
 func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
-	usage := rootCmd.UsageString()
+	usage := NewRootCmd(sysenv.New(t.TempDir(), nil)).UsageString()
 	for _, leaked := range []string{"Body text", "Outcome: what was decided", "Status (open, active, closed)"} {
 		if strings.Contains(usage, leaked) {
 			t.Fatalf("root usage still leaks add-only flag %q:\n%s", leaked, usage)

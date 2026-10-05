@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // TestHookSessionEnvelope verifies the SessionStart envelope shape and that
@@ -20,35 +21,22 @@ import (
 // directive line, then either Active / Open + entries (or the empty marker),
 // then Recently Touched with truncated outcomes.
 func TestUnknownHookVerbDrainsStdinWithoutOutput(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
-	stdin, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := `{"hook":"event","message":"payload"}`
-	if _, err := writer.WriteString(payload); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	previous := os.Stdin
-	os.Stdin = stdin
-	t.Cleanup(func() {
-		os.Stdin = previous
-		_ = stdin.Close()
-	})
-	stdout, stderr, err := executeCLI(t, dir, "hook", "event")
+	env, _ := testEnv(t)
+	stdin := strings.NewReader(`{"hook":"event","message":"payload"}`)
+	env.Stdin = stdin
+	stdout, stderr, err := executeIn(t, env, dir, "hook", "event")
 	if err != nil || stdout != "" || stderr != "" {
 		t.Fatalf("unknown hook result stdout=%q stderr=%q err=%v", stdout, stderr, err)
 	}
-	remaining, err := io.ReadAll(stdin)
-	if err != nil || len(remaining) != 0 {
-		t.Fatalf("unknown hook left unread stdin %q, err=%v", remaining, err)
+	if stdin.Len() != 0 {
+		t.Fatalf("unknown hook left %d bytes of stdin unread", stdin.Len())
 	}
 }
 
 func TestOldEventHookPipesPayloadToSilentUnknownVerb(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	hookDir := t.TempDir()
 	oldEvent, err := os.ReadFile("testdata/old-event.sh")
@@ -90,12 +78,8 @@ func TestUnknownHookVerbSubprocessHelper(t *testing.T) {
 	if args == "" {
 		return
 	}
-	rootCmd.SetArgs(strings.Fields(args))
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	// This is the felt binary's main, run in a child process.
+	os.Exit(Run(sysenv.OS(), strings.Fields(args)))
 }
 
 func TestHookSessionEnvelope(t *testing.T) {
@@ -483,8 +467,11 @@ func TestHookPreToolGate(t *testing.T) {
 	}
 	plainDir := t.TempDir()
 
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env, _ := testEnv(t)
+	tmp := t.TempDir()
+	env.Set("TMPDIR", tmp)
+	a := testApp(t, env)
+	home := homeOf(t, env)
 	claudeTranscript := filepath.Join(home, ".claude", "projects", "x", "log.jsonl")
 	codexTranscript := filepath.Join(t.TempDir(), "codex.jsonl")
 	piTranscript := filepath.Join(home, ".pi", "agent", "sessions", "-Users-x", "log.jsonl")
@@ -585,14 +572,9 @@ func TestHookPreToolGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Clean flag files used in this case.
-			for _, sid := range []string{tc.flagFor, tc.noFlagFor, tc.input.SessionID} {
-				if sid != "" {
-					_ = os.Remove(filepath.Join(os.TempDir(), "felt-reminded-"+sid))
-				}
-			}
-
-			out := runPreToolWithInput(t, tc.input)
+			// Each case has its own session id, so its flag file is its own.
+			t.Parallel()
+			out := runPreToolWithInput(t, a, tc.input)
 
 			if tc.expectOut {
 				if !strings.Contains(out, "\"permissionDecision\": \"deny\"") {
@@ -605,12 +587,12 @@ func TestHookPreToolGate(t *testing.T) {
 			}
 
 			if tc.flagFor != "" {
-				if _, err := os.Stat(filepath.Join(os.TempDir(), "felt-reminded-"+tc.flagFor)); err != nil {
+				if _, err := os.Stat(filepath.Join(tmp, "felt-reminded-"+tc.flagFor)); err != nil {
 					t.Fatalf("expected flag file for %s: %v", tc.flagFor, err)
 				}
 			}
 			if tc.noFlagFor != "" {
-				if _, err := os.Stat(filepath.Join(os.TempDir(), "felt-reminded-"+tc.noFlagFor)); err == nil {
+				if _, err := os.Stat(filepath.Join(tmp, "felt-reminded-"+tc.noFlagFor)); err == nil {
 					t.Fatalf("did not expect flag file for %s", tc.noFlagFor)
 				}
 			}
@@ -625,15 +607,15 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(feltDir, ".felt"), 0755); err != nil {
 		t.Fatalf("mkdir .felt: %v", err)
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	claudeTranscript := filepath.Join(home, ".claude", "projects", "x", "log.jsonl")
+	env, _ := testEnv(t)
+	env.Set("TMPDIR", t.TempDir())
+	a := testApp(t, env)
+	claudeTranscript := filepath.Join(homeOf(t, env), ".claude", "projects", "x", "log.jsonl")
 
 	sid := "persist-test"
-	_ = os.Remove(filepath.Join(os.TempDir(), "felt-reminded-"+sid))
 
 	// Activate felt skill: marks flag, no output.
-	out := runPreToolWithInput(t, preToolInput{
+	out := runPreToolWithInput(t, a, preToolInput{
 		SessionID:      sid,
 		ToolName:       "Skill",
 		CWD:            feltDir,
@@ -647,7 +629,7 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 	}
 
 	// Subsequent Bash: silent pass.
-	out = runPreToolWithInput(t, preToolInput{
+	out = runPreToolWithInput(t, a, preToolInput{
 		SessionID:      sid,
 		ToolName:       "Bash",
 		CWD:            feltDir,
@@ -713,50 +695,25 @@ func runHookCommand(t *testing.T, dir string, args ...string) string {
 	return out
 }
 
-// stdinPipe marshals input onto a pipe the hook can read as its stdin.
-func stdinPipe(t *testing.T, input any) *os.File {
+// stdinPipe marshals input into a reader the hook can read as its stdin.
+func stdinPipe(t *testing.T, input any) io.Reader {
 	t.Helper()
 	payload, err := json.Marshal(input)
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-	stdinR, stdinW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("stdin pipe: %v", err)
-	}
-	if _, err := stdinW.Write(payload); err != nil {
-		t.Fatalf("write stdin: %v", err)
-	}
-	stdinW.Close()
-	return stdinR
+	return bytes.NewReader(payload)
 }
 
 // runPreToolWithInput invokes runPreToolHook directly with a constructed
 // payload — easier than wiring stdin through the cobra layer in tests.
-func runPreToolWithInput(t *testing.T, input preToolInput) string {
+func runPreToolWithInput(t *testing.T, a *app, input preToolInput) string {
 	t.Helper()
-
-	stdinR := stdinPipe(t, input)
-
-	stdoutR, stdoutW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
-	defer stdoutR.Close()
-
-	done := make(chan struct{})
-	var buf bytes.Buffer
-	go func() {
-		_, _ = buf.ReadFrom(stdoutR)
-		close(done)
-	}()
-
-	if err := runPreToolHook(stdinR, stdoutW); err != nil {
+	var out bytes.Buffer
+	if err := a.runPreToolHook(stdinPipe(t, input), &out); err != nil {
 		t.Fatalf("runPreToolHook: %v", err)
 	}
-	stdoutW.Close()
-	<-done
-	return buf.String()
+	return out.String()
 }
 
 // runPostToolWithInput invokes runPostToolHook directly with a constructed

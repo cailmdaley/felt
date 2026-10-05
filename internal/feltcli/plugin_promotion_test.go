@@ -9,10 +9,15 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestPluginPromotionLockSerializesTransactions(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
 	var active int32
 	var maxActive int32
 	var wg sync.WaitGroup
@@ -20,7 +25,7 @@ func TestPluginPromotionLockSerializesTransactions(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := withPluginPromotionLock(func() error {
+			if err := a.withPluginPromotionLock(func() error {
 				current := atomic.AddInt32(&active, 1)
 				for {
 					maximum := atomic.LoadInt32(&maxActive)
@@ -43,19 +48,11 @@ func TestPluginPromotionLockSerializesTransactions(t *testing.T) {
 }
 
 func TestRestoreCodexInstallationRemovesCandidateBeforeAddingPrevious(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "calls.log")
-	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$CODEX_TEST_LOG"
-exit 0
-`
-	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CODEX_TEST_LOG", logPath)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Parallel()
+	env, _ := testEnv(t)
+	calls := fakeCallLog(t, env, "codex", "")
 
-	err := restoreCodexInstallation(codexInstallationState{
+	err := testApp(t, env).restoreCodexInstallation(codexInstallationState{
 		Source:     "/last-known-good",
 		Configured: true,
 		Installed:  false,
@@ -63,10 +60,7 @@ exit 0
 	if err != nil {
 		t.Fatalf("restoreCodexInstallation: %v", err)
 	}
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := calls()
 	want := "plugin marketplace remove " + marketplaceName + "\n" +
 		"plugin marketplace add /last-known-good\n" +
 		"plugin remove " + codexPluginRef + "\n"
@@ -103,6 +97,7 @@ func testRepoRoot(t *testing.T) string {
 }
 
 func TestValidatePluginCandidateChecksGenerationAndExecutable(t *testing.T) {
+	t.Parallel()
 	root := testRepoRoot(t)
 	if err := validatePluginCandidate(root, testFeltExecutable(t)); err != nil {
 		t.Fatalf("repository candidate should validate: %v", err)
@@ -137,36 +132,32 @@ func TestValidatePluginCandidateChecksGenerationAndExecutable(t *testing.T) {
 }
 
 func TestCaptureNativeInstallationUsesCurrentCLIJSONShapes(t *testing.T) {
+	t.Parallel()
 	if got := claudeMarketplaceSource(claudeMarketplaceEntry{Source: "github", Repo: "cailmdaley/felt"}); got != "cailmdaley/felt" {
 		t.Fatalf("Claude github rollback source = %q", got)
 	}
 
-	dir := t.TempDir()
-	codex := filepath.Join(dir, "codex")
-	script := `#!/bin/sh
-if [ "$1" = plugin ] && [ "$2" = marketplace ]; then
+	env, _ := testEnv(t)
+	sysenvtest.FakeCommand(t, env, "codex", `if [ "$1" = plugin ] && [ "$2" = marketplace ]; then
   printf '%s\n' '{"marketplaces":[{"name":"cailmdaley-felt","root":"/tmp/felt-current","marketplaceSource":{"sourceType":"github","source":"cailmdaley/felt"}}]}'
 elif [ "$1" = plugin ] && [ "$2" = list ]; then
   printf '%s\n' '{"installed":[{"pluginId":"felt@cailmdaley-felt"}]}'
 else
   exit 1
 fi
-`
-	if err := os.WriteFile(codex, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	state := captureCodexInstallation()
+`)
+	state := testApp(t, env).captureCodexInstallation()
 	if !state.Configured || state.Source != "cailmdaley/felt" || !state.Installed {
 		t.Fatalf("Codex state = %#v, want github source + installed plugin", state)
 	}
 }
 
 func TestStagePluginCandidateCopiesOnlyValidatedPayload(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, _ := testEnv(t)
+	home := homeOf(t, env)
 	root := testRepoRoot(t)
-	candidate, err := stagePluginCandidate(root, testFeltExecutable(t))
+	candidate, err := testApp(t, env).stagePluginCandidate(root, testFeltExecutable(t))
 	if err != nil {
 		t.Fatalf("stagePluginCandidate: %v", err)
 	}
@@ -182,6 +173,7 @@ func TestStagePluginCandidateCopiesOnlyValidatedPayload(t *testing.T) {
 }
 
 func TestCopyTreeRejectsSymlinkPayload(t *testing.T) {
+	t.Parallel()
 	source := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside")
 	if err := os.WriteFile(outside, []byte("not part of the candidate"), 0o644); err != nil {
@@ -197,9 +189,11 @@ func TestCopyTreeRejectsSymlinkPayload(t *testing.T) {
 }
 
 func TestLocalPluginSourceWithoutManifestIsRejectedBeforeInstall(t *testing.T) {
-	t.Setenv("FELT_BIN", testFeltExecutable(t))
+	t.Parallel()
+	env, _ := testEnv(t)
+	env.Set("FELT_BIN", testFeltExecutable(t))
 	called := false
-	err := withStagedPluginCandidateWithRestore(t.TempDir(), func(string) error {
+	err := testApp(t, env).withStagedPluginCandidateWithRestore(t.TempDir(), func(string) error {
 		called = true
 		return nil
 	}, nil)
@@ -212,6 +206,7 @@ func TestLocalPluginSourceWithoutManifestIsRejectedBeforeInstall(t *testing.T) {
 }
 
 func TestPromotePluginCandidateRollsBackOnInstallerFailure(t *testing.T) {
+	t.Parallel()
 	runtimeDir := t.TempDir()
 	current := filepath.Join(runtimeDir, pluginCurrentName)
 	if err := os.MkdirAll(current, 0o755); err != nil {
@@ -227,7 +222,8 @@ func TestPromotePluginCandidateRollsBackOnInstallerFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(candidate, "generation"), []byte("bad"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := promotePluginCandidate(candidate, func(string) error { return os.ErrPermission }, nil)
+	env, _ := testEnv(t)
+	err := testApp(t, env).promotePluginCandidate(candidate, func(string) error { return os.ErrPermission }, nil)
 	if err == nil || !strings.Contains(err.Error(), "last known-good preserved") {
 		t.Fatalf("expected rollback error, got %v", err)
 	}
@@ -244,6 +240,7 @@ func TestPromotePluginCandidateRollsBackOnInstallerFailure(t *testing.T) {
 }
 
 func TestPromotePluginCandidateRestoresNativeStateBeforeReturningFailure(t *testing.T) {
+	t.Parallel()
 	runtimeDir := t.TempDir()
 	current := filepath.Join(runtimeDir, pluginCurrentName)
 	if err := os.MkdirAll(current, 0o755); err != nil {
@@ -260,7 +257,8 @@ func TestPromotePluginCandidateRestoresNativeStateBeforeReturningFailure(t *test
 		t.Fatal(err)
 	}
 	nativeGeneration := "good"
-	err := promotePluginCandidate(candidate, func(string) error {
+	env, _ := testEnv(t)
+	err := testApp(t, env).promotePluginCandidate(candidate, func(string) error {
 		nativeGeneration = "bad"
 		return os.ErrPermission
 	}, func() error {
@@ -277,7 +275,10 @@ func TestPromotePluginCandidateRestoresNativeStateBeforeReturningFailure(t *test
 }
 
 func TestPromotePluginCandidateIsRepeatable(t *testing.T) {
+	t.Parallel()
 	runtimeDir := t.TempDir()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
 	for _, generation := range []string{"one", "two"} {
 		candidate := filepath.Join(runtimeDir, ".candidate-"+generation)
 		if err := os.MkdirAll(candidate, 0o755); err != nil {
@@ -286,7 +287,7 @@ func TestPromotePluginCandidateIsRepeatable(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(candidate, "generation"), []byte(generation), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := promotePluginCandidate(candidate, func(active string) error {
+		if err := a.promotePluginCandidate(candidate, func(active string) error {
 			_, err := os.Stat(filepath.Join(active, "generation"))
 			return err
 		}, nil); err != nil {
@@ -300,6 +301,7 @@ func TestPromotePluginCandidateIsRepeatable(t *testing.T) {
 }
 
 func TestRecoverPluginPromotionPrefersLastKnownGoodAfterInterruption(t *testing.T) {
+	t.Parallel()
 	runtimeDir := t.TempDir()
 	current := filepath.Join(runtimeDir, pluginCurrentName)
 	previous := filepath.Join(runtimeDir, pluginPreviousName)
@@ -322,7 +324,8 @@ func TestRecoverPluginPromotionPrefersLastKnownGoodAfterInterruption(t *testing.
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := recoverPluginPromotion(runtimeDir); err != nil {
+	env, _ := testEnv(t)
+	if err := testApp(t, env).recoverPluginPromotion(runtimeDir); err != nil {
 		t.Fatalf("recovery: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(current, "generation"))
@@ -335,6 +338,7 @@ func TestRecoverPluginPromotionPrefersLastKnownGoodAfterInterruption(t *testing.
 }
 
 func TestRecoverPluginPromotionRestoresFilesystemBeforeNativeReconciliation(t *testing.T) {
+	t.Parallel()
 	f := newRemoteSetupFixture(t, "claude")
 	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
 	current := filepath.Join(runtimeDir, pluginCurrentName)
@@ -367,7 +371,7 @@ func TestRecoverPluginPromotionRestoresFilesystemBeforeNativeReconciliation(t *t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := recoverPluginPromotion(runtimeDir); err != nil {
+	if err := f.a.recoverPluginPromotion(runtimeDir); err != nil {
 		t.Fatalf("recovery: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(current, "generation.txt"))
@@ -384,8 +388,9 @@ func TestRecoverPluginPromotionRestoresFilesystemBeforeNativeReconciliation(t *t
 }
 
 func TestRecoverInitialClaudePromotionDoesNotRemoveAlreadyAbsentMarketplace(t *testing.T) {
+	t.Parallel()
 	f := newRemoteSetupFixture(t, "claude")
-	t.Setenv("FAKE_CLAUDE_FAIL_ABSENT_REMOVE", "1")
+	f.env.Set("FAKE_CLAUDE_FAIL_ABSENT_REMOVE", "1")
 	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
 	current := filepath.Join(runtimeDir, pluginCurrentName)
 	if err := os.MkdirAll(current, 0o755); err != nil {
@@ -399,7 +404,7 @@ func TestRecoverInitialClaudePromotionDoesNotRemoveAlreadyAbsentMarketplace(t *t
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := recoverPluginPromotion(runtimeDir); err != nil {
+	if err := f.a.recoverPluginPromotion(runtimeDir); err != nil {
 		t.Fatalf("already-absent recovery: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(runtimeDir, pluginJournalName)); !os.IsNotExist(err) {
@@ -415,6 +420,7 @@ func TestRecoverInitialClaudePromotionDoesNotRemoveAlreadyAbsentMarketplace(t *t
 }
 
 func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testing.T) {
+	t.Parallel()
 	f := newRemoteSetupFixture(t, "claude")
 	runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
 	current := filepath.Join(runtimeDir, pluginCurrentName)
@@ -447,10 +453,10 @@ func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testi
 	}
 
 	root := testRepoRoot(t)
-	installFakeGitForPluginAcquisition(t, root)
-	t.Setenv("FELT_BIN", testFeltExecutable(t))
-	t.Setenv("FELT_TEST_GIT_FAIL", "1")
-	err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
+	installFakeGitForPluginAcquisition(t, f.env, root)
+	f.env.Set("FELT_BIN", testFeltExecutable(t))
+	f.env.Set("FELT_TEST_GIT_FAIL", "1")
+	err := f.a.withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
 		t.Fatal("native installer called after acquisition failure")
 		return nil
 	}, nil)
@@ -464,9 +470,9 @@ func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testi
 		t.Fatalf("filesystem after acquisition failure = %q (%v), want good", got, readErr)
 	}
 
-	t.Setenv("FELT_TEST_GIT_FAIL", "0")
+	f.env.Set("FELT_TEST_GIT_FAIL", "0")
 	called := false
-	if err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(active string) error {
+	if err := f.a.withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(active string) error {
 		called = true
 		return validatePluginCandidate(active, "")
 	}, nil); err != nil {
@@ -478,6 +484,7 @@ func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testi
 }
 
 func TestParseRemoteMarketplaceRef(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		input      string
@@ -502,6 +509,7 @@ func TestParseRemoteMarketplaceRef(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := parseRemoteMarketplaceRef(test.input)
 			if test.wantErr {
 				if err == nil {
@@ -519,11 +527,13 @@ func TestParseRemoteMarketplaceRef(t *testing.T) {
 	}
 }
 
-func installFakeGitForPluginAcquisition(t *testing.T, source string) string {
+// installFakeGitForPluginAcquisition fakes git on env's PATH: a clone copies
+// source's plugin payload, logged to $FELT_TEST_GIT_LOG, and fails when
+// $FELT_TEST_GIT_FAIL is 1. It returns the log path.
+func installFakeGitForPluginAcquisition(t *testing.T, env *sysenv.Env, source string) string {
 	t.Helper()
-	dir := t.TempDir()
-	git := filepath.Join(dir, "git")
-	script := `#!/bin/sh
+	log := filepath.Join(t.TempDir(), "git.log")
+	sysenvtest.FakeCommand(t, env, "git", `#!/bin/sh
 last=""
 for arg do last="$arg"; done
 printf '%s\n' "$*" >> "$FELT_TEST_GIT_LOG"
@@ -538,22 +548,20 @@ fi
 mkdir -p "$last"
 cp -R "$FELT_TEST_GIT_SOURCE"/.claude-plugin "$last"/
 cp -R "$FELT_TEST_GIT_SOURCE"/claude-plugin "$last"/
-`
-	if err := os.WriteFile(git, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("FELT_TEST_GIT_SOURCE", source)
-	t.Setenv("FELT_TEST_GIT_LOG", filepath.Join(dir, "git.log"))
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return dir
+`)
+	env.Set("FELT_TEST_GIT_SOURCE", source)
+	env.Set("FELT_TEST_GIT_LOG", log)
+	return log
 }
 
 func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, _ := testEnv(t)
+	home := homeOf(t, env)
+	a := testApp(t, env)
 	root := testRepoRoot(t)
-	installFakeGitForPluginAcquisition(t, root)
-	t.Setenv("FELT_BIN", testFeltExecutable(t))
+	gitLog := installFakeGitForPluginAcquisition(t, env, root)
+	env.Set("FELT_BIN", testFeltExecutable(t))
 
 	var seen []string
 	install := func(active string) error {
@@ -567,7 +575,7 @@ func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
 		return nil
 	}
 	for i := 0; i < 2; i++ {
-		if err := withStagedPluginCandidateWithRestore("cailmdaley/felt#v1.2.3", install, nil); err != nil {
+		if err := a.withStagedPluginCandidateWithRestore("cailmdaley/felt#v1.2.3", install, nil); err != nil {
 			t.Fatalf("remote promotion %d: %v", i+1, err)
 		}
 	}
@@ -582,7 +590,7 @@ func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("temporary acquisition checkout was not cleaned up: %v", entries)
 	}
-	log, err := os.ReadFile(os.Getenv("FELT_TEST_GIT_LOG"))
+	log, err := os.ReadFile(gitLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,8 +608,9 @@ func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
 }
 
 func TestRemoteMarketplaceAcquisitionFailureCleansUpAndDoesNotInstall(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, _ := testEnv(t)
+	home := homeOf(t, env)
 	runtimeDir := filepath.Join(home, ".felt", pluginRuntimeDirName)
 	stale := filepath.Join(runtimeDir, pluginAcquirePrefix+"interrupted")
 	if err := os.MkdirAll(stale, 0o755); err != nil {
@@ -611,11 +620,11 @@ func TestRemoteMarketplaceAcquisitionFailureCleansUpAndDoesNotInstall(t *testing
 		t.Fatal(err)
 	}
 	root := testRepoRoot(t)
-	installFakeGitForPluginAcquisition(t, root)
-	t.Setenv("FELT_TEST_GIT_FAIL", "1")
-	t.Setenv("FELT_BIN", testFeltExecutable(t))
+	installFakeGitForPluginAcquisition(t, env, root)
+	env.Set("FELT_TEST_GIT_FAIL", "1")
+	env.Set("FELT_BIN", testFeltExecutable(t))
 	called := false
-	err := withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
+	err := testApp(t, env).withStagedPluginCandidateWithRestore("cailmdaley/felt@missing", func(string) error {
 		called = true
 		return nil
 	}, nil)

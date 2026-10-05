@@ -11,40 +11,50 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
-var sessionCmd = &cobra.Command{
-	Use:   "session",
-	Short: "Print the start-of-session context",
-	Long: `Prints what an agent is given at session start: the skill directive, up to
+func (a *app) sessionCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "session",
+		Short: "Print the start-of-session context",
+		Long: `Prints what an agent is given at session start: the skill directive, up to
 five open or active fibers and five other recently updated ones, and an
 Attention list when the store needs tidying (top-level sprawl, open or active
 fibers with children, a broad active set, a long open queue, tracked fibers
 older than 30 days). felt hook session wraps the same text for harness hooks.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Print(buildSessionContext())
-		return nil
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprint(a.env.Stdout, a.buildSessionContext())
+			return nil
+		},
+	}
+	command.GroupID = groupStore
+	return command
 }
 
 // The bundled Claude Code plugin's hook scripts call these subcommands only at
 // the harness boundary. Keep the human-facing session context available as
 // plain text via `felt session`; `felt hook ...` is integration glue and may
 // emit machine envelopes.
-var hookCmd = &cobra.Command{
-	Use:   "hook",
-	Short: "Harness hook adapters, called by the plugin's hooks",
-	Long: `Each subcommand reads a harness hook payload on stdin and writes the envelope
+func (a *app) hookCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "hook",
+		Short: "Harness hook adapters, called by the plugin's hooks",
+		Long: `Each subcommand reads a harness hook payload on stdin and writes the envelope
 that harness expects. They are plumbing for the plugin; felt session prints the
 session context as readable text.`,
-	Args: cobra.ArbitraryArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, _ = io.Copy(io.Discard, os.Stdin)
-		return nil
-	},
+		Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, _ = io.Copy(io.Discard, a.env.Stdin)
+			return nil
+		},
+	}
+	command.GroupID = groupAgents
+	command.AddCommand(a.hookSessionCmd())
+	command.AddCommand(a.hookPreToolCmd())
+	command.AddCommand(a.hookPostToolCmd())
+	return command
 }
 
 type sessionEnvelope struct {
@@ -55,64 +65,63 @@ type sessionInner struct {
 	AdditionalContext string `json:"additionalContext"`
 }
 
-var hookSessionCmd = &cobra.Command{
-	Use:   "session",
-	Short: "Emit the SessionStart additionalContext envelope",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		envelope := sessionEnvelope{HookSpecificOutput: sessionInner{
-			HookEventName:     "SessionStart",
-			AdditionalContext: buildSessionContext(),
-		}}
-		return encodeHookJSON(os.Stdout, envelope)
-	},
+func (a *app) hookSessionCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "session",
+		Short: "Emit the SessionStart additionalContext envelope",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			envelope := sessionEnvelope{HookSpecificOutput: sessionInner{
+				HookEventName:     "SessionStart",
+				AdditionalContext: a.buildSessionContext(),
+			}}
+			return encodeHookJSON(a.env.Stdout, envelope)
+		},
+	}
+	return command
 }
 
 // encodeHookJSON writes indented JSON without HTML-escaping `<>&` (Go's encoder
 // escapes them by default). The wire is semantically equivalent either way, but
 // the unescaped form reads more cleanly in logs where fiber bodies contain
 // angle brackets. Output is pinned by internal/feltcli/hook_test.go — change it deliberately.
-func encodeHookJSON(w *os.File, v interface{}) error {
+func encodeHookJSON(w io.Writer, v interface{}) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
 
-var hookPreToolCmd = &cobra.Command{
-	Use:   "pretool",
-	Short: "PreToolUse gate: deny non-felt tool calls until the felt skill is activated",
-	Long: `Reads the PreToolUse payload from stdin and emits either a deny envelope
+func (a *app) hookPreToolCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "pretool",
+		Short: "PreToolUse gate: deny non-felt tool calls until the felt skill is activated",
+		Long: `Reads the PreToolUse payload from stdin and emits either a deny envelope
 (if the felt skill hasn't been activated this session in a felt-enabled
 project) or nothing (pass through). Outside felt-enabled projects, or in
 non-Claude sessions like Codex, this is a pass-through.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPreToolHook(os.Stdin, os.Stdout)
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runPreToolHook(a.env.Stdin, a.env.Stdout)
+		},
+	}
+	return command
 }
 
-var hookPostToolCmd = &cobra.Command{
-	Use:   "posttool",
-	Short: "PostToolUse: stamp updated-at when an agent edits a fiber file directly",
-	Long: `Reads the PostToolUse payload from stdin. When the tool was Edit, Write, or
+func (a *app) hookPostToolCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "posttool",
+		Short: "PostToolUse: stamp updated-at when an agent edits a fiber file directly",
+		Long: `Reads the PostToolUse payload from stdin. When the tool was Edit, Write, or
 MultiEdit on a markdown file inside a felt store, stamps the owning fiber's
 updated-at, so a direct edit counts toward recency as felt add and felt edit
 do. Silent for any other tool, file, or error.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPostToolHook(os.Stdin)
-	},
-}
-
-func init() {
-	sessionCmd.GroupID = groupStore
-	rootCmd.AddCommand(sessionCmd)
-	hookCmd.GroupID = groupAgents
-	rootCmd.AddCommand(hookCmd)
-	hookCmd.AddCommand(hookSessionCmd)
-	hookCmd.AddCommand(hookPreToolCmd)
-	hookCmd.AddCommand(hookPostToolCmd)
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPostToolHook(a.env.Stdin)
+		},
+	}
+	return command
 }
 
 // ----------------------------------------------------------------------------
@@ -121,12 +130,12 @@ func init() {
 
 // isClaudeTranscriptPath recognizes the only harness-specific distinction the
 // Felt PreToolUse gate needs: Claude Code stores transcripts under projects/.
-func isClaudeTranscriptPath(transcriptPath string) bool {
+func (a *app) isClaudeTranscriptPath(transcriptPath string) bool {
 	if transcriptPath == "" {
 		return false
 	}
-	home, _ := os.UserHomeDir()
-	claudeDir := os.Getenv("CLAUDE_CONFIG_DIR")
+	home, _ := a.env.UserHomeDir()
+	claudeDir := a.env.Getenv("CLAUDE_CONFIG_DIR")
 	if claudeDir == "" {
 		claudeDir = filepath.Join(home, ".claude")
 	}
@@ -160,13 +169,13 @@ const (
 // buildSessionContext renders the markdown additionalContext text. Output is
 // pinned by internal/feltcli/hook_test.go — change it deliberately; a wording or layout
 // change shows up as a test diff.
-func buildSessionContext() string {
+func (a *app) buildSessionContext() string {
 	var sb strings.Builder
 	sb.WriteString("# Felt Workflow Context\n\n")
 	sb.WriteString(sessionDirective)
 	sb.WriteString("\n\n")
 
-	root, err := felt.ProjectRoot(sysenv.OS(), changeDir)
+	root, err := felt.ProjectRoot(a.env, a.dir)
 	if err != nil || root == "" {
 		sb.WriteString(sessionNoRepoNote)
 		sb.WriteString("\n")
@@ -469,7 +478,7 @@ type preToolInput struct {
 //   - Codex (transcript_path not under ~/.claude/projects/, or empty): mark, pass.
 //   - flag already set: pass.
 //   - otherwise: emit deny envelope.
-func runPreToolHook(stdin *os.File, stdout *os.File) error {
+func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 	var input preToolInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		// Can't parse input: silent pass. Better to lose the gate than block.
@@ -483,7 +492,7 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 		return nil
 	}
 
-	flagPath := filepath.Join(os.TempDir(), "felt-reminded-"+input.SessionID)
+	flagPath := filepath.Join(a.tempDir(), "felt-reminded-"+input.SessionID)
 
 	// Skill tool: open the gate only on felt activation specifically. Without
 	// this asymmetry an agent could bypass felt by activating a sibling skill
@@ -498,7 +507,7 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 
 	// Non-Claude sessions have no Skill tool to activate, and the deny would
 	// deadlock the loop.
-	if !isClaudeTranscriptPath(input.TranscriptPath) {
+	if !a.isClaudeTranscriptPath(input.TranscriptPath) {
 		_ = os.WriteFile(flagPath, nil, 0644)
 		return nil
 	}
@@ -521,6 +530,17 @@ func runPreToolHook(stdin *os.File, stdout *os.File) error {
 		PermissionDecisionReason: preToolDenyReason,
 	}}
 	return encodeHookJSON(stdout, envelope)
+}
+
+// tempDir is os.TempDir read through the invocation's environment.
+func (a *app) tempDir() string {
+	if a.env.Live() {
+		return os.TempDir()
+	}
+	if dir := a.env.Getenv("TMPDIR"); dir != "" {
+		return dir
+	}
+	return "/tmp"
 }
 
 // ----------------------------------------------------------------------------
@@ -560,7 +580,7 @@ const postToolTouchInterval = time.Hour
 // PostToolUse hook must never fail the tool call, and losing one stamp is
 // cheaper than blocking. The frontmatter stamp is the recency mechanism —
 // a missed stamp just means one edit reads slightly stale.
-func runPostToolHook(stdin *os.File) error {
+func runPostToolHook(stdin io.Reader) error {
 	var input postToolInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil

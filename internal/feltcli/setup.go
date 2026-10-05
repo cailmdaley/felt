@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -28,33 +27,43 @@ const marketplaceRepo = "cailmdaley/felt"
 // defaultMarketplaceRef is the GitHub ref to register when no --source is
 // given. For tagged binaries we pin to the matching tag so the installed
 // plugin matches the binary; `dev` builds track the default branch.
-func defaultMarketplaceRef() string {
-	if Version == "" || Version == "dev" {
+func (a *app) defaultMarketplaceRef() string {
+	if a.version == "" || a.version == "dev" {
 		return marketplaceRepo
 	}
-	return marketplaceRepo + "#v" + Version
+	return marketplaceRepo + "#v" + a.version
 }
 
 // claudeMarketplaceClonePath is the legacy directory Claude Code used for a
 // GitHub-sourced marketplace. It remains a fallback for installations made by
 // older felt versions; current setup promotes a validated local runtime first.
-func claudeMarketplaceClonePath() string {
-	home, err := os.UserHomeDir()
+func (a *app) claudeMarketplaceClonePath() string {
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	return filepath.Join(home, ".claude", "plugins", "marketplaces", marketplaceName)
 }
 
-var setupCmd = &cobra.Command{
-	Use:   "setup",
-	Short: "Install and inspect felt's agent-harness integrations",
+func (a *app) setupCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "setup",
+		Short: "Install and inspect felt's agent-harness integrations",
+	}
+	command.GroupID = groupAgents
+	command.AddCommand(a.setupClaudeCmd())
+	command.AddCommand(a.setupCodexCmd())
+	command.AddCommand(a.setupPiCmd())
+	command.AddCommand(a.setupSkillsCmd())
+	command.AddCommand(a.setupValidateCmd())
+	return command
 }
 
-var setupClaudeCmd = &cobra.Command{
-	Use:   "claude",
-	Short: "Install the felt plugin for Claude Code via the plugin marketplace",
-	Long: `Installs the felt plugin for Claude Code: the felt and shuttle skills, and
+func (a *app) setupClaudeCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "claude",
+		Short: "Install the felt plugin for Claude Code via the plugin marketplace",
+		Long: `Installs the felt plugin for Claude Code: the felt and shuttle skills, and
 hooks that inject the session context, hold tool use until the felt skill is
 active, stamp updated-at on fibers edited directly, and record harness events
 and commits for shuttle (these write nothing unless shuttle's state directory,
@@ -66,34 +75,39 @@ $FELT_PLUGIN_DIR (the plugin directory; its parent is the marketplace root).
 felt validates it, promotes it to a local generation, and registers that with
 claude plugin marketplace add and claude plugin install. --uninstall removes
 the plugin and its marketplace.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		source, _ := cmd.Flags().GetString("source")
-		uninstall, _ := cmd.Flags().GetBool("uninstall")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			source, _ := cmd.Flags().GetString("source")
+			uninstall, _ := cmd.Flags().GetBool("uninstall")
 
-		if uninstall {
-			return uninstallPlugin()
-		}
+			if uninstall {
+				return a.uninstallPlugin()
+			}
 
-		marketplaceSource, err := resolveSetupSource(source)
-		if err != nil {
-			return err
-		}
-		if err := installPluginViaCLI(marketplaceSource); err != nil {
-			return err
-		}
-		// The plugin now serves felt's skills; a link to the same skills in
-		// ~/.claude/skills would load them a second time.
-		for _, name := range pruneMarketplaceSkillLinks() {
-			fmt.Printf("Unlinked skill (served by the plugin): %s\n", name)
-		}
-		return nil
-	},
+			marketplaceSource, err := a.resolveSetupSource(source)
+			if err != nil {
+				return err
+			}
+			if err := a.installPluginViaCLI(marketplaceSource); err != nil {
+				return err
+			}
+			// The plugin now serves felt's skills; a link to the same skills in
+			// ~/.claude/skills would load them a second time.
+			for _, name := range a.pruneMarketplaceSkillLinks() {
+				fmt.Fprintf(a.env.Stdout, "Unlinked skill (served by the plugin): %s\n", name)
+			}
+			return nil
+		},
+	}
+	command.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Claude Code")
+	command.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	return command
 }
 
-var setupCodexCmd = &cobra.Command{
-	Use:   "codex",
-	Short: "Install the felt plugin for Codex via the plugin marketplace",
-	Long: `Installs the felt plugin for Codex: the felt and shuttle skills and the same
+func (a *app) setupCodexCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "codex",
+		Short: "Install the felt plugin for Codex via the plugin marketplace",
+		Long: `Installs the felt plugin for Codex: the felt and shuttle skills and the same
 hooks as the Claude Code plugin. Re-running updates it.
 
 The source is chosen as for felt setup claude; felt validates it, promotes it
@@ -101,38 +115,43 @@ to a local generation, and registers that with codex plugin marketplace add
 and codex plugin add. Codex asks you to trust the plugin's hooks in your next
 interactive session; until you accept, the skills load but the hooks stay
 dormant. --uninstall removes the plugin and its marketplace.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		source, _ := cmd.Flags().GetString("source")
-		uninstall, _ := cmd.Flags().GetBool("uninstall")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			source, _ := cmd.Flags().GetString("source")
+			uninstall, _ := cmd.Flags().GetBool("uninstall")
 
-		if uninstall {
-			return uninstallCodexPlugin()
-		}
+			if uninstall {
+				return a.uninstallCodexPlugin()
+			}
 
-		marketplaceSource, err := resolveSetupSource(source)
-		if err != nil {
-			return err
-		}
+			marketplaceSource, err := a.resolveSetupSource(source)
+			if err != nil {
+				return err
+			}
 
-		if err := installCodexPluginViaCLI(marketplaceSource); err != nil {
-			return err
-		}
+			if err := a.installCodexPluginViaCLI(marketplaceSource); err != nil {
+				return err
+			}
 
-		// Codex doesn't have CLAUDE.md's "skill discovery via plugin" convention
-		// turned on for every user yet, and the AGENTS.md snippet is a nice
-		// nudge toward the practice on top of having the skill loadable.
-		fmt.Println()
-		fmt.Println("You may want to put something like the following in your AGENTS.md, adjusted to match your work style:")
-		fmt.Println()
-		fmt.Println(claudeMDSnippet())
-		return nil
-	},
+			// Codex doesn't have CLAUDE.md's "skill discovery via plugin" convention
+			// turned on for every user yet, and the AGENTS.md snippet is a nice
+			// nudge toward the practice on top of having the skill loadable.
+			fmt.Fprintln(a.env.Stdout)
+			fmt.Fprintln(a.env.Stdout, "You may want to put something like the following in your AGENTS.md, adjusted to match your work style:")
+			fmt.Fprintln(a.env.Stdout)
+			fmt.Fprintln(a.env.Stdout, claudeMDSnippet())
+			return nil
+		},
+	}
+	command.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Codex")
+	command.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	return command
 }
 
-var setupPiCmd = &cobra.Command{
-	Use:   "pi",
-	Short: "Install the felt package for pi via the pi package manager",
-	Long: `Installs the felt package for pi (@earendil-works/pi-coding-agent): the felt
+func (a *app) setupPiCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "pi",
+		Short: "Install the felt package for pi via the pi package manager",
+		Long: `Installs the felt package for pi (@earendil-works/pi-coding-agent): the felt
 and shuttle skills and a pi extension that injects the session context,
 enforces the skill-activation gate, and records harness activity for shuttle.
 Re-running is safe.
@@ -140,110 +159,104 @@ Re-running is safe.
 Runs pi install git:github.com/` + marketplaceRepo + `@v<tag> for this binary's tag
 (a dev build takes the default branch); pi clones the repository itself.
 --uninstall removes the package.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		uninstall, _ := cmd.Flags().GetBool("uninstall")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			uninstall, _ := cmd.Flags().GetBool("uninstall")
 
-		if uninstall {
-			// Remove whatever source is actually registered — a dev-checkout
-			// install is invisible to the old hardcoded git spec. Fall back to
-			// the git default so the remove attempt matches the install default.
-			installed := piFeltPackageSource()
-			if installed == "" {
-				installed = "git:github.com/" + marketplaceRepo
+			if uninstall {
+				// Remove whatever source is actually registered — a dev-checkout
+				// install is invisible to the old hardcoded git spec. Fall back to
+				// the git default so the remove attempt matches the install default.
+				installed := a.piFeltPackageSource()
+				if installed == "" {
+					installed = "git:github.com/" + marketplaceRepo
+				}
+				return a.runHarnessCLI("pi", "remove", installed)
 			}
-			return runHarnessCLI("pi", "remove", installed)
-		}
 
-		return installPiPackageViaCLI(piPackageSource(defaultMarketplaceRef()))
-	},
+			return a.installPiPackageViaCLI(piPackageSource(a.defaultMarketplaceRef()))
+		},
+	}
+	command.Flags().Bool("uninstall", false, "Remove the felt pi package")
+	return command
 }
 
-var setupSkillsCmd = &cobra.Command{
-	Use:   "skills",
-	Short: "Link felt skills to a target directory",
-	Long: `Symlinks each skill in the plugin directory into --target (default
+func (a *app) setupSkillsCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "skills",
+		Short: "Link felt skills to a target directory",
+		Long: `Symlinks each skill in the plugin directory into --target (default
 ~/.claude/skills), replacing existing entries of the same name. The plugin is
 found from --source (a checkout or its plugin directory), then
 $FELT_PLUGIN_DIR, then a directory marketplace registered with Claude Code,
 then Claude Code's clone at ~/.claude/plugins/marketplaces/` + marketplaceName + `.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		target, _ := cmd.Flags().GetString("target")
-		source, _ := cmd.Flags().GetString("source")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, _ := cmd.Flags().GetString("target")
+			source, _ := cmd.Flags().GetString("source")
 
-		if target == "" {
-			home, err := os.UserHomeDir()
+			if target == "" {
+				home, err := a.env.UserHomeDir()
+				if err != nil {
+					return err
+				}
+				target = filepath.Join(home, ".claude", "skills")
+			}
+
+			pluginDir, err := a.findPluginDir(source)
 			if err != nil {
 				return err
 			}
-			target = filepath.Join(home, ".claude", "skills")
-		}
 
-		pluginDir, err := findPluginDir(source)
-		if err != nil {
-			return err
-		}
-
-		return linkSkillsFromPlugin(target, pluginDir)
-	},
+			return a.linkSkillsFromPlugin(target, pluginDir)
+		},
+	}
+	command.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
+	command.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	return command
 }
 
-var setupValidateCmd = &cobra.Command{
-	Use:   "validate",
-	Short: "Validate a complete local plugin candidate",
-	Long: `Checks a felt checkout (--source, required) as a plugin candidate: the Claude
+func (a *app) setupValidateCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "validate",
+		Short: "Validate a complete local plugin candidate",
+		Long: `Checks a felt checkout (--source, required) as a plugin candidate: the Claude
 and Codex manifests, the shared skills, and the executable hooks. It changes
 nothing installed, so release and CI gates can run it.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		source, _ := cmd.Flags().GetString("source")
-		if source == "" {
-			return errors.New("setup validate requires --source <felt checkout>")
-		}
-		root, err := findMarketplaceRoot(source)
-		if err != nil {
-			return err
-		}
-		executable, _ := cmd.Flags().GetString("executable")
-		if executable == "" {
-			executable, err = currentFeltExecutable()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			source, _ := cmd.Flags().GetString("source")
+			if source == "" {
+				return errors.New("setup validate requires --source <felt checkout>")
+			}
+			root, err := a.findMarketplaceRoot(source)
 			if err != nil {
 				return err
 			}
-		}
-		if err := validatePluginCandidate(root, executable); err != nil {
-			return err
-		}
-		fmt.Printf("Plugin candidate valid: %s\n", root)
-		return nil
-	},
-}
-
-func init() {
-	setupClaudeCmd.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Claude Code")
-	setupClaudeCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
-	setupCodexCmd.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Codex")
-	setupCodexCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
-	setupPiCmd.Flags().Bool("uninstall", false, "Remove the felt pi package")
-	setupSkillsCmd.Flags().String("target", "", "Target directory (default: ~/.claude/skills)")
-	setupSkillsCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
-	setupValidateCmd.Flags().String("source", "", "Path to felt repo checkout or plugin directory (required)")
-	setupValidateCmd.Flags().String("executable", "", "felt executable to probe (default: running felt)")
-	setupCmd.AddCommand(setupClaudeCmd)
-	setupCmd.AddCommand(setupCodexCmd)
-	setupCmd.AddCommand(setupPiCmd)
-	setupCmd.AddCommand(setupSkillsCmd)
-	setupCmd.AddCommand(setupValidateCmd)
-	setupCmd.GroupID = groupAgents
-	rootCmd.AddCommand(setupCmd)
+			executable, _ := cmd.Flags().GetString("executable")
+			if executable == "" {
+				executable, err = a.currentFeltExecutable()
+				if err != nil {
+					return err
+				}
+			}
+			if err := validatePluginCandidate(root, executable); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.env.Stdout, "Plugin candidate valid: %s\n", root)
+			return nil
+		},
+	}
+	command.Flags().String("source", "", "Path to felt repo checkout or plugin directory (required)")
+	command.Flags().String("executable", "", "felt executable to probe (default: running felt)")
+	return command
 }
 
 // resolveSetupSource picks what `felt setup claude|codex` registers: with no
 // --source and no $FELT_PLUGIN_DIR, the GitHub ref (the harness clones the
 // marketplace itself); otherwise the resolved local marketplace root.
-func resolveSetupSource(source string) (string, error) {
-	if source == "" && os.Getenv("FELT_PLUGIN_DIR") == "" {
-		return defaultMarketplaceRef(), nil
+func (a *app) resolveSetupSource(source string) (string, error) {
+	if source == "" && a.env.Getenv("FELT_PLUGIN_DIR") == "" {
+		return a.defaultMarketplaceRef(), nil
 	}
-	return findMarketplaceRoot(source)
+	return a.findMarketplaceRoot(source)
 }
 
 // hasMarketplaceManifest returns true if dir contains a marketplace manifest at
@@ -256,19 +269,19 @@ func hasMarketplaceManifest(dir string) bool {
 // absManifestRoot reports dir as an absolute path when it carries a
 // marketplace manifest. Callers rely on every successful findMarketplaceRoot
 // return being absolute.
-func absManifestRoot(dir string) (string, bool) {
+func (a *app) absManifestRoot(dir string) (string, bool) {
 	if !hasMarketplaceManifest(dir) {
 		return "", false
 	}
-	abs, err := filepath.Abs(dir)
+	abs, err := a.env.Abs(dir)
 	return abs, err == nil
 }
 
 // findPluginDir returns the plugin directory derived from the marketplace
 // root: <repo-root>/claude-plugin/. Used by `setup skills`, which reads the
 // skill directories out of it.
-func findPluginDir(source string) (string, error) {
-	root, err := findMarketplaceRoot(source)
+func (a *app) findPluginDir(source string) (string, error) {
+	root, err := a.findMarketplaceRoot(source)
 	if err != nil {
 		return "", err
 	}
@@ -281,22 +294,22 @@ func findPluginDir(source string) (string, error) {
 //
 // Resolution order: explicit --source arg, $FELT_PLUGIN_DIR, the registered
 // directory marketplace, then the legacy Claude Code clone path.
-func findMarketplaceRoot(source string) (string, error) {
+func (a *app) findMarketplaceRoot(source string) (string, error) {
 	if source != "" {
-		if abs, ok := absManifestRoot(source); ok {
+		if abs, ok := a.absManifestRoot(source); ok {
 			return abs, nil
 		}
 		// Allow pointing at the plugin subdir; walk one level up to find
 		// the marketplace root.
-		if abs, ok := absManifestRoot(filepath.Dir(source)); ok {
+		if abs, ok := a.absManifestRoot(filepath.Dir(source)); ok {
 			return abs, nil
 		}
 		return "", fmt.Errorf("no marketplace manifest found at %q\n  Expected .claude-plugin/marketplace.json (felt repo root)", source)
 	}
 
-	if env := os.Getenv("FELT_PLUGIN_DIR"); env != "" {
+	if env := a.env.Getenv("FELT_PLUGIN_DIR"); env != "" {
 		// $FELT_PLUGIN_DIR points at the plugin dir; the repo root is its parent.
-		if abs, ok := absManifestRoot(filepath.Dir(env)); ok {
+		if abs, ok := a.absManifestRoot(filepath.Dir(env)); ok {
 			return abs, nil
 		}
 		return "", fmt.Errorf("$FELT_PLUGIN_DIR=%q: parent has no .claude-plugin/marketplace.json", env)
@@ -306,8 +319,8 @@ func findMarketplaceRoot(source string) (string, error) {
 	// at a local repo (dev installs). Reading it out of `claude plugin
 	// marketplace list --json` keeps us in sync with whatever path the user
 	// registered, even if it differs from where the binary is running from.
-	if entry, ok := marketplaceEntry(marketplaceName); ok && entry.Source == "directory" && entry.Path != "" {
-		if abs, ok := absManifestRoot(entry.Path); ok {
+	if entry, ok := a.marketplaceEntry(marketplaceName); ok && entry.Source == "directory" && entry.Path != "" {
+		if abs, ok := a.absManifestRoot(entry.Path); ok {
 			return abs, nil
 		}
 	}
@@ -315,8 +328,8 @@ func findMarketplaceRoot(source string) (string, error) {
 	// Fallback 2: Claude Code clones GitHub-sourced marketplaces to a known
 	// path. If the user has run `felt setup claude` (or otherwise installed
 	// the marketplace from GitHub), the plugin files live there.
-	if cloned := claudeMarketplaceClonePath(); cloned != "" {
-		if abs, ok := absManifestRoot(cloned); ok {
+	if cloned := a.claudeMarketplaceClonePath(); cloned != "" {
+		if abs, ok := a.absManifestRoot(cloned); ok {
 			return abs, nil
 		}
 	}
@@ -330,7 +343,7 @@ func findMarketplaceRoot(source string) (string, error) {
 // installPluginViaCLI installs or refreshes the felt plugin. Always
 // `marketplace add`s with the caller's `repoRoot` — for git sources that
 // advances the pinned ref to whatever the current binary's
-// defaultMarketplaceRef() emits, and for directory sources it's a no-op
+// a.defaultMarketplaceRef() emits, and for directory sources it's a no-op
 // re-register. Then plugin install (fresh) or plugin update (existing) to
 // apply. Idempotent.
 //
@@ -339,19 +352,19 @@ func findMarketplaceRoot(source string) (string, error) {
 // from v1.0.7 → v1.0.8, an installed plugin pinned at v1.0.7 would never
 // see new content. `marketplace add` with the new ref is what actually
 // moves the user forward.
-func installPluginViaCLI(repoRoot string) error {
-	if _, err := exec.LookPath("claude"); err != nil {
+func (a *app) installPluginViaCLI(repoRoot string) error {
+	if _, err := a.env.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
 	}
-	return withPluginPromotionLock(func() error {
-		previous := captureClaudeInstallation()
-		return withStagedPluginCandidateWithRestore(repoRoot, installClaudePluginAtSource, func() error {
-			return restoreClaudeInstallation(previous)
+	return a.withPluginPromotionLock(func() error {
+		previous := a.captureClaudeInstallation()
+		return a.withStagedPluginCandidateWithRestore(repoRoot, a.installClaudePluginAtSource, func() error {
+			return a.restoreClaudeInstallation(previous)
 		})
 	})
 }
 
-func installClaudePluginAtSource(repoRoot string) error {
+func (a *app) installClaudePluginAtSource(repoRoot string) error {
 	pluginRef := "felt@" + marketplaceName
 	// Ask whether the PLUGIN is installed, not whether its marketplace is
 	// registered. The two come apart whenever registration succeeds and the
@@ -360,9 +373,9 @@ func installClaudePluginAtSource(repoRoot string) error {
 	// partway. A marketplace-based check would send those cases down the
 	// update path for a plugin that isn't there, and `claude plugin update`
 	// hard-fails on a missing plugin.
-	installed := isPluginInstalled(pluginRef)
+	installed := a.isPluginInstalled(pluginRef)
 
-	if err := runHarnessCLI("claude", "plugin", "marketplace", "add", repoRoot); err != nil {
+	if err := a.runHarnessCLI("claude", "plugin", "marketplace", "add", repoRoot); err != nil {
 		return fmt.Errorf("registering marketplace: %w", err)
 	}
 
@@ -370,7 +383,7 @@ func installClaudePluginAtSource(repoRoot string) error {
 	if installed {
 		op, gerund = "update", "updating"
 	}
-	if err := runHarnessCLI("claude", "plugin", op, pluginRef); err != nil {
+	if err := a.runHarnessCLI("claude", "plugin", op, pluginRef); err != nil {
 		return fmt.Errorf("%s %s: %w", gerund, pluginRef, err)
 	}
 	// The CLI's zero exit is not trusted as proof of materialization: the
@@ -381,21 +394,21 @@ func installClaudePluginAtSource(repoRoot string) error {
 	// uninstall+install retry — which forces a fresh cache copy — before the
 	// promotion is refused. The same retry converges interrupted-promotion
 	// reconciliation, whose reinstall also lands here.
-	if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
-		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
-		if installErr := runHarnessCLI("claude", "plugin", "install", pluginRef); installErr != nil {
+	if err := a.verifyClaudeLoadedGeneration(repoRoot); err != nil {
+		_, _ = a.claudePluginCommand("uninstall", pluginRef).Output()
+		if installErr := a.runHarnessCLI("claude", "plugin", "install", pluginRef); installErr != nil {
 			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", pluginRef, err, installErr)
 		}
-		if err := verifyClaudeLoadedGeneration(repoRoot); err != nil {
+		if err := a.verifyClaudeLoadedGeneration(repoRoot); err != nil {
 			return err
 		}
 	}
-	if removed := pruneLegacyClaudeHooks(); removed > 0 {
-		fmt.Printf("✓ Removed %d legacy Claude hook entries (now served via plugin)\n", removed)
+	if removed := a.pruneLegacyClaudeHooks(); removed > 0 {
+		fmt.Fprintf(a.env.Stdout, "✓ Removed %d legacy Claude hook entries (now served via plugin)\n", removed)
 	}
 
-	fmt.Println()
-	fmt.Println("Restart Claude Code for changes to take effect.")
+	fmt.Fprintln(a.env.Stdout)
+	fmt.Fprintln(a.env.Stdout, "Restart Claude Code for changes to take effect.")
 	return nil
 }
 
@@ -404,8 +417,8 @@ func installClaudePluginAtSource(repoRoot string) error {
 // in installPluginViaCLI. Returns false when the CLI is missing or the call
 // fails — install is the safe guess, since installing an installed plugin is
 // a no-op while updating a missing one is an error.
-func isPluginInstalled(ref string) bool {
-	out, err := claudePluginCommand("list", "--json").Output()
+func (a *app) isPluginInstalled(ref string) bool {
+	out, err := a.claudePluginCommand("list", "--json").Output()
 	if err != nil {
 		return false
 	}
@@ -434,8 +447,8 @@ type claudeMarketplaceEntry struct {
 // marketplaceEntry looks up an entry by name in the claude CLI's registered
 // marketplaces. Returns the entry and true on success; false if the CLI is
 // missing, the call fails, or the name isn't found.
-func marketplaceEntry(name string) (claudeMarketplaceEntry, bool) {
-	out, err := claudePluginCommand("marketplace", "list", "--json").Output()
+func (a *app) marketplaceEntry(name string) (claudeMarketplaceEntry, bool) {
+	out, err := a.claudePluginCommand("marketplace", "list", "--json").Output()
 	if err != nil {
 		return claudeMarketplaceEntry{}, false
 	}
@@ -467,13 +480,13 @@ func marketplaceEntry(name string) (claudeMarketplaceEntry, bool) {
 //
 // The plugin goes first: `marketplace remove` on a source with an installed
 // plugin is not something to rely on succeeding.
-func uninstallPlugin() error {
-	if _, err := exec.LookPath("claude"); err != nil {
+func (a *app) uninstallPlugin() error {
+	if _, err := a.env.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI not found in PATH: %w", err)
 	}
 
 	pluginRef := "felt@" + marketplaceName
-	if err := runHarnessCLI("claude", "plugin", "uninstall", pluginRef); err != nil {
+	if err := a.runHarnessCLI("claude", "plugin", "uninstall", pluginRef); err != nil {
 		return fmt.Errorf("uninstalling %s: %w", pluginRef, err)
 	}
 
@@ -481,16 +494,16 @@ func uninstallPlugin() error {
 	// uninstall retires. Unlink them first, or uninstall leaves dangling
 	// symlinks in ~/.claude/skills — worse residue than the registration we
 	// came to clean up.
-	for _, name := range pruneMarketplaceSkillLinks() {
-		fmt.Printf("Unlinked skill: %s\n", name)
+	for _, name := range a.pruneMarketplaceSkillLinks() {
+		fmt.Fprintf(a.env.Stdout, "Unlinked skill: %s\n", name)
 	}
 
-	if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
+	if err := a.runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 		return fmt.Errorf("removing marketplace %s: %w", marketplaceName, err)
 	}
 
-	fmt.Println()
-	fmt.Println("Restart Claude Code for changes to take effect.")
+	fmt.Fprintln(a.env.Stdout)
+	fmt.Fprintln(a.env.Stdout, "Restart Claude Code for changes to take effect.")
 	return nil
 }
 
@@ -506,16 +519,16 @@ func uninstallPlugin() error {
 // alone; so is anything that is a real directory. A non-default --target is
 // not tracked anywhere, so we cannot reach it — best-effort by design, and
 // silent when there is nothing to do.
-func pruneMarketplaceSkillLinks() []string {
+func (a *app) pruneMarketplaceSkillLinks() []string {
 	// Roots that do not exist hold nothing a link could resolve into.
 	var managed []string
-	runtimeDir, _ := pluginRuntimeDir()
-	for _, dir := range []string{claudeMarketplaceClonePath(), runtimeDir} {
-		if resolved, err := canonicalPath(dir); dir != "" && err == nil {
+	runtimeDir, _ := a.pluginRuntimeDir()
+	for _, dir := range []string{a.claudeMarketplaceClonePath(), runtimeDir} {
+		if resolved, err := a.canonicalPath(dir); dir != "" && err == nil {
 			managed = append(managed, resolved)
 		}
 	}
-	skillsDir, err := homePath(".claude", "skills")
+	skillsDir, err := a.homePath(".claude", "skills")
 	if err != nil {
 		return nil
 	}
@@ -533,7 +546,7 @@ func pruneMarketplaceSkillLinks() []string {
 		// Judge where the link lands, not how its text is spelled: a path
 		// through .. or through a further symlink can leave a managed root.
 		// A link that does not resolve is left alone.
-		target, err := canonicalPath(path)
+		target, err := a.canonicalPath(path)
 		if err != nil {
 			continue
 		}
@@ -551,13 +564,13 @@ func pruneMarketplaceSkillLinks() []string {
 
 // runHarnessCLI invokes a harness CLI, piping stdout/stderr through to the
 // caller so the user sees the same status output the harness prints natively.
-func runHarnessCLI(bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
+func (a *app) runHarnessCLI(bin string, args ...string) error {
+	cmd := a.env.Command(bin, args...)
 	if bin == "claude" && len(args) > 0 && args[0] == "plugin" {
-		cmd = claudePluginCommand(args[1:]...)
+		cmd = a.claudePluginCommand(args[1:]...)
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = a.env.Stdout
+	cmd.Stderr = a.env.Stderr
 	return cmd.Run()
 }
 
@@ -583,17 +596,17 @@ func piPackageSource(source string) string {
 // Drop any felt entry registered elsewhere first — git→local (what a
 // dev-source `felt update` does) and local→git alike; same-source reinstalls
 // (including a tag bump) replace their own entry in place.
-func installPiPackageViaCLI(spec string) error {
-	if installed := piFeltPackageSource(); installed != "" && !samePiSourceLocation(installed, spec) {
-		if err := runHarnessCLI("pi", "remove", installed); err != nil {
+func (a *app) installPiPackageViaCLI(spec string) error {
+	if installed := a.piFeltPackageSource(); installed != "" && !samePiSourceLocation(installed, spec) {
+		if err := a.runHarnessCLI("pi", "remove", installed); err != nil {
 			return fmt.Errorf("removing %q before installing %q: %w", installed, spec, err)
 		}
 	}
-	if err := runHarnessCLI("pi", "install", spec); err != nil {
+	if err := a.runHarnessCLI("pi", "install", spec); err != nil {
 		return err
 	}
-	fmt.Println()
-	fmt.Println("Restart any running pi sessions (or run /reload) so the skills and extension load.")
+	fmt.Fprintln(a.env.Stdout)
+	fmt.Fprintln(a.env.Stdout, "Restart any running pi sessions (or run /reload) so the skills and extension load.")
 	return nil
 }
 
@@ -615,20 +628,20 @@ func samePiSourceLocation(a, b string) bool {
 // for Codex, so `felt update` moves the package to the ref matching the binary
 // that just landed. Silent no-op when pi isn't installed or has no felt
 // package (a bare `pi install` of some other checkout isn't ours to move).
-func refreshPiSetupIfInstalled(marketplaceRef string) {
-	if _, err := exec.LookPath("pi"); err != nil || piFeltPackageSource() == "" {
+func (a *app) refreshPiSetupIfInstalled(marketplaceRef string) {
+	if _, err := a.env.LookPath("pi"); err != nil || a.piFeltPackageSource() == "" {
 		return
 	}
-	fmt.Println()
-	fmt.Println("Refreshing pi package...")
-	if err := installPiPackageViaCLI(piPackageSource(marketplaceRef)); err != nil {
-		fmt.Printf("pi refresh failed: %v\n", err)
-		fmt.Println("Rerun `felt setup pi` to retry.")
+	fmt.Fprintln(a.env.Stdout)
+	fmt.Fprintln(a.env.Stdout, "Refreshing pi package...")
+	if err := a.installPiPackageViaCLI(piPackageSource(marketplaceRef)); err != nil {
+		fmt.Fprintf(a.env.Stdout, "pi refresh failed: %v\n", err)
+		fmt.Fprintln(a.env.Stdout, "Rerun `felt setup pi` to retry.")
 	}
 }
 
 // linkSkillsFromPlugin symlinks each skill in <pluginDir>/skills/ into targetDir.
-func linkSkillsFromPlugin(targetDir, pluginDir string) error {
+func (a *app) linkSkillsFromPlugin(targetDir, pluginDir string) error {
 	skillsDir := filepath.Join(pluginDir, "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -650,7 +663,7 @@ func linkSkillsFromPlugin(targetDir, pluginDir string) error {
 		dest := filepath.Join(targetDir, name)
 
 		if existing, err := os.Readlink(dest); err == nil && existing == src {
-			fmt.Printf("· Skill already linked: %s\n", name)
+			fmt.Fprintf(a.env.Stdout, "· Skill already linked: %s\n", name)
 			continue
 		}
 
@@ -658,7 +671,7 @@ func linkSkillsFromPlugin(targetDir, pluginDir string) error {
 		if err := os.Symlink(src, dest); err != nil {
 			return fmt.Errorf("linking skill %s: %w", name, err)
 		}
-		fmt.Printf("✓ Linked skill: %s → %s\n", name, src)
+		fmt.Fprintf(a.env.Stdout, "✓ Linked skill: %s → %s\n", name, src)
 	}
 	return nil
 }
@@ -691,8 +704,8 @@ func claudeMDSnippet() string {
 // decide whether to refresh Codex setup alongside the Claude plugin, so it
 // deliberately does not count a bare marketplace registration — reinstalling a
 // plugin the user removed is worse than leaving a stray registration.
-func feltCodexInstalled() bool {
-	cfg, err := readCodexConfig()
+func (a *app) feltCodexInstalled() bool {
+	cfg, err := a.readCodexConfig()
 	if err == nil {
 		if plugins, ok := cfg["plugins"].(map[string]interface{}); ok {
 			if _, has := plugins[codexPluginRef]; has {
@@ -700,7 +713,7 @@ func feltCodexInstalled() bool {
 			}
 		}
 	}
-	return feltCodexLegacyHooksInstalled()
+	return a.feltCodexLegacyHooksInstalled()
 }
 
 // feltCodexWiringPresent returns true when anything felt put in Codex's config
@@ -713,11 +726,11 @@ func feltCodexInstalled() bool {
 // between the two verbs or a user who ran `codex plugin remove`, which leaves
 // the marketplace behind. Uninstall should clean up either; refresh must not
 // reinstall the second one, so it keeps the narrower test above.
-func feltCodexWiringPresent() bool {
-	if feltCodexInstalled() {
+func (a *app) feltCodexWiringPresent() bool {
+	if a.feltCodexInstalled() {
 		return true
 	}
-	cfg, err := readCodexConfig()
+	cfg, err := a.readCodexConfig()
 	if err != nil {
 		return false
 	}
@@ -732,8 +745,8 @@ func feltCodexWiringPresent() bool {
 // feltCodexLegacyHooksInstalled returns true when ~/.codex/hooks.json has any
 // felt-flagged direct entries (the pre-1.0.8 wiring). Kept around so the
 // lockstep refresh path can clean those up on the next `felt update`.
-func feltCodexLegacyHooksInstalled() bool {
-	hooksPath, err := homePath(".codex", "hooks.json")
+func (a *app) feltCodexLegacyHooksInstalled() bool {
+	hooksPath, err := a.homePath(".codex", "hooks.json")
 	if err != nil {
 		return false
 	}
@@ -761,21 +774,21 @@ func pruneCodexHookEntries(hooks map[string]interface{}) int {
 // ref rather than deriving one, so an update from a local checkout keeps Codex
 // on that checkout instead of quietly repointing it at GitHub. Silent no-op
 // when Codex setup isn't installed.
-func refreshCodexSetupIfInstalled(marketplaceRef string) {
-	if !feltCodexInstalled() {
+func (a *app) refreshCodexSetupIfInstalled(marketplaceRef string) {
+	if !a.feltCodexInstalled() {
 		return
 	}
-	fmt.Println()
-	fmt.Println("Refreshing Codex plugin...")
-	if err := installCodexPluginViaCLI(marketplaceRef); err != nil {
-		fmt.Printf("Codex refresh failed: %v\n", err)
-		fmt.Println("Rerun `felt setup codex` to retry.")
+	fmt.Fprintln(a.env.Stdout)
+	fmt.Fprintln(a.env.Stdout, "Refreshing Codex plugin...")
+	if err := a.installCodexPluginViaCLI(marketplaceRef); err != nil {
+		fmt.Fprintf(a.env.Stdout, "Codex refresh failed: %v\n", err)
+		fmt.Fprintln(a.env.Stdout, "Rerun `felt setup codex` to retry.")
 	}
 }
 
 // homePath joins parts onto the user's home directory.
-func homePath(parts ...string) (string, error) {
-	home, err := os.UserHomeDir()
+func (a *app) homePath(parts ...string) (string, error) {
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
@@ -790,7 +803,7 @@ const codexPluginRef = "felt@" + marketplaceName
 // codexMarketplaceSource adapts a Claude-flavored marketplace ref
 // (`owner/repo#tag`) into Codex's accepted form (`owner/repo@tag`). Local
 // filesystem paths are passed through unchanged. The two CLIs diverged on
-// ref syntax; defaultMarketplaceRef() produces Claude's form for ergonomic
+// ref syntax; a.defaultMarketplaceRef() produces Claude's form for ergonomic
 // reuse, so we translate at the boundary instead of carrying two refs.
 func codexMarketplaceSource(source string) string {
 	if isLocalPath(source) {
@@ -815,24 +828,24 @@ func isLocalPath(source string) bool {
 // cache under ~/.codex/plugins/cache/ and writes the
 // `[plugins."felt@…"] enabled = true` entry itself, so felt never touches
 // ~/.codex/config.toml. Both verbs are idempotent; re-running is safe.
-func installCodexPluginViaCLI(marketplaceSource string) error {
-	if _, err := exec.LookPath("codex"); err != nil {
+func (a *app) installCodexPluginViaCLI(marketplaceSource string) error {
+	if _, err := a.env.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
 	}
-	return withPluginPromotionLock(func() error {
-		previous := captureCodexInstallation()
-		return withStagedPluginCandidateWithRestore(marketplaceSource, installCodexPluginAtSource, func() error {
-			return restoreCodexInstallation(previous)
+	return a.withPluginPromotionLock(func() error {
+		previous := a.captureCodexInstallation()
+		return a.withStagedPluginCandidateWithRestore(marketplaceSource, a.installCodexPluginAtSource, func() error {
+			return a.restoreCodexInstallation(previous)
 		})
 	})
 }
 
-func installCodexPluginAtSource(marketplaceSource string) error {
-	if err := repointCodexMarketplace(codexMarketplaceSource(marketplaceSource)); err != nil {
+func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
+	if err := a.repointCodexMarketplace(codexMarketplaceSource(marketplaceSource)); err != nil {
 		return err
 	}
 
-	if err := runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
+	if err := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 		return fmt.Errorf("installing %s: %w\n"+
 			"  felt installs through Codex's native plugin commands, verified on\n"+
 			"  codex-cli 0.147.0. Upgrade Codex if `codex plugin add` is unknown.",
@@ -843,34 +856,34 @@ func installCodexPluginAtSource(marketplaceSource string) error {
 	// after Codex's reported cache proves it holds the promoted generation.
 	// A failed verify gets one remove+add retry to force a fresh cache before
 	// the promotion is refused.
-	if err := verifyCodexLoadedGeneration(marketplaceSource); err != nil {
-		_, _ = runCodexCLIQuiet("plugin", "remove", codexPluginRef)
-		if addErr := runHarnessCLI("codex", "plugin", "add", codexPluginRef); addErr != nil {
+	if err := a.verifyCodexLoadedGeneration(marketplaceSource); err != nil {
+		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
+		if addErr := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); addErr != nil {
 			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", codexPluginRef, err, addErr)
 		}
-		if err := verifyCodexLoadedGeneration(marketplaceSource); err != nil {
+		if err := a.verifyCodexLoadedGeneration(marketplaceSource); err != nil {
 			return err
 		}
 	}
 
 	// Direct ~/.codex/hooks.json entries would fire the same hooks a second
 	// time alongside the plugin's.
-	if removed := pruneLegacyCodexHooks(); removed > 0 {
-		fmt.Printf("✓ Removed %d legacy hooks.json entries (now served via plugin)\n", removed)
+	if removed := a.pruneLegacyCodexHooks(); removed > 0 {
+		fmt.Fprintf(a.env.Stdout, "✓ Removed %d legacy hooks.json entries (now served via plugin)\n", removed)
 	}
 
 	// `~/.agents/skills/{felt,ralph}` symlinks predate Codex's plugin
 	// skill discovery. The plugin's `skills:` pointer in plugin.json
 	// supersedes them, and leaving stale symlinks risks Codex loading
 	// the same skill twice from two paths.
-	if removed := pruneLegacyCodexSkills(); removed > 0 {
-		fmt.Printf("✓ Removed %d legacy ~/.agents/skills symlinks (now served via plugin)\n", removed)
+	if removed := a.pruneLegacyCodexSkills(); removed > 0 {
+		fmt.Fprintf(a.env.Stdout, "✓ Removed %d legacy ~/.agents/skills symlinks (now served via plugin)\n", removed)
 	}
 
-	fmt.Println()
-	fmt.Println("Restart Codex for changes to take effect. Your next interactive Codex")
-	fmt.Println("session will ask you to review and trust felt's hooks — until you accept,")
-	fmt.Println("the skills load but the hooks stay dormant.")
+	fmt.Fprintln(a.env.Stdout)
+	fmt.Fprintln(a.env.Stdout, "Restart Codex for changes to take effect. Your next interactive Codex")
+	fmt.Fprintln(a.env.Stdout, "session will ask you to review and trust felt's hooks — until you accept,")
+	fmt.Fprintln(a.env.Stdout, "the skills load but the hooks stay dormant.")
 	return nil
 }
 
@@ -884,29 +897,29 @@ func installCodexPluginAtSource(marketplaceSource string) error {
 // for the verb — returns with the existing registration untouched, because
 // unregistering felt on the way to failing to register it is strictly worse
 // than doing nothing.
-func repointCodexMarketplace(codexSource string) error {
-	out, err := runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
+func (a *app) repointCodexMarketplace(codexSource string) error {
+	out, err := a.runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
 	if err == nil {
-		fmt.Print(out)
+		fmt.Fprint(a.env.Stdout, out)
 		return nil
 	}
 	if !codexMarketplaceConflict(out) {
 		return fmt.Errorf("registering codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
-	previousSource, _ := codexMarketplaceState()
+	previousSource, _ := a.codexMarketplaceState()
 
-	fmt.Printf("Repointing marketplace %s → %s\n", marketplaceName, codexSource)
-	if _, rmErr := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName); rmErr != nil {
+	fmt.Fprintf(a.env.Stdout, "Repointing marketplace %s → %s\n", marketplaceName, codexSource)
+	if _, rmErr := a.runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName); rmErr != nil {
 		return fmt.Errorf("repointing codex marketplace %s: %w\n%s", codexSource, err, strings.TrimSpace(out))
 	}
 
-	retryOut, retryErr := runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
+	retryOut, retryErr := a.runCodexCLIQuiet("plugin", "marketplace", "add", codexSource)
 	if retryErr != nil {
 		if previousSource != "" {
 			// Re-register the prior source before returning. A failed repoint is
 			// not allowed to strand the user's working marketplace on a missing
 			// source; the outer promotion transaction will restore the cache too.
-			if restoreOut, restoreErr := runCodexCLIQuiet("plugin", "marketplace", "add", previousSource); restoreErr != nil {
+			if restoreOut, restoreErr := a.runCodexCLIQuiet("plugin", "marketplace", "add", previousSource); restoreErr != nil {
 				return fmt.Errorf("re-registering codex marketplace %s: %w\n%s\n  restoring previous source %s also failed: %v\n%s",
 					codexSource, retryErr, strings.TrimSpace(retryOut), previousSource, restoreErr, strings.TrimSpace(restoreOut))
 			}
@@ -916,7 +929,7 @@ func repointCodexMarketplace(codexSource string) error {
 			"  `felt setup codex` once the cause is fixed.",
 			codexSource, retryErr, strings.TrimSpace(retryOut))
 	}
-	fmt.Print(retryOut)
+	fmt.Fprint(a.env.Stdout, retryOut)
 	return nil
 }
 
@@ -934,15 +947,15 @@ func codexMarketplaceConflict(out string) bool {
 // runCodexCLIQuiet invokes the codex CLI capturing combined output instead of
 // streaming it, so a failure the caller recovers from doesn't print an alarming
 // error the user can't act on.
-func runCodexCLIQuiet(args ...string) (string, error) {
-	out, err := exec.Command("codex", args...).CombinedOutput()
+func (a *app) runCodexCLIQuiet(args ...string) (string, error) {
+	out, err := a.env.Command("codex", args...).CombinedOutput()
 	return string(out), err
 }
 
 // readCodexConfig loads ~/.codex/config.toml as a generic map. Callers only
 // index the result, so a nil map (empty or comment-only document) is fine.
-func readCodexConfig() (map[string]interface{}, error) {
-	path, err := homePath(".codex", "config.toml")
+func (a *app) readCodexConfig() (map[string]interface{}, error) {
+	path, err := a.homePath(".codex", "config.toml")
 	if err != nil {
 		return nil, err
 	}
@@ -962,8 +975,8 @@ func readCodexConfig() (map[string]interface{}, error) {
 
 // pruneLegacyCodexHooks removes felt-flagged entries from ~/.codex/hooks.json.
 // Returns the count of pruned entries.
-func pruneLegacyCodexHooks() int {
-	hooksPath, err := homePath(".codex", "hooks.json")
+func (a *app) pruneLegacyCodexHooks() int {
+	hooksPath, err := a.homePath(".codex", "hooks.json")
 	if err != nil {
 		return 0
 	}
@@ -1013,8 +1026,8 @@ func pruneHookFile(path string, prune func(hooks map[string]interface{}) int) in
 // (especially PostToolUse) appear twice. Match only the known legacy basename,
 // preserve every unrelated Claude hook, and leave the file untouched when it
 // is absent or contains no legacy entry.
-func pruneLegacyClaudeHooks() int {
-	settingsPath, err := homePath(".claude", "settings.json")
+func (a *app) pruneLegacyClaudeHooks() int {
+	settingsPath, err := a.homePath(".claude", "settings.json")
 	if err != nil {
 		return 0
 	}
@@ -1030,8 +1043,8 @@ func pruneLegacyClaudeHooks() int {
 // pruneLegacyCodexSkills removes felt-related symlinks from
 // ~/.agents/skills/. Only removes symlinks (not directories) to avoid
 // touching anything the user installed manually.
-func pruneLegacyCodexSkills() int {
-	dir, err := homePath(".agents", "skills")
+func (a *app) pruneLegacyCodexSkills() int {
+	dir, err := a.homePath(".agents", "skills")
 	if err != nil {
 		return 0
 	}
@@ -1057,18 +1070,18 @@ func pruneLegacyCodexSkills() int {
 // prints as a note; anything else is returned, because a removal that didn't
 // happen must not be announced as one. `codex plugin remove` exits 0 on an
 // absent plugin, so only `marketplace remove` reaches the benign branch.
-func reportCodexRemoval(out string, err error) error {
+func (a *app) reportCodexRemoval(out string, err error) error {
 	text := strings.TrimSpace(out)
 	message := strings.TrimPrefix(text, "Error: ")
 	if err == nil {
 		if text != "" {
-			fmt.Println(text)
+			fmt.Fprintln(a.env.Stdout, text)
 		}
 		return nil
 	}
 	if strings.Contains(text, "is not configured or installed") {
 		if message != "" {
-			fmt.Printf("· %s\n", message)
+			fmt.Fprintf(a.env.Stdout, "· %s\n", message)
 		}
 		return nil
 	}
@@ -1080,37 +1093,37 @@ func reportCodexRemoval(out string, err error) error {
 
 // uninstallCodexPlugin removes the plugin and its marketplace through Codex's
 // own commands, then prunes any leftover hooks.json / agents-skills entries.
-func uninstallCodexPlugin() error {
+func (a *app) uninstallCodexPlugin() error {
 	var failures []error
-	if _, err := exec.LookPath("codex"); err == nil {
+	if _, err := a.env.LookPath("codex"); err == nil {
 		// `plugin remove` drops both the config.toml entry and the cached
 		// plugin directory; `marketplace remove` unregisters the source.
 		// A failure here doesn't stop the legacy pruning below, but it is
 		// carried to the end so uninstall doesn't claim to have finished.
-		if err := reportCodexRemoval(runCodexCLIQuiet("plugin", "remove", codexPluginRef)); err != nil {
+		if err := a.reportCodexRemoval(a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)); err != nil {
 			failures = append(failures, fmt.Errorf("removing plugin %s: %w", codexPluginRef, err))
 		}
-		if err := reportCodexRemoval(runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)); err != nil {
+		if err := a.reportCodexRemoval(a.runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)); err != nil {
 			failures = append(failures, fmt.Errorf("removing marketplace %s: %w", marketplaceName, err))
 		}
 	} else {
-		fmt.Println("codex CLI not found in PATH — skipping plugin removal.")
-		fmt.Println("Rerun `felt setup codex --uninstall` with codex installed to finish.")
+		fmt.Fprintln(a.env.Stdout, "codex CLI not found in PATH — skipping plugin removal.")
+		fmt.Fprintln(a.env.Stdout, "Rerun `felt setup codex --uninstall` with codex installed to finish.")
 	}
 
-	if removed := pruneLegacyCodexHooks(); removed > 0 {
-		fmt.Printf("✓ Removed %d legacy hooks.json entries\n", removed)
+	if removed := a.pruneLegacyCodexHooks(); removed > 0 {
+		fmt.Fprintf(a.env.Stdout, "✓ Removed %d legacy hooks.json entries\n", removed)
 	}
-	if removed := pruneLegacyCodexSkills(); removed > 0 {
-		fmt.Printf("✓ Removed %d legacy ~/.agents/skills symlinks\n", removed)
+	if removed := a.pruneLegacyCodexSkills(); removed > 0 {
+		fmt.Fprintf(a.env.Stdout, "✓ Removed %d legacy ~/.agents/skills symlinks\n", removed)
 	}
 
 	if len(failures) > 0 {
 		return errors.Join(failures...)
 	}
 
-	fmt.Println()
-	fmt.Println("Restart Codex for changes to take effect.")
+	fmt.Fprintln(a.env.Stdout)
+	fmt.Fprintln(a.env.Stdout, "Restart Codex for changes to take effect.")
 	return nil
 }
 

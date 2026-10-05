@@ -36,10 +36,12 @@ func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, w
 }
 
 func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
+	t.Parallel()
 	for _, h := range nativeHarnesses {
 		t.Run(h.name, func(t *testing.T) {
+			t.Parallel()
 			f := newRemoteSetupFixture(t, h.name)
-			if err := h.install(f.remote); err != nil {
+			if err := h.install(f.a, f.remote); err != nil {
 				t.Fatalf("baseline remote %s setup: %v", h.name, err)
 			}
 			if got := f.currentGeneration(t); got != "one" {
@@ -49,15 +51,16 @@ func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 			for _, tamper := range []string{"stale", "alter", "missing-marker"} {
 				t.Run(tamper, func(t *testing.T) {
 					f.setGeneration(t, "poisoned-"+tamper)
-					t.Setenv("FAKE_NATIVE_TAMPER", tamper)
-					err := h.install(f.remote + "#" + tamper)
+					f.env.Set("FAKE_NATIVE_TAMPER", tamper)
+					t.Cleanup(func() { f.env.Unset("FAKE_NATIVE_TAMPER") })
+					err := h.install(f.a, f.remote+"#"+tamper)
 					assertRefusedBeforeCommit(t, f, err, "one")
 				})
 			}
 
 			// With the lie removed the same source promotes and verifies cleanly.
 			f.setGeneration(t, "honest")
-			if err := h.install(f.remote + "#honest"); err != nil {
+			if err := h.install(f.a, f.remote+"#honest"); err != nil {
 				t.Fatalf("honest retry after refused caches: %v", err)
 			}
 			if got := f.currentGeneration(t); got != "honest" {
@@ -72,8 +75,9 @@ func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 // version legitimately keeps the old versioned cache, and setup converges by
 // falling back to uninstall+install — which re-copies — before verifying.
 func TestClaudeSetupRecoversStaleUpdateCacheViaReinstall(t *testing.T) {
+	t.Parallel()
 	f := newRemoteSetupFixture(t, "claude")
-	if err := installPluginViaCLI(f.remote); err != nil {
+	if err := f.a.installPluginViaCLI(f.remote); err != nil {
 		t.Fatalf("baseline remote Claude setup: %v", err)
 	}
 	baseline, err := os.ReadFile(f.nativeLog)
@@ -81,8 +85,8 @@ func TestClaudeSetupRecoversStaleUpdateCacheViaReinstall(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.setGeneration(t, "refreshed")
-	t.Setenv("FAKE_NATIVE_TAMPER", "stale-update")
-	if err := installPluginViaCLI(f.remote + "#refreshed"); err != nil {
+	f.env.Set("FAKE_NATIVE_TAMPER", "stale-update")
+	if err := f.a.installPluginViaCLI(f.remote + "#refreshed"); err != nil {
 		t.Fatalf("stale-update promotion did not converge via reinstall: %v", err)
 	}
 	if got := f.currentGeneration(t); got != "refreshed" {

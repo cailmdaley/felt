@@ -6,12 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // TestPiPackageSource pins the pi-side translation: pi's git shorthand needs
 // the full github.com host, and a pinned Claude ref (`#v<tag>`) becomes pi's
 // `@v<tag>`. Local paths pass through — pi installs a directory in place.
 func TestPiPackageSource(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ in, want string }{
 		{"/home/dev/code/felt", "/home/dev/code/felt"},                        // local abs path → unchanged
 		{"./felt", "./felt"},                                                  // local rel path → unchanged
@@ -30,6 +33,7 @@ func TestPiPackageSource(t *testing.T) {
 // while a kind or location change (git↔local, two checkouts) counts as
 // different — the old entry must be dropped first or pi loads felt twice.
 func TestSamePiSourceLocation(t *testing.T) {
+	t.Parallel()
 	same := [][2]string{
 		{"git:github.com/cailmdaley/felt", "git:github.com/cailmdaley/felt"},
 		{"git:github.com/cailmdaley/felt", "git:github.com/cailmdaley/felt@v1.0.14"}, // tag bump
@@ -84,96 +88,72 @@ func scaffoldFeltCheckout(t *testing.T, dir string) {
 // was blind to local installs — refresh no-op'd and uninstall left residue —
 // so the local cases here are the regression.
 func TestPiFeltPackageSource(t *testing.T) {
+	t.Parallel()
 	const noRef = "git:github.com/cailmdaley/felt"
 
-	t.Run("absent settings → empty", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
-		if got := piFeltPackageSource(); got != "" {
-			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
-		}
-	})
-
-	t.Run("no felt package → empty", func(t *testing.T) {
-		home := t.TempDir()
-		writePiSettings(t, home, []string{"npm:pi-subagents", "/home/dev/unrelated"})
-		t.Setenv("HOME", home)
-		if got := piFeltPackageSource(); got != "" {
-			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
-		}
-	})
-
-	for _, tc := range []struct{ name, entry, want string }{
-		{"git bare", noRef, noRef},
-		{"git tagged", noRef + "@v1.0.14", noRef + "@v1.0.14"},
+	for _, tc := range []struct {
+		name string
+		// arrange lays out home and returns the source piFeltPackageSource
+		// should report.
+		arrange func(t *testing.T, home string) string
+	}{
+		{"absent settings → empty", func(t *testing.T, home string) string { return "" }},
+		{"no felt package → empty", func(t *testing.T, home string) string {
+			writePiSettings(t, home, []string{"npm:pi-subagents", "/home/dev/unrelated"})
+			return ""
+		}},
+		{"git bare", func(t *testing.T, home string) string {
+			writePiSettings(t, home, []string{"npm:pi-subagents", noRef})
+			return noRef
+		}},
+		{"git tagged", func(t *testing.T, home string) string {
+			writePiSettings(t, home, []string{"npm:pi-subagents", noRef + "@v1.0.14"})
+			return noRef + "@v1.0.14"
+		}},
+		{"local checkout by package name", func(t *testing.T, home string) string {
+			checkout := filepath.Join(home, "dev", "felt")
+			scaffoldFeltCheckout(t, checkout)
+			writePiSettings(t, home, []string{checkout})
+			return checkout
+		}},
+		{"home-relative local entry", func(t *testing.T, home string) string {
+			scaffoldFeltCheckout(t, filepath.Join(home, "dev", "felt"))
+			writePiSettings(t, home, []string{"dev/felt"})
+			return "dev/felt"
+		}},
+		{"local dir without felt package.json → empty", func(t *testing.T, home string) string {
+			other := filepath.Join(home, "dev", "other")
+			scaffoldFeltCheckout(t, other)
+			if err := os.WriteFile(filepath.Join(other, "package.json"), []byte(`{"name":"other"}`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writePiSettings(t, home, []string{other})
+			return ""
+		}},
+		{"malformed settings → empty", func(t *testing.T, home string) string {
+			if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(home, ".pi", "agent", "settings.json"), []byte("{not json"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			return ""
+		}},
+		{"tilde entry expanded against home", func(t *testing.T, home string) string {
+			scaffoldFeltCheckout(t, filepath.Join(home, "dev", "felt"))
+			writePiSettings(t, home, []string{"~/dev/felt"})
+			return "~/dev/felt"
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			home := t.TempDir()
-			writePiSettings(t, home, []string{"npm:pi-subagents", tc.entry})
-			t.Setenv("HOME", home)
-			if got := piFeltPackageSource(); got != tc.want {
-				t.Errorf("piFeltPackageSource() = %q, want %q", got, tc.want)
+			t.Parallel()
+			env, _ := testEnv(t)
+			want := tc.arrange(t, homeOf(t, env))
+			if got := testApp(t, env).piFeltPackageSource(); got != want {
+				t.Errorf("piFeltPackageSource() = %q, want %q", got, want)
 			}
 		})
 	}
-
-	t.Run("local checkout by package name", func(t *testing.T) {
-		home := t.TempDir()
-		checkout := filepath.Join(home, "dev", "felt")
-		scaffoldFeltCheckout(t, checkout)
-		writePiSettings(t, home, []string{checkout})
-		t.Setenv("HOME", home)
-		if got := piFeltPackageSource(); got != checkout {
-			t.Errorf("piFeltPackageSource() = %q, want %q", got, checkout)
-		}
-	})
-
-	t.Run("home-relative local entry", func(t *testing.T) {
-		home := t.TempDir()
-		scaffoldFeltCheckout(t, filepath.Join(home, "dev", "felt"))
-		writePiSettings(t, home, []string{"dev/felt"})
-		t.Setenv("HOME", home)
-		if got := piFeltPackageSource(); got != "dev/felt" {
-			t.Errorf("piFeltPackageSource() = %q, want %q", got, "dev/felt")
-		}
-	})
-
-	t.Run("local dir without felt package.json → empty", func(t *testing.T) {
-		home := t.TempDir()
-		other := filepath.Join(home, "dev", "other")
-		scaffoldFeltCheckout(t, other)
-		if err := os.WriteFile(filepath.Join(other, "package.json"), []byte(`{"name":"other"}`), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		writePiSettings(t, home, []string{other})
-		t.Setenv("HOME", home)
-		if got := piFeltPackageSource(); got != "" {
-			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
-		}
-	})
-
-	t.Run("malformed settings → empty", func(t *testing.T) {
-		home := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(home, ".pi", "agent"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(home, ".pi", "agent", "settings.json"), []byte("{not json"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("HOME", home)
-		if got := piFeltPackageSource(); got != "" {
-			t.Errorf("piFeltPackageSource() = %q, want \"\"", got)
-		}
-	})
-
-	t.Run("tilde entry expanded against home", func(t *testing.T) {
-		home := t.TempDir()
-		scaffoldFeltCheckout(t, filepath.Join(home, "dev", "felt"))
-		writePiSettings(t, home, []string{"~/dev/felt"})
-		t.Setenv("HOME", home)
-		if got := piFeltPackageSource(); got != "~/dev/felt" {
-			t.Errorf("piFeltPackageSource() = %q, want %q", got, "~/dev/felt")
-		}
-	})
 }
 
 // TestInstallPiPackageViaCLI_SourceSwap pins the remove-before-install
@@ -181,37 +161,22 @@ func TestPiFeltPackageSource(t *testing.T) {
 // otherwise pass every pure-comparator test while duplicating felt in pi's
 // settings. fakePiOnPath is the pi-side mirror of fakeClaudeOnPath.
 func TestInstallPiPackageViaCLI_SourceSwap(t *testing.T) {
+	t.Parallel()
 	const gitSpec = "git:github.com/cailmdaley/felt"
-
-	// fakePiOnPath puts a stub `pi` at the front of PATH for the duration of
-	// the test, logging every invocation — the pi-side mirror of
-	// fakeClaudeOnPath. Returns a func reading the log.
-	fakePiOnPath := func(t *testing.T) func() string {
-		dir := t.TempDir()
-		log := filepath.Join(dir, "calls.log")
-		script := "#!/bin/sh\necho \"$@\" >> " + log + "\nexit 0\n"
-		if err := os.WriteFile(filepath.Join(dir, "pi"), []byte(script), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-		return func() string {
-			b, _ := os.ReadFile(log)
-			return string(b)
-		}
-	}
 
 	t.Run("orchestrator swaps a differing source before install", func(t *testing.T) {
 		// Pins installPiPackageViaCLI's remove-before-install flow end to end:
 		// flipping samePiSourceLocation's negation would otherwise pass every
 		// pure-comparator test while duplicating felt in pi's settings.
-		home := t.TempDir()
+		t.Parallel()
+		env, _ := testEnv(t)
+		home := homeOf(t, env)
 		checkout := filepath.Join(home, "dev", "felt")
 		scaffoldFeltCheckout(t, checkout)
 		writePiSettings(t, home, []string{"npm:pi-subagents", checkout})
-		t.Setenv("HOME", home)
-		calls := fakePiOnPath(t)
+		calls := fakeCallLog(t, env, "pi", "")
 
-		if err := installPiPackageViaCLI(gitSpec); err != nil {
+		if err := testApp(t, env).installPiPackageViaCLI(gitSpec); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		got := calls()
@@ -225,12 +190,12 @@ func TestInstallPiPackageViaCLI_SourceSwap(t *testing.T) {
 	})
 
 	t.Run("same-source reinstall removes nothing", func(t *testing.T) {
-		home := t.TempDir()
-		writePiSettings(t, home, []string{gitSpec})
-		t.Setenv("HOME", home)
-		calls := fakePiOnPath(t)
+		t.Parallel()
+		env, _ := testEnv(t)
+		writePiSettings(t, homeOf(t, env), []string{gitSpec})
+		calls := fakeCallLog(t, env, "pi", "")
 
-		if err := installPiPackageViaCLI(gitSpec + "@v1.2.3"); err != nil {
+		if err := testApp(t, env).installPiPackageViaCLI(gitSpec + "@v1.2.3"); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if got := calls(); strings.Contains(got, "remove") {
@@ -244,6 +209,7 @@ func TestInstallPiPackageViaCLI_SourceSwap(t *testing.T) {
 // defaultMarketplaceRef() emits Claude's form. Local paths pass through — Codex
 // accepts a directory marketplace directly.
 func TestCodexMarketplaceSource(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ in, want string }{
 		{"/home/dev/code/felt", "/home/dev/code/felt"},         // local abs path → unchanged
 		{"./felt", "./felt"},                                   // local rel path → unchanged
@@ -264,6 +230,7 @@ func TestCodexMarketplaceSource(t *testing.T) {
 // network blip or on a conflict about an unrelated marketplace. The first case
 // is codex 0.147.0's message verbatim.
 func TestCodexMarketplaceConflict(t *testing.T) {
+	t.Parallel()
 	conflicts := []string{
 		"Error: marketplace 'cailmdaley-felt' is already added from a different source; remove it before adding this source\n",
 	}
@@ -293,10 +260,12 @@ func TestCodexMarketplaceConflict(t *testing.T) {
 // TestFindPluginDir verifies the resolver returns a valid plugin directory
 // from a --source path pointing at a felt repo checkout.
 func TestFindPluginDir_FromRepoCheckout(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 
 	// The repo should have a claude-plugin/plugin.json.
-	pluginDir, err := findPluginDir(root)
+	env, _ := testEnv(t)
+	pluginDir, err := testApp(t, env).findPluginDir(root)
 	if err != nil {
 		t.Fatalf("findPluginDir(%s): %v", root, err)
 	}
@@ -335,9 +304,11 @@ func scaffoldRepoLayout(t *testing.T) (string, string) {
 // TestFindPluginDir_FromRepoRoot verifies the resolver returns the
 // claude-plugin/ subdir when given the repo root (which has marketplace.json).
 func TestFindPluginDir_FromRepoRoot(t *testing.T) {
+	t.Parallel()
 	repoRoot, expectedPluginDir := scaffoldRepoLayout(t)
 
-	pluginDir, err := findPluginDir(repoRoot)
+	env, _ := testEnv(t)
+	pluginDir, err := testApp(t, env).findPluginDir(repoRoot)
 	if err != nil {
 		t.Fatalf("findPluginDir(%s): %v", repoRoot, err)
 	}
@@ -349,11 +320,13 @@ func TestFindPluginDir_FromRepoRoot(t *testing.T) {
 // TestFindPluginDir_EnvVar verifies $FELT_PLUGIN_DIR pointing at the plugin
 // directory derives the marketplace root from its parent.
 func TestFindPluginDir_EnvVar(t *testing.T) {
+	t.Parallel()
 	_, pluginDir := scaffoldRepoLayout(t)
 
-	t.Setenv("FELT_PLUGIN_DIR", pluginDir)
+	env, _ := testEnv(t)
+	env.Set("FELT_PLUGIN_DIR", pluginDir)
 
-	resolved, err := findPluginDir("")
+	resolved, err := testApp(t, env).findPluginDir("")
 	if err != nil {
 		t.Fatalf("findPluginDir (env): %v", err)
 	}
@@ -362,42 +335,27 @@ func TestFindPluginDir_EnvVar(t *testing.T) {
 	}
 }
 
-// fakeClaudeOnPath puts a stub `claude` at the front of PATH for the duration
-// of the test. The stub appends every invocation to a log file, answers
-// `plugin list --json` with listJSON, and answers `plugin marketplace list
-// --json` with the felt marketplace already registered — the state every
-// caller of installPluginViaCLI is really in, since setup registers the
-// marketplace before it installs anything. Returns a func reading the log.
-func fakeClaudeOnPath(t *testing.T, listJSON string) func() string {
+// fakeClaudeOnPath puts a stub `claude` first on env's PATH. The stub logs
+// every invocation, answers `plugin list --json` with listJSON, and answers
+// `plugin marketplace list --json` with the felt marketplace already
+// registered — the state every caller of installPluginViaCLI is really in,
+// since setup registers the marketplace before it installs anything. Returns
+// a func reading the log.
+func fakeClaudeOnPath(t *testing.T, env *sysenv.Env, listJSON string) func() string {
 	t.Helper()
-	dir := t.TempDir()
-	log := filepath.Join(dir, "calls.log")
 	marketplaceJSON := `[{"name":"` + marketplaceName + `","source":"directory","path":"/tmp/felt-repo"}]`
-	script := "#!/bin/sh\n" +
-		"echo \"$@\" >> " + log + "\n" +
-		"if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then\n" +
-		"  cat <<'JSON'\n" + marketplaceJSON + "\nJSON\n" +
-		"elif [ \"$1\" = plugin ] && [ \"$2\" = list ]; then\n" +
-		"  cat <<'JSON'\n" + listJSON + "\nJSON\n" +
-		"fi\n" +
-		"exit 0\n"
-	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return func() string {
-		b, err := os.ReadFile(log)
-		if err != nil {
-			return ""
-		}
-		return string(b)
-	}
+	return fakeCallLog(t, env, "claude",
+		"if [ \"$1\" = plugin ] && [ \"$2\" = marketplace ] && [ \"$3\" = list ]; then\n"+
+			"  cat <<'JSON'\n"+marketplaceJSON+"\nJSON\n"+
+			"elif [ \"$1\" = plugin ] && [ \"$2\" = list ]; then\n"+
+			"  cat <<'JSON'\n"+listJSON+"\nJSON\n"+
+			"fi\n")
 }
 
 func TestPruneLegacyClaudeHooks(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	settingsDir := filepath.Join(home, ".claude")
+	t.Parallel()
+	env, _ := testEnv(t)
+	settingsDir := filepath.Join(homeOf(t, env), ".claude")
 	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +392,7 @@ func TestPruneLegacyClaudeHooks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := pruneLegacyClaudeHooks(); got != 2 {
+	if got := testApp(t, env).pruneLegacyClaudeHooks(); got != 2 {
 		t.Fatalf("pruneLegacyClaudeHooks() = %d, want 2", got)
 	}
 
@@ -473,17 +431,16 @@ func TestPruneLegacyClaudeHooks(t *testing.T) {
 // which hard-fails on a plugin that isn't installed. The op must follow
 // whether the PLUGIN is installed.
 func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
-	// installPluginViaCLI also performs the legacy Claude-hook migration. Keep
-	// these CLI orchestration tests hermetic rather than letting that migration
-	// inspect the developer's real ~/.claude/settings.json.
-	t.Setenv("HOME", t.TempDir())
+	t.Parallel()
 	pluginRef := "felt@" + marketplaceName
 
 	t.Run("plugin absent → install", func(t *testing.T) {
 		// A registered marketplace with no felt plugin: the state an install
 		// that failed after `marketplace add` leaves behind.
-		calls := fakeClaudeOnPath(t, `[{"id":"other@somewhere"}]`)
-		if err := installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
+		t.Parallel()
+		env, _ := testEnv(t)
+		calls := fakeClaudeOnPath(t, env, `[{"id":"other@somewhere"}]`)
+		if err := testApp(t, env).installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if got := calls(); !strings.Contains(got, "plugin install "+pluginRef) {
@@ -492,8 +449,10 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 	})
 
 	t.Run("plugin present → update", func(t *testing.T) {
-		calls := fakeClaudeOnPath(t, `[{"id":"`+pluginRef+`"}]`)
-		if err := installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
+		t.Parallel()
+		env, _ := testEnv(t)
+		calls := fakeClaudeOnPath(t, env, `[{"id":"`+pluginRef+`"}]`)
+		if err := testApp(t, env).installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if got := calls(); !strings.Contains(got, "plugin update "+pluginRef) {
@@ -504,8 +463,10 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 	t.Run("unreadable plugin list → install", func(t *testing.T) {
 		// Install is the safe guess: installing an installed plugin is a
 		// no-op, updating a missing one is an error.
-		calls := fakeClaudeOnPath(t, `not json`)
-		if err := installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
+		t.Parallel()
+		env, _ := testEnv(t)
+		calls := fakeClaudeOnPath(t, env, `not json`)
+		if err := testApp(t, env).installClaudePluginAtSource("/tmp/felt-repo"); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 		if got := calls(); !strings.Contains(got, "plugin install "+pluginRef) {
@@ -522,9 +483,10 @@ func TestInstallPluginViaCLI_OpFollowsPluginNotMarketplace(t *testing.T) {
 // hanging off it — and the skills `felt setup skills` linked out of its clone
 // have to be unlinked first, or removing the clone leaves dangling symlinks.
 func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	calls := fakeClaudeOnPath(t, `[{"id":"felt@`+marketplaceName+`"}]`)
+	t.Parallel()
+	env, _ := testEnv(t)
+	home := homeOf(t, env)
+	calls := fakeClaudeOnPath(t, env, `[{"id":"felt@`+marketplaceName+`"}]`)
 
 	// Skills linked from the marketplace clone and from the plugin runtime
 	// the directory marketplace serves (both go), one linked from a local
@@ -559,7 +521,7 @@ func TestUninstallPluginRemovesMarketplaceAndSkillLinks(t *testing.T) {
 		}
 	}
 
-	if err := uninstallPlugin(); err != nil {
+	if err := testApp(t, env).uninstallPlugin(); err != nil {
 		t.Fatalf("uninstallPlugin: %v", err)
 	}
 

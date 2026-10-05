@@ -132,14 +132,6 @@ Body.
 	}
 }
 
-// runCommand runs one `felt …` invocation against dir and returns its stdout
-// (see executeCLI).
-func runCommand(t *testing.T, dir string, args ...string) (string, error) {
-	t.Helper()
-	stdout, _, err := executeCLI(t, dir, args...)
-	return stdout, err
-}
-
 // TestCheckCommandCountsUnparseableFiberFirst pins the fix for a store where a
 // fiber had been invisible for three weeks. Its `outcome:` was a bare unquoted
 // scalar containing a colon-space, which YAML reads as a nested mapping; the

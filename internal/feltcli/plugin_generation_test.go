@@ -8,6 +8,9 @@ import (
 )
 
 func TestPluginGenerationMarkerBindsSameVersionPayloadChanges(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
 	root := testRepoRoot(t)
 	one := filepath.Join(t.TempDir(), "one")
 	two := filepath.Join(t.TempDir(), "two")
@@ -21,11 +24,11 @@ func TestPluginGenerationMarkerBindsSameVersionPayloadChanges(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(two, "claude-plugin", "skills", "felt", "SKILL.md"), []byte("same version, different payload\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	first, err := buildPluginGeneration("local", root, "", "", one)
+	first, err := a.buildPluginGeneration("local", root, "", "", one)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := buildPluginGeneration("local", root, "", "", two)
+	second, err := a.buildPluginGeneration("local", root, "", "", two)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +38,9 @@ func TestPluginGenerationMarkerBindsSameVersionPayloadChanges(t *testing.T) {
 }
 
 func TestPluginGenerationMarkerLivesInsideHarnessPayload(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
 	root := testRepoRoot(t)
 	candidate := filepath.Join(t.TempDir(), "candidate")
 	for _, name := range []string{".claude-plugin", "claude-plugin"} {
@@ -42,7 +48,7 @@ func TestPluginGenerationMarkerLivesInsideHarnessPayload(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	identity, err := buildPluginGeneration("github", marketplaceRepo, "v1.2.3", "0123456789012345678901234567890123456789", candidate)
+	identity, err := a.buildPluginGeneration("github", marketplaceRepo, "v1.2.3", "0123456789012345678901234567890123456789", candidate)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/spf13/cobra"
 )
 
 type syncFixture struct {
@@ -59,8 +57,9 @@ func writeSyncFile(t *testing.T, dir, name, body string) {
 
 func runFixtureSync(t *testing.T, f syncFixture, push bool) (string, error) {
 	t.Helper()
+	env, _ := testEnv(t)
 	var out bytes.Buffer
-	err := syncStore(context.Background(), f.clone, push, &out)
+	err := testApp(t, env).syncStore(context.Background(), f.clone, push, &out)
 	return out.String(), err
 }
 
@@ -351,14 +350,8 @@ func TestSyncResolvesSymlinkedStoreAndSerializesRepository(t *testing.T) {
 	if err := os.Symlink(storeView, view); err != nil {
 		t.Fatal(err)
 	}
-	previousDir := changeDir
-	changeDir = project
-	t.Cleanup(func() { changeDir = previousDir })
-	var output bytes.Buffer
-	cmd := &cobra.Command{}
-	cmd.SetOut(&output)
-	if err := syncCmd.RunE(cmd, nil); err != nil {
-		t.Fatal(err)
+	if out, err := runCommand(t, project, "sync"); err != nil {
+		t.Fatalf("sync: %v\n%s", err, out)
 	}
 	common := syncTestGit(t, f.clone, "rev-parse", "--git-common-dir")
 	if !filepath.IsAbs(common) {

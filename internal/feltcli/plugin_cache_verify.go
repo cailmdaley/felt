@@ -15,12 +15,12 @@ import (
 
 // verifyClaudeLoadedGeneration checks the cache `claude plugin list --json`
 // reports as installed against the promoted generation at current.
-func verifyClaudeLoadedGeneration(current string) error {
+func (a *app) verifyClaudeLoadedGeneration(current string) error {
 	expected, present, err := promotedGenerationForVerify(current)
 	if err != nil || !present {
 		return err
 	}
-	out, err := claudePluginCommand("list", "--json").Output()
+	out, err := a.claudePluginCommand("list", "--json").Output()
 	if err != nil {
 		return fmt.Errorf("verifying Claude cache: claude plugin list: %w", err)
 	}
@@ -40,7 +40,7 @@ func verifyClaudeLoadedGeneration(current string) error {
 			// silently flipping the preference would be worse. Verify the
 			// materialized bytes, and say loudly that nothing loads until the
 			// user re-enables.
-			fmt.Printf("⚠ %s is installed but disabled; the verified plugin will not load until you run `claude plugin enable %s`\n", ref, ref)
+			fmt.Fprintf(a.env.Stdout, "⚠ %s is installed but disabled; the verified plugin will not load until you run `claude plugin enable %s`\n", ref, ref)
 		}
 		if plugin.InstallPath == "" {
 			return fmt.Errorf("verifying Claude cache: plugin list reports %s without an install path", ref)
@@ -52,12 +52,12 @@ func verifyClaudeLoadedGeneration(current string) error {
 
 // verifyCodexLoadedGeneration checks the cache `codex plugin list --json`
 // reports as installed against the promoted generation at current.
-func verifyCodexLoadedGeneration(current string) error {
+func (a *app) verifyCodexLoadedGeneration(current string) error {
 	expected, present, err := promotedGenerationForVerify(current)
 	if err != nil || !present {
 		return err
 	}
-	out, err := runCodexCLIQuiet("plugin", "list", "--json")
+	out, err := a.runCodexCLIQuiet("plugin", "list", "--json")
 	if err != nil {
 		return fmt.Errorf("verifying Codex cache: codex plugin list: %w", err)
 	}
@@ -74,7 +74,7 @@ func verifyCodexLoadedGeneration(current string) error {
 		if !plugin.Enabled {
 			// Same call as the Claude path: a disable is user preference, not
 			// a materialization failure; verify the bytes and surface the gap.
-			fmt.Printf("⚠ %s is installed but disabled; the verified plugin will not load until you re-enable it in Codex\n", codexPluginRef)
+			fmt.Fprintf(a.env.Stdout, "⚠ %s is installed but disabled; the verified plugin will not load until you re-enable it in Codex\n", codexPluginRef)
 		}
 		if plugin.Source.Path == "" {
 			return fmt.Errorf("verifying Codex cache: plugin list reports %s without a cache path", codexPluginRef)

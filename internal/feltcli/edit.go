@@ -6,28 +6,26 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 // Edit command flags
-var (
-	editName    string
-	editStatus  string
-	editDue     string
-	editTags    []string
-	editUntag   []string
-	editBody    string
-	editOutcome string
-	editSet     []string
-	editUnset   []string
-)
 
-var editCmd = &cobra.Command{
-	Use:   "edit <id>",
-	Short: "Change a fiber's native fields or scalar frontmatter",
-	Long: `Each flag rewrites one field; updated-at is stamped on every edit. -s closed
+func (a *app) editCmd() *cobra.Command {
+	var editName string
+	var editStatus string
+	var editDue string
+	var editTags []string
+	var editUntag []string
+	var editBody string
+	var editOutcome string
+	var editSet []string
+	var editUnset []string
+	command := &cobra.Command{
+		Use:   "edit <id>",
+		Short: "Change a fiber's native fields or scalar frontmatter",
+		Long: `Each flag rewrites one field; updated-at is stamped on every edit. -s closed
 stamps closed-at; -s open or -s active clears it. Status changes do not alter
 project-owned frontmatter. For a change smaller than the whole body, edit the file.
 
@@ -35,109 +33,121 @@ project-owned frontmatter. For a change smaller than the whole body, edit the fi
 YAML so true and 12 keep their types; native keys, empty values, and keys
 holding a mapping or list are refused. --unset removes any key felt does not
 own, structured ones included.`,
-	Example: `  felt edit analysis/covariance -s closed -o "jackknife, 200 patches"
+		Example: `  felt edit analysis/covariance -s closed -o "jackknife, 200 patches"
   felt edit analysis/covariance --set horizon=stashed`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := felt.RequireStore(sysenv.OS(), changeDir)
-		if err != nil {
-			return err
-		}
-		scopeID := felt.CommandScope(sysenv.OS(), root, changeDir)
-		// A fiber in the enclosing store is edited where it lives.
-		target, err := felt.ResolveRef(storage, scopeID, args[0])
-		if err != nil {
-			return err
-		}
-		storage = target.Storage
-		f, err := storage.Read(target.ID)
-		if err != nil {
-			return err
-		}
-
-		hasFlags := len(collectChangedEditFields(cmd)) > 0
-		if !hasFlags {
-			return fmt.Errorf("no changes requested: use edit flags (use --body only when you intend to overwrite the full body)")
-		}
-
-		bodyOverwritten := false
-		bodyCleared := false
-
-		if cmd.Flags().Changed("name") {
-			f.Name = editName
-		}
-		if cmd.Flags().Changed("status") {
-			if err := f.SetStatus(editStatus, time.Now()); err != nil {
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			storage, root, err := felt.RequireStore(a.env, a.dir)
+			if err != nil {
 				return err
 			}
-		}
-		if cmd.Flags().Changed("body") {
-			if f.Body != "" && editBody != f.Body && !f.HasEmptyBody() {
-				bodyOverwritten = true
+			scopeID := felt.CommandScope(a.env, root, a.dir)
+			// A fiber in the enclosing store is edited where it lives.
+			target, err := felt.ResolveRef(storage, scopeID, args[0])
+			if err != nil {
+				return err
 			}
-			if f.Body != "" && editBody == "" && !f.HasEmptyBody() {
-				bodyCleared = true
+			storage = target.Storage
+			f, err := storage.Read(target.ID)
+			if err != nil {
+				return err
 			}
-			f.Body = editBody
-		}
-		if cmd.Flags().Changed("outcome") {
-			f.Outcome = editOutcome
-		}
-		if cmd.Flags().Changed("due") {
-			if editDue == "" {
-				f.Due = nil
-			} else {
-				due, err := time.Parse("2006-01-02", editDue)
-				if err != nil {
-					return fmt.Errorf("invalid due date (use YYYY-MM-DD): %w", err)
-				}
-				f.Due = &due
+
+			hasFlags := len(collectChangedEditFields(cmd)) > 0
+			if !hasFlags {
+				return fmt.Errorf("no changes requested: use edit flags (use --body only when you intend to overwrite the full body)")
 			}
-		}
-		if cmd.Flags().Changed("tag") {
-			for _, tag := range splitListFlag(editTags) {
-				f.AddTag(tag)
+
+			bodyOverwritten := false
+			bodyCleared := false
+
+			if cmd.Flags().Changed("name") {
+				f.Name = editName
 			}
-		}
-		if cmd.Flags().Changed("untag") {
-			for _, tag := range splitListFlag(editUntag) {
-				f.RemoveTag(tag)
-			}
-		}
-		if cmd.Flags().Changed("unset") {
-			for _, key := range editUnset {
-				if err := unsetExtraField(f, key); err != nil {
+			if cmd.Flags().Changed("status") {
+				if err := f.SetStatus(editStatus, time.Now()); err != nil {
 					return err
 				}
 			}
-		}
-		if cmd.Flags().Changed("set") {
-			for _, assignment := range editSet {
-				if err := setExtraField(f, assignment); err != nil {
-					return err
+			if cmd.Flags().Changed("body") {
+				if f.Body != "" && editBody != f.Body && !f.HasEmptyBody() {
+					bodyOverwritten = true
+				}
+				if f.Body != "" && editBody == "" && !f.HasEmptyBody() {
+					bodyCleared = true
+				}
+				f.Body = editBody
+			}
+			if cmd.Flags().Changed("outcome") {
+				f.Outcome = editOutcome
+			}
+			if cmd.Flags().Changed("due") {
+				if editDue == "" {
+					f.Due = nil
+				} else {
+					due, err := time.Parse("2006-01-02", editDue)
+					if err != nil {
+						return fmt.Errorf("invalid due date (use YYYY-MM-DD): %w", err)
+					}
+					f.Due = &due
 				}
 			}
-		}
-		// Bump the durable recency anchor: a felt edit is a content write felt
-		// itself records, so updated-at travels in git and seeds a fresh
-		// clone's recency at this moment rather than mtime. Stamped before
-		// Write so it lands in the file the mechanical event then hashes.
-		f.Touch(time.Now())
+			if cmd.Flags().Changed("tag") {
+				for _, tag := range splitListFlag(editTags) {
+					f.AddTag(tag)
+				}
+			}
+			if cmd.Flags().Changed("untag") {
+				for _, tag := range splitListFlag(editUntag) {
+					f.RemoveTag(tag)
+				}
+			}
+			if cmd.Flags().Changed("unset") {
+				for _, key := range editUnset {
+					if err := unsetExtraField(f, key); err != nil {
+						return err
+					}
+				}
+			}
+			if cmd.Flags().Changed("set") {
+				for _, assignment := range editSet {
+					if err := setExtraField(f, assignment); err != nil {
+						return err
+					}
+				}
+			}
+			// Bump the durable recency anchor: a felt edit is a content write felt
+			// itself records, so updated-at travels in git and seeds a fresh
+			// clone's recency at this moment rather than mtime. Stamped before
+			// Write so it lands in the file the mechanical event then hashes.
+			f.Touch(time.Now())
 
-		if err := storage.Write(f); err != nil {
-			return err
-		}
+			if err := storage.Write(f); err != nil {
+				return err
+			}
 
-		switch {
-		case bodyCleared:
-			fmt.Printf("Updated %s%s (body cleared; previous content removed)\n", f.ID, target.Location())
-		case bodyOverwritten:
-			fmt.Printf("Updated %s%s (body overwritten)\n", f.ID, target.Location())
-		default:
-			fmt.Printf("Updated %s%s\n", f.ID, target.Location())
-		}
-		return nil
-	},
+			switch {
+			case bodyCleared:
+				fmt.Fprintf(a.env.Stdout, "Updated %s%s (body cleared; previous content removed)\n", f.ID, target.Location())
+			case bodyOverwritten:
+				fmt.Fprintf(a.env.Stdout, "Updated %s%s (body overwritten)\n", f.ID, target.Location())
+			default:
+				fmt.Fprintf(a.env.Stdout, "Updated %s%s\n", f.ID, target.Location())
+			}
+			return nil
+		},
+	}
+	command.GroupID = groupFibers
+	command.Flags().StringVar(&editName, "name", "", "Set name")
+	command.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed; empty clears)")
+	command.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
+	command.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s) (repeatable; comma-separated accepted)")
+	command.Flags().StringVarP(&editBody, "body", "b", "", "Replace the whole body")
+	command.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
+	command.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
+	command.Flags().StringArrayVar(&editSet, "set", nil, "Set a top-level scalar key felt does not own (key=value; repeatable)")
+	command.Flags().StringArrayVar(&editUnset, "unset", nil, "Remove a top-level key felt does not own (repeatable)")
+	return command
 }
 
 // editFlagNames is the canonical list of edit's top-level metadata flags, in
@@ -209,23 +219,4 @@ func unsetExtraField(f *felt.Felt, key string) error {
 		return fmt.Errorf("--unset %q targets a native field; clear it with its dedicated flag (e.g. --%s \"\")", key, key)
 	}
 	return f.SetExtraField(key, nil)
-}
-
-func init() {
-	editCmd.GroupID = groupFibers
-	rootCmd.AddCommand(editCmd)
-	initEditFlags()
-}
-
-// initEditFlags registers edit's flag set.
-func initEditFlags() {
-	editCmd.Flags().StringVar(&editName, "name", "", "Set name")
-	editCmd.Flags().StringVarP(&editStatus, "status", "s", "", "Set status (open, active, closed; empty clears)")
-	editCmd.Flags().StringArrayVarP(&editTags, "tag", "t", nil, "Add tag(s) (repeatable; comma-separated accepted)")
-	editCmd.Flags().StringArrayVar(&editUntag, "untag", nil, "Remove tag(s) (repeatable; comma-separated accepted)")
-	editCmd.Flags().StringVarP(&editBody, "body", "b", "", "Replace the whole body")
-	editCmd.Flags().StringVarP(&editOutcome, "outcome", "o", "", "Set outcome")
-	editCmd.Flags().StringVarP(&editDue, "due", "D", "", "Set due date (YYYY-MM-DD, empty to clear)")
-	editCmd.Flags().StringArrayVar(&editSet, "set", nil, "Set a top-level scalar key felt does not own (key=value; repeatable)")
-	editCmd.Flags().StringArrayVar(&editUnset, "unset", nil, "Remove a top-level key felt does not own (repeatable)")
 }
