@@ -95,7 +95,7 @@ export class TabStrip {
     const nextSelected = next.findIndex((record) => record.key === oldSelectedKey)
     this.selectedIndex = next.length ? (nextSelected >= 0 ? nextSelected : Math.min(Math.max(this.selectedIndex, 0), next.length - 1)) : -1
 
-    for (let index = next.length - 1; index >= 0; index--) {
+    for (let index = 0; index < next.length; index++) {
       const button = next[index].button
       const at = this.el.children[index]
       if (at !== button) this.el.insertBefore(button, at ?? null)

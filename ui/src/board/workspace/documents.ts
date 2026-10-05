@@ -205,7 +205,7 @@ export function defaultSelection(channel: Channel): DocKey {
   const report = reports.find((document) => document.provenance.some((item) => item.kind === 'embed')) ?? reports[0]
   const prose = channel.documents.find((document) => document.kind === 'fiber')
   const first = report ?? prose ?? channel.documents[0]
-  if (!first) throw new Error('Cannot select a document from an empty channel')
+  if (!first) throw new Error('Cannot select a document from an empty constitution')
   return first.key
 }
 

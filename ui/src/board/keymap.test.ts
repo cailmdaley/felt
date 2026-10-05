@@ -35,7 +35,7 @@ describe('shared keyboard table', () => {
     expect(keyIntent(event('j', {}, child), 'reader')).toBeNull()
     expect(shouldForwardDocumentKey(event('j', {}, child))).toBe(false)
     child.setAttribute('contenteditable', 'false')
-    expect(keyIntent(event('j', {}, child), 'reader')).toBe('scrollDown')
+    expect(keyIntent(event('j', {}, child), 'reader')).toBe('nextChannel')
   })
   it('gives native activation and composite navigation controls first refusal', () => {
     const button = document.createElement('button')

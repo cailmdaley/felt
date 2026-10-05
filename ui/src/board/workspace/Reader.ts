@@ -19,7 +19,7 @@ export interface ReaderOptions {
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
-  /** The overview's compact rows, independent of channel stepping's entry order. */
+  /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
 }
 
@@ -95,8 +95,8 @@ export class Reader {
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
-    this.sidebarToggle = button('ws-sidebar-toggle', '▥ Channels', () => this.toggleSidebar(), 'Channels')
-    this.sidebarToggle.title = 'Channels (⌘\\)'
+    this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
+    this.sidebarToggle.title = 'Constitutions (⌘\\)'
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.sidebarToggle, this.title)
     this.trail = element('div', 'ws-nav-trail')
@@ -114,10 +114,10 @@ export class Reader {
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.stage.append(this.track)
-    this.sidebar.setAttribute('aria-label', 'Channels')
+    this.sidebar.setAttribute('aria-label', 'Constitutions')
     this.sidebarFind.type = 'search'
-    this.sidebarFind.placeholder = 'Find a channel'
-    this.sidebarFind.setAttribute('aria-label', 'Find a channel')
+    this.sidebarFind.placeholder = 'Find a constitution'
+    this.sidebarFind.setAttribute('aria-label', 'Find a constitution')
     this.sidebarFind.addEventListener('input', () => this.fillSidebar())
     this.sidebar.append(this.sidebarFind, this.sidebarList)
     const main = element('div', 'ws-stage-row')
@@ -490,8 +490,8 @@ export class Reader {
     this.closeMenu()
     const menu = element('div', 'ws-menu ws-switcher')
     const find = element('input', 'ws-channel-find')
-    find.placeholder = 'Find a channel'
-    find.setAttribute('aria-label', 'Find a channel')
+    find.placeholder = 'Find a constitution'
+    find.setAttribute('aria-label', 'Find a constitution')
     let list = this.channelList()
     find.addEventListener('input', () => { const next = this.channelList(find.value); list.replaceWith(next); list = next })
     menu.append(find, list)
@@ -521,7 +521,7 @@ export class Reader {
     const shown = this.sidebarShown
     this.el.classList.toggle('ws-with-sidebar', shown)
     this.sidebarToggle.setAttribute('aria-expanded', String(shown))
-    this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide channels' : 'Show channels')
+    this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
     this.sidebar.inert = !shown
     if (shown) this.fillSidebar()
   }
@@ -563,7 +563,7 @@ export class Reader {
     else if (intent === 'first' || intent === 'last') this.selectIndex(intent === 'first' ? 0 : (this.channel?.documents.length ?? 1) - 1)
     else if (intent === 'open') this.toggleExpand()
     else if (intent === 'prevChannel' || intent === 'nextChannel') {
-      const cards = this.opts.cards()
+      const cards = this.opts.switcherCards?.() ?? this.opts.cards()
       const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
       const card = cards[index + (intent === 'prevChannel' ? -1 : 1)]
       if (index >= 0 && card) this.opts.onChannel(card)

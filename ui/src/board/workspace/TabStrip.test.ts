@@ -35,6 +35,7 @@ describe('TabStrip', () => {
     const onSelect = vi.fn(), onExpand = vi.fn()
     const strip = create(onSelect, onExpand)
     strip.render(['Prose', 'Report', 'Appendix'])
+    expect([...strip.el.children].map(button => button.textContent)).toEqual(['Prose', 'Report', 'Appendix'])
     expect(strip.el.getAttribute('role')).toBe('tablist')
     expect(strip.el.getAttribute('aria-label')).toBe('Documents')
     expect(strip.buttons.map((button) => button.getAttribute('role'))).toEqual(['tab', 'tab', 'tab'])
@@ -79,6 +80,7 @@ describe('TabStrip', () => {
     expect(document.activeElement).toBe(report)
 
     strip.render(['Prose', 'Report', 'New page', 'Notes'])
+    expect([...strip.el.children].map(button => button.textContent)).toEqual(['Prose', 'Report', 'New page', 'Notes'])
     expect(strip.buttons[0]).toBe(prose)
     expect(strip.buttons[1]).toBe(report)
     expect(strip.buttons[3]).toBe(notes)
@@ -93,6 +95,7 @@ describe('TabStrip', () => {
     const selected = strip.buttons[1]
     selected.focus()
     strip.render(['Three', 'Two', 'One'])
+    expect([...strip.el.children].map(button => button.textContent)).toEqual(['Three', 'Two', 'One'])
     expect(strip.buttons[1]).toBe(selected)
     expect(document.activeElement).toBe(selected)
     expect(strip.buttons.map((button) => button.tabIndex)).toEqual([-1, 0, -1])
