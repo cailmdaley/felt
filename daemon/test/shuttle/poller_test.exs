@@ -2100,6 +2100,8 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    # The boot cycle's own `tmux ls` lands before the probe count below.
+    settle_poller!(poller)
     MockRunner.set_tmux_server_missing(true)
 
     assert {:error, {:tmux_server_unavailable, message}} =
@@ -5282,6 +5284,9 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    # The boot cycle runs before the fiber exists, so no poll re-dispatches it
+    # behind the test's own calls once its session is gone.
+    settle_poller!(poller)
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
