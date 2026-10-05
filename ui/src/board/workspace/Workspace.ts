@@ -38,7 +38,6 @@ interface ChannelState {
   /** The owner file-time reads in flight, at most one per channel. */
   metadataRead?: Promise<boolean>
   selected?: DocKey
-  selectionVersion: number
   routedFile?: DocKey
   loaded: boolean
   metadataKnown: boolean
@@ -300,7 +299,7 @@ export class Workspace {
       state = {
         card,
         channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, modifiedAt: card.modifiedAt }),
-        links: [], fileModifiedAt: new Map(), selectionVersion: 0, loaded: false, metadataKnown,
+        links: [], fileModifiedAt: new Map(), loaded: false, metadataKnown,
       }
       this.channels.set(key, state)
     } else { state.card = card; state.metadataKnown ||= metadataKnown }
@@ -346,10 +345,10 @@ export class Workspace {
     this.overview.opened(state.card, state.metadataKnown)
     this.overview.refresh()
     this.overview.setVisible(false)
-    const wanted = route.doc ?? state.selected
+    // Selection resolves before the first paint; data arriving later never moves it.
+    const wanted = route.doc ?? state.selected ?? this.knownReport(state)
     const loadedBefore = state.loaded
-    const selectionVersion = state.selectionVersion
-    if (route.doc) state.selected = route.doc
+    if (wanted) this.intend(state, wanted)
     this.opts.onVisibility(true)
     this.depth.setActive(true)
     this.show(state)
@@ -362,36 +361,44 @@ export class Workspace {
     }
     await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
-    if (state.selectionVersion === selectionVersion) {
-      if (wanted && state.channel.documents.some(d => d.key === wanted)) state.selected = wanted
-      else if (!wanted) state.selected = defaultSelection(state.channel)
-    }
-    if (!loadedBefore && route.doc && !state.channel.documents.some(d => d.key === route.doc)) {
-      const file = parseDocKey(route.doc)
-      if (file && (!state.loaded || this.isBodyFile(state, route.doc))) {
-        if (state.loaded) state.links.push({ path: file.path, owner: file.owner })
-        else state.routedFile = route.doc
-        this.rebuild(state)
-        if (state.selectionVersion === selectionVersion) state.selected = route.doc
-      }
-    }
     this.show(state, loadedBefore)
-    this.history.select(state.selected ?? defaultSelection(state.channel))
+    this.history.select(this.shown(state))
     this.startTimer()
+  }
+  /**
+   * Hold a wanted page as the selection. A page the channel has not listed yet
+   * gets a provisional frame now, so the reader starts on it rather than
+   * jumping to it when the channel's documents arrive.
+   */
+  private intend(state: ChannelState, key: DocKey): void {
+    state.selected = key
+    if (state.channel.documents.some(d => d.key === key) || !parseDocKey(key)) return
+    state.routedFile = key
+    this.rebuild(state)
+  }
+  /** The report the Board's receipt feed already names for this channel, before the channel's own reads return. */
+  private knownReport(state: ChannelState): DocKey | undefined {
+    const card = state.card
+    const report = this.overview.unfiledReceipts(state.channel.uid).find(file => (file.host ?? card.originId) === card.originId && file.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
+    return report ? docKey(card.originId, report.fullPath, card.originId, card.fiberDir) : undefined
+  }
+  /** The page on screen: the selection when the channel lists it, else the fiber's own page. */
+  private shown(state: ChannelState): DocKey {
+    const documents = state.channel.documents
+    return state.selected && documents.some(d => d.key === state.selected) ? state.selected : documents[0].key
   }
   private show(state: ChannelState, animate = true): void {
     const ch = state.channel
-    if (!state.selected || !ch.documents.some(d => d.key === state.selected)) state.selected = defaultSelection(ch)
+    const selected = this.shown(state)
     this.refreshProse(state)
-    this.reader.show(ch, state.selected, this.origin, state.card, animate, state.loaded)
-    if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: state.selected }
+    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded)
+    if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.dock.syncRuntime(state.card)
   }
   private select(key: DocKey): void {
     const state = this.current
     if (!state || !state.channel.documents.some(d => d.key === key)) return
     state.selected = key
-    state.selectionVersion++
     state.routedFile = undefined
     this.reader.select(key)
     this.history.select(key)
@@ -411,7 +418,6 @@ export class Workspace {
     if (!state.links.some(link => docKey(link.owner ?? state.card.originId, link.path, state.card.originId, state.card.fiberDir) === key)) state.links.push({ path, title })
     this.rebuild(state)
     state.selected = key
-    state.selectionVersion++
     this.show(state)
     this.history.select(key)
     void this.readFileMetadata(state).then(() => {
@@ -544,6 +550,7 @@ export class Workspace {
   private rebuild(state: ChannelState): void {
     const before = state.channel
     const card = state.card
+    const routed = state.routedFile
     if (state.loaded && state.routedFile) {
       const file = parseDocKey(state.routedFile)
       if (file && this.isBodyFile(state, state.routedFile)) state.links.push({ path: file.path, owner: file.owner })
@@ -559,7 +566,9 @@ export class Workspace {
       sent, links, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {
-      state.selected = fallbackSelection(before.documents.map(d => d.key), state.channel.documents.map(d => d.key), state.selected)
+      // A routed page the loaded channel does not hold goes to the report, else the fiber's page.
+      state.selected = state.selected === routed ? defaultSelection(state.channel)
+        : fallbackSelection(before.documents.map(d => d.key), state.channel.documents.map(d => d.key), state.selected)
     }
   }
   private startTimer(): void {
@@ -570,7 +579,7 @@ export class Workspace {
       const state = this.current
       if (!state || !this.isActive) return
       void this.load(state, true).then(() => {
-        if (this.current === state && this.isActive && !this.disposed) { this.show(state); this.history.select(state.selected ?? defaultSelection(state.channel)); this.startTimer() }
+        if (this.current === state && this.isActive && !this.disposed) { this.show(state); this.history.select(this.shown(state)); this.startTimer() }
       })
     }, 15000)
   }
