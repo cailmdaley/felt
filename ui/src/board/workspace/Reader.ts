@@ -615,7 +615,8 @@ export class Reader {
     const card = this.currentCard
     const themes = this.opts.themes
     if (!toggle || !themes) return
-    toggle.hidden = !card || !themes.hasTheme(card)
+    // A stored Plain choice stays reachable even when no theme is declared, so it can be cleared.
+    toggle.hidden = !card || (!themes.hasTheme(card) && !themes.isPlain(card))
     toggle.setAttribute('aria-pressed', String(!!card && themes.isPlain(card)))
   }
   private closeMenu(): boolean {

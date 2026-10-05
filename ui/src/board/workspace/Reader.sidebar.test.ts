@@ -295,6 +295,12 @@ describe('Reader channel sidebar', () => {
     toggle.click()
     expect(themes.togglePlain).toHaveBeenCalledWith(alpha)
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    hasTheme = false
+    reader.el.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
+    expect(toggle.hidden).toBe(false)
+    toggle.click()
+    reader.el.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
+    expect(toggle.hidden).toBe(true)
   })
 
   it('focuses the sidebar find from the title when open and opens a switcher when closed', () => {
