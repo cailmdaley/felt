@@ -300,25 +300,36 @@ async function readPeek(entry: Entry, signal: AbortSignal): Promise<Peek | null>
 }
 
 /**
+ * What a whole-body read found, the one shape every asker of it shares:
+ * the owner's status and validator, and the body when there is one, whether
+ * or not it was small enough to hold.
+ */
+interface WholeRead { status: number; etag?: string; text?: string }
+
+/**
  * One whole-body read, conditional when the caller sends `If-None-Match`. A
  * 200 is held as the document's text and a 304 confirms the text held. The
  * live poller reads through this. A read of the same document already in
  * flight is joined rather than repeated, and moved up the queue when this ask
- * is more urgent; its caller is answered from the text it holds, 304 when
- * the caller's validator still matches.
+ * is more urgent; each asker is answered from what it found, 304 when the
+ * asker's validator matches.
  */
 export const fetchDocument: DocumentFetch = async (url, init) => {
   const entry = entryFor(url)
   const priority = init.rank ?? RESOURCE_PRIORITY.selected
   const id = `text\0${resourceKey(url)}`
+  const validator = ifNoneMatch(init.headers)
   const pending = inFlight.get(id)
   if (pending) {
     pending.join(priority, init.signal ?? undefined)
-    await pending.promise.catch(() => null)
+    const found = await (pending.promise as Promise<WholeRead>).catch(() => null)
     if (init.signal?.aborted) throw init.signal.reason
-    if (entry.text && isFresh(entry.text)) return heldAnswer(entry.text.value, ifNoneMatch(init.headers))
+    if (inFlight.get(id) === pending) inFlight.delete(id)
+    // A 304 to another asker's validator carries no body this asker can use.
+    if (found && !(found.status === 304 && found.etag !== validator && found.text === undefined)) return answer(found, validator)
   }
-  return shared(id, priority, (signal, onSelected) => readWhole(entry, { ...init, signal }, onSelected), init.signal ?? undefined)
+  const found = await shared<WholeRead>(id, priority, (signal, onSelected) => readWhole(entry, { ...init, signal }, onSelected), init.signal ?? undefined)
+  return answer(found, validator)
 }
 
 /** Move a whole-body read of `url` already waiting in the queue up to `priority`. */
@@ -326,17 +337,18 @@ export function promoteDocument(url: string, priority: ResourcePriority): void {
   inFlight.get(`text\0${resourceKey(url)}`)?.promote(priority)
 }
 
-/** The held text as the poller reads a response: its status, validator and body. */
-function heldAnswer(body: TextBody, ifNoneMatch: string | undefined): Response {
-  const unchanged = body.etag !== undefined && body.etag === ifNoneMatch
+/** A whole-body read as the poller reads a response: its status, validator and body. */
+function answer(found: WholeRead, validator: string | undefined): Response {
+  const readable = found.status === 200 || found.status === 304
+  const status = readable ? (found.etag !== undefined && found.etag === validator ? 304 : 200) : found.status
   return {
-    status: unchanged ? 304 : 200, ok: !unchanged, statusText: '',
-    headers: { get: (name: string) => name.toLowerCase() === 'etag' ? body.etag ?? null : null },
-    text: async () => unchanged ? '' : body.text,
+    status, ok: status >= 200 && status < 300, statusText: '',
+    headers: { get: (name: string) => name.toLowerCase() === 'etag' ? found.etag ?? null : null },
+    text: async () => status === 200 ? found.text ?? '' : '',
   } as unknown as Response
 }
 
-async function readWhole(entry: Entry, init: RequestInit, onSelected: (lift: () => void) => void): Promise<Response> {
+async function readWhole(entry: Entry, init: RequestInit, onSelected: (lift: () => void) => void): Promise<WholeRead> {
   const etag = ifNoneMatch(init.headers)
   // A background read finishes, body and all, within the deadline; once the
   // selected page waits on it, it may take as long as a large body needs.
@@ -345,12 +357,16 @@ async function readWhole(entry: Entry, init: RequestInit, onSelected: (lift: () 
   try {
     const response = await fetch(entry.src, { ...init, signal: limit.signal })
     if (response.status === 304) {
-      if (entry.text && entry.text.value.etag === etag) entry.text.at = Date.now()
-      return response
+      const held = entry.text?.value.etag === etag ? entry.text : undefined
+      if (held) held.at = Date.now()
+      return { status: 304, etag: etagOf(response) ?? etag, text: held?.value.text }
     }
     if (response.status === 404) entry.missing = Date.now()
-    if (response.ok) { entry.missing = undefined; holdText(entry, { text: await response.clone().text(), etag: etagOf(response) }) }
-    return response
+    if (!response.ok) return { status: response.status }
+    const body = { text: await response.text(), etag: etagOf(response) }
+    entry.missing = undefined
+    holdText(entry, body)
+    return { status: 200, ...body }
   } finally { limit.answered() }
 }
 
@@ -379,11 +395,11 @@ export async function text(src: string, priority: ResourcePriority = RESOURCE_PR
     const whole = wholePeek(entry)
     if (whole) return whole
   }
-  return shared(`text\0${resourceKey(src)}`, priority, async (signal, onSelected) => {
-    const etag = entry.text?.value.etag
-    const response = await readWhole(entry, { cache: 'no-store', signal, headers: provesContent(etag) ? { 'If-None-Match': etag } : undefined }, onSelected)
-    return response.ok || response.status === 304 ? entry.text?.value ?? null : null
-  }, options.signal).catch(() => null)
+  const etag = entry.text?.value.etag
+  const found = await shared<WholeRead>(`text\0${resourceKey(src)}`, priority, (signal, onSelected) =>
+    readWhole(entry, { cache: 'no-store', signal, headers: provesContent(etag) ? { 'If-None-Match': etag } : undefined }, onSelected), options.signal).catch(() => null)
+  if (found?.text !== undefined) return { text: found.text, etag: found.etag }
+  return found && (found.status === 200 || found.status === 304) ? entry.text?.value ?? null : null
 }
 
 /** A fresh peek that holds the entire document, kept as its text. */

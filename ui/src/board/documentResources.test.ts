@@ -287,7 +287,7 @@ describe('shared reads', () => {
     void busy
   })
 
-  it.skip('keeps a joined read the shape each asker expects, even for a body too large to hold', async () => {
+  it('keeps a joined read the shape each asker expects, even for a body too large to hold', async () => {
     let finish!: (response: Response) => void
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { finish = r })))
     const huge = 'y'.repeat(RESOURCE_TEXT_BUDGET + 1)
