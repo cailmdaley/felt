@@ -1,6 +1,7 @@
 /* The reader's map: a band of tiles beneath the stage, a scale model of the run.
-   Its strip is centred under the selected page (inline padding of half the band
-   lets the first and last tiles sit centred too) and fades where tiles run past. */
+   Its strip holds the selected tile under the selected page (inline padding up to
+   that point lets the first and last tiles sit there too) and fades where tiles
+   run past. */
 .ws-band {
   position: relative; z-index: 2; flex: none; display: grid; align-items: center;
   grid-template-columns: var(--ws-band-side) minmax(0, 1fr) var(--ws-band-side);
@@ -12,7 +13,7 @@
 }
 .ws-tabs {
   display: flex; align-items: center; gap: var(--ws-tile-gap); min-width: 0; position: relative;
-  height: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air)); padding: 0 50%;
+  height: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air)); padding: 0 var(--ws-strip-end, 50%) 0 var(--ws-strip-start, 50%);
   overflow-x: auto; scrollbar-width: none;
   --ws-fade-left: 0px; --ws-fade-right: 0px;
   mask-image: linear-gradient(90deg, transparent, var(--ws-mask) var(--ws-fade-left), var(--ws-mask) calc(100% - var(--ws-fade-right)), transparent);

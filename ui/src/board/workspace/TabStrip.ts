@@ -88,6 +88,7 @@ export class TabStrip {
   private tipFor: HTMLButtonElement | null = null
   private tipWarmUntil = 0
   private channel: Channel | null = null
+  private focus: number | null = null
   private readonly shuttleBase: string | null
   private readonly stopSketches: () => void
 
@@ -133,6 +134,14 @@ export class TabStrip {
   arrive(keys: ReadonlySet<string>): void {
     if (!this.visible) return
     for (const record of this.records) if (keys.has(record.key)) this.receiptMotion.tab(record.button)
+  }
+
+  /** Where, inside the strip, the selected tile's centre belongs; null centres it. */
+  setFocus(x: number | null): void {
+    this.focus = x
+    // The strip's ends are padded to the focus, so the first and last tiles can reach it too.
+    if (x === null) { this.el.style.removeProperty('--ws-strip-start'); this.el.style.removeProperty('--ws-strip-end') }
+    else { this.el.style.setProperty('--ws-strip-start', `${x}px`); this.el.style.setProperty('--ws-strip-end', `calc(100% - ${x}px)`) }
   }
 
   setVisible(visible: boolean): void {
@@ -211,7 +220,7 @@ export class TabStrip {
     this.selectedIndex = index
     this.updateSelection()
     const selected = this.records[index].button
-    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth)
+    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth, this.focus ?? this.el.clientWidth / 2)
     this.animationTarget = target
     this.cancelAnimation()
     if (!animate || this.motion?.matches || this.el.clientWidth === 0) {

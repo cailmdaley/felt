@@ -684,6 +684,27 @@ test('The map beneath the stage indexes pages as legible tiles, captions a hover
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
 })
 
+for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps one gutter, and the map follows it (${width})`, async p => {
+  await open(p); await reportReady(p)
+  const geometry = async () => p.evaluate(() => {
+    const rect = el => el.getBoundingClientRect()
+    const page = rect(document.querySelector('.ws-page.ws-selected')), sidebar = rect(document.querySelector('.ws-sidebar'))
+    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage'))
+    return { gutter: page.left - sidebar.right, right: stage.right - page.right, page: page.left + page.width / 2, tile: tile.left + tile.width / 2,
+      ground: getComputedStyle(document.querySelector('.ws-sidebar')).backgroundColor }
+  })
+  for (const label of ['calibration-report', 'Constitution', 'remote-summary.pdf']) {
+    await choose(p, label)
+    await p.waitForTimeout(350)
+    const at = await geometry()
+    // The pointer's parallax may drift the page a few pixels.
+    assert.ok(Math.abs(at.gutter - 24) <= 4, `${label}: the page sits one gutter from the sidebar: ${JSON.stringify(at)}`)
+    assert.ok(at.right >= 24, `${label}: the page shrinks before it crowds the stage's far edge: ${JSON.stringify(at)}`)
+    assert.ok(Math.abs(at.tile - at.page) < 3, `${label}: the selected tile sits under the page: ${JSON.stringify(at)}`)
+    assert.notEqual(at.ground, 'rgba(0, 0, 0, 0)', 'the sidebar column has its own ground')
+  }
+}, { width, height: 900 }, 'true')
+
 for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals move only their tab and folio (${reducedMotion})`, async p => {
   await open(p); await reportReady(p)
   await report(p).evaluate(f => { window.__arrivalReport = f.contentWindow })

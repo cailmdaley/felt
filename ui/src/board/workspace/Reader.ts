@@ -545,13 +545,16 @@ export class Reader {
   private layout(animate: boolean): void {
     this.layoutNavbar()
     const tabIndex = this.channel?.documents.findIndex(d => d.key === this.selected) ?? -1
-    if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     const ch = this.channel
-    if (!ch || !this.active) return
+    if (!ch || !this.active) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
     const W = this.stage.clientWidth, H = this.stage.clientHeight
-    if (!W || !H) return
+    if (!W || !H) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
     const inset = this.measure('stage-inset', 28), gap = this.measure('gap', 24)
-    const boxW = W - inset * 2, boxH = H - inset * 2
+    // Beside the sidebar the page keeps one page gap from the column and shrinks
+    // before that gutter grows; the right neighbour has the room left over.
+    // Without the sidebar the page is centred in the stage.
+    const docked = this.sidebarShown
+    const boxW = docked ? W - gap - inset : W - inset * 2, boxH = H - inset * 2
     if (!animate || this.motion.matches) {
       this.stage.classList.add('ws-instant')
       void this.stage.offsetWidth
@@ -560,7 +563,7 @@ export class Reader {
         this.instantRaf = requestAnimationFrame(() => this.stage.classList.remove('ws-instant'))
       })
     }
-    let x = 0, centre = 0
+    let x = 0, centre = 0, selectedWidth = 0
     ch.documents.forEach(doc => {
       const f = this.host.get(doc.key)
       if (!f) return
@@ -569,10 +572,13 @@ export class Reader {
       f.el.style.left = `${x}px`
       f.el.style.width = `${width}px`
       f.el.style.height = `${boxH}px`
-      if (sel) centre = x + width / 2
+      if (sel) { centre = x + width / 2; selectedWidth = width }
       x += width + gap
     })
-    const target = Math.round(W / 2 - centre)
+    const target = Math.round(docked ? gap - (centre - selectedWidth / 2) : W / 2 - centre)
+    // The map holds the selected tile under the page's centre.
+    this.tabs.setFocus(docked ? this.stage.offsetLeft + target + centre - this.band.offsetLeft - this.tabs.el.offsetLeft : null)
+    if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
     if (!this.swiping) this.track.style.transform = `translateX(${target}px)`

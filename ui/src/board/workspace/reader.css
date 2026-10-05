@@ -201,7 +201,11 @@
 .ws-sidebar.ws-sidebar-flight { display: block; position: fixed; inset: 0; width: auto; padding: 0; pointer-events: none; z-index: calc(var(--ws-reader-layer) + 1); }
 .ws-sidebar-flight .ws-constitution-card { overflow: hidden; pointer-events: none; transition: none; }
 .ws-sidebar-flight .ws-flight-current { background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light); }
+/* The column has its own ground: the reader's paper ground, held over the veil so
+   the blurred Desk stops at its edge, and one hairline where it meets the stage.
+   The current card still reaches across that line toward the page. */
 .ws-with-sidebar .ws-sidebar { display: flex; }
+:is(.ws-with-sidebar, .ws-sidebar-leaving) .ws-sidebar:not(.ws-sidebar-flight) { background: color-mix(in srgb, var(--ws-ground) 82%, transparent); box-shadow: inset calc(-1 * var(--ws-line-width)) 0 0 var(--ws-hairline-soft); }
 /* A closing sidebar slides out over the stage that has already taken its room. */
 .ws-sidebar-sliding .ws-stage { overflow: visible; }
 .ws-sidebar-leaving .ws-sidebar { display: flex; position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
