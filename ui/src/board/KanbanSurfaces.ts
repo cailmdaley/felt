@@ -69,6 +69,26 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   pinned: 'Pinned',
 }
 
+/** The same paper face in a Desk column, a folio, or a compact constitution card. */
+export function buildCardPaper(card: KanbanCard): HTMLElement {
+  const el = document.createElement('div')
+  el.className = 'kbn-card'
+  const header = document.createElement('div'); header.className = 'kbn-card-header'
+  const glyph = document.createElement('span')
+  glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
+  glyph.textContent = isAgentCard(card) ? '◐' : '✓'
+  const name = document.createElement('span'); name.className = 'kbn-card-name'; name.textContent = card.name
+  header.append(glyph, name)
+  const id = document.createElement('div'); id.className = 'kbn-card-id'; id.textContent = card.id
+  el.append(header, id)
+  if (card.outcome) {
+    const outcome = document.createElement('div'); outcome.className = 'kbn-card-outcome'
+    outcome.innerHTML = renderMarkdown(card.outcome)
+    el.append(outcome)
+  }
+  return el
+}
+
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']
 
@@ -1724,7 +1744,7 @@ export class KanbanSurfaceRenderer {
   ): HTMLElement {
     const isStale = originStaleness?.status === 'stale'
 
-    const el = document.createElement('div')
+    const el = buildCardPaper(card)
     el.className = `kbn-card kbn-card-${kind}${isStale ? ' kbn-card--stale' : ''}`
     if (lensState.dim) el.classList.add('kbn-card--lens-off')
     if (lensState.ghost) el.classList.add('kbn-card--lens-ghost')
@@ -1761,34 +1781,6 @@ export class KanbanSurfaceRenderer {
     // attaches a second listener set, and the pair disagree about the card's
     // held title, leaving a refused drag's tooltip stuck on the card.
     this.installStackTarget(el, card)
-
-    const headerRow = document.createElement('div')
-    headerRow.className = 'kbn-card-header'
-
-    const glyph = document.createElement('span')
-    glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
-    glyph.textContent = isAgentCard(card) ? '◐' : '✓'
-
-    // Clicking the title opens the document workspace reader. The fiber page
-    // carries its controls inline, and the worker pill opens the conversation.
-    const name = document.createElement('span')
-    name.className = 'kbn-card-name'
-    name.textContent = card.name
-
-    headerRow.append(glyph, name)
-    el.append(headerRow)
-
-    const idEl = document.createElement('div')
-    idEl.className = 'kbn-card-id'
-    idEl.textContent = card.id
-    el.append(idEl)
-
-    if (card.outcome) {
-      const outcome = document.createElement('div')
-      outcome.className = 'kbn-card-outcome'
-      outcome.innerHTML = renderMarkdown(card.outcome)
-      el.append(outcome)
-    }
 
     const meta = document.createElement('div')
     meta.className = 'kbn-card-meta'

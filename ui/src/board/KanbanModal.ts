@@ -42,6 +42,7 @@ import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
+import type { SidebarEntry } from './workspace/SidebarFlight.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
@@ -489,6 +490,12 @@ export class KanbanModal {
       cards: () => this.workspaceCards(),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
+      deskColumn: card => this.workspaceColumn(card),
+      onReturnCard: card => {
+        this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+        this.workspaceReturnFocus = null
+        this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
+      },
       onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
       dock: this.dock,
     })
@@ -651,6 +658,18 @@ export class KanbanModal {
       : cardStillOwned ? Array.from(this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []).find(el => el.dataset.fiberId === address.id || el.dataset.fiberId === address.head)
       : this.tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')
     target?.focus({ preventScroll: true })
+  }
+
+  /** The reader takes the opened card's actual drawn region, preserving the flight seam. */
+  private workspaceColumn(card: KanbanCard): SidebarEntry[] {
+    const sources = this.deskKeyboard?.columnFor({ uid: card.uid ?? card.id, origin: card.originId }) ?? []
+    const cards = new Map(this.workspaceCards().map(row => [JSON.stringify([row.originId, row.uid ?? row.id]), row]))
+    return sources.flatMap(source => {
+      const card = cards.get(JSON.stringify([source.dataset.cardOrigin, source.dataset.cardUid]))
+      if (!card) return []
+      const band = source.closest('.kbn-flight-band')?.querySelector('.kbn-flight-caption')?.textContent ?? undefined
+      return [{ card, band, source }]
+    })
   }
 
   /** Drawn Desk order, followed by undrawn folded and chronological cards. */

@@ -13,6 +13,7 @@ interface BoardInternals {
   fetchAndRender(): Promise<void>
   workspace: Workspace
   deskEl: HTMLElement
+  workspaceColumn(card: typeof head): Array<{ card: typeof head }>
 }
 let board: KanbanModal
 let inside: BoardInternals
@@ -112,6 +113,21 @@ describe('Desk keyboard selection', () => {
     press('j'); expect(selected()).toBe('working')
     press('k'); press('Enter')
     expect(window.location.hash).toContain('child-uid')
+  })
+  it('carries the same navigable flight column into the reader, without hidden queue members', () => {
+    press('j'); press('h'); press('Enter')
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['head-uid', 'working'])
+    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
+    expect(document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued-list')!.hidden).toBe(false)
+    expect(inside.workspace.isActive).toBe(false)
+    expect(inside.workspaceColumn(head).map(entry => entry.card.uid ?? entry.card.id)).toEqual(['head-uid', 'child-uid', 'working'])
+  })
+  it('includes expanded queue members in the reader column', () => {
+    press('j'); press('h')
+    document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
+    press('Enter')
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['head-uid', 'child-uid', 'working'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')

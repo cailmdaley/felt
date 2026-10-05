@@ -101,6 +101,24 @@ beforeEach(() => {
 afterEach(() => { workspace?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('keeps the originating Desk column and bands through j/k and returns the current card', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const returned = vi.fn()
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility,
+      deskColumn: () => [{ card: cards[0], band: 'Needs you' }, { card: cards[1], band: 'Working' }],
+      onReturnCard: returned, dock: new Dock('', changed),
+    })
+    workspace.open(cards[0]); await flush()
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Needs you', 'Working'])
+    expect(document.querySelectorAll('.ws-sidebar .kbn-card')).toHaveLength(2)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
+    expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(returned).toHaveBeenCalledWith(expect.objectContaining({ uid: 'beta', originId: 'host-b' }))
+  })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()
     document.body.replaceChildren()
