@@ -217,7 +217,9 @@ export class ChannelThemes {
         const availabilityChanged = entry.customAvailable !== customAvailable
         entry.customAvailable = customAvailable
         this.compile(entry); this.paint(entry)
-        if (availabilityChanged) for (const root of this.roots.keys()) this.changed(root)
+        if (availabilityChanged) {
+          for (const [root, bound] of this.roots) if (bound === entry) this.changed(root)
+        }
       }
     })().finally(() => { entry.pending = undefined })
     return entry.pending

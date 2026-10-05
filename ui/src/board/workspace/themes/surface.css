@@ -14,6 +14,8 @@
   transition: background-color var(--ws-crossing) var(--ws-ease), opacity var(--ws-veil-time) var(--ws-ease);
 }
 .ws-plain-toggle { min-height: var(--ws-phone-target); }
+.ws-plain-toggle[hidden] { display: none; }
+.ws-plain-toggle[aria-pressed='true']::before { content: '✓'; margin-right: var(--ws-small-gap); }
 .ws-content [data-part='prose'] hr, .ws-prose hr { border: 0; border-top: var(--ws-line-width) solid var(--ws-hairline); }
 @media (prefers-reduced-motion: reduce) {
   [data-ws-theme], [data-ws-theme] *, [data-ws-theme] *::before, [data-ws-theme] *::after { animation: none !important; transition: none !important; }

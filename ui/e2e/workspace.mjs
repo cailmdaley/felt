@@ -14,6 +14,14 @@ const name = 'Calibrate the shear response'
 const tests = []
 const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce', touch = false) => tests.push({ name, run, viewport, sidebarChoice, reducedMotion, touch })
 const selected = p => p.locator('.ws-page.ws-selected')
+const plainThemeLabel = "Plain (drop this constitution's theme)"
+async function openPlainThemeMenu(p) {
+  const trigger = await p.locator('.ws-thumbbar').isVisible()
+    ? p.locator('.ws-thumbbar [aria-label="Document menu"]')
+    : selected(p).locator('.ws-menu-button')
+  await trigger.click()
+  return p.getByRole('button', { name: plainThemeLabel, exact: true })
+}
 const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label
 const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true, includeHidden: true })
 async function open(p, expected = 'calibration-report') {
@@ -1449,21 +1457,21 @@ test('Plain removes custom and bundled styling, persists, and can restore custom
   await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').click()
   await choose(p, 'Constitution')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
-  await p.locator('.ws-channel-title').click()
-  await p.getByRole('button', { name: 'Plain', exact: true }).click()
-  assert.equal(await p.getByRole('button', { name: 'Plain', exact: true }).getAttribute('aria-pressed'), 'true')
+  const plain = await openPlainThemeMenu(p)
+  await plain.click()
+  assert.equal(await plain.getAttribute('aria-pressed'), 'true')
+  assert.equal(await plain.evaluate(el => getComputedStyle(el, '::before').content), '"✓"')
   assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
   assert.equal(await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').getAttribute('data-ws-theme'), null)
   await p.reload()
   await p.locator('.ws-channel-title').waitFor()
   assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
-  await p.locator('.ws-channel-title').click()
-  await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  const plainAfterReload = await openPlainThemeMenu(p)
+  await plainAfterReload.click()
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   await p.setViewportSize({ width: 390, height: 844 })
-  await p.locator('.ws-channel-title').click() // close the open picker
-  await p.locator('.ws-channel-title').click()
-  assert.ok((await p.getByRole('button', { name: 'Plain', exact: true }).boundingBox()).height >= 44, 'Plain has a phone-sized touch target')
+  const phonePlain = await openPlainThemeMenu(p)
+  assert.ok((await phonePlain.boundingBox()).height >= 44, 'Plain has a phone-sized touch target')
 })
 
 test('Broken theme falls back to its bundled base', async p => {
@@ -1552,8 +1560,8 @@ test('Nested sidebar cards reset foreign variables, including cards in Plain', a
   }
   await assertNeutral()
   await foreign.click(); await choose(p, 'Constitution')
-  await p.locator('.ws-channel-title').click()
-  await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  const plain = await openPlainThemeMenu(p)
+  await plain.click()
   assert.equal(await foreign.getAttribute('data-ws-theme'), null)
   assert.ok(await foreign.getAttribute('data-ws-theme-boundary') !== null)
   await p.locator('.ws-sidebar').getByRole('button', { name: new RegExp(name) }).click()
@@ -1594,7 +1602,7 @@ test('Theme changes repaint paused audio without replacing the player or fetchin
   })
   const before = await pixel(); assert.deepEqual(before.drawn, before.ink)
   const reads = (await records(p)).filter(r => decodeURIComponent(r.url).includes('tone.mp3')).length
-  await p.locator('.ws-channel-title').click(); await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  const plain = await openPlainThemeMenu(p); await plain.click()
   await p.clock.runFor(80)
   const after = await pixel(); assert.deepEqual(after.drawn, after.ink); assert.notDeepEqual(after.ink, before.ink)
   assert.ok(await p.evaluate(() => document.querySelector('.ws-selected audio') === window.__themedAudio && window.__themedAudio.paused && window.__themedAudio.currentTime === 0))

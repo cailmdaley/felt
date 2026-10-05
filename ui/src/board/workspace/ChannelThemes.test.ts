@@ -30,6 +30,13 @@ describe('channel theme lifetime and owner reads', () => {
   })
 
   it('discovers a beside-fiber theme while the saved Plain choice is active', async () => {
+    const otherCard = { ...card, uid: 'unrelated-theme', fiberDir: undefined }
+    const other = root()
+    const unrelatedChange = vi.fn()
+    other.addEventListener('workspace-theme-change', unrelatedChange)
+    themes.bind(other, otherCard)
+    await Promise.resolve()
+    unrelatedChange.mockClear()
     const el = root()
     const becameAvailable = vi.fn()
     el.addEventListener('workspace-theme-change', () => {
@@ -44,6 +51,7 @@ describe('channel theme lifetime and owner reads', () => {
     expect(themes.isPlain(card)).toBe(true)
     expect(el.dataset.wsTheme).toBeUndefined()
     expect(becameAvailable).toHaveBeenCalled()
+    expect(unrelatedChange).not.toHaveBeenCalled()
     themes.togglePlain(card)
     expect(el.dataset.wsTheme).toBeTruthy()
   })
