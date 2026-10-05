@@ -17,6 +17,7 @@ System.put_env("SHUTTLE_REMOTES_FILE", Path.expand("fixtures/remotes/absent.json
 # which takes seconds on a large store, on the caller's process. Tests that
 # want configured stores set SHUTTLE_STORES or SHUTTLE_STORES_FILE.
 System.delete_env("SHUTTLE_STORES")
+
 System.put_env(
   "SHUTTLE_STORES_FILE",
   Path.join(System.tmp_dir!(), "shuttle-test-stores-#{System.system_time(:nanosecond)}.json")
