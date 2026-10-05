@@ -12,6 +12,7 @@ import (
 )
 
 func TestMailboxReservationIgnoresPostLinkCleanupFailures(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reservation.json")
 	payload := []byte(`{"nonce":"attempt-1"}`)
@@ -39,8 +40,8 @@ func TestMailboxReservationIgnoresPostLinkCleanupFailures(t *testing.T) {
 }
 
 func TestMailboxQueueOfferAndReplay(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	if err := RegisterMailbox(env, "claude", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
@@ -72,8 +73,8 @@ func TestMailboxQueueOfferAndReplay(t *testing.T) {
 }
 
 func TestMailboxOutputFailurePreservesPending(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	_ = RegisterMailbox(env, "claude", "s", "host", "/", os.Getpid(), true)
 	r := Request{Address: "shuttle://host/claude/s", Text: "hello", MessageID: "m"}
 	if _, err := Send(context.Background(), env, "host", r); err != nil {
@@ -90,8 +91,8 @@ func TestMailboxOutputFailurePreservesPending(t *testing.T) {
 }
 
 func TestMailboxConcurrentHooksOfferOnce(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	_ = RegisterMailbox(env, "claude", "s", "host", "/", os.Getpid(), true)
 	for i := 0; i < 10; i++ {
 		_, err := Send(context.Background(), env, "host", Request{Address: "shuttle://host/claude/s", Text: "hello", MessageID: fmt.Sprint(i)})
@@ -130,8 +131,8 @@ func TestMailboxConcurrentHooksOfferOnce(t *testing.T) {
 }
 
 func TestMailboxWithdrawAndNoWake(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	_ = RegisterMailbox(env, "claude", "s", "host", "/", os.Getpid(), true)
 	_, err := Send(context.Background(), env, "host", Request{Address: "shuttle://host/claude/s", Text: "hello", Wake: true, MessageID: "w"})
 	if err == nil {
@@ -150,8 +151,8 @@ func TestMailboxWithdrawAndNoWake(t *testing.T) {
 }
 
 func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	if err := RegisterMailbox(env, "codex", "thread/1", "owner", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
@@ -179,8 +180,8 @@ func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 }
 
 func TestMailboxWakeRejectedForEveryHookHarness(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	for _, harness := range []string{"claude", "codex"} {
 		if err := RegisterMailbox(env, harness, "s", "host", "/", os.Getpid(), true); err != nil {
 			t.Fatal(err)
@@ -193,6 +194,7 @@ func TestMailboxWakeRejectedForEveryHookHarness(t *testing.T) {
 }
 
 func TestMergeNativeAndHookSessionsPrefersNativeRecord(t *testing.T) {
+	t.Parallel()
 	hook := Session{Address: "shuttle://host/codex/id", Host: "host", Harness: "codex", ID: "id", State: "hook", Capabilities: []string{"context"}, LastSeen: 1}
 	native := hook
 	native.State = "active"
@@ -205,6 +207,7 @@ func TestMergeNativeAndHookSessionsPrefersNativeRecord(t *testing.T) {
 }
 
 func TestMergeSessionsCollapsesRepeatedNativeAndHookAddresses(t *testing.T) {
+	t.Parallel()
 	native := Session{Address: "shuttle://host/claude/id", State: "idle"}
 	hook := Session{Address: "shuttle://host/claude/other", State: "hook"}
 	got := mergeSessions([]Session{native, native}, []Session{native, hook, hook})
@@ -214,8 +217,8 @@ func TestMergeSessionsCollapsesRepeatedNativeAndHookAddresses(t *testing.T) {
 }
 
 func TestClaudeDiscoveryKeepsHookRegistrationWhenNativeCLIUnavailable(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	env.Set("PATH", t.TempDir())
 	if err := RegisterMailbox(env, "claude", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)

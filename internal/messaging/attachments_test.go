@@ -20,9 +20,9 @@ func testAttachment(name string, data []byte) Attachment {
 }
 
 func TestPartialAttachmentWriteRemainsDefiniteRejection(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	root := t.TempDir()
-	env.Set("SHUTTLE_DATA_DIR", root)
+	root := dataDir(env)
 	request := Request{Address: "shuttle://host/codex/thread", MessageID: "partial-files", Attachments: []Attachment{testAttachment("first.bin", []byte("first")), testAttachment("second.bin", []byte("second"))}}
 	idHash := sha256.Sum256([]byte(request.MessageID))
 	dir := filepath.Join(root, "message-files", hex.EncodeToString(idHash[:]))
@@ -42,6 +42,7 @@ func TestPartialAttachmentWriteRemainsDefiniteRejection(t *testing.T) {
 }
 
 func TestReadAttachmentsPreservesBinaryBytes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	want := []byte{0, 1, 2, 0xff, '\n', 0}
 	path := filepath.Join(dir, "payload.bin")
@@ -58,6 +59,7 @@ func TestReadAttachmentsPreservesBinaryBytes(t *testing.T) {
 }
 
 func TestReadAttachmentsRejectsFIFOWithoutBlocking(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "pipe")
 	if err := syscall.Mkfifo(path, 0600); err != nil {
 		t.Fatal(err)
@@ -78,6 +80,7 @@ func TestReadAttachmentsRejectsFIFOWithoutBlocking(t *testing.T) {
 }
 
 func TestAttachmentValidationRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
 	base := Request{Address: "shuttle://host/codex/session", Text: "message", MessageID: "id"}
 	tests := []struct {
 		name        string
@@ -93,6 +96,7 @@ func TestAttachmentValidationRejectsMalformedInput(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			req := base
 			req.Attachments = tc.attachments
 			if err := validateRequest("host", req); ErrorCode(err) != "invalid_request" {
@@ -111,6 +115,7 @@ func TestAttachmentValidationRejectsMalformedInput(t *testing.T) {
 }
 
 func TestRequestHashWithoutAttachmentsIsCompatible(t *testing.T) {
+	t.Parallel()
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", From: "sender", Wake: true, MessageID: "ignored"}
 	b, _ := json.Marshal(struct {
 		Address, Text, From string
@@ -123,9 +128,9 @@ func TestRequestHashWithoutAttachmentsIsCompatible(t *testing.T) {
 }
 
 func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	dataDir := t.TempDir()
-	env.Set("SHUTTLE_DATA_DIR", dataDir)
+	dataDir := dataDir(env)
 	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
 	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
@@ -172,8 +177,8 @@ func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
 }
 
 func TestMaterializePreservesMaximumLengthName(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	name := strings.Repeat("a", 255)
 	files, err := materializeAttachments(env, "long-name", []Attachment{testAttachment(name, []byte("data"))})
 	if err != nil || len(files) != 1 {
@@ -188,9 +193,9 @@ func TestMaterializePreservesMaximumLengthName(t *testing.T) {
 }
 
 func TestAttachmentPayloadChangeConflictsOnMessageID(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	dataDir := t.TempDir()
-	env.Set("SHUTTLE_DATA_DIR", dataDir)
+	dataDir := dataDir(env)
 	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
 	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
@@ -206,9 +211,9 @@ func TestAttachmentPayloadChangeConflictsOnMessageID(t *testing.T) {
 }
 
 func TestPreexistingSymlinkPreventsDelivery(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	dataDir := t.TempDir()
-	env.Set("SHUTTLE_DATA_DIR", dataDir)
+	dataDir := dataDir(env)
 	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
 	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)

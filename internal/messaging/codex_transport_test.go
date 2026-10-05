@@ -14,6 +14,7 @@ import (
 )
 
 func TestCodexSocketSelection(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	home, err := env.UserHomeDir()
 	if err != nil {
@@ -140,7 +141,7 @@ func (f *fakeCodex) methodCount(method string) int {
 }
 
 func TestCodexMutationReceipts(t *testing.T) {
-	env := testEnv(t)
+	t.Parallel()
 	tests := []struct {
 		name, state, mutation string
 		wake                  bool
@@ -161,9 +162,10 @@ func TestCodexMutationReceipts(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := &fakeCodex{t: t, state: tc.state, mutation: tc.mutation, mutationReply: tc.reply, collideRequest: tc.collision}
+			env := testEnv(t)
 			env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-			env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			req := Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "message-1", Wake: tc.wake}
@@ -190,11 +192,11 @@ func TestCodexMutationReceipts(t *testing.T) {
 }
 
 func TestCodexRefusesSteerWithoutActiveTurnID(t *testing.T) {
-	env := testEnv(t)
+	t.Parallel()
 	for _, wake := range []bool{false, true} {
 		f := &fakeCodex{t: t, state: "active", emptyActiveTurnID: true, mutation: "turn/steer", mutationReply: map[string]any{}}
+		env := testEnv(t)
 		env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-		env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 		receipt, err := Send(context.Background(), env, "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "no-turn-id", Wake: wake})
 		if receipt.Status != StatusRejected || ErrorCode(err) != "busy_race" {
 			t.Fatalf("wake=%v: %#v, %v", wake, receipt, err)
@@ -206,13 +208,13 @@ func TestCodexRefusesSteerWithoutActiveTurnID(t *testing.T) {
 }
 
 func TestCodexWakeRefusesPendingInputWithoutMutation(t *testing.T) {
-	env := testEnv(t)
+	t.Parallel()
 	// These native activeFlags also drive Shuttle.CodexApp thread_status/2.
 	for _, flag := range []string{"waitingOnApproval", "waitingOnUserInput"} {
 		for _, wake := range []bool{false, true} {
 			f := &fakeCodex{t: t, state: "active", activeFlags: []string{flag}, mutation: "turn/steer", mutationReply: map[string]any{"turnId": "turn-1"}}
+			env := testEnv(t)
 			env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-			env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 			receipt, err := Send(context.Background(), env, "h", Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "pending-input", Wake: wake})
 			if wake {
 				if receipt.Status != StatusRejected || ErrorCode(err) != "pending_input" || f.methodCount("turn/steer") != 0 {
@@ -229,10 +231,10 @@ func TestCodexWakeRefusesPendingInputWithoutMutation(t *testing.T) {
 }
 
 func TestCodexLostWakeAcknowledgmentIsNotRetried(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	f := &fakeCodex{t: t, state: "idle", mutation: "turn/start", dropMutationReply: true}
 	env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	req := Request{Address: "shuttle://h/codex/thread-1", Text: "do work", MessageID: "lost-wake", Wake: true}
 	for range 2 {
 		receipt, err := Send(context.Background(), env, "h", req)
@@ -246,10 +248,10 @@ func TestCodexLostWakeAcknowledgmentIsNotRetried(t *testing.T) {
 }
 
 func TestCodexLostAcknowledgmentIsDeduplicated(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	f := &fakeCodex{t: t, state: "idle", mutation: "thread/inject_items", dropMutationReply: true}
 	env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, f))
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	req := Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "lost-ack"}
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

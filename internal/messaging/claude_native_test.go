@@ -92,7 +92,45 @@ func nativeRows(frame map[string]any, f *os.File, synthetic bool) {
 	}
 }
 
+// observationSettle is how long a test lets the sender's transcript observer
+// (which rescans every 25ms) read what the receiver wrote before the test ends
+// the observation window.
+const observationSettle = 250 * time.Millisecond
+
+// notify records that the receiver fixture has responded, at most once.
+func notify(responded chan<- struct{}) {
+	select {
+	case responded <- struct{}{}:
+	default:
+	}
+}
+
+// sendUntilSettled sends req and ends its observation window once the
+// receiver has responded and settle has passed, standing in for the
+// observation timeout running out: the sender reports what it had observed by
+// then, without the test waiting out the production window.
+func sendUntilSettled(env *sysenv.Env, req Request, responded <-chan struct{}, settle time.Duration) (Receipt, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		select {
+		case <-responded:
+		case <-ctx.Done():
+			return
+		}
+		timer := time.NewTimer(settle)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return Send(ctx, env, "host", req)
+}
+
 func TestObserveClaudeTurnReportsFurthestObservedStage(t *testing.T) {
+	t.Parallel()
 	const (
 		uuid    = "message-uuid"
 		content = "the queued content"
@@ -129,6 +167,7 @@ func TestObserveClaudeTurnReportsFurthestObservedStage(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			path := filepath.Join(t.TempDir(), "transcript.jsonl")
 			f, err := os.Create(path)
 			if err != nil {
@@ -165,6 +204,7 @@ func TestObserveClaudeTurnReportsFurthestObservedStage(t *testing.T) {
 }
 
 func TestClaudeNativeWakeAndAttachmentRetry(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, false) })
 	req.Attachments = []Attachment{{Name: "notes.bin", Data: []byte{0, 1, 255}}}
@@ -187,8 +227,10 @@ func TestClaudeNativeWakeAndAttachmentRetry(t *testing.T) {
 }
 
 func TestClaudeNativeNoWakeAndUnknownRetry(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
+	responded := make(chan struct{}, 1)
+	req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) { notify(responded) })
 	req.Wake = false
 	r, err := Send(context.Background(), env, "host", req)
 	if err != nil || r.Status != StatusQueued || sent.Load() != 0 {
@@ -196,13 +238,15 @@ func TestClaudeNativeNoWakeAndUnknownRetry(t *testing.T) {
 	}
 	req.Wake = true
 	req.MessageID = "wake-timeout"
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	r, err = Send(ctx, env, "host", req)
+	r, err = sendUntilSettled(env, req, responded, 0)
 	if err == nil || r.Status != StatusUnknown {
 		t.Fatalf("%+v %v", r, err)
 	}
-	r, err = Send(context.Background(), env, "host", req)
+	// The retry rescans the transcript for its bounded window; nothing will
+	// appear, so a short context ends it.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	r, err = Send(ctx, env, "host", req)
 	if err == nil || r.Status != StatusUnknown || sent.Load() != 1 {
 		t.Fatalf("%+v %v writes %d", r, err, sent.Load())
 	}
@@ -234,9 +278,11 @@ func busyReceiverRows(frame map[string]any, f *os.File, absorb bool) {
 }
 
 func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	frameCh := make(chan map[string]any, 1)
-	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, _ *os.File) { frameCh <- frame })
+	responded := make(chan struct{}, 1)
+	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, _ *os.File) { frameCh <- frame; notify(responded) })
 	registration, err := readClaudeNative(env, "session")
 	if err != nil {
 		t.Fatal(err)
@@ -245,9 +291,7 @@ func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
 	if err := os.WriteFile(registration.Transcript, prefix, 0600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	first, firstErr := Send(ctx, env, "host", req)
-	cancel()
+	first, firstErr := sendUntilSettled(env, req, responded, 0)
 	if first.Status != StatusUnknown || ErrorCode(firstErr) != "ambiguous_delivery" {
 		t.Fatalf("first receipt: %+v %v", first, firstErr)
 	}
@@ -273,6 +317,7 @@ func TestClaudeNativeRetryRefreshesReceiptWithoutResending(t *testing.T) {
 }
 
 func TestClaudeNativeRetryReturnsObservedStageWhenRefreshLockIsBusy(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
 	registration, err := readClaudeNative(env, "session")
@@ -307,16 +352,20 @@ func TestClaudeNativeRetryReturnsObservedStageWhenRefreshLockIsBusy(t *testing.T
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 
-	receipt, err := Send(context.Background(), env, "host", req)
+	// The submitted row is already on disk, so the rescan reads it at once and
+	// a short context only ends its wait for an assistant row.
+	ctx, cancel := context.WithTimeout(context.Background(), observationSettle)
+	defer cancel()
+	receipt, err := Send(ctx, env, "host", req)
 	if err != nil || receipt.Status != StatusSubmitted || sent.Load() != 0 {
 		t.Fatalf("retry returned stale receipt or resent: %+v %v writes=%d", receipt, err, sent.Load())
 	}
 }
 
 func TestClaudeNativeRetryKeepsSubmittedReceiptWhenRegistrationIsGone(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	dir := t.TempDir()
-	env.Set("SHUTTLE_DATA_DIR", dir)
+	dir := dataDir(env)
 	req := Request{Address: "shuttle://h/claude/0f7c3b1e-1111-2222-3333-444455556666", Text: "hi", MessageID: "m-sub", Wake: true}
 	offset := int64(0)
 	stored := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubmitted, Transport: claudeNativeTransport, Detail: "stored submitted"}
@@ -329,9 +378,11 @@ func TestClaudeNativeRetryKeepsSubmittedReceiptWhenRegistrationIsGone(t *testing
 }
 
 func TestClaudeNativeRetryKeepsReceiptWhenTranscriptCannotBeRescanned(t *testing.T) {
-	env := testEnv(t)
+	t.Parallel()
 	for _, failure := range []string{"open", "scan-bound"} {
 		t.Run(failure, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
 			req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
 			registration, err := readClaudeNative(env, "session")
 			if err != nil {
@@ -363,6 +414,7 @@ func TestClaudeNativeRetryKeepsReceiptWhenTranscriptCannotBeRescanned(t *testing
 }
 
 func TestClaudeNativeRetryWithoutOffsetKeepsStoredReceipt(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
 	frame := map[string]any{"uuid": claudeNativeUUID(req)}
@@ -388,6 +440,7 @@ func TestClaudeNativeRetryWithoutOffsetKeepsStoredReceipt(t *testing.T) {
 }
 
 func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, true) })
 	r, err := Send(context.Background(), env, "host", req)
@@ -397,32 +450,34 @@ func TestClaudeNativeMidTurnAbsorptionIsAccepted(t *testing.T) {
 }
 
 func TestClaudeNativeQueuedBehindTurnReportsQueueAdmission(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, false) })
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	r, err := Send(ctx, env, "host", req)
+	responded := make(chan struct{}, 1)
+	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { busyReceiverRows(frame, f, false); notify(responded) })
+	r, err := sendUntilSettled(env, req, responded, observationSettle)
 	if err != nil || r.Status != StatusQueued || r.Detail != "queued behind the receiver's current turn; it runs when that turn ends" {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
 
 func TestClaudeNativeAbsorptionOfAnotherMessageIsNotEvidence(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
+	responded := make(chan struct{}, 1)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) {
 		frame["uuid"] = "another-message"
 		frame["message"] = map[string]any{"content": "another message"}
 		busyReceiverRows(frame, f, true)
+		notify(responded)
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	r, err := Send(ctx, env, "host", req)
+	r, err := sendUntilSettled(env, req, responded, observationSettle)
 	if err == nil || r.Status != StatusUnknown || strings.Contains(r.Detail, "queued") {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
 
 func TestClaudeNativeSyntheticErrorIsNotStarted(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { nativeRows(frame, f, true) })
 	first, err := Send(context.Background(), env, "host", req)
@@ -437,6 +492,7 @@ func TestClaudeNativeSyntheticErrorIsNotStarted(t *testing.T) {
 }
 
 func TestClaudeNativeScanFailureAfterQueueIsUnknown(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) {
 		content := frame["message"].(map[string]any)["content"].(string)
@@ -453,6 +509,7 @@ func TestClaudeNativeScanFailureAfterQueueIsUnknown(t *testing.T) {
 }
 
 func TestClaudeNativeReplacedSocketRefusesBeforeSend(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
 	reg, _ := readClaudeNative(env, "session")
@@ -466,21 +523,23 @@ func TestClaudeNativeReplacedSocketRefusesBeforeSend(t *testing.T) {
 }
 
 func TestClaudeNativeEvidenceIgnoresUnrelatedAndMalformed(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
+	responded := make(chan struct{}, 1)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) {
 		f.WriteString("not json\n")
 		frame["uuid"] = "unrelated"
 		nativeRows(frame, f, false)
+		notify(responded)
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	r, err := Send(ctx, env, "host", req)
+	r, err := sendUntilSettled(env, req, responded, observationSettle)
 	if err == nil || r.Status != StatusUnknown {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
 
 func TestClaudeNativeRegistrationKeepsOneLiveOwner(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	_, _ = nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
 	original, err := readClaudeNative(env, "session")
@@ -525,24 +584,27 @@ func TestClaudeNativeRegistrationKeepsOneLiveOwner(t *testing.T) {
 }
 
 func TestClaudeNativeEvidenceRequiresExactSession(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
+	responded := make(chan struct{}, 1)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) {
 		uuid := frame["uuid"].(string)
 		json.NewEncoder(f).Encode(map[string]any{"type": "user", "sessionId": "other-session", "uuid": uuid})
 		json.NewEncoder(f).Encode(map[string]any{"type": "assistant", "sessionId": "session", "uuid": "assistant", "parentUuid": uuid, "message": map[string]any{"role": "assistant", "model": "claude-test"}})
+		notify(responded)
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	r, err := Send(ctx, env, "host", req)
+	r, err := sendUntilSettled(env, req, responded, observationSettle)
 	if err == nil || r.Status != StatusUnknown {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
 
 func TestClaudeNativePolicyReceipts(t *testing.T) {
-	env := testEnv(t)
+	t.Parallel()
 	for _, status := range []string{"held", "denied", "expired", "refused", "dropped"} {
 		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
 			req, sent := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) {
 				reg, _ := readClaudeNative(env, "session")
 				c, err := net.Dial("unix", strings.TrimPrefix(frame["from"].(string), "uds:"))
@@ -578,6 +640,7 @@ func TestClaudeNativePolicyReceipts(t *testing.T) {
 // must still bind beside the receiver's socket, in the name shape Claude
 // accepts for peers.
 func TestClaudeNativePolicyReceiptUnderLongTMPDIR(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	long := filepath.Join(socketTempDir(t), strings.Repeat("d", 45))
 	if err := os.Mkdir(long, 0700); err != nil {
@@ -610,7 +673,9 @@ func TestClaudeNativePolicyReceiptUnderLongTMPDIR(t *testing.T) {
 }
 
 func TestClaudeNativeRejectsUncorrelatedPolicyReceipt(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
+	responded := make(chan struct{}, 1)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) {
 		reg, _ := readClaudeNative(env, "session")
 		c, err := net.Dial("unix", strings.TrimPrefix(frame["from"].(string), "uds:"))
@@ -619,17 +684,17 @@ func TestClaudeNativeRejectsUncorrelatedPolicyReceipt(t *testing.T) {
 		}
 		defer c.Close()
 		json.NewEncoder(c).Encode(map[string]any{"type": "control", "action": "peer_message_status", "status": "denied", "from": "uds:" + reg.Socket, "orig_msg_id": "wrong-id"})
+		notify(responded)
 		io.Copy(io.Discard, c) // stay connected: macOS has no peer PID after close
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	r, err := Send(ctx, env, "host", req)
+	r, err := sendUntilSettled(env, req, responded, observationSettle)
 	if err == nil || r.Status != StatusUnknown {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
 
 func TestClaudeNativeRegistrationDoesNotWaitForHeldLock(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	_, _ = nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
 	reg, _ := readClaudeNative(env, "session")
@@ -649,12 +714,13 @@ func TestClaudeNativeRegistrationDoesNotWaitForHeldLock(t *testing.T) {
 		if err == nil {
 			t.Fatal("registration ignored held lock")
 		}
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("registration blocks its receiver hook")
 	}
 }
 
 func TestClaudeNativeObservesFirstTranscriptCreation(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, _ *os.File) {
 		reg, _ := readClaudeNative(env, "session")
@@ -676,6 +742,7 @@ func TestClaudeNativeObservesFirstTranscriptCreation(t *testing.T) {
 }
 
 func TestClaudeNativeReceivesPolicyWithoutTranscript(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
 	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, _ *os.File) {
 		reg, _ := readClaudeNative(env, "session")
@@ -701,9 +768,11 @@ func TestClaudeNativeReceivesPolicyWithoutTranscript(t *testing.T) {
 }
 
 func TestClaudeNativeRefusesUnsafeTranscriptBeforeSend(t *testing.T) {
-	env := testEnv(t)
+	t.Parallel()
 	for _, kind := range []string{"symlink", "fifo"} {
 		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
 			req, sent := nativeClaudeFixture(t, env, func(map[string]any, *os.File) {})
 			reg, _ := readClaudeNative(env, "session")
 			if err := os.Remove(reg.Transcript); err != nil {

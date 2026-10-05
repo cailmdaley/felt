@@ -25,8 +25,8 @@ func startReceiver(t *testing.T) *exec.Cmd {
 }
 
 func TestMailboxOfExitedReceiverLeavesDiscoveryAndRejects(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	receiver := startReceiver(t)
 	if err := RegisterMailbox(env, "codex", "old-worker", "host", "/project", receiver.Process.Pid, true); err != nil {
 		t.Fatal(err)
@@ -63,8 +63,8 @@ func TestMailboxOfExitedReceiverLeavesDiscoveryAndRejects(t *testing.T) {
 }
 
 func TestMailboxRegistrationWithoutReceiverProcessIsNotLive(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	dir := mailboxDir(env, "codex", "legacy")
 	if err := ensureDir(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -82,8 +82,8 @@ func TestMailboxRegistrationWithoutReceiverProcessIsNotLive(t *testing.T) {
 }
 
 func TestRegisterMailboxRefusesAReceiverThatIsNotRunning(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	receiver := startReceiver(t)
 	pid := receiver.Process.Pid
 	_ = receiver.Process.Kill()
@@ -99,6 +99,7 @@ func TestRegisterMailboxRefusesAReceiverThatIsNotRunning(t *testing.T) {
 }
 
 func TestProcessParentMatchesGetppid(t *testing.T) {
+	t.Parallel()
 	ppid, name, ok := processParent(os.Getpid())
 	if !ok || ppid != os.Getppid() || name == "" || !strings.HasPrefix(filepath.Base(os.Args[0]), name) {
 		t.Fatalf("processParent(self) = %d %q %v; want ppid %d, name prefixing %q", ppid, name, ok, os.Getppid(), filepath.Base(os.Args[0]))
@@ -115,6 +116,7 @@ func TestProcessParentMatchesGetppid(t *testing.T) {
 // that launches a hook through a shell which cannot exec it away; the hook
 // must name the harness, not the shell.
 func TestHookReceiverPIDSkipsShells(t *testing.T) {
+	t.Parallel()
 	switch os.Getenv("SHUTTLE_TEST_HOOK_ROLE") {
 	case "hook":
 		os.Stdout.WriteString(strconv.Itoa(HookReceiverPID()) + " " + strconv.Itoa(os.Getppid()) + "\n")
@@ -143,8 +145,8 @@ func TestHookReceiverPIDSkipsShells(t *testing.T) {
 }
 
 func TestSendToExitedHookReceiverIsRejectedNotQueued(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(t.TempDir(), "absent.sock"))
 	receiver := startReceiver(t)
 	if err := RegisterMailbox(env, "codex", "gone", "host", "/", receiver.Process.Pid, true); err != nil {
