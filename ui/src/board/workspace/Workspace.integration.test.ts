@@ -58,6 +58,15 @@ const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
 }
 // Microtask depth varies with the Node runtime (undici fetch/Response hops), so drain generously.
 const flush = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
+/** The Board's receipt feed has named alpha's report before the channel opens. */
+const feedNamesReport = async (): Promise<void> => {
+  const original = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/sent-files/all/')
+    ? new Response(JSON.stringify({ files: [{ fullPath: '/notes/alpha/report.html', uid: 'alpha', host: 'host-a', timestamp: Date.now(), sessionId: 'session-two' }] }))
+    : original(input, init))
+  workspace.overview.refresh()
+  await flush()
+}
 const changed = vi.fn()
 const visibility = vi.fn<(active: boolean) => void>()
 
@@ -258,6 +267,7 @@ describe('workspace reader integration', () => {
       if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('table.html') ? 2000000000 : 1900000000 }))
       return original(input, init)
     })
+    await feedNamesReport()
     workspace.open(cards[0]); await flush()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
@@ -340,7 +350,8 @@ describe('workspace reader integration', () => {
     expect(calls.filter(call => call.url.includes('/sent-files/all/composite')).every(({ url }) => !url.includes('since_ms=0'))).toBe(true)
   })
 
-  it('selects the declared report on first entry and retains the same iframe through pages, expand and return', async () => {
+  it('opens on the report the receipt feed already names, and retains the same iframe through pages, expand and return', async () => {
+    await feedNamesReport()
     workspace.open(cards[0])
     await flush()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
@@ -603,7 +614,8 @@ describe('workspace reader integration', () => {
     await flush()
     // Each channel orders its declarations as its own body does.
     expect(labels()).toEqual(['Note', 'table.html', 'shared'])
-    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('shared')
+    // Nothing named a page before the channel painted, so it stays on its own page.
+    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Note')
     const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
@@ -712,6 +724,55 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(document.activeElement).toBe(control)
     expect(control.isConnected).toBe(true)
+  })
+
+  it('never moves a painted selection when the channel\'s receipts arrive late', async () => {
+    let deliver: () => void = () => {}
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/api/v1/sent-files?')
+      ? new Promise<Response>(resolve => { deliver = () => { void original(input, init).then(resolve) } }) : original(input, init))
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    // Nothing names a page at open: the fiber's own page paints and stays.
+    workspace.open(cards[0]); await flush()
+    expect(selected()).toBe('fiber:host-a:alpha')
+    deliver(); await flush()
+    expect(workspace.reader.host.get(reportKey)).toBeTruthy()
+    expect(selected()).toBe('fiber:host-a:alpha')
+    expect(window.location.hash).not.toContain(encodeURIComponent(reportKey))
+    // A routed page paints at once from a provisional frame, before its receipts.
+    workspace.dispose()
+    window.history.replaceState(null, '', '/')
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(tableKey)}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await flush()
+    expect(selected()).toBe(tableKey)
+    const frame = workspace.reader.host.get(tableKey)!.el
+    deliver(); await flush()
+    expect(selected()).toBe(tableKey)
+    expect(workspace.reader.host.get(tableKey)!.el).toBe(frame)
+  })
+
+  it('gates neither the page list nor the selection on file metadata', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/file-info?') ? new Promise<Response>(() => {}) : original(input, init))
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(reportKey)}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).toContain('table.html')
+  })
+
+  it('sends a routed page the loaded channel does not hold to the report', async () => {
+    const gone = docKey('host-a', '/notes/alpha/gone.html', 'host-a')
+    window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(gone)}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).not.toContain('gone.html')
   })
 
   it('keeps an explicit prose selection made while the body is loading', async () => {
