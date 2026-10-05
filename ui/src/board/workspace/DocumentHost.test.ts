@@ -92,6 +92,22 @@ describe('say it once label bars', () => {
 })
 
 describe('stable document frames', () => {
+  it('owns an audio poster per frame and updates its fallback from the native duration', () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+    const audioDoc: WorkspaceDocument = { ...docs[0], kind: 'audio', path: '/song.wav' }
+    host.setChannel([audioDoc], audioDoc.key)
+    const frame = host.get(audioDoc.key)!
+    const poster = frame.sheet.querySelector('.ws-media-poster')!
+    expect(poster.textContent).toContain('♪')
+    const audio = document.createElement('audio')
+    Object.defineProperty(audio, 'duration', { value: 75 })
+    const dispose = render.calls[0].options.decorateAudio!(audio)
+    audio.dispatchEvent(new Event('loadedmetadata'))
+    expect(poster.textContent).toContain('1:15')
+    expect(poster.classList.contains('ws-media-poster-ready')).toBe(false)
+    dispose()
+  })
+
   it('creates placeholders, mounts just selection and neighbours, and never reparents on reorder', async () => {
     host.setChannel(docs.slice(0, 5), docs[2].key)
     expect(track.children).toHaveLength(5)

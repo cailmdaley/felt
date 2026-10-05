@@ -32,6 +32,9 @@ export class AudioPage {
   private readonly metadata = new Map<DocKey, HTMLAudioElement>()
   private readonly observer: ResizeObserver | null
   private peaks: number[] | null = null
+  private waveformDuration: number | null = null
+  private publishedPeaks: number[] | null = null
+  private publishedDuration: number | null = null
   private signature = ''
   private animation = 0
   private cancelDrag: (() => void) | null = null
@@ -41,10 +44,12 @@ export class AudioPage {
   private readonly doc: WorkspaceDocument
   private readonly base: string
   private readonly onSelect: (key: DocKey) => void
+  private readonly onPoster?: (peaks: number[] | null, duration: number | null) => void
 
   constructor(audio: HTMLAudioElement, doc: WorkspaceDocument,
-    base: string, onSelect: (key: DocKey) => void) {
-    this.audio = audio; this.doc = doc; this.base = base; this.onSelect = onSelect
+    base: string, onSelect: (key: DocKey) => void,
+    onPoster?: (peaks: number[] | null, duration: number | null) => void) {
+    this.audio = audio; this.doc = doc; this.base = base; this.onSelect = onSelect; this.onPoster = onPoster
     this.el.className = 'ws-audio-page'
     this.el.dataset.part = 'audio-page'
     this.el.setAttribute('aria-label', 'Audio listening controls')
@@ -88,6 +93,7 @@ export class AudioPage {
     audio.controls = false
     audio.before(this.el)
     for (const event of ['timeupdate', 'loadedmetadata', 'durationchange', 'play', 'pause', 'ended', 'seeked']) audio.addEventListener(event, this.update)
+    for (const event of ['loadedmetadata', 'durationchange']) audio.addEventListener(event, this.posterMetadata)
     this.waveform.addEventListener('pointerdown', this.pointerDown)
     this.waveform.addEventListener('pointermove', event => {
       const rect = this.waveform.getBoundingClientRect()
@@ -110,8 +116,10 @@ export class AudioPage {
     void loadWaveform(doc.key, fileBytesUrl(base, doc.path, doc.owner), this.controller.signal).then(data => {
       if (this.disposed) return
       this.peaks = data?.peaks ?? null
+      this.waveformDuration = data?.duration ?? null
       this.el.dataset.waveform = this.peaks ? 'decoded' : 'progress'
       this.draw()
+      this.publishPoster()
     })
   }
 
@@ -146,6 +154,7 @@ export class AudioPage {
     this.controller.abort(); this.observer?.disconnect(); cancelAnimationFrame(this.animation)
     document.removeEventListener('workspace-theme-change', this.themeChanged)
     for (const event of ['timeupdate', 'loadedmetadata', 'durationchange', 'play', 'pause', 'ended', 'seeked']) this.audio.removeEventListener(event, this.update)
+    for (const event of ['loadedmetadata', 'durationchange']) this.audio.removeEventListener(event, this.posterMetadata)
     for (const media of this.metadata.values()) { media.removeAttribute('src'); media.load() }
     this.metadata.clear()
     this.el.remove()
@@ -168,8 +177,20 @@ export class AudioPage {
     cancelAnimationFrame(this.animation)
     if (!this.audio.paused && !this.disposed) this.animation = requestAnimationFrame(this.update)
   }
+  private readonly posterMetadata = (): void => this.publishPoster()
+  private publishPoster(force = false): void {
+    const mediaDuration = Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.duration : null
+    const duration = mediaDuration ?? this.waveformDuration
+    if (!force && this.publishedPeaks === this.peaks && this.publishedDuration === duration) return
+    this.publishedPeaks = this.peaks
+    this.publishedDuration = duration
+    this.onPoster?.(this.peaks, duration)
+  }
   private readonly themeChanged = (event: Event): void => {
-    if (event.target instanceof Element && event.target.contains(this.el)) this.draw()
+    if (event.target instanceof Element && event.target.contains(this.el)) {
+      this.draw()
+      this.publishPoster(true)
+    }
   }
   private readonly draw = (): void => {
     const canvas = this.waveform, context = canvas.getContext('2d')

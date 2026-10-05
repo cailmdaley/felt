@@ -860,6 +860,28 @@ test('Text, markdown, code, image, archive and missing-file cause', async p => {
   assert.match(await selected(p).locator('.ws-document-path').innerText(), /\/deliverables\/not-produced.csv$/)
 })
 
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Receded media posters show cached audio peaks and the first video frame (${device})`, async p => {
+  await open(p); await choose(p, 'tone.mp3')
+  await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')
+  await choose(p, 'tone.wav')
+  const audioPage = p.locator('.ws-page[data-key$="/tone.mp3"]')
+  const audioPoster = audioPage.locator('.ws-media-poster')
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.mp3"] .ws-media-poster-ready'))
+  assert.equal(await audioPoster.locator('canvas').evaluate(canvas => canvas.width), 1000)
+  assert.ok(await audioPoster.locator('canvas').evaluate(canvas => getComputedStyle(canvas).display === 'block'))
+  const waveformWidth = await audioPoster.evaluate(el => el.querySelector('canvas').getBoundingClientRect().width / el.getBoundingClientRect().width)
+  assert.ok(waveformWidth >= 0.88, `waveform covers most of the neighbour (${waveformWidth})`)
+  await choose(p, 'test.mp4')
+  await poll(p, () => [...document.querySelectorAll('.ws-selected video')].some(video => video.readyState >= 2 && video.videoWidth > 0))
+  const labels = await p.locator('.ws-tab').evaluateAll(tabs => tabs.map(tab => tab.getAttribute('aria-label')))
+  const videoIndex = labels.indexOf('test.mp4')
+  const adjacent = labels[videoIndex === 0 ? 1 : videoIndex - 1]
+  await choose(p, adjacent)
+  const videoPoster = p.locator('.ws-page[data-key$="/test.mp4"] .ws-media-poster')
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/test.mp4"] .ws-media-poster-ready'))
+  assert.ok(await videoPoster.locator('canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0))
+}, viewport)
+
 for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pauses away and parking without auto-resume`, async p => {
   await open(p); await choose(p, `tone.${format}`)
   const audio = p.getByRole('tabpanel', { name: `tone.${format}`, exact: true, includeHidden: true }).locator('audio')

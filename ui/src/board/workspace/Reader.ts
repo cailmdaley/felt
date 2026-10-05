@@ -382,12 +382,7 @@ export class Reader {
   private prepareFrame(frame: DocumentFrame): void {
     frame.el.classList.toggle('ws-text-page', ['fiber', 'text', 'markdown', 'code'].includes(frame.doc.kind))
     frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
-    if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') {
-      frame.el.classList.add('ws-media-page')
-      const poster = element('div', 'ws-media-poster', frame.doc.kind === 'audio' ? '♪' : '▷')
-      poster.setAttribute('aria-hidden', 'true')
-      frame.sheet.append(poster)
-    }
+    if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') frame.el.classList.add('ws-media-page')
     frame.el.setAttribute('role', 'tabpanel')
     frame.el.setAttribute('aria-label', frame.doc.name)
     const glyph = element('span', 'ws-kind-glyph')
