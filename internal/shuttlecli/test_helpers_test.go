@@ -161,3 +161,19 @@ func serveDaemon(t testing.TB, env *sysenv.Env, handler http.Handler) *httptest.
 	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 	return server
 }
+
+// setHostEnvIn points env at the host config file and the listener and data
+// variables the host resolver reads: blank first, then base, then overrides.
+func setHostEnvIn(t testing.TB, env *sysenv.Env, file string, base, overrides map[string]string) {
+	t.Helper()
+	for _, k := range []string{"SHUTTLE_LISTEN", "SHUTTLE_PORT", "SHUTTLE_DATA_DIR", "SHUTTLE_DAEMON_URL"} {
+		env.Set(k, "")
+	}
+	for k, v := range base {
+		env.Set(k, v)
+	}
+	for k, v := range overrides {
+		env.Set(k, v)
+	}
+	env.Set("SHUTTLE_HOST_CONFIG_FILE", file)
+}
