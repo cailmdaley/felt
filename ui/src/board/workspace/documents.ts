@@ -130,25 +130,26 @@ export function documentActivity(document: WorkspaceDocument): number | undefine
   return times.length ? Math.max(...times) : undefined
 }
 
-/** The first receipt's time; undefined when no receipt carries a valid time. */
-export function firstSent(document: WorkspaceDocument): number | undefined {
+/** The latest receipt's time; undefined when no receipt carries a valid time. */
+export function lastSent(document: WorkspaceDocument): number | undefined {
   const times = document.provenance.flatMap(p => p.kind === 'sent' && Number.isFinite(p.time) ? [p.time] : [])
-  return times.length ? Math.min(...times) : undefined
+  return times.length ? Math.max(...times) : undefined
 }
 
 /**
- * A channel's order after its fiber page: documents declared in the body and
- * never sent, in body order; then sent documents by their first delivery,
- * oldest first; then sends whose time is unknown. A re-send never moves a
- * document. Identity breaks every tie. `declared` maps a document to its
- * position among the body's declarations.
+ * A channel's order after its fiber page: sent documents by their latest
+ * receipt, newest first, then sends whose time is unknown; then documents
+ * declared in the body and never sent, in body order. A re-send moves its
+ * document to the front. Identity breaks every tie. `declared` maps a
+ * document to its position among the body's declarations.
  */
 export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map()) {
   const rank = (doc: WorkspaceDocument): [number, number] => {
-    const sent = firstSent(doc)
-    if (sent !== undefined) return [1, sent]
+    const sent = lastSent(doc)
+    if (sent !== undefined) return [0, -sent]
+    if (doc.provenance.some(p => p.kind === 'sent')) return [1, 0]
     const position = declared.get(doc.key)
-    return position !== undefined ? [0, position] : [2, 0]
+    return position !== undefined ? [2, position] : [3, 0]
   }
   return (a: WorkspaceDocument, b: WorkspaceDocument): number => {
     const [ag, av] = rank(a), [bg, bv] = rank(b)

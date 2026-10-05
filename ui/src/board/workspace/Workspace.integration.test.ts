@@ -255,16 +255,18 @@ describe('workspace reader integration', () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input)
-      if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('table.html') ? 2000000000 : 1900000000 }))
+      if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('report.html') ? 2000000000 : 1900000000 }))
       return original(input, init)
     })
     workspace.open(cards[0]); await flush()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
-    expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
+    expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
+    expect(workspace.reader.host.get(reportKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
     const order = [...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))
-    expect(order.indexOf('table.html')).toBeGreaterThan(order.indexOf('Report'))
+    // The table's later receipt leads; the report's newer file time does not move it.
+    expect(order.indexOf('table.html')).toBeLessThan(order.indexOf('Report'))
     const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
     expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
     document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()

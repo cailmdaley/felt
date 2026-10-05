@@ -120,7 +120,7 @@ describe('buildChannel', () => {
     expect(channel.documents[2].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
   })
 
-  it('orders declarations by body, then deliveries by first send, while retaining receipt history', () => {
+  it('orders deliveries by latest receipt, newest first, then declarations by body, while retaining receipt history', () => {
     const first = buildChannel({
       ...base,
       embeds: [{ path: 'second.html' }, { path: 'first.html' }],
@@ -141,10 +141,10 @@ describe('buildChannel', () => {
       previous: first,
     })
     expect(first.documents.map((document) => document.name)).toEqual([
-      'A channel', 'second.html', 'first.html', 'earlier.pdf', 'later.pdf',
+      'A channel', 'later.pdf', 'earlier.pdf', 'second.html', 'first.html',
     ])
     expect(second.documents.map((document) => document.name)).toEqual([
-      'A channel', 'new-report.html', 'first.html', 'earlier.pdf', 'later.pdf', 'arrival.txt',
+      'A channel', 'arrival.txt', 'later.pdf', 'earlier.pdf', 'new-report.html', 'first.html',
     ])
     expect(second.documents.find((document) => document.name === 'later.pdf')?.provenance)
       .toEqual([
