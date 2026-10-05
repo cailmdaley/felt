@@ -1334,6 +1334,14 @@ test('Remote worker pill records attach handler without launching a terminal', a
   assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
 })
 
+test('The head worker control opens the same remote worker as the pill', async p => {
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await p.locator('.ws-navbar .ws-head-worker .kbn-card-worker').click()
+  await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
+  const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
+  assert.equal(event.host, 'basalt-login-02')
+})
+
 test('Phone overview single column, reader sheet, footer stepping and Back', async p => {
   const switcher = await p.locator('.kbn-viewtabs').boundingBox()
   assert.equal(Math.round(switcher.y + switcher.height), 844, 'view switcher sits at the bottom')
@@ -1682,7 +1690,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `verdict-${device}-${state}.png`) })
     }
     await open(p)
-    assert.equal(await p.locator('.ws-navbar .kbn-card-worker, .ws-navbar .ws-worker-pill').count(), 0, 'the navbar carries no worker plate')
+    assert.ok(await p.locator('.ws-navbar .ws-head-worker').isHidden(), 'a fiber with no worker leaves the head without a worker control')
     if (device === 'phone') {
       assert.ok(!await p.locator('.ws-nav-verdicts').isVisible(), 'the phone top bar stays the name alone')
       await p.locator('.ws-page-choice').click()
@@ -1723,6 +1731,20 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.ok(await dot.isVisible(), 'the act zone pill shows its worker dot')
     assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none', 'reduced motion suppresses breathing')
     assert.ok(await p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-turn-active').count())
+    const head = p.locator('.ws-navbar .ws-head-worker .ws-worker-control')
+    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.dataset.workerState === 'aloft')
+    const headDot = await head.locator('.ws-worker-dot').evaluate(el => getComputedStyle(el).backgroundColor)
+    const headLook = await head.evaluate(el => ({ border: getComputedStyle(el).borderTopWidth, background: getComputedStyle(el).backgroundColor }))
+    assert.deepEqual(headLook, { border: '0px', background: 'rgba(0, 0, 0, 0)' }, 'the head draws the worker bare')
+    const headBox = await head.boundingBox(), position = await p.locator('.ws-head-position').boundingBox()
+    if (device === 'phone') {
+      assert.ok(await head.locator('.ws-worker-state').isHidden(), 'the phone top bar shows the dot alone')
+      assert.ok(headBox.width >= 44 && headBox.height >= 44, `the phone dot is a full target: ${JSON.stringify(headBox)}`)
+      assert.ok(headBox.x + headBox.width >= viewport.width - 16, 'the phone dot sits at the right end of the top bar')
+    } else {
+      assert.match(await head.innerText(), /aloft\s*12 m/)
+      assert.ok(headBox.x + headBox.width <= position.x, 'the worker control precedes the page count')
+    }
     await shot('aloft')
     await p.evaluate(async () => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
@@ -1732,11 +1754,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     })
     await poll(p, () => document.querySelector('.ws-selected .ws-dock .ws-worker-control')?.dataset.workerState === 'waiting')
     assert.equal(await p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-turn-active').count(), 0)
+    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.dataset.workerState === 'waiting')
+    assert.notEqual(await head.locator('.ws-worker-dot').evaluate(el => getComputedStyle(el).backgroundColor), headDot, 'a waiting worker turns the head dot gold')
     await shot('waiting')
     await p.locator('.ws-return').click()
     await chooseDeskColumn(p, 0)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
     await poll(p, () => { const pill = document.querySelector('.ws-selected .ws-dock .ws-worker-pill'); return pill?.hidden === true && getComputedStyle(pill).display === 'none' })
+    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker')?.hidden === true)
     await shot('no-worker')
   }, viewport)
 }
@@ -1785,7 +1810,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       return text.join(' ')
     })
     assert.doesNotMatch(passive, /claude-opus|\bhigh\b|umber-workstation|\/fixture-store\/workspace/, 'launch metadata has no passive home outside settings')
-    assert.equal(await p.locator('.ws-navbar .kbn-card-worker').count(), 0, 'the act zone pill is the only conversation control')
+    assert.ok(await p.locator('.ws-navbar .kbn-card-worker').count() <= 1, 'the head carries at most one worker control')
     assert.ok(await selected(p).locator('.kbn-card-worker').count() <= 1, 'the act zone pill is the only conversation control')
     assert.equal(await selected(p).locator('.ws-fiber-prose > h1:visible').count(), device === 'phone' ? 0 : 1, 'desktop title is the adopted reading anchor; phone navbar owns the name')
     const navbar = p.locator('.ws-navbar')

@@ -97,6 +97,9 @@ export class Reader {
   private readonly position = element('span', 'ws-position')
   /** The running head's page count, at its right end. */
   private readonly headPosition = element('span', 'ws-position ws-head-position')
+  /** The one worker control: the card's own pill, drawn bare in the head's right end. */
+  private readonly headWorker = element('span', 'ws-head-worker')
+  private workerClock = 0
   private readonly pageTitle = element('span', 'ws-thumb-title')
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
@@ -160,9 +163,13 @@ export class Reader {
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.sidebarToggle, this.returnButton, this.title, this.verdicts)
     this.headPosition.setAttribute('aria-hidden', 'true')
+    this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
+    this.headWorker.hidden = true
+    const trail = element('div', 'ws-nav-trail')
+    trail.append(this.headWorker, this.headPosition)
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
-    this.navbar.append(this.lead, this.tabs.el, this.headPosition)
+    this.navbar.append(this.lead, this.tabs.el, trail)
     this.prev = button('ws-thumb-button', '', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '', () => this.step(1), 'Next document')
     this.prev.innerHTML = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>'
@@ -269,6 +276,7 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
+    if (!this.workerClock) this.workerClock = window.setInterval(() => this.paintWorker(), 30000)
     this.paintVerdicts()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
@@ -297,6 +305,7 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
+    window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
     this.cancelResize?.()
     this.setSidebarVisible(false, animate)
@@ -417,8 +426,18 @@ export class Reader {
     }
     this.verdicts.hidden = !key || !this.verdicts.firstChild || this.document?.kind === 'fiber'
   }
+  /** Repaint the head's worker control from the current card, keeping its focus. */
+  private paintWorker(): void {
+    const card = this.currentCard
+    const pill = card ? this.opts.workerPill?.(card) ?? null : null
+    const focused = this.headWorker.contains(document.activeElement)
+    this.headWorker.replaceChildren(...(card && pill ? [workerPlate(card, pill)] : []))
+    this.headWorker.hidden = !pill
+    if (focused) this.headWorker.querySelector<HTMLElement>('.kbn-card-worker')?.focus({ preventScroll: true })
+  }
   private paint(animate: boolean): void {
     this.paintVerdicts()
+    this.paintWorker()
     const ch = this.channel
     if (!ch) return
     const index = ch.documents.findIndex(d => d.key === this.selected)
@@ -519,7 +538,7 @@ export class Reader {
     const leadGap = parseFloat(getComputedStyle(this.lead).columnGap) || 0
     const leadParts = [this.sidebarToggle, this.returnButton, this.title, this.verdicts].filter(el => el.offsetWidth > 0)
     const lead = leadParts.reduce((sum, el) => sum + (el === this.title ? Math.min(this.measure('title-ceiling', 360), el.scrollWidth) : el.offsetWidth), 0) + Math.max(0, leadParts.length - 1) * leadGap
-    const position = this.headPosition.offsetWidth
+    const position = this.headPosition.parentElement?.offsetWidth ?? this.headPosition.offsetWidth
     const stripStyle = getComputedStyle(this.tabs.el)
     const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + (parseFloat(stripStyle.paddingLeft) || 0) + (parseFloat(stripStyle.paddingRight) || 0) + 1
     // The index is centred over the stage, which starts after the sidebar,
@@ -908,6 +927,7 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)
     this.cancelResize?.()
