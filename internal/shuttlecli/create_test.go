@@ -9,13 +9,6 @@ import (
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
-// seedPlainFiber writes a pure note (no shuttle: block) with the given status, so
-// the create verbs have a fiber to attach a block to.
-func seedPlainFiber(t *testing.T, storage *felt.Storage, id, status string) {
-	t.Helper()
-	seedFiber(t, storage, id, "", status, nil, nil)
-}
-
 // ---- install ---------------------------------------------------------------
 
 func TestShuttleInstall_Armed(t *testing.T) {

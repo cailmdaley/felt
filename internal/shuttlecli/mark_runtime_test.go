@@ -14,27 +14,6 @@ import (
 // (runCommand → rootCmd.Execute), not a mock, so a flag the daemon relies on
 // but the CLI doesn't accept fails HERE.
 
-// shuttleRuntimeMap decodes the fiber's shuttle.runtime sub-mapping into a
-// plain map for assertions, mirroring the nested-write contract
-// shuttle.SetRuntimeField establishes that runtime fields live under
-// shuttle.runtime, never as flat shuttle siblings.
-func shuttleRuntimeMap(t *testing.T, f *felt.Felt) map[string]any {
-	t.Helper()
-	node, ok := f.ExtraFields["shuttle"]
-	if !ok || node == nil {
-		t.Fatalf("fiber %s carries no shuttle: block", f.ID)
-	}
-	var shuttle map[string]any
-	if err := node.Decode(&shuttle); err != nil {
-		t.Fatalf("decoding shuttle: block: %v", err)
-	}
-	rt, ok := shuttle["runtime"].(map[string]any)
-	if !ok {
-		t.Fatalf("shuttle.runtime missing or not a mapping: %#v", shuttle["runtime"])
-	}
-	return rt
-}
-
 // TestShuttleMarkRuntime_DaemonDispatchArgv locks in the exact argv
 // Shuttle.Continuation.write_dispatch/4 shells (daemon/lib/shuttle/continuation.ex,
 // the `mark_runtime/4` private helper), post-C1:

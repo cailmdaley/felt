@@ -21,52 +21,6 @@ import (
 
 // ---- shared lifecycle test helpers -----------------------------------------
 
-func newStore(t *testing.T) (string, *felt.Storage) {
-	t.Helper()
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	return dir, storage
-}
-
-// seedFiber writes a fiber straight through storage, bypassing the cmd-layer
-// validation — so a deliberately invalid block can be planted on disk.
-func seedFiber(t *testing.T, storage *felt.Storage, id, uid, status string, block map[string]any, tempered *bool) {
-	t.Helper()
-	f := &felt.Felt{ID: id, UID: uid, Name: id, Status: status, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if block != nil {
-		if err := f.SetExtraField("shuttle", block); err != nil {
-			t.Fatalf("SetExtraField shuttle: %v", err)
-		}
-	}
-	if tempered != nil {
-		if err := f.SetExtraField("tempered", *tempered); err != nil {
-			t.Fatalf("SetExtraField tempered: %v", err)
-		}
-	}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("Write %s: %v", id, err)
-	}
-}
-
-// seedShuttleRole seeds a fiber carrying a shuttle: block plus the requested
-// felt-native status and optional tempered verdict.
-func seedShuttleRole(t *testing.T, storage *felt.Storage, id, status string, block map[string]any, tempered *bool) {
-	t.Helper()
-	seedFiber(t, storage, id, "", status, block, tempered)
-}
-
-func mustRead(t *testing.T, storage *felt.Storage, id string) *felt.Felt {
-	t.Helper()
-	f, err := storage.Read(id)
-	if err != nil {
-		t.Fatalf("Read %s: %v", id, err)
-	}
-	return f
-}
-
 // withStubbedTmux is an app whose tmux probes answer from live (the set of
 // session names reported as existing) and record each kill in the returned
 // slice instead of reaching a tmux server.
@@ -77,10 +31,6 @@ func withStubbedTmux(t *testing.T, live map[string]bool) (*app, *[]string) {
 	a.tmuxSessionExists = func(name string) bool { return live[name] }
 	a.killTmuxSession = func(name string) error { *killed = append(*killed, name); return nil }
 	return a, killed
-}
-
-func oneshot() map[string]any {
-	return map[string]any{"kind": "oneshot", "agent": "claude-opus", "project_dir": "/srv/work"}
 }
 
 // ---- close -----------------------------------------------------------------

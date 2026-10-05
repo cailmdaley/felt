@@ -25,22 +25,6 @@ func withOwnHost(t *testing.T, hostID string) {
 	t.Setenv("SHUTTLE_HOST_FILE", path)
 }
 
-// shuttleFeltWithBlock builds an in-memory fiber carrying a shuttle: block, for
-// unit tests that exercise a helper directly (not through a command).
-func shuttleFeltWithBlock(t *testing.T, block map[string]any) *felt.Felt {
-	t.Helper()
-	f, err := felt.New("test-fiber", "Test Fiber")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if block != nil {
-		if err := f.SetExtraField("shuttle", block); err != nil {
-			t.Fatalf("SetExtraField: %v", err)
-		}
-	}
-	return f
-}
-
 func TestResolveOwnHost_Precedence(t *testing.T) {
 	withOwnHost(t, "filehost")
 	t.Setenv("SHUTTLE_HOST", "envhost")

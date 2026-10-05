@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // remoteFixture is one row of daemon/test/fixtures/remotes/expected.json — the shared
@@ -403,17 +401,6 @@ func writeRemotes(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	t.Setenv("SHUTTLE_REMOTES_FILE", path)
-	return path
-}
-
-// writeRemotesIn writes body as env's fleet file.
-func writeRemotesIn(t testing.TB, env *sysenv.Env, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "remotes.json")
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	env.Set("SHUTTLE_REMOTES_FILE", path)
 	return path
 }
 

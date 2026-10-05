@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
@@ -161,35 +162,69 @@ func closedLoopbackAddr() string {
 	return addr
 }
 
+// TestTestMainFencesLiveMachineState asserts both fences: the process
+// environment TestMain scrubs, and the per-test env testEnv derives from it,
+// whose machine-level paths sit inside that test's own temp dir.
 func TestTestMainFencesLiveMachineState(t *testing.T) {
-	endpoint, err := testApp(t).daemonEndpoint("/api/v1/lifecycle")
+	t.Run("process", func(t *testing.T) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFenced(t, sysenv.OS(), testFenceDir)
+		if !strings.HasPrefix(home, testFenceDir) {
+			t.Fatalf("process home %q is outside the test fence %q", home, testFenceDir)
+		}
+	})
+	t.Run("per-test env", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		home, err := env.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := filepath.Dir(home)
+		if strings.HasPrefix(root, testFenceDir) || !strings.Contains(root, "TestTestMainFences") {
+			t.Fatalf("per-test home %q is not under this test's temp dir", home)
+		}
+		assertFenced(t, env, root)
+	})
+}
+
+// assertFenced checks that env reaches no live daemon and that every config
+// path it resolves lies inside root.
+func assertFenced(t *testing.T, env *sysenv.Env, root string) {
+	t.Helper()
+	a := newApp(env)
+	endpoint, err := a.daemonEndpoint("/api/v1/lifecycle")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.HasSuffix(strings.SplitN(strings.TrimPrefix(endpoint, "http://"), "/", 2)[0], ":4000") {
 		t.Fatalf("daemon endpoint %q escapes the test fence", endpoint)
 	}
-	if _, err := testApp(t).postDaemon(endpoint, []byte(`{}`), daemonReadTimeout); err == nil || requestCouldHaveReachedDaemon(err) {
+	if _, err := a.postDaemon(endpoint, []byte(`{}`), daemonReadTimeout); err == nil || requestCouldHaveReachedDaemon(err) {
 		t.Fatalf("fenced daemon endpoint accepted a connection: %v", err)
 	}
 	for name, resolve := range map[string]func() (string, error){
-		"remotes":       testApp(t).shuttleRemotesPath,
-		"stores":        testApp(t).feltStoresRegistryPath,
-		"agents":        func() (string, error) { return testApp(t).shuttleConfigPath("SHUTTLE_AGENTS_FILE", "agents.json") },
-		"projects":      func() (string, error) { return testApp(t).shuttleConfigPath("SHUTTLE_PROJECTS_FILE", "projects.json") },
-		"home":          os.UserHomeDir,
-		"host config":   testApp(t).hostClassFilePath,
-		"host identity": func() (string, error) { return testApp(t).hostConfigFilePath(), nil },
+		"remotes":       a.shuttleRemotesPath,
+		"stores":        a.feltStoresRegistryPath,
+		"agents":        func() (string, error) { return a.shuttleConfigPath("SHUTTLE_AGENTS_FILE", "agents.json") },
+		"projects":      func() (string, error) { return a.shuttleConfigPath("SHUTTLE_PROJECTS_FILE", "projects.json") },
+		"home":          env.UserHomeDir,
+		"host config":   a.hostClassFilePath,
+		"host identity": func() (string, error) { return a.hostConfigFilePath(), nil },
+		"data dir":      func() (string, error) { return shuttle.DataDir(env) },
 	} {
 		path, err := resolve()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(path, testFenceDir) {
-			t.Fatalf("%s path %q is outside the test fence %q", name, path, testFenceDir)
+		if !strings.HasPrefix(path, root) {
+			t.Fatalf("%s path %q is outside the test fence %q", name, path, root)
 		}
 	}
-	remotes, err := testApp(t).configuredRemotes()
+	remotes, err := a.configuredRemotes()
 	if err != nil || len(remotes) != 0 {
 		t.Fatalf("configured remotes = %v, %v; want none", remotes, err)
 	}
