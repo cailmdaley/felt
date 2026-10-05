@@ -19,6 +19,7 @@ export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
+const SEEN_STORAGE = 'shuttle.workspace.overview.seen'
 const DAY_GROUPS = ['Today', 'Yesterday', 'This week', 'Earlier'] as const
 const HOST_MARKS = ['○', '■', '▲', '◇', '◐', '□', '△', '◆']
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0
@@ -162,12 +163,17 @@ export class Overview {
   private visible = true
   private disposed = false
   private scroll = 0
+  /** When this sheet was last left; receipts before it are not news, even in fibers never opened. */
+  private readonly seen: number
   private raf?: number
 
   constructor(opts: OverviewOptions) {
     this.opts = opts
     const lens = stored(LENS_STORAGE)
     if (lens === 'recent' || lens === 'projects' || lens === 'hosts') this.lens = lens
+    const seen = stored(SEEN_STORAGE)
+    this.seen = typeof seen === 'number' && Number.isFinite(seen) ? seen : Date.now()
+    persist(SEEN_STORAGE, this.seen)
     const visits = stored(VISIT_STORAGE)
     if (visits && typeof visits === 'object' && !Array.isArray(visits)) {
       for (const [uid, at] of Object.entries(visits)) if (typeof at === 'number' && Number.isFinite(at)) this.visits.set(uid, at)
@@ -280,7 +286,7 @@ export class Overview {
 
   setVisible(visible: boolean): void {
     if (this.disposed || visible === this.visible) return
-    if (!visible) this.scroll = this.el.scrollTop
+    if (!visible) { this.scroll = this.el.scrollTop; persist(SEEN_STORAGE, Date.now()) }
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
@@ -404,7 +410,7 @@ export class Overview {
     text(folio.when, age(folio.latest))
     folio.el.title = folio.card.path || folio.uid
     folio.el.dataset.depth = String(Math.max(1, Math.min(3, folio.receipts.length)))
-    folio.fresh.hidden = folio.latest <= (this.visits.get(folio.uid) ?? 0)
+    folio.fresh.hidden = folio.latest <= Math.max(this.seen, this.visits.get(folio.uid) ?? 0)
     const lead = folio.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html') ?? folio.receipts[0]
     const key = `folio:${folio.uid}:${lead?.key ?? 'prose'}`
     if (folio.thumb?.key !== key) {

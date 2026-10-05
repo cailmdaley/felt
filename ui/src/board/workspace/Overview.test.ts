@@ -91,6 +91,19 @@ describe('Overview receipt membership and identity', () => {
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
   })
 
+  it('marks only receipts newer than the last time the sheet was left', async () => {
+    feed.files = [receipt('alpha', '/old.html', now() - 60000)]
+    await refresh()
+    expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
+    feed.files.push(receipt('alpha', '/new.html', now() + 1000)); await refresh()
+    expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(false)
+    vi.setSystemTime(now() + 5000); overview.hide()
+    overview.dispose()
+    overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen })
+    document.body.append(overview.el); await refresh()
+    expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
+  })
+
   it('takes twelve newest documents, not twelve sends, and deterministically breaks ties', async () => {
     feed.files = Array.from({ length: 15 }, (_, i) => receipt('alpha', `/file/${String(i).padStart(2, '0')}.html`, now() - i * 1000))
     feed.files.push(receipt('alpha', '/file/00.html', now() - 1000))

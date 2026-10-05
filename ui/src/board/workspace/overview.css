@@ -166,3 +166,6 @@
   .ws-overview-folio-title { font-size: 18px; }
   .ws-overview-footer { margin-top: 6px; gap: 8px; }
 }
+/* A field shows focus by its rule, not a ring: the caret already says where you are. */
+.ws-overview .ws-overview-find:focus-visible { outline: none; border-color: var(--ws-ink-faint); }
+.ws-overview-find::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
