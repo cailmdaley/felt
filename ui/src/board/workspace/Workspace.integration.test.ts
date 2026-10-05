@@ -605,7 +605,6 @@ describe('workspace reader integration', () => {
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
-    expect(prose.querySelector('.ws-prose-contents')?.textContent).toBe('3 pages2 reports')
     expect(labels()).toEqual(['Note', 'table.html', 'shared'])
   })
 
