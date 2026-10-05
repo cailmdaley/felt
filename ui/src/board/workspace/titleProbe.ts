@@ -1,6 +1,6 @@
 import { readThumbnailMetadata } from '../FileViewerPanel.js'
 import { fileBytesUrl } from '../utils.js'
-import { cacheDocumentTitle, declaredTitle } from './DocumentTitles.js'
+import { cacheDocumentTitle, titleIsCurrent } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
 
 /**
@@ -26,19 +26,21 @@ function pump(): void {
 
 /**
  * The index names pages by their declared titles, so it reads each titled
- * document's first 64 KiB once per session, independent of any thumbnail,
+ * document's first 64 KiB once per session, independent of any thumbnail
+ * (revalidating any title recalled from an earlier visit),
  * ahead of the stage's images and frames competing for the same connections.
  */
 export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDocument[]): void {
   for (const doc of documents) {
     const rank = TITLED[doc.kind]
-    if (rank === undefined || probed.has(doc.key) || declaredTitle(doc.key)) continue
+    // A title recalled from an earlier visit still names the tab; the peek revalidates it.
+    if (rank === undefined || probed.has(doc.key) || titleIsCurrent(doc.key)) continue
     probed.add(doc.key)
     queue.push({ rank, run: async () => {
       let read = false
       await readThumbnailMetadata(fileBytesUrl(shuttleBase, doc.path, doc.owner), new AbortController().signal, (source, etag) => {
         read = true
-        if (declaredTitle(doc.key)) return
+        if (titleIsCurrent(doc.key)) return
         const text = doc.kind === 'html' || doc.kind === 'text'
         cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
       }, 'high')
