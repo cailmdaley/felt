@@ -108,15 +108,17 @@
     linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
   background-size: 24px 24px;
 }
-[data-part="prose"] :is(h1, h2, h3, h4) {
+:scope [data-part="prose"] :is(h1, h2, h3, h4) {
   color: var(--ws-ink);
   font-family: var(--ws-mono);
   font-weight: 500;
+  font-style: normal;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 :scope[data-part="folio"] {
+  padding: 10px;
   color: var(--ws-ink);
   background-color: var(--ws-paper);
   background-image:

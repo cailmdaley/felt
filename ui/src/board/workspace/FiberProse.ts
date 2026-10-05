@@ -76,8 +76,10 @@ export function buildFiberProse(
   scroller.className = 'ws-prose-scroll'
   const article = document.createElement('article')
   article.className = 'ws-prose ws-fiber-prose kbn-detail-prose'
+  article.dataset.part = 'prose'
   const header = document.createElement('header')
   header.className = 'ws-prose-header'
+  header.dataset.part = 'fiber-header'
   if (card.status) {
     const status = document.createElement('span')
     status.className = 'ws-prose-status'
@@ -86,6 +88,7 @@ export function buildFiberProse(
   }
   const title = document.createElement('h1')
   title.textContent = channel.name
+  title.dataset.part = 'fiber-title'
   const body = document.createElement('div')
   body.className = 'ws-prose-body'
   body.innerHTML = renderFiberMarkdown(channel.body, channel.outcome ?? card.outcome ?? '', {

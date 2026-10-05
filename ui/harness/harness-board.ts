@@ -1237,7 +1237,7 @@ const harnessEvents: Array<Record<string, unknown>> = []
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const method = (init?.method ?? 'GET').toUpperCase()
-  const request = { url, method, body: typeof init?.body === 'string' ? init.body : null }
+  const request = { url, method, body: typeof init?.body === 'string' ? init.body : null, headers: Object.fromEntries(new Headers(init?.headers).entries()) }
   mockRequests.push(request)
   mockHandlers.push({ method, path: new URL(url, 'http://harness.invalid').pathname })
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -1473,7 +1473,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // A text card's body. Images, pages and PDFs load by URL, not through
   // fetch, so offline they stay faces.
   if (url.includes('/api/v1/file')) {
-    if (workspaceFixture) return workspaceFixture.fileResponse(url, method)
+    if (workspaceFixture) return workspaceFixture.fileResponse(url, method, init?.headers)
     return new Response('# Daily digest\n\nThree cosmic-shear papers and one CMB-lensing cross-correlation.\n', {
       headers: { 'Content-Type': 'text/plain' },
     })

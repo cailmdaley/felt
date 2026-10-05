@@ -9,9 +9,11 @@ import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
+import type { ChannelThemes } from './ChannelThemes.js'
 
 export interface ReaderOptions {
   shuttleBase: string
+  themes?: ChannelThemes
   buildProse(doc: WorkspaceDocument): HTMLElement
   onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
   onSelect(key: DocKey): void
@@ -93,6 +95,8 @@ export class Reader {
   constructor(opts: ReaderOptions) {
     this.opts = opts
     this.el.setAttribute('aria-label', 'Document reader')
+    this.veil.dataset.part = 'veil'
+    this.conversation.dataset.part = 'act'
     this.el.inert = true
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
@@ -129,6 +133,14 @@ export class Reader {
     }
     this.sidebarPicker = new ConstitutionPicker({ ...pickerOptions, revealCurrent: true })
     this.picker = new ConstitutionPicker(pickerOptions)
+    if (opts.themes) for (const picker of [this.picker, this.sidebarPicker]) {
+      const plain = button('ws-menu-item ws-plain-toggle', 'Plain', () => {
+        if (this.currentCard) opts.themes!.togglePlain(this.currentCard)
+        for (const el of this.el.querySelectorAll('[data-part="plain-toggle"]')) el.setAttribute('aria-pressed', String(!!this.currentCard && opts.themes!.isPlain(this.currentCard)))
+      }, 'Plain')
+      plain.dataset.part = 'plain-toggle'
+      picker.el.append(plain)
+    }
     this.sidebarPicker.el.style.display = 'contents'
     this.sidebar.append(this.sidebarPicker.el)
     const main = element('div', 'ws-stage-row')
@@ -169,6 +181,7 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
+    if (this.currentCard) this.opts.themes?.bind(this.el, this.currentCard)
     const arriving = !this.active
     this.active = true
     if (arriving) this.arrive(origin === 'Board')
@@ -205,6 +218,7 @@ export class Reader {
   hide(animate = false): void {
     this.cancelResize?.()
     this.active = false
+    this.opts.themes?.unbind(this.el)
     this.closeMenu()
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
@@ -478,6 +492,7 @@ export class Reader {
     if (this.sidebarShown) { this.sidebarPicker.focus(); return }
     if (this.picker.isOpen) { this.picker.close(); return }
     this.closeMenu()
+    this.picker.el.querySelector('[data-part="plain-toggle"]')?.setAttribute('aria-pressed', String(!!this.currentCard && !!this.opts.themes?.isPlain(this.currentCard)))
     this.picker.show(this.el, this.title)
   }
   /** Re-list the channel rows after the overview's order changes. */
@@ -501,6 +516,7 @@ export class Reader {
     this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
     this.sidebar.inert = !shown
     this.sidebarPicker.refresh(shown)
+    this.sidebarPicker.el.querySelector('[data-part="plain-toggle"]')?.setAttribute('aria-pressed', String(!!this.currentCard && !!this.opts.themes?.isPlain(this.currentCard)))
   }
   /** Rows refresh in place; the list keeps its scroll and the find its text. */
   private fillSidebar(): void {
@@ -586,6 +602,7 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    this.opts.themes?.unbind(this.el)
     this.cancelResize?.()
     this.closeMenu()
     this.observer?.disconnect()

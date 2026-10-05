@@ -106,6 +106,7 @@
 }
 
 :scope[data-part="folio"] {
+  padding: 10px; border-radius: 3px;
   color: var(--ws-ink);
   background-color: var(--ws-paper);
   background-image:

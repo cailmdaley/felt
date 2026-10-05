@@ -206,10 +206,12 @@ export class DocumentHost {
     el.dataset.key = doc.key
     const sheet = document.createElement('div')
     sheet.className = 'ws-sheet'
+    sheet.dataset.part = 'page-frame'
     const content = document.createElement('div')
     content.className = 'ws-content'
     const label = document.createElement('div')
     label.className = 'ws-labelbar'
+    label.dataset.part = 'label-bar'
     sheet.append(content, label)
     el.append(sheet)
     const frame: DocumentFrame = { el, sheet, content, label, doc, viewer: null }

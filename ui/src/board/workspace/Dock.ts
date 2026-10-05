@@ -448,6 +448,7 @@ export class Dock {
     if (!this.root) {
       this.root = document.createElement('div')
       this.root.className = 'ws-dock'
+      this.root.dataset.part = 'act'
       this.root.tabIndex = -1
       this.root.addEventListener('click', event => event.stopPropagation())
     }

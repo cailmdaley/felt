@@ -559,6 +559,7 @@ function toCard(
       (entry.reportPath ? entry.reportPath.replace(/\/[^/]*$/, '') : undefined),
     status: f.status,
     outcome: f.outcome,
+    theme: f.theme,
     due: f.due,
     tags: f.tags,
     createdAt: f.createdAt,

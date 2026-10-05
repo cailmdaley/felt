@@ -1,0 +1,21 @@
+/* Inherited CSS stops here too; the ordinary control rules rebuild this zone. */
+:where([data-ws-theme] [data-part='act']) { all: initial; display: revert; }
+/* The shared worker control keeps its pigments on the channel's paper. */
+[data-ws-theme] .kbn-card-worker {
+  color: var(--ws-agent); border-color: color-mix(in srgb, var(--ws-agent) 55%, transparent);
+  background-color: color-mix(in srgb, var(--ws-agent) 12%, transparent);
+}
+[data-ws-theme] .kbn-card-worker-attention { color: var(--ws-you); background-color: color-mix(in srgb, var(--ws-you) 15%, transparent); }
+[data-ws-theme] .kbn-card-worker-waiting { color: var(--ws-owed); background-color: color-mix(in srgb, var(--ws-owed) 15%, transparent); }
+/* Only the room's tint crosses; its pages and chrome change immediately. */
+.ws-reader [data-part='veil'] {
+  transition: background-color var(--ws-crossing) var(--ws-ease), opacity var(--ws-veil-time) var(--ws-ease);
+}
+.ws-plain-toggle { min-height: var(--ws-phone-target); }
+.ws-content [data-part='prose'] hr, .ws-prose hr { border: 0; border-top: var(--ws-line-width) solid var(--ws-hairline); }
+@media (prefers-reduced-motion: reduce) {
+  [data-ws-theme], [data-ws-theme] *, [data-ws-theme] *::before, [data-ws-theme] *::after { animation: none !important; transition: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .ws-reader [data-part='veil'] { background-color: var(--ws-ground) !important; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

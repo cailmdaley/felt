@@ -8,11 +8,13 @@ import { chooseEvictions, chooseLoads, LOAD_POLICY } from '../views/shelfLoad.js
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { documentKind } from './documents.js'
 import { docKey, parseDocKey, type DocKey } from './documents.js'
+import type { ChannelThemes } from './ChannelThemes.js'
 import './tokens.css'
 import './overview.css'
 
 export interface OverviewOptions {
   shuttleBase: string
+  themes?: ChannelThemes
   cards(): KanbanCard[]
   onOpen(card: KanbanCard, doc?: DocKey): void
   /** Full lens order, independent of Find; suitable for reader channel stepping. */
@@ -376,6 +378,10 @@ export class Overview {
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
+    for (const folio of this.folios.values()) {
+      if (visible) this.opts.themes?.bind(folio.el, folio.card)
+      else this.opts.themes?.unbind(folio.el)
+    }
     if (visible) { this.el.scrollTop = this.scroll; this.schedule() }
     else if (this.raf !== undefined) { cancelAnimationFrame(this.raf); this.raf = undefined }
   }
@@ -416,6 +422,7 @@ export class Overview {
     this.observer?.disconnect()
     this.resizeObserver?.disconnect()
     if (this.raf !== undefined) cancelAnimationFrame(this.raf)
+    for (const folio of this.folios.values()) this.opts.themes?.unbind(folio.el)
     for (const thumb of this.thumbnails.values()) this.unmount(thumb)
     this.thumbnails.clear()
     window.removeEventListener('resize', this.schedule)
@@ -477,6 +484,7 @@ export class Overview {
     }
     for (const [uid, folio] of this.folios) if (!byUid.has(uid)) {
       if (folio.thumb) this.removeThumbnail(folio.thumb)
+      this.opts.themes?.unbind(folio.el)
       folio.el.remove(); this.folios.delete(uid)
     }
     this.marks = overviewHostMarks([...this.fleetHosts, ...known.values()].flatMap(h => typeof h === 'string' ? [h] : [h.originId, ...(h.mirroredOrigins ?? [])]).concat([...this.folios.values()].flatMap(f => f.receipts.map(r => r.owner))))
@@ -532,7 +540,7 @@ export class Overview {
   }
 
   private createFolio(uid: string, card: KanbanCard): Folio {
-    const el = button('ws-overview-folio'); el.dataset.uid = uid
+    const el = button('ws-overview-folio'); el.dataset.uid = uid; el.dataset.part = 'folio'
     const stack = node('div', 'ws-overview-stack')
     const tx = node('div', 'ws-overview-folio-text')
     const title = node('div', 'ws-overview-folio-title')
@@ -551,6 +559,7 @@ export class Overview {
     return folio
   }
   private updateFolio(folio: Folio): void {
+    if (this.visible && this.el.isConnected) this.opts.themes?.bind(folio.el, folio.card)
     text(folio.name, folio.card.name)
     text(folio.outcome, folio.card.outcome ?? '')
     text(folio.count, `${folio.receipts.length} ${folio.receipts.length === 1 ? 'document' : 'documents'}`)

@@ -548,6 +548,7 @@ function buildTextViewer(
 
   const pane = document.createElement('div')
   pane.className = 'kbn-fileview-text'
+  pane.dataset.part = 'prose'
   wrap.append(pane, veil)
 
   let hasContent = false

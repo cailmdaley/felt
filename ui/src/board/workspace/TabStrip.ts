@@ -156,6 +156,7 @@ export class TabStrip {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'ws-tab'
+    button.dataset.part = 'tab'
     button.setAttribute('role', 'tab')
     button.tabIndex = -1
     button.dataset.tabKey = key

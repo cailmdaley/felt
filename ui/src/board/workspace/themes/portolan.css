@@ -38,6 +38,16 @@
   backdrop-filter: var(--ws-veil-filter);
 }
 
+[data-part="veil"]::after {
+  content: "";
+  position: absolute;
+  right: 6%; bottom: 4%;
+  width: min(42vw, 420px); aspect-ratio: 1;
+  border: 1px solid var(--ws-rhumb); border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, var(--ws-rhumb) 0deg 0.3deg, transparent 0.3deg 22.5deg);
+  opacity: .7; pointer-events: none;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   [data-part="veil"] {
     background: var(--ws-ground);
@@ -72,11 +82,12 @@
 [data-part="fiber-title"] { color: var(--ws-ink); }
 [data-part="fiber-title"]::after {
   content: "✥";
-  display: inline-block;
-  margin-inline-start: 0.45em;
+  display: block;
+  width: 140px; margin-top: .65em; text-align: center;
   color: var(--ws-ink-muted);
-  font: 500 0.64em/1 var(--ws-mono);
-  vertical-align: 0.16em;
+  font: 500 0.48em/1 var(--ws-mono);
+  background-image: linear-gradient(var(--ws-hairline), var(--ws-hairline)), linear-gradient(var(--ws-hairline), var(--ws-hairline));
+  background-size: 42% 1px; background-position: left center, right center; background-repeat: no-repeat;
   opacity: 0.72;
 }
 
@@ -86,6 +97,7 @@
 }
 
 :scope[data-part="folio"] {
+  padding: 10px; border-radius: 5px;
   color: var(--ws-ink);
   background-color: var(--ws-paper);
   box-shadow: inset 0 0 0 1px var(--ws-hairline-soft);

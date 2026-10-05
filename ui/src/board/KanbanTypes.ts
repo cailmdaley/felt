@@ -43,6 +43,8 @@ export interface KanbanCard {
   fiberDir?: string
   status: string
   outcome?: string
+  /** Bundled theme for this channel; Desk surfaces do not consume it. */
+  theme?: string
   due?: string
   tags?: string[]
   createdAt: string
