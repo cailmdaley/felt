@@ -102,7 +102,7 @@
   flex: none; min-width: var(--ws-tab-floor); max-width: var(--ws-tab-ceiling);
   height: var(--ws-control-height); padding: 0 var(--ws-inset); border-radius: var(--ws-control-radius);
   white-space: nowrap; overflow: hidden; color: var(--ws-ink-muted) !important;
-  font-size: var(--ws-label-size) !important; text-align: center; border: var(--ws-line-width) solid transparent !important;
+  font-size: var(--ws-label-size); font-family: var(--ws-serif); letter-spacing: 0; text-align: center; border: var(--ws-line-width) solid transparent !important;
 }
 .ws-tab-fresh::after { content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 5px; border-radius: 50%; background: var(--kbn-owed); }
 .ws-tab:hover { color: var(--ws-ink) !important; background: var(--ws-hover); }
