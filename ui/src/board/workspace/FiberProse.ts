@@ -115,7 +115,7 @@ export function buildFiberProse(
   const files = channel.documents.map((doc, index) => ({ doc, index })).filter(({ doc }) => doc.kind !== 'fiber')
   if (files.length) {
     const heading = document.createElement('h2')
-    heading.textContent = 'In this channel'
+    heading.textContent = 'In this constitution'
     const list = document.createElement('ul')
     list.className = 'ws-prose-documents'
     for (const { doc, index } of files) {

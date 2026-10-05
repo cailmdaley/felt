@@ -1,0 +1,254 @@
+// @vitest-environment node
+// @ts-expect-error Node types are excluded from the browser UI's tsconfig.
+import { createRequire } from 'node:module'
+import type * as Esbuild from 'esbuild'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as HostModule from './DocumentHost.js'
+import type * as ViewerModule from '../FileViewerPanel.js'
+import type * as KeymapModule from '../keymap.js'
+import type { WorkspaceDocument } from './documents.js'
+
+type Production = typeof HostModule & typeof ViewerModule & typeof KeymapModule
+let production: Production
+let bundle: string
+let host: HostModule.DocumentHost
+let track: HTMLElement
+let reportHtml: string
+let errors: unknown[]
+let browser: { window: Window & typeof globalThis; close: () => void }
+const messages = vi.fn()
+const app = vi.fn()
+const documents: WorkspaceDocument[] = [0, 1].map(n => ({
+  key: `host-a:/report-${n}.html`, owner: 'host-a', path: `/report-${n}.html`,
+  name: `report-${n}.html`, kind: 'html', provenance: [],
+}))
+
+beforeAll(async () => {
+  // Compile only this in-memory entry, with the production minifier defaults.
+  // No keepNames or externalized keymap: toString must survive real aliasing.
+  // Compile in Node's realm, before creating the browser realm.
+  const { build } = createRequire(import.meta.url)('esbuild') as typeof Esbuild
+  const result = await build({
+    stdin: {
+      contents: `export { DocumentHost, withWorkspaceKeyBridge } from './src/board/workspace/DocumentHost.js';
+        export { buildFileViewer, disposeFileViewer } from './src/board/FileViewerPanel.js';
+        export { keyIntent } from './src/board/keymap.js';`,
+      resolveDir: new URL('../../../', import.meta.url).pathname,
+      sourcefile: 'workspace-bridge-test-entry.ts', loader: 'ts',
+    },
+    bundle: true, minify: true, write: false, platform: 'browser',
+    format: 'iife', globalName: '__workspaceProduction', target: 'es2022',
+    loader: { '.css': 'empty' },
+  })
+  bundle = result.outputFiles[0].text
+})
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  const { JSDOM } = createRequire(import.meta.url)('jsdom')
+  const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+    url: 'http://workspace.test/', runScripts: 'dangerously', pretendToBeVisual: true,
+  })
+  browser = { window: dom.window, close: () => dom.window.close() }
+  for (const name of ['window', 'document', 'sessionStorage', 'KeyboardEvent', 'MessageEvent', 'Event'] as const) {
+    vi.stubGlobal(name, name === 'window' ? browser.window : browser.window[name])
+  }
+  errors = []
+  reportHtml = '<!doctype html><html><head></head><body><p id="report">Report</p></body></html>'
+  const fetchFile = vi.fn(async () => new Response(reportHtml, { status: 200 }))
+  vi.stubGlobal('fetch', fetchFile)
+  browser.window.fetch = fetchFile
+  const script = document.createElement('script')
+  script.textContent = bundle
+  document.head.append(script)
+  script.remove()
+  production = (window as unknown as { __workspaceProduction: Production }).__workspaceProduction
+  track = document.createElement('div')
+  document.body.append(track)
+  host = new production.DocumentHost(track, {
+    shuttleBase: '', buildProse: () => document.createElement('div'), onSelect: vi.fn(),
+  })
+  document.addEventListener('keydown', onAppKey)
+})
+
+afterEach(() => {
+  host.dispose()
+  document.removeEventListener('keydown', onAppKey)
+  browser.close()
+  vi.unstubAllGlobals()
+  expect(errors).toEqual([])
+})
+
+function onAppKey(event: KeyboardEvent): void {
+  const intent = production.keyIntent(event, 'reader')
+  if (intent) app(intent, {
+    key: event.key, repeat: event.repeat, metaKey: event.metaKey, ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey, altKey: event.altKey, target: event.target,
+  })
+}
+
+async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
+  host.setChannel(documents, doc.key)
+  let iframe: HTMLIFrameElement
+  await vi.waitFor(() => {
+    iframe = host.get(doc.key)!.viewer!.querySelector('iframe')!
+    expect(iframe?.srcdoc).not.toBe('')
+  })
+  const frame = iframe!
+  const win = frame.contentWindow!
+  win.addEventListener('error', event => { errors.push(event.error ?? event.message); event.preventDefault() })
+  win.scrollTo = vi.fn()
+  // JSDOM doesn't navigate srcdoc and doesn't populate MessageEvent.source.
+  // Execute the renderer's actual srcdoc in its iframe; adapt only transport,
+  // preserving the real frame Window identity for DocumentHost's source gate.
+  Object.defineProperty(win, 'parent', { configurable: true, value: {
+    postMessage(data: unknown, origin: string) {
+      messages(data, origin)
+      window.dispatchEvent(new MessageEvent('message', { data, source: win }))
+    },
+  } })
+  frame.contentDocument!.open()
+  frame.contentDocument!.write(frame.srcdoc)
+  frame.contentDocument!.close()
+  win.dispatchEvent(new Event('load'))
+  await new Promise(resolve => win.setTimeout(resolve, 0))
+  return frame
+}
+
+function press(frame: HTMLIFrameElement, key: string, init: KeyboardEventInit = {}, selector = 'body'): KeyboardEvent {
+  const win = frame.contentWindow! as Window & typeof globalThis
+  const event = new win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
+  frame.contentDocument!.querySelector(selector)!.dispatchEvent(event)
+  return event
+}
+
+describe('minified production document keyboard bridge', () => {
+  it('executes serialized functions and bubbles unhandled reader chords through the selected host to the app', async () => {
+    const frame = await report()
+    const keys: Array<[string, KeyboardEventInit, string]> = [
+      ['h', {}, 'prev'], ['l', {}, 'next'],
+      ['j', {}, 'nextChannel'], ['k', {}, 'prevChannel'],
+      ['ArrowDown', { repeat: true }, 'scrollDown'], ['?', { shiftKey: true }, 'help'],
+      ['\\', { metaKey: true }, 'sidebar'], ['\\', { ctrlKey: true }, 'sidebar'],
+    ]
+    for (const [key, init, intent] of keys) {
+      expect(press(frame, key, init).defaultPrevented).toBe(true)
+      expect(app).toHaveBeenLastCalledWith(intent, expect.objectContaining({ key, target: track, ...init }))
+      expect(messages).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'shuttle-workspace-key', key, ...init }), '*')
+    }
+    expect(app).toHaveBeenCalledTimes(keys.length)
+    expect(messages).toHaveBeenCalledTimes(keys.length)
+    press(frame, '?', { repeat: true })
+    press(frame, 'Escape', { repeat: true })
+    press(frame, 'Delete')
+    press(frame, 'J', { shiftKey: true })
+    press(frame, 'K', { shiftKey: true })
+    press(frame, 'l', { ctrlKey: true })
+    expect(app).toHaveBeenCalledTimes(keys.length)
+    expect(messages).toHaveBeenCalledTimes(keys.length)
+  })
+
+  it('gives report document and load-time window handlers first refusal', async () => {
+    reportHtml = `<html><head><script>
+      window.documentDialog = true; window.windowDialog = true;
+      document.addEventListener('keydown', function(e) {
+        if (window.documentDialog && e.key === 'Escape') e.preventDefault();
+        if (e.key === 'h') e.stopPropagation();
+      });
+      window.addEventListener('load', function() {
+        window.addEventListener('keydown', function(e) {
+          if (window.windowDialog && e.key === 'Escape') e.preventDefault();
+        });
+      }, {once: true});
+    </script></head><body>Dialog report</body></html>`
+    const frame = await report()
+    const win = frame.contentWindow! as Window & { documentDialog: boolean; windowDialog: boolean }
+    press(frame, 'Escape')
+    expect(messages).not.toHaveBeenCalled()
+    win.documentDialog = false
+    press(frame, 'Escape')
+    expect(messages).not.toHaveBeenCalled()
+    win.windowDialog = false
+    press(frame, 'h')
+    expect(messages).not.toHaveBeenCalled()
+    press(frame, 'Escape')
+    expect(app).toHaveBeenCalledExactlyOnceWith('back', expect.objectContaining({ key: 'Escape' }))
+  })
+
+  it('leaves editable fields and their descendants alone, including command and alt chords', async () => {
+    reportHtml = `<html><head></head><body>
+      <input id="input"><textarea id="textarea"></textarea><select id="select"><option>One</option></select>
+      <div role="textbox" id="textbox"></div><div contenteditable="true"><span id="editable">Text</span></div>
+      <div contenteditable=""><span id="empty-editable">Text</span></div>
+      <div contenteditable="false" id="readonly">Report</div>
+    </body></html>`
+    const frame = await report()
+    for (const id of ['input', 'textarea', 'select', 'textbox', 'editable', 'empty-editable']) {
+      for (const [key, init] of [['j', {}], ['\\', { metaKey: true }], ['ArrowRight', { altKey: true }]] as const) {
+        expect(press(frame, key, init, '#' + id).defaultPrevented).toBe(false)
+      }
+    }
+    expect(messages).not.toHaveBeenCalled()
+    press(frame, 'ArrowDown', {}, '#readonly')
+    expect(app).toHaveBeenCalledExactlyOnceWith('scrollDown', expect.anything())
+  })
+
+  it('preserves native control activation and composite navigation while forwarding unrelated reader keys', async () => {
+    reportHtml = `<html><head></head><body>
+      <button><span id="button">Open</span></button><a href="#" id="link">Link</a>
+      <details><summary id="summary">Details</summary></details><div role="checkbox" id="checkbox"></div>
+      <div role="slider"><span id="slider">Value</span></div><div role="tablist" id="tabs"></div>
+      <audio id="audio" controls></audio><video id="video" controls></video>
+    </body></html>`
+    const frame = await report()
+    for (const id of ['button', 'link', 'summary', 'checkbox']) {
+      for (const key of ['Enter', ' ']) expect(press(frame, key, {}, '#' + id).defaultPrevented).toBe(false)
+    }
+    for (const id of ['slider', 'tabs']) {
+      for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']) {
+        expect(press(frame, key, {}, '#' + id).defaultPrevented).toBe(false)
+      }
+    }
+    for (const id of ['audio', 'video']) expect(press(frame, 'j', {}, '#' + id).defaultPrevented).toBe(false)
+    expect(messages).not.toHaveBeenCalled()
+    press(frame, 'h', {}, '#button')
+    press(frame, 'ArrowRight', { altKey: true }, '#slider')
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['prev', 'next'])
+  })
+
+  it('ignores executed bridges from receded or parked frames and messages from foreign sources', async () => {
+    const first = await report(documents[0])
+    const second = await report(documents[1])
+    press(first, 'l')
+    expect(messages).toHaveBeenCalledOnce()
+    expect(app).not.toHaveBeenCalled()
+    const data = { type: 'shuttle-workspace-key', key: 'l' }
+    for (const source of [window, null]) window.dispatchEvent(new MessageEvent('message', { source, data }))
+    expect(app).not.toHaveBeenCalled()
+    press(second, 'l')
+    expect(app).toHaveBeenCalledOnce()
+    host.setChannel([documents[1]], documents[1].key)
+    press(first, 'j')
+    expect(app).toHaveBeenCalledOnce()
+    host.parkAll()
+    press(second, 'j')
+    expect(app).toHaveBeenCalledOnce()
+  })
+
+  it('never applies the HTML transform to native PDF, image, or audio viewers', async () => {
+    const transformHtml = vi.fn(production.withWorkspaceKeyBridge)
+    for (const [path, kind, tag] of [
+      ['/report.pdf', 'pdf', 'iframe'], ['/figure.png', 'image', 'img'], ['/audio.mp3', undefined, 'audio'],
+    ] as const) {
+      const viewer = production.buildFileViewer('', path, 'host-a', undefined, undefined, { kind, transformHtml })
+      document.body.append(viewer)
+      expect(viewer.querySelector(tag)).not.toBeNull()
+      expect(viewer.querySelector('iframe')?.srcdoc ?? '').toBe('')
+      expect(viewer.querySelector('script')).toBeNull()
+      production.disposeFileViewer(viewer)
+      viewer.remove()
+    }
+    await Promise.resolve()
+    expect(transformHtml).not.toHaveBeenCalled()
+  })
+})
