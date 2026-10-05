@@ -12,7 +12,7 @@
   padding: 24px;
   background: color-mix(in srgb, var(--kbn-ink) 20%, transparent);
   color: var(--kbn-ink);
-  font-family: var(--ws-sans);
+  font-family: var(--ws-serif);
 }
 .kbn-keymap-dialog {
   box-sizing: border-box;
@@ -26,15 +26,17 @@
   box-shadow: 0 12px 48px color-mix(in srgb, var(--kbn-ink) 15%, transparent);
 }
 .kbn-keymap-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.kbn-keymap-dialog h2 { margin: 0; font: 28px var(--ws-serif); }
-.kbn-keymap-dialog p { font-size: 13px; line-height: 1.5; color: var(--kbn-ink-muted); }
-.kbn-keymap-dialog button { color: var(--kbn-ink); background: var(--ws-fill); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); min-height: 44px; padding: 0 14px; cursor: pointer; }
+.kbn-keymap-dialog h2 { margin: 0; font: 500 var(--ws-heading-size)/1.1 var(--ws-serif); }
+.kbn-keymap-dialog p { font: var(--ws-label-size)/1.5 var(--ws-serif); color: var(--kbn-ink-muted); }
+.kbn-keymap-dialog button { color: var(--kbn-ink); background: var(--ws-fill); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); min-height: var(--ws-phone-target); padding: 0 14px; font: var(--ws-label-size)/1.2 var(--ws-serif); cursor: pointer; }
+.kbn-keymap-dialog .kbn-keymap-close { min-width: var(--ws-phone-target); padding: 0; background: transparent; border: 0; font: var(--ws-section-size)/1 var(--ws-serif); }
+.kbn-keymap-dialog .kbn-keymap-close:hover { background: var(--ws-hover); }
 .kbn-keymap-dialog button:focus-visible { outline: 2px solid var(--kbn-ink); outline-offset: 2px; }
 .kbn-keymap-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
-.kbn-keymap-sections h3 { font: 22px var(--ws-serif); margin: 12px 0; }
-.kbn-keymap-sections dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: baseline; font-size: 12px; }
+.kbn-keymap-sections h3 { font: 500 var(--ws-section-size)/1.2 var(--ws-serif); margin: 12px 0; }
+.kbn-keymap-sections dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: baseline; font: var(--ws-label-size)/1.4 var(--ws-serif); }
 .kbn-keymap-sections dt, .kbn-keymap-sections dd { margin: 0; }
-.kbn-keymap-sections kbd { font: 11px var(--ws-mono); white-space: nowrap; }
+.kbn-keymap-sections kbd { font: var(--ws-small-size)/1.2 var(--ws-mono); white-space: nowrap; }
 .kbn-keymap-sections dd { color: var(--kbn-ink-muted); line-height: 1.4; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-keymap-overlay { padding: 12px; }
