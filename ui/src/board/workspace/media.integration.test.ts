@@ -108,6 +108,10 @@ describe('native media documents', () => {
     host.parkAll(); host.setChannel([audioDoc, videoDoc], audioDoc.key)
     expect(host.get(audioDoc.key)!.viewer!.querySelector('audio')).toBe(audio)
     expect(audio.currentTime).toBe(.5); expect(audio.paused).toBe(true)
+    const updated = { ...audioDoc, provenance: [...audioDoc.provenance, { kind: 'sent' as const, time: 2, worker: 'sol' }] }
+    host.setChannel([updated, videoDoc], updated.key)
+    expect(host.get(updated.key)!.viewer!.querySelector('audio')).toBe(audio)
+    expect(host.get(updated.key)!.viewer!.querySelector('.kbn-media-provenance')?.textContent).toContain('2 receipts')
   })
 
   it('activates a refreshed media element when selection precedes its metadata load', async () => {

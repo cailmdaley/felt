@@ -78,6 +78,13 @@ export class DocumentHost {
       const state = this.frames.get(doc.key) ?? this.create(doc)
       // Provenance and labels can change without touching the live document.
       state.frame.doc = doc
+      for (const viewer of [state.frame.viewer, state.pending]) {
+        const title = viewer?.querySelector('.kbn-media-title')
+        const provenance = viewer?.querySelector('.kbn-media-provenance')
+        if (title) title.textContent = documentTitle(doc)
+        if (provenance) provenance.textContent = documentProvenance(doc)
+        viewer?.querySelector('audio,video')?.setAttribute('aria-label', documentTitle(doc))
+      }
     }
     this.select(selected)
   }
