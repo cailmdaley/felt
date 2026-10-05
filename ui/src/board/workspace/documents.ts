@@ -13,7 +13,7 @@ export interface WorkspaceDocument {
   owner: string
   path: string
   name: string
-  kind: 'fiber' | 'html' | 'pdf' | 'image' | 'text' | 'other'
+  kind: 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other'
   provenance: Provenance[]
 }
 
@@ -87,7 +87,7 @@ export function fiberKey(owner: string, uid: string): DocKey {
 export function documentKind(path: string): WorkspaceDocument['kind'] {
   const kind = fileKind(path)
   if (kind === 'markdown' || kind === 'text') return 'text'
-  return kind === 'audio' ? 'other' : kind
+  return kind
 }
 
 function provenanceKey(p: Provenance): string {

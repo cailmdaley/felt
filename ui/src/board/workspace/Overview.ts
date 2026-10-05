@@ -3,8 +3,10 @@ import { readFiber } from './fiberSource.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
-import { fileUrl, normalizeShelfFiles, shelfKind, type ShelfFile } from '../views/shelfData.js'
-import { chooseEvictions, chooseLoads, LOAD_POLICY, TextCache } from '../views/shelfLoad.js'
+import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
+import { chooseEvictions, chooseLoads, LOAD_POLICY } from '../views/shelfLoad.js'
+import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
+import { documentKind } from './documents.js'
 import { docKey, parseDocKey, type DocKey } from './documents.js'
 import './tokens.css'
 import './overview.css'
@@ -125,7 +127,6 @@ interface Thumbnail {
   near: boolean
   lastVisible: number
   body?: HTMLElement
-  controller?: AbortController
   timer?: ReturnType<typeof setTimeout>
   generation: number
 }
@@ -147,7 +148,6 @@ export class Overview {
   private readonly ribbonItems = new Map<DocKey, RibbonItem>()
   private readonly groups = new Map<string, Group>()
   private readonly thumbnails = new Map<string, Thumbnail>()
-  private readonly textCache = new TextCache()
   private readonly visits = new Map<string, number>()
   private readonly openedCards = new Map<string, KanbanCard>()
   private readonly fetchedCards = new Map<string, KanbanCard>()
@@ -673,7 +673,9 @@ export class Overview {
   private createThumbnail(key: string, file: Receipt | undefined, fallback: string): Thumbnail {
     const el = node('div', 'ws-overview-thumb')
     el.setAttribute('aria-hidden', 'true'); el.inert = true
-    const face = node('div', 'ws-overview-thumb-face', file?.basename ?? fallback)
+    const kind = file ? documentKind(file.fullPath) : 'fiber'
+    const glyph = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
+    const face = node('div', 'ws-overview-thumb-face', `${glyph} ${file?.basename ?? fallback}`)
     el.append(face)
     const thumb: Thumbnail = { key, el, file, state: 'idle', near: false, lastVisible: 0, generation: 0 }
     this.thumbnails.set(key, thumb); this.observer?.observe(el)
@@ -684,8 +686,8 @@ export class Overview {
   }
   private unmount(thumb: Thumbnail): void {
     thumb.generation++
-    thumb.controller?.abort(); thumb.controller = undefined
     clearTimeout(thumb.timer); thumb.timer = undefined
+    disposeFileViewer(thumb.body ?? null)
     thumb.body?.remove(); thumb.body = undefined; thumb.state = 'idle'
   }
   private readonly schedule = (): void => {
@@ -716,7 +718,7 @@ export class Overview {
     if (this.disposed || !this.visible) return
     this.scaleThumbnails()
     const all = [...this.thumbnails.values()]
-    const drawable = (t: Thumbnail): boolean => !!t.file && ['page', 'image', 'text'].includes(shelfKind(t.file.fullPath))
+    const drawable = (t: Thumbnail): boolean => !!t.file
     const candidates = all.filter(t => t.state === 'idle' && drawable(t) && this.priority(t) > 0)
     if (!candidates.length) return
     const best = Math.max(...candidates.map(t => this.priority(t)))
@@ -734,11 +736,13 @@ export class Overview {
   private scaleThumbnails(): void {
     for (const thumb of this.thumbnails.values()) {
       if (!thumb.body) continue
-      if (thumb.body.tagName !== 'IFRAME' && thumb.body.tagName !== 'PRE') continue
-      const width = thumb.body.tagName === 'IFRAME' ? 1040 : 760
+      const content = thumb.body.querySelector<HTMLElement>('iframe,pre')
+      if (!content) continue
+      const width = thumb.body.classList.contains('kbn-thumbnail-pdf') ? 900 : content.tagName === 'IFRAME' ? 1040 : 760
       const scale = (thumb.el.clientWidth || 176) / width
-      thumb.body.style.transform = `scale(${scale})`
-      if (thumb.body.tagName === 'IFRAME') thumb.body.style.height = `${Math.ceil((thumb.el.clientHeight || 116) / scale)}px`
+      content.style.width = `${width}px`
+      content.style.transform = `scale(${scale})`
+      if (content.tagName === 'IFRAME') content.style.height = `${Math.ceil((thumb.el.clientHeight || 116) / scale)}px`
     }
   }
   private mount(thumb: Thumbnail): void {
@@ -751,42 +755,19 @@ export class Overview {
       if (!current() || thumb.state !== 'loading') return
       clearTimeout(thumb.timer); thumb.timer = undefined
       thumb.state = ok ? 'live' : 'failed'
-      if (!ok) { thumb.controller?.abort(); thumb.body?.remove(); thumb.body = undefined }
+      if (!ok) { disposeFileViewer(thumb.body ?? null); thumb.body?.remove(); thumb.body = undefined }
       this.schedule()
     }
     thumb.timer = setTimeout(() => finish(false), file.owner === 'local' ? LOAD_POLICY.softTimeoutLocalMs : LOAD_POLICY.softTimeoutRemoteMs)
-    const url = fileUrl(this.opts.shuttleBase, file)
-    const kind = shelfKind(file.fullPath)
-    if (kind === 'page') {
-      const frame = node('iframe', 'ws-overview-thumb-body')
-      frame.setAttribute('sandbox', ''); frame.inert = true; frame.tabIndex = -1; frame.title = file.basename
-      frame.setAttribute('scrolling', 'no'); frame.style.width = '1040px'
-      frame.addEventListener('load', () => finish(true), { once: true })
-      frame.addEventListener('error', () => finish(false), { once: true })
-      frame.src = url; thumb.body = frame; thumb.el.append(frame)
-    } else if (kind === 'image') {
-      const image = node('img', 'ws-overview-thumb-body')
-      image.alt = ''; image.decoding = 'async'; image.inert = true
-      image.addEventListener('load', () => finish(true), { once: true })
-      image.addEventListener('error', () => finish(false), { once: true })
-      image.src = url; thumb.body = image; thumb.el.append(image)
-    } else if (kind === 'text') {
-      const controller = new AbortController(); thumb.controller = controller
-      const draw = (source: string): void => {
-        if (!current() || thumb.state !== 'loading') return
-        const pre = node('pre', 'ws-overview-thumb-body', source.slice(0, 12000))
-        pre.style.width = '760px'; pre.inert = true
-        thumb.body = pre; thumb.el.append(pre); this.scaleThumbnails(); finish(true)
-      }
-      const cached = this.textCache.get(file.key)
-      if (cached !== undefined) draw(cached)
-      else void fetch(url, { signal: controller.signal }).then(async response => {
-        if (!response.ok) throw new Error('Thumbnail unavailable')
-        const source = (await response.text()).slice(0, 12000)
-        if (!current()) return
-        this.textCache.set(file.key, source); draw(source)
-      }).catch(() => finish(false))
-    }
+    const kind = documentKind(file.fullPath)
+    thumb.body = buildFileViewer(this.opts.shuttleBase, file.fullPath, file.owner, undefined, undefined, {
+      kind: kind === 'fiber' ? undefined : kind,
+      thumbnail: true,
+      active: false,
+      onState: state => { this.scaleThumbnails(); finish(state.status === 'ready') },
+    })
+    thumb.body.classList.add('ws-overview-thumb-body')
+    thumb.el.append(thumb.body)
     this.scaleThumbnails()
   }
 }

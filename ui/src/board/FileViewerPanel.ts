@@ -12,15 +12,17 @@
 import './FileViewerPanel.css'
 import './prose.css'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
+import { fileKind } from './attachments.js'
 import {
   AUDIO_EXTS,
   IMAGE_EXTS,
+  VIDEO_EXTS,
   MARKDOWN_EXTS,
-  TEXT_EXTS,
   basename,
   escapeHtml,
   fileBytesUrl,
   fileExt,
+  fileInfoUrl,
   prepareIframeExternalLinks,
   renderMarkdown,
 } from './utils.js'
@@ -31,7 +33,11 @@ export type FileViewerState =
 
 export interface FileViewerOptions {
   /** A document model can supply its classification instead of suffix dispatch. */
-  kind?: 'html' | 'text' | 'image' | 'pdf'
+  kind?: 'html' | 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'other'
+  /** Inert previews use the same kind dispatch within their host's load budget. */
+  thumbnail?: boolean
+  title?: string
+  provenance?: string
   /** Inactive viewers read once for a preview, without periodic subscriptions. */
   active?: boolean
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
@@ -65,8 +71,11 @@ export function buildFileViewer(
 ): HTMLElement {
   const ext = fileExt(fullPath)
   const src = fileBytesUrl(shuttleBase, fullPath, originId)
+  const classified = fileKind(fullPath)
+  const kind = options.kind ?? (classified === 'markdown' ? 'text' : classified)
+  if (options.thumbnail) return buildThumbnail(src, fullPath, kind, options)
 
-  if (options.kind === 'image' || (!options.kind && IMAGE_EXTS.has(ext))) {
+  if (kind === 'image') {
     // Mount the plate on a vellum mat so it reads as a mounted figure, centered
     // with breathing room, rather than a bitmap bled to the cell edge.
     const wrap = document.createElement('div')
@@ -92,15 +101,8 @@ export function buildFileViewer(
     return wrap
   }
 
-  if (!options.kind && AUDIO_EXTS.has(ext)) {
-    const wrap = document.createElement('div')
-    wrap.className = 'kbn-fileview-audio'
-    const audio = document.createElement('audio')
-    audio.controls = true
-    audio.src = src
-    wrap.append(audio)
-    return wrap
-  }
+  if (kind === 'audio' || kind === 'video') return buildMediaViewer(src, fullPath, kind, options)
+  if (kind === 'other') return buildUnsupportedViewer(shuttleBase, fullPath, originId, options)
 
   // TEXT. An iframe is the wrong instrument here: the daemon serves most text
   // suffixes as `application/octet-stream`, so the frame either downloads the
@@ -112,15 +114,15 @@ export function buildFileViewer(
   // `.kbn-detail-prose` skin so a sent report looks like the fiber it came
   // from; anything else as a code block, reusing the `md-code-block` markup
   // the markdown renderer already emits for fenced code.
-  if (options.kind === 'text' || (!options.kind && TEXT_EXTS.has(ext))) {
+  if (kind === 'text') {
     return buildTextViewer(src, fullPath, ext, onTextPane, options)
   }
 
-  if (options.kind === 'html' || (!options.kind && (ext === 'html' || ext === 'htm'))) {
+  if (kind === 'html') {
     return buildHtmlViewer(src, fullPath, onFrameLoad, options)
   }
 
-  // Non-live iframe deliverables (PDF and opaque browser-native formats).
+  // The browser-native PDF viewer retains its layout while parked.
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 
@@ -181,6 +183,208 @@ export function buildFileViewer(
   return wrap
 }
 
+type MediaState = { media: HTMLMediaElement; active: boolean }
+const mediaViewers = new WeakMap<HTMLElement, MediaState>()
+const players = new Set<HTMLMediaElement>()
+type EmbeddedMediaState = { active: boolean; players: Set<HTMLMediaElement>; unbind: () => void }
+const embeddedMediaViewers = new WeakMap<HTMLElement, EmbeddedMediaState>()
+
+function bindEmbeddedMedia(wrap: HTMLElement, iframe: HTMLIFrameElement): void {
+  const state = embeddedMediaViewers.get(wrap)
+  if (!state) return
+  state.unbind()
+  for (const media of state.players) { media.pause(); players.delete(media) }
+  state.players.clear()
+  try {
+    const content = iframe.contentDocument
+    if (!content) return
+    const play = (event: Event): void => {
+      const media = event.target as HTMLMediaElement
+      if (!['AUDIO', 'VIDEO'].includes(media.tagName)) return
+      state.players.add(media)
+      players.add(media)
+      if (!state.active) { media.pause(); return }
+      for (const other of players) if (other !== media) other.pause()
+    }
+    content.addEventListener('play', play, true)
+    for (const media of content.querySelectorAll<HTMLMediaElement>('audio,video')) {
+      state.players.add(media)
+      players.add(media)
+      if (!state.active) media.pause()
+      else if (!media.paused) for (const other of players) if (other !== media) other.pause()
+    }
+    state.unbind = () => content.removeEventListener('play', play, true)
+  } catch { /* Cross-origin frames keep their browser-owned controls. */ }
+}
+
+function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', options: FileViewerOptions): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = `kbn-fileview-media kbn-fileview-${kind}`
+  const page = document.createElement('div')
+  page.className = 'kbn-media-page'
+  const mark = document.createElement('div')
+  mark.className = 'kbn-media-kind'
+  mark.textContent = kind === 'audio' ? '♪  AUDIO' : '▹  VIDEO'
+  const title = document.createElement('h1')
+  title.className = 'kbn-media-title'
+  title.textContent = options.title || basename(path)
+  const provenance = document.createElement('p')
+  provenance.className = 'kbn-media-provenance'
+  provenance.textContent = options.provenance || path
+  const media = document.createElement(kind)
+  media.controls = true
+  media.preload = 'metadata'
+  media.setAttribute('aria-label', title.textContent)
+  if (media instanceof HTMLVideoElement) media.playsInline = true
+  const timeline = document.createElement('progress')
+  timeline.className = 'kbn-media-progress'
+  timeline.max = 1
+  timeline.value = 0
+  timeline.setAttribute('aria-hidden', 'true')
+  const state: MediaState = { media, active: options.active !== false }
+  mediaViewers.set(wrap, state)
+  players.add(media)
+  media.addEventListener('play', () => {
+    if (!state.active) { media.pause(); return }
+    for (const other of players) if (other !== media) other.pause()
+  })
+  media.addEventListener('timeupdate', () => {
+    timeline.value = Number.isFinite(media.duration) && media.duration > 0 ? media.currentTime / media.duration : 0
+  })
+  media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
+  let disposed = false
+  const controller = new AbortController()
+  media.addEventListener('error', () => {
+    // The metadata probe distinguishes a missing resource from a codec failure.
+    void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => {
+      if (!disposed) options.onState?.({ status: 'error', error: new Error(res.ok ? 'media format is not supported by this browser' : `file request failed: ${res.status}`), hasContent: false })
+    }).catch(error => { if (!disposed) options.onState?.({ status: 'error', error, hasContent: false }) })
+  })
+  page.append(mark, title, provenance, media)
+  if (kind === 'audio') page.append(timeline)
+  wrap.append(page)
+  media.src = src
+  viewerDisposers.set(wrap, () => {
+    disposed = true
+    controller.abort()
+    media.pause()
+    players.delete(media)
+    mediaViewers.delete(wrap)
+    media.removeAttribute('src')
+    media.load()
+  })
+  return wrap
+}
+
+function buildUnsupportedViewer(base: string, path: string, owner: string, options: FileViewerOptions): HTMLElement {
+  const box = document.createElement('div')
+  box.className = 'kbn-fileview-unsupported ws-document-state'
+  const name = document.createElement('h3')
+  name.textContent = options.title || basename(path)
+  const detail = document.createElement('p')
+  detail.textContent = 'Not drawn here'
+  const download = document.createElement('a')
+  download.href = fileBytesUrl(base, path, owner)
+  download.download = basename(path)
+  download.textContent = 'Download'
+  box.append(name, detail, download)
+  const controller = new AbortController()
+  viewerDisposers.set(box, () => controller.abort())
+  void fetch(fileInfoUrl(base, path, owner), { signal: controller.signal, cache: 'no-store' }).then(async response => {
+    if (!response.ok) throw new Error(`file request failed: ${response.status}`)
+    const info = await response.json() as { exists?: boolean; size?: number }
+    if (controller.signal.aborted) return
+    if (!info.exists) throw new Error('file request failed: 404')
+    if (typeof info.size === 'number' && Number.isFinite(info.size)) detail.textContent = `Not drawn here · ${info.size.toLocaleString()} bytes`
+    options.onState?.({ status: 'ready' })
+  }).catch(error => { if (!controller.signal.aborted) options.onState?.({ status: 'error', error, hasContent: false }) })
+  return box
+}
+
+/** A budgeted, inert view of the same resource kind the reader renders. */
+function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerOptions['kind']>, options: FileViewerOptions): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = `kbn-fileview-thumbnail kbn-thumbnail-${kind}`
+  wrap.inert = true
+  wrap.setAttribute('aria-hidden', 'true')
+  const controller = new AbortController()
+  let disposed = false
+  let settled = false
+  const finish = (ok: boolean): void => {
+    if (disposed || settled) return
+    settled = true
+    options.onState?.(ok ? { status: 'ready' } : { status: 'error', error: new Error('Thumbnail unavailable'), hasContent: false })
+  }
+  const glyph = document.createElement('div')
+  glyph.className = 'kbn-thumbnail-glyph'
+  glyph.textContent = `${{ audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]}\n${basename(path)}`
+  wrap.append(glyph)
+  let native: HTMLMediaElement | null = null
+  if (kind === 'image') {
+    const image = document.createElement('img')
+    image.alt = ''
+    image.decoding = 'async'
+    image.addEventListener('load', () => finish(true), { once: true })
+    image.addEventListener('error', () => finish(false), { once: true })
+    image.src = src
+    wrap.append(image)
+  } else if (kind === 'html' || kind === 'pdf') {
+    const frame = document.createElement('iframe')
+    frame.title = basename(path)
+    frame.inert = true
+    frame.tabIndex = -1
+    frame.setAttribute('scrolling', 'no')
+    if (kind === 'html') {
+      frame.setAttribute('sandbox', '')
+      frame.allow = "autoplay 'none'"
+    }
+    // Native PDF viewers need their plugin; the host makes the whole slot inert.
+    frame.addEventListener('load', () => {
+      if (kind === 'html') { finish(true); return }
+      void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => finish(res.ok)).catch(() => finish(false))
+    }, { once: true })
+    frame.addEventListener('error', () => finish(false), { once: true })
+    frame.src = kind === 'pdf' ? `${src}#page=1&view=FitH&toolbar=0` : src
+    wrap.append(frame)
+  } else if (kind === 'audio' || kind === 'video') {
+    const media = document.createElement(kind)
+    native = media
+    media.preload = 'metadata'
+    media.muted = true
+    media.tabIndex = -1
+    media.addEventListener('play', () => media.pause())
+    media.addEventListener('loadedmetadata', () => {
+      if (kind === 'audio' && Number.isFinite(media.duration)) glyph.textContent += `\n${formatMediaTime(media.duration)}`
+      finish(true)
+    }, { once: true })
+    media.addEventListener('error', () => finish(false), { once: true })
+    if (media instanceof HTMLVideoElement) media.playsInline = true
+    media.src = src
+    wrap.append(media)
+  } else if (kind === 'text') {
+    void fetch(src, { signal: controller.signal }).then(async res => {
+      if (!res.ok) throw new Error('Thumbnail unavailable')
+      const source = await res.text()
+      if (disposed) return
+      const pre = document.createElement('pre')
+      pre.inert = true
+      pre.textContent = source.slice(0, 12000)
+      wrap.append(pre)
+      finish(true)
+    }).catch(() => finish(false))
+  } else queueMicrotask(() => finish(true))
+  viewerDisposers.set(wrap, () => {
+    disposed = true
+    controller.abort()
+    if (native) { native.pause(); native.removeAttribute('src'); native.load() }
+  })
+  return wrap
+}
+
+function formatMediaTime(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`
+}
+
 const liveViewSubscriptions = new WeakMap<HTMLElement, LiveFileSubscription>()
 const viewerDisposers = new WeakMap<HTMLElement, () => void>()
 
@@ -195,12 +399,24 @@ export function disposeFileViewer(viewer: HTMLElement | null): void {
 
 /** Pause a hidden reader tab without tearing down its viewer DOM. */
 export function suspendFileViewer(viewer: HTMLElement | null): void {
-  if (viewer) liveViewSubscriptions.get(viewer)?.suspend()
+  if (viewer) {
+    liveViewSubscriptions.get(viewer)?.suspend()
+    const state = mediaViewers.get(viewer)
+    if (state) { state.active = false; state.media.pause() }
+    const embedded = embeddedMediaViewers.get(viewer)
+    if (embedded) { embedded.active = false; for (const media of embedded.players) media.pause() }
+  }
 }
 
 /** Resume a reader tab and revalidate its file while retaining its DOM. */
 export function resumeFileViewer(viewer: HTMLElement | null): void {
-  if (viewer) void liveViewSubscriptions.get(viewer)?.resume()
+  if (viewer) {
+    void liveViewSubscriptions.get(viewer)?.resume()
+    const state = mediaViewers.get(viewer)
+    if (state) state.active = true
+    const embedded = embeddedMediaViewers.get(viewer)
+    if (embedded) embedded.active = true
+  }
 }
 
 /** Finish an inactive preview's initial read without activating its subscription. */
@@ -216,6 +432,8 @@ function buildHtmlViewer(
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
+  const embedded: EmbeddedMediaState = { active: options.active !== false, players: new Set(), unbind: () => {} }
+  embeddedMediaViewers.set(wrap, embedded)
 
   const veil = loadingVeil(fullPath, options)
   let disposed = false
@@ -237,6 +455,7 @@ function buildHtmlViewer(
     failed = false
     veil.remove()
     prepareIframeExternalLinks(initialFrame)
+    bindEmbeddedMedia(wrap, initialFrame)
     onFrameLoad?.(initialFrame, false)
     options.onState?.({ status: 'ready' })
   })
@@ -266,6 +485,7 @@ function buildHtmlViewer(
         if (disposed || loaded || currentGeneration !== generation) return
         loaded = true
         prepareIframeExternalLinks(next)
+        bindEmbeddedMedia(wrap, next)
         const panelScroll = wrap.parentElement?.scrollTop ?? 0
         try {
           next.contentWindow?.scrollTo(0, iframe.contentWindow?.scrollY ?? 0)
@@ -305,7 +525,14 @@ function buildHtmlViewer(
     },
   )
   liveViewSubscriptions.set(wrap, stop)
-  viewerDisposers.set(wrap, () => { disposed = true; generation++; stagingFrame?.remove() })
+  viewerDisposers.set(wrap, () => {
+    disposed = true
+    generation++
+    stagingFrame?.remove()
+    embedded.unbind()
+    for (const media of embedded.players) { media.pause(); players.delete(media) }
+    embeddedMediaViewers.delete(wrap)
+  })
   return wrap
 }
 
@@ -416,5 +643,5 @@ function showLoadError(veil: HTMLElement, wrap: HTMLElement, fullPath: string, e
  *  cannot. */
 export function isScrollableFile(path: string): boolean {
   const ext = fileExt(path)
-  return !IMAGE_EXTS.has(ext) && !AUDIO_EXTS.has(ext)
+  return !IMAGE_EXTS.has(ext) && !AUDIO_EXTS.has(ext) && !VIDEO_EXTS.has(ext)
 }

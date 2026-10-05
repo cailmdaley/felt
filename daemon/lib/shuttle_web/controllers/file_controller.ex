@@ -13,8 +13,8 @@ defmodule ShuttleWeb.FileController do
   `/felt-edit`.** The composite board stamps each fiber with its `origin`; the
   panel carries that origin back. A local-owned path is read here; a
   remote-owned path forwards to the owning daemon's identical `/file` (origin
-  stripped) over the SSH tunnel and relays its bytes, content type, and cache
-  validators (`OriginRouter.forward_file_get/4`).
+  stripped) over the SSH tunnel and relays its bytes, content type, range
+  metadata, and cache validators (`OriginRouter.forward_file_get/4`).
 
   **Path contract.** `path` must be ABSOLUTE — the panel resolves a fiber's
   `:::{embed} <rel>` against the fiber's own directory client-side before
@@ -26,14 +26,13 @@ defmodule ShuttleWeb.FileController do
   404 for a missing file, while `/file-info` reports `exists: false`; neither
   500s the panel.
 
-  **Conditional reads on both owner legs.** A file response carries a weak
-  `ETag` (a SHA-256 digest of the served bytes) and `Last-Modified` (from mtime),
-  and honors `If-None-Match` / `If-Modified-Since` with a bodyless 304. The
-  owner-routed leg forwards those request headers and relays the owner's
-  validators, so an unchanged remote file also costs a header exchange. A peer
-  without conditional-GET support still returns 200; the board compares the
-  returned content fingerprint before changing its view. `/file-info` remains
-  available for metadata-only probes used by other artifact types.
+  **Conditional and range reads on both owner legs.** A weak `ETag` hashes the
+  served file bytes, so same-size rewrites with the same mtime still invalidate
+  it. `If-None-Match` can return a bodyless 304; byte ranges return 206 or 416,
+  and `If-Range` dates can authorize a range while weak entity tags cannot. The
+  owner-routed leg forwards these request headers and relays the owner's
+  validators and range metadata. `/file-info` remains available for
+  metadata-only probes used by other artifact types.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -42,6 +41,21 @@ defmodule ShuttleWeb.FileController do
     only: [relay_bytes: 2, relay_file_bytes: 2, file_token: 1]
 
   alias Shuttle.OriginRouter
+
+  @media_types %{
+    ".mp3" => "audio/mpeg",
+    ".wav" => "audio/wav",
+    ".m4a" => "audio/mp4",
+    ".aac" => "audio/aac",
+    ".ogg" => "audio/ogg",
+    ".oga" => "audio/ogg",
+    ".flac" => "audio/flac",
+    ".opus" => "audio/ogg",
+    ".mp4" => "video/mp4",
+    ".m4v" => "video/x-m4v",
+    ".mov" => "video/quicktime",
+    ".webm" => "video/webm"
+  }
 
   # POSIX mtime (per `time: :posix`) is seconds since 1970; Erlang's gregorian
   # seconds count from year 0. `http_date/1` uses
@@ -135,26 +149,151 @@ defmodule ShuttleWeb.FileController do
   # and filesystem timestamp are unchanged.
   defp serve_with_validators(conn, path, mtime, _size) do
     case File.read(path) do
-      {:ok, body} ->
-        etag = weak_etag(body)
-        last_modified = http_date(mtime)
+      {:ok, body} -> serve_representation(conn, path, body, mtime, weak_etag(body))
+      {:error, _reason} -> file_not_found(conn)
+    end
+  end
 
-        conn =
-          conn
-          |> put_resp_header("etag", etag)
-          |> put_resp_header("last-modified", last_modified)
-          |> put_resp_header("cache-control", "public, max-age=300")
+  defp serve_representation(conn, path, body, mtime, etag) do
+    size = byte_size(body)
 
-        if not_modified?(conn, etag, mtime) do
-          send_resp(conn, 304, "")
+    conn =
+      conn
+      |> put_resp_header("etag", etag)
+      |> put_resp_header("last-modified", http_date(mtime))
+      |> put_resp_header("cache-control", "public, max-age=300")
+
+    if not_modified?(conn, etag, mtime) do
+      send_resp(conn, 304, "")
+    else
+      case requested_range(conn, etag, mtime, size) do
+        {:partial, first, last} -> send_partial(conn, path, body, size, first, last)
+        :unsatisfiable -> send_unsatisfiable(conn, path, size)
+        :ignore -> send_full(conn, path, body)
+      end
+    end
+  end
+
+  defp send_full(conn, path, body) do
+    conn
+    |> representation_headers(path)
+    |> put_resp_header("content-length", Integer.to_string(byte_size(body)))
+    |> send_resp(200, body)
+  end
+
+  defp send_partial(conn, path, body, size, first, last) do
+    length = last - first + 1
+    partial = binary_part(body, first, length)
+
+    conn
+    |> representation_headers(path)
+    |> put_resp_header("content-range", "bytes #{first}-#{last}/#{size}")
+    |> put_resp_header("content-length", Integer.to_string(length))
+    |> send_resp(206, partial)
+  end
+
+  defp send_unsatisfiable(conn, path, size) do
+    conn
+    |> representation_headers(path)
+    |> put_resp_header("content-range", "bytes */#{size}")
+    |> put_resp_header("content-length", "0")
+    |> send_resp(416, "")
+  end
+
+  defp representation_headers(conn, path) do
+    conn =
+      case Map.fetch(@media_types, String.downcase(Path.extname(path))) do
+        {:ok, content_type} -> put_resp_content_type(conn, content_type, nil)
+        :error -> put_resp_content_type(conn, MIME.from_path(path))
+      end
+
+    put_resp_header(conn, "accept-ranges", "bytes")
+  end
+
+  defp file_not_found(conn), do: conn |> put_status(404) |> json(%{error: "file not found"})
+
+  defp requested_range(conn, etag, mtime, size) do
+    case get_req_header(conn, "range") do
+      [range] ->
+        if if_range_matches?(conn, etag, mtime), do: parse_byte_range(range, size), else: :ignore
+
+      _ ->
+        :ignore
+    end
+  end
+
+  defp if_range_matches?(conn, etag, mtime) do
+    case get_req_header(conn, "if-range") do
+      [] ->
+        true
+
+      [value] ->
+        value = String.trim(value)
+
+        if strong_entity_tag?(value) and strong_entity_tag?(etag) do
+          value == etag
         else
-          conn
-          |> put_resp_content_type(MIME.from_path(path))
-          |> send_resp(200, body)
+          case parse_http_date(value) do
+            {:ok, date} -> date == mtime
+            :error -> false
+          end
         end
 
-      {:error, _reason} ->
-        conn |> put_status(404) |> json(%{error: "file not found"})
+      _ ->
+        false
+    end
+  end
+
+  defp strong_entity_tag?(tag),
+    do: String.starts_with?(tag, "\"") and String.ends_with?(tag, "\"")
+
+  defp parse_http_date(value) do
+    case :httpd_util.convert_request_date(String.to_charlist(value)) do
+      {{year, month, day}, {hour, minute, second}} = datetime
+      when year > 0 and month in 1..12 and day in 1..31 and hour in 0..23 and minute in 0..59 and
+             second in 0..60 ->
+        gregorian_seconds = :calendar.datetime_to_gregorian_seconds(datetime)
+        {:ok, gregorian_seconds - @gregorian_epoch_offset}
+
+      _ ->
+        :error
+    end
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
+  end
+
+  defp parse_byte_range(range, size) do
+    case Regex.run(~r/\Abytes=(\d*)-(\d*)\z/i, String.trim(range)) do
+      [_, "", ""] ->
+        :ignore
+
+      [_, "", suffix] ->
+        suffix_range(String.to_integer(suffix), size)
+
+      [_, first, ""] ->
+        bounded_range(String.to_integer(first), size - 1, size)
+
+      [_, first, last] ->
+        bounded_range(String.to_integer(first), String.to_integer(last), size)
+
+      _ ->
+        :ignore
+    end
+  end
+
+  defp suffix_range(0, _size), do: :unsatisfiable
+  defp suffix_range(_length, 0), do: :unsatisfiable
+
+  defp suffix_range(length, size),
+    do: {:partial, max(size - length, 0), size - 1}
+
+  defp bounded_range(first, last, size) do
+    if size == 0 or first >= size or last < first do
+      :unsatisfiable
+    else
+      {:partial, first, min(last, size - 1)}
     end
   end
 
@@ -180,7 +319,7 @@ defmodule ShuttleWeb.FileController do
   defp weak_tag(tag), do: tag
 
   defp conditional_headers(conn) do
-    ["if-none-match", "if-modified-since"]
+    ["if-none-match", "if-modified-since", "range", "if-range"]
     |> Enum.flat_map(fn name -> Enum.map(get_req_header(conn, name), &{name, &1}) end)
   end
 

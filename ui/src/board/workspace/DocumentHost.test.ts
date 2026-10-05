@@ -73,6 +73,20 @@ describe('stable document frames', () => {
     expect(host.get(docs[3].key)!.sheet.inert).toBe(true)
   })
 
+  it('does not reselect a page that recedes in its own document-link handler', () => {
+    const fiber = { ...docs[0], kind: 'fiber' as const }
+    host.setChannel([fiber, docs[1]], fiber.key)
+    const frame = host.get(fiber.key)!
+    const link = document.createElement('button')
+    frame.viewer!.append(link)
+    link.addEventListener('click', () => host.select(docs[1].key))
+    link.click()
+    expect(host.get(docs[1].key)!.el.classList.contains('ws-selected')).toBe(true)
+    expect(onSelect).not.toHaveBeenCalled()
+    frame.el.click()
+    expect(onSelect).toHaveBeenCalledWith(fiber.key)
+  })
+
   it('restores prose scroll after its reading geometry is assigned', async () => {
     const prose = document.createElement('div')
     let laidOut = false, top = 0
@@ -265,23 +279,20 @@ describe('refresh and failure states', () => {
     expect(frame.content.querySelector('.ws-document-status')).toBeNull()
   })
 
-  it('shows missing paths, and uses a Download state for unsupported files including mp3', async () => {
+  it('shows missing paths and delegates unsupported files to the shared kind renderer', async () => {
     host.setChannel([docs[0]], docs[0].key)
     render.calls[0].options.onState!({ status: 'error', error: new Error('file request failed: 404'), hasContent: false })
     await Promise.resolve()
     expect(host.get(docs[0].key)!.content.textContent).toContain('Not found on host-a')
     expect(host.get(docs[0].key)!.content.querySelector('code')!.textContent).toBe(docs[0].path)
-    const audio = { ...doc(18), path: '/audio.mp3', name: 'audio.mp3', kind: 'other' as const }
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { headers: { 'content-length': '2048' } })))
-    host.setChannel([audio], audio.key)
-    await Promise.resolve()
-    const content = host.get(audio.key)!.content
-    expect(content.textContent).toContain('2,048 bytes')
-    expect(content.querySelector('audio')).toBeNull()
-    expect(content.querySelector('a')!.download).toBe('audio.mp3')
-    expect(render.calls).toHaveLength(1)
-    host.refresh(audio.key)
-    expect(render.calls).toHaveLength(1)
+    const archive = { ...doc(18), path: '/archive.zip', name: 'archive.zip', kind: 'other' as const }
+    host.setChannel([archive], archive.key)
+    expect(render.calls).toHaveLength(2)
+    expect(render.calls[1].options.kind).toBe('other')
+    await ready(render.calls[1])
+    host.refresh(archive.key)
+    expect(render.calls).toHaveLength(3)
+    expect(render.calls[2].options.kind).toBe('other')
   })
 
   it('lets the controller fetch fresh prose without rebuilding cached content on Refresh', async () => {

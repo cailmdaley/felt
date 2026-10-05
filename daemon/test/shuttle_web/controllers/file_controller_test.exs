@@ -39,6 +39,33 @@ defmodule ShuttleWeb.FileControllerTest do
       assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
     end
 
+    test "uses browser media types for common audio and video extensions" do
+      for {extension, content_type} <- [
+            {"mp3", "audio/mpeg"},
+            {"wav", "audio/wav"},
+            {"m4a", "audio/mp4"},
+            {"aac", "audio/aac"},
+            {"ogg", "audio/ogg"},
+            {"oga", "audio/ogg"},
+            {"flac", "audio/flac"},
+            {"opus", "audio/ogg"},
+            {"mp4", "video/mp4"},
+            {"m4v", "video/x-m4v"},
+            {"mov", "video/quicktime"},
+            {"webm", "video/webm"}
+          ] do
+        path = tmp_path(extension)
+        File.write!(path, "media")
+        on_exit(fn -> File.rm(path) end)
+
+        conn = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+        assert conn.status == 200
+        assert conn.resp_body == "media"
+        assert get_resp_header(conn, "content-type") == [content_type]
+      end
+    end
+
     test "404 for a non-existent absolute path" do
       conn = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(tmp_path("missing"))}")
 
@@ -75,6 +102,135 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert conn.status == 200
       assert %{"exists" => false} = json_response(conn, 200)
+    end
+
+    test "serves an MP3 byte range from the requested seek offset" do
+      audio = :binary.copy("0123456789", 10)
+      path = tmp_path("mp3")
+      File.write!(path, audio)
+      on_exit(fn -> File.rm(path) end)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      full = get(api_conn(), url)
+      assert full.status == 200
+      assert full.resp_body == audio
+      assert get_resp_header(full, "accept-ranges") == ["bytes"]
+      assert get_resp_header(full, "content-length") == ["100"]
+      assert get_resp_header(full, "content-type") == ["audio/mpeg"]
+
+      seek = api_conn() |> put_req_header("range", "bytes=75-") |> get(url)
+
+      assert seek.status == 206
+      assert seek.resp_body == binary_part(audio, 75, 25)
+      assert get_resp_header(seek, "accept-ranges") == ["bytes"]
+      assert get_resp_header(seek, "content-range") == ["bytes 75-99/100"]
+      assert get_resp_header(seek, "content-length") == ["25"]
+      assert get_resp_header(seek, "content-type") == ["audio/mpeg"]
+    end
+
+    test "serves bounded, open-ended, and suffix byte ranges" do
+      path = tmp_path("mp4")
+      File.write!(path, "0123456789")
+      on_exit(fn -> File.rm(path) end)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      for {range, body, content_range} <- [
+            {"bytes=2-5", "2345", "bytes 2-5/10"},
+            {"bytes=3-", "3456789", "bytes 3-9/10"},
+            {"bytes=-3", "789", "bytes 7-9/10"},
+            {"bytes=8-99", "89", "bytes 8-9/10"}
+          ] do
+        conn = api_conn() |> put_req_header("range", range) |> get(url)
+
+        assert conn.status == 206
+        assert conn.resp_body == body
+        assert get_resp_header(conn, "accept-ranges") == ["bytes"]
+        assert get_resp_header(conn, "content-range") == [content_range]
+        assert get_resp_header(conn, "content-length") == [Integer.to_string(byte_size(body))]
+        assert get_resp_header(conn, "content-type") == ["video/mp4"]
+      end
+    end
+
+    test "returns 416 and the representation size for unsatisfiable byte ranges" do
+      path = tmp_path("mp4")
+      File.write!(path, "0123456789")
+      on_exit(fn -> File.rm(path) end)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      for range <- ["bytes=10-", "bytes=4-2", "bytes=-0"] do
+        conn = api_conn() |> put_req_header("range", range) |> get(url)
+
+        assert conn.status == 416
+        assert conn.resp_body == ""
+        assert get_resp_header(conn, "accept-ranges") == ["bytes"]
+        assert get_resp_header(conn, "content-range") == ["bytes */10"]
+        assert get_resp_header(conn, "content-length") == ["0"]
+      end
+    end
+
+    test "ignores malformed and multiple ranges" do
+      path = tmp_path("mp4")
+      File.write!(path, "0123456789")
+      on_exit(fn -> File.rm(path) end)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      for range <- ["bytes=bad", "items=0-1", "bytes=", "bytes=0-1,4-5"] do
+        conn = api_conn() |> put_req_header("range", range) |> get(url)
+
+        assert conn.status == 200
+        assert conn.resp_body == "0123456789"
+        assert get_resp_header(conn, "content-range") == []
+      end
+    end
+
+    test "If-Range dates authorize current ranges, but weak ETags and old dates do not" do
+      path = tmp_path("mp4")
+      File.write!(path, "0123456789")
+      File.touch!(path, {{2020, 1, 1}, {0, 0, 0}})
+      on_exit(fn -> File.rm(path) end)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      first = get(api_conn(), url)
+      [etag] = get_resp_header(first, "etag")
+      [last_modified] = get_resp_header(first, "last-modified")
+      assert String.starts_with?(etag, "W/")
+
+      ranged =
+        api_conn()
+        |> put_req_header("range", "bytes=0-1")
+        |> put_req_header("if-range", last_modified)
+        |> get(url)
+
+      assert ranged.status == 206
+      assert ranged.resp_body == "01"
+
+      weak_tag =
+        api_conn()
+        |> put_req_header("range", "bytes=0-1")
+        |> put_req_header("if-range", etag)
+        |> get(url)
+
+      assert weak_tag.status == 200
+      assert weak_tag.resp_body == "0123456789"
+      assert get_resp_header(weak_tag, "content-range") == []
+
+      stale_date =
+        api_conn()
+        |> put_req_header("range", "bytes=0-1")
+        |> put_req_header("if-range", "Thu, 01 Jan 1970 00:00:00 GMT")
+        |> get(url)
+
+      assert stale_date.status == 200
+      assert stale_date.resp_body == "0123456789"
+
+      future_date =
+        api_conn()
+        |> put_req_header("range", "bytes=0-1")
+        |> put_req_header("if-range", "Tue, 01 Jan 2030 00:00:00 GMT")
+        |> get(url)
+
+      assert future_date.status == 200
+      assert future_date.resp_body == "0123456789"
     end
 
     test "200 carries ETag, Last-Modified, and Cache-Control validators" do
@@ -121,10 +277,12 @@ defmodule ShuttleWeb.FileControllerTest do
       conn =
         api_conn()
         |> put_req_header("if-none-match", etag)
+        |> put_req_header("range", "bytes=0-1")
         |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
 
       assert conn.status == 304
       assert conn.resp_body == ""
+      assert get_resp_header(conn, "content-range") == []
     end
 
     test "If-Modified-Since alone never returns 304" do
@@ -286,6 +444,48 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert StubGetFileClient.last().url ==
                "http://localhost:4001/api/v1/file?path=%2Fabs%2Fon%2Fcandide.html"
+    end
+
+    test "forwards Range and If-Range and relays a remote 206 byte response" do
+      last_modified = "Tue, 01 Jan 2030 00:00:00 GMT"
+      etag = ~s(W/"remote-media")
+
+      headers = [
+        {"accept-ranges", "bytes"},
+        {"content-range", "bytes 2-4/10"},
+        {"content-length", "3"},
+        {"content-type", "audio/mpeg"},
+        {"etag", etag},
+        {"last-modified", last_modified},
+        {"cache-control", "public, max-age=300"}
+      ]
+
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 206, headers, "audio/mpeg", "abc"}
+      )
+
+      conn =
+        api_conn()
+        |> put_req_header("range", "bytes=2-4")
+        |> put_req_header("if-range", last_modified)
+        |> get("/api/v1/file?path=#{URI.encode_www_form("/abs/on/candide.mp3")}&origin=candide")
+
+      assert conn.status == 206
+      assert conn.resp_body == "abc"
+      assert get_resp_header(conn, "accept-ranges") == ["bytes"]
+      assert get_resp_header(conn, "content-range") == ["bytes 2-4/10"]
+      assert get_resp_header(conn, "content-length") == ["3"]
+      assert get_resp_header(conn, "content-type") == ["audio/mpeg"]
+      assert get_resp_header(conn, "etag") == [etag]
+      assert get_resp_header(conn, "last-modified") == [last_modified]
+      assert get_resp_header(conn, "cache-control") == ["public, max-age=300"]
+
+      assert StubGetFileClient.last().headers == [
+               {"range", "bytes=2-4"},
+               {"if-range", last_modified}
+             ]
     end
 
     test "forwards file-info to the owning daemon without downloading the file" do

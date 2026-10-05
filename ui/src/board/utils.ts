@@ -377,12 +377,10 @@ export function cacheBustUrl(url: string, nonce: number = Date.now()): string {
   return u.origin === CACHE_BUST_BASE ? u.pathname + u.search + u.hash : u.href
 }
 
-/** The by-extension image/audio vocabulary. `buildFileViewer` in
- *  FileViewerPanel (the Reader) is its one consumer now that `:::{embed}`
- *  bodies no longer render inline — an attachment opens through that same
- *  viewer, so there is still exactly one dispatch. Read-only. */
+/** File kind vocabulary shared by documents, readers, and thumbnails. */
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
-export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'ogg', 'flac', 'aac'])
+export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus'])
+export const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm'])
 /**
  * Extensions whose bytes are TEXT the browser can lay out itself, given the
  * chance. The daemon serves most of these as `application/octet-stream`, so an

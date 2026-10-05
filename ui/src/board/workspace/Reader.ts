@@ -291,7 +291,7 @@ export class Reader {
       if (agent) segments.push(element('span', 'ws-agent', agent))
     } else if (embed?.kind === 'embed' && embed.title) segments.push(embed.title)
     segments.push(doc.owner)
-    const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', text: '≡', other: '□' }[doc.kind]
+    const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
     const summary = segments.map(part => typeof part === 'string' ? part : part.textContent).join(' · ')
@@ -314,8 +314,11 @@ export class Reader {
     const saved = this.sizes[doc.key]
     if (Number.isFinite(saved) && saved > 0) return Math.min(max, saved)
     let width = this.measure(doc.kind === 'html' ? 'html-width' : doc.kind === 'pdf' ? 'pdf-width' : 'prose-width', doc.kind === 'html' ? 1040 : doc.kind === 'pdf' ? 900 : 760)
-    const img = this.host.get(doc.key)?.content.querySelector('img')
+    const content = this.host.get(doc.key)?.content
+    const img = content?.querySelector('img')
     if (doc.kind === 'image' && img?.naturalWidth && img.naturalHeight) width = Math.max(320, (height - this.measure('label-height', 40)) * img.naturalWidth / img.naturalHeight)
+    const video = content?.querySelector('video')
+    if (doc.kind === 'video' && video?.videoWidth && video.videoHeight) width = Math.max(320, (height - 180) * video.videoWidth / video.videoHeight)
     return Math.min(max, width)
   }
   private layoutNavbar(): void {
