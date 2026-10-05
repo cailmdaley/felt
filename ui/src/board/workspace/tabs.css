@@ -1,46 +1,95 @@
-/* The running head's index: bare serif labels a step below the name, in muted ink. The selected
-   label is in ink over one fine rule; there is no fill, plate or shadow. */
-.ws-tab-label {
-  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font: var(--ws-index-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0;
-  text-decoration: underline transparent var(--ws-line-width); text-underline-offset: var(--ws-tab-rule-offset);
-  text-decoration-skip-ink: none;
+/* The reader's map: a band of tiles beneath the stage, a scale model of the run.
+   Its strip is centred under the selected page (inline padding of half the band
+   lets the first and last tiles sit centred too) and fades where tiles run past. */
+.ws-band {
+  position: relative; z-index: 2; flex: none; display: grid; align-items: center;
+  grid-template-columns: var(--ws-band-side) minmax(0, 1fr) var(--ws-band-side);
+  height: var(--ws-band-height); padding: 0 var(--ws-stage-inset) var(--ws-band-foot);
 }
-.ws-tab[aria-selected='true'] .ws-tab-label { text-decoration-color: currentColor; }
-.ws-tab-anchor .ws-tab-label { font-size: var(--ws-tab-anchor-size); }
-.ws-tab.ws-clipped:has(.ws-tab-label) { mask-image: none; }
-/* The gold fresh mark rides at the label's shoulder, like a superior figure. */
-.ws-tab-fresh::after { flex: none; margin: 0 0 0 3px; transform: translateY(-5px); }
+.ws-band-position {
+  justify-self: end; color: var(--ws-ink-muted); font: var(--ws-small-size)/1 var(--ws-mono);
+  letter-spacing: var(--ws-mono-tracking); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.ws-tabs {
+  display: flex; align-items: center; gap: var(--ws-tile-gap); min-width: 0; position: relative;
+  height: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air)); padding: 0 50%;
+  overflow-x: auto; scrollbar-width: none;
+  --ws-fade-left: 0px; --ws-fade-right: 0px;
+  mask-image: linear-gradient(90deg, transparent, var(--ws-mask) var(--ws-fade-left), var(--ws-mask) calc(100% - var(--ws-fade-right)), transparent);
+}
+.ws-tabs::-webkit-scrollbar { display: none; }
+.ws-tabs.ws-fade-l { --ws-fade-left: var(--ws-band-fade); }
+.ws-tabs.ws-fade-r { --ws-fade-right: var(--ws-band-fade); }
 
-/* The hover preview: the document at a legible size, its title and arrival. */
-.ws-tab-preview {
-  position: fixed; z-index: 6; width: var(--ws-preview-width); padding: var(--ws-small-gap);
-  background: var(--ws-paper); color: var(--ws-ink); border: var(--ws-line-width) solid var(--ws-hairline);
-  border-radius: var(--ws-control-radius); box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid);
-  pointer-events: none; user-select: none;
+/* A tile is a small sheet of the page's paper, opaque so the veil's drawing stays
+   beneath it. Unselected tiles recede a little (their faces dim on the paper);
+   the selected one is lifted, with an ink hairline and a contact shadow. */
+.ws-tab {
+  position: relative; flex: none; width: var(--ws-tile-width); height: var(--ws-tile-height); padding: 0;
+  border-radius: var(--ws-tile-radius); background: var(--ws-paper); color: var(--ws-ink-muted);
+  border: var(--ws-line-width) solid var(--ws-hairline-soft) !important;
+  transition: transform var(--ws-crossing) var(--ws-ease),
+    box-shadow var(--ws-crossing) var(--ws-ease), border-color var(--ws-crossing) var(--ws-ease);
 }
-.ws-tab-preview[hidden] { display: none; }
-/* A pointer that leaves for a page goes straight into its frame, which would
-   swallow the leave; while a preview is up the frames let it reach the reader. */
-.ws-reader:has(> .ws-tab-preview:not([hidden])) iframe { pointer-events: none; }
-.ws-tab-preview-thumb {
-  --ws-preview-aspect: 1.6;
-  width: 100%; aspect-ratio: var(--ws-preview-aspect); overflow: hidden;
-  border: var(--ws-line-width) solid var(--ws-hairline-soft); border-radius: 3px;
+.ws-tab:hover { border-color: var(--ws-hairline) !important; }
+.ws-tab .ws-tab-thumb { opacity: var(--ws-tile-receded-opacity); transition: opacity var(--ws-crossing) var(--ws-ease); }
+.ws-tab:hover .ws-tab-thumb { opacity: var(--ws-tile-hover-opacity); }
+.ws-tab[aria-selected='true'] .ws-tab-thumb { opacity: 1; }
+.ws-tab[aria-selected='true'] {
+  color: var(--ws-ink); transform: translateY(var(--ws-tile-lift));
+  border-color: var(--ws-ink) !important; box-shadow: var(--ws-shadow-contact);
 }
-.ws-tab-preview-thumb[data-kind='pdf'] { --ws-preview-aspect: 0.9; }
-.ws-tab-preview-thumb[data-kind='audio'] { --ws-preview-aspect: 3; }
-.ws-tab-preview-face { width: 100%; height: 100%; }
-.ws-tab-preview-face.ws-tab-kind-fiber .ws-thumbnail-face { display: block; white-space: pre-wrap; font: var(--ws-small-size)/1.3 var(--ws-serif); }
-.ws-tab-preview-face .kbn-thumbnail-image img { object-fit: contain; }
-.ws-tab-preview-face.ws-tab-kind-video video { opacity: 0; }
-.ws-tab-preview-face.ws-tab-kind-video .kbn-thumbnail-glyph { display: flex !important; }
-.ws-tab-preview-face.ws-tab-kind-audio audio { display: none; }
-.ws-tab-preview-title {
-  margin: var(--ws-small-gap) 2px 0; font: var(--ws-label-size)/1.25 var(--ws-serif);
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+/* Names live in the tiles' faces and the caption; this label speaks only to assistive technology. */
+.ws-tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The face: the title in the serif, small, and the kind in a corner. */
+.ws-tab .ws-tab-thumb { position: absolute; inset: 0; border-radius: inherit; background: transparent; }
+.ws-tab .ws-tab-thumb .ws-thumbnail-face { padding: var(--ws-tile-pad); }
+.ws-tab .ws-tab-thumb .ws-thumbnail-title {
+  font: 500 var(--ws-tile-title-size)/1.14 var(--ws-serif); color: var(--ws-ink-soft); letter-spacing: 0;
+  -webkit-line-clamp: 3; overflow-wrap: break-word; hyphens: auto;
 }
-.ws-tab-preview-meta {
-  margin: 2px 2px 1px; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.ws-tab[aria-selected='true'] .ws-tab-thumb .ws-thumbnail-title { color: var(--ws-ink); }
+.ws-tab .ws-tab-thumb .ws-thumbnail-preview { display: none; }
+.ws-tab .ws-tab-thumb .ws-thumbnail-kind { right: 5px; bottom: 3px; font-size: var(--ws-tile-glyph-size); }
+/* The constitution's tile is its § alone, set large: the anchor of the run. */
+.ws-tab-anchor .ws-tab-thumb .ws-thumbnail-face { align-items: center; justify-content: center; }
+.ws-tab-anchor .ws-tab-thumb .ws-thumbnail-title { display: none; }
+.ws-tab-anchor .ws-tab-thumb .ws-thumbnail-kind { position: static; color: inherit; font: var(--ws-tile-anchor-size)/1 var(--ws-serif); }
+/* A recording's sketch: the loudest moment of each stretch, along the foot. */
+.ws-tile-sketch {
+  position: absolute; left: var(--ws-tile-pad); right: 18px; bottom: 5px; height: 11px;
+  display: flex; align-items: center; gap: 1px; color: var(--ws-ink-muted);
 }
+.ws-tile-sketch i { flex: 1; min-width: 1px; max-width: 2px; border-radius: 1px; background: currentColor; }
+.ws-tile-sketch[data-form='duration'] { font: var(--ws-tile-glyph-size)/1 var(--ws-mono); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+/* A live thumbnail fills the tile once it loads; the face beneath hides. */
+.ws-tab .ws-tab-thumb .kbn-thumbnail-image img { object-fit: cover; }
+.ws-tab .ws-tab-thumb :is(.kbn-thumbnail-glyph, .kbn-thumbnail-name) { display: none; }
+
+/* The gold fresh mark sits at the tile's shoulder. */
+.ws-tab-fresh::after {
+  content: ''; position: absolute; top: -3px; right: -3px; z-index: 1; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--kbn-owed); box-shadow: 0 0 0 2px var(--ws-paper);
+}
+
+/* The hovered tile's title: a caption in the serif, set in the gap between the page and the band. */
+.ws-tab-tip {
+  position: absolute; left: 0; bottom: calc(100% - var(--ws-tile-air)); z-index: 4; transform: translateX(-50%);
+  max-width: min(420px, 70%); display: flex; align-items: center; height: var(--ws-tip-height);
+  color: var(--ws-ink); font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; pointer-events: none;
+}
+.ws-tab-tip[hidden] { display: none; }
+.ws-tab-tip-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+/* The phone's sense of place: a tick per page along the bottom bar's top edge, the current one in ink. */
+.ws-page-ticks { display: none; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-page-ticks {
+    position: absolute; left: var(--ws-phone-target); right: var(--ws-phone-target); top: 0; height: 5px;
+    display: flex; justify-content: center; gap: 3px; pointer-events: none;
+  }
+  .ws-page-tick { flex: 0 1 12px; min-width: 1px; height: 2px; background: var(--ws-hairline); }
+  .ws-page-tick-current { height: 3px; background: var(--ws-ink); }
+}
+@media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab .ws-tab-thumb { transition: none; } }

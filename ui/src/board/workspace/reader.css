@@ -36,10 +36,11 @@
 .ws-mono, .ws-labelbar, .ws-receipts, .ws-position {
   font-family: var(--ws-mono); letter-spacing: var(--ws-mono-tracking);
 }
-/* The running head: one row on the veil, no plates. Names and verbs in the
-   serif, the page count in mono, all on one baseline. */
+/* The running head: one row on the veil, no plates. It says where you are:
+   the return, the fiber's name and its verdicts, and its worker; the map at
+   the foot says which page. Names and verbs in the serif, on one baseline. */
 .ws-navbar {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline; column-gap: var(--ws-head-span); padding: var(--ws-head-top) var(--ws-head-end) 0 var(--ws-head-start);
   background: transparent; position: relative; z-index: 3; flex: none;
 }
@@ -64,7 +65,7 @@
 .ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
-/* The right end: the worker control, then the page count. */
+/* The right end: the worker control. */
 .ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0; }
 .ws-head-worker { flex: none; display: flex; align-items: baseline; }
 .ws-head-worker[hidden] { display: none; }
@@ -79,7 +80,6 @@
 .ws-head-worker .ws-worker-dot { align-self: center; width: 7px; height: 7px; }
 .ws-head-worker .ws-worker-state { font: inherit; }
 .ws-head-worker .ws-worker-elapsed { font: var(--ws-small-size)/1 var(--ws-mono); letter-spacing: 0; }
-.ws-head-position { color: var(--ws-ink-muted); font-size: var(--ws-small-size); letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ws-worker-state { font: var(--ws-label-size)/1.2 var(--ws-serif); }
 .ws-worker-elapsed { font: var(--ws-small-size)/1.4 var(--ws-mono); }
 /* A dot is too small for ink-mixed pigments: working is the machine's own cobalt, waiting the undiluted gold. */
@@ -103,27 +103,11 @@
   background: transparent; font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0; text-transform: none;
 }
 .ws-reader .ws-nav-verdicts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); }
-.ws-tabs {
-  display: flex; align-self: center; gap: var(--ws-tab-gap); overflow-x: auto; scrollbar-width: none;
-  min-width: 0; position: relative; padding: 0 var(--ws-tab-fade);
-  --ws-fade-left: 0px; --ws-fade-right: 0px;
-  mask-image: linear-gradient(90deg, transparent, var(--ws-mask) var(--ws-fade-left), var(--ws-mask) calc(100% - var(--ws-fade-right)), transparent);
-}
-.ws-tabs::-webkit-scrollbar { display: none; }
-.ws-tabs.ws-fade-l { --ws-fade-left: var(--ws-tab-fade); }
-.ws-tabs.ws-fade-r { --ws-fade-right: var(--ws-tab-fade); }
-.ws-tab {
-  flex: none; display: flex; align-items: center; min-width: var(--ws-tab-floor); max-width: var(--ws-tab-ceiling);
-  height: var(--ws-control-height); padding: 0 var(--ws-tab-pad); border-radius: var(--ws-control-radius);
-  white-space: nowrap; overflow: hidden; color: var(--ws-ink-muted) !important;
-  font-size: var(--ws-label-size); font-family: var(--ws-serif); letter-spacing: 0; justify-content: center; border: 0 !important;
-}
-.ws-tab-fresh::after { content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 5px; border-radius: 50%; background: var(--kbn-owed); }
-.ws-tab:hover, .ws-tab[aria-selected='true'] { color: var(--ws-ink) !important; }
-.ws-tab.ws-clipped { mask-image: linear-gradient(90deg, var(--ws-mask) calc(100% - var(--ws-tab-fade)), transparent); }
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
+.ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .ws-stage {
-  position: relative; overflow: hidden; flex: 1; min-height: 0; min-width: 0;
+  /* Pages clip at the stage's sides; their shadows still fall below it, toward the map. */
+  position: relative; overflow-x: clip; overflow-y: visible; flex: 1; min-height: 0; min-width: 0;
   background: transparent; transform-origin: center 40%;
 }
 .ws-parallax { position: absolute; inset: 0; transform: translate3d(var(--ws-page-x, 0px), var(--ws-page-y, 0px), 0); }
@@ -277,7 +261,7 @@
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
-  .ws-nav-verdicts, .ws-tabs, .ws-head-position { display: none !important; }
+  .ws-nav-verdicts, .ws-band { display: none !important; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
   .ws-reader .ws-navbar .ws-head-worker .ws-worker-control { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
