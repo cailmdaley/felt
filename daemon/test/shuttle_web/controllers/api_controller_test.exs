@@ -195,9 +195,7 @@ defmodule ShuttleWeb.APIControllerTest do
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    MockRunner.set_new_session_delay(5_250)
-
-    started_at_ms = System.monotonic_time(:millisecond)
+    MockRunner.set_new_session_delay(300)
 
     conn =
       post(
@@ -208,14 +206,28 @@ defmodule ShuttleWeb.APIControllerTest do
         })
       )
 
-    elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
-
-    assert elapsed_ms >= 5_000
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
     assert body["dispatched"] == true
     assert body["fiber_id"] == fiber_id
     assert body["tmux_session"] == FiberUid.session(fiber_id)
+
+    # The request waits on the Poller's dispatch call timeout, which clears
+    # GenServer's 5 s default (PollerTest pins that): shrunk below a spawn's
+    # duration, the request gives up first, so it holds no shorter wait of its
+    # own and no GenServer default in between.
+    late_id = "tests/api-late-dispatch"
+    MockRunner.set_fiber(late_id, make_fiber(late_id))
+    MockRunner.set_shuttle(late_id, oneshot_shuttle())
+    previous = Application.get_env(:shuttle, :dispatch_call_timeout_ms)
+    on_exit(fn -> restore_app_env(:dispatch_call_timeout_ms, previous) end)
+    Application.put_env(:shuttle, :dispatch_call_timeout_ms, 200)
+    MockRunner.set_new_session_delay(600)
+
+    assert {:timeout, {GenServer, :call, _}} =
+             catch_exit(
+               post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => late_id}))
+             )
   end
 
   test "dispatch returns 400 without fiber_id" do

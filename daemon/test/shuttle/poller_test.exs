@@ -5689,11 +5689,8 @@ defmodule Shuttle.PollerTest do
   end
 
   test "dispatch_fiber waits past the default GenServer timeout for slow successful dispatches" do
-    fiber_id = "tests/slow-api-dispatch"
-    fiber = make_fiber(fiber_id)
-    MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    MockRunner.set_new_session_delay(5_250)
+    # The worker-changing calls wait past GenServer's 5 s default...
+    assert Poller.dispatch_call_timeout_ms() > 5_000
 
     {:ok, poller} =
       start_poller!(
@@ -5703,14 +5700,30 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    started_at_ms = System.monotonic_time(:millisecond)
+    # The fibers arrive after the boot cycle, so only these calls dispatch them.
+    settle_poller!(poller)
+    slow_id = "tests/slow-api-dispatch"
+    MockRunner.set_fiber(slow_id, make_fiber(slow_id))
+    MockRunner.set_shuttle(slow_id, oneshot_shuttle())
+    late_id = "tests/late-api-dispatch"
+    MockRunner.set_fiber(late_id, make_fiber(late_id))
+    MockRunner.set_shuttle(late_id, oneshot_shuttle())
 
-    assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, [])
+    # ...a slow spawn still answers...
+    MockRunner.set_new_session_delay(300)
+    assert {:ok, session} = Poller.dispatch_fiber(poller, slow_id, [])
+    assert session == FiberUid.session(slow_id)
+    assert Poller.snapshot(poller).eligible |> Enum.any?(&(&1.fiber_id == slow_id))
 
-    elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
-    assert elapsed_ms >= 5_000
-    assert session == FiberUid.session(fiber_id)
-    assert Poller.snapshot(poller).eligible |> Enum.any?(&(&1.fiber_id == fiber_id))
+    # ...and the wait is that timeout, not GenServer's default: shrunk below a
+    # spawn's duration, the caller gives up first.
+    previous = Application.get_env(:shuttle, :dispatch_call_timeout_ms)
+    on_exit(fn -> restore_app_env(:dispatch_call_timeout_ms, previous) end)
+    Application.put_env(:shuttle, :dispatch_call_timeout_ms, 200)
+    MockRunner.set_new_session_delay(600)
+
+    assert {:timeout, {GenServer, :call, _}} =
+             catch_exit(Poller.dispatch_fiber(poller, late_id, []))
   end
 
   # ── Multi-host tests ──
