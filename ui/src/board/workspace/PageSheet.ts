@@ -132,7 +132,8 @@ export class PageSheet {
         const thumb = new Thumbnail({ key: `sheet:${doc.key}`, shuttleBase: this.base,
           file: doc.kind === 'fiber' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
           fallback: channel.outcome ?? channel.name, captioned: true, className: 'ws-page-sheet-thumb',
-          priority: () => this.isOpen && this.onScreen(button) ? 4 : 0,
+          // Native PDF previews navigate subframes; the text face keeps this history layer self-contained.
+          priority: () => doc.kind !== 'pdf' && this.isOpen && this.onScreen(button) ? 4 : 0,
           distance: () => Math.abs(index - channel.documents.findIndex(d => d.key === this.model?.selected)),
         })
         if (doc.kind === 'fiber') thumb.setProse(extractEmbeds(channel.body).body || channel.outcome || '', channel.labels[index])

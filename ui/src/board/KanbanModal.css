@@ -2271,6 +2271,7 @@
     font-size: calc(11.5px * var(--kbn-type-scale, 1));
   }
   .kbn-viewtab-hotkey { display: none; }
+  .kbn-modal .kbn-body-veiled > .kbn-view-host { top: 0; bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
   .kbn-viewtabs-lens {
     display: block;
     flex: 1 1 0;

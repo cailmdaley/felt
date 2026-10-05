@@ -201,7 +201,7 @@ test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p =
   assert.ok(entering.frames.every(frame => 'transform' in frame && 'opacity' in frame && !('filter' in frame)))
   await p.waitForTimeout(70)
   await p.locator('.ws-sidebar-toggle').click()
-  await p.waitForTimeout(330)
+  await poll(p, () => !document.querySelector('.ws-sidebar-flight'))
   assert.equal(await p.locator('.ws-sidebar-flight').count(), 0)
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
   await p.locator('.ws-sidebar-toggle').click()
@@ -378,7 +378,7 @@ test('Audio waveform, transport, comparison, keep-position and keyboard guards',
 
 for (const format of ['mp4', 'webm']) test(`Video ${format} plays and seeks native fixture`, async p => {
   await open(p); await choose(p, `test.${format}`)
-  const video = selected(p).locator('video')
+  const video = p.getByRole('tabpanel', { name: `test.${format}`, exact: true, includeHidden: true }).locator('video')
   await video.evaluate(async v => { await v.play() })
   await poll(p, () => [...document.querySelectorAll('video')].some(v => v.currentTime > 0 && v.videoWidth > 0))
   await video.evaluate(v => { v.pause(); v.currentTime = 0.5 })
@@ -428,7 +428,18 @@ test('Remote worker pill records attach handler without launching a terminal', a
 })
 
 test('Phone overview single column, reader sheet, footer stepping and Back', async p => {
+  const switcher = await p.locator('.kbn-viewtabs').boundingBox()
+  assert.equal(Math.round(switcher.y + switcher.height), 844, 'view switcher sits at the bottom')
+  for (const view of ['desk', 'chronicle', 'shelf']) assert.ok((await p.locator(`[data-view="${view}"]`).boundingBox()).height >= 44)
+  const seasons = p.locator('.kbn-viewtabs-lens')
+  if (await seasons.locator('.kbn-lens-chip').count()) {
+    const gear = await p.locator('.kbn-viewtabs-settings').boundingBox(), lane = await seasons.boundingBox()
+    assert.ok(lane.x + lane.width <= gear.x, 'season scrollport ends before Settings')
+    await seasons.evaluate(el => { el.scrollLeft = el.scrollWidth })
+    assert.ok(await seasons.evaluate(el => el.scrollLeft > 0))
+  }
   await p.locator('[data-view="shelf"]').click()
+  assert.equal((await p.locator('.ws-overview').boundingBox()).y, 0, 'overview starts above the bottom switcher')
   await poll(p, () => document.querySelectorAll('.ws-overview-folio:not([hidden])').length >= 2)
   const folios = await p.locator('.ws-overview-folio:visible').evaluateAll(es => es.map(e => e.getBoundingClientRect().x))
   assert.ok(folios.length > 1 && folios.every(x => Math.abs(x - folios[0]) < 2))
@@ -744,7 +755,12 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /basalt-login-02/, 'foreign document owner remains in label')
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    if (device === 'phone') {
+      await p.locator('.kbn-folio-seg[data-folio="1"]').click()
+      await poll(p, () => document.querySelector('.kbn-folio-seg[data-folio="1"]')?.getAttribute('aria-selected') === 'true')
+    }
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await poll(p, () => /^aloft(?: · (?:terminal|browser))?$/i.test(document.querySelector('.ws-worker-pill')?.textContent.trim() ?? ''))
     assert.match((await navbar.textContent()).trim(), /^aloft(?: · (?:terminal|browser))?$/i, 'navbar names state, not agent')
     await choose(p, 'Constitution')
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
