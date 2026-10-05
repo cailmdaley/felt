@@ -54,7 +54,7 @@ interface Entry {
 
 const ENTRY_LIMIT = 600
 /** Whole bodies stay after their readers leave, up to this many characters in all. */
-const TEXT_BUDGET = 24 * 1024 * 1024
+export const RESOURCE_TEXT_BUDGET = 24 * 1024 * 1024
 const FACT_LIMIT = 8
 /**
  * A read in flight. A more urgent asker moves it up the queue while it still
@@ -109,11 +109,14 @@ function entryFor(src: string): Entry {
 
 function holdText(entry: Entry, body: TextBody): void {
   if (entry.text) textHeld -= entry.text.value.text.length
+  entry.text = undefined
+  // A body larger than the whole budget is read through, not held.
+  if (body.text.length > RESOURCE_TEXT_BUDGET) return
   entry.text = { value: body, at: Date.now() }
   textHeld += body.text.length
   // The least recently asked bodies go first; their heads, peeks and facts stay.
   for (const other of entries.values()) {
-    if (textHeld <= TEXT_BUDGET) break
+    if (textHeld <= RESOURCE_TEXT_BUDGET) break
     if (other === entry || !other.text) continue
     textHeld -= other.text.value.text.length
     other.text = undefined

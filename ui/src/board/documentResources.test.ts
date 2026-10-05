@@ -1,7 +1,7 @@
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  bytes, fact, fetchDocument, head, peek, peekVersion, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS,
+  bytes, fact, fetchDocument, head, peek, peekVersion, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS, RESOURCE_TEXT_BUDGET,
   RESOURCE_PRIORITY, text, type ResourcePriority,
 } from './documentResources.js'
 import { resetLanes } from './requestLanes.js'
@@ -240,6 +240,16 @@ describe('shared reads', () => {
     expect(unchanged.status).toBe(304)
     expect((await thumbnail)!.text).toBe('<h1>Report</h1>')
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not hold a body larger than the whole text budget, nor evict others for it', async () => {
+    const huge = 'x'.repeat(RESOURCE_TEXT_BUDGET + 1)
+    vi.stubGlobal('fetch', vi.fn(async (src: string) => new Response(src.includes('huge') ? huge : 'small', { headers: { ETag: 'W/"sha256-h"' } })))
+    await (await fetchDocument('/api/v1/file?path=/small.md', { cache: 'no-cache' })).text()
+    const response = await fetchDocument('/api/v1/file?path=/huge.html', { cache: 'no-cache' })
+    expect((await response.text()).length).toBe(huge.length)
+    expect(recallText('/api/v1/file?path=/huge.html')).toBeUndefined()
+    expect(recallText('/api/v1/file?path=/small.md')?.text).toBe('small')
   })
 
   it('lets a thumbnail join a page read already in flight', async () => {
