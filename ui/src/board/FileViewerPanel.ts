@@ -135,7 +135,8 @@ export function buildFileViewer(
 
   const iframe = document.createElement('iframe')
   iframe.className = 'kbn-fileview-frame'
-  iframe.src = src
+  iframe.src = `${src}#navpanes=0&view=FitH`
+  iframe.style.background = 'var(--ws-paper)'
   iframe.title = basename(fullPath)
   wrap.append(iframe, veil)
 

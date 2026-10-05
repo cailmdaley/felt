@@ -226,7 +226,7 @@ describe('workspace reader integration', () => {
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
   })
 
-  it('keeps body links and embeds while placing the inline controls above the outcome', async () => {
+  it('keeps body links and embeds while placing the outcome above inline controls', async () => {
     workspace.open(cards[0])
     await flush()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
@@ -234,7 +234,7 @@ describe('workspace reader integration', () => {
     const band = article.querySelector<HTMLElement>('.ws-dock')!
     const outcome = article.querySelector<HTMLElement>('.kbn-detail-lede')!
     expect(header.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(band.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(outcome.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
     const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Note')!
@@ -335,7 +335,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('Aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
-    button('New session').click()
+    band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     expect(confirm).toHaveBeenCalledOnce()
     button('Temper').click()
     expect(transition).toHaveBeenCalledWith(expect.objectContaining({
@@ -343,7 +343,7 @@ describe('workspace reader integration', () => {
       feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b', originId: 'host-a',
     }), 'tempered')
     vi.mocked(fetch).mockClear()
-    button('Resume').click()
+    band.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
     await flush()
     const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/dispatch'))!
     expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: 'Keep this draft' })
@@ -457,8 +457,9 @@ describe('workspace reader integration', () => {
     const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.textContent === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
-    const proseLabels = [...prose.querySelectorAll<HTMLButtonElement>('.ws-prose-documents button')].map(button => button.textContent ?? '')
-    expect(labels()).toEqual(['Note', ...proseLabels])
+    expect(prose.querySelector('.ws-prose-documents')).toBeNull()
+    expect(prose.querySelector('.ws-prose-contents')?.textContent).toBe('3 pages2 reports')
+    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
   })
 
   it('uses the shared Reader keymap for single-step tab roving focus', async () => {

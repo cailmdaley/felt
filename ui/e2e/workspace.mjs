@@ -122,10 +122,10 @@ test('Fiber composer isolates keys; settings and history use mocked daemon', asy
   await p.getByText('History', { exact: true }).click()
 })
 
-test('Body embed appears once in channel and its channel link opens report', async p => {
+test('Fiber contents replace the duplicate file list and select the newest report', async p => {
   await open(p); await choose(p, 'Constitution')
-  assert.equal(await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^calibration-report$/ }).count(), 1)
-  await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^calibration-report$/ }).click()
+  assert.equal(await selected(p).locator('.ws-prose-documents').count(), 0)
+  await selected(p).locator('.ws-prose-contents button').filter({ hasText: /report/ }).click()
   await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === 'calibration-report')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
 })
@@ -461,20 +461,18 @@ test('Desk slash opens the same constitution picker without opening reader; Esca
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
 })
 
-// Say-it-once checks are scoped to the selected page and its chrome. Tabs,
-// the constitution switcher/title and the in-constitution document list repeat
-// names intentionally: they select/navigate. The navbar and control-band pills
-// are two conversation actions, not two passive worker summaries. Expanded
-// settings may repeat values in editable controls; the folded summary is their
-// single passive home. Parked/receded pages and the inert Desk aren't a second
-// readable screen, so global text counts would enforce the wrong contract.
+// Say-it-once checks cover the selected page and its chrome. Tabs and the
+// constitution switcher repeat names as navigation actions. The desktop fiber
+// title is a reading anchor; the phone uses only the navbar name. Expanded
+// settings may repeat values in editable controls. Parked/receded pages and
+// the inert Desk are not a second readable screen.
 const inventory = []
 const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
   test(`Say it once: ${device} fiber, media, PDF and unsupported metadata`, async p => {
     await open(p); await choose(p, 'Constitution')
     const header = selected(p).locator('.ws-prose-header')
-    assert.equal((await header.innerText()).trim().toLowerCase(), 'closed', 'fiber header carries status alone')
+    assert.equal((await header.innerText()).trim().toLowerCase(), 'awaiting your review', 'fiber kicker uses the Desk state')
     assert.equal(await header.locator(':scope > *').count(), 1)
     const settings = selected(p).locator('.kbn-detail-controls-toggle')
     assert.equal(await settings.getAttribute('aria-expanded'), 'false')
@@ -497,7 +495,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     })
     assert.doesNotMatch(passive, /claude-opus|\bhigh\b|umber-workstation|\/fixture-store\/workspace/, 'launch metadata has no passive home outside settings')
     assert.equal(await selected(p).locator('.kbn-card-worker,.ws-dock-worker').count(), 0, 'navbar owns the only conversation control')
-    assert.equal(await selected(p).locator('.ws-fiber-prose > h1').count(), 0, 'navbar owns the fiber name')
+    assert.equal(await selected(p).locator('.ws-fiber-prose > h1:visible').count(), device === 'phone' ? 0 : 1, 'desktop title is the adopted reading anchor; phone navbar owns the name')
     const navbar = p.locator('.ws-worker-pill')
     assert.doesNotMatch(await navbar.innerText(), /claude-opus|umber-workstation|fixture-store/)
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /changed 47m ago/i, 'fiber time comes from modified_at, not updated_at or receipts')
@@ -506,12 +504,27 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     // Expanded editable values are an action exception, not passive duplicates.
     await settings.click()
     assert.ok(await selected(p).getByRole('combobox', { name: 'Agent', exact: true }).isVisible())
+    await capture('settings-expanded')
     await settings.click()
+    await selected(p).getByText('History', { exact: true }).click()
+    await selected(p).locator('.kbn-ctl-session-list > li').last().waitFor()
+    await capture('history-expanded')
+    await selected(p).getByText('History', { exact: true }).click()
+    await choose(p, 'calibration-report')
+    await reportReady(p)
+    await capture('report')
+    await choose(p, 'Constitution')
     for (const [state, label] of [['media', 'tone.mp3'], ['pdf', 'response.pdf'], ['unsupported', 'archive.zip']]) {
       await choose(p, label)
       if (state === 'media') {
         await poll(p, () => document.querySelector('.ws-selected audio')?.readyState >= 1)
+        await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')
         assert.equal(await selected(p).locator('.ws-audio-waveform').count(), 1, 'the listening instrument owns position controls')
+        await capture('audio-paused')
+        await selected(p).getByRole('button', { name: 'Play', exact: true }).click()
+        await poll(p, () => document.querySelector('.ws-selected audio')?.currentTime > 0.2)
+        await capture('audio-playing')
+        await selected(p).getByRole('button', { name: 'Pause', exact: true }).click()
       }
       if (state === 'pdf') await selected(p).locator('iframe').waitFor()
       if (state === 'unsupported') await selected(p).getByRole('link', { name: 'Download', exact: true }).waitFor()
@@ -544,6 +557,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       return copy.textContent
     })
     assert.ok(!outsideSettings.includes(await cadence.innerText()), 'cadence is not repeated outside its editable settings')
+    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await p.locator('[data-view="shelf"]').click()
+    await p.locator('.ws-overview-folio').first().waitFor()
+    await p.screenshot({ path: resolve(shots, `${device}-overview.png`) })
 
     async function capture(state) {
       await mkdir(shots, { recursive: true })

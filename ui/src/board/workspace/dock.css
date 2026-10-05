@@ -27,17 +27,6 @@
 .ws-dock :is(button, input, select, textarea):not(.kbn-card-worker) { color: inherit; }
 .ws-dock button { cursor: pointer; }
 .ws-dock :disabled { opacity: .55; cursor: default; }
-.ws-dock-worker {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ws-small-gap) 10px;
-  padding: var(--ws-small-gap) 0;
-}
-.ws-dock-worker:empty { display: none; }
-/* Worker pills inherit the Desk's states and pigments without recolouring. */
-.ws-dock .kbn-card-worker { min-height: var(--ctl-h); display: inline-flex; align-items: center; }
 .ws-dock .kbn-detail-directive:focus-visible { outline: none; }
 .ws-dock .kbn-detail-app-guide {
   margin: var(--ws-inset) 0;
@@ -96,7 +85,7 @@
 .ws-dock .kbn-ctl-btn {
   flex: none;
   padding: 4px 10px;
-  border: var(--ws-line-width) solid var(--ws-hairline);
+  border: var(--ws-line-width) solid var(--ws-hairline) !important;
   background: var(--ws-paper);
   font: var(--ws-chrome-size)/1.3 var(--ws-mono);
   white-space: nowrap;
@@ -214,7 +203,7 @@
 .ws-dock .kbn-detail-parent-option-id { font: var(--ws-small-size) var(--ws-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
 .ws-dock .kbn-detail-parent-empty { cursor: default; color: var(--ws-ink-muted); font: italic var(--ws-chrome-size) var(--ws-serif); }
 .ws-dock .kbn-ctl-foot { grid-column: 4; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); }
-.ws-dock :is(.kbn-detail-controls-toggle, .kbn-ctl-history-toggle, .kbn-ctl-foot .kbn-ctl-btn) { font: 12px/1.4 var(--ws-mono) !important; min-height: var(--ctl-h); display: flex; align-items: center; }
+.ws-dock :is(.kbn-detail-controls-toggle, .kbn-ctl-foot .kbn-ctl-btn) { font: 12px/1.4 var(--ws-mono) !important; min-height: var(--ctl-h); display: flex; align-items: center; }
 .ws-dock .kbn-ctl-history-toggle { gap: 8px; }
 .ws-dock .kbn-ctl-history-toggle .kbn-ctl-label { font: inherit; color: inherit; }
 .ws-dock .kbn-ctl-history-chevron { display: inline-flex; align-items: center; line-height: 1; }
@@ -257,6 +246,30 @@
   .ws-dock .kbn-ctl-image-remove { width: var(--ws-phone-target); height: var(--ws-phone-target); }
 }
 
-@media (pointer: coarse) {
-  .ws-dock .kbn-card-worker { min-height: var(--ws-phone-target); }
+/* Data stays mono; verbs are serif plates. */
+.ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-sends .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,
+.ws-dock .kbn-ctl-history-toggle { font: 15px/1.4 var(--ws-serif) !important; }
+.ws-dock .kbn-ctl-composer { border: 0; border-bottom: 1px solid var(--ws-hairline); border-radius: 0; }
+.ws-dock .kbn-ctl-composer:has(.kbn-ctl-microphone) { grid-template-columns: auto minmax(0, 1fr) auto; }
+.ws-dock .kbn-ctl-composer:not(:focus-within, .kbn-ctl-composer-draft):has(.kbn-ctl-microphone) .kbn-ctl-composer-foot { grid-column: 3; }
+.ws-dock .kbn-ctl-composer:has(.kbn-ctl-microphone):is(:focus-within, .kbn-ctl-composer-draft) { grid-template-columns: auto minmax(0, 1fr); }
+.ws-dock .kbn-ctl-composer .kbn-ctl-composer-foot { padding-right: 0; }
+.ws-dock .kbn-ctl-sends { border: 0; overflow: visible; }
+.ws-dock .kbn-ctl-sends .kbn-ctl-btn { border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-fill); }
+.ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn { position: relative; font-size: 0 !important; background-image: none; padding: 0; width: 36px; border: 1px solid var(--ws-hairline); }
+.ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn::before { content: ''; position: absolute; left: calc(50% - 3px); top: calc(50% - 8px); width: 6px; height: 11px; border: 1px solid currentColor; border-radius: 4px; }
+.ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn::after { content: ''; position: absolute; left: calc(50% - 6px); top: calc(50% - 3px); width: 12px; height: 9px; border: 1px solid currentColor; border-top: 0; border-radius: 0 0 8px 8px; box-shadow: 0 5px 0 -4px currentColor; }
+.ws-dock .kbn-ctl-verdict { grid-column: 1 / -1; display: flex; gap: 8px; margin-bottom: 8px; }
+.ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 36px; padding-inline: 16px; }
+.ws-dock .kbn-ctl-verdict .kbn-ctl-temper { color: var(--ws-verdict); border-color: var(--ws-verdict) !important; background: color-mix(in srgb, var(--ws-verdict) 10%, var(--ws-paper)); }
+.ws-dock .kbn-ctl-verdict-menu { position: relative; }
+.ws-dock .kbn-ctl-verdict-menu summary { cursor: pointer; display: grid; place-items: center; min-width: 36px; min-height: 36px; list-style: none; font: 20px/1 var(--ws-serif); }
+.ws-dock .kbn-ctl-verdict-menu summary::-webkit-details-marker { display: none; }
+.ws-dock .kbn-ctl-verdict-menu .kbn-ctl-menu { gap: 4px; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-dock .kbn-ctl-composer, .ws-dock .kbn-ctl-composer:has(.kbn-ctl-microphone) { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .ws-dock .kbn-ctl-composer:not(:focus-within, .kbn-ctl-composer-draft) .kbn-ctl-composer-foot { grid-column: 3; grid-row: 1; }
+  .ws-dock .kbn-ctl-composer:not(:has(.kbn-ctl-microphone)) { grid-template-columns: minmax(0, 1fr) auto; }
+  .ws-dock .kbn-ctl-composer:not(:focus-within, .kbn-ctl-composer-draft):not(:has(.kbn-ctl-microphone)) .kbn-ctl-composer-foot { grid-column: 2; }
+  .ws-dock .kbn-ctl-verdict .kbn-ctl-btn, .ws-dock .kbn-ctl-verdict-menu summary, .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn { min-height: 44px; min-width: 44px; }
 }

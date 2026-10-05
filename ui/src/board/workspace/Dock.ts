@@ -14,6 +14,7 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
+import { fiberPageColumn } from './fiberPageState.js'
 import './tokens.css'
 import './dock.css'
 
@@ -408,6 +409,9 @@ export class Dock {
   private dismissConversation: (() => boolean) | null = null
   private composerSend: ComposerSend | null = null
   private composerError: HTMLElement | null = null
+  private composerPaint: (() => void) | null = null
+  private actPaint: (() => void) | null = null
+  private verdictMenu: HTMLDetailsElement | null = null
   private freshButton: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
@@ -534,6 +538,8 @@ export class Dock {
     this.timers.clear()
     this.composerSend = null
     this.composerError = null
+    this.composerPaint = this.actPaint = null
+    this.verdictMenu = null
     this.freshButton = null
     this.settingsSync = null
     this.historySync = null
@@ -544,6 +550,7 @@ export class Dock {
   }
 
   handleEscape(): boolean {
+    if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
     return Boolean(this.dismissConversation?.() || this.dismissMeeting?.() || this.dismissParent?.())
   }
 
@@ -626,13 +633,15 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
     }
     this.settingsSync?.(incoming)
     this.historySync?.()
+    this.composerPaint?.()
+    this.actPaint?.()
     for (const [button, blocked] of this.blockedDispatches) {
       if (blocked.worker === workerIdentity(card)) continue
       button.disabled = false
@@ -758,8 +767,35 @@ export class Dock {
     for (const [btn, target] of [[discard, 'composted'], [temper, 'tempered']] as const) {
       btn.addEventListener('click', () => this.onTransition(card, target))
     }
-    foot.append(errorEl, statusEl, discard, temper)
+    const verdict = document.createElement('div')
+    verdict.className = 'kbn-ctl-verdict'
+    const menu = document.createElement('details')
+    menu.className = 'kbn-ctl-verdict-menu'
+    const more = document.createElement('summary')
+    more.textContent = '⋯'; more.setAttribute('aria-label', 'Fiber actions')
+    const choices = document.createElement('div'); choices.className = 'kbn-ctl-menu'
+    menu.append(more, choices)
+    this.verdictMenu = menu
+    foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
+    this.actPaint = () => {
+      const column = fiberPageColumn(card)
+      this.el.dataset.column = column
+      const review = column === 'awaitingReview'
+      if (review) {
+        if (verdict.parentElement !== body) body.prepend(verdict)
+        if (temper.parentElement !== verdict) verdict.append(temper, discard)
+        menu.remove()
+      } else {
+        verdict.remove()
+        if (column === 'drafts') { temper.remove(); discard.remove(); menu.remove() }
+        else {
+          if (temper.parentElement !== choices) choices.append(temper, discard)
+          if (menu.parentElement !== foot) foot.append(menu)
+        }
+      }
+    }
+    this.actPaint()
   }
 
   private buildComposer(card: KanbanCard): HTMLElement {
@@ -805,8 +841,17 @@ export class Dock {
     // While a send is in flight every verb is held and the chips are frozen,
     // so what is sent is what was shown.
     let busy = false
-    const fresh = ctlButton('New session', 'kbn-ctl-send')
-    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
+    const fresh = ctlButton('Start ↵', 'kbn-ctl-send')
+    const resume = ctlButton('Resume ↵', 'kbn-ctl-send kbn-ctl-resume')
+    this.composerPaint = () => {
+      const draft = fiberPageColumn(card) === 'drafts'
+      const resumable = !draft && Boolean(card.sessionUuid)
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : 'Start ↵'
+      fresh.hidden = resumable
+      resume.hidden = !resumable
+      message.placeholder = fiberPageColumn(card) === 'awaitingReview' ? 'Reply and resume…' : 'What should the worker do next?'
+    }
+    this.composerPaint()
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
       busy = on
       for (const verb of [fresh, resume]) if (verb !== except) verb.disabled = on
@@ -877,7 +922,8 @@ export class Dock {
     foot.className = 'kbn-ctl-composer-foot'
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
-    if (this.meeting) sends.append(this.buildMeeting(card, err, send))
+    const meeting = this.meeting ? this.buildMeeting(card, err, send) : null
+    if (meeting) meeting.classList.add('kbn-ctl-microphone')
     sends.append(fresh, resume)
     foot.append(sends)
 
@@ -899,7 +945,15 @@ export class Dock {
       void this.runRequeue(card, send.compose, 'previous', resume, err).then((ok) => ok && send.sent())
     })
 
-    box.append(message, strip.el, foot)
+    message.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
+      event.preventDefault(); event.stopPropagation()
+      if (event.repeat || busy) return
+      const previous = Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
+      const resumeSession = event.altKey ? !previous : previous
+      void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
+    })
+    box.append(...(meeting ? [meeting] : []), message, strip.el, foot)
     wrap.append(box, imageErr, err)
     return wrap
   }
