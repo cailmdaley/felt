@@ -153,7 +153,8 @@ export class ConstitutionPicker {
   private readonly keydown = (event: KeyboardEvent): void => {
     const mine = this.el.contains(event.target as Node) || (event.target === this.find && this.listening)
     if (!this.el.isConnected || !mine || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey) return
-    if (event.key === 'Escape') this.close(true)
+    // A shared field's owner puts it away on Escape.
+    if (event.key === 'Escape') { if (this.opts.find) return; this.close(true) }
     else if (event.key === 'Enter' && event.target === this.find) {
       if (event.repeat) return
       this.list.querySelector<HTMLElement>('.ws-channel-row')?.click()

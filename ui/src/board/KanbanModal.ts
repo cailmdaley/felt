@@ -787,10 +787,11 @@ export class KanbanModal {
     this.findEl.setAttribute('aria-label', 'Find a constitution')
     this.findEl.addEventListener('focus', () => this.workspace?.find(this.activeViewId === 'shelf'))
     this.findEl.addEventListener('input', () => this.workspace?.find(this.activeViewId === 'shelf'))
+    // Escape puts Find away whole: its list, its filter and the focus.
     this.findEl.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (e.key !== 'Escape' || e.isComposing) return
       e.preventDefault(); e.stopPropagation()
-      this.workspace?.closeFind()
+      this.workspace?.clearFind()
       this.findEl?.blur()
     })
     const findKey = document.createElement('span')

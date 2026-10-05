@@ -168,6 +168,15 @@ export class Workspace {
   }
   /** Close the Find's list, if it hangs open. */
   closeFind(): void { this.barPicker.close() }
+  /** Empty the bar's Find and lift whatever it filtered. */
+  clearFind(): void {
+    const input = this.opts.find
+    this.barPicker.close()
+    if (!input?.value) return
+    input.value = ''
+    this.overview.setQuery('')
+    this.reader.refreshChannels()
+  }
   /** Return from the reader to the view it was opened from, as Escape does. */
   returnToOrigin(): void {
     if (!this.isActive) return
