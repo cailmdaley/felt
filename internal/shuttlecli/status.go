@@ -539,7 +539,7 @@ func shuttleTruncateID(s string, n int) string {
 	return "…" + s[len(s)-(n-1):]
 }
 
-func registerShuttleStatusFlags() {
+func init() {
 	statusCmd.Flags().BoolVar(&statusClosed, "closed", false,
 		"Also list closed fibers (hidden from the table by default; --json always includes them)")
 	statusCmd.Flags().BoolVar(&statusIncludeOrphans, "include-orphans", false,
@@ -549,10 +549,6 @@ func registerShuttleStatusFlags() {
 	statusCmd.Flags().StringVar(&statusRemote, "remote", "",
 		"Show only the named remote (queries daemon /api/v1/state/composite)")
 	statusCmd.MarkFlagsMutuallyExclusive("all", "remote")
-}
-
-func init() {
-	registerShuttleStatusFlags()
 	addShuttleCommand(statusCmd)
 	addShuttleCommand(psCmd)
 }

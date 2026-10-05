@@ -577,9 +577,9 @@ and availability.`,
 			if sessionsMaterialize || sessionsDir != "" {
 				return fmt.Errorf("--materialize and --dir require a fiber, session UUID, or --commit <sha>")
 			}
-			return runShuttleSessionDiscovery(cmd.Context())
+			return runShuttleSessionDiscovery(cmd.Context(), &sessionsDiscovery)
 		}
-		if sessionsDiscoveryLocal || sessionsDiscoveryHost != "" || sessionsDiscoveryHarness != "" {
+		if sessionsDiscovery.local || sessionsDiscovery.host != "" || sessionsDiscovery.harness != "" {
 			return fmt.Errorf("--local, --host, and --harness apply only to no-argument live session discovery")
 		}
 		ledger, err := fetchSessionLedger()

@@ -35,15 +35,15 @@ func installIntoTemp(t *testing.T, jobDir string) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	prevJob, prevLog, prevSSH, prevWriteOnly :=
-		tunnelsJobDir, tunnelsLogDir, tunnelsAutoSSH, tunnelsWriteOnly
+		tunnelsInstallOpts.jobDir, tunnelsInstallOpts.logDir, tunnelsInstallOpts.autoSSH, tunnelsInstallOpts.writeOnly
 	t.Cleanup(func() {
-		tunnelsJobDir, tunnelsLogDir, tunnelsAutoSSH, tunnelsWriteOnly =
+		tunnelsInstallOpts.jobDir, tunnelsInstallOpts.logDir, tunnelsInstallOpts.autoSSH, tunnelsInstallOpts.writeOnly =
 			prevJob, prevLog, prevSSH, prevWriteOnly
 	})
-	tunnelsJobDir = jobDir
-	tunnelsLogDir = filepath.Join(home, "logs")
-	tunnelsAutoSSH = "/usr/bin/autossh"
-	tunnelsWriteOnly = false
+	tunnelsInstallOpts.jobDir = jobDir
+	tunnelsInstallOpts.logDir = filepath.Join(home, "logs")
+	tunnelsInstallOpts.autoSSH = "/usr/bin/autossh"
+	tunnelsInstallOpts.writeOnly = false
 	return home
 }
 
@@ -95,7 +95,7 @@ func TestInstallTunnels_Launchd(t *testing.T) {
 	calls := stubSupervisorsOnPath(t, 0)
 	home := installIntoTemp(t, "")
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := installTunnels([]string{"alpha"}, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestInstallTunnels_Systemd(t *testing.T) {
 	calls := stubSupervisorsOnPath(t, 0)
 	home := installIntoTemp(t, "")
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := installTunnels([]string{"alpha"}, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -174,7 +174,7 @@ func TestInstallTunnels_SystemdWithoutUserSession(t *testing.T) {
 	calls := stubSupervisorsOnPath(t, 1)
 	home := installIntoTemp(t, "")
 
-	err := installTunnels([]string{"alpha"})
+	err := installTunnels([]string{"alpha"}, tunnelsInstallOpts)
 	if err == nil {
 		t.Fatal("install must refuse without a systemd user session")
 	}
@@ -207,9 +207,9 @@ func TestInstallTunnels_WriteOnly(t *testing.T) {
 			useHostGOOS(t, tc.goos)
 			calls := stubSupervisorsOnPath(t, 1)
 			home := installIntoTemp(t, "")
-			tunnelsWriteOnly = true
+			tunnelsInstallOpts.writeOnly = true
 
-			if err := installTunnels([]string{"alpha"}); err != nil {
+			if err := installTunnels([]string{"alpha"}, tunnelsInstallOpts); err != nil {
 				t.Fatalf("install --write-only: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(home, tc.jobPath)); err != nil {
@@ -230,7 +230,7 @@ func TestInstallTunnels_UnsupportedPlatform(t *testing.T) {
 	stubSupervisorsOnPath(t, 0)
 	home := installIntoTemp(t, "")
 
-	err := installTunnels([]string{"alpha"})
+	err := installTunnels([]string{"alpha"}, tunnelsInstallOpts)
 	if err == nil {
 		t.Fatal("install must refuse on a platform with no supervisor")
 	}
@@ -531,7 +531,7 @@ func TestInstallTunnels_PruneRemovesOrphan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := installTunnels(nil, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -561,7 +561,7 @@ func TestInstallTunnels_PruneLeavesStillNamedRemoteAlone(t *testing.T) {
 	stubSupervisorsOnPath(t, 0)
 	home := installIntoTemp(t, "")
 
-	if err := installTunnels(nil); err != nil {
+	if err := installTunnels(nil, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	plist := filepath.Join(home, "Library", "LaunchAgents", "io.shuttle.shuttle-tunnel-alpha.plist")
@@ -587,7 +587,7 @@ func TestInstallTunnels_NamedRemoteDoesNotPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := installTunnels([]string{"alpha"}, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install alpha: %v", err)
 	}
 	if _, err := os.Stat(orphan); err != nil {
@@ -613,7 +613,7 @@ func TestInstallTunnels_PruneCatchesManagerNone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := installTunnels(nil, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -643,7 +643,7 @@ func TestInstallTunnels_PruneIgnoresNonMatchingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := installTunnels(nil, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	for _, path := range []string{handWritten, customLabel} {
@@ -660,8 +660,8 @@ func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
 	useHostGOOS(t, "linux")
 	calls := stubSupervisorsOnPath(t, 0)
 	home := installIntoTemp(t, "")
-	tunnelsDryRun = true
-	t.Cleanup(func() { tunnelsDryRun = false })
+	tunnelsInstallOpts.dryRun = true
+	t.Cleanup(func() { tunnelsInstallOpts.dryRun = false })
 
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
@@ -672,7 +672,7 @@ func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := installTunnels(nil, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install --dry-run: %v", err)
 	}
 	if _, err := os.Stat(orphan); err != nil {
@@ -699,10 +699,10 @@ func TestInstallTunnels_DryRunCreatesNoDirectories(t *testing.T) {
 	useHostGOOS(t, "darwin")
 	calls := stubSupervisorsOnPath(t, 0)
 	home := installIntoTemp(t, "")
-	tunnelsDryRun = true
-	t.Cleanup(func() { tunnelsDryRun = false })
+	tunnelsInstallOpts.dryRun = true
+	t.Cleanup(func() { tunnelsInstallOpts.dryRun = false })
 
-	if err := installTunnels(nil); err != nil {
+	if err := installTunnels(nil, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install --dry-run: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "Library")); !os.IsNotExist(err) {
@@ -723,8 +723,8 @@ func TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing(t *testing.T) {
 	useHostGOOS(t, "linux")
 	stubSupervisorsOnPath(t, 0)
 	home := installIntoTemp(t, "")
-	tunnelsDryRun = true
-	t.Cleanup(func() { tunnelsDryRun = false })
+	tunnelsInstallOpts.dryRun = true
+	t.Cleanup(func() { tunnelsInstallOpts.dryRun = false })
 
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
@@ -735,7 +735,7 @@ func TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := installTunnels([]string{"alpha"}, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install alpha --dry-run: %v", err)
 	}
 	if _, err := os.Stat(orphan); err != nil {
@@ -770,7 +770,7 @@ func TestInstallTunnels_PruneCatchesAnOldLabelPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := installTunnels(nil, tunnelsInstallOpts); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {

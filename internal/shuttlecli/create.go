@@ -423,28 +423,6 @@ in place, set-model / set-agent for the agent, uninstall to start over.`,
 	},
 }
 
-// registerShuttleCreateFlags binds the create verbs' flags.
-func registerShuttleCreateFlags() {
-	installCmd.Flags().StringVarP(&installModel, "model", "m", "", "Agent ID (default: registry default)")
-	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required unless --disabled")
-	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
-	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); arm it later with 'shuttle resume'")
-	installCmd.Flags().StringVar(&installSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
-
-	repeatCmd.Flags().StringVarP(&repeatSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax) — required")
-	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name")
-	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
-	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
-	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
-	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
-	_ = repeatCmd.MarkFlagRequired("schedule")
-
-	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
-	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
-	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
-	pinCmd.Flags().StringVar(&pinSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
-}
-
 // newBlockSurface applies the creation-only transport default. Absence remains
 // CLI on a stored block for compatibility, but a newly created Codex role
 // starts in the app unless the caller explicitly asks for CLI.
@@ -471,7 +449,24 @@ func newBlockSurface(block *shuttle.Block, requested string, reg *shuttle.AgentR
 }
 
 func init() {
-	registerShuttleCreateFlags()
+	installCmd.Flags().StringVarP(&installModel, "model", "m", "", "Agent ID (default: registry default)")
+	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required unless --disabled")
+	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
+	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); arm it later with 'shuttle resume'")
+	installCmd.Flags().StringVar(&installSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
+
+	repeatCmd.Flags().StringVarP(&repeatSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax) — required")
+	repeatCmd.Flags().StringVarP(&repeatTZ, "tz", "z", "UTC", "IANA timezone name")
+	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
+	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
+	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
+	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
+	_ = repeatCmd.MarkFlagRequired("schedule")
+
+	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
+	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
+	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
+	pinCmd.Flags().StringVar(&pinSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 	addShuttleCommand(installCmd)
 	addShuttleCommand(repeatCmd)
 	addShuttleCommand(pinCmd)

@@ -1213,9 +1213,14 @@ func init() {
 	setAgentCmd.Flags().StringVar(&setAgentProjectDir, "project-dir", "", "Set the worker cwd without changing its lifecycle")
 	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
 	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
-	for _, c := range []*cobra.Command{pauseCmd, closeCmd, reopenCmd, setOutcomeCmd, setModelCmd, setAgentCmd, reshapeCmd, uninstallShuttleCmd} {
-		c.Flags().Bool("local", false, localFlagUsage)
-	}
+	pauseCmd.Flags().Bool("local", false, localFlagUsage)
+	closeCmd.Flags().Bool("local", false, localFlagUsage)
+	reopenCmd.Flags().Bool("local", false, localFlagUsage)
+	setOutcomeCmd.Flags().Bool("local", false, localFlagUsage)
+	setModelCmd.Flags().Bool("local", false, localFlagUsage)
+	setAgentCmd.Flags().Bool("local", false, localFlagUsage)
+	reshapeCmd.Flags().Bool("local", false, localFlagUsage)
+	uninstallShuttleCmd.Flags().Bool("local", false, localFlagUsage)
 
 	addShuttleCommand(pauseCmd)
 	addShuttleCommand(resumeCmd)

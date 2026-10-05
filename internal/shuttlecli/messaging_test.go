@@ -66,19 +66,21 @@ func TestReadMessageRequestFrameReturnsAtNewline(t *testing.T) {
 }
 
 func TestBuildAttachmentOnlyMessage(t *testing.T) {
-	oldFiles, oldID, oldFrom, oldFile := messageAttachments, messageID, messageFrom, messageFile
-	t.Cleanup(func() { messageAttachments, messageID, messageFrom, messageFile = oldFiles, oldID, oldFrom, oldFile })
+	oldFiles, oldID, oldFrom, oldFile := messageOpts.attachments, messageOpts.id, messageOpts.from, messageOpts.file
+	t.Cleanup(func() {
+		messageOpts.attachments, messageOpts.id, messageOpts.from, messageOpts.file = oldFiles, oldID, oldFrom, oldFile
+	})
 	path := filepath.Join(t.TempDir(), "bytes.bin")
 	want := []byte{0, 255, 10, 128}
 	if err := os.WriteFile(path, want, 0600); err != nil {
 		t.Fatal(err)
 	}
-	messageAttachments, messageID, messageFrom, messageFile = []string{path}, "file-only", "sender", ""
+	messageOpts.attachments, messageOpts.id, messageOpts.from, messageOpts.file = []string{path}, "file-only", "sender", ""
 	args := []string{"shuttle://host/codex/id"}
 	if err := shuttleMessageCmd.Args(shuttleMessageCmd, args); err != nil {
 		t.Fatal(err)
 	}
-	request, err := buildMessageRequest(strings.NewReader(""), args)
+	request, err := buildMessageRequest(strings.NewReader(""), args, &messageOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +90,11 @@ func TestBuildAttachmentOnlyMessage(t *testing.T) {
 }
 
 func TestBuildMessageRequestContextOnlyOptOut(t *testing.T) {
-	oldWake, oldContextOnly := messageWake, messageContextOnly
-	t.Cleanup(func() { messageWake, messageContextOnly = oldWake, oldContextOnly })
-	messageWake, messageContextOnly = true, true
+	oldWake, oldContextOnly := messageOpts.wake, messageOpts.contextOnly
+	t.Cleanup(func() { messageOpts.wake, messageOpts.contextOnly = oldWake, oldContextOnly })
+	messageOpts.wake, messageOpts.contextOnly = true, true
 
-	request, err := buildMessageRequest(strings.NewReader("please read"), []string{"shuttle://host/codex/id"})
+	request, err := buildMessageRequest(strings.NewReader("please read"), []string{"shuttle://host/codex/id"}, &messageOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,11 +104,11 @@ func TestBuildMessageRequestContextOnlyOptOut(t *testing.T) {
 }
 
 func TestBuildMessageRequestDefaultsToWake(t *testing.T) {
-	oldWake, oldContextOnly := messageWake, messageContextOnly
-	t.Cleanup(func() { messageWake, messageContextOnly = oldWake, oldContextOnly })
-	messageWake, messageContextOnly = true, false
+	oldWake, oldContextOnly := messageOpts.wake, messageOpts.contextOnly
+	t.Cleanup(func() { messageOpts.wake, messageOpts.contextOnly = oldWake, oldContextOnly })
+	messageOpts.wake, messageOpts.contextOnly = true, false
 
-	request, err := buildMessageRequest(strings.NewReader("please act"), []string{"shuttle://host/codex/id"})
+	request, err := buildMessageRequest(strings.NewReader("please act"), []string{"shuttle://host/codex/id"}, &messageOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,12 +118,12 @@ func TestBuildMessageRequestDefaultsToWake(t *testing.T) {
 }
 
 func TestMessageCobraWakeFlags(t *testing.T) {
-	oldWake, oldContextOnly := messageWake, messageContextOnly
+	oldWake, oldContextOnly := messageOpts.wake, messageOpts.contextOnly
 	wakeFlag := shuttleMessageCmd.Flags().Lookup("wake")
 	contextOnlyFlag := shuttleMessageCmd.Flags().Lookup("context-only")
 	oldWakeChanged, oldContextOnlyChanged := wakeFlag.Changed, contextOnlyFlag.Changed
 	t.Cleanup(func() {
-		messageWake, messageContextOnly = oldWake, oldContextOnly
+		messageOpts.wake, messageOpts.contextOnly = oldWake, oldContextOnly
 		_ = shuttleMessageCmd.Flags().Set("wake", strconv.FormatBool(oldWake))
 		_ = shuttleMessageCmd.Flags().Set("context-only", strconv.FormatBool(oldContextOnly))
 		wakeFlag.Changed, contextOnlyFlag.Changed = oldWakeChanged, oldContextOnlyChanged
@@ -142,7 +144,7 @@ func TestMessageCobraWakeFlags(t *testing.T) {
 	if err := shuttleMessageCmd.Flags().Set("context-only", "true"); err != nil {
 		t.Fatal(err)
 	}
-	request, err := buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"})
+	request, err := buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"}, &messageOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +158,7 @@ func TestMessageCobraWakeFlags(t *testing.T) {
 	if err := shuttleMessageCmd.Flags().Set("wake", "false"); err != nil {
 		t.Fatal(err)
 	}
-	request, err = buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"})
+	request, err = buildMessageRequest(strings.NewReader("context"), []string{"shuttle://host/codex/id"}, &messageOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,20 +229,20 @@ func TestMessageHelpDocumentsReceiptExitStatuses(t *testing.T) {
 }
 
 func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
-	oldID, oldFile, oldFrom := messageID, messageFile, messageFrom
-	oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON := messageWake, messageContextOnly, messageLocal, messageRequestJSON, jsonOutput
+	oldID, oldFile, oldFrom := messageOpts.id, messageOpts.file, messageOpts.from
+	oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON := messageOpts.wake, messageOpts.contextOnly, messageOpts.local, messageOpts.requestJSON, jsonOutput
 	oldIn, oldOut, oldErr := shuttleMessageCmd.InOrStdin(), shuttleMessageCmd.OutOrStdout(), shuttleMessageCmd.ErrOrStderr()
-	oldAttachments := messageAttachments
+	oldAttachments := messageOpts.attachments
 	t.Cleanup(func() {
-		messageID, messageFile, messageFrom = oldID, oldFile, oldFrom
-		messageWake, messageContextOnly, messageLocal, messageRequestJSON, jsonOutput = oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON
-		messageAttachments = oldAttachments
+		messageOpts.id, messageOpts.file, messageOpts.from = oldID, oldFile, oldFrom
+		messageOpts.wake, messageOpts.contextOnly, messageOpts.local, messageOpts.requestJSON, jsonOutput = oldWake, oldContextOnly, oldLocal, oldRequestJSON, oldJSON
+		messageOpts.attachments = oldAttachments
 		shuttleMessageCmd.SetIn(oldIn)
 		shuttleMessageCmd.SetOut(oldOut)
 		shuttleMessageCmd.SetErr(oldErr)
 	})
-	messageID, messageFile, messageFrom = "msg-interrupted", "", "test sender"
-	messageWake, messageContextOnly, messageLocal, messageRequestJSON, jsonOutput = true, false, false, false, false
+	messageOpts.id, messageOpts.file, messageOpts.from = "msg-interrupted", "", "test sender"
+	messageOpts.wake, messageOpts.contextOnly, messageOpts.local, messageOpts.requestJSON, jsonOutput = true, false, false, false, false
 	var stderr synchronizedMessageBuffer
 	shuttleMessageCmd.SetIn(strings.NewReader(""))
 	shuttleMessageCmd.SetOut(io.Discard)

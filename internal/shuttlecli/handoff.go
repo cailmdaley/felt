@@ -103,11 +103,11 @@ func resolveHandoffPath(fiber string) (string, bool, error) {
 // not-yet-existing path) — a bias toward "different", which errs on the safe
 // side: stamping the named file without the self-kill, never a false
 // clean-exit.
-func samePath(a, b string) bool {
-	ra, errA := canonicalPath(a)
-	rb, errB := canonicalPath(b)
+func samePath(left, right string) bool {
+	ra, errA := canonicalPath(left)
+	rb, errB := canonicalPath(right)
 	if errA != nil || errB != nil {
-		return a == b
+		return left == right
 	}
 	return ra == rb
 }

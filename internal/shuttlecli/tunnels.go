@@ -85,13 +85,16 @@ type tunnelTemplateData struct {
 	Multiplex   bool
 }
 
-var (
-	tunnelsJobDir    string
-	tunnelsLogDir    string
-	tunnelsAutoSSH   string
-	tunnelsWriteOnly bool
-	tunnelsDryRun    bool
-)
+// tunnelsInstallOptions are the flags of shuttle tunnels install.
+type tunnelsInstallOptions struct {
+	jobDir    string
+	logDir    string
+	autoSSH   string
+	writeOnly bool
+	dryRun    bool
+}
+
+var tunnelsInstallOpts tunnelsInstallOptions
 
 // tunnelSupervisor is the host's job supervisor. It answers the questions
 // install has to ask per platform: where a job file lives, what it is called,
@@ -162,11 +165,11 @@ var tunnelsInstallCmd = &cobra.Command{
 	Short: "Write and optionally start the supervisor jobs for shuttle tunnels",
 	Args:  cobra.ArbitraryArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return installTunnels(args)
+		return installTunnels(args, tunnelsInstallOpts)
 	},
 }
 
-func installTunnels(requested []string) error {
+func installTunnels(requested []string, o tunnelsInstallOptions) error {
 	// The all-remotes form is convergent: it installs every remote the fleet
 	// file currently names with a managed tunnel, AND prunes every job on this
 	// host that our own naming convention recognizes but the file no longer
@@ -202,7 +205,7 @@ func installTunnels(requested []string) error {
 		return err
 	}
 
-	jobDir := tunnelsJobDir
+	jobDir := o.jobDir
 	if jobDir == "" {
 		jobDir = sup.JobDir
 	}
@@ -212,11 +215,11 @@ func installTunnels(requested []string) error {
 	// probe and the autossh lookup, which only an install about to act needs
 	// answered; failing a preview on a missing autossh would hide the orphan
 	// listing the operator asked for. It prints everything and exits 0.
-	if tunnelsDryRun {
+	if o.dryRun {
 		for _, spec := range specs {
 			fmt.Printf("would install %s -> %s\n", spec.Name, filepath.Join(jobDir, sup.JobFile(spec)))
 		}
-		if convergent && !tunnelsWriteOnly {
+		if convergent && !o.writeOnly {
 			return pruneOrphanTunnels(sup, jobDir, specs, true)
 		}
 		return nil
@@ -228,18 +231,18 @@ func installTunnels(requested []string) error {
 		// and should hear why. --write-only is an explicit "just render
 		// them", so it skips the probe exactly as it skips the activation the
 		// probe guards.
-		if !tunnelsWriteOnly && sup.Preflight != nil {
+		if !o.writeOnly && sup.Preflight != nil {
 			if err := sup.Preflight(); err != nil {
 				return err
 			}
 		}
 
-		logDir := tunnelsLogDir
+		logDir := o.logDir
 		if logDir == "" {
 			logDir = filepath.Join(home, ".local", "state", "shuttle")
 		}
 
-		autosshPath := tunnelsAutoSSH
+		autosshPath := o.autoSSH
 		if autosshPath == "" {
 			autosshPath, err = exec.LookPath("autossh")
 			if err != nil {
@@ -291,7 +294,7 @@ func installTunnels(requested []string) error {
 			fmt.Printf("installed %s -> %s\n", spec.Name, jobPath)
 			fmt.Printf("  log: %s\n", logPath)
 
-			if tunnelsWriteOnly {
+			if o.writeOnly {
 				continue
 			}
 			if err := sup.Activate(spec, jobPath); err != nil {
@@ -299,7 +302,7 @@ func installTunnels(requested []string) error {
 			}
 		}
 
-		if !tunnelsWriteOnly && sup.Note != "" {
+		if !o.writeOnly && sup.Note != "" {
 			fmt.Println(sup.Note)
 		}
 	}
@@ -307,7 +310,7 @@ func installTunnels(requested []string) error {
 	// --write-only means "render, don't touch the supervisor" — pruning stops
 	// jobs and deletes files, which is exactly the touching write-only asks us
 	// to skip, so it sits out this pass entirely rather than half-applying.
-	if convergent && !tunnelsWriteOnly {
+	if convergent && !o.writeOnly {
 		if err := pruneOrphanTunnels(sup, jobDir, specs, false); err != nil {
 			return err
 		}
@@ -620,11 +623,11 @@ func runSupervisor(bin string, args ...string) error {
 }
 
 func init() {
-	tunnelsInstallCmd.Flags().StringVar(&tunnelsJobDir, "unit-dir", "", "Directory to write supervisor jobs into (default: ~/Library/LaunchAgents on macOS, ~/.config/systemd/user on Linux)")
-	tunnelsInstallCmd.Flags().StringVar(&tunnelsLogDir, "log-dir", "", "Directory for autossh logs (default: ~/.local/state/shuttle)")
-	tunnelsInstallCmd.Flags().StringVar(&tunnelsAutoSSH, "autossh-path", "", "Path to autossh (default: resolve on PATH)")
-	tunnelsInstallCmd.Flags().BoolVar(&tunnelsWriteOnly, "write-only", false, "Write the job files but do not load or start them")
-	tunnelsInstallCmd.Flags().BoolVar(&tunnelsDryRun, "dry-run", false, "Print what would be installed, and (with no remote named) which orphaned jobs would be removed; writes nothing and shells no supervisor")
+	tunnelsInstallCmd.Flags().StringVar(&tunnelsInstallOpts.jobDir, "unit-dir", "", "Directory to write supervisor jobs into (default: ~/Library/LaunchAgents on macOS, ~/.config/systemd/user on Linux)")
+	tunnelsInstallCmd.Flags().StringVar(&tunnelsInstallOpts.logDir, "log-dir", "", "Directory for autossh logs (default: ~/.local/state/shuttle)")
+	tunnelsInstallCmd.Flags().StringVar(&tunnelsInstallOpts.autoSSH, "autossh-path", "", "Path to autossh (default: resolve on PATH)")
+	tunnelsInstallCmd.Flags().BoolVar(&tunnelsInstallOpts.writeOnly, "write-only", false, "Write the job files but do not load or start them")
+	tunnelsInstallCmd.Flags().BoolVar(&tunnelsInstallOpts.dryRun, "dry-run", false, "Print what would be installed, and (with no remote named) which orphaned jobs would be removed; writes nothing and shells no supervisor")
 	tunnelsCmd.AddCommand(tunnelsInstallCmd)
 	addShuttleCommand(tunnelsCmd)
 }

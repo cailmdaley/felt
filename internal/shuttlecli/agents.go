@@ -80,9 +80,9 @@ stream.`,
 		records := reg.Records()
 		if agentsSourceFilter != "" {
 			filtered := make([]shuttle.AgentRecord, 0, len(records))
-			for _, a := range records {
-				if a.Source == agentsSourceFilter {
-					filtered = append(filtered, a)
+			for _, rec := range records {
+				if rec.Source == agentsSourceFilter {
+					filtered = append(filtered, rec)
 				}
 			}
 			records = filtered
@@ -100,12 +100,12 @@ stream.`,
 		for _, w := range reg.Warnings() {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 		}
-		for _, a := range records {
-			if a.IsAlias() {
-				fmt.Printf("%s %-22s → %s%s\n", sourceMarker(a), a.ID, a.AliasOf, formatAlias(a))
+		for _, rec := range records {
+			if rec.IsAlias() {
+				fmt.Printf("%s %-22s → %s%s\n", sourceMarker(rec), rec.ID, rec.AliasOf, formatAlias(rec))
 				continue
 			}
-			fmt.Printf("%s %-22s %-7s %-16s%s\n", sourceMarker(a), a.ID, a.CLI, a.Model, formatConstraints(a))
+			fmt.Printf("%s %-22s %-7s %-16s%s\n", sourceMarker(rec), rec.ID, rec.CLI, rec.Model, formatConstraints(rec))
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), registryFooter(reg))
 		return nil
@@ -273,8 +273,8 @@ func registryFooter(reg *shuttle.AgentRegistry) string {
 			reg.BuiltinCount(), path, total)
 	}
 	user := 0
-	for _, a := range reg.Records() {
-		if a.Source == shuttle.SourceUser {
+	for _, rec := range reg.Records() {
+		if rec.Source == shuttle.SourceUser {
 			user++
 		}
 	}

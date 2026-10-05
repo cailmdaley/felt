@@ -15,12 +15,15 @@ import (
 
 const collaborationField = "collaboration"
 
-var (
-	assignCollaborators []string
-	assignRoles         []string
-	assignClear         bool
-	assignJSON          string
-)
+// assignOptions are the flags of shuttle assign.
+type assignOptions struct {
+	collaborators []string
+	roles         []string
+	clear         bool
+	json          string
+}
+
+var assignOpts assignOptions
 
 var assignCmd = &cobra.Command{
 	Use:   "assign <fiber>",
@@ -51,7 +54,7 @@ other roles and collaborators; it does not change worker lifecycle settings.`,
 		}
 		defer unlock()
 
-		changed, err := applyCollaborationFlags(cmd, f, st)
+		changed, err := applyCollaborationFlags(cmd, assignOpts, f, st)
 		if err != nil {
 			return err
 		}
@@ -67,21 +70,21 @@ other roles and collaborators; it does not change worker lifecycle settings.`,
 	},
 }
 
-func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage) (bool, error) {
+func applyCollaborationFlags(cmd *cobra.Command, o assignOptions, f *felt.Felt, st *felt.Storage) (bool, error) {
 	jsonSet := cmd.Flags().Changed("json-assignment")
 	clearSet := cmd.Flags().Changed("clear")
 	patchSet := cmd.Flags().Changed("role") || cmd.Flags().Changed("collaborator")
 	if (jsonSet && (clearSet || patchSet)) || (clearSet && patchSet) {
 		return false, fmt.Errorf("assign: --json-assignment, --clear, and membership flags are mutually exclusive")
 	}
-	if clearSet && !assignClear {
+	if clearSet && !o.clear {
 		return false, fmt.Errorf("assign: --clear may only be true")
 	}
 	if clearSet {
 		return true, f.SetExtraField(collaborationField, nil)
 	}
 	if jsonSet {
-		assignment, err := shuttle.ParseCollaborationJSON(assignJSON)
+		assignment, err := shuttle.ParseCollaborationJSON(o.json)
 		if err != nil {
 			return false, err
 		}
@@ -112,8 +115,8 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 	if err != nil {
 		return false, err
 	}
-	roleMatches := make([]*felt.Felt, 0, len(assignRoles))
-	for _, query := range assignRoles {
+	roleMatches := make([]*felt.Felt, 0, len(o.roles))
+	for _, query := range o.roles {
 		role, err := resolveRoleProfile(profiles, query)
 		if err != nil {
 			return false, err
@@ -125,7 +128,7 @@ func applyCollaborationFlags(cmd *cobra.Command, f *felt.Felt, st *felt.Storage)
 			assignment.Participants[path.Base(role.ID)] = []string{}
 		}
 	}
-	for _, query := range assignCollaborators {
+	for _, query := range o.collaborators {
 		var preferredRole *felt.Felt
 		if !strings.Contains(query, "/") && len(roleMatches) == 1 {
 			preferredRole = roleMatches[0]
@@ -420,9 +423,9 @@ func profilePaths(profiles []*felt.Felt) string {
 }
 
 func init() {
-	assignCmd.Flags().StringArrayVar(&assignRoles, "role", nil, "Role profile name, path, or intrinsic UID (repeatable)")
-	assignCmd.Flags().StringArrayVar(&assignCollaborators, "collaborator", nil, "Collaborator profile name, path, or intrinsic UID (repeatable)")
-	assignCmd.Flags().BoolVar(&assignClear, "clear", false, "Remove the whole collaboration assignment")
-	assignCmd.Flags().StringVar(&assignJSON, "json-assignment", "", "Replace collaboration from a role-to-collaborator JSON object")
+	assignCmd.Flags().StringArrayVar(&assignOpts.roles, "role", nil, "Role profile name, path, or intrinsic UID (repeatable)")
+	assignCmd.Flags().StringArrayVar(&assignOpts.collaborators, "collaborator", nil, "Collaborator profile name, path, or intrinsic UID (repeatable)")
+	assignCmd.Flags().BoolVar(&assignOpts.clear, "clear", false, "Remove the whole collaboration assignment")
+	assignCmd.Flags().StringVar(&assignOpts.json, "json-assignment", "", "Replace collaboration from a role-to-collaborator JSON object")
 	addShuttleCommand(assignCmd)
 }
