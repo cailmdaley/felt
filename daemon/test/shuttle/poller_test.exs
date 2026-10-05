@@ -5694,8 +5694,8 @@ defmodule Shuttle.PollerTest do
   end
 
   test "dispatch_fiber waits past the default GenServer timeout for slow successful dispatches" do
-    # The worker-changing calls wait past GenServer's 5 s default...
-    assert Poller.dispatch_call_timeout_ms() > 5_000
+    # The worker-changing calls wait 30 s, well past GenServer's 5 s default...
+    assert Poller.dispatch_call_timeout_ms() == 30_000
 
     {:ok, poller} =
       start_poller!(
@@ -5729,6 +5729,41 @@ defmodule Shuttle.PollerTest do
 
     assert {:timeout, {GenServer, :call, _}} =
              catch_exit(Poller.dispatch_fiber(poller, late_id, []))
+  end
+
+  test "every worker-changing call gives up at the configured dispatch timeout" do
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_call_timeouts,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    previous = Application.get_env(:shuttle, :dispatch_call_timeout_ms)
+    on_exit(fn -> restore_app_env(:dispatch_call_timeout_ms, previous) end)
+    Application.put_env(:shuttle, :dispatch_call_timeout_ms, 100)
+
+    # A suspended Poller never answers. Each call must give up at the shrunk
+    # 100 ms, well inside the 2 s window; GenServer's 5 s default or the 30 s
+    # production value would still be waiting when the window closes.
+    :sys.suspend(poller)
+
+    calls = [
+      dispatch_fiber: fn -> Poller.dispatch_fiber(poller, "tests/t", []) end,
+      claim_session: fn -> Poller.claim_session(poller, "tests/t", "s", []) end,
+      kill_session: fn -> Poller.kill_session(poller, "tests/t") end,
+      capture: fn -> Poller.capture(poller, "yap", []) end,
+      lifecycle_transition: fn -> Poller.lifecycle_transition(poller, :accept, "tests/t") end
+    ]
+
+    for {name, call} <- calls do
+      task = Task.async(fn -> catch_exit(call.()) end)
+
+      assert {:ok, {:timeout, {GenServer, :call, _}}} = Task.yield(task, 2_000),
+             "#{name} did not give up at the configured timeout"
+    end
   end
 
   # ── Multi-host tests ──
