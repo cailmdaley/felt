@@ -470,7 +470,8 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *)')).toHaveLength(1)
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(1)
+    expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^aloft/)
     expect(band.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
@@ -567,7 +568,10 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
-    expect(document.querySelector('.ws-navbar .kbn-card-worker')).toBeNull()
+    const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!
+    head.click()
+    expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
+    openWorker.mockClear()
     const pill = document.querySelector<HTMLButtonElement>('.ws-dock .ws-worker-pill button.kbn-card-worker')!
     expect(pill).not.toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
