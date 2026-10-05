@@ -77,13 +77,17 @@ export function postForceDispatch(
   })
 }
 
-/** What a refused dispatch says: the structured ineligibility copy when the
+/** What a refused dispatch says: the readiness rejection explains that no
+ *  launch occurred; otherwise, the structured ineligibility copy when the
  *  daemon sent any (it names the actual host / project_dir), else its
  *  `error`, else `fallback`. A start that could not arm its fiber
  *  (`arm_refused`) reads as the owning host's reason — the Shuttle CLI's own
  *  words when it refused — placed on that host, where any command it names
  *  runs. */
-export function dispatchFailureMessage(body: DispatchFailureBody, fallback: string): string {
+export function dispatchFailureMessage(body: DispatchFailureBody, fallback: string, status?: number): string {
+  if (status === 503 && body.error === 'booting' && body.ready === false) {
+    return 'The daemon is starting. Nothing was launched; try again shortly.'
+  }
   if (body.reason === 'arm_refused' && body.message?.trim()) {
     const reason = body.message.trim()
     return body.host ? `On ${body.host}: ${reason}` : reason
@@ -108,6 +112,7 @@ export function isAgentCard(card: KanbanCard): boolean {
  *  when a human must supply a block field first, `needs`. */
 export type DispatchFailureBody = DispatchIneligibleBody & {
   error?: string
+  ready?: boolean
   host?: string
   needs?: string
 }

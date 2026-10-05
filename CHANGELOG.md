@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Fixed
+
+- Remote recovery respects a responding daemon regardless of whether it runs under
+  tmux or a service supervisor. Booting daemons are allowed to finish, and queued
+  restarts check liveness again before invoking the launcher.
+- A launch rejected during daemon startup explains that nothing launched and can
+  be retried. The composer preserves the message for an explicit retry.
+
 ## [2.0.0-rc.1] — 2026-10-05
 
 ### Breaking changes

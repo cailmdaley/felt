@@ -96,6 +96,14 @@ const refused: DispatchFailureBody = {
 }
 
 describe('a refused start reads in the owning host’s words', () => {
+  it('explains the readiness rejection without reinterpreting other failures', () => {
+    expect(dispatchFailureMessage({ error: 'booting', ready: false }, 'fallback', 503))
+      .toBe('The daemon is starting. Nothing was launched; try again shortly.')
+    expect(dispatchFailureMessage({ error: 'booting', ready: false }, 'fallback', 500)).toBe('booting')
+    expect(dispatchFailureMessage({ error: 'booting' }, 'fallback', 503)).toBe('booting')
+    expect(dispatchFailureMessage({ error: 'unavailable', ready: false }, 'fallback', 503)).toBe('unavailable')
+  })
+
   it('places the reason on the host where any command it names must run', () => {
     expect(dispatchFailureMessage(refused, 'fallback')).toBe(`On owner-host: ${REASON}`)
   })

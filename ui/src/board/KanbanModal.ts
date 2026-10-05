@@ -1141,7 +1141,7 @@ export class KanbanModal {
       this.detailModal.openStartPrompt(card, body)
       return false
     }
-    throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`))
+    throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`, res.status))
   }
 
   /**
