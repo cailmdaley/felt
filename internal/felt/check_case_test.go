@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func gitIn(t *testing.T, dir string, args ...string) string {
@@ -37,7 +39,7 @@ func TestCheckCaseCollisionsInGitIndex(t *testing.T) {
 	gitIn(t, dir, "init", "-q")
 	gitIn(t, dir, "add", ".")
 
-	issues, err := CheckCaseCollisions(s)
+	issues, err := CheckCaseCollisions(sysenv.OS(), s)
 	if err != nil {
 		t.Fatalf("CheckCaseCollisions: %v", err)
 	}
@@ -50,7 +52,7 @@ func TestCheckCaseCollisionsInGitIndex(t *testing.T) {
 		gitIn(t, dir, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+p)
 	}
 
-	issues, err = CheckCaseCollisions(s)
+	issues, err = CheckCaseCollisions(sysenv.OS(), s)
 	if err != nil {
 		t.Fatalf("CheckCaseCollisions: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestCheckCaseCollisionsIgnoresDiskRespelling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := CheckCaseCollisions(s)
+	issues, err := CheckCaseCollisions(sysenv.OS(), s)
 	if err != nil {
 		t.Fatalf("CheckCaseCollisions: %v", err)
 	}
@@ -136,7 +138,7 @@ func TestCheckCaseCollisionsThroughRespelledSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues, err := CheckCaseCollisions(NewStorage(view))
+	issues, err := CheckCaseCollisions(sysenv.OS(), NewStorage(view))
 	if err != nil {
 		t.Fatalf("CheckCaseCollisions: %v", err)
 	}
@@ -161,7 +163,7 @@ func indexTwins(t *testing.T, repo string) {
 
 func wantReportTwins(t *testing.T, s *Storage) {
 	t.Helper()
-	issues, err := CheckCaseCollisions(s)
+	issues, err := CheckCaseCollisions(sysenv.OS(), s)
 	if err != nil {
 		t.Fatalf("CheckCaseCollisions: %v", err)
 	}

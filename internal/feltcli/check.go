@@ -60,7 +60,7 @@ var checkCmd = &cobra.Command{
 			return err
 		}
 		issues = append(issues, structureIssues...)
-		caseIssues, err := felt.CheckCaseCollisions(storage)
+		caseIssues, err := felt.CheckCaseCollisions(sysenv.OS(), storage)
 		if err != nil {
 			return err
 		}

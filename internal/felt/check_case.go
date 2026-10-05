@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // CheckCaseCollisions reports directories in the store that hold two entries
@@ -24,7 +25,8 @@ import (
 // spellings within one source; a tracked file merely spelled differently on
 // disk is one file, not two. Companion files count like fibers. Symlinked
 // directories are not followed; each store they reach is checked on its own.
-func CheckCaseCollisions(s *Storage) ([]CheckIssue, error) {
+// git runs inside env.
+func CheckCaseCollisions(env *sysenv.Env, s *Storage) ([]CheckIssue, error) {
 	root, err := filepath.EvalSymlinks(s.root)
 	if err != nil {
 		return nil, fmt.Errorf("resolving .felt path: %w", err)
@@ -36,7 +38,7 @@ func CheckCaseCollisions(s *Storage) ([]CheckIssue, error) {
 
 	seen := map[string]bool{}
 	var issues []CheckIssue
-	for _, source := range [][]string{gitIndexPaths(root), onDisk} {
+	for _, source := range [][]string{gitIndexPaths(env, root), onDisk} {
 		for _, issue := range caseCollisions(source) {
 			if key := issue.FiberID + "\x00" + issue.Message; !seen[key] {
 				seen[key] = true
@@ -127,8 +129,8 @@ func storeEntryPaths(root string) ([]string, error) {
 // from the one the index records, and git's own pathspec scoping would then
 // find nothing. A store outside any repository, or a missing git, yields
 // nothing.
-func gitIndexPaths(root string) []string {
-	topOut, err := gitOutput(root, "rev-parse", "--show-toplevel")
+func gitIndexPaths(env *sysenv.Env, root string) []string {
+	topOut, err := gitOutput(env, root, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil
 	}
@@ -141,7 +143,7 @@ func gitIndexPaths(root string) []string {
 	if !ok {
 		return nil
 	}
-	out, err := gitOutput(top, "-c", "core.quotePath=false", "ls-files", "-z")
+	out, err := gitOutput(env, top, "-c", "core.quotePath=false", "ls-files", "-z")
 	if err != nil {
 		return nil
 	}
@@ -176,8 +178,8 @@ func foldedRel(top, root string) (string, bool) {
 	return strings.Join(rest, "/") + "/", true
 }
 
-func gitOutput(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+func gitOutput(env *sysenv.Env, dir string, args ...string) ([]byte, error) {
+	cmd := env.Command("git", args...)
 	cmd.Dir = dir
 	return cmd.Output()
 }
