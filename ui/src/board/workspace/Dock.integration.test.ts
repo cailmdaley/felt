@@ -39,6 +39,43 @@ beforeEach(async () => {
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+describe('Dock booting dispatch rejection', () => {
+  it.each(['New session', 'Resume'])('explains a 503 booting %s without consuming the draft or retrying', async name => {
+    const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    draft.value = 'explicit correction'
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValue(response({ error: 'booting', ready: false }, 503))
+    button(name).click()
+    await flush()
+    expect(band.el.textContent).toContain('The daemon is starting. Nothing was launched; try again shortly.')
+    expect(button(name).disabled).toBe(false)
+    expect(draft.value).toBe('explicit correction')
+    expect(writes()).toHaveLength(1)
+    expect(saved).not.toHaveBeenCalled()
+  })
+
+  it('explains a 503 booting Start retry and keeps the visible message for another explicit try', async () => {
+    const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    draft.value = 'corrected message'
+    vi.mocked(fetch).mockClear()
+    vi.mocked(fetch).mockResolvedValueOnce(response({ reason: 'arm_refused', needs: 'project_dir', host: 'owner' }, 422))
+      .mockResolvedValueOnce(response({ error: 'booting', ready: false }, 503))
+    button('Resume').click()
+    await flush()
+    const dir = band.el.querySelector<HTMLInputElement>('.kbn-start-prompt-input')!
+    dir.value = '/srv/project'; dir.dispatchEvent(new Event('input'))
+    band.el.querySelector<HTMLButtonElement>('.kbn-start-prompt .kbn-ctl-send')!.click()
+    await flush()
+    expect(band.el.textContent).toContain('The daemon is starting. Nothing was launched; try again shortly.')
+    expect(button('Resume').disabled).toBe(false)
+    expect(button('New session').disabled).toBe(false)
+    expect(draft.value).toBe('corrected message')
+    expect(writes()).toHaveLength(2)
+    expect(writes()[1]).toMatchObject({ resume_mode: 'previous', user_message: 'corrected message', project_dir: '/srv/project', origin: 'owner' })
+    expect(saved).not.toHaveBeenCalled()
+  })
+})
+
 describe('Dock dispatch recovery', () => {
   it.each(['New session', 'Resume'])('re-enables %s after a sessionless conflict only when worker state changes', async name => {
     vi.mocked(fetch).mockResolvedValue(response({}, 409))
