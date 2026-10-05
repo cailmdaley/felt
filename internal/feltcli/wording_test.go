@@ -8,6 +8,7 @@ import (
 // TestEmptyResultsSayWhatTheyMean: the store holds fibers, and an empty ls or
 // find says so in those words.
 func TestEmptyResultsSayWhatTheyMean(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 	for _, args := range [][]string{{"ls", "nothing-here"}, {"find", "nothing-here"}} {
 		out, err := runCommand(t, dir, args...)

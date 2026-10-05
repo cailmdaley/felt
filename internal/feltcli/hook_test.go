@@ -74,6 +74,7 @@ FELT_TEST_HOOK_ARGS="$*" exec "$FELT_TEST_BINARY" -test.run=^TestUnknownHookVerb
 }
 
 func TestUnknownHookVerbSubprocessHelper(t *testing.T) {
+	t.Parallel()
 	args := os.Getenv("FELT_TEST_HOOK_ARGS")
 	if args == "" {
 		return
@@ -83,6 +84,7 @@ func TestUnknownHookVerbSubprocessHelper(t *testing.T) {
 }
 
 func TestHookSessionEnvelope(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	active := &felt.Felt{
@@ -141,6 +143,7 @@ func TestHookSessionEnvelope(t *testing.T) {
 // closed and untracked fibers land in Recently Touched. A fiber appears in at
 // most one section.
 func TestSessionSectionPlacement(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	base := mustParseTime(t, "2026-04-10T09:00:00Z")
@@ -180,6 +183,7 @@ func TestSessionSectionPlacement(t *testing.T) {
 // TestSessionRecencyOrdering: sections sort by the git-durable RecencyAnchor
 // (updated-at when present, else created-at) DESC — never file mtime.
 func TestSessionRecencyOrdering(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	// Three closed fibers, created oldest→newest as old/mid/noev. We give `old`
@@ -213,6 +217,7 @@ func TestSessionRecencyOrdering(t *testing.T) {
 // timestamp (updated-at) rendered in local time, so the visible label matches
 // the sort key — and shows the update time, not the fiber's created-at.
 func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	created := mustParseTime(t, "2026-04-01T00:00:00Z")
@@ -237,6 +242,7 @@ func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
 // TestSessionSectionCaps: each section renders at most five fibers even when
 // more qualify.
 func TestSessionSectionCaps(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	base := mustParseTime(t, "2026-04-01T00:00:00Z")
@@ -272,6 +278,7 @@ func TestSessionSectionCaps(t *testing.T) {
 }
 
 func TestSessionCommandPrintsPlainContext(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	active := &felt.Felt{
@@ -299,6 +306,7 @@ func TestSessionCommandPrintsPlainContext(t *testing.T) {
 }
 
 func TestSessionWarnsOnLegacyFlatStore(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, name := range []string{"old-thing-1a2b3c4d", "other-9f8e7d6c"} {
 		content := "---\nname: " + name + "\n---\n"
@@ -320,6 +328,7 @@ func TestSessionWarnsOnLegacyFlatStore(t *testing.T) {
 // folder raises the same Attention note, named for what it is; a blocked one,
 // which migrate cannot fold, does not recommend migrate.
 func TestSessionWarnsOnStrayFiberFiles(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	parent := &felt.Felt{ID: "parent", Name: "Parent", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	if err := storage.Write(parent); err != nil {
@@ -345,6 +354,7 @@ func TestSessionWarnsOnStrayFiberFiles(t *testing.T) {
 }
 
 func TestSessionLayoutNoteNamesBothShapes(t *testing.T) {
+	t.Parallel()
 	hint := "; " + felt.LegacyFlatMigrationHint
 	note := sessionLayoutNote([]felt.CheckIssue{
 		{Level: felt.CheckLevelError, FiberID: ".", Message: "multiple bare fiber files at .felt/ root: a, b" + hint},
@@ -361,6 +371,7 @@ func TestSessionLayoutNoteNamesBothShapes(t *testing.T) {
 }
 
 func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
+	t.Parallel()
 	now := mustParseTime(t, "2026-05-26T12:00:00Z")
 	var felts []*felt.Felt
 	for i := 0; i < sessionTopLevelLimit+1; i++ {
@@ -389,6 +400,7 @@ func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
 }
 
 func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
+	t.Parallel()
 	now := mustParseTime(t, "2026-05-26T12:00:00Z")
 	felts := []*felt.Felt{
 		{
@@ -421,6 +433,7 @@ func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
 // TestHookSessionNoRepoEnvelope: outside a felt repo, we still emit the
 // directive plus a hint to felt init. No "Active / Open" header.
 func TestHookSessionNoRepoEnvelope(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir() // no .felt inside
 
 	out := runHookCommand(t, dir, "hook", "session")
@@ -441,6 +454,7 @@ func TestHookSessionNoRepoEnvelope(t *testing.T) {
 // TestHookSessionEmptyEnvelope: felt repo exists but no active or open fibers
 // — we emit the empty marker, not the Active / Open header.
 func TestHookSessionEmptyEnvelope(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 
 	out := runHookCommand(t, dir, "hook", "session")
@@ -461,6 +475,7 @@ func TestHookSessionEmptyEnvelope(t *testing.T) {
 // outside felt repos. Sibling-skill activations (shuttle, etc) must not satisfy
 // the gate.
 func TestHookPreToolGate(t *testing.T) {
+	t.Parallel()
 	feltDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(feltDir, ".felt"), 0755); err != nil {
 		t.Fatalf("mkdir .felt: %v", err)
@@ -603,6 +618,7 @@ func TestHookPreToolGate(t *testing.T) {
 // TestHookPreToolFlagPersists: once the flag is set, a subsequent non-Skill
 // tool call passes silently.
 func TestHookPreToolFlagPersists(t *testing.T) {
+	t.Parallel()
 	feltDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(feltDir, ".felt"), 0755); err != nil {
 		t.Fatalf("mkdir .felt: %v", err)
@@ -733,6 +749,7 @@ func postEditInput(tool, filePath string) postToolInput {
 }
 
 func TestPostToolHookStampsEdit(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		tool string
@@ -751,6 +768,7 @@ func TestPostToolHookStampsEdit(t *testing.T) {
 		{"lowercase tool name", "edit", func(s *felt.Storage) string { return s.Path("alpha") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			_, storage := newStore(t)
 			created := mustParseTime(t, "2026-04-10T09:00:00Z")
 			if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: created}); err != nil {
@@ -776,6 +794,7 @@ func TestPostToolHookStampsEdit(t *testing.T) {
 // file alone — whether the freshness comes from a recent stamp or from a fiber
 // that was only just created.
 func TestPostToolHookSkipsFreshAnchor(t *testing.T) {
+	t.Parallel()
 	_, storage := newStore(t)
 	old := mustParseTime(t, "2026-04-10T09:00:00Z")
 	stamped := time.Now().Add(-5 * time.Minute)
@@ -811,6 +830,7 @@ func TestPostToolHookSkipsFreshAnchor(t *testing.T) {
 }
 
 func TestPostToolHookIgnoresNonEditAndNonFelt(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{ID: "gamma", Name: "Gamma", CreatedAt: created}); err != nil {
@@ -832,6 +852,7 @@ func TestPostToolHookIgnoresNonEditAndNonFelt(t *testing.T) {
 }
 
 func TestFiberFromEditedPath(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "root-fiber", Name: "Root"}); err != nil {
 		t.Fatalf("Write root: %v", err)
@@ -853,6 +874,7 @@ func TestFiberFromEditedPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			gotRoot, gotID, ok := fiberFromEditedPath(tc.path)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v (id=%q)", ok, tc.wantOK, gotID)
@@ -871,6 +893,7 @@ func TestFiberFromEditedPath(t *testing.T) {
 }
 
 func TestPostToolHookSkipsDuringGitOperation(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	old := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: old}); err != nil {

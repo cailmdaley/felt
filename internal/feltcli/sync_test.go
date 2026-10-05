@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -16,28 +19,127 @@ type syncFixture struct {
 	root   string
 	remote string
 	clone  string
+	// peer is a second clone of remote, configured to commit and push.
+	peer string
 }
 
+// syncTemplate is one remote, clone and peer built once per package with
+// git and copied into each fixture, so a test pays for the git work it is
+// about rather than for a dozen setup subprocesses.
+var syncTemplate struct {
+	once sync.Once
+	root string
+	err  error
+}
+
+// newSyncFixture is a fresh copy of the sync template: a bare remote with one
+// commit (base.md), a clone tracking it, and a peer clone, each repository's
+// remote URL pointing at the copy's own remote.
 func newSyncFixture(t *testing.T) syncFixture {
 	t.Helper()
+	syncTemplate.once.Do(func() {
+		syncTemplate.root, syncTemplate.err = buildSyncTemplate()
+	})
+	if syncTemplate.err != nil {
+		t.Fatal(syncTemplate.err)
+	}
 	base := t.TempDir()
-	f := syncFixture{root: base, remote: filepath.Join(base, "remote.git"), clone: filepath.Join(base, "clone")}
-	syncTestGit(t, base, "init", "--bare", f.remote)
-	syncTestGit(t, base, "clone", f.remote, f.clone)
-	syncTestGit(t, f.clone, "config", "user.name", "Sync Test")
-	syncTestGit(t, f.clone, "config", "user.email", "sync-test@example.invalid")
-	writeSyncFile(t, f.clone, "base.md", "base\n")
-	syncTestGit(t, f.clone, "add", "base.md")
-	syncTestGit(t, f.clone, "commit", "-m", "base")
-	syncTestGit(t, f.clone, "push", "-u", "origin", "HEAD")
+	if err := copySyncTree(syncTemplate.root, base); err != nil {
+		t.Fatal(err)
+	}
+	f := syncFixture{root: base, remote: filepath.Join(base, "remote.git"), clone: filepath.Join(base, "clone"), peer: filepath.Join(base, "peer")}
+	for _, repo := range []string{f.clone, f.peer} {
+		config := filepath.Join(repo, ".git", "config")
+		data, err := os.ReadFile(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Quoted, because a subtest's directory name can hold '#', which
+		// starts a comment in an unquoted git config value.
+		url := strconv.Quote(f.remote)
+		data = bytes.ReplaceAll(data, []byte("url = "+filepath.Join(syncTemplate.root, "remote.git")), []byte("url = "+url))
+		if !bytes.Contains(data, []byte(url)) {
+			t.Fatalf("template %s names no remote URL to rewrite:\n%s", config, data)
+		}
+		if err := os.WriteFile(config, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return f
+}
+
+func buildSyncTemplate() (string, error) {
+	base, err := os.MkdirTemp(testScratch, "sync-template-")
+	if err != nil {
+		return "", err
+	}
+	// Resolve symlinks (macOS /var → /private/var) so the remote URL git
+	// records is the spelling the fixture rewrites.
+	if base, err = filepath.EvalSymlinks(base); err != nil {
+		return "", err
+	}
+	remote, clone, peer := filepath.Join(base, "remote.git"), filepath.Join(base, "clone"), filepath.Join(base, "peer")
+	steps := [][]string{
+		{base, "init", "--bare", remote},
+		{base, "clone", remote, clone},
+		{clone, "config", "user.name", "Sync Test"},
+		{clone, "config", "user.email", "sync-test@example.invalid"},
+		{clone, "add", "base.md"},
+		{clone, "commit", "-m", "base"},
+		{clone, "push", "-u", "origin", "HEAD"},
+		{base, "clone", remote, peer},
+		{peer, "config", "user.name", "Peer"},
+		{peer, "config", "user.email", "peer@example.invalid"},
+	}
+	for i, step := range steps {
+		if i == 4 {
+			if err := os.WriteFile(filepath.Join(clone, "base.md"), []byte("base\n"), 0o644); err != nil {
+				return "", err
+			}
+		}
+		if out, err := syncGitCommand(step[0], step[1:]...).CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git %v in %s: %v\n%s", step[1:], step[0], err, out)
+		}
+	}
+	return base, nil
+}
+
+// copySyncTree copies the template's directories, regular files and modes
+// from src into dst.
+func copySyncTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, info.Mode().Perm())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode().Perm())
+	})
+}
+
+func syncGitCommand(dir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
+	return cmd
 }
 
 func syncTestGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
-	out, err := cmd.CombinedOutput()
+	out, err := syncGitCommand(dir, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
 	}
@@ -64,7 +166,9 @@ func runFixtureSync(t *testing.T, f syncFixture, push bool) (string, error) {
 }
 
 func TestSyncNoopFastForwardAndDivergentMerge(t *testing.T) {
+	t.Parallel()
 	t.Run("no-op", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
 		_, err := runFixtureSync(t, f, false)
 		if err != nil {
@@ -72,11 +176,9 @@ func TestSyncNoopFastForwardAndDivergentMerge(t *testing.T) {
 		}
 	})
 	t.Run("fast-forward", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
-		peer := filepath.Join(f.root, "peer")
-		syncTestGit(t, f.root, "clone", f.remote, peer)
-		syncTestGit(t, peer, "config", "user.name", "Peer")
-		syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+		peer := f.peer
 		writeSyncFile(t, peer, "upstream.md", "upstream\n")
 		syncTestGit(t, peer, "add", "upstream.md")
 		syncTestGit(t, peer, "commit", "-m", "upstream")
@@ -90,11 +192,9 @@ func TestSyncNoopFastForwardAndDivergentMerge(t *testing.T) {
 		}
 	})
 	t.Run("divergent clean merge", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
-		peer := filepath.Join(f.root, "peer")
-		syncTestGit(t, f.root, "clone", f.remote, peer)
-		syncTestGit(t, peer, "config", "user.name", "Peer")
-		syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+		peer := f.peer
 		writeSyncFile(t, f.clone, "local.md", "local\n")
 		syncTestGit(t, f.clone, "add", "local.md")
 		syncTestGit(t, f.clone, "commit", "-m", "local")
@@ -114,11 +214,9 @@ func TestSyncNoopFastForwardAndDivergentMerge(t *testing.T) {
 }
 
 func TestSyncConflictRetainsStagesAndRetryAfterResolution(t *testing.T) {
+	t.Parallel()
 	f := newSyncFixture(t)
-	peer := filepath.Join(f.root, "peer")
-	syncTestGit(t, f.root, "clone", f.remote, peer)
-	syncTestGit(t, peer, "config", "user.name", "Peer")
-	syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+	peer := f.peer
 	writeSyncFile(t, f.clone, "base.md", "local\n")
 	syncTestGit(t, f.clone, "add", "base.md")
 	syncTestGit(t, f.clone, "commit", "-m", "local edit")
@@ -146,7 +244,9 @@ func TestSyncConflictRetainsStagesAndRetryAfterResolution(t *testing.T) {
 }
 
 func TestSyncStagedRefusalAndSafeUnstagedUntrackedState(t *testing.T) {
+	t.Parallel()
 	t.Run("staged refused", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
 		writeSyncFile(t, f.clone, "staged.md", "keep\n")
 		syncTestGit(t, f.clone, "add", "staged.md")
@@ -159,11 +259,9 @@ func TestSyncStagedRefusalAndSafeUnstagedUntrackedState(t *testing.T) {
 		}
 	})
 	t.Run("non-overlapping unstaged and untracked survive fast-forward", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
-		peer := filepath.Join(f.root, "peer")
-		syncTestGit(t, f.root, "clone", f.remote, peer)
-		syncTestGit(t, peer, "config", "user.name", "Peer")
-		syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+		peer := f.peer
 		writeSyncFile(t, peer, "upstream.md", "upstream\n")
 		syncTestGit(t, peer, "add", "upstream.md")
 		syncTestGit(t, peer, "commit", "-m", "upstream")
@@ -185,11 +283,9 @@ func TestSyncStagedRefusalAndSafeUnstagedUntrackedState(t *testing.T) {
 		}
 	})
 	t.Run("overlap refused and preserved", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
-		peer := filepath.Join(f.root, "peer")
-		syncTestGit(t, f.root, "clone", f.remote, peer)
-		syncTestGit(t, peer, "config", "user.name", "Peer")
-		syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+		peer := f.peer
 		writeSyncFile(t, peer, "base.md", "remote\n")
 		syncTestGit(t, peer, "add", "base.md")
 		syncTestGit(t, peer, "commit", "-m", "upstream")
@@ -205,11 +301,9 @@ func TestSyncStagedRefusalAndSafeUnstagedUntrackedState(t *testing.T) {
 		}
 	})
 	t.Run("untracked collision refused and preserved", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
-		peer := filepath.Join(f.root, "peer")
-		syncTestGit(t, f.root, "clone", f.remote, peer)
-		syncTestGit(t, peer, "config", "user.name", "Peer")
-		syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+		peer := f.peer
 		writeSyncFile(t, peer, "untracked-collision.md", "upstream\n")
 		syncTestGit(t, peer, "add", "untracked-collision.md")
 		syncTestGit(t, peer, "commit", "-m", "upstream")
@@ -227,11 +321,9 @@ func TestSyncStagedRefusalAndSafeUnstagedUntrackedState(t *testing.T) {
 }
 
 func TestSyncIgnoredCollisionPreservesLocalBytes(t *testing.T) {
+	t.Parallel()
 	f := newSyncFixture(t)
-	peer := filepath.Join(f.root, "peer")
-	syncTestGit(t, f.root, "clone", f.remote, peer)
-	syncTestGit(t, peer, "config", "user.name", "Peer")
-	syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+	peer := f.peer
 	name := "ignored-collision.md"
 	writeSyncFile(t, filepath.Join(f.clone, ".git", "info"), "exclude", name+"\n")
 	writeSyncFile(t, f.clone, name, "local ignored bytes\n")
@@ -251,6 +343,7 @@ func TestSyncIgnoredCollisionPreservesLocalBytes(t *testing.T) {
 }
 
 func TestSyncPushTargetsTrackingBranchAndReportsRejection(t *testing.T) {
+	t.Parallel()
 	f := newSyncFixture(t)
 	wrongRemote := filepath.Join(f.root, "wrong.git")
 	syncTestGit(t, f.root, "init", "--bare", wrongRemote)
@@ -291,7 +384,9 @@ func TestSyncPushTargetsTrackingBranchAndReportsRejection(t *testing.T) {
 }
 
 func TestSyncReportsMissingUpstreamAndFetchFailure(t *testing.T) {
+	t.Parallel()
 	t.Run("missing upstream", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
 		syncTestGit(t, f.clone, "branch", "--unset-upstream")
 		_, err := runFixtureSync(t, f, false)
@@ -300,6 +395,7 @@ func TestSyncReportsMissingUpstreamAndFetchFailure(t *testing.T) {
 		}
 	})
 	t.Run("fetch failure", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
 		syncTestGit(t, f.clone, "remote", "set-url", "origin", filepath.Join(f.root, "missing.git"))
 		_, err := runFixtureSync(t, f, false)
@@ -308,11 +404,9 @@ func TestSyncReportsMissingUpstreamAndFetchFailure(t *testing.T) {
 		}
 	})
 	t.Run("deleted tracking branch", func(t *testing.T) {
+		t.Parallel()
 		f := newSyncFixture(t)
-		peer := filepath.Join(f.root, "peer")
-		syncTestGit(t, f.root, "clone", f.remote, peer)
-		syncTestGit(t, peer, "config", "user.name", "Peer")
-		syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+		peer := f.peer
 		writeSyncFile(t, peer, "upstream.md", "upstream\n")
 		syncTestGit(t, peer, "add", "upstream.md")
 		syncTestGit(t, peer, "commit", "-m", "upstream")
@@ -337,6 +431,7 @@ func TestSyncReportsMissingUpstreamAndFetchFailure(t *testing.T) {
 }
 
 func TestSyncResolvesSymlinkedStoreAndSerializesRepository(t *testing.T) {
+	t.Parallel()
 	f := newSyncFixture(t)
 	project := filepath.Join(f.root, "project")
 	view := filepath.Join(project, ".felt")
@@ -380,7 +475,7 @@ func TestSyncResolvesSymlinkedStoreAndSerializesRepository(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("second lock did not proceed after release")
 	}
 }
@@ -396,14 +491,14 @@ func FuzzSyncStateSequencePreservesLocalFiles(fz *testing.F) {
 	fz.Add([]byte{2, 3})
 	fz.Add([]byte{4, 2})
 	fz.Fuzz(func(t *testing.T, operations []byte) {
+		// Each input runs on its own fixture copy and env, so the seed
+		// corpus runs side by side under go test.
+		t.Parallel()
 		if len(operations) > 8 {
 			operations = operations[:8]
 		}
 		f := newSyncFixture(t)
-		peer := filepath.Join(f.root, "peer")
-		syncTestGit(t, f.root, "clone", f.remote, peer)
-		syncTestGit(t, peer, "config", "user.name", "Peer")
-		syncTestGit(t, peer, "config", "user.email", "peer@example.invalid")
+		peer := f.peer
 		staged := false
 		conflict := false
 		ignoredCollision := false

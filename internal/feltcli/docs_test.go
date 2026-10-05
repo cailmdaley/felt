@@ -24,6 +24,7 @@ var retiredCommandPhrases = []string{
 }
 
 func TestGeneratedGuidanceAvoidsRetiredCommands(t *testing.T) {
+	t.Parallel()
 	// Only scan the in-binary string fixtures; the plugin tree (skills,
 	// hooks, manifest) is scanned by TestPluginSkillsAvoidRetiredCommands.
 	for name, text := range map[string]string{
@@ -38,6 +39,7 @@ func TestGeneratedGuidanceAvoidsRetiredCommands(t *testing.T) {
 }
 
 func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
+	t.Parallel()
 	var visible []string
 	for _, cmd := range NewRootCmd(sysenv.New(t.TempDir(), nil)).Commands() {
 		if cmd.Hidden {
@@ -80,6 +82,7 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 }
 
 func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
+	t.Parallel()
 	usage := NewRootCmd(sysenv.New(t.TempDir(), nil)).UsageString()
 	for _, leaked := range []string{"Body text", "Outcome: what was decided", "Status (open, active, closed)"} {
 		if strings.Contains(usage, leaked) {
@@ -170,10 +173,12 @@ func forbidUnder(t *testing.T, root, ext string, phrases ...string) {
 }
 
 func TestPluginSkillsAvoidRetiredCommands(t *testing.T) {
+	t.Parallel()
 	forbidUnder(t, pluginSkillsRoot(t), "", retiredCommandPhrases...)
 }
 
 func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
+	t.Parallel()
 	skillsRoot := pluginSkillsRoot(t)
 
 	data, err := os.ReadFile(filepath.Join(skillsRoot, "shuttle", "references", "meeting.md"))
@@ -194,6 +199,7 @@ func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
 }
 
 func TestPluginSkillsAreSortedAndKnown(t *testing.T) {
+	t.Parallel()
 	names := pluginSkillNames(t)
 	sorted := make([]string, len(names))
 	copy(sorted, names)
@@ -211,6 +217,7 @@ func TestPluginSkillsAreSortedAndKnown(t *testing.T) {
 }
 
 func TestReadmeListsPluginSkills(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {
@@ -232,6 +239,7 @@ func TestReadmeListsPluginSkills(t *testing.T) {
 }
 
 func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
+	t.Parallel()
 	docsDir := filepath.Join(repoRoot(t), "docs")
 	if _, err := os.Stat(docsDir); err != nil {
 		t.Fatalf("could not find repository docs/: %v", err)
@@ -240,6 +248,7 @@ func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
 }
 
 func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
+	t.Parallel()
 	for name, text := range map[string]string{
 		"claudeMDSnippet": claudeMDSnippet(),
 	} {
@@ -255,6 +264,7 @@ func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
 // TestPluginAssetsAvoidLegacyTitleDetailLevel walks the plugin tree (skills,
 // hooks, manifest) for legacy detail-level phrasing.
 func TestPluginAssetsAvoidLegacyTitleDetailLevel(t *testing.T) {
+	t.Parallel()
 	pluginRoot := filepath.Join(repoRoot(t), "claude-plugin")
 	if _, err := os.Stat(pluginRoot); err != nil {
 		t.Skipf("no claude-plugin at %s: %v", pluginRoot, err)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"reflect"
 	"runtime/debug"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
@@ -21,10 +22,13 @@ type app struct {
 	json    bool   // --json
 	dir     string // -C
 	version string // the release version this binary reports and pins plugins to
+	// probeTimeout bounds how long felt update waits for a sibling shuttle or
+	// brew to report its version or prefix.
+	probeTimeout time.Duration
 }
 
 func newApp(env *sysenv.Env) *app {
-	return &app{env: env, version: Version}
+	return &app{env: env, version: Version, probeTimeout: 3 * time.Second}
 }
 
 // Version is the current release version, set through build metadata.

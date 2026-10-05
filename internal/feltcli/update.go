@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -139,7 +138,7 @@ func (a *app) siblingShuttleBuildMatches(feltPath, expectedBuild string) bool {
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), a.probeTimeout)
 	defer cancel()
 	output, err := a.env.CommandContext(ctx, shuttlePath, "--version").CombinedOutput()
 	if err != nil {
@@ -165,7 +164,7 @@ func (a *app) refuseHomebrewUpdate(path string) error {
 	if err != nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), a.probeTimeout)
 	defer cancel()
 	output, err := a.env.CommandContext(ctx, brew, "--prefix").Output()
 	if err != nil {

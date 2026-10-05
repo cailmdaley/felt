@@ -10,6 +10,7 @@ import (
 )
 
 func TestCheckCommandReportsIssues(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	fiber := &felt.Felt{ID: "fiber-a"}
@@ -30,6 +31,7 @@ func TestCheckCommandReportsIssues(t *testing.T) {
 }
 
 func TestCheckCommandNamesLegacyFlatMigration(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, name := range []string{"old-thing-1a2b3c4d", "other-9f8e7d6c"} {
 		content := "---\nname: " + name + "\n---\n"
@@ -54,6 +56,7 @@ func TestCheckCommandNamesLegacyFlatMigration(t *testing.T) {
 }
 
 func TestCheckCommandJSONExitsNonZeroOnError(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	fiber := &felt.Felt{ID: "fiber-a"}
@@ -74,6 +77,7 @@ func TestCheckCommandJSONExitsNonZeroOnError(t *testing.T) {
 }
 
 func TestCheckCommandSucceedsWhenOnlySubstrateChecksPass(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	fiber := &felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -96,6 +100,7 @@ func TestCheckCommandSucceedsWhenOnlySubstrateChecksPass(t *testing.T) {
 }
 
 func TestCheckCommandReportsLegacyFormatIssues(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 
 	path := filepath.Join(dir, ".felt", "legacy-fiber", "legacy-fiber.md")
@@ -140,6 +145,7 @@ Body.
 // count it. A fiber can drop out of the assemblage entirely; check must say so,
 // first, and fail.
 func TestCheckCommandCountsUnparseableFiberFirst(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	// A second, lesser problem: a broken body reference. It must still be
@@ -209,6 +215,7 @@ Body.
 // slug rescue could salvage is a warning — it still reaches its fiber — so
 // check prints it and exits zero.
 func TestCheckCommandStaleLinkPathWarnsWithoutFailing(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, f := range []*felt.Felt{
@@ -236,6 +243,7 @@ func TestCheckCommandStaleLinkPathWarnsWithoutFailing(t *testing.T) {
 // stray is a layout error pointing at migrate, and the link is broken because
 // the stray is not a fiber.
 func TestCheckCommandFailsOnStrayFiberFile(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, f := range []*felt.Felt{
@@ -269,6 +277,7 @@ func TestCheckCommandFailsOnStrayFiberFile(t *testing.T) {
 // with the way out instead of acting on a same-named fiber elsewhere, and
 // `add` refuses to create the collision.
 func TestCommandsRefuseStrayIDs(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, f := range []*felt.Felt{

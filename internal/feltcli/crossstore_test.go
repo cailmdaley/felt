@@ -67,6 +67,7 @@ func loomRoot(t *testing.T, subProj string) string {
 // TestShowReachesEnclosingStore: a substore is a lens, not a fence — an id
 // that names one real fiber out there is shown, not refused.
 func TestShowReachesEnclosingStore(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "show", "ai-futures/portolan/debug", "--detail", "name")
@@ -79,6 +80,7 @@ func TestShowReachesEnclosingStore(t *testing.T) {
 }
 
 func TestShowResolvesIntrinsicUIDFromEnclosingStore(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
@@ -93,6 +95,7 @@ func TestShowResolvesIntrinsicUIDFromEnclosingStore(t *testing.T) {
 }
 
 func TestShowRejectsDuplicateIntrinsicUIDAcrossEnclosingStore(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
@@ -107,6 +110,7 @@ func TestShowRejectsDuplicateIntrinsicUIDAcrossEnclosingStore(t *testing.T) {
 // TestRmReachesEnclosingStoreAndSaysWhere: the destructive verb acts on the
 // fiber the user named, where it lives, and never on the local same-slug one.
 func TestRmReachesEnclosingStoreAndSaysWhere(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "rm", "ai-futures/portolan/debug")
@@ -131,6 +135,7 @@ func TestRmReachesEnclosingStoreAndSaysWhere(t *testing.T) {
 // TestEditReachesEnclosingStoreAndSaysWhere: edit is a mutation too, so it
 // names where it wrote.
 func TestEditReachesEnclosingStoreAndSaysWhere(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "edit", "ai-futures/portolan/debug", "--name", "Renamed out there")
@@ -156,6 +161,7 @@ func TestEditReachesEnclosingStoreAndSaysWhere(t *testing.T) {
 // external fiber under a local parent runs in the enclosing store with the
 // local id translated into outer coordinates.
 func TestNestAcrossBoundaryLiftsBothIDs(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "nest", "ai-futures/portolan/debug", "notes/runbook")
@@ -181,6 +187,7 @@ func TestNestAcrossBoundaryLiftsBothIDs(t *testing.T) {
 // TestUnnestAcrossBoundaryPromotesInEnclosingStore: top level means the top
 // level of the store that holds the fiber.
 func TestUnnestAcrossBoundaryPromotesInEnclosingStore(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "unnest", "ai-futures/portolan/debug")
@@ -202,6 +209,7 @@ func TestUnnestAcrossBoundaryPromotesInEnclosingStore(t *testing.T) {
 // does not become a search of the store — that is what `felt find` is for, and
 // a filtered ls in a substore says so on a trailer line.
 func TestLsStaysInTheView(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "ls", "debug")
@@ -222,6 +230,7 @@ func TestLsStaysInTheView(t *testing.T) {
 // TestLsFilterTrailerIsTextOnly: --json is the wire the daemon and the board
 // read; a human-facing hint has no place in it.
 func TestLsFilterTrailerIsTextOnly(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "ls", "debug", "--json")
@@ -236,6 +245,7 @@ func TestLsFilterTrailerIsTextOnly(t *testing.T) {
 // TestLsBareStaysLocal: a bare listing answers "what am I working on here",
 // and must not pay for — or print — the enclosing store.
 func TestLsBareStaysLocal(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "ls")
@@ -259,6 +269,7 @@ func TestLsBareStaysLocal(t *testing.T) {
 // a local `debug` made it work, two of them made it fail. The gate is gone;
 // resolution reaches the enclosing store on every local miss.
 func TestPartialForeignPathResolvesRegardless(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 
 	// A second local `debug` twin: under the old gate this ambiguity switched
@@ -282,6 +293,7 @@ func TestPartialForeignPathResolvesRegardless(t *testing.T) {
 // but whose slug a forgiving rule would answer is refused with the answer as
 // a suggestion; the same-named fiber survives. `show` stays forgiving.
 func TestRmAndMovesActOnlyOnExactIDs(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, id := range []string{"a", "b", "b/zzz", "b/notes"} {
 		writeFixtureFelt(t, storage, id, id)
@@ -341,6 +353,7 @@ func TestRmAndMovesActOnlyOnExactIDs(t *testing.T) {
 // and a path naming a stray fiber file out there reports the stray, in show
 // as in rm, rather than resolving to its same-named twin.
 func TestRmThroughViewRefusesEnclosingStoreGuesses(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	writeFixtureFelt(t, loom, "commons/x", "X")
@@ -383,6 +396,7 @@ func TestRmThroughViewRefusesEnclosingStoreGuesses(t *testing.T) {
 // position — `portolan/debug` from ai-futures/felt is ai-futures/portolan/debug
 // — is not a guess, so rm acts on it there.
 func TestRmThroughViewAcceptsLexicalPathOutThere(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	out, err := runCommand(t, subProj, "rm", "portolan/debug")
 	if err != nil || !strings.Contains(out, "Deleted ai-futures/portolan/debug") {
@@ -397,6 +411,7 @@ func TestRmThroughViewAcceptsLexicalPathOutThere(t *testing.T) {
 // docs/getting-started.md: bare unique slugs are not guesses, so unnest and
 // nest take them.
 func TestGettingStartedNestSequence(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 	for _, args := range [][]string{
 		{"add", "covariance-estimation", "Covariance estimation", "-s", "open"},
@@ -420,6 +435,7 @@ func TestGettingStartedNestSequence(t *testing.T) {
 // the view holds `ai-futures/portolan/chartedx`. edit and show must reach the
 // loom's fiber, and rm must act on it rather than call the query a guess.
 func TestExactOutsideIDBeatsLocalPrefixCompletion(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	sub := felt.NewStorage(subProj)
 	writeFixtureFelt(t, sub, "ai-futures/portolan/chartedx", "Local lookalike")
@@ -460,6 +476,7 @@ func TestExactOutsideIDBeatsLocalPrefixCompletion(t *testing.T) {
 // local id begins. Moving the local lookalike must not rewrite it to follow
 // the lookalike: the move plan reads paths by the same tiers resolution does.
 func TestNestFromViewLeavesExactOutsideLinkAlone(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 	sub := felt.NewStorage(subProj)
 	writeFixtureFelt(t, sub, "ai-futures/portolan/chartedx", "Local lookalike")
@@ -518,6 +535,7 @@ func inputFroms(t *testing.T, s *felt.Storage, id string) []string {
 // rewrite inputs.from in the enclosing store's fibers outside the view, with
 // or without an input id, in the enclosing store's coordinates.
 func TestNestFromViewRewritesOutsideInputs(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	writeConsumer(t, loom, "commons/reader", "ai-futures/felt/notes/runbook")
@@ -545,6 +563,7 @@ func TestNestFromViewRewritesOutsideInputs(t *testing.T) {
 // its last segment is warned on from the store root — the entry's input id
 // is not what makes it an edge.
 func TestCheckFlagsStaleInputFromWithoutID(t *testing.T) {
+	t.Parallel()
 	loomProj, _ := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	writeConsumer(t, loom, "commons/reader", "ai-futures/felt/old/runbook")

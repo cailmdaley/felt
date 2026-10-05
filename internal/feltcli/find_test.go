@@ -15,6 +15,7 @@ import (
 // ids, the rest of the store under a separator naming it, each by its full id
 // there. This store's own subtree never appears twice.
 func TestFindSearchesTheWholeStore(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "find", "debug")
@@ -49,11 +50,13 @@ func TestFindSearchesTheWholeStore(t *testing.T) {
 // TestFindAcceptsSearchShapedFilters: -t and --body ask the same question a
 // query does, and reach just as far.
 func TestFindAcceptsSearchShapedFilters(t *testing.T) {
+	t.Parallel()
 	for _, filter := range [][]string{
 		{"-t", "decision"},
 		{"--body", "Charted"},
 	} {
 		t.Run(strings.Join(filter, " "), func(t *testing.T) {
+			t.Parallel()
 			_, subProj := newCrossStoreFixture(t)
 
 			out, err := runCommand(t, subProj, append([]string{"find"}, filter...)...)
@@ -71,6 +74,7 @@ func TestFindAcceptsSearchShapedFilters(t *testing.T) {
 // block stops at the cap and closes with an EXACT count of the remainder and
 // the flag that lifts it — a truncation the reader can act on.
 func TestFindCapsTheOuterBlock(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	// 25 flat siblings: past the cap, and none is an ancestor of another, so
@@ -105,6 +109,7 @@ func TestFindCapsTheOuterBlock(t *testing.T) {
 // TestFindInTopLevelStoreIsALocalSearch: a store that encloses nothing has no
 // outer half; find is simply a search of that store, with no separator.
 func TestFindInTopLevelStoreIsALocalSearch(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	writeFixtureFelt(t, storage, "kanban", "Kanban board")
 	writeFixtureFelt(t, storage, "unrelated", "Unrelated")
@@ -127,6 +132,7 @@ func TestFindInTopLevelStoreIsALocalSearch(t *testing.T) {
 // TestFindNeedsSomethingToSearchFor: a bare `felt find` is `felt ls` asked
 // wrong; say so rather than dumping the loom.
 func TestFindNeedsSomethingToSearchFor(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "find")
@@ -141,6 +147,7 @@ func TestFindNeedsSomethingToSearchFor(t *testing.T) {
 // TestFindClosedHintCountsBothStores: closed matches are suppressed and
 // counted, and the count covers the outer block too.
 func TestFindClosedHintCountsBothStores(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	closedAt := time.Now()
@@ -175,6 +182,7 @@ func TestFindClosedHintCountsBothStores(t *testing.T) {
 // coordinates it was printed in, each naming the store that holds it — and
 // uncapped, because a machine consumer wants the whole answer.
 func TestFindJSONIsOneMergedArray(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	for i := 0; i < 25; i++ {
@@ -228,6 +236,7 @@ func TestFindJSONIsOneMergedArray(t *testing.T) {
 // TestFindWithoutLocalHitsNamesTheStorePlainly: "elsewhere" reads as a
 // contrast with something above it. With no local hits there is nothing above.
 func TestFindWithoutLocalHitsNamesTheStorePlainly(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 
 	out, err := runCommand(t, subProj, "find", "commons")

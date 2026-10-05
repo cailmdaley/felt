@@ -17,6 +17,7 @@ func readFiberBody(t *testing.T, s *felt.Storage, id string) string {
 }
 
 func TestNestNamesRewrittenFibersAndCheckStaysClean(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, f := range []*felt.Felt{
 		{ID: "a", Name: "A"},
@@ -59,6 +60,7 @@ func TestNestNamesRewrittenFibersAndCheckStaysClean(t *testing.T) {
 // In a view, links to a local fiber are written either with the view's own
 // ids or with the enclosing store's; a move inside the view rewrites both.
 func TestNestInViewRewritesBothSpellings(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 	sub := felt.NewStorage(subProj)
 	body := "Local [[notes/runbook]], outer [[ai-futures/felt/notes/runbook]]."
@@ -81,6 +83,7 @@ func TestNestInViewRewritesBothSpellings(t *testing.T) {
 // A move lifted into the enclosing store sees every fiber there, the view's
 // included, and rewrites their links in the spelling each was written in.
 func TestNestAcrossBoundaryRewritesViewLinks(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 	sub := felt.NewStorage(subProj)
 	if err := sub.Write(&felt.Felt{ID: "citer", Name: "Citer", Body: "See [[ai-futures/portolan/debug]]."}); err != nil {
@@ -100,6 +103,7 @@ func TestNestAcrossBoundaryRewritesViewLinks(t *testing.T) {
 // in that store's coordinates, keeping each link's shape; nest names them by
 // their ids there.
 func TestNestInViewRewritesEnclosingStore(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	body := "Full [[ai-futures/felt/notes/runbook]], suffix [[felt/notes/runbook]], bare [[runbook]]."

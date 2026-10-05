@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
@@ -43,8 +44,7 @@ func TestUpdatePairIsCurrentRequiresMatchingSiblingShuttle(t *testing.T) {
 	if err := os.WriteFile(feltPath, []byte("felt"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env, _ := testEnv(t)
-	a := testApp(t, env)
+	a := probingApp(t)
 	if a.updatePairIsCurrent(feltPath, "1.2.3", "v1.2.3", "build-a") {
 		t.Fatal("felt without a sibling shuttle was considered up to date")
 	}
@@ -106,10 +106,9 @@ func TestRefuseHomebrewUpdateUsesBrewPrefix(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("felt"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	env, _ := testEnv(t)
-	sysenvtest.FakeCommand(t, env, "brew", "printf '%s\\n' \"$BREW_PREFIX\"\n")
-	env.Set("BREW_PREFIX", prefix)
-	a := testApp(t, env)
+	a := probingApp(t)
+	sysenvtest.FakeCommand(t, a.env, "brew", "printf '%s\\n' \"$BREW_PREFIX\"\n")
+	a.env.Set("BREW_PREFIX", prefix)
 	if err := a.refuseHomebrewUpdate(binary); err == nil || !strings.Contains(err.Error(), "brew upgrade felt") {
 		t.Fatalf("Homebrew-prefix felt update error = %v", err)
 	}
@@ -221,6 +220,17 @@ func TestReplaceBinaryPairRejectsNonFileDestinationBeforeChangingPair(t *testing
 	if got, err := os.ReadFile(feltPath); err != nil || string(got) != "old felt" {
 		t.Fatalf("felt after rejected update = %q, %v", got, err)
 	}
+}
+
+// probingApp is an app whose fake shuttle and brew have a minute to answer:
+// a loaded machine running the suite in parallel can take longer than the
+// production timeout to start a shell script.
+func probingApp(t *testing.T) *app {
+	t.Helper()
+	env, _ := testEnv(t)
+	a := testApp(t, env)
+	a.probeTimeout = time.Minute
+	return a
 }
 
 func updateArchive(t *testing.T, binaries map[string][]byte) []byte {

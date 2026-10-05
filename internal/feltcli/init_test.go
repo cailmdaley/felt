@@ -13,6 +13,7 @@ import (
 // though nothing much had happened, and it named neither the path nor a next
 // step.
 func TestInitCommandNamesWhatItCreated(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	output, err := runCommand(t, dir, "init")
@@ -47,6 +48,7 @@ func TestInitCommandNamesWhatItCreated(t *testing.T) {
 // TestInitCommandOverExistingStoreStaysIdempotent keeps the "nothing much
 // happened" register where it belongs — the re-run, not the first run.
 func TestInitCommandOverExistingStoreStaysIdempotent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	if _, err := runCommand(t, dir, "init"); err != nil {

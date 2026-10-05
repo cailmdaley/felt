@@ -49,6 +49,7 @@ func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 			}
 
 			for _, tamper := range []string{"stale", "alter", "missing-marker"} {
+				// serial: each tamper mode is a step on the shared fixture f.
 				t.Run(tamper, func(t *testing.T) {
 					f.setGeneration(t, "poisoned-"+tamper)
 					f.env.Set("FAKE_NATIVE_TAMPER", tamper)

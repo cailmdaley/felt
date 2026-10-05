@@ -13,6 +13,7 @@ func seedShuttleFiber(t *testing.T, storage *felt.Storage, id string, block map[
 }
 
 func TestFeltEditLeavesShuttleFacetOpaque(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	seedShuttleFiber(t, storage, "bad", map[string]any{"kind": "bogus"})
 
@@ -42,6 +43,7 @@ func TestFeltEditLeavesShuttleFacetOpaque(t *testing.T) {
 }
 
 func TestFeltLsJSONPreservesShuttleWithoutResolution(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	seedShuttleFiber(t, storage, "valid", map[string]any{"kind": "oneshot", "agent": "claude-opus"})
 	// A scalar value is opaque frontmatter, not a facet.
@@ -74,6 +76,7 @@ func TestFeltLsJSONPreservesShuttleWithoutResolution(t *testing.T) {
 }
 
 func TestFeltEditChangesStatusWithoutResolvingAgent(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	seedShuttleFiber(t, storage, "f", map[string]any{"kind": "oneshot", "agent": "retired-agent", "project_dir": "/srv/work"})
 	if out, err := runCommand(t, dir, "edit", "f", "-s", "active"); err != nil {
@@ -85,6 +88,7 @@ func TestFeltEditChangesStatusWithoutResolvingAgent(t *testing.T) {
 }
 
 func TestEditOfArmedFiberWithoutProjectDirIsNotArming(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	seedShuttleFiber(t, storage, "role", map[string]any{
 		"kind": "standing", "agent": "claude-opus",
@@ -107,6 +111,7 @@ func TestEditOfArmedFiberWithoutProjectDirIsNotArming(t *testing.T) {
 }
 
 func TestAddPaysNoShuttleCost(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if out, err := runCommand(t, dir, "add", "plain", "A plain note"); err != nil {
 		t.Fatalf("add: %v\n%s", err, out)
