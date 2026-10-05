@@ -26,9 +26,8 @@ export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
 const RECEIPT_OVERLAP_MS = 60000
 const MAX_CHANGE_ROWS = 8
-/** Metadata read backoff: an unreachable owner retries within 30 s; a fiber its owner says does not exist waits 30 s, doubling to 5 min. */
+/** An unreachable owner's metadata read retries within this long. */
 const RETRY_MS = 30000
-const MISSING_RETRY_MS = 300000
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
 const SEEN_STORAGE = 'shuttle.workspace.overview.seen'
@@ -346,9 +345,8 @@ export class Overview {
   /** Metadata paints immediately; one coalesced feed read finishes asynchronously. */
   refresh(): void {
     if (this.disposed) return
-    // A poll retries transient failures at once. An owner that answered "not
-    // found" keeps its backoff until the next visit, because every read of a
-    // missing fiber asks each host in turn.
+    // A poll retries transient failures at once. A fiber its owner answered
+    // "not found" for waits for the next visit: every such read asks each host in turn.
     if (!this.request) for (const [uid, retry] of this.cardRetries) if (!this.missingCards.has(uid)) retry.at = 0
     this.reconcile()
     if (this.request) return
@@ -542,7 +540,9 @@ export class Overview {
       const card = file.uid ? known.get(file.uid) : undefined
       const key = docKey(file.host ?? '', file.fullPath, card?.originId ?? 'local', card?.fiberDir)
       const parsed = parseDocKey(key)!
-      const uid = file.uid && !this.missingCards.has(file.uid) ? file.uid : `other:${parsed.owner}`
+      // A receipt sent outside any fiber carries its session id in place of a fiber uid.
+      const filed = file.uid && file.uid !== file.sessionId && !this.missingCards.has(file.uid)
+      const uid = filed ? file.uid! : `other:${parsed.owner}`
       const receipt: Receipt = { ...file, fullPath: parsed.path, key, uid, owner: parsed.owner, host: parsed.owner }
       let documents = byUid.get(uid)
       if (!documents) { documents = new Map(); byUid.set(uid, documents) }
@@ -600,7 +600,7 @@ export class Overview {
     }
     clearTimeout(this.retryTimer)
     const eligible = new Set(candidates.map(uidOf))
-    const times = [...this.cardRetries].filter(([uid]) => eligible.has(uid) && !this.cardLoads.has(uid) && !this.externalLoads.has(uid)).map(([, retry]) => retry.at)
+    const times = [...this.cardRetries].filter(([uid]) => eligible.has(uid) && !this.cardLoads.has(uid) && !this.externalLoads.has(uid)).map(([, retry]) => retry.at).filter(Number.isFinite)
     if (times.length) this.retryTimer = setTimeout(() => this.reconcile(), Math.max(1, Math.min(...times) - Date.now()))
   }
 
@@ -952,8 +952,8 @@ export class Overview {
         const missing = error instanceof Error && error.message.startsWith('Fiber not found on ')
         if (missing) this.missingCards.add(uid)
         const attempts = (this.cardRetries.get(uid)?.attempts ?? 0) + 1
-        const wait = missing ? Math.min(MISSING_RETRY_MS, RETRY_MS * 2 ** Math.min(attempts - 1, 4)) : Math.min(RETRY_MS, 1000 * 2 ** Math.min(attempts - 1, 5))
-        this.cardRetries.set(uid, { attempts, at: Date.now() + wait })
+        // A fiber its owner says does not exist is asked for again only on the next visit.
+        this.cardRetries.set(uid, { attempts, at: missing ? Infinity : Date.now() + Math.min(RETRY_MS, 1000 * 2 ** Math.min(attempts - 1, 5)) })
       }
       return undefined
     }

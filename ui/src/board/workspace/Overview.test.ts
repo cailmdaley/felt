@@ -272,13 +272,24 @@ describe('Overview receipt membership and identity', () => {
     expect(onOpen.mock.calls[0][1]).toBe('bytes-host:/remote/report.html')
   })
 
-  it('backs off a confirmed missing fiber across polls instead of asking its owner again on every one', async () => {
+  it('remembers a confirmed missing fiber until the next visit instead of asking its owner on every poll', async () => {
     feed.files = [receipt('missing', '/remote/report.html', now(), 'bytes-host')]
     const reads = (): number => fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/v1/fibers/missing?')).length
     await refresh()
     expect(reads()).toBe(1)
     for (let poll = 0; poll < 8; poll++) { vi.advanceTimersByTime(15000); await refresh() }
-    expect(reads()).toBeLessThanOrEqual(3)
+    vi.advanceTimersByTime(3600000); await settle()
+    expect(reads()).toBe(1)
+    expect(name('other:bytes-host')).toBe('Unfiled · bytes-host')
+    overview.hide(); overview.show(); await refresh()
+    expect(reads()).toBe(2)
+  })
+
+  it('files a receipt stamped with its session id as Unfiled without asking for a fiber', async () => {
+    feed.files = [receipt('a95e80f5-9498-4c72-9fb2-3eb11118ef19', '/tmp/demo/hubble.png', now(), 'bytes-host', { sessionId: 'a95e80f5-9498-4c72-9fb2-3eb11118ef19' })]
+    await refresh()
+    for (let poll = 0; poll < 4; poll++) { vi.advanceTimersByTime(15000); await refresh() }
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/v1/fibers/'))).toHaveLength(0)
     expect(name('other:bytes-host')).toBe('Unfiled · bytes-host')
   })
 
