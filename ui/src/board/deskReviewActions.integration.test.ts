@@ -20,8 +20,8 @@ function renderer(): KanbanSurfaceRenderer {
   })
 }
 
-describe('review actions stay on Awaiting review cards', () => {
-  it('renders Temper and Discard only on actionable cards in that column', () => {
+describe('verdict actions ride cards awaiting review and in flight', () => {
+  it('renders Temper and Discard on review and in-flight cards, never drafts', () => {
     const data = response({ now: {
       drafts: [card({ id: 'draft' })],
       inFlight: [card({ id: 'flight', status: 'active', shuttleKind: 'oneshot' })],
@@ -29,9 +29,10 @@ describe('review actions stay on Awaiting review cards', () => {
     } })
     const root = renderer().renderNowSection(data.now, data.staleness)
     expect(root.querySelector('[data-fiber-id="draft"] .kbn-card-review-meta-actions')).toBeNull()
-    expect(root.querySelector('[data-fiber-id="flight"] .kbn-card-review-meta-actions')).toBeNull()
-    const actions = root.querySelectorAll<HTMLButtonElement>('[data-fiber-id="review"] .kbn-review-meta-btn')
-    expect([...actions].map((button) => button.textContent)).toEqual(['Temper', 'Discard'])
-    expect([...actions].every((button) => button.type === 'button')).toBe(true)
+    for (const id of ['flight', 'review']) {
+      const actions = root.querySelectorAll<HTMLButtonElement>(`[data-fiber-id="${id}"] .kbn-review-meta-btn`)
+      expect([...actions].map((button) => button.textContent)).toEqual(['Temper', 'Discard'])
+      expect([...actions].every((button) => button.type === 'button')).toBe(true)
+    }
   })
 })

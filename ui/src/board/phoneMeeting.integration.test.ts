@@ -46,6 +46,11 @@ const defer = <T,>() => {
   const promise = new Promise<T>((yes) => { resolve = yes })
   return { promise, resolve }
 }
+/** Turn the composer's Meeting switch on and choose `kind`. */
+const arm = (meeting: HTMLElement, kind: string): void => {
+  meeting.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.click()
+  ;[...meeting.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.textContent === kind)!.click()
+}
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 let board: KanbanModal
 let state: BoardState
@@ -133,11 +138,10 @@ describe('board phone meeting card wiring', () => {
       }))
       const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), sendWith())
       document.body.append(menu)
-      menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
+      arm(menu, 'Phone')
       order.length = 0
       fetcher.mockClear()
-      const phone = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!
-      phone.click()
+      menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
       expect(order).toEqual(['context', 'resume', 'mic'])
       expect(fetcher).not.toHaveBeenCalled()
       opening.resolve(opened as unknown as Mic)
@@ -158,8 +162,8 @@ describe('board phone meeting card wiring', () => {
     fetcher.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'hark unavailable' }) })
     const error = document.createElement('div')
     const menu = state.dock.buildMeeting(card({ id: 'science/task' }), error, sendWith())
-    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
-    menu.querySelector<HTMLButtonElement>('[role="menuitem"]:last-child')!.click()
+    arm(menu, 'Phone')
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
     await flush()
     expect(opened.close).toHaveBeenCalledOnce()
     expect(RelayLink).not.toHaveBeenCalled()
@@ -180,8 +184,8 @@ describe('board phone meeting card wiring', () => {
         : { available: true, meeting: current },
     }))
     const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), send)
-    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
-    ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!.click()
+    arm(menu, 'Phone')
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
     expect(order).toEqual(['mic'])
     expect(send.setBusy).toHaveBeenCalledWith(true)
     opening.resolve(opened as unknown as Mic)
@@ -199,8 +203,8 @@ describe('board phone meeting card wiring', () => {
     const error = document.createElement('div')
     const send = sendWith(async () => { throw new Error("Couldn't upload images: fiber not found: science/task") })
     const menu = state.dock.buildMeeting(card({ id: 'science/task' }), error, send)
-    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
-    ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!.click()
+    arm(menu, 'Phone')
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
     await vi.waitFor(() => expect(error.textContent).toBe("Couldn't upload images: fiber not found: science/task"))
     expect(opened.close).toHaveBeenCalledOnce()
     expect(RelayLink).not.toHaveBeenCalled()
@@ -224,8 +228,8 @@ describe('board phone meeting card wiring', () => {
       }))
       const send = sendWith(async () => '[Image: /h/a.png]')
       const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), send)
-      menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
-      ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Room')!.click()
+      arm(menu, 'Room')
+      menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
       await vi.waitFor(() => expect(send.setBusy).toHaveBeenLastCalledWith(false))
       expect(send.sent).toHaveBeenCalledTimes(received ? 1 : 0)
     }

@@ -13,6 +13,8 @@ export interface ThumbnailOptions {
   className?: string
   /** A caption beside the thumbnail already names the document, so the face and glyph card leave the name out. */
   captioned?: boolean
+  /** The face's title, when the caller names the document better than its declared title or file name. */
+  title?(): string
   /** Visible candidates outrank the loading ring; zero suspends loading. */
   priority(): number
   distance(): number
@@ -107,9 +109,13 @@ export class Thumbnail {
     this.title.textContent = thumbnailTitle(this.opts.captioned, title)
     this.preview.textContent = prose.slice(0, 800)
   }
+  /** Add a mark of the caller's own to the face, beneath the live preview. */
+  adorn(mark: HTMLElement): void { this.face.append(mark) }
+  /** Repaint the face after the caller's name for the document changes. */
+  retitle(): void { this.paintFace() }
   private paintFace(): void {
     const metadata = this.documentKey ? declaredTitle(this.documentKey) : undefined
-    const title = thumbnailTitle(this.opts.captioned, metadata?.title, this.file?.basename)
+    const title = this.opts.title?.() ?? thumbnailTitle(this.opts.captioned, metadata?.title, this.file?.basename)
     this.title.textContent = title
     this.preview.textContent = metadata?.preview || (this.file ? '' : this.opts.fallback)
     const name = this.body?.querySelector<HTMLElement>('.kbn-thumbnail-name')

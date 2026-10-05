@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { centeredScrollLeft, indexCaptions, TAB_CROSSING_MS, TabStrip } from './TabStrip.js'
+import { centeredScrollLeft, indexCaptions, TAB_CROSSING_MS, TabStrip, TIP_DELAY_MS } from './TabStrip.js'
+import { noteAudioSketch } from './audioSketch.js'
 import type { KeyIntent } from '../keymap.js'
 import { buildChannel } from './documents.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
@@ -116,11 +117,13 @@ describe('TabStrip', () => {
     } as unknown as MediaQueryList
     vi.stubGlobal('matchMedia', vi.fn(() => media))
     const strip = create()
-    strip.render(['One', 'Two'])
+    strip.render(['One', 'Two', 'Three'])
     dimensions(strip.el, { clientWidth: 100, scrollWidth: 500 })
     dimensions(strip.buttons[1], { offsetLeft: 200, offsetWidth: 90 })
+    dimensions(strip.buttons[2], { offsetLeft: 300, offsetWidth: 90 })
     strip.mark(1, true)
     expect(strip.el.scrollLeft).toBe(195)
+    // Edges fade only where a tile runs past them.
     expect(strip.el.classList.contains('ws-fade-l')).toBe(true)
     expect(strip.el.classList.contains('ws-fade-r')).toBe(true)
   })
@@ -141,82 +144,94 @@ describe('TabStrip', () => {
     expect(selected.getAttribute('aria-label')).toBe('Declared title')
   })
 
-  it('indexes pages in words: the fiber page as §, file names without their extension unless that collides', () => {
+  it('names pages in words: the fiber page as §, file names without their extension unless that collides', () => {
     const channel = buildChannel({ uid: 'words', owner: 'words-host', name: 'A named fiber', path: '/fiber.md', fiberDir: '/', body: 'Preview prose', embeds: [{ path: '/song.mp3' }, { path: '/a/take.wav' }, { path: '/b/take.flac' }] })
     expect(indexCaptions(channel.labels, channel)).toEqual(['§', 'song', 'take.wav', 'take.flac'])
     const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
     strips.push(strip)
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
-    expect(strip.buttons.map(button => button.textContent)).toEqual(['§', 'song', 'take.wav', 'take.flac'])
+    expect(strip.buttons.map(button => button.querySelector('.ws-tab-label')?.textContent)).toEqual(['§', 'song', 'take.wav', 'take.flac'])
     expect(strip.buttons.map(button => button.getAttribute('aria-label'))).toEqual(channel.labels)
     expect(strip.buttons[0].classList.contains('ws-tab-anchor')).toBe(true)
     expect(strip.buttons.some(button => button.hasAttribute('title'))).toBe(false)
-    expect(strip.el.querySelector('[data-part="thumbnail"]')).toBeNull()
   })
 
-  describe('hover preview', () => {
-    const pointer = (type: string, target: Element, pointerType = 'mouse', relatedTarget: Element | null = null): void => {
-      const event = new MouseEvent(type, { bubbles: true, relatedTarget })
+  it('gives every tile a legible face at once: its title, its kind, and a recording its sketch or length', () => {
+    const channel = buildChannel({ uid: 'faces', owner: 'faces-host', name: 'Faces', path: '/fiber.md', fiberDir: '/', body: 'Body', embeds: [{ path: '/report.html', title: 'The composer’s desk' }, { path: '/etude.mp3' }, { path: '/score.pdf' }, { path: '/coda.mp3' }] })
+    noteAudioSketch(channel.documents[2].key, [0.1, 0.9, 0.4, 0.2], 61)
+    noteAudioSketch(channel.documents[4].key, null, 125)
+    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
+    strips.push(strip)
+    strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+    const face = (i: number): Element => strip.buttons[i].querySelector('[data-part="thumbnail-face"]')!
+    expect(strip.buttons.map(b => b.dataset.kind)).toEqual(['fiber', 'html', 'audio', 'pdf', 'audio'])
+    expect(strip.buttons.map(b => b.dataset.caption)).toEqual([undefined, 'The composer’s desk', 'etude', 'score', 'coda'])
+    expect(face(0).querySelector('.ws-thumbnail-kind')?.textContent).toBe('§')
+    expect(face(1).querySelector('.ws-thumbnail-title')?.textContent).toBe('The composer’s desk')
+    expect(face(2).querySelector('.ws-thumbnail-title')?.textContent).toBe('etude')
+    expect(face(2).querySelectorAll('.ws-tile-sketch[data-form="peaks"] i')).toHaveLength(4)
+    expect(face(3).querySelector('.ws-thumbnail-title')?.textContent).toBe('score')
+    expect(face(3).querySelector('.ws-thumbnail-kind')?.textContent).toBe('▧')
+    expect(face(4).querySelector('.ws-tile-sketch')?.textContent).toBe('2:05')
+    noteAudioSketch(channel.documents[4].key, [0.5, 0.5], 125)
+    expect(face(4).querySelectorAll('.ws-tile-sketch i')).toHaveLength(2)
+  })
+
+  describe('hover caption', () => {
+    const pointer = (type: string, target: Element, pointerType = 'mouse'): void => {
+      const event = new MouseEvent(type, { bubbles: true })
       Object.defineProperty(event, 'pointerType', { value: pointerType })
       target.dispatchEvent(event)
     }
-    const setup = (): { strip: TabStrip; preview: NonNullable<TabStrip['preview']> } => {
+    const setup = (): TabStrip => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
       const channel = buildChannel({ uid: 'peek', owner: 'peek-host', name: 'Peek', path: '/fiber.md', fiberDir: '/', body: 'Body prose', embeds: [{ path: '/one.html' }, { path: '/two.png' }] })
       const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
       strips.push(strip)
-      document.body.append(strip.el, strip.preview!.el)
+      const band = document.createElement('div')
+      band.style.position = 'relative'
+      band.append(strip.el, strip.tip)
+      document.body.append(band)
       strip.render(channel.labels, channel.documents.map(d => d.key), channel)
-      return { strip, preview: strip.preview! }
+      strip.mark(0, false)
+      return strip
     }
     afterEach(() => { vi.useRealTimers() })
 
-    it('waits before a first preview, then follows the pointer across labels at once', () => {
-      const { strip, preview } = setup()
+    it('waits before a first caption, then follows the pointer across tiles at once', () => {
+      const strip = setup()
       pointer('pointerover', strip.buttons[1])
-      vi.advanceTimersByTime(399)
-      expect(preview.open).toBe(false)
+      vi.advanceTimersByTime(TIP_DELAY_MS - 1)
+      expect(strip.tip.hidden).toBe(true)
       vi.advanceTimersByTime(1)
-      expect(preview.open).toBe(true)
-      expect(preview.el.getAttribute('aria-hidden')).toBe('true')
-      expect(preview.el.querySelector('.ws-tab-preview-title')?.textContent).toBe('one.html')
-      expect(preview.el.querySelector('[data-part="thumbnail"]')).not.toBeNull()
-      expect(preview.el.querySelector('[data-part="thumbnail-face"]')).not.toBeNull()
-      pointer('pointerout', strip.buttons[1], 'mouse', strip.buttons[2])
+      expect(strip.tip.hidden).toBe(false)
+      expect(strip.tip.getAttribute('aria-hidden')).toBe('true')
+      expect(strip.tip.textContent).toBe('one.html')
       pointer('pointerover', strip.buttons[2])
-      expect(preview.open).toBe(true)
-      expect(preview.el.querySelector('.ws-tab-preview-title')?.textContent).toBe('two.png')
-      expect(document.activeElement).not.toBe(preview.el)
+      expect(strip.tip.textContent).toBe('two.png')
     })
 
-    it('leaves with the pointer, gives way to a press or a key, and ignores touch', () => {
-      const { strip, preview } = setup()
-      pointer('pointerover', strip.buttons[0], 'touch')
-      vi.advanceTimersByTime(1000)
-      expect(preview.open).toBe(false)
+    it('names no selected tile, gives way to a press or a key, leaves with the pointer and ignores touch', () => {
+      const strip = setup()
       pointer('pointerover', strip.buttons[0])
-      vi.advanceTimersByTime(400)
-      expect(preview.el.querySelector('.ws-tab-preview-title')?.textContent).toBe('Peek')
-      pointer('pointerout', strip.buttons[0], 'mouse', document.body)
-      vi.advanceTimersByTime(200)
-      expect(preview.open).toBe(false)
+      vi.advanceTimersByTime(1000)
+      expect(strip.tip.hidden).toBe(true)
+      pointer('pointerover', strip.buttons[1], 'touch')
+      vi.advanceTimersByTime(1000)
+      expect(strip.tip.hidden).toBe(true)
       pointer('pointerover', strip.buttons[1])
-      expect(preview.open).toBe(true)
+      vi.advanceTimersByTime(TIP_DELAY_MS)
+      expect(strip.tip.hidden).toBe(false)
       pointer('pointerdown', strip.buttons[1])
-      expect(preview.open).toBe(false)
-      pointer('pointerover', strip.buttons[1])
-      vi.advanceTimersByTime(1000)
-      expect(preview.open).toBe(false)
+      expect(strip.tip.hidden).toBe(true)
       pointer('pointerover', strip.buttons[2])
-      vi.advanceTimersByTime(400)
-      expect(preview.open).toBe(true)
-      expect(preview.dismiss()).toBe(true)
-      expect(preview.dismiss()).toBe(false)
-      strip.setVisible(false)
-      vi.advanceTimersByTime(1000)
-      pointer('pointerover', strip.buttons[0])
-      vi.advanceTimersByTime(1000)
-      expect(preview.open).toBe(false)
+      vi.advanceTimersByTime(TIP_DELAY_MS)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+      expect(strip.tip.hidden).toBe(true)
+      pointer('pointerover', strip.buttons[1])
+      vi.advanceTimersByTime(TIP_DELAY_MS)
+      strip.el.dispatchEvent(new MouseEvent('pointerleave'))
+      expect(strip.tip.hidden).toBe(true)
     })
   })
 
