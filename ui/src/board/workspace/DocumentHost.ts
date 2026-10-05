@@ -6,6 +6,7 @@ import {
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
 import { fileBytesUrl } from '../utils.js'
+import { blockingDialogOpen } from '../views/ViewRegistry.js'
 
 export interface DocumentFrame {
   el: HTMLElement
@@ -63,6 +64,7 @@ export class DocumentHost {
     this.track = track
     this.options = options
     window.addEventListener('message', this.onMessage)
+    document.addEventListener('keydown', this.onMediaKey, true)
   }
 
   get(key: DocKey): DocumentFrame | undefined {
@@ -156,11 +158,6 @@ export class DocumentHost {
       void this.revalidate(state)
       return
     }
-    if (state.frame.doc.kind === 'other') {
-      this.clearNotice(state)
-      this.buildUnsupported(state)
-      return
-    }
     this.saveScroll(state)
     this.buildViewer(state, true)
   }
@@ -186,6 +183,7 @@ export class DocumentHost {
     if (this.disposed) return
     this.disposed = true
     window.removeEventListener('message', this.onMessage)
+    document.removeEventListener('keydown', this.onMediaKey, true)
     for (const state of this.frames.values()) {
       this.evict(state)
       state.frame.el.remove()
@@ -237,8 +235,6 @@ export class DocumentHost {
       state.frame.viewer = prose
       state.loaded = true
       this.bindScroller(state, prose)
-    } else if (state.frame.doc.kind === 'other') {
-      this.buildUnsupported(state)
     } else {
       this.buildViewer(state, false)
     }
@@ -269,7 +265,9 @@ export class DocumentHost {
       {
         quietLoading: true,
         active: state.active,
-        kind: doc.kind === 'fiber' || doc.kind === 'other' ? undefined : doc.kind,
+        kind: doc.kind === 'fiber' ? undefined : doc.kind,
+        title: documentTitle(doc),
+        provenance: documentProvenance(doc),
         transformHtml: withWorkspaceKeyBridge,
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
@@ -369,10 +367,19 @@ export class DocumentHost {
     notice.setAttribute('role', 'status')
     const cause = document.createElement('p')
     const owner = state.frame.doc.owner
+    const unsupportedMedia = message === 'media format is not supported by this browser'
     cause.textContent = missing
       ? `Not found on ${owner}${stale ? ' — showing last loaded copy' : ''}`
+      : unsupportedMedia ? 'This browser cannot play this format'
       : `${owner} is unreachable${stale ? ' — showing last loaded copy' : ''}`
     notice.append(cause)
+    if (unsupportedMedia) {
+      const download = document.createElement('a')
+      download.href = fileBytesUrl(this.options.shuttleBase, state.frame.doc.path, owner)
+      download.download = state.frame.doc.name
+      download.textContent = 'Download'
+      notice.append(download)
+    }
     if (missing) {
       const path = document.createElement('code')
       path.className = 'ws-document-path'
@@ -394,37 +401,6 @@ export class DocumentHost {
     state.notice?.remove()
     state.notice = null
     state.frame.el.classList.remove('ws-stale')
-  }
-
-  private buildUnsupported(state: FrameState): void {
-    const doc = state.frame.doc
-    const box = document.createElement('div')
-    box.className = 'ws-document-state'
-    const name = document.createElement('h3')
-    name.textContent = doc.name
-    const detail = document.createElement('p')
-    detail.textContent = 'Not drawn here'
-    const download = document.createElement('a')
-    download.href = fileBytesUrl(this.options.shuttleBase, doc.path, doc.owner)
-    download.download = doc.name
-    download.textContent = 'Download'
-    box.append(name, detail, download)
-    state.frame.viewer = box
-    state.loaded = true
-    state.frame.content.replaceChildren(box)
-    state.controller?.abort()
-    const controller = new AbortController()
-    state.controller = controller
-    void fetch(download.href, { method: 'HEAD', signal: controller.signal }).then((res) => {
-      if (this.disposed || state.controller !== controller) return
-      if (!res.ok) this.failure(state, new Error(`file request failed: ${res.status}`), false)
-      else {
-        const size = Number(res.headers.get('content-length'))
-        if (res.headers.has('content-length') && Number.isFinite(size)) detail.textContent = `Not drawn here · ${size.toLocaleString()} bytes`
-      }
-    }).catch((error: unknown) => {
-      if (!controller.signal.aborted && !this.disposed) this.failure(state, error, false)
-    })
   }
 
   private async refreshProse(state: FrameState): Promise<void> {
@@ -493,6 +469,21 @@ export class DocumentHost {
     }
   }
 
+  /** Space belongs to a selected media page, without changing the app keymap. */
+  private readonly onMediaKey = (event: KeyboardEvent): void => {
+    if (!this.selected || event.key !== ' ' || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
+    const state = this.frames.get(this.selected)
+    if (!state?.active || state.frame.el.closest('[inert]') || blockingDialogOpen() || this.track.closest('.ws-reader')?.querySelector('.ws-menu')) return
+    const intent = keyIntent(event, 'reader')
+    if (intent !== 'pageDown' && intent !== 'pageUp') return
+    const media = state.frame.viewer?.querySelector('audio,video') as HTMLMediaElement | null
+    if (!media) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    if (media.paused) void media.play().catch(() => { /* Native controls remain available after a refused autoplay. */ })
+    else media.pause()
+  }
+
   private readonly onMessage = (event: MessageEvent): void => {
     if (this.disposed || !this.selected) return
     const state = this.frames.get(this.selected)
@@ -510,6 +501,20 @@ export class DocumentHost {
     // Bubble through the same app handler; keys never focus a document.
     this.track.dispatchEvent(forwarded)
   }
+}
+
+function documentTitle(doc: WorkspaceDocument): string {
+  const embed = doc.provenance.find(p => p.kind === 'embed' && p.title)
+  return embed?.kind === 'embed' ? embed.title || doc.name : doc.name
+}
+
+function documentProvenance(doc: WorkspaceDocument): string {
+  const receipts = doc.provenance.filter(p => p.kind === 'sent')
+  const latest = receipts.at(-1)
+  const source = latest?.kind === 'sent'
+    ? `sent · ${receipts.length} ${receipts.length === 1 ? 'receipt' : 'receipts'}${latest.worker ? ` · ${latest.worker}` : ''}`
+    : doc.provenance.some(p => p.kind === 'embed') ? 'embedded' : 'linked from body'
+  return `${source} · ${doc.owner}`
 }
 
 function readScroll(key: DocKey): ScrollPosition {

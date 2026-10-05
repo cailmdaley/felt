@@ -20,6 +20,7 @@
 
 import {
   AUDIO_EXTS,
+  VIDEO_EXTS,
   IMAGE_EXTS,
   MARKDOWN_EXTS,
   TEXT_EXTS,
@@ -102,12 +103,13 @@ export function formatBytes(size: number | undefined): string {
  * browser has nothing to show for it, which is precisely why it behaves
  * differently from the kinds that do.
  */
-export type FileKind = 'image' | 'audio' | 'html' | 'markdown' | 'text' | 'pdf' | 'other'
+export type FileKind = 'image' | 'audio' | 'video' | 'html' | 'markdown' | 'text' | 'pdf' | 'other'
 
 export function fileKind(path: string): FileKind {
   const ext = fileExt(path)
   if (IMAGE_EXTS.has(ext)) return 'image'
   if (AUDIO_EXTS.has(ext)) return 'audio'
+  if (VIDEO_EXTS.has(ext)) return 'video'
   if (ext === 'html' || ext === 'htm') return 'html'
   if (ext === 'pdf') return 'pdf'
   if (MARKDOWN_EXTS.has(ext)) return 'markdown'
@@ -137,10 +139,7 @@ export function fileTapAction(coarse: boolean, path: string): 'read' | 'download
   return kind === 'pdf' || kind === 'other' ? 'download' : 'read'
 }
 
-/** How many bytes of a text file a card face needs. Generous enough that ~6
- *  lines survive even a file of long lines, small enough that a strip of them
- *  costs nothing. The daemon's file route answers a `Range` request with the
- *  whole body (no `Accept-Ranges`), so the slice happens here, not there. */
+/** Text preview budget: enough for six opening lines on a card face. */
 export const PREVIEW_BYTES = 2048
 
 /**

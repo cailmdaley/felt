@@ -84,17 +84,92 @@
   box-shadow: 0 4px 14px -6px rgba(27, 22, 17, 0.28);
 }
 
-.kbn-fileview-audio {
+/* Native transports sit on the same paper and type as the document frame. */
+.kbn-fileview-media {
   display: flex;
   flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  overflow: auto;
+  padding: clamp(20px, 5vw, 56px);
+  color: var(--ws-ink, #342c20);
+  background: var(--ws-paper, #FBF6E9);
 }
-
+.kbn-media-page { width: 100%; max-width: 620px; min-width: 0; }
+.kbn-media-kind, .kbn-media-provenance {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--ws-muted, #786b54);
+  overflow-wrap: anywhere;
+}
+.kbn-media-kind { letter-spacing: .16em; }
+.kbn-media-title {
+  font: normal clamp(24px, 3vw, 38px)/1.12 var(--font-main, 'EB Garamond', Georgia, serif);
+  margin: 20px 0 12px;
+  overflow-wrap: anywhere;
+}
+.kbn-media-provenance { margin: 0 0 32px; }
 .kbn-fileview-audio audio {
+  display: block;
   width: 100%;
-  max-width: 480px;
+  border: 1px solid var(--ws-rule, #c6b38d);
+  border-radius: 28px;
+  background: #f0e6d0;
+  color-scheme: light;
+}
+.kbn-fileview-audio audio::-webkit-media-controls-panel { background-color: #f0e6d0; }
+.kbn-media-progress {
+  display: block;
+  width: calc(100% - 32px);
+  height: 2px;
+  margin: 26px 16px 0;
+  border: 0;
+  appearance: none;
+  background: var(--ws-rule, #c6b38d);
+}
+.kbn-media-progress::-webkit-progress-bar { background: var(--ws-rule, #c6b38d); }
+.kbn-media-progress::-webkit-progress-value { background: var(--ws-ink, #342c20); }
+.kbn-media-progress::-moz-progress-bar { background: var(--ws-ink, #342c20); }
+.kbn-fileview-video { padding: 20px; }
+.kbn-fileview-video .kbn-media-page { max-width: none; height: 100%; display: flex; flex-direction: column; justify-content: center; }
+.kbn-fileview-video .kbn-media-title { font-size: 26px; margin: 12px 0 6px; }
+.kbn-fileview-video .kbn-media-provenance { margin-bottom: 16px; }
+.kbn-fileview-video video {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  max-height: calc(100% - 120px);
+  object-fit: contain;
+  border-radius: 3px;
+  background: #211e18;
+}
+.kbn-fileview-unsupported h3 { font-family: var(--font-main, 'EB Garamond', Georgia, serif); }
+
+/* Preview cells are inert and contain no transport or script-capable HTML. */
+.kbn-fileview-thumbnail { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--ws-paper, #FBF6E9); }
+.kbn-thumbnail-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  padding: 10px;
+  white-space: pre-line;
+  text-align: center;
+  overflow-wrap: anywhere;
+  font: 10px/1.8 var(--font-mono, 'IBM Plex Mono', monospace);
+  color: var(--ws-muted, #786b54);
+}
+.kbn-fileview-thumbnail iframe, .kbn-fileview-thumbnail pre { position: absolute; inset: 0; transform-origin: top left; border: 0; margin: 0; }
+.kbn-fileview-thumbnail pre { padding: 24px; white-space: pre-wrap; font: 14px/1.5 var(--font-mono, monospace); background: var(--ws-paper, #FBF6E9); }
+.kbn-fileview-thumbnail img, .kbn-fileview-thumbnail video { position: absolute; width: 100%; height: 100%; object-fit: contain; inset: 0; }
+.kbn-fileview-thumbnail audio { display: none; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-fileview-media { padding: 24px 20px; }
+  .kbn-fileview-video { padding: 12px; }
+  .kbn-media-title { font-size: 28px; }
 }
 
 /* ── Text bodies the Reader renders itself ──────────────────────────────
