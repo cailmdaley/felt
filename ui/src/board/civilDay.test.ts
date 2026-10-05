@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ascByKey,
   civilDayAt,
+  civilDaySpan,
   descByKey,
   dueCivilDay,
   formatSpanMinutes,
@@ -247,6 +248,14 @@ describe('civilDayAt', () => {
   it('starts a spring-forward day whose midnight does not exist at its first instant', () => {
     // Santiago moves 00:00 → 01:00 on 2026-09-06.
     expect(civilDayAt('2026-09-06', 0, zone('America/Santiago'))).toBe(Date.parse('2026-09-06T04:00:00Z'));
+  });
+
+  it('spans a DST day by its real length', () => {
+    // 2026-03-08 is 23 hours in Los Angeles, 2026-11-01 is 25.
+    for (const [day, hours] of [['2026-03-08', 23], ['2026-11-01', 25], ['2026-07-30', 24]] as const) {
+      const [from, to] = civilDaySpan(day, day, LA);
+      expect(to + 1000 - from, day).toBe(hours * 3_600_000);
+    }
   });
 
   it('is undefined for anything that is not a bare civil day', () => {
