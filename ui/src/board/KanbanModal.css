@@ -2234,18 +2234,33 @@
     opacity: 1;
     pointer-events: auto;
   }
-  /* A compact 28px plate; the 44px touch target reaches past it vertically. */
-  .kbn-card-review-meta-actions .kbn-review-meta-btn {
+  /* The button is the whole 44px touch target, on a transparent ground; its
+     compact 28px plate is drawn inside it. Negative margins keep the meta
+     row's layout at the plate's height, so the card does not grow. */
+  .kbn-card-review-meta-actions .kbn-review-meta-btn.kbn-action {
     position: relative;
-    height: 28px;
+    isolation: isolate;
+    height: 44px;
+    margin-block: -8px;
     min-width: 44px;
     padding: 0 10px;
+    background: transparent;
+    border-width: 0;
   }
-  .kbn-card-review-meta-actions .kbn-review-meta-btn::after {
+  .kbn-card-review-meta-actions .kbn-review-meta-btn.kbn-action:hover { background: transparent; }
+  .kbn-card-review-meta-actions .kbn-review-meta-btn.kbn-action:focus-visible { outline: none; }
+  .kbn-card-review-meta-actions .kbn-review-meta-btn::before {
     content: '';
     position: absolute;
-    inset: -8px 0;
+    inset: 8px 0;
+    z-index: -1;
+    background: var(--verdict-tint);
+    border: 1px solid var(--verdict-edge);
+    border-radius: 2px;
+    transition: background 120ms ease, border-color 120ms ease;
   }
+  .kbn-card-review-meta-actions .kbn-review-meta-btn:hover::before { background: var(--verdict-tint-strong); border-color: var(--verdict-pigment); }
+  .kbn-card-review-meta-actions .kbn-review-meta-btn:focus-visible::before { outline: 2px solid var(--verdict-pigment); outline-offset: 2px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .kbn-card-review-meta-actions { transition: none; }

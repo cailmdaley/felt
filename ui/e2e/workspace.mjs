@@ -154,17 +154,26 @@ test('Awaiting-review actions reveal without shifting and remain thumb-sized on 
 }, undefined, undefined, 'reduce')
 
 test('Awaiting-review actions stay visible and thumb-sized without hover', async p => {
+  // The column is a folio on the phone: show it, so every probe lands on a button really on screen.
+  await chooseDeskColumn(p, 2)
   const actions = p.locator('[data-column="awaitingReview"] .kbn-card-review-meta-actions').first()
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
-  // A compact plate whose touch target reaches 8 px past it above and below.
+  // A compact 28 px plate inside a 44 px button, whose reach does not grow the card's meta row.
   for (const button of await actions.locator('button').all()) {
     const reach = await button.evaluate(el => {
-      el.scrollIntoView({ block: 'center', inline: 'center' })
       const box = el.getBoundingClientRect(), x = box.left + box.width / 2
+      const plate = getComputedStyle(el, '::before'), meta = el.closest('.kbn-card-meta').getBoundingClientRect()
       const hit = y => el.contains(document.elementFromPoint(x, y))
-      return { height: box.height, above: hit(box.top - 7), below: hit(box.bottom + 7) }
+      return {
+        onScreen: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+        height: box.height, plate: parseFloat(plate.height) + parseFloat(plate.borderTopWidth) + parseFloat(plate.borderBottomWidth),
+        meta: meta.height, top: hit(box.top + 1), bottom: hit(box.bottom - 1),
+      }
     })
-    assert.ok(reach.height + 16 >= 44 && reach.above && reach.below, `verdict touch target: ${JSON.stringify(reach)}`)
+    assert.ok(reach.onScreen, `the verdict is on screen: ${JSON.stringify(reach)}`)
+    assert.ok(reach.height >= 44 && reach.top && reach.bottom, `verdict touch target: ${JSON.stringify(reach)}`)
+    assert.equal(reach.plate, 28, 'the plate reads compact')
+    assert.equal(reach.meta, 28, 'the touch reach does not grow the meta row')
   }
 }, { width: 390, height: 844 }, undefined, 'reduce', true)
 
@@ -593,10 +602,16 @@ test('The running head indexes pages in words, previews on hover within the shar
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0, 'first visits are quiet')
   const preview = p.locator('.ws-tab-preview')
   await p.mouse.move(700, 500)
+  // Time the first hover in the page, so a slow runner cannot blur the wait.
+  await p.evaluate(() => {
+    const strip = document.querySelector('.ws-tabs'), card = document.querySelector('.ws-tab-preview')
+    strip.addEventListener('pointerover', () => { window.__hoverAt ??= performance.now() })
+    new MutationObserver(() => { if (!card.hidden) window.__shownAt ??= performance.now() }).observe(card, { attributes: true, attributeFilter: ['hidden'] })
+  })
   await tab(p, 'response.pdf').hover()
-  await p.waitForTimeout(200)
-  assert.ok(await preview.isHidden(), 'a first hover waits')
   await preview.waitFor({ state: 'visible' })
+  const wait = await p.evaluate(() => window.__shownAt - window.__hoverAt)
+  assert.ok(wait >= 390, `a first hover waits: ${wait} ms`)
   assert.match(await preview.locator('.ws-tab-preview-meta').textContent(), /sent/)
   const anchor = await tab(p, 'response.pdf').boundingBox(), card = await preview.boundingBox()
   assert.ok(Math.abs(card.x + card.width / 2 - (anchor.x + anchor.width / 2)) < 2 && card.y >= anchor.y + anchor.height, 'the preview hangs beneath its label')
