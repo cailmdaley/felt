@@ -54,6 +54,12 @@ defmodule Shuttle.Test.Env do
   @doc "Make a `:shuttle` app env key read as absent in this test's scope."
   def delete_app_env(key) when is_atom(key), do: put(:app, key, :delete)
 
+  @doc """
+  Make the calling test a scope owner with no overrides yet, so
+  `Shuttle.Env.scope_key/1` qualifies process-global caches by this test.
+  """
+  def own_scope!, do: ensure_owner(self())
+
   @doc "Prepend `dir` to this test's scoped `PATH`."
   def prepend_path(dir) when is_binary(dir) do
     put_env("PATH", Enum.join([dir | List.wrap(Shuttle.Env.get("PATH"))], ":"))
@@ -108,6 +114,8 @@ defmodule Shuttle.Test.Env do
     if :ets.insert_new(@table, {{:owner, owner}, true}) do
       ExUnit.Callbacks.on_exit({__MODULE__, owner}, fn -> clear(owner) end)
     end
+
+    :ok
   end
 
   @doc false

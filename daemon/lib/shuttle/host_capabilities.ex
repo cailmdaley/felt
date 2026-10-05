@@ -39,14 +39,14 @@ defmodule Shuttle.HostCapabilities do
 
   @doc false
   def cached_browser_capable?(probe, now_ms) do
-    case :persistent_term.get(@browser_cache_key, nil) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@browser_cache_key), nil) do
       {checked_at, capable}
       when now_ms >= checked_at and now_ms - checked_at < @browser_cache_ttl_ms ->
         capable
 
       _ ->
         capable = probe.()
-        :persistent_term.put(@browser_cache_key, {now_ms, capable})
+        :persistent_term.put(Shuttle.Env.scope_key(@browser_cache_key), {now_ms, capable})
         capable
     end
   end
