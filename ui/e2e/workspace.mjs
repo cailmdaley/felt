@@ -52,7 +52,7 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   }
   await choose(p, 'brief.md')
   await choose(p, 'calibration-report')
-  for (const [down, up] of [['j', 'k'], ['ArrowDown', 'ArrowUp']]) {
+  for (const [down, up] of [['ArrowDown', 'ArrowUp']]) {
     await iframe.evaluate(f => f.contentWindow.scrollTo(0, 0))
     await p.keyboard.press(down)
     await poll(p, () => window.__reportWindow.scrollY > 0)
@@ -75,6 +75,20 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
   await open(p)
   assert.ok(await iframe.evaluate(f => f.contentWindow === window.__reportWindow && f.contentWindow.__sentinel === 'kept' && f.contentDocument.querySelector('#report-identity').textContent === window.__reportIdentity))
+})
+
+test('j/k step constitutions in the switcher order', async p => {
+  await open(p)
+  await p.locator('.ws-channel-title').click()
+  const rows = p.locator('.ws-switcher .ws-channel-row')
+  const names = await rows.locator('.ws-channel-name').allTextContents()
+  assert.ok(names.length >= 2)
+  await rows.first().click()
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[0])
+  await p.keyboard.press('j')
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
+  await p.keyboard.press('k')
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[0])
 })
 
 test('Fiber composer isolates keys; settings and history use mocked daemon', async p => {
@@ -246,6 +260,7 @@ test('Remote worker pill records attach handler without launching a terminal', a
 
 test('Phone overview single column, reader tabs, footer stepping and Back', async p => {
   await p.locator('[data-view="shelf"]').click()
+  await poll(p, () => document.querySelectorAll('.ws-overview-folio:not([hidden])').length >= 2)
   const folios = await p.locator('.ws-overview-folio:visible').evaluateAll(es => es.map(e => e.getBoundingClientRect().x))
   assert.ok(folios.length > 1 && folios.every(x => Math.abs(x - folios[0]) < 2))
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
