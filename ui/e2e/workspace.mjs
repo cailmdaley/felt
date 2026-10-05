@@ -12,7 +12,7 @@ const browser = await chromium.launch({ executablePath: chrome, headless: true,
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 const name = 'Calibrate the shear response'
 const tests = []
-const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce') => tests.push({ name, run, viewport, sidebarChoice, reducedMotion })
+const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce', touch = false) => tests.push({ name, run, viewport, sidebarChoice, reducedMotion, touch })
 const selected = p => p.locator('.ws-page.ws-selected')
 const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label
 const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true, includeHidden: true })
@@ -61,7 +61,9 @@ async function reportY(p) { return (await reportDocument(p)).evaluate(() => docu
 async function pollReport(p, fn, arg) { await (await reportDocument(p)).waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
 async function records(p) { return p.evaluate(() => window.__harness.requests) }
 
-test('Desk keyboard starts in awaiting review and Enter opens report first', async p => {
+test('Fresh Desk leaves focus alone; the first j selects awaiting review and Enter opens first', async p => {
+  assert.ok(await p.evaluate(() => document.activeElement !== document.querySelector('.kbn-col-head')), 'load must not focus a column head')
+  assert.equal(await p.locator('.kbn-key-selected').count(), 0)
   await p.keyboard.press('j')
   assert.match(await p.locator('.kbn-card.kbn-key-selected').innerText(), /Calibrate the shear response/)
   await p.keyboard.press('Enter')
@@ -69,6 +71,48 @@ test('Desk keyboard starts in awaiting review and Enter opens report first', asy
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await p.evaluate(() => document.activeElement?.tagName !== 'IFRAME' && !document.activeElement?.closest('.ws-content')), 'keyboard entry must keep app-level focus')
 })
+
+test('Awaiting-review actions reveal without shifting and remain thumb-sized on touch', async p => {
+  const drafts = p.locator('[data-column="drafts"]')
+  const flight = p.locator('[data-column="inFlight"]')
+  const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
+  const actions = review.locator('.kbn-card-review-meta-actions')
+  assert.equal(await drafts.locator('.kbn-card-review-meta-actions').count(), 0)
+  assert.equal(await flight.locator('.kbn-card-review-meta-actions').count(), 0)
+  assert.equal(await actions.locator('button').count(), 2)
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  const before = await actions.evaluate(el => {
+    const { width, height } = el.getBoundingClientRect()
+    return { width, height }
+  })
+  const box = await review.boundingBox()
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  assert.deepEqual(await actions.evaluate(el => {
+    const { width, height } = el.getBoundingClientRect()
+    return { width, height }
+  }), before)
+  await p.mouse.move(0, 0)
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await actions.locator('button').first().focus()
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  await p.evaluate(() => document.activeElement?.blur())
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await p.keyboard.press('j')
+  assert.ok(await review.evaluate(el => el.classList.contains('kbn-key-selected')))
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  await p.keyboard.press('Escape')
+  await p.evaluate(() => document.activeElement?.blur())
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+}, undefined, undefined, 'reduce')
+
+test('Awaiting-review actions stay visible and thumb-sized without hover', async p => {
+  const actions = p.locator('[data-column="awaitingReview"] .kbn-card-review-meta-actions').first()
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  for (const button of await actions.locator('button').all()) {
+    assert.ok((await button.boundingBox()).height >= 44)
+  }
+}, { width: 390, height: 844 }, undefined, 'reduce', true)
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
   await open(p)
@@ -1271,10 +1315,13 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 
 const started = performance.now()
 let passed = 0
+let ran = 0
 try {
-  for (const { name, run, viewport, sidebarChoice, reducedMotion } of tests) {
+  for (const { name, run, viewport, sidebarChoice, reducedMotion, touch } of tests) {
+    if (process.env.E2E_ONLY && !new RegExp(process.env.E2E_ONLY).test(name)) continue
+    ran++
     const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
-      hasTouch: !!viewport && viewport.width <= 700, isMobile: !!viewport && viewport.width <= 700,
+      hasTouch: !!touch || (!!viewport && viewport.width <= 700), isMobile: !!touch || (!!viewport && viewport.width <= 700),
       reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
     const page = await context.newPage()
     page.setDefaultTimeout(2000)
@@ -1300,5 +1347,5 @@ try {
 } finally { await browser.close() }
 await mkdir(shots, { recursive: true })
 await writeFile(resolve(shots, 'inventory.json'), JSON.stringify(inventory, null, 2))
-console.log(`${passed} passed, ${tests.length - passed} failed; ${((performance.now() - started) / 1000).toFixed(1)}s`)
-if (passed !== tests.length) process.exitCode = 1
+console.log(`${passed} passed, ${ran - passed} failed; ${((performance.now() - started) / 1000).toFixed(1)}s`)
+if (passed !== ran) process.exitCode = 1
