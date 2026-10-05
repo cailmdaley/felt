@@ -2251,13 +2251,6 @@ const flipWorker = p => p.evaluate(async () => {
   row.runtime.last_activity_at = Date.now() - 120000
   await window.__harness.modal.fetchAndRender()
 })
-// Shifts the guard knows about, each with its owner, so the suite stays green
-// while they are routed. Remove an entry when its fix lands.
-const KNOWN_SHIFTS = {
-  // KanbanModal.css `.kbn-flight-band[data-flight-band="needsYou"] .kbn-card`
-  // thickens the left border to 3 px, nudging the card's content 2 px.
-  needsYouEdge: ['div.kbn-card.kbn-card-inFlight'],
-}
 
 // `r` focuses the composer where it stands; a field out of view scrolls its
 // page only as far as its top, so the kicker stays whole.
@@ -2316,7 +2309,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
-  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-nav-trail'], settle: 100 })
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control'], settle: 100 })
   await still(p, "opening the fiber's ⋯ menu", () => p.locator(`${dock} .kbn-ctl-verdict-menu summary`).click(), { allow: ['.kbn-ctl-verdict-menu .kbn-ctl-menu'] })
 }, viewport)
 
@@ -2337,11 +2330,11 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.keyboard.press('s')
   await p.locator('.ws-sidebar .kbn-card').nth(1).waitFor()
   await p.waitForTimeout(400)
-  await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover(), { allow: ['.ws-sidebar .kbn-card:hover'] })
+  await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover())
   await still(p, 'a sidebar poll repaint', () => repaint(p))
   await choose(p, 'Constitution')
   await composerKeyStaysPut(p)
-  await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-nav-trail'], known: KNOWN_SHIFTS.needsYouEdge, settle: 100 })
+  await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
 }, viewport)
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and the Board (${device})`, async p => {
@@ -2351,14 +2344,15 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await chooseDeskColumn(p, index)
     const card = p.locator(`[data-column="${column}"] .kbn-card`).first()
     if (phone) { await p.waitForTimeout(400); continue }
-    // A card under the pointer is the touched control; its lift is its own.
-    await still(p, `hovering a ${column} card`, () => card.hover(), { allow: [`[data-column="${column}"] .kbn-card:hover`] })
+    // Under reduced motion a hovered card does not lift.
+    await still(p, `hovering a ${column} card`, () => card.hover())
     await p.mouse.move(1, 1)
     await p.waitForTimeout(200)
   }
   if (!phone) await still(p, 'j selecting a card (the verdict reveal)', () => p.keyboard.press('j'))
   await still(p, 'a Desk poll repaint', () => repaint(p))
-  await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker'], known: KNOWN_SHIFTS.needsYouEdge, settle: 100 })
+  // The pill's word grows into the meta row's empty spacer; nothing visible moves.
+  await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.kbn-card-meta-spacer'], settle: 100 })
   if (phone) return
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').first().waitFor()

@@ -1379,8 +1379,12 @@
 .kbn-flight-band[data-flight-band="needsYou"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
+/* The gold edge is painted inside the card's own 1 px border, so a card
+   crossing into the band changes colour, never size. A background layer
+   leaves the card's shadows to whichever surface draws it. */
 .kbn-flight-band[data-flight-band="needsYou"] .kbn-card {
-  border-left: 3px solid var(--kbn-owed);
+  border-left-color: var(--kbn-owed);
+  background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
 }
 .kbn-flight-band + .kbn-flight-band {
   margin-top: 4px;
@@ -1573,6 +1577,9 @@
   transform: translateY(-1px);
 }
 .kbn-card:active { cursor: grabbing; }
+@media (prefers-reduced-motion: reduce) {
+  .kbn-card:hover:not(.kbn-longpress-held), .kbn-pin-chip:hover { transform: none; }
+}
 /* The long press, while it is being held: the card settles a little, the way a
    physical thing does under a thumb. It is the only feedback touch gets that
    the gesture has been noticed at all — the menu is still 450ms away. iOS also
