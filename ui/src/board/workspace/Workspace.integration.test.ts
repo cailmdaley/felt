@@ -395,7 +395,7 @@ describe('workspace reader integration', () => {
     const innerWindow = iframe.contentWindow
     const toggle = document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(toggle.textContent).toBe('▥ Constitutions')
-    expect(toggle.title).toBe('Constitutions (⌘\\)')
+    expect(toggle.title).toBe('Constitutions (s or ⌘\\)')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(workspace.reader.el.classList.contains('ws-with-sidebar')).toBe(false)
     toggle.click()

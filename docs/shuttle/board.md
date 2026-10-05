@@ -169,6 +169,7 @@ On phones, previous/next controls sit in a thumb bar, and browser Back returns t
 
 Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions in sidebar order; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
+c (or .) opens the worker's conversation exactly as its pill does, on the Desk and in the reader; s (or ⌘\\) toggles the Constitutions sidebar.
 Alt-left/right step pages and Alt-down/up step constitutions, including while typing.
 A plain fiber reached by wikilink keeps the tab label **Note**.
 The tablist keeps one Tab stop and moves focus with its selected tab.

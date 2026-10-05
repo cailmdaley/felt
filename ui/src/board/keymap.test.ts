@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeySurface } from './keymap.js'
+import { DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeySurface } from './keymap.js'
 
 function event(key: string, init: KeyboardEventInit = {}, target?: HTMLElement): KeyboardEvent {
   const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
@@ -85,6 +85,15 @@ describe('shared keyboard table', () => {
     for (const init of [{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }, { altKey: true }, { repeat: true }]) {
       expect(keyIntent(event(key, init), 'reader')).toBeNull()
     }
+  })
+  it('c opens the conversation (dot is its alias), s toggles the sidebar, and no report can ask for the conversation', () => {
+    for (const surface of ['desk', 'reader'] as KeySurface[]) {
+      expect(keyIntent(event('c'), surface)).toBe('conversation')
+      expect(keyIntent(event('.'), surface)).toBe('conversation')
+    }
+    expect(keyIntent(event('s'), 'reader')).toBe('sidebar')
+    expect(keyIntent(event('\\', { metaKey: true }), 'reader')).toBe('sidebar')
+    expect(DOCUMENT_KEY_INTENTS).not.toContain('conversation')
   })
   it('reserves u for half-page up and dot for conversation on every reader page', () => {
     expect(keyIntent(event('u'), 'desk')).toBeNull()

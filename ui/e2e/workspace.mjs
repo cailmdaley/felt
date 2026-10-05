@@ -224,7 +224,7 @@ test('Hostile report keys cannot queue verdicts or open controls; trusted and po
   const key = await selected(p).getAttribute('data-key')
   const before = (await records(p)).filter(r => r.method === 'POST').length
   await inner.evaluate(() => {
-    for (const key of ['x', 't', 'z', '.', 'r', 'p', ',', '>', 'Enter', 'o']) {
+    for (const key of ['x', 't', 'z', '.', 'c', 'r', 'p', ',', '>', 'Enter', 'o']) {
       parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'key', payload: { key } }, '*')
     }
   })
@@ -735,7 +735,7 @@ test('Review plate reaches verdicts from a delivery and leaves the fiber page it
   await plate.waitFor()
   assert.equal(await plate.getAttribute('aria-label'), 'Awaiting review')
   await choose(p, 'Constitution')
-  assert.equal(await plate.count(), 0)
+  assert.ok(!await plate.isVisible(), 'the fiber page carries its own pair')
   assert.ok(await selected(p).locator('.kbn-ctl-verdict').isVisible())
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
@@ -983,14 +983,16 @@ test('Pending verdicts on two fibers commit independently', async p => {
   await poll(p, () => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length === 2)
 })
 
-test('Conversation dot-key uses the pill destination in reader and selected Desk card', async p => {
+test('Conversation c (and its dot alias) uses the pill destination in reader and selected Desk card', async p => {
   const remote = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
   await remote.click()
-  await p.keyboard.press('.')
-  await poll(p, () => window.__harness.events.filter(e => e.type === 'open-worker').length === 1)
+  const opened = n => poll(p, n => window.__harness.events.filter(e => e.type === 'open-worker').length === n, n)
+  await p.keyboard.press('c'); await opened(1)
+  assert.ok(!await p.locator('.ws-sidebar').isVisible(), 'c no longer toggles the sidebar')
+  await p.keyboard.press('.'); await opened(2)
   await p.locator('.ws-return').click()
-  await p.keyboard.press('.')
-  await poll(p, () => window.__harness.events.filter(e => e.type === 'open-worker').length === 2)
+  await p.keyboard.press('c'); await opened(3)
+  await p.keyboard.press('.'); await opened(4)
 })
 
 test('Fiber composer isolates keys; settings and history use mocked daemon', async p => {
@@ -1426,12 +1428,12 @@ async function swipe(p, x, y, endX, endY, cancel = false) {
   await cdp.detach()
 }
 
-test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
+test('Reader s and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
   await open(p)
   const title = p.locator('.ws-channel-title')
   const sidebar = p.locator('.ws-sidebar')
   await title.focus()
-  await p.keyboard.press('c')
+  await p.keyboard.press('s')
   assert.ok(await sidebar.isVisible())
   for (const page of await p.locator('.ws-page.ws-receded.ws-before').all()) {
     assert.equal(await page.evaluate(el => getComputedStyle(el).clipPath), 'inset(0px 100% 0px 0px)', 'left neighbours are masked behind the sidebar')
@@ -1455,7 +1457,7 @@ test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters fil
   await find.press('Escape')
   assert.ok(await sidebar.isVisible(), 'Escape from sidebar Find does not return to Desk')
   assert.ok(await title.evaluate(e => e === document.activeElement), 'Escape restores Find opener focus')
-  await p.keyboard.press('c')
+  await p.keyboard.press('s')
   assert.equal(await sidebar.isVisible(), false)
   await p.keyboard.press('Meta+Backslash')
   assert.ok(await sidebar.isVisible(), 'Cmd-Backslash remains a sidebar alias')
@@ -1493,7 +1495,7 @@ test('Sidebar current card follows Board folio j/k, Alt navigation and browser B
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await reportReady(p)
   await p.locator('.ws-channel-title').focus()
-  await p.keyboard.press('c')
+  await p.keyboard.press('s')
   const sidebar = p.locator('.ws-sidebar')
   const rows = sidebar.locator('.ws-channel-row')
   assert.ok(await sidebar.isVisible())
@@ -1628,7 +1630,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.locator('.ws-return').click()
     await chooseDeskColumn(p, 0)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
-    await poll(p, () => document.querySelector('.ws-selected .ws-dock .ws-worker-pill')?.hidden === true)
+    await poll(p, () => { const pill = document.querySelector('.ws-selected .ws-dock .ws-worker-pill'); return pill?.hidden === true && getComputedStyle(pill).display === 'none' })
     await shot('no-worker')
   }, viewport)
 }

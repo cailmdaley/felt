@@ -201,7 +201,7 @@ describe('Reader channel sidebar', () => {
     const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(wideToggle.textContent).toBe('▥ Constitutions')
-    expect(wideToggle.title).toBe('Constitutions (⌘\\)')
+    expect(wideToggle.title).toBe('Constitutions (s or ⌘\\)')
     expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
     disposeReader(wide)
 
@@ -235,9 +235,9 @@ describe('Reader channel sidebar', () => {
     expect(storedTrue.el.classList.contains('ws-with-sidebar')).toBe(true)
   })
 
-  it('toggles with c as well as the command alias', () => {
+  it('toggles with s as well as the command alias', () => {
     const reader = makeReader()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
