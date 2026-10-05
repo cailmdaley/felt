@@ -193,6 +193,38 @@ describe('shared reads', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
+  it('moves a queued neighbour read up when its page is selected, reading it once', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const order: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (src: string) => { order.push(src); if (src.includes('busy')) await gate; return body(src, 'W/"sha256-n"', 200) }))
+    const busy = [peek('/api/v1/file?path=/busy-a'), peek('/api/v1/file?path=/busy-b')]
+    const src = '/api/v1/file?path=/next.html'
+    const neighbour = fetchDocument(src, { cache: 'no-cache', rank: RESOURCE_PRIORITY.neighbour })
+    const selected = await fetchDocument(src, { cache: 'no-store' })
+    expect(await selected.text()).toBe(src)
+    expect(order).toEqual(['/api/v1/file?path=/busy-a', '/api/v1/file?path=/busy-b', src])
+    release(); await Promise.all([...busy, neighbour])
+    expect(order.filter(url => url === src)).toHaveLength(1)
+  })
+
+  it('answers a selected page from a thumbnail read already in flight, 304 when its validator matches', async () => {
+    let finish!: (response: Response) => void
+    const fetcher = vi.fn(() => new Promise<Response>(r => { finish = r }))
+    vi.stubGlobal('fetch', fetcher)
+    const src = '/api/v1/file?path=%2Freport.html'
+    const thumbnail = text(src, RESOURCE_PRIORITY.thumbnail)
+    await Promise.resolve(); await Promise.resolve()
+    const page = fetchDocument(src, { cache: 'no-cache' })
+    const poll = fetchDocument(src, { cache: 'no-store', headers: { 'If-None-Match': 'W/"sha256-r"' } })
+    finish(body('<h1>Report</h1>', 'W/"sha256-r"', 200))
+    const [answer, unchanged] = await Promise.all([page, poll])
+    expect([answer.status, await answer.text(), answer.headers.get('ETag')]).toEqual([200, '<h1>Report</h1>', 'W/"sha256-r"'])
+    expect(unchanged.status).toBe(304)
+    expect((await thumbnail)!.text).toBe('<h1>Report</h1>')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it('lets a thumbnail join a page read already in flight', async () => {
     let finish!: (response: Response) => void
     const fetcher = vi.fn(() => new Promise<Response>(r => { finish = r }))

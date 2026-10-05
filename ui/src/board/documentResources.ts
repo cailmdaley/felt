@@ -60,7 +60,12 @@ const FACT_LIMIT = 8
  * A read in flight. A more urgent asker moves it up the queue while it still
  * waits; it is cancelled once every asker that can abandon it has.
  */
-interface Pending { promise: Promise<unknown>; join: (priority: ResourcePriority, asker?: AbortSignal) => void }
+interface Pending {
+  promise: Promise<unknown>
+  /** A new asker; one without a signal keeps the read alive. */
+  join: (priority: ResourcePriority, asker?: AbortSignal) => void
+  promote: (priority: ResourcePriority) => void
+}
 const entries = new Map<string, Entry>()
 const inFlight = new Map<string, Pending>()
 let textHeld = 0
@@ -148,6 +153,13 @@ function shared<T>(id: string, priority: ResourcePriority, work: (signal: AbortS
   }
   const entry: Pending = {
     promise,
+    promote: next => {
+      if (started || next >= rank) return
+      rank = next
+      waiting.abort()
+      waiting = new AbortController()
+      run()
+    },
     join: (next, signal) => {
       if (!signal) kept = true
       else if (!signal.aborted) {
@@ -159,11 +171,7 @@ function shared<T>(id: string, priority: ResourcePriority, work: (signal: AbortS
           waiting.abort(signal.reason)
         }, { once: true })
       }
-      if (started || next >= rank) return
-      rank = next
-      waiting.abort()
-      waiting = new AbortController()
-      run()
+      entry.promote(next)
     },
   }
   inFlight.set(id, entry)
@@ -272,19 +280,38 @@ async function readPeek(entry: Entry, signal: AbortSignal): Promise<Peek | null>
 /**
  * One whole-body read, conditional when the caller sends `If-None-Match`. A
  * 200 is held as the document's text and a 304 confirms the text held. The
- * live poller reads through this; a reader asking `text` meanwhile joins it.
+ * live poller reads through this. A read of the same document already in
+ * flight is joined rather than repeated, and moved up the queue when this ask
+ * is more urgent; its caller is answered from the text it holds, 304 when
+ * the caller's validator still matches.
  */
-export const fetchDocument: DocumentFetch = (url, init) => {
+export const fetchDocument: DocumentFetch = async (url, init) => {
   const entry = entryFor(url)
   const priority = init.rank ?? RESOURCE_PRIORITY.selected
-  const read = queued(priority, () => readWhole(entry, init, priority), init.signal ?? undefined)
   const id = `text\0${resourceKey(url)}`
-  if (!inFlight.has(id)) {
-    const joined: Pending = { promise: read.then(() => entry.text?.value ?? null, () => null), join: () => {} }
-    inFlight.set(id, joined)
-    void joined.promise.finally(() => { if (inFlight.get(id) === joined) inFlight.delete(id) })
+  const pending = inFlight.get(id)
+  if (pending) {
+    pending.join(priority, init.signal ?? undefined)
+    await pending.promise.catch(() => null)
+    if (init.signal?.aborted) throw init.signal.reason
+    if (entry.text && isFresh(entry.text)) return heldAnswer(entry.text.value, ifNoneMatch(init.headers))
   }
-  return read
+  return shared(id, priority, signal => readWhole(entry, { ...init, signal }, priority), init.signal ?? undefined)
+}
+
+/** Move a whole-body read of `url` already waiting in the queue up to `priority`. */
+export function promoteDocument(url: string, priority: ResourcePriority): void {
+  inFlight.get(`text\0${resourceKey(url)}`)?.promote(priority)
+}
+
+/** The held text as the poller reads a response: its status, validator and body. */
+function heldAnswer(body: TextBody, ifNoneMatch: string | undefined): Response {
+  const unchanged = body.etag !== undefined && body.etag === ifNoneMatch
+  return {
+    status: unchanged ? 304 : 200, ok: !unchanged, statusText: '',
+    headers: { get: (name: string) => name.toLowerCase() === 'etag' ? body.etag ?? null : null },
+    text: async () => unchanged ? '' : body.text,
+  } as unknown as Response
 }
 
 async function readWhole(entry: Entry, init: RequestInit, priority: ResourcePriority): Promise<Response> {
@@ -321,6 +348,8 @@ export async function text(src: string, priority: ResourcePriority = RESOURCE_PR
   if (!options.fresh) {
     // A title peek of a short document already read all of it.
     await inFlight.get(`peek\0${resourceKey(src)}`)?.promise.catch(() => null)
+    const reading = inFlight.get(`text\0${resourceKey(src)}`)
+    if (reading) { reading.join(priority, options.signal); await reading.promise.catch(() => null) }
     if (options.signal?.aborted || knownMissing(entry)) return null
     if (isFresh(entry.text)) return entry.text!.value
     const whole = wholePeek(entry)

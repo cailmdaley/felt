@@ -1,4 +1,4 @@
-import { fetchDocument, recallText, RESOURCE_PRIORITY, type DocumentFetch, type TextBody } from './documentResources.js'
+import { fetchDocument, promoteDocument, recallText, RESOURCE_PRIORITY, type DocumentFetch, type ResourcePriority, type TextBody } from './documentResources.js'
 
 /**
  * One change-aware watcher for every live file-reading surface, layered on the
@@ -61,6 +61,8 @@ export interface LiveFileRefreshOptions {
   fetch?: DocumentFetch
   /** The text already held for a URL; an injected `fetch` starts with none. */
   recall?: (url: string) => TextBody | undefined
+  /** Move a read of a URL still waiting in the queue up to a priority. */
+  promote?: (url: string, priority: ResourcePriority) => void
   now?: () => number
   isVisible?: () => boolean
   setInterval?: typeof globalThis.setInterval
@@ -76,6 +78,7 @@ export interface LiveFileRefreshOptions {
 export class LiveFileRefresh {
   private readonly fetchFile: DocumentFetch
   private readonly recall: (url: string) => TextBody | undefined
+  private readonly promote: (url: string, priority: ResourcePriority) => void
   private readonly now: () => number
   private readonly isVisible: () => boolean
   private readonly schedule: typeof globalThis.setInterval
@@ -88,6 +91,7 @@ export class LiveFileRefresh {
   constructor(options: LiveFileRefreshOptions = {}) {
     this.fetchFile = options.fetch ?? fetchDocument
     this.recall = options.recall ?? (options.fetch ? () => undefined : recallText)
+    this.promote = options.promote ?? (options.fetch ? () => {} : promoteDocument)
     this.now = options.now ?? Date.now
     this.isVisible = options.isVisible ?? (() => typeof document === 'undefined' || !document.hidden)
     this.schedule = options.setInterval ?? globalThis.setInterval.bind(globalThis)
@@ -199,6 +203,13 @@ export class LiveFileRefresh {
   private async revalidate(url: string): Promise<void> {
     const file = this.files.get(url)
     if (!file || !this.isVisible()) return
+    // A read already under way is as fresh as one started now; one still
+    // queued as a neighbour's preview moves up, since its page now reads first.
+    if (file.inFlight) {
+      this.promote(url, RESOURCE_PRIORITY.selected)
+      await file.inFlight
+      return
+    }
     file.nextPollAt = 0
     await this.pollFile(url, file, true)
   }
