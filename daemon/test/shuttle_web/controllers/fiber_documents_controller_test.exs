@@ -773,10 +773,11 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
   test "GET /api/v1/fibers/:id reads a polled ULID through its slug, and checks the answer",
        %{store: store} do
-    ulid = "01JZ0000000000000000000002"
+    polled = "01JZ0000000000000000000002"
     other = "01JZ0000000000000000000003"
+    stale = "01JZ0000000000000000000004"
 
-    for {slug, uid} <- [{"tests/by-slug", ulid}, {"tests/other", other}] do
+    for {slug, uid} <- [{"tests/by-slug", polled}, {"tests/other", other}, {"tests/stale", stale}] do
       write_fiber!(store, slug, """
       ---
       id: #{uid}
@@ -792,12 +793,12 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     end
 
     poller = warm_poller!(store)
-    assert Shuttle.Poller.slug_for_uid(ulid) == "tests/by-slug"
+    assert Shuttle.Poller.slug_for_uid(polled) == "tests/by-slug"
     log = install_logging_felt!(store)
 
-    conn = get(api_conn(), "/api/v1/fibers/#{ulid}?body=true")
+    conn = get(api_conn(), "/api/v1/fibers/#{polled}?body=true")
 
-    assert [%{"fiber" => %{"id" => ^ulid, "body" => "Body of tests/by-slug."}}] =
+    assert [%{"fiber" => %{"id" => ^polled, "body" => "Body of tests/by-slug."}}] =
              Jason.decode!(conn.resp_body)["fibers"]
 
     assert File.read!(log) == "show tests/by-slug -j\n"
@@ -805,16 +806,42 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     # A stale slug answers with another fiber's UID; the read falls through to
     # the UID itself rather than serving the wrong document.
     :sys.replace_state(poller, fn state ->
-      %{state | uid_slug_index: Map.put(state.uid_slug_index, ulid, "tests/other")}
+      %{state | uid_slug_index: Map.put(state.uid_slug_index, stale, "tests/other")}
     end)
 
     File.write!(log, "")
-    conn = get(api_conn(), "/api/v1/fibers/#{ulid}?body=true")
+    conn = get(api_conn(), "/api/v1/fibers/#{stale}?body=true")
 
-    assert [%{"fiber" => %{"id" => ^ulid, "body" => "Body of tests/by-slug."}}] =
+    assert [%{"fiber" => %{"id" => ^stale, "body" => "Body of tests/stale."}}] =
              Jason.decode!(conn.resp_body)["fibers"]
 
-    assert File.read!(log) == "show tests/other -j\nshow #{ulid} -j\n"
+    assert File.read!(log) == "show tests/other -j\nshow #{stale} -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id reads an unpolled ULID through the slug its first read found",
+       %{store: store} do
+    uid = "01JZ0000000000000000000005"
+
+    write_fiber!(store, "tests/unpolled", """
+    ---
+    id: #{uid}
+    name: Unpolled
+    status: open
+    ---
+
+    Unpolled body.
+    """)
+
+    log = install_logging_felt!(store)
+
+    for _ <- 1..2 do
+      conn = get(api_conn(), "/api/v1/fibers/#{uid}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "body" => "Unpolled body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow tests/unpolled -j\n"
   end
 
   test "GET /api/v1/fibers/:id?body=true includes the felt body alongside full metadata",
