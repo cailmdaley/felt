@@ -1468,6 +1468,57 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   }, viewport)
 }
 
+test('Theme font families are private and unicode-range faces cannot target the composer', async p => {
+  await open(p); await choose(p, 'Constitution')
+  const requests = []
+  await p.route('https://theme-probe.invalid/**', route => { requests.push(route.request().url()); return route.abort() })
+  const result = await p.evaluate(() => {
+    const reader = document.querySelector('.ws-reader')
+    const scope = reader.dataset.wsTheme
+    const css = `@font-face { font-family: "EB Garamond"; src: url(https://theme-probe.invalid/character-a.woff2); unicode-range: U+61; }
+      @font-face { font-family: "Fixture Multi Word"; src: local("Georgia"); }
+      :scope { --fixture-font: Fixture Multi Word; }
+      [data-part="prose"] { font-family: var(--fixture-font, "EB Garamond") !important; }
+      [data-part="prose"] p { font: italic 18px "Fixture Multi Word", serif !important; }
+      [data-part="act"] textarea { font-family: "EB Garamond"; }`
+    const source = window.__harness.scopeTheme(css, `[data-ws-theme="${scope}"]`, 'font-probe')
+    const before = new Set(document.fonts)
+    const style = document.createElement('style'); style.textContent = source; document.head.append(style)
+    const composer = reader.querySelector('textarea'); composer.value = 'aaaa'; composer.focus()
+    return { source, font: getComputedStyle(composer).fontFamily,
+      proseFont: getComputedStyle(reader.querySelector('[data-part="prose"]')).fontFamily,
+      paragraphFont: getComputedStyle(reader.querySelector('[data-part="prose"] p')).fontFamily,
+      faces: [...document.fonts].filter(face => !before.has(face)).map(face => face.family) }
+  })
+  await p.waitForTimeout(200)
+  assert.ok(result.source.includes('font-probe-EB Garamond'))
+  assert.ok(result.source.includes('font-probe-Fixture Multi Word'))
+  assert.ok(result.proseFont.includes('font-probe-Fixture Multi Word'), 'custom-property font references are renamed')
+  assert.ok(result.paragraphFont.includes('font-probe-Fixture Multi Word'), 'font shorthand references are renamed')
+  assert.ok(!result.font.includes('font-probe'), 'the act-zone composer keeps its own font')
+  assert.ok(!result.faces.includes('EB Garamond'), 'a theme cannot install an unnamespaced font-face')
+  assert.deepEqual(requests, [], 'unicode-range faces and theme URLs cannot fetch arbitrary servers')
+})
+
+test('Theme URLs allow only data, Google Fonts and relative resources inside the fiber folder', async p => {
+  const result = await p.evaluate(() => {
+    const css = `@font-face { font-family: Test; src: url("./fonts/test.woff2"); }
+      :scope { --good: url("nested/../paper.png"); --bad: url("../secret.png");
+        --encoded: url("%2e%2e/secret.png"); --slash: url("nested%2f..%2fsecret.png");
+        --external: url("https://theme-probe.invalid/beacon"); --same: url("https://board.test/api/v1/version");
+        --absolute: url("/api/v1/version"); --protocol: url("//theme-probe.invalid/beacon");
+        --escaped: u\\72l("https://theme-probe.invalid/escape");
+        --data: url("data:image/svg+xml;base64,PHN2Zy8+");
+        --google: url("https://fonts.gstatic.com/s/font.woff2");
+        --disguised: url("https://fonts.gstatic.com.evil.test/font.woff2");
+        --image-set: image-set("https://theme-probe.invalid/image.png" 1x);
+      }`
+    return window.__harness.scopeTheme(css, '[data-ws-theme="url-probe"]', 'url-probe', new Map(), 'https://board.test/api/v1/file-assets/owner/fiber/theme.css')
+  })
+  for (const allowed of ['data:image', 'fonts.gstatic.com/s/font.woff2', '/file-assets/owner/fiber/fonts/test.woff2', '/file-assets/owner/fiber/paper.png']) assert.ok(result.includes(allowed), allowed)
+  for (const forbidden of ['theme-probe.invalid', 'secret.png', '/api/v1/version', 'evil.test']) assert.ok(!result.includes(forbidden), forbidden)
+})
+
 test('Custom theme is scoped with private keyframes, hoisted fonts and conditional rules', async p => {
   const desk = await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity)
   await p.locator('[data-view="shelf"]').click()

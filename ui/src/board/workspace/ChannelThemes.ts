@@ -144,13 +144,18 @@ export class ChannelThemes {
     const selector = `[data-ws-theme="${entry.scope}"]`
     if (typeof CSSStyleSheet.prototype.replaceSync !== 'function') { entry.compiled = ''; return }
     const base = bundled[`./themes/${entry.base}.css`] ?? ''
+    const asset = new URL(fileBytesUrl(this.base, '', entry.card.originId), document.baseURI)
+    asset.pathname = asset.pathname.replace(/\/file$/, `/file-assets/${encodeURIComponent(entry.card.originId)}`)
+      + `${entry.card.fiberDir ?? ''}/theme.css`.split('/').map(encodeURIComponent).join('/')
+    asset.search = ''
+    const assetBase = entry.card.fiberDir ? asset.href : undefined
     try {
-      if (entry.custom) scopeTheme(entry.custom, selector, entry.scope, this.defaults)
-      entry.compiled = scopeTheme(base + '\n' + entry.custom, selector, entry.scope, this.defaults)
+      if (entry.custom) scopeTheme(entry.custom, selector, entry.scope, this.defaults, assetBase)
+      entry.compiled = scopeTheme(base + '\n' + entry.custom, selector, entry.scope, this.defaults, assetBase)
     } catch (error) {
       console.warn('Shuttle theme: CSS could not be parsed; using the bundled base', error)
       entry.custom = ''
-      entry.compiled = scopeTheme(base, selector, entry.scope, this.defaults)
+      entry.compiled = scopeTheme(base, selector, entry.scope, this.defaults, assetBase)
     }
   }
   private paint(entry: ThemeEntry): void {
