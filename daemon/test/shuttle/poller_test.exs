@@ -1344,7 +1344,7 @@ defmodule Shuttle.PollerTest do
     assert wait_until(fn ->
              MockRunner.commands()
              |> Enum.drop(booted)
-             |> Enum.any?(fn {cmd, args} -> cmd in ["felt", "shuttle"] and "ls" in args end)
+             |> Enum.any?(&match?({"shuttle", ["-C", _store, "ls", "--json" | _]}, &1))
            end)
 
     started_at_ms = System.monotonic_time(:millisecond)
