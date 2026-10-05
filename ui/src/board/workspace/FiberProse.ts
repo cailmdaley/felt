@@ -70,6 +70,8 @@ export function buildFiberProse(
   opts: {
     shuttleBase: string
     controls?: HTMLElement
+    /** The status line's acts (worker pill, Temper, Discard), owned by the control band. */
+    acts?: HTMLElement
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
   },
@@ -88,6 +90,7 @@ export function buildFiberProse(
     status.textContent = fiberPageKicker(card)
     header.append(status)
   }
+  if (opts.acts) header.append(opts.acts)
   const title = document.createElement('h1')
   title.textContent = channel.name
   title.dataset.part = 'fiber-title'

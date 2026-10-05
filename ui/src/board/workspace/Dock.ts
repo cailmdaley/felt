@@ -16,6 +16,7 @@ import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
 import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
+import { workerPlate } from './workerPlate.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import './tokens.css'
@@ -398,6 +399,8 @@ export interface DockOptions {
 export class Dock {
   private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
+  private headRoot: HTMLElement | null = null
+  private headWorkerKey: string | null = null
   private card: KanbanCard | null = null
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
@@ -461,6 +464,22 @@ export class Dock {
       this.root.addEventListener('click', event => event.stopPropagation())
     }
     return this.root
+  }
+
+  /**
+   * The acts the fiber page's status line carries: the worker pill, then
+   * Temper and Discard. Built once per band, so a prose repaint re-seats the
+   * same controls under the pointer and the focus.
+   */
+  get head(): HTMLElement {
+    if (!this.headRoot) {
+      this.headRoot = document.createElement('div')
+      this.headRoot.className = 'ws-fiber-acts'
+      this.headRoot.dataset.part = 'act'
+      this.headRoot.dataset.act = 'verdict'
+      this.headRoot.addEventListener('click', event => event.stopPropagation())
+    }
+    return this.headRoot
   }
 
   private later(fn: () => void, ms: number): number {
@@ -557,6 +576,8 @@ export class Dock {
     this.savesPending = 0
     this.blockedDispatches.clear()
     this.root?.replaceChildren()
+    this.headRoot?.replaceChildren()
+    this.headWorkerKey = null
   }
 
   /**
@@ -654,6 +675,19 @@ export class Dock {
     return card.tmuxSession ? terminalWorkerPill(card, {
       phase: this.workerPhase(card), openWorker: this.onOpenWorker,
     }) : null
+  }
+
+  /** The status line's pill, rebuilt only when what it says or opens changes, keeping its focus. */
+  private paintHeadWorker(card: KanbanCard, slot: HTMLElement): void {
+    const pill = this.workerPillFor(card)
+    const plate = pill ? workerPlate(card, pill, this.workerPhase(card)) : null
+    const key = plate ? JSON.stringify([plate.outerHTML, card.tmuxSession, card.sessionLink, card.sessionUuid]) : null
+    if (key === this.headWorkerKey) return
+    this.headWorkerKey = key
+    const focused = slot.contains(document.activeElement)
+    slot.replaceChildren(...(plate ? [plate] : []))
+    slot.hidden = !plate
+    if (focused) plate?.focus({ preventScroll: true })
   }
 
   /** Keyboard opening activates the exact destination used by the worker pill. */
@@ -835,19 +869,20 @@ export class Dock {
     const verdict = this.verdictControlsFor(card)
     verdict.setAttribute('role', 'group')
     verdict.setAttribute('aria-label', 'Verdict')
+    const worker = document.createElement('span')
+    worker.className = 'ws-fiber-worker'
+    this.head.replaceChildren(worker, verdict)
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
-    // Every fiber without a verdict carries Temper and Discard here. Awaiting
-    // review, the pair leads the act zone as plates; otherwise it rides the
-    // composer's row as quiet verbs beside the field, after its send.
+    // The status line carries the worker and, for every fiber without a
+    // verdict, Temper and Discard: plates while it awaits review, quiet
+    // verbs otherwise. The act zone below is the composer alone.
     this.actPaint = () => {
       const column = fiberPageColumn(card)
       this.el.dataset.column = column
-      const place = column === 'awaitingReview' || !compose ? 'lead' : 'composer'
-      verdict.dataset.place = place
-      if (!verdictReachable(card)) verdict.remove()
-      else if (place === 'lead') { if (body.firstElementChild !== verdict) body.prepend(verdict) }
-      else if (verdict.parentElement !== compose) compose!.insertBefore(verdict, compose!.firstElementChild?.nextSibling ?? null)
+      this.head.dataset.column = column
+      verdict.hidden = !verdictReachable(card)
+      this.paintHeadWorker(card, worker)
     }
     this.actPaint()
   }

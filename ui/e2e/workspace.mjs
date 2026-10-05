@@ -890,10 +890,10 @@ test('Verdicts live on the constitution: leading plates in review, the composer 
   await open(p)
   assert.equal(await p.locator('.ws-navbar :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the head carries no verdicts')
   await choose(p, 'Constitution')
-  const lead = selected(p).locator('.ws-dock .kbn-ctl-verdict')
-  assert.equal(await lead.getAttribute('data-place'), 'lead')
+  const lead = selected(p).locator('.ws-prose-header .ws-fiber-acts .kbn-ctl-verdict')
   assert.equal(await lead.getAttribute('aria-label'), 'Verdict')
-  assert.ok(await lead.evaluate(el => el === el.parentElement.firstElementChild), 'awaiting review, the pair leads the act zone')
+  assert.equal(await selected(p).locator('.ws-dock :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the act zone is the composer alone')
+  assert.ok(await lead.locator('.kbn-ctl-temper').evaluate(el => getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'), 'awaiting review, the pair is plated on the status line')
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await p.locator('.ws-channel-title').focus(); await p.keyboard.press('t')
@@ -906,17 +906,14 @@ test('Verdicts live on the constitution: leading plates in review, the composer 
   await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
-  const row = selected(p).locator('.ws-dock .kbn-ctl-compose > .kbn-ctl-verdict')
-  assert.equal(await row.getAttribute('data-place'), 'composer')
   const seat = await selected(p).evaluate(page => {
     const rect = sel => page.querySelector(sel).getBoundingClientRect()
-    const field = rect('.kbn-ctl-composer'), temper = rect('.kbn-ctl-compose .kbn-ctl-temper'), discard = rect('.kbn-ctl-compose .kbn-ctl-discard')
-    const send = page.querySelector('.kbn-ctl-composer .kbn-ctl-send:not(.kbn-ctl-secondary)')
-    return { beside: temper.left >= field.right && discard.left > temper.left, sameLine: Math.abs((temper.top + temper.bottom) / 2 - (field.top + field.bottom) / 2) <= 1,
-      plateless: getComputedStyle(page.querySelector('.kbn-ctl-compose .kbn-ctl-temper')).backgroundColor === 'rgba(0, 0, 0, 0)',
-      sendPlated: getComputedStyle(send).backgroundColor !== 'rgba(0, 0, 0, 0)' }
+    const status = rect('.ws-prose-status'), worker = rect('.ws-fiber-acts .kbn-card-worker'), temper = rect('.ws-fiber-acts .kbn-ctl-temper'), discard = rect('.ws-fiber-acts .kbn-ctl-discard'), title = rect('.ws-fiber-prose > h1')
+    return { order: status.right <= worker.left && worker.right < temper.left && temper.right <= discard.left, aboveTitle: discard.bottom <= title.top,
+      plateless: getComputedStyle(page.querySelector('.ws-fiber-acts .kbn-ctl-temper')).backgroundColor === 'rgba(0, 0, 0, 0)',
+      composerAlone: page.querySelectorAll('.ws-dock :is(.kbn-ctl-temper, .kbn-ctl-discard, .kbn-card-worker)').length === 0 }
   })
-  assert.deepEqual(seat, { beside: true, sameLine: true, plateless: true, sendPlated: true }, `the in-flight pair sits beside the field, secondary to its send: ${JSON.stringify(seat)}`)
+  assert.deepEqual(seat, { order: true, aboveTitle: true, plateless: true, composerAlone: true }, `in flight, the status line reads kicker, worker, Temper, Discard: ${JSON.stringify(seat)}`)
 })
 
 async function verdictLook(locator) {
@@ -1028,7 +1025,7 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
   await choose(p, 'Constitution')
   for (const verb of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
-    const box = await selected(p).locator(`.ws-dock .kbn-ctl-verdict ${verb}`).boundingBox()
+    const box = await selected(p).locator(`.ws-fiber-acts .kbn-ctl-verdict ${verb}`).boundingBox()
     assert.ok(box.height >= 44 && box.width >= 44, `${verb} is a full target on the constitution's page: ${JSON.stringify(box)}`)
   }
 }, { width: 844, height: 390 }, 'false', 'reduce', true)
@@ -1080,7 +1077,7 @@ test('Key discard then act-zone Temper replaces the pending verdict with one del
   await p.locator('.ws-channel-title').focus(); await p.keyboard.press('x')
   await p.clock.runFor(3000)
   await choose(p, 'Constitution')
-  await selected(p).locator('.ws-dock .kbn-ctl-verdict').getByRole('button', { name: 'Temper', exact: true }).click()
+  await selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict').getByRole('button', { name: 'Temper', exact: true }).click()
   assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
   assert.match(await p.locator('.ws-verdict-toast').innerText(), /^Tempered/)
   await p.clock.runFor(5999)
@@ -1146,7 +1143,7 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
   await chooseDeskColumn(p, 0)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
   await choose(p, 'Constitution')
-  assert.ok(await selected(p).locator('.ws-dock .kbn-ctl-compose .kbn-ctl-temper').isVisible(), 'a draft carries the pair in its composer row')
+  assert.ok(await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), 'a draft carries the pair on its status line')
   await p.keyboard.press('t')
   await p.locator('.ws-verdict-toast').waitFor()
   await p.keyboard.press('z')
@@ -1158,7 +1155,7 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
   // A live worker asks once at the gesture; declining queues nothing.
   const asked = []
   p.once('dialog', dialog => { asked.push(dialog.message()); void dialog.dismiss() })
-  await selected(p).locator('.ws-dock .kbn-ctl-compose .kbn-ctl-temper').click()
+  await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').click()
   assert.equal(asked.length, 1, 'tempering a live worker asks first')
   assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
@@ -1863,7 +1860,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.equal(await p.locator('.ws-navbar :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the head carries no verdicts')
     if (device === 'phone') {
       await choose(p, 'Constitution')
-      const buttons = await selected(p).locator('.ws-dock .kbn-ctl-verdict button').evaluateAll(es => es.map(e => {
+      const buttons = await selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict button').evaluateAll(es => es.map(e => {
         const rect = e.getBoundingClientRect()
         return { x: rect.x, right: rect.right, y: rect.y, bottom: rect.bottom, height: rect.height, text: e.textContent }
       }))
@@ -2321,8 +2318,8 @@ test('Protected verdict plate and portaled toast retain material without author 
   await open(p)
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   await choose(p, 'Constitution')
-  const plate = selected(p).locator('.ws-dock .kbn-ctl-verdict')
-  assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'composer')
+  const plate = selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict')
+  assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'verdict')
   assert.notEqual(await plate.getByRole('button', { name: 'Temper', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
   await choose(p, 'calibration-report')
   const material = await p.locator('.ws-reader').evaluate(el => ({ paper: getComputedStyle(el).getPropertyValue('--ws-paper').trim(), ink: getComputedStyle(el).getPropertyValue('--ws-ink').trim() }))
@@ -2423,7 +2420,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await field.scrollIntoViewIfNeeded()
   await still(p, 'focusing the composer', () => field.click(), keyboard)
   await still(p, 'typing a word', () => p.keyboard.type('Rerun'))
-  const above = ['.ws-navbar', '.ws-selected .ws-prose-status', '.ws-selected .kbn-ctl-verdict']
+  const above = ['.ws-navbar', '.ws-selected .ws-prose-status', '.ws-selected .ws-fiber-acts']
   const before = await field.boundingBox()
   assert.ok(unexpected(await layoutShift(p, { regions: above, act: () => p.keyboard.type(' the masks with the corrected weights, then compare the null spectra at high ell against the previous run') })).length === 0, 'wrapped text moves nothing above the field')
   const grown = await field.boundingBox()
@@ -2432,8 +2429,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   assert.equal((await field.boundingBox()).height, before.height, 'an emptied field returns to its resting height')
   await still(p, 'blurring the composer', () => p.evaluate(() => document.activeElement.blur()), keyboard)
   if (!phone) await composerKeyStaysPut(p)
-  if (!phone) for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard', '.kbn-ctl-meet-switch', '.kbn-ctl-resume', '.kbn-ctl-secondary', '.kbn-detail-controls-toggle', '.kbn-ctl-history-toggle']) {
-    await still(p, `hovering ${control}`, () => p.locator(`${dock} ${control}`).first().hover(), { allow: [`${dock} ${control}`] })
+  if (!phone) for (const control of ['.ws-fiber-acts .kbn-ctl-temper', '.ws-fiber-acts .kbn-ctl-discard', '.ws-dock .kbn-ctl-meet-switch', '.ws-dock .kbn-ctl-resume', '.ws-dock .kbn-ctl-secondary', '.ws-dock .kbn-detail-controls-toggle', '.ws-dock .kbn-ctl-history-toggle']) {
+    await still(p, `hovering ${control}`, () => p.locator(`.ws-selected ${control}`).first().hover(), { allow: [`.ws-selected ${control}`] })
   }
   // Meeting trades the composer's verbs, inside the composer, on its row.
   for (const state of ['on', 'off']) await still(p, `turning Meeting ${state}`, () => p.locator(`${dock} .kbn-ctl-meet-switch`).click(), { allow: [`${dock} .kbn-ctl-composer`] })
@@ -2449,15 +2446,16 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await choose(p, 'Constitution')
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control'], settle: 100 })
   // In flight, the composer's row carries the verdict pair; the head carries none.
-  assert.ok(await p.locator(`${dock} .kbn-ctl-compose > .kbn-ctl-verdict .kbn-ctl-temper`).isVisible(), 'the composer row carries Temper in flight')
+  const acts = '.ws-selected .ws-fiber-acts'
+  assert.ok(await p.locator(`${acts} .kbn-ctl-temper`).isVisible(), 'the status line carries Temper in flight')
   assert.equal(await p.locator('.ws-navbar :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the head carries no verdicts')
   if (!phone) for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
-    await still(p, `hovering the in-flight ${control}`, () => p.locator(`${dock} .kbn-ctl-compose ${control}`).hover(), { allow: [`${dock} .kbn-ctl-compose ${control}`] })
+    await still(p, `hovering the in-flight ${control}`, () => p.locator(`${acts} ${control}`).hover(), { allow: [`${acts} ${control}`] })
   }
   const inFlightField = p.locator(`${dock} .kbn-detail-directive`)
   await inFlightField.click()
   // On the phone the pair sits beneath the field, so only the desktop row is held.
-  if (!phone) assert.deepEqual(unexpected(await layoutShift(p, { regions: [`${dock} .kbn-ctl-compose > .kbn-ctl-verdict`], act: () => p.keyboard.type(' the masks with the corrected weights, then compare the null spectra at high ell against the previous run and the run before it') })), [], 'wrapped text leaves the in-flight pair on its line')
+  assert.deepEqual(unexpected(await layoutShift(p, { regions: [acts], act: () => p.keyboard.type(' the masks with the corrected weights, then compare the null spectra at high ell against the previous run and the run before it') })), [], 'wrapped text leaves the status line as it is')
   await inFlightField.fill('')
   await p.evaluate(() => document.activeElement.blur())
 }, viewport)

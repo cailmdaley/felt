@@ -45,10 +45,11 @@ describe('shared verdict controls', () => {
     const review = task({ status: 'closed' })
     const controls = new Dock('', saved, transition)
     const band = controls.bandFor(review)
-    document.body.append(band.el)
+    document.body.append(band.head, band.el)
     expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('composer')
-    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
-    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
+    expect(band.head.dataset.part).toBe('act'); expect(band.head.dataset.act).toBe('verdict')
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
     ])
@@ -211,28 +212,27 @@ describe('state-shaped act zone', () => {
     expect(message.placeholder).toBe('What should the worker do next?')
   })
 
-  it('puts review verdicts first, retains a draft across runtime changes, and seats verdicts outside review in the composer row', () => {
+  it('seats the verdicts on the status line in every unverdicted column, retaining a draft across runtime changes', () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
-    expect(band.el.querySelector('.ws-dock-body')?.firstElementChild?.className).toBe('kbn-ctl-verdict')
-    expect(band.el.querySelector<HTMLElement>('.kbn-ctl-verdict')?.dataset.place).toBe('lead')
-    expect(band.el.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
+    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
+    expect(band.head.dataset.column).toBe('awaitingReview')
+    expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
     expect(message.placeholder).toBe('Reply and resume…')
     dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
-    // In flight the pair sits beside the field, after the composer, in the same row.
-    const inFlight = band.el.querySelector<HTMLElement>('.kbn-ctl-compose > .kbn-ctl-verdict')!
-    expect(inFlight.dataset.place).toBe('composer')
-    expect(inFlight.previousElementSibling?.classList.contains('kbn-ctl-composer')).toBe(true)
-    expect(band.el.querySelectorAll('.kbn-ctl-temper')).toHaveLength(1)
-    dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(band.el.querySelector<HTMLElement>('.kbn-ctl-compose > .kbn-ctl-verdict')?.dataset.place).toBe('composer')
-    dock.syncRuntime({ ...review, status: 'closed', tempered: true })
+    // In flight the pair stays on the status line beside the worker; the act zone is the composer alone.
+    expect(band.head.dataset.column).toBe('inFlight')
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
     expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
+    dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
+    dock.syncRuntime({ ...review, status: 'closed', tempered: true })
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
   })

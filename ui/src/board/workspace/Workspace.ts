@@ -266,6 +266,7 @@ export class Workspace {
     this.proseRevisions.set(key, this.proseRevision(state))
     const page = buildFiberProse(state.card, state.channel, {
       controls: this.controls(state)?.el,
+      acts: this.controls(state)?.head,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title) => this.openFile(path, title),
