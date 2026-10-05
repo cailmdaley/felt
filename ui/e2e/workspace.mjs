@@ -4,7 +4,7 @@ import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
-import { layoutShift, unexpected } from './layoutShift.mjs'
+import { frames, layoutShift, unexpected } from './layoutShift.mjs'
 
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 await access(chrome)
@@ -2259,6 +2259,28 @@ const KNOWN_SHIFTS = {
   needsYouEdge: ['div.kbn-card.kbn-card-inFlight'],
 }
 
+// `r` focuses the composer where it stands; a field out of view scrolls its
+// page only as far as its top, so the kicker stays whole.
+async function composerKeyStaysPut(p) {
+  await p.evaluate(() => document.activeElement?.blur())
+  await still(p, 'r focusing a visible composer', () => p.keyboard.press('r'))
+  await p.evaluate(() => document.activeElement?.blur())
+  await selected(p).locator('.ws-prose-body').evaluate(body => {
+    const tall = document.createElement('div'); tall.className = 'e2e-tall'; tall.style.height = '3000px'; body.append(tall)
+    body.closest('.ws-prose-scroll').scrollTop = 900
+  })
+  await p.keyboard.press('r')
+  await frames(p)
+  const seen = await selected(p).evaluate(page => {
+    const scroller = page.querySelector('.ws-prose-scroll'), view = scroller.getBoundingClientRect()
+    const field = page.querySelector('.kbn-detail-directive').getBoundingClientRect()
+    const kicker = page.querySelector('.ws-prose-status').getBoundingClientRect()
+    return { focused: document.activeElement?.classList.contains('kbn-detail-directive'), fieldInView: field.top >= view.top && field.bottom <= view.bottom, kickerWhole: kicker.top >= view.top, scrollTop: scroller.scrollTop }
+  })
+  assert.deepEqual(seen, { focused: true, fieldInView: true, kickerWhole: true, scrollTop: 0 }, 'r brings an off-screen composer in from the page top')
+  await selected(p).locator('.e2e-tall').evaluate(tall => tall.remove())
+}
+
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the act zone (${device})`, async p => {
   const phone = device === 'phone'
   // The phone's page bar steps aside while a field holds the keyboard; the
@@ -2278,6 +2300,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await field.fill('')
   assert.equal((await field.boundingBox()).height, before.height, 'an emptied field returns to its resting height')
   await still(p, 'blurring the composer', () => p.evaluate(() => document.activeElement.blur()), keyboard)
+  if (!phone) await composerKeyStaysPut(p)
   if (!phone) for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard', '.kbn-ctl-meet-switch', '.kbn-ctl-resume', '.kbn-ctl-secondary', '.kbn-detail-controls-toggle', '.kbn-ctl-history-toggle']) {
     await still(p, `hovering ${control}`, () => p.locator(`${dock} ${control}`).first().hover(), { allow: [`${dock} ${control}`] })
   }
@@ -2316,6 +2339,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.waitForTimeout(400)
   await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover(), { allow: ['.ws-sidebar .kbn-card:hover'] })
   await still(p, 'a sidebar poll repaint', () => repaint(p))
+  await choose(p, 'Constitution')
+  await composerKeyStaysPut(p)
   await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-nav-trail'], known: KNOWN_SHIFTS.needsYouEdge, settle: 100 })
 }, viewport)
 

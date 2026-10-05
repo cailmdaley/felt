@@ -250,7 +250,7 @@ export class Workspace {
     if (!state) return
     const key = state.channel.documents[0]?.key
     if (key) this.select(key)
-    this.controls(state)?.el.querySelector<HTMLTextAreaElement>('.kbn-detail-directive')?.focus()
+    this.controls(state)?.focusComposer()
   }
 
   private controls(state: ChannelState | null): Dock | undefined {

@@ -561,6 +561,26 @@ export class Dock {
     this.root?.replaceChildren()
   }
 
+  /**
+   * Focus the composer without moving the page under it. Only a field out of
+   * view scrolls its page, and then to the page's top when the field fits on
+   * the first screen, so the kicker and title stay whole.
+   */
+  focusComposer(): boolean {
+    const field = this.root?.querySelector<HTMLTextAreaElement>('.kbn-detail-directive')
+    if (!field) return false
+    field.focus({ preventScroll: true })
+    let scroller = field.parentElement
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement
+    if (!scroller) return true
+    const view = scroller.getBoundingClientRect()
+    const box = field.getBoundingClientRect()
+    if (box.top >= view.top && box.bottom <= view.bottom) return true
+    const fromTop = box.bottom - view.top + scroller.scrollTop
+    scroller.scrollTop = fromTop <= scroller.clientHeight ? 0 : scroller.scrollTop + box.top - view.top - box.height
+    return true
+  }
+
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
