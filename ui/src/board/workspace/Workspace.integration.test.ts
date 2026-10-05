@@ -98,9 +98,72 @@ beforeEach(() => {
   visibility.mockClear()
   workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
-afterEach(() => { workspace?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('replaces key verdicts with clicks and commits only the live identity after a move', async () => {
+    workspace.dispose()
+    const reviewing = card({ id: 'work/review', uid: 'stable-review', name: 'Review', originId: 'host-a',
+      path: 'work/review/review.md', fiberDir: '/notes/review', status: 'closed', shuttleKind: 'oneshot' })
+    let live = reviewing
+    bodyCards = [reviewing]
+    const commit = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [live], origin: () => 'Desk',
+      onVisibility: visibility, dock: new Dock('', changed, commit) })
+    workspace.open(reviewing); await flush()
+    vi.useFakeTimers()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
+    vi.advanceTimersByTime(3000)
+    document.querySelector<HTMLButtonElement>('.ws-review-plate .kbn-ctl-temper')!.click()
+    expect(commit).not.toHaveBeenCalled()
+    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
+    expect(document.querySelector('.ws-verdict-toast')?.textContent).toMatch(/^Tempered/)
+    live = { ...reviewing, id: 'elsewhere/renamed', path: 'elsewhere/renamed/renamed.md', fiberDir: '/notes/renamed' }
+    vi.advanceTimersByTime(5999)
+    expect(commit).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(commit).toHaveBeenCalledExactlyOnceWith(live, 'tempered')
+    vi.useRealTimers()
+  })
+  it.each(['replacement', 'removed', 'other origin'])('drops a delayed verdict when its indexed identity is %s', async change => {
+    workspace.dispose()
+    const reviewing = card({ id: 'work/review', uid: 'UID-A', originId: 'host-a',
+      status: 'closed', shuttleKind: 'oneshot' })
+    let live = [reviewing]
+    bodyCards = live
+    const commit = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
+      onVisibility: visibility, dock: new Dock('', changed, commit) })
+    workspace.open(reviewing); await flush()
+    vi.useFakeTimers()
+    workspace.queueVerdict(reviewing, 'composted')
+    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
+    live = change === 'removed' ? [] : [{ ...reviewing,
+      ...(change === 'replacement' ? { uid: 'UID-B' } : { originId: 'host-b' }) }]
+    bodyCards = live
+    vi.advanceTimersByTime(6000); await flush()
+    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
+    expect(commit).not.toHaveBeenCalled()
+  })
+  it.each(['same identity', 'replacement', 'missing'])('rechecks an off-index linked fiber against its owner: %s', async result => {
+    workspace.dispose()
+    const linked = card({ id: 'work/linked', uid: 'linked-uid', originId: 'host-a',
+      status: 'closed', shuttleKind: 'oneshot' })
+    bodyCards = [linked]
+    const commit = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [], origin: () => 'Desk',
+      onVisibility: visibility, dock: new Dock('', changed, commit) })
+    workspace.open(linked); await flush()
+    vi.useFakeTimers()
+    workspace.queueVerdict(linked, 'tempered')
+    const renamed = { ...linked, id: 'work/moved', path: 'work/moved/moved.md' }
+    bodyCards = result === 'missing' ? [] : [result === 'replacement' ? { ...linked, uid: 'replacement-uid' } : renamed]
+    vi.mocked(fetch).mockClear()
+    vi.advanceTimersByTime(6000); await flush()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/v1/fibers/linked-uid?body=true&origin=host-a&routed=1'))).toBe(true)
+    if (result === 'same identity') expect(commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: linked.uid, id: renamed.id, originId: linked.originId }), 'tempered')
+    else expect(commit).not.toHaveBeenCalled()
+  })
   it('keeps the originating Desk column and bands through j/k and returns the current card', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
@@ -378,7 +441,11 @@ describe('workspace reader integration', () => {
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     expect(confirm).toHaveBeenCalledOnce()
+    vi.useFakeTimers()
     button('Temper').click()
+    expect(transition).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(6000)
+    vi.useRealTimers()
     expect(transition).toHaveBeenCalledWith(expect.objectContaining({
       id: 'b/task', uid: 'stable-task', path: 'b/task/task.md', fiberDir: '/notes/b/task',
       feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b', originId: 'host-a',

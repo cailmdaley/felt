@@ -1,4 +1,4 @@
-import { keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
+import { DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
 import { referenceRuntime, type ReferenceTarget, type ReferencePlayback } from './ChannelReferences.js'
 import referenceStyles from './references.css?inline'
 
@@ -11,15 +11,48 @@ export type DocumentMessage = { protocol: typeof PROTOCOL; version: typeof VERSI
 export function envelope(type: string, payload: Record<string, unknown> = {}): DocumentMessage {
   return { protocol: PROTOCOL, version: VERSION, type, payload }
 }
+export const REFERENCE_LIMIT = 500
+export const REFERENCE_LENGTH = 256
+const REFERENCE_RATE = 4
+const KEY_FIELDS = ['key', 'altKey', 'ctrlKey', 'metaKey', 'shiftKey', 'repeat']
+const SCROLL_INTENTS = ['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp']
+function fields(value: unknown, allowed: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  for (const key in value) if (!Object.hasOwn(value, key) || !allowed.includes(key)) return false
+  return true
+}
+const shortString = (value: unknown, max = REFERENCE_LENGTH): value is string => typeof value === 'string' && value.length <= max
+const coordinate = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 0x7fffffff
+const boundedArray = (value: unknown, valid: (item: unknown) => boolean): boolean => Array.isArray(value) && value.length <= REFERENCE_LIMIT && Array.from(value).every(valid)
+
+/** Fixed schemas bound work in both directions; unknown types and extra data are refused. */
 export function documentMessage(data: unknown): data is DocumentMessage {
-  if (!data || typeof data !== 'object') return false
-  const message = data as DocumentMessage
-  return message.protocol === PROTOCOL && message.version === VERSION && typeof message.type === 'string'
-    && !!message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)
+  if (!fields(data, ['protocol', 'version', 'type', 'payload']) || data.protocol !== PROTOCOL || data.version !== VERSION || typeof data.type !== 'string') return false
+  const p = data.payload
+  switch (data.type) {
+    case 'ready': return fields(p, ['media']) && (p.media === undefined || typeof p.media === 'boolean')
+    case 'media': case 'references:scan': return fields(p, [])
+    case 'pause': return fields(p, []) || fields(p, ['candidate']) && shortString(p.candidate)
+    case 'active': return fields(p, ['active']) && typeof p.active === 'boolean'
+    case 'key': return fields(p, KEY_FIELDS) && shortString(p.key, 64) && p.key.length > 0
+      && KEY_FIELDS.slice(1).every(key => p[key] === undefined || typeof p[key] === 'boolean')
+    case 'scroll':
+      if (fields(p, ['intent', 'instant']) && typeof p.intent === 'string') return SCROLL_INTENTS.includes(p.intent) && (p.instant === undefined || typeof p.instant === 'boolean')
+      return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
+    case 'restore': return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
+    case 'references': return fields(p, ['candidates']) && boundedArray(p.candidates, item => shortString(item))
+    case 'select': case 'play': return fields(p, ['candidate']) && shortString(p.candidate)
+    case 'references:resolved': return fields(p, ['targets']) && boundedArray(p.targets, item =>
+      fields(item, ['candidate', 'title', 'audio']) && shortString(item.candidate) && shortString(item.title) && typeof item.audio === 'boolean')
+    case 'references:playback': return fields(p, ['states']) && boundedArray(p.states, item =>
+      fields(item, ['candidate', 'playing', 'progress']) && shortString(item.candidate) && typeof item.playing === 'boolean'
+      && typeof item.progress === 'number' && Number.isFinite(item.progress) && item.progress >= 0 && item.progress <= 1)
+    default: return false
+  }
 }
 
 /** This function is serialized, so every dependency arrives as an argument. */
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, references: typeof referenceRuntime, css: string, protocol: string, version: number): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -46,7 +79,27 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   let scroller: HTMLElement | null = null
   let pendingRestore: ScrollPosition | null = null
   let restoreTimer: ReturnType<typeof setTimeout> | undefined
-  const send = (type: string, payload: Record<string, unknown> = {}): void => parent.postMessage({ protocol, version, type, payload }, '*')
+  let referencesAt = -Infinity
+  let referencesTimer: ReturnType<typeof setTimeout> | undefined
+  let pendingReferences: Record<string, unknown> | undefined
+  const send = (type: string, payload: Record<string, unknown> = {}): void => {
+    if (type === 'references') {
+      // Coalesce ordinary rescans so the latest layout reaches the parent budget.
+      const wait = Math.ceil(limits.interval - (Date.now() - referencesAt))
+      if (wait > 0) {
+        pendingReferences = payload
+        if (referencesTimer === undefined) referencesTimer = setTimeout(() => {
+          referencesTimer = undefined
+          const latest = pendingReferences; pendingReferences = undefined
+          if (latest) send('references', latest)
+        }, wait)
+        return
+      }
+      clearTimeout(referencesTimer); referencesTimer = undefined; pendingReferences = undefined
+      referencesAt = Date.now()
+    }
+    parent.postMessage({ protocol, version, type, payload }, '*')
+  }
   const style = document.createElement('style'); style.textContent = css
   ;(document.head ?? document.documentElement).append(style)
   let links: ReturnType<typeof references> | undefined
@@ -132,12 +185,14 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     window.setTimeout(() => {
       if (!active) pause()
       send('ready', { media: !!document.querySelector('audio,video') })
-      links = references(document, candidates => send('references', { candidates }),
+      links = references(document, candidates => send('references', { candidates: candidates.filter(candidate => candidate.length <= limits.length).slice(0, limits.count) }),
         (type, candidate) => { if (active) send(type, { candidate }) })
       links.scan()
       // Report handlers installed at load get first refusal.
       window.addEventListener('keydown', event => {
-        if (!forward(event) || !intent(event, 'reader', bindings, target => !forward({ target, defaultPrevented: false } as KeyboardEvent))) return
+        if (!event.isTrusted || !forward(event)) return
+        const action = intent(event, 'reader', bindings, target => !forward({ target, defaultPrevented: false } as KeyboardEvent))
+        if (!action || !allowed.includes(action)) return
         event.preventDefault()
         send('key', { key: event.key, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
           shiftKey: event.shiftKey, repeat: event.repeat })
@@ -148,7 +203,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length
@@ -171,17 +226,32 @@ export function frameBridge(frame: HTMLIFrameElement): FrameBridge | undefined {
 /** Opaque origins cannot authenticate by origin; only this top-frame Window can speak. */
 export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message: DocumentMessage) => void): FrameBridge {
   const listeners = new Set<(position: ScrollPosition) => void>()
+  const referenceTimes: number[] = []
   const bridge: FrameBridge = {
     position: { x: 0, y: 0 },
     command: (type, payload = {}) => {
+      // Titles are presentation text, not identity; keep long titles within the wire budget.
+      if (type === 'references:resolved' && Array.isArray(payload.targets)) payload = {
+        targets: payload.targets.slice(0, REFERENCE_LIMIT).map((target: ReferenceTarget) => ({ ...target, title: target.title.slice(0, REFERENCE_LENGTH) })),
+      }
+      const message = envelope(type, payload)
+      if (!documentMessage(message)) return
       if (type === 'restore' && typeof payload.x === 'number' && typeof payload.y === 'number') bridge.position = { x: payload.x, y: payload.y }
-      frame.contentWindow?.postMessage(envelope(type, payload), '*')
+      frame.contentWindow?.postMessage(message, '*')
     },
     subscribeScroll: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
     dispose: () => { window.removeEventListener('message', onMessage); listeners.clear(); bridges.delete(frame) },
   }
   const onMessage = (event: MessageEvent): void => {
-    if (!event.source || event.source !== frame.contentWindow || !documentMessage(event.data)) return
+    if (!event.source || event.source !== frame.contentWindow) return
+    // Drop excess batches before walking their candidates. Each frame owns its budget.
+    if (event.data?.type === 'references') {
+      const now = Date.now()
+      while (referenceTimes.length && now - referenceTimes[0] >= 1000) referenceTimes.shift()
+      if (referenceTimes.length >= REFERENCE_RATE) return
+      referenceTimes.push(now)
+    }
+    if (!documentMessage(event.data)) return
     const message = event.data
     if (message.type === 'scroll') {
       const { x, y } = message.payload

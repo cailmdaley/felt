@@ -23,6 +23,7 @@ interface ThemeEntry {
 export class ChannelThemes {
   private readonly entries = new Map<string, ThemeEntry>()
   private readonly roots = new Map<HTMLElement, ThemeEntry>()
+  private readonly readers = new Set<HTMLElement>()
   private readonly plain = new Set<string>()
   private readonly warnings = new Set<string>()
   private disposed = false
@@ -79,9 +80,13 @@ export class ChannelThemes {
     else this.plain.add(key)
     try { localStorage.setItem(PLAIN_STORAGE, JSON.stringify([...this.plain])) } catch { /* Storage is optional. */ }
     const entry = this.entries.get(key)
-    if (entry) { this.paint(entry); if (!this.plain.has(key)) void this.refresh(entry) }
+    if (entry) {
+      this.paint(entry)
+      if (!this.plain.has(key) && [...this.readers].some(root => this.roots.get(root) === entry)) void this.refresh(entry)
+    }
   }
-  bind(root: HTMLElement, card: KanbanCard): void {
+  /** Only a reader requests custom CSS. Context surfaces consume the session cache. */
+  bind(root: HTMLElement, card: KanbanCard, mode: 'reader' | 'cached' = 'cached'): void {
     if (this.disposed) return
     root.dataset.wsThemeBoundary = ''
     const key = this.key(card)
@@ -93,6 +98,8 @@ export class ChannelThemes {
       this.entries.set(key, entry)
     }
     this.roots.set(root, entry)
+    if (mode === 'reader') this.readers.add(root)
+    else this.readers.delete(root)
     const oldDir = entry.card.fiberDir
     entry.card = card
     const base = this.baseName(card)
@@ -102,11 +109,12 @@ export class ChannelThemes {
       this.compile(entry)
     }
     this.paint(entry)
-    if (!this.isPlain(card)) void this.refresh(entry)
+    if (mode === 'reader' && !this.isPlain(card)) void this.refresh(entry)
   }
   unbind(root: HTMLElement): void {
     const old = this.roots.get(root)
     this.roots.delete(root)
+    this.readers.delete(root)
     const changed = root.hasAttribute('data-ws-theme') || root.hasAttribute('data-ws-theme-name')
     delete root.dataset.wsTheme
     delete root.dataset.wsThemeName
@@ -144,13 +152,18 @@ export class ChannelThemes {
     const selector = `[data-ws-theme="${entry.scope}"]`
     if (typeof CSSStyleSheet.prototype.replaceSync !== 'function') { entry.compiled = ''; return }
     const base = bundled[`./themes/${entry.base}.css`] ?? ''
+    const asset = new URL(fileBytesUrl(this.base, '', entry.card.originId), document.baseURI)
+    asset.pathname = asset.pathname.replace(/\/file$/, `/file-assets/${encodeURIComponent(entry.card.originId)}`)
+      + `${entry.card.fiberDir ?? ''}/theme.css`.split('/').map(encodeURIComponent).join('/')
+    asset.search = ''
+    const assetBase = entry.card.fiberDir ? asset.href : undefined
     try {
-      if (entry.custom) scopeTheme(entry.custom, selector, entry.scope, this.defaults)
-      entry.compiled = scopeTheme(base + '\n' + entry.custom, selector, entry.scope, this.defaults)
+      if (entry.custom) scopeTheme(entry.custom, selector, entry.scope, this.defaults, assetBase)
+      entry.compiled = scopeTheme(base + '\n' + entry.custom, selector, entry.scope, this.defaults, assetBase)
     } catch (error) {
       console.warn('Shuttle theme: CSS could not be parsed; using the bundled base', error)
       entry.custom = ''
-      entry.compiled = scopeTheme(base, selector, entry.scope, this.defaults)
+      entry.compiled = scopeTheme(base, selector, entry.scope, this.defaults, assetBase)
     }
   }
   private paint(entry: ThemeEntry): void {

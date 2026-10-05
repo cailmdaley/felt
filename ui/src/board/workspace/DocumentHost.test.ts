@@ -464,7 +464,7 @@ describe('report scrolling', () => {
 })
 
 describe('document keyboard bridge', () => {
-  it('lets document and report load-time window handlers consume Escape before forwarding', async () => {
+  it('lets report handlers consume synthetic Escape without forwarding untrusted input', async () => {
     const iframe = document.createElement('iframe')
     document.body.append(iframe)
     const win = iframe.contentWindow!
@@ -490,10 +490,9 @@ describe('document keyboard bridge', () => {
     expect(postMessage).not.toHaveBeenCalled()
     windowDialog = false
     press('Escape')
-    expect(postMessage).toHaveBeenCalledOnce()
-    expect(postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'key', payload: expect.objectContaining({ key: 'Escape' }) }), '*')
+    expect(postMessage).not.toHaveBeenCalled()
     press('ArrowRight', true)
-    expect(postMessage).toHaveBeenCalledTimes(2)
+    expect(postMessage).not.toHaveBeenCalled()
     iframe.remove()
   })
 

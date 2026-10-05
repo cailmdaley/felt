@@ -9,6 +9,8 @@ defmodule ShuttleWeb.FileRelayTest do
   @endpoint ShuttleWeb.Endpoint
   @moduletag :tmp_dir
   @size 6 * 1024 * 1024
+  @sandbox_policy "sandbox allow-scripts allow-popups " <>
+                    "allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms"
 
   defmodule UncappedOwner do
     @behaviour Plug
@@ -16,7 +18,13 @@ defmodule ShuttleWeb.FileRelayTest do
 
     def call(conn, opts) do
       send(opts[:observer], {:owner_request, conn.method, get_req_header(conn, "range")})
-      conn = put_resp_content_type(conn, "video/mp4", nil)
+
+      conn =
+        conn
+        |> put_resp_content_type("video/mp4", nil)
+        |> put_resp_header("content-security-policy", "sandbox allow-scripts allow-same-origin")
+        |> put_resp_header("x-content-type-options", "unsafe")
+
       size = File.stat!(opts[:path]).size
 
       ranges =
@@ -86,6 +94,7 @@ defmodule ShuttleWeb.FileRelayTest do
         |> get("/api/v1/file?path=%2Fremote.mp4&origin=file-owner")
 
       assert conn.status == 206
+      assert_file_security(conn)
       assert byte_size(conn.resp_body) == 4 * 1024 * 1024
       assert get_resp_header(conn, "content-range") == [content_range]
       assert get_resp_header(conn, "content-length") == ["4194304"]
@@ -104,6 +113,7 @@ defmodule ShuttleWeb.FileRelayTest do
     assert_receive {:owner_request, "HEAD", []}
     assert conn.status == 200
     assert conn.resp_body == ""
+    assert_file_security(conn)
     assert get_resp_header(conn, "content-length") == [Integer.to_string(@size)]
 
     # Also inspect the transport body directly; the downstream HEAD adapter
@@ -125,6 +135,7 @@ defmodule ShuttleWeb.FileRelayTest do
       |> get("/api/v1/file?path=%2Fremote.mp4&origin=file-owner")
 
     assert conn.status == 200
+    assert_file_security(conn)
     assert byte_size(conn.resp_body) == @size
     assert get_resp_header(conn, "content-range") == []
     assert get_resp_header(conn, "content-length") == [Integer.to_string(@size)]
@@ -134,7 +145,23 @@ defmodule ShuttleWeb.FileRelayTest do
   test "full remote GET keeps the full representation" do
     conn = get(api_conn(), "/api/v1/file?path=%2Fremote.mp4&origin=file-owner")
     assert conn.status == 200
+    assert_file_security(conn)
     assert byte_size(conn.resp_body) == @size
     assert_receive {:owner_request, "GET", []}
+  end
+
+  test "real httpc relay enforces hub security on XML and unknown asset paths" do
+    for path <- ["remote.xml", "remote.unknown"] do
+      conn = get(api_conn(), "/api/v1/file-assets/file-owner/#{path}")
+      assert conn.status == 200
+      assert byte_size(conn.resp_body) == @size
+      assert_file_security(conn)
+      assert_receive {:owner_request, "GET", []}
+    end
+  end
+
+  defp assert_file_security(conn) do
+    assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+    assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
   end
 end

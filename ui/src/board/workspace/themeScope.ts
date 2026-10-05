@@ -1,15 +1,19 @@
 /** CSSOM scopes selectors; only global font definitions and namespaced animations escape. */
-export function scopeTheme(css: string, scope: string, namespace: string, defaults: ReadonlyMap<string, string> = new Map()): string {
+export function scopeTheme(css: string, scope: string, namespace: string, defaults: ReadonlyMap<string, string> = new Map(), assetBase?: string): string {
   const sheet = new CSSStyleSheet()
   const imports = themeImports(css)
   sheet.replaceSync(imports.body)
   if (imports.body.trim() && !sheet.cssRules.length) throw new Error('No valid CSS rules')
   const names = new Map<string, string>()
+  const fonts = new Map<string, string>()
   const collect = (rules: CSSRuleList): void => {
     for (const rule of Array.from(rules)) {
       if (rule.type === CSSRule.KEYFRAMES_RULE) {
         const keyframes = rule as CSSKeyframesRule
         names.set(keyframes.name, `${namespace}-${keyframes.name}`)
+      } else if (rule.type === CSSRule.FONT_FACE_RULE) {
+        const family = cssName((rule as CSSFontFaceRule).style.getPropertyValue('font-family'))
+        if (family) fonts.set(family.toLowerCase(), `${namespace}-${family}`)
       } else if ('cssRules' in rule) collect((rule as CSSGroupingRule).cssRules)
     }
   }
@@ -17,6 +21,7 @@ export function scopeTheme(css: string, scope: string, namespace: string, defaul
   // Animation values can arrive through custom properties in another rule.
   const aliases = new Map<string, string[]>()
   const animationAliases = new Set<string>()
+  const fontAliases = new Set(['--ws-serif', '--ws-mono', '--font-main', '--font-serif', '--font-mono'])
   const collectAliases = (rules: CSSRuleList): void => {
     for (const rule of Array.from(rules)) {
       if ('style' in rule) {
@@ -26,13 +31,26 @@ export function scopeTheme(css: string, scope: string, namespace: string, defaul
           if (property.startsWith('--')) aliases.set(property, [...(aliases.get(property) ?? []), value])
         }
         for (const property of ANIMATION_PROPERTIES) for (const name of variables(style.getPropertyValue(property))) animationAliases.add(name)
+        for (const property of ['font', 'font-family']) for (const name of variables(style.getPropertyValue(property))) fontAliases.add(name)
       }
       if ('cssRules' in rule) collectAliases((rule as CSSGroupingRule).cssRules)
     }
   }
   collectAliases(sheet.cssRules)
   for (const name of animationAliases) for (const value of aliases.get(name) ?? []) for (const dependency of variables(value)) animationAliases.add(dependency)
+  for (const name of fontAliases) for (const value of aliases.get(name) ?? []) for (const dependency of variables(value)) fontAliases.add(dependency)
   const declarations = (style: CSSStyleDeclaration): string => {
+    // Font aliases may be consumed by the bundled skin or by other scoped rules.
+    for (const property of Array.from({ length: style.length }, (_, i) => style.item(i))) {
+      const original = style.getPropertyValue(property)
+      if (!original) continue
+      let value = original
+      const safe = themeUrls(value, assetBase)
+      if (safe === null) { style.removeProperty(property); continue }
+      value = safe
+      if (property === 'font' || property === 'font-family' || fontAliases.has(property)) value = fontNames(value, fonts)
+      if (value !== original) style.setProperty(property, value, style.getPropertyPriority(property))
+    }
     for (const property of [...ANIMATION_PROPERTIES, ...animationAliases]) {
       const value = style.getPropertyValue(property)
       if (value) style.setProperty(property, animationNames(value, names), style.getPropertyPriority(property))
@@ -50,7 +68,7 @@ export function scopeTheme(css: string, scope: string, namespace: string, defaul
       // nesting and functional pseudo-classes. No selector is rewritten as text.
       return scoped ? `@scope (${scope}) to ([data-part="act"], :scope [data-ws-theme], :scope [data-ws-theme-boundary]) { ${text} }` : text
     }
-    if (rule.type === CSSRule.FONT_FACE_RULE) return rule.cssText
+    if (rule.type === CSSRule.FONT_FACE_RULE) return `@font-face { ${declarations((rule as CSSFontFaceRule).style)} }`
     if (rule.type === CSSRule.KEYFRAMES_RULE) {
       const frames = rule as CSSKeyframesRule
       return `@keyframes ${CSS.escape(names.get(frames.name)!)} { ${Array.from(frames.cssRules).map(frame => `${(frame as CSSKeyframeRule).keyText} { ${declarations((frame as CSSKeyframeRule).style)} }`).join('\n')} }`
@@ -75,6 +93,109 @@ export function scopeTheme(css: string, scope: string, namespace: string, defaul
     :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) { ${resetDeclarations([...aliases.keys()].filter(name => name !== '--ws-paper' && name !== '--ws-ink'))} }
   }` : ''
   return [imports.allowed.join('\n'), reset, emit(sheet.cssRules, true)].join('\n')
+}
+
+/** CSS escapes are decoded before either family matching or URL policy checks. */
+function cssUnescape(value: string): string {
+  return value.replace(/\\(?:([0-9a-f]{1,6})(?:\r\n|[ \t\n\r\f])?|([^\n\r\f])|(?:\r\n|[\n\r\f]))/gi, (_match, hex: string | undefined, char: string | undefined) => {
+    if (!hex) return char ?? ''
+    const code = parseInt(hex, 16)
+    return code === 0 || code > 0x10ffff || code >= 0xd800 && code <= 0xdfff ? '\ufffd' : String.fromCodePoint(code)
+  })
+}
+function cssName(value: string): string {
+  const text = value.trim()
+  return cssUnescape(text[0] === '"' || text[0] === "'" ? text.slice(1, -1) : text.replace(/\s+/g, ' '))
+}
+
+/** Rewrite quoted and multi-word families, including font shorthands and aliases. */
+function fontNames(value: string, names: Map<string, string>): string {
+  let output = ''
+  for (let i = 0; i < value.length;) {
+    if (value[i] === '"' || value[i] === "'") {
+      const end = quotedEnd(value, i), token = value.slice(i, end)
+      output += names.has(cssName(token).toLowerCase()) ? JSON.stringify(names.get(cssName(token).toLowerCase())) : token
+      i = end; continue
+    }
+    if (identifier(value[i]) || value[i] === '\\') {
+      let end = i
+      while (end < value.length && (identifier(value[end]) || value[end] === '\\')) end = value[end] === '\\' ? escapeEnd(value, end) : end + 1
+      // Functions and their string arguments aren't font-family references.
+      if (value[end] === '(' && cssUnescape(value.slice(i, end)).toLowerCase() !== 'var') {
+        let depth = 1, close = end + 1
+        for (; close < value.length && depth; close++) {
+          if (value[close] === '"' || value[close] === "'") close = quotedEnd(value, close) - 1
+          else if (value[close] === '(') depth++
+          else if (value[close] === ')') depth--
+        }
+        output += value.slice(i, close); i = close; continue
+      }
+      let candidateEnd = end, matched: { end: number; name: string } | undefined
+      for (;;) {
+        const name = names.get(cssName(value.slice(i, candidateEnd)).toLowerCase())
+        if (name) matched = { end: candidateEnd, name }
+        let next = candidateEnd
+        while (/\s/.test(value[next] ?? '') && next < value.length) next++
+        if (next === candidateEnd || !value[next] || !identifier(value[next]) && value[next] !== '\\') break
+        candidateEnd = next
+        while (candidateEnd < value.length && (identifier(value[candidateEnd]) || value[candidateEnd] === '\\')) candidateEnd = value[candidateEnd] === '\\' ? escapeEnd(value, candidateEnd) : candidateEnd + 1
+        if (value[candidateEnd] === '(') break
+      }
+      output += matched ? JSON.stringify(matched.name) : value.slice(i, end)
+      i = matched?.end ?? end
+    } else output += value[i++]
+  }
+  return output
+}
+
+/** A relative URL is resolved against the owning fiber, never the board's URL. */
+function safeThemeUrl(raw: string, assetBase?: string): string | null {
+  const value = cssName(raw)
+  if (!value || /[\u0000-\u001f\u007f\\]/.test(value)) return null
+  if (/^data:/i.test(value)) return value
+  try {
+    const absolute = /^[a-z][a-z0-9+.-]*:/i.test(value) || value.startsWith('/')
+    if (absolute) {
+      const url = new URL(value)
+      return url.protocol === 'https:' && ['fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.hostname)
+        && !url.username && !url.password && !url.port ? url.href : null
+    }
+    // Encoded separators and residual escapes cannot alter the daemon's path decoding.
+    if (/%(?:2f|5c|25)/i.test(value)) return null
+    const base = new URL(assetBase ?? 'https://theme.invalid/fiber/theme.css')
+    const directory = new URL('.', base)
+    const url = new URL(value, base)
+    if (url.origin !== directory.origin || !url.pathname.startsWith(directory.pathname)) return null
+    return assetBase ? url.href : value
+  } catch { return null }
+}
+function themeUrls(value: string, assetBase?: string): string | null {
+  let output = ''
+  for (let i = 0; i < value.length;) {
+    if (value[i] === '"' || value[i] === "'") {
+      const end = quotedEnd(value, i); output += value.slice(i, end); i = end; continue
+    }
+    if (identifier(value[i]) || value[i] === '\\') {
+      let end = i
+      while (end < value.length && (identifier(value[end]) || value[end] === '\\')) end = value[end] === '\\' ? escapeEnd(value, end) : end + 1
+      const name = cssUnescape(value.slice(i, end)).toLowerCase()
+      // image-set accepts URL strings without url(); keep it out of the styling surface.
+      if (value[end] === '(' && ['image-set', '-webkit-image-set'].includes(name)) {
+        console.info('Shuttle theme: dropped image-set declaration'); return null
+      }
+      if (name !== 'url' || value[end] !== '(') { output += value.slice(i, end); i = end; continue }
+      let close = end + 1
+      for (; close < value.length; close++) {
+        if (value[close] === '"' || value[close] === "'") close = quotedEnd(value, close) - 1
+        else if (value[close] === '\\') close = escapeEnd(value, close) - 1
+        else if (value[close] === ')') break
+      }
+      const url = close < value.length ? safeThemeUrl(value.slice(end + 1, close), assetBase) : null
+      if (url === null) { console.info('Shuttle theme: dropped URL outside the fiber folder or Google Fonts', value); return null }
+      output += `url(${JSON.stringify(url)})`; i = close + 1
+    } else output += value[i++]
+  }
+  return output
 }
 
 const ANIMATION_PROPERTIES = ['animation', 'animation-name', '-webkit-animation', '-webkit-animation-name']
@@ -172,12 +293,18 @@ function themeImports(css: string): { body: string; allowed: string[] } {
       }
       const statement = css.slice(i, end)
       let target = statement.slice(7).trim()
-      if (target.toLowerCase().startsWith('url(')) target = target.slice(4).trim()
-      const url = target[0] === '"' || target[0] === "'" ? target.slice(1, quotedEnd(target, 0) - 1) : target.slice(0, target.indexOf(')'))
+      const functional = target.toLowerCase().startsWith('url(')
+      if (functional) target = target.slice(4).trim()
+      const quoted = target[0] === '"' || target[0] === "'"
+      const urlEnd = quoted ? quotedEnd(target, 0) : target.indexOf(')')
+      const url = quoted ? target.slice(1, urlEnd - 1) : target.slice(0, urlEnd)
+      const modifiers = target.slice(urlEnd + (quoted ? 0 : 1)).trim().replace(/^\)\s*/, '').replace(/;$/, '').trim()
       try {
-        const parsed = new URL(url)
-        if (parsed.protocol === 'https:' && parsed.hostname === 'fonts.googleapis.com' && !parsed.username && !parsed.password) allowed.push(statement)
-        else console.info('Shuttle theme: dropped @import (only Google Fonts is allowed)', statement)
+        const parsed = new URL(cssUnescape(url))
+        if (parsed.protocol === 'https:' && parsed.hostname === 'fonts.googleapis.com' && !parsed.username && !parsed.password && !parsed.port) {
+          // Emit the validated URL, never the authored spelling decoded by the browser.
+          allowed.push(`@import url(${JSON.stringify(parsed.href)})${modifiers ? ` ${modifiers}` : ''};`)
+        } else console.info('Shuttle theme: dropped @import (only Google Fonts is allowed)', statement)
       } catch { console.info('Shuttle theme: dropped invalid @import', statement) }
       i = end; continue
     }

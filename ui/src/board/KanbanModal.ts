@@ -329,9 +329,8 @@ export class KanbanModal {
     this.dock = new Dock(
       this.shuttleBase,
       () => { void this.fetchAndRender() },
-      // Temper / Discard route through the same optimistic path as the inline
-      // card buttons and drags — instant relocation, background commit, reconcile.
-      (card, target) => this.transition(card, target),
+      // Expired verdicts enter the optimistic lifecycle path exactly once.
+      (card, target) => this.transition(card, target, { verdictCommitted: true }),
       this.openWorkerAfterGesture,
       {
         meeting: {
@@ -1072,9 +1071,21 @@ export class KanbanModal {
      *    a second `applyOptimisticTransition` would lift the card from its NEW
      *    surface and re-place it, and re-derive nothing useful.
      */
-    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean } = {},
+    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean; verdictCommitted?: boolean } = {},
   ): void {
     const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
+    // Server placement, or the gesture's pre-paint basis, determines a no-op.
+    // A same-column verdict must not authorize a delayed write after reopening.
+    const fromKind = findCardColumn(basis, card.id)
+    if (fromKind === target) {
+      this.showBanner(`“${card.name}” is already in ${COLUMN_TITLES[target]}.`, 'info')
+      this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
+      return
+    }
+    if ((target === 'tempered' || target === 'composted') && this.workspace && !opts.verdictCommitted) {
+      this.workspace.queueVerdict(card, target)
+      return
+    }
     // A verdict on a card with a LIVE worker kills that worker (commitTransition
     // → killWorkerIfRunning), and it did so silently — one click on Compost and
     // a running session was gone, while "New session", which destroys less,
@@ -1092,21 +1103,6 @@ export class KanbanModal {
         this.announce(`Left ${card.name} running.`)
         return
       }
-    }
-
-    // Use the server's placement from the last response — that's the source
-    // of truth for which column the card is in. Re-deriving from card fields
-    // here is a footgun: column classification depends on `shuttle.enabled`,
-    // `idea` tag, `tempered`, standing-role review state, etc. — anything
-    // the local rule misses (or drifts from the server) silently no-ops the
-    // drag with a snap-back.
-    const fromKind = findCardColumn(basis, card.id)
-    if (fromKind === target) {
-      // Dropped back onto the column it already lives in — a no-op, but say so
-      // rather than letting the drag feel ignored.
-      this.showBanner(`“${card.name}” is already in ${COLUMN_TITLES[target]}.`, 'info')
-      this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
-      return
     }
 
     // Surface-shift case: card lives on a non-Now surface (timeline.futureDated
@@ -1457,7 +1453,8 @@ export class KanbanModal {
     this.gestureDepth += 1
     try {
       const unfolded = clearQueueEdge(before, fiberId)
-      const painted = drop.column
+      // Verdict placement waits for the shared undo window; unqueuing is independent.
+      const painted = drop.column && drop.column !== 'tempered' && drop.column !== 'composted'
         ? (applyOptimisticTransition(unfolded, fiberId, drop.column) ?? unfolded)
         : unfolded
       if (painted) this.applyResponse(painted)
@@ -1508,8 +1505,8 @@ export class KanbanModal {
         dependsOnShape: undefined,
       }
       if (drop.column) {
-        // Already painted, and `before` is where the card actually came from.
-        this.transition(released, drop.column, { basis: before, skipOptimistic: true })
+        // Non-verdict drops are painted; verdicts remain on their source surface.
+        this.transition(released, drop.column, { basis: before, skipOptimistic: drop.column !== 'tempered' && drop.column !== 'composted' })
         return
       }
       if (drop.horizon !== undefined) {

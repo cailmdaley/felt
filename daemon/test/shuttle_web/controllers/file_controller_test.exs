@@ -114,7 +114,8 @@ defmodule ShuttleWeb.FileControllerTest do
     end
 
     @tag :tmp_dir
-    test "leaves PDFs, media and images unsandboxed", %{tmp_dir: dir} do
+    @tag :file_security
+    test "sandboxes PDFs, media and images without changing their content types", %{tmp_dir: dir} do
       for {extension, accept, content_type} <- [
             {"pdf", "application/pdf", "application/pdf"},
             {"mp4", "video/mp4", "video/mp4"},
@@ -131,7 +132,7 @@ defmodule ShuttleWeb.FileControllerTest do
 
         assert conn.status == 200
         assert get_resp_header(conn, "content-type") |> List.first() =~ content_type
-        assert get_resp_header(conn, "content-security-policy") == []
+        assert_file_security(conn)
         assert get_resp_header(conn, "access-control-allow-origin") == []
       end
     end
@@ -522,6 +523,181 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
+  describe "file security boundary" do
+    for extension <- ~w(html xml rss atom svg svgz unknown pdf mp3), route <- [:file, :asset] do
+      @tag :tmp_dir
+      @tag :file_security
+      test "sandboxes local #{extension} bytes on #{route}", %{tmp_dir: dir} do
+        path = Path.join(dir, "document.#{unquote(extension)}")
+        body = "representation"
+        File.write!(path, body)
+        url = file_url(unquote(route), "local", path)
+
+        conn = local_conn() |> put_req_header("origin", "null") |> get(url)
+
+        assert conn.status == 200
+        assert conn.resp_body == body
+        assert_file_security(conn)
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
+
+      @tag :file_security
+      test "sandboxes relayed #{extension} bytes on #{route} without trusting owner headers" do
+        headers = [
+          {"content-security-policy", "sandbox allow-scripts allow-same-origin"},
+          {"x-content-type-options", "unsafe"},
+          {"access-control-allow-origin", "null"}
+        ]
+
+        stub_forward("file-owner", "http://localhost:4001", {
+          :ok,
+          200,
+          headers,
+          "application/octet-stream",
+          "remote representation"
+        })
+
+        path = "/project/document.#{unquote(extension)}"
+        conn = get(api_conn(), file_url(unquote(route), "file-owner", path))
+
+        assert conn.status == 200
+        assert conn.resp_body == "remote representation"
+        assert_file_security(conn)
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+
+        assert StubGetFileClient.last().url ==
+                 "http://localhost:4001/api/v1/file?path=#{URI.encode_www_form(path)}"
+      end
+    end
+
+    for route <- [:file, :asset] do
+      @tag :tmp_dir
+      @tag :file_security
+      test "retains file security on local HEAD, 206, 304 and 416 on #{route}", %{tmp_dir: dir} do
+        path = Path.join(dir, "data.xml")
+        File.write!(path, "0123456789")
+        url = file_url(unquote(route), "local", path)
+        first = get(api_conn(), url)
+        [etag] = get_resp_header(first, "etag")
+
+        responses = [
+          {head(api_conn(), url), 200},
+          {api_conn() |> put_req_header("range", "bytes=1-3") |> get(url), 206},
+          {api_conn() |> put_req_header("if-none-match", etag) |> get(url), 304},
+          {api_conn() |> put_req_header("range", "bytes=99-") |> get(url), 416}
+        ]
+
+        for {conn, status} <- responses do
+          assert conn.status == status
+          assert_file_security(conn)
+        end
+      end
+
+      @tag :file_security
+      test "retains file security on relayed 206, 304, 404 and 416 on #{route}" do
+        url = file_url(unquote(route), "file-owner", "/remote.xml")
+        stub_forward("file-owner", "http://localhost:4001", {:ok, 200, [], "text/xml", ""})
+
+        for status <- [206, 304, 404, 416] do
+          StubGetFileClient.set_response({:ok, status, [], "text/xml", ""})
+
+          conn = get(api_conn(), url)
+          assert conn.status == status
+          assert_file_security(conn)
+        end
+      end
+
+      @tag :file_security
+      test "retains file security on relay failures on #{route}" do
+        stub_forward("file-owner", "http://localhost:4001", {:error, :econnrefused})
+        conn = get(api_conn(), file_url(unquote(route), "file-owner", "/remote.xml"))
+        assert conn.status == 502
+        assert_file_security(conn)
+      end
+    end
+
+    @tag :tmp_dir
+    @tag :file_security
+    test "retains file security on missing and invalid paths", %{tmp_dir: dir} do
+      for {url, status} <- [
+            {"/api/v1/file", 400},
+            {"/api/v1/file?path=", 400},
+            {"/api/v1/file?path=relative.xml", 400},
+            {file_url(:file, "local", Path.join(dir, "missing.xml")), 404},
+            {file_asset_url("local", Path.join(dir, "missing.xml")), 404},
+            {file_asset_url("local", dir), 404},
+            {"/api/v1/file-assets/local", 400}
+          ] do
+        conn = get(api_conn(), url)
+        assert conn.status == status
+        assert_file_security(conn)
+      end
+    end
+
+    @tag :file_security
+    test "retains file security on CORS errors and preflight before the controller" do
+      for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
+        forbidden = local_conn() |> put_req_header("origin", "null") |> post(url)
+        assert forbidden.status == 403
+        assert_file_security(forbidden)
+
+        preflight = options(local_conn(), url)
+        assert preflight.status == 204
+        assert_file_security(preflight)
+      end
+    end
+
+    @tag :file_security
+    test "retains file security when endpoint parsing raises" do
+      for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
+        {400, headers, _body} =
+          assert_error_sent(400, fn ->
+            api_conn() |> post(url, "{")
+          end)
+
+        assert List.keyfind(headers, "content-security-policy", 0) ==
+                 {"content-security-policy", @sandbox_policy}
+
+        assert List.keyfind(headers, "x-content-type-options", 0) ==
+                 {"x-content-type-options", "nosniff"}
+      end
+    end
+
+    @tag :file_security
+    test "retains file security when query decoding raises" do
+      {400, headers, _body} =
+        assert_error_sent(400, fn ->
+          get(api_conn(), "/api/v1/file?path=%FF")
+        end)
+
+      assert List.keyfind(headers, "content-security-policy", 0) ==
+               {"content-security-policy", @sandbox_policy}
+
+      assert List.keyfind(headers, "x-content-type-options", 0) ==
+               {"x-content-type-options", "nosniff"}
+    end
+
+    @tag :file_security
+    test "retains file security on booting responses before the controller" do
+      Shuttle.Readiness.begin_boot()
+      on_exit(fn -> Shuttle.Readiness.mark_ready() end)
+
+      for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
+        conn = get(api_conn(), url)
+        assert conn.status == 503
+        assert_file_security(conn)
+      end
+    end
+
+    @tag :tmp_dir
+    @tag :file_security
+    test "does not sandbox file-info or other API responses", %{tmp_dir: dir} do
+      conn = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(dir)}")
+      assert conn.status == 200
+      assert get_resp_header(conn, "content-security-policy") == []
+    end
+  end
+
   describe "bounded file I/O" do
     @tag :tmp_dir
     test "large ranges use file offsets and a metadata ETag without reading the whole file", %{
@@ -706,6 +882,7 @@ defmodule ShuttleWeb.FileControllerTest do
       assert conn.status == 200
       assert conn.resp_body == "body {}"
       assert get_resp_header(conn, "content-type") == ["text/css"]
+
       assert StubGetFileClient.last().url ==
                "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport%2Ffoo.css"
     end
@@ -724,6 +901,7 @@ defmodule ShuttleWeb.FileControllerTest do
       assert conn.resp_body == body
       assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
       assert get_resp_header(conn, "access-control-allow-origin") == []
+
       assert StubGetFileClient.last().url ==
                "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport.html"
     end
@@ -960,6 +1138,16 @@ defmodule ShuttleWeb.FileControllerTest do
       assert %{"error" => _} = json_response(conn, 502)
     end
   end
+
+  defp assert_file_security(conn) do
+    assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+    assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+  end
+
+  defp file_url(:file, origin, path),
+    do: "/api/v1/file?#{URI.encode_query(%{"path" => path, "origin" => origin})}"
+
+  defp file_url(:asset, origin, path), do: file_asset_url(origin, path)
 
   defp file_asset_url(origin, path) do
     encoded_origin = URI.encode(origin, fn char -> URI.char_unreserved?(char) end)

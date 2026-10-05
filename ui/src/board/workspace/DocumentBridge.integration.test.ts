@@ -112,6 +112,18 @@ async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
   win.postMessage = (data: unknown) => win.dispatchEvent(new browser.window.MessageEvent('message', { data, source: parent as unknown as Window }))
   ;(win as Window & typeof globalThis).HTMLMediaElement.prototype.pause = vi.fn()
   ;(win as Window & typeof globalThis).matchMedia = () => ({ matches: true } as MediaQueryList)
+  // JSDOM cannot create trusted input. A test-only listener facade exercises
+  // positive bridge semantics; Chrome e2e verifies genuine trusted input.
+  const add = win.addEventListener.bind(win)
+  win.addEventListener = ((type: string, listener: EventListener, options?: AddEventListenerOptions | boolean) => {
+    add(type, type === 'keydown' ? (event: Event) => listener(new Proxy(event, {
+      get(target, property) {
+        if (property === 'isTrusted') return (win as Window & { trustedTestKey?: boolean }).trustedTestKey === true
+        const value = Reflect.get(target, property, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })) : listener, options)
+  }) as Window['addEventListener']
   frame.contentDocument!.open()
   frame.contentDocument!.write(frame.srcdoc)
   frame.contentDocument!.close()
@@ -121,14 +133,32 @@ async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
   return frame
 }
 
-function press(frame: HTMLIFrameElement, key: string, init: KeyboardEventInit = {}, selector = 'body'): KeyboardEvent {
-  const win = frame.contentWindow! as Window & typeof globalThis
+function press(frame: HTMLIFrameElement, key: string, init: KeyboardEventInit = {}, selector = 'body', trusted = true): KeyboardEvent {
+  const win = frame.contentWindow! as Window & typeof globalThis & { trustedTestKey: boolean }
+  win.trustedTestKey = trusted
   const event = new win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
   frame.contentDocument!.querySelector(selector)!.dispatchEvent(event)
   return event
 }
 
 describe('minified production document keyboard bridge', () => {
+  it('rejects direct report keys that write, open controls or transport media, while retaining navigation', async () => {
+    const frame = await report()
+    const send = (key: string, extra = {}) => window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow, data: { protocol: 'shuttle-document', version: 1, type: 'key', payload: { key, ...extra } },
+    }))
+    for (const key of ['x', 't', 'z', '.', 'r', 'p', ',', '>', 'Enter', 'o']) send(key)
+    expect(app).not.toHaveBeenCalled()
+    send('ArrowDown'); send('ArrowRight', { altKey: true })
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'next'])
+  })
+
+  it('does not forward an untrusted library-generated key event', async () => {
+    const frame = await report()
+    press(frame, 'ArrowRight', { altKey: true }, 'body', false)
+    expect(messages).not.toHaveBeenCalled()
+    expect(app).not.toHaveBeenCalled()
+  })
   it('executes serialized functions and bubbles unhandled reader chords through the selected host to the app', async () => {
     const frame = await report()
     const keys: Array<[string, KeyboardEventInit, string]> = [

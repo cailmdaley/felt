@@ -174,6 +174,59 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   assert.equal(await reportY(p), readingY)
 })
 
+test('Hostile report keys cannot queue verdicts or open controls; trusted and posted navigation still work', async p => {
+  await open(p); await reportReady(p)
+  const inner = await reportDocument(p)
+  const key = await selected(p).getAttribute('data-key')
+  const before = (await records(p)).filter(r => r.method === 'POST').length
+  await inner.evaluate(() => {
+    for (const key of ['x', 't', 'z', '.', 'r', 'p', ',', '>', 'Enter', 'o']) {
+      parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'key', payload: { key } }, '*')
+    }
+  })
+  await p.waitForTimeout(150)
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal(await selected(p).getAttribute('data-key'), key)
+  assert.equal(await p.locator('.ws-expanded').count(), 0)
+  assert.equal((await records(p)).filter(r => r.method === 'POST').length, before)
+  assert.equal(await p.evaluate(() => window.__harness.events.filter(e => e.type === 'open-worker').length), 0)
+  await inner.evaluate(() => {
+    document.body.tabIndex = -1; document.body.focus()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true, cancelable: true }))
+  })
+  await p.waitForTimeout(100)
+  assert.equal(await selected(p).getAttribute('data-key'), key, 'untrusted report key events are ignored')
+  await p.keyboard.press('ArrowDown')
+  await pollReport(p, () => document.scrollingElement.scrollTop > 0)
+  await p.keyboard.press('Alt+ArrowRight')
+  assert.notEqual(await selected(p).getAttribute('data-key'), key)
+  await choose(p, 'calibration-report')
+  await inner.evaluate(() => parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'key', payload: { key: 'ArrowRight', altKey: true } }, '*'))
+  await poll(p, key => document.querySelector('.ws-selected')?.dataset.key !== key, key)
+})
+
+test('Report reference batches are size-capped and limited to four responses a second', async p => {
+  await open(p); await reportReady(p)
+  const inner = await reportDocument(p)
+  // Keep ordinary scanner decoration out of the malicious sender's rate budget.
+  await inner.evaluate(() => document.querySelectorAll('code,a[href]').forEach(element => element.remove()))
+  await p.waitForTimeout(1100)
+  await inner.evaluate(() => {
+    window.__referenceResponses = 0
+    window.addEventListener('message', event => { if (event.data?.type === 'references:resolved') window.__referenceResponses++ })
+    for (let i = 0; i < 20; i++) parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'references', payload: { candidates: ['brief.md'] } }, '*')
+  })
+  await p.waitForTimeout(100)
+  assert.equal(await inner.evaluate(() => window.__referenceResponses), 4)
+  await p.waitForTimeout(1100)
+  await inner.evaluate(() => {
+    window.__referenceResponses = 0
+    for (const candidates of [Array(501).fill('brief.md'), ['a'.repeat(257)]]) parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'references', payload: { candidates } }, '*')
+  })
+  await p.waitForTimeout(100)
+  assert.equal(await inner.evaluate(() => window.__referenceResponses), 0)
+})
+
 test('Channel references select from HTML, markdown, plain text and the fiber with coherent history', async p => {
   await open(p); await reportReady(p)
   const key = await selected(p).getAttribute('data-key')
@@ -606,8 +659,43 @@ test('Review plate reaches verdicts from a delivery and leaves the fiber page it
   assert.equal(await plate.count(), 0)
   assert.ok(await selected(p).locator('.kbn-ctl-verdict').isVisible())
   await choose(p, 'calibration-report')
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await plate.getByRole('button', { name: 'Temper', exact: true }).click()
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
+  await p.clock.runFor(6000)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+})
+
+test('Key discard then plate Temper replaces the pending verdict with one delayed write', async p => {
+  await open(p); await reportReady(p)
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  await p.locator('.ws-channel-title').focus(); await p.keyboard.press('x')
+  await p.clock.runFor(3000)
+  await p.locator('.ws-review-plate').getByRole('button', { name: 'Temper', exact: true }).click()
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
+  assert.match(await p.locator('.ws-verdict-toast').innerText(), /^Tempered/)
+  await p.clock.runFor(5999)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
+  await p.clock.runFor(1)
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+  const writes = (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
+  assert.equal(writes.length, 1)
+  assert.equal(JSON.parse(writes[0].body).target, 'tempered')
+})
+
+for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay and undo through the same queue`, async p => {
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  if (surface === 'fiber') { await open(p); await choose(p, 'Constitution') }
+  const controls = surface === 'Desk'
+    ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-review-meta-actions')
+    : selected(p).locator('.kbn-ctl-verdict')
+  await controls.getByRole('button', { name: /Discard/ }).click({ force: true })
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
+  await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
+  await p.clock.runFor(6000)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
 })
 
 test('Verdict keys delay writes, guard typing, undo, and commit after leaving the reader', async p => {
@@ -1402,6 +1490,81 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   }, viewport)
 }
 
+test('Theme font families are private and unicode-range faces cannot target the composer', async p => {
+  await open(p); await choose(p, 'Constitution')
+  const requests = []
+  await p.route('https://theme-probe.invalid/**', route => { requests.push(route.request().url()); return route.abort() })
+  const result = await p.evaluate(() => {
+    const reader = document.querySelector('.ws-reader')
+    const scope = reader.dataset.wsTheme
+    const css = `@font-face { font-family: "EB Garamond"; src: url(https://theme-probe.invalid/character-a.woff2); unicode-range: U+61; }
+      @font-face { font-family: "Fixture Multi Word"; src: local("Georgia"); }
+      :scope { --fixture-font: Fixture Multi Word; }
+      [data-part="prose"] { font-family: var(--fixture-font, "EB Garamond") !important; }
+      [data-part="prose"] p { font: italic 18px "Fixture Multi Word", serif !important; }
+      [data-part="act"] textarea { font-family: "EB Garamond"; }`
+    const source = window.__harness.scopeTheme(css, `[data-ws-theme="${scope}"]`, 'font-probe')
+    const before = new Set(document.fonts)
+    const style = document.createElement('style'); style.textContent = source; document.head.append(style)
+    const composer = reader.querySelector('textarea'); composer.value = 'aaaa'; composer.focus()
+    return { source, font: getComputedStyle(composer).fontFamily,
+      proseFont: getComputedStyle(reader.querySelector('[data-part="prose"]')).fontFamily,
+      paragraphFont: getComputedStyle(reader.querySelector('[data-part="prose"] p')).fontFamily,
+      faces: [...document.fonts].filter(face => !before.has(face)).map(face => face.family) }
+  })
+  await p.waitForTimeout(200)
+  assert.ok(result.source.includes('font-probe-EB Garamond'))
+  assert.ok(result.source.includes('font-probe-Fixture Multi Word'))
+  assert.ok(result.proseFont.includes('font-probe-Fixture Multi Word'), 'custom-property font references are renamed')
+  assert.ok(result.paragraphFont.includes('font-probe-Fixture Multi Word'), 'font shorthand references are renamed')
+  assert.ok(!result.font.includes('font-probe'), 'the act-zone composer keeps its own font')
+  assert.ok(!result.faces.includes('EB Garamond'), 'a theme cannot install an unnamespaced font-face')
+  assert.deepEqual(requests, [], 'unicode-range faces and theme URLs cannot fetch arbitrary servers')
+})
+
+test('Theme URLs allow only data, Google Fonts and relative resources inside the fiber folder', async p => {
+  const result = await p.evaluate(() => {
+    const css = `@font-face { font-family: Test; src: url("./fonts/test.woff2"); }
+      :scope { --good: url("nested/../paper.png"); --bad: url("../secret.png");
+        --encoded: url("%2e%2e/secret.png"); --slash: url("nested%2f..%2fsecret.png");
+        --external: url("https://theme-probe.invalid/beacon"); --same: url("https://board.test/api/v1/version");
+        --absolute: url("/api/v1/version"); --protocol: url("//theme-probe.invalid/beacon");
+        --escaped: u\\72l("https://theme-probe.invalid/escape");
+        --data: url("data:image/svg+xml;base64,PHN2Zy8+");
+        --google: url("https://fonts.gstatic.com/s/font.woff2");
+        --disguised: url("https://fonts.gstatic.com.evil.test/font.woff2");
+        --image-set: image-set("https://theme-probe.invalid/image.png" 1x);
+      }`
+    return window.__harness.scopeTheme(css, '[data-ws-theme="url-probe"]', 'url-probe', new Map(), 'https://board.test/api/v1/file-assets/owner/fiber/theme.css')
+  })
+  for (const allowed of ['data:image', 'fonts.gstatic.com/s/font.woff2', '/file-assets/owner/fiber/fonts/test.woff2', '/file-assets/owner/fiber/paper.png']) assert.ok(result.includes(allowed), allowed)
+  for (const forbidden of ['theme-probe.invalid', 'secret.png', '/api/v1/version', 'evil.test']) assert.ok(!result.includes(forbidden), forbidden)
+})
+
+test('Escaped theme imports cannot load unscoped CSS or target the composer', async p => {
+  await open(p); await choose(p, 'Constitution')
+  const composer = p.locator('.ws-selected [data-part="act"] textarea')
+  await composer.waitFor()
+  const before = await composer.evaluate(element => getComputedStyle(element).color)
+  const requests = []
+  await p.route('https://fonts.googleapis.com.evil.test/**', route => {
+    requests.push(route.request().url())
+    return route.fulfill({ contentType: 'text/css', body: 'textarea { color: rgb(123, 45, 67) !important; }' })
+  })
+  const compiled = await p.evaluate(() => {
+    const css = String.raw`@import "https://fonts.googleapis.com\2e evil.test/probe.css"; :scope { --probe: 1; }`
+    const output = window.__harness.scopeTheme(css, '[data-ws-theme="import-probe"]', 'import-probe')
+    const style = document.createElement('style'); style.textContent = output; document.head.append(style)
+    return output
+  })
+  await p.waitForTimeout(250)
+  assert.deepEqual(requests, [], 'CSS-decoded import host must pass the resource policy')
+  assert.ok(!compiled.includes('evil.test'))
+  assert.equal(await composer.evaluate(element => getComputedStyle(element).color), before)
+  const safe = await p.evaluate(() => window.__harness.scopeTheme(String.raw`@import "https://fonts.googleapis.com/css2?family=Roboto" screen; :scope { color: red; }`, ':scope', 'safe-import'))
+  assert.ok(safe.includes('@import url("https://fonts.googleapis.com/css2?family=Roboto") screen;'), 'permitted imports use a canonical URL')
+})
+
 test('Custom theme is scoped with private keyframes, hoisted fonts and conditional rules', async p => {
   const desk = await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity)
   await p.locator('[data-view="shelf"]').click()
@@ -1427,7 +1590,7 @@ test('Custom theme is scoped with private keyframes, hoisted fonts and condition
   assert.ok(!source.includes('example.invalid'), 'non-Google imports are removed before insertion')
   const fontImport = '@import url(https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap);'
   const allowed = await p.evaluate(css => window.__harness.scopeTheme(`${css} h1 { color: red }`, '[data-ws-theme="font-check"]', 'font-check'), fontImport)
-  assert.ok(allowed.startsWith(fontImport), 'Google Fonts import survives URL semicolons without loading an external stylesheet')
+  assert.ok(allowed.startsWith('@import url("https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap");'), 'Google Fonts import survives URL semicolons in canonical form')
   assert.ok(allowed.includes('@scope'), 'rules after an import remain scoped')
   assert.equal(await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity), desk, 'Desk is outside the theme scope')
   const other = p.locator('.ws-overview-folio[data-uid="01KVBR2G7CXDWMG85592QW78M9"]')
@@ -1510,6 +1673,25 @@ test('Night Chart text and protected control pigments meet AA on dark paper', as
   })
   for (const { part, ratio } of contrasts) assert.ok(ratio >= 4.5, `${part}: ${ratio.toFixed(2)}:1`)
   console.log(`CONTRAST Night Chart ${Math.min(...contrasts.map(c => c.ratio)).toFixed(2)}:1 minimum across ${contrasts.length} text samples`)
+})
+
+test('Overview and sidebar never fan out theme.css probes; folios reuse the reader ETag cache', async p => {
+  const themeReads = async () => (await records(p)).filter(r => r.url.includes('/api/v1/file?') && decodeURIComponent(r.url).includes('/theme.css'))
+  await p.locator('[data-view="shelf"]').click()
+  await p.locator('.ws-overview-folio').first().waitFor()
+  await p.waitForTimeout(100)
+  assert.equal((await themeReads()).length, 0, 'cold overview uses bundled themes only')
+  await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  assert.equal((await themeReads()).length, 1, 'only the open reader loads custom CSS')
+  await p.clock.fastForward(16000)
+  await poll(p, () => window.__harness.requests.some(r => decodeURIComponent(r.url).includes('calibration-report/theme.css') && r.headers?.['if-none-match']))
+  const count = (await themeReads()).length
+  await p.locator('.ws-return').click()
+  await p.locator('.ws-overview-folio').first().waitFor()
+  await p.clock.fastForward(16000)
+  assert.equal((await themeReads()).length, count, 'overview does not revalidate any custom theme')
+  assert.equal(await p.locator('.ws-overview-folio').filter({ hasText: name }).evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '1', 'reader-loaded theme survives on the folio')
 })
 
 test('Theme refresh uses ETag on the ordinary cadence, not on selection frames', async p => {
