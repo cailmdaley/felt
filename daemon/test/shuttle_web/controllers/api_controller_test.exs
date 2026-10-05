@@ -99,6 +99,14 @@ defmodule ShuttleWeb.APIControllerTest do
     refute forwarded =~ "origin"
   end
 
+  # A suspended Poller or RemoteRegistry never answers, so a degraded state
+  # read costs the controller's whole state timeout. Shrink it for this test.
+  defp shrink_state_timeout do
+    previous = Application.get_env(:shuttle, :state_call_timeout_ms)
+    Application.put_env(:shuttle, :state_call_timeout_ms, 50)
+    on_exit(fn -> restore_app_env(:state_call_timeout_ms, previous) end)
+  end
+
   # ── POST /api/v1/dispatch ──
 
   test "dispatches a fiber via API" do
@@ -1039,6 +1047,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "state degrades to JSON when the poller is unavailable" do
+    shrink_state_timeout()
     :sys.suspend(Shuttle.Poller)
 
     try do
@@ -1113,6 +1122,8 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "composite degrades remote snapshots when the remote registry is unavailable" do
+    shrink_state_timeout()
+
     start_supervised!({
       Shuttle.RemoteRegistry,
       remotes: [
@@ -1147,6 +1158,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "composite degrades local snapshot when the poller is unavailable" do
+    shrink_state_timeout()
     :sys.suspend(Shuttle.Poller)
 
     try do
