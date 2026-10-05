@@ -55,10 +55,11 @@ describe('workspace palette follows the Desk', () => {
   it('keeps the workspace to the serif and the mono, with no sans family', () => {
     for (const sheet of [tokens, reader, css]) expect(sheet).not.toMatch(/--ws-sans|sans-serif|system-ui/)
   })
-  it('keeps cinnabar out of the workspace except for keyboard focus', () => {
+  it('reserves cinnabar for keyboard focus and the human pigment', () => {
     expect(`${reader}\n${css}`).not.toMatch(/--kbn-you/)
-    expect(tokens.match(/--kbn-you/g)).toHaveLength(1)
+    expect(tokens.match(/--kbn-you/g)).toHaveLength(2)
     expect(tokens).toMatch(/--ws-focus:[^;]*--kbn-you/)
+    expect(tokens).toMatch(/--ws-you:[^;]*--kbn-you/)
   })
   it('floats the workspace on a vellum veil, blurring only still layers', () => {
     for (const sheet of [tokens, reader, css]) expect(sheet).not.toMatch(/--ws-grid/)

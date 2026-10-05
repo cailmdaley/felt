@@ -70,6 +70,7 @@ nav:
       - Frontmatter: concepts/frontmatter.md
       - Collaborators and roles: concepts/collaborators.md
       - Companions: concepts/companions.md
+      - Constitution themes: concepts/themes.md
       - Cross-Project: concepts/cross-project.md
   - Agents & Plugin: agents.md
   - Development:

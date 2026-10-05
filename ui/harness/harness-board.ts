@@ -32,6 +32,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
+import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
 import { installWorkspaceNativeURLs, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
@@ -1237,7 +1238,7 @@ const harnessEvents: Array<Record<string, unknown>> = []
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const method = (init?.method ?? 'GET').toUpperCase()
-  const request = { url, method, body: typeof init?.body === 'string' ? init.body : null }
+  const request = { url, method, body: typeof init?.body === 'string' ? init.body : null, headers: Object.fromEntries(new Headers(init?.headers).entries()) }
   mockRequests.push(request)
   mockHandlers.push({ method, path: new URL(url, 'http://harness.invalid').pathname })
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -1473,7 +1474,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // A text card's body. Images, pages and PDFs load by URL, not through
   // fetch, so offline they stay faces.
   if (url.includes('/api/v1/file')) {
-    if (workspaceFixture) return workspaceFixture.fileResponse(url, method)
+    if (workspaceFixture) return workspaceFixture.fileResponse(url, method, init?.headers)
     return new Response('# Daily digest\n\nThree cosmic-shear papers and one CMB-lensing cross-correlation.\n', {
       headers: { 'Content-Type': 'text/plain' },
     })
@@ -1563,6 +1564,7 @@ try {
   // range the board's cards live in.
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,
+    scopeTheme,
     MOCK_FEED: workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED,
     temporal: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
     requests: mockRequests,

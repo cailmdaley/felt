@@ -448,6 +448,8 @@ export class Dock {
     if (!this.root) {
       this.root = document.createElement('div')
       this.root.className = 'ws-dock'
+      this.root.dataset.part = 'act'
+      this.root.dataset.act = 'composer'
       this.root.tabIndex = -1
       this.root.addEventListener('click', event => event.stopPropagation())
     }
@@ -657,6 +659,7 @@ export class Dock {
   verdictPlateFor(card: KanbanCard): HTMLElement {
     const plate = document.createElement('div')
     plate.className = 'ws-review-plate'
+    plate.dataset.part = 'act'; plate.dataset.act = 'verdict'
     const state = document.createElement('span')
     state.textContent = 'Awaiting review'
     plate.append(state, this.verdictControlsFor(card))

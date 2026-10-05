@@ -81,9 +81,11 @@ export class Thumbnail {
     this.opts = opts; this.key = opts.key; this.file = opts.file
     this.el = document.createElement('div')
     this.el.className = `ws-thumbnail ${opts.className ?? ''}`
+    this.el.dataset.part = 'thumbnail'
     this.el.setAttribute('aria-hidden', 'true'); this.el.inert = true
     const kind = opts.file ? documentKind(opts.file.fullPath) : 'fiber'
     this.face = document.createElement('div'); this.face.className = 'ws-thumbnail-face ws-overview-thumb-face'
+    this.face.dataset.part = 'thumbnail-face'
     const glyph = document.createElement('span'); glyph.className = 'ws-thumbnail-kind'
     glyph.textContent = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
     this.title = document.createElement('strong'); this.title.className = 'ws-thumbnail-title'

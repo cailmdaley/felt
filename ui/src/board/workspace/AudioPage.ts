@@ -46,8 +46,10 @@ export class AudioPage {
     base: string, onSelect: (key: DocKey) => void) {
     this.audio = audio; this.doc = doc; this.base = base; this.onSelect = onSelect
     this.el.className = 'ws-audio-page'
+    this.el.dataset.part = 'audio-page'
     this.el.setAttribute('aria-label', 'Audio listening controls')
     this.waveform.className = 'ws-audio-waveform'
+    this.waveform.dataset.part = 'audio-waveform'
     this.waveform.tabIndex = 0
     this.waveform.setAttribute('role', 'slider')
     this.waveform.setAttribute('aria-label', 'Playback position')
@@ -103,6 +105,7 @@ export class AudioPage {
     })
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(this.draw)
     this.observer?.observe(this.waveform)
+    document.addEventListener('workspace-theme-change', this.themeChanged)
     this.update()
     void loadWaveform(doc.key, fileBytesUrl(base, doc.path, doc.owner), this.controller.signal).then(data => {
       if (this.disposed) return
@@ -141,6 +144,7 @@ export class AudioPage {
     this.disposed = true
     this.cancelDrag?.()
     this.controller.abort(); this.observer?.disconnect(); cancelAnimationFrame(this.animation)
+    document.removeEventListener('workspace-theme-change', this.themeChanged)
     for (const event of ['timeupdate', 'loadedmetadata', 'durationchange', 'play', 'pause', 'ended', 'seeked']) this.audio.removeEventListener(event, this.update)
     for (const media of this.metadata.values()) { media.removeAttribute('src'); media.load() }
     this.metadata.clear()
@@ -164,6 +168,9 @@ export class AudioPage {
     cancelAnimationFrame(this.animation)
     if (!this.audio.paused && !this.disposed) this.animation = requestAnimationFrame(this.update)
   }
+  private readonly themeChanged = (event: Event): void => {
+    if (event.target instanceof Element && event.target.contains(this.el)) this.draw()
+  }
   private readonly draw = (): void => {
     const canvas = this.waveform, context = canvas.getContext('2d')
     if (!context) return
@@ -171,9 +178,9 @@ export class AudioPage {
     if (!width || !height) return
     canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio)
     context.scale(ratio, ratio)
-    const style = getComputedStyle(this.el)
+    const style = getComputedStyle(canvas)
     const played = Number.isFinite(this.audio.duration) && this.audio.duration > 0 ? this.audio.currentTime / this.audio.duration : 0
-    const ink = style.getPropertyValue('--ws-ink').trim() || '#30281e'
+    const ink = style.color || '#30281e'
     const soft = style.getPropertyValue('--ws-ink-muted').trim() || '#928675'
     const paint = (color: string): void => {
       context.fillStyle = color

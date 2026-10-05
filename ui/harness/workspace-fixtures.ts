@@ -35,7 +35,7 @@ export interface WorkspaceExample {
   files: WorkspaceFileFixture[]
   receipts: Array<Record<string, unknown>>
   fiberIndex: Array<{ id: string; name: string }>
-  fileResponse(url: string, method: string): Response
+  fileResponse(url: string, method: string, headers?: HeadersInit): Response
 }
 
 const inlineBlob = (data: string, mime: string): Blob => {
@@ -156,6 +156,8 @@ export function workspaceExample(now: number): WorkspaceExample {
       inCardIndex: false,
     },
   ]
+  const previews = new URLSearchParams(location.search).getAll('theme-preview')
+  const previewFor = (uid: string): string | undefined => previews.find(value => value.startsWith(`${uid}:`))?.slice(uid.length + 1)
   const rows = fibers.filter(fiber => fiber.inCardIndex !== false).map((fiber, index) => {
     const dir = `${project}/.felt/${fiber.id}`
     const entry: Record<string, unknown> = {
@@ -169,6 +171,7 @@ export function workspaceExample(now: number): WorkspaceExample {
         name: fiber.name,
         status: fiber.status,
         outcome: fiber.outcome,
+        theme: previewFor(fiber.uid) ?? ['portolan', 'blueprint', 'night-chart', 'laboratory-paper', 'portolan'][index],
         tags: ['workspace', 'research'],
         created_at: iso(-fiber.age * day),
         updated_at: iso(-minute),
@@ -221,6 +224,24 @@ export function workspaceExample(now: number): WorkspaceExample {
     body: body instanceof Blob ? body : new Blob([body], { type: mime }),
   })
   const files: WorkspaceFileFixture[] = [
+    file(WORKSPACE_HOST, `${mainDir}/theme.css`, 'text/css', `
+      @import 'https://example.invalid/font.css';
+      @font-face { font-family: "Shuttle Fixture Flourish"; src: local("Georgia"); }
+      @keyframes ink-flourish { from { opacity: .45; } to { opacity: 1; } }
+      @keyframes \\31 ink { to { opacity: 1; } }
+      @keyframes "foo bar" { to { opacity: 1; } }
+      :scope { --ws-custom-ready: 1; --fixture-animation: ink-flourish 2s ease infinite alternate; --fixture-space-animation: "foo bar" 1s; }
+      [data-part="fiber-header"] { animation-name: ink-flourish; }
+      [data-part="prose"] h2 { animation: var(--fixture-space-animation, \\31 ink 1s); }
+      [data-part="fiber-title"]::after { content: '✧'; display: block; color: var(--ws-verdict); font-family: "Shuttle Fixture Flourish"; animation: var(--fixture-animation, ink-flourish 2s ease infinite alternate); }
+      @media (min-width: 1px) { @supports (display: grid) { @layer fixture { [data-part="label-bar"] { border-top-style: double; } } } }
+      [data-part="prose"] { --ws-nested-ready: 1; & p { text-underline-offset: .2em; } --ws-after-nested: 1; }
+      .kbn-desk .kbn-card { opacity: .13; }
+      [data-part="audio-waveform"] { color: rgb(11, 109, 127); }
+      @media (width: 1379px) { button { color: red !important; font-family: fantasy !important; } }
+      @media (width: 1379px) { :scope { --ws-mono: fantasy; --ws-control-height: 99px; --ws-agent: red; --kbn-agent: red; --font-mono: fantasy; text-transform: uppercase; font-style: italic; } }
+    `),
+    file(WORKSPACE_HOST, `${project}/.felt/research/workspace/mask-validation/theme.css`, 'text/css', '{ ] broken css'),
     file(WORKSPACE_HOST, report, 'text/html', reportHTML),
     file(WORKSPACE_HOST, notes, 'text/markdown', '# Field note\n\nThe transfer ratio is consistent with unity in the validation range.\n\nRead [the report](../.felt/research/workspace/calibration-report/report.html), or listen to `tone.mp3`.\n'),
     file(WORKSPACE_HOST, readme, 'text/plain', 'Fixture text document.\n\nThis body is served by the mocked file route.\nListen to `tone.mp3`.\n'),
@@ -260,6 +281,8 @@ export function workspaceExample(now: number): WorkspaceExample {
       ':::{embed} report.html',
       ':title: Calibration report',
       ':::',
+      '',
+      '## Validation notes',
       '',
       'Read the [mask table](tables/mask.csv) alongside the report.',
       '',
@@ -301,18 +324,21 @@ export function workspaceExample(now: number): WorkspaceExample {
     { id: 'research/workspace/method-note', name: 'Method note' },
   ]
   const fileMap = new Map(files.map(item => [key(item.owner, item.path), item]))
-  const fileResponse = (url: string, method: string): Response => {
+  const fileResponse = (url: string, method: string, requestHeaders?: HeadersInit): Response => {
     const parsed = new URL(url, 'http://workspace-harness.invalid')
     const path = parsed.searchParams.get('path') ?? ''
     const owner = parsed.searchParams.get('origin') || WORKSPACE_HOST
-    const found = fileMap.get(key(owner, path))
+    // Theme comparisons show each bundled base without the custom fixture layer.
+    const found = path === `${mainDir}/theme.css` && previewFor(WORKSPACE_UID) ? undefined : fileMap.get(key(owner, path))
     if (parsed.pathname.endsWith('/file-info')) {
       return new Response(JSON.stringify(found
         ? { exists: true, size: found.body.size, modified_at: Math.floor(now / 1000) }
         : { exists: false }), { headers: { 'Content-Type': 'application/json' } })
     }
     if (!found) return new Response(null, { status: 404, statusText: 'Not Found' })
-    const headers = new Headers({ 'Content-Type': found.mime, 'Content-Length': String(found.body.size) })
+    const etag = `"fixture-${found.body.size}"`
+    if (new Headers(requestHeaders).get('If-None-Match') === etag) return new Response(null, { status: 304, headers: { ETag: etag } })
+    const headers = new Headers({ 'Content-Type': found.mime, 'Content-Length': String(found.body.size), ETag: etag })
     return new Response(method.toUpperCase() === 'HEAD' ? null : found.body, { status: 200, headers })
   }
   return {

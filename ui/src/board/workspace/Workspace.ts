@@ -16,6 +16,7 @@ import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { Overview } from './Overview.js'
 import { WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
+import { ChannelThemes } from './ChannelThemes.js'
 
 export interface WorkspaceOptions {
   shuttleBase: string
@@ -53,6 +54,7 @@ export class Workspace {
   readonly dock: Dock
   private readonly verdicts = new Verdicts()
   private readonly picker: ConstitutionPicker
+  private readonly themes: ChannelThemes
   private readonly root: HTMLElement
   private readonly depth: WorkspaceDepth
   private readonly opts: WorkspaceOptions
@@ -78,8 +80,10 @@ export class Workspace {
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
+    this.themes = new ChannelThemes(opts.shuttleBase)
     this.overview = new Overview({
       shuttleBase: opts.shuttleBase,
+      themes: this.themes,
       cards: opts.cards,
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
       onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh() },
@@ -94,6 +98,7 @@ export class Workspace {
     })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
+      themes: this.themes,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
@@ -207,7 +212,7 @@ export class Workspace {
         return
       }
       this.dock.verdict(card, verdict)
-    })
+    }, this.themes.material(this.reader.el))
   }
   private focusComposer(): void {
     const state = this.current
@@ -534,6 +539,7 @@ export class Workspace {
     this.picker.dispose()
     this.reader.dispose()
     this.overview.dispose()
+    this.themes.dispose()
     this.depth.dispose()
   }
 }

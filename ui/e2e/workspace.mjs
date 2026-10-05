@@ -210,7 +210,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   const audio = p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/deliverables/tone.mp3"] audio')
   assert.equal(await inner.locator('button[aria-pressed="true"]').count(), 0, 'references never autoplay')
   if (device === 'desktop') { await play.focus(); await p.keyboard.press('Enter') }
-  else await play.click()
+  else await play.tap()
   await poll(p, () => { const audio = document.querySelector('.ws-page[data-key$="/tone.mp3"] audio'); return audio && !audio.paused && audio.currentTime > 0 })
   assert.equal(await selected(p).getAttribute('data-key'), initial)
   await inner.getByRole('button', { name: 'Pause tone.mp3', exact: true }).waitFor()
@@ -1400,6 +1400,215 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       console.log(`INVENTORY ${JSON.stringify(inventory.at(-1))}`)
     }
   }, viewport)
+}
+
+test('Custom theme is scoped with private keyframes, hoisted fonts and conditional rules', async p => {
+  const desk = await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity)
+  await p.locator('[data-view="shelf"]').click()
+  await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').click()
+  await choose(p, 'Constitution')
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  const theme = await p.locator('.ws-reader').getAttribute('data-ws-theme')
+  const source = await p.locator(`style[data-ws-theme-sheet="${theme}"]`).textContent()
+  assert.ok(source.includes(`@keyframes ${theme}-ink-flourish`))
+  assert.ok(source.includes(`animation-name: ${theme}-ink-flourish`))
+  assert.ok(source.includes(`--fixture-animation: ${theme}-ink-flourish`))
+  assert.ok(source.includes(`var(--fixture-animation, ${theme}-ink-flourish`))
+  assert.ok(source.includes(`@keyframes ${theme}-1ink`))
+  assert.ok(source.includes(`var(--fixture-space-animation, ${theme}-1ink`))
+  await p.emulateMedia({ reducedMotion: 'no-preference' })
+  assert.equal(await selected(p).locator('[data-part="fiber-title"]').evaluate(el => getComputedStyle(el, '::after').animationName), `${theme}-ink-flourish`)
+  assert.equal(await selected(p).locator('.ws-prose h2').first().evaluate(el => getComputedStyle(el).animationName), `${theme}-foo\\ bar`, 'escaped and quoted names share CSSOM identity')
+  await p.emulateMedia({ reducedMotion: 'reduce' })
+  assert.equal(await selected(p).locator('[data-part="fiber-title"]').evaluate(el => getComputedStyle(el, '::after').animationName), 'none')
+  assert.ok(source.includes('@font-face') && source.includes('Shuttle Fixture Flourish'))
+  assert.ok(source.includes('@media') && source.includes('@supports') && source.includes('@layer'))
+  assert.equal(await selected(p).locator('[data-part="prose"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-after-nested').trim()), '1', 'declarations following a nested selector survive CSSOM scoping')
+  assert.ok(!source.includes('example.invalid'), 'non-Google imports are removed before insertion')
+  const fontImport = '@import url(https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap);'
+  const allowed = await p.evaluate(css => window.__harness.scopeTheme(`${css} h1 { color: red }`, '[data-ws-theme="font-check"]', 'font-check'), fontImport)
+  assert.ok(allowed.startsWith(fontImport), 'Google Fonts import survives URL semicolons without loading an external stylesheet')
+  assert.ok(allowed.includes('@scope'), 'rules after an import remain scoped')
+  assert.equal(await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity), desk, 'Desk is outside the theme scope')
+  const other = p.locator('.ws-overview-folio[data-uid="01KVBR2G7CXDWMG85592QW78M9"]')
+  assert.equal(await other.evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '', 'another channel does not inherit the custom theme')
+  await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
+  await other.click()
+  assert.equal(await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '')
+})
+
+test('Plain removes custom and bundled styling, persists, and can restore custom CSS', async p => {
+  await p.locator('[data-view="shelf"]').click()
+  await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').click()
+  await choose(p, 'Constitution')
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  await p.locator('.ws-channel-title').click()
+  await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  assert.equal(await p.getByRole('button', { name: 'Plain', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
+  assert.equal(await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').getAttribute('data-ws-theme'), null)
+  await p.reload()
+  await p.locator('.ws-channel-title').waitFor()
+  assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
+  await p.locator('.ws-channel-title').click()
+  await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  await p.setViewportSize({ width: 390, height: 844 })
+  await p.locator('.ws-channel-title').click() // close the open picker
+  await p.locator('.ws-channel-title').click()
+  assert.ok((await p.getByRole('button', { name: 'Plain', exact: true }).boundingBox()).height >= 44, 'Plain has a phone-sized touch target')
+})
+
+test('Broken theme falls back to its bundled base', async p => {
+  await p.locator('.kbn-card').filter({ hasText: 'Mask validation notes' }).click()
+  await choose(p, 'Constitution')
+  await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'laboratory-paper')
+  const theme = await p.locator('.ws-reader').getAttribute('data-ws-theme')
+  const source = await p.locator(`style[data-ws-theme-sheet="${theme}"]`).textContent()
+  assert.ok(source.length > 100, 'the bundled base remains present')
+  assert.ok(!source.includes('broken css'))
+  assert.ok(await selected(p).locator('.ws-prose').isVisible())
+})
+
+test('Act zone stops broad button rules and resets theme fonts, sizes and pigments', async p => {
+  await open(p); await choose(p, 'Constitution')
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  assert.equal(await selected(p).locator('.ws-prose-contents button').first().evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)', 'the broad rule is active in the reading zone')
+  const temper = selected(p).getByRole('button', { name: 'Temper', exact: true })
+  const style = await temper.evaluate(el => ({ color: getComputedStyle(el).color, font: getComputedStyle(el).fontFamily, height: getComputedStyle(el).getPropertyValue('--ws-control-height').trim(), agent: getComputedStyle(el).getPropertyValue('--ws-agent').trim(), transform: getComputedStyle(el).textTransform, pigment: getComputedStyle(el).getPropertyValue('--kbn-agent').trim(), mono: getComputedStyle(el).getPropertyValue('--font-mono').trim() }))
+  assert.notEqual(style.color, 'rgb(255, 0, 0)', 'button { color: red } cannot reach Temper')
+  assert.ok(!style.font.includes('fantasy'))
+  assert.equal(style.height, '32px')
+  assert.notEqual(style.agent, 'red')
+  assert.equal(style.transform, 'none', 'inherited theme typography also stops at the act zone')
+  assert.notEqual(style.pigment, 'red', 'theme aliases cannot change a control pigment')
+  assert.ok(!style.mono.includes('fantasy'), 'theme aliases cannot change a control font')
+  assert.equal(await selected(p).locator('.ws-dock').getAttribute('data-part'), 'act')
+  assert.equal(await p.locator('.ws-worker-pill').getAttribute('data-part'), 'act')
+}, { width: 1379, height: 900 })
+
+test('Night Chart text and protected control pigments meet AA on dark paper', async p => {
+  await p.locator('.kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await choose(p, 'Constitution')
+  await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'night-chart')
+  const contrasts = await selected(p).evaluate(page => {
+    const band = page.querySelector('.ws-dock')
+    const error = document.createElement('span')
+    error.className = 'kbn-detail-error'; error.textContent = 'Fixture error'
+    band.append(error)
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d')
+    const rgb = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3) }
+    const luminance = color => rgb(color).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0)
+    const paper = luminance(getComputedStyle(band).getPropertyValue('--ws-paper'))
+    const result = [...page.querySelectorAll('.ws-prose h1,.ws-prose-body p,.ws-prose-status,.ws-labelbar,.kbn-ctl-agent,.kbn-card-worker,.kbn-detail-error')].map(el => {
+      const ink = luminance(getComputedStyle(el).color)
+      return { part: el.className || el.tagName, ratio: (Math.max(ink, paper) + .05) / (Math.min(ink, paper) + .05) }
+    })
+    error.remove()
+    return result
+  })
+  for (const { part, ratio } of contrasts) assert.ok(ratio >= 4.5, `${part}: ${ratio.toFixed(2)}:1`)
+  console.log(`CONTRAST Night Chart ${Math.min(...contrasts.map(c => c.ratio)).toFixed(2)}:1 minimum across ${contrasts.length} text samples`)
+})
+
+test('Theme refresh uses ETag on the ordinary cadence, not on selection frames', async p => {
+  await open(p); await choose(p, 'Constitution')
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  const reads = async () => (await records(p)).filter(r => r.url.includes('/api/v1/file?') && decodeURIComponent(r.url).includes('calibration-report/theme.css'))
+  const count = (await reads()).length
+  await choose(p, 'brief.md'); await choose(p, 'Constitution')
+  assert.equal((await reads()).length, count)
+  await p.clock.fastForward(16000)
+  await poll(p, () => window.__harness.requests.some(r => decodeURIComponent(r.url).includes('calibration-report/theme.css') && r.headers?.['if-none-match']))
+  assert.ok((await reads()).at(-1).headers['if-none-match'])
+})
+
+test('Nested sidebar cards reset foreign variables, including cards in Plain', async p => {
+  await open(p); await choose(p, 'Constitution')
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  const foreign = p.locator('[data-part="sidebar-card"]').filter({ hasText: 'Mask validation notes' })
+  await foreign.waitFor()
+  assert.equal(await foreign.getAttribute('data-ws-theme-name'), 'laboratory-paper')
+  const own = p.locator('[data-part="sidebar-card"]').filter({ hasText: name })
+  assert.equal(await own.getAttribute('data-ws-theme'), await p.locator('.ws-reader').getAttribute('data-ws-theme'))
+  const assertNeutral = async () => {
+    const values = await foreign.evaluate(el => {
+      const s = getComputedStyle(el)
+      return { ready: s.getPropertyValue('--ws-custom-ready').trim(), after: s.getPropertyValue('--ws-after-nested').trim(), mono: s.getPropertyValue('--font-mono').trim(), transform: s.textTransform, height: s.getPropertyValue('--ws-control-height').trim() }
+    })
+    assert.equal(values.ready, '', 'unknown custom variables stop at the nested boundary')
+    assert.equal(values.after, '')
+    assert.ok(!values.mono.includes('fantasy'))
+    assert.equal(values.transform, 'none')
+    assert.equal(values.height, '32px')
+  }
+  await assertNeutral()
+  await foreign.click(); await choose(p, 'Constitution')
+  await p.locator('.ws-channel-title').click()
+  await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  assert.equal(await foreign.getAttribute('data-ws-theme'), null)
+  assert.ok(await foreign.getAttribute('data-ws-theme-boundary') !== null)
+  await p.locator('.ws-sidebar').getByRole('button', { name: new RegExp(name) }).click()
+  await choose(p, 'Constitution')
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  await assertNeutral()
+}, { width: 1379, height: 900 }, 'true')
+
+test('Protected verdict plate and portaled toast retain material without author CSS', async p => {
+  await open(p)
+  await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  const plate = p.locator('.ws-review-plate')
+  assert.equal(await plate.getAttribute('data-part'), 'act')
+  assert.equal(await plate.getAttribute('data-act'), 'verdict')
+  assert.notEqual(await plate.getByRole('button', { name: 'Temper', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
+  const material = await p.locator('.ws-reader').evaluate(el => ({ paper: getComputedStyle(el).getPropertyValue('--ws-paper').trim(), ink: getComputedStyle(el).getPropertyValue('--ws-ink').trim() }))
+  await p.locator('.ws-channel-title').focus(); await p.keyboard.press('t')
+  const toast = p.locator('.ws-verdict-toast')
+  await toast.waitFor()
+  assert.equal(await toast.getAttribute('data-part'), 'act')
+  assert.equal(await toast.getAttribute('data-act'), 'toast')
+  assert.equal(await toast.getAttribute('data-ws-theme'), null)
+  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  assert.deepEqual(await toast.evaluate(el => ({ paper: getComputedStyle(el).getPropertyValue('--ws-paper').trim(), ink: getComputedStyle(el).getPropertyValue('--ws-ink').trim() })), material)
+  assert.ok(!await toast.getByRole('button').evaluate(el => getComputedStyle(el).fontFamily.includes('fantasy')))
+  await p.keyboard.press('z')
+}, { width: 1379, height: 900 })
+
+test('Theme changes repaint paused audio without replacing the player or fetching bytes', async p => {
+  await open(p); await choose(p, 'tone.mp3')
+  const wave = selected(p).locator('[data-part="audio-waveform"]')
+  await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')
+  await p.evaluate(() => { window.__themedAudio = document.querySelector('.ws-selected audio') })
+  const pixel = async () => wave.evaluate(canvas => {
+    const probe = document.createElement('canvas'); probe.width = probe.height = 1
+    const ctx = probe.getContext('2d'); ctx.fillStyle = getComputedStyle(canvas).color; ctx.fillRect(0, 0, 1, 1)
+    return { ink: [...ctx.getImageData(0, 0, 1, 1).data], drawn: [...canvas.getContext('2d').getImageData(0, Math.floor(canvas.height / 2), 1, 1).data] }
+  })
+  const before = await pixel(); assert.deepEqual(before.drawn, before.ink)
+  const reads = (await records(p)).filter(r => decodeURIComponent(r.url).includes('tone.mp3')).length
+  await p.locator('.ws-channel-title').click(); await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  await p.clock.runFor(80)
+  const after = await pixel(); assert.deepEqual(after.drawn, after.ink); assert.notDeepEqual(after.ink, before.ink)
+  assert.ok(await p.evaluate(() => document.querySelector('.ws-selected audio') === window.__themedAudio && window.__themedAudio.paused && window.__themedAudio.currentTime === 0))
+  assert.equal((await records(p)).filter(r => decodeURIComponent(r.url).includes('tone.mp3')).length, reads)
+})
+
+for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']) {
+  test(`Theme phone paper stays edge to edge with styled bars and page sheet: ${theme}`, async p => {
+    const themed = new URL(url); themed.searchParams.set('theme-preview', `01KVBR1F9BWBVKF97473PV67K8:${theme}`)
+    await p.goto(themed.href); await open(p); await choose(p, 'Constitution')
+    const frame = selected(p).locator('[data-part="page-frame"]')
+    const box = await frame.boundingBox()
+    assert.ok(Math.abs(box.x) < 1 && Math.abs(box.width - 390) < 1)
+    assert.deepEqual(await frame.evaluate(el => { const s = getComputedStyle(el); return [s.borderRadius, s.clipPath, s.boxShadow, s.borderTopWidth] }), ['0px', 'none', 'none', '0px'])
+    assert.ok(await p.locator('[data-part="phone-topbar"]').isVisible())
+    assert.ok(await p.locator('[data-part="phone-bottom-bar"]').isVisible())
+    await p.locator('.ws-page-choice').click()
+    assert.ok(await p.locator('[data-part="page-sheet-panel"]').isVisible())
+    assert.ok(await p.locator('[data-part="page-sheet-row"]').count() > 1)
+    assert.equal(await p.locator('[data-part="page-sheet-panel"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()), await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()))
+  }, { width: 390, height: 844 })
 }
 
 const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(process.env.E2E_ONLY).test(test.name))

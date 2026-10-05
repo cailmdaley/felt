@@ -60,6 +60,7 @@ export class TabStrip {
     this.onExpand = onExpand
     this.el = document.createElement('div')
     this.el.className = 'ws-tabs'
+    this.el.dataset.part = 'tab-strip'
     this.el.setAttribute('role', 'tablist')
     this.el.setAttribute('aria-label', 'Documents')
     this.motion = typeof window.matchMedia === 'function'
@@ -234,6 +235,7 @@ export class TabStrip {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'ws-tab'
+    button.dataset.part = 'tab'
     button.setAttribute('role', 'tab')
     button.tabIndex = -1
     button.dataset.tabKey = key

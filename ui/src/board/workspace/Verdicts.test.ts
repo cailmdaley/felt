@@ -11,6 +11,30 @@ const key = (key: string, init: KeyboardEventInit = {}, target: EventTarget = wi
 }
 
 describe('late verdicts', () => {
+  it('snapshots only paper and ink onto a protected body-level toast without changing write timing', () => {
+    const commit = vi.fn(), material = { paper: 'rgb(10, 20, 30)', ink: 'rgb(240, 230, 220)' }
+    verdicts.queue(card({ id: 'a' }), 'tempered', commit, material)
+    const toast = document.querySelector<HTMLElement>('.ws-verdict-toast')!
+    expect(toast.closest('.ws-reader')).toBeNull()
+    expect(toast.dataset.part).toBe('act'); expect(toast.dataset.act).toBe('toast')
+    expect(toast.hasAttribute('data-ws-act-material')).toBe(true)
+    expect(toast.hasAttribute('data-ws-theme')).toBe(false)
+    material.paper = 'red'; material.ink = 'blue'
+    expect(toast.style.getPropertyValue('--ws-paper')).toBe('rgb(10, 20, 30)')
+    expect(toast.style.getPropertyValue('--ws-ink')).toBe('rgb(240, 230, 220)')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    vi.advanceTimersByTime(5999); expect(commit).not.toHaveBeenCalled()
+    verdicts.dispose()
+    vi.advanceTimersByTime(1); expect(commit).not.toHaveBeenCalled()
+  })
+  it('keeps standalone toasts unmaterialed when no reader supplied a snapshot', () => {
+    verdicts.queue(card({ id: 'a' }), 'tempered', vi.fn())
+    const toast = document.querySelector<HTMLElement>('.ws-verdict-toast')!
+    expect(toast.dataset.act).toBe('toast')
+    expect(toast.hasAttribute('data-ws-act-material')).toBe(false)
+    expect(toast.style.cssText).toBe('')
+  })
+
   it('writes only after six seconds and keeps a polite, named Undo toast', () => {
     const commit = vi.fn()
     verdicts.queue(card({ id: 'music', name: 'Music' }), 'tempered', commit)

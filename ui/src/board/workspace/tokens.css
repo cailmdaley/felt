@@ -19,6 +19,8 @@
   --ws-fresh: var(--kbn-owed-bright);
   --ws-owed: color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-ink-soft));
   --ws-focus: var(--kbn-you);
+  --ws-you: var(--kbn-you);
+  --ws-verdict: var(--kbn-tempered-ink);
   /* The vellum veil: the Desk's parchment, thinned so the Desk shows through
      soft and unreadable under a blur. */
   --ws-veil: color-mix(in srgb, var(--kbn-parchment) 42%, transparent);
