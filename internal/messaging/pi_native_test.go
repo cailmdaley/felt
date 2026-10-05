@@ -94,9 +94,8 @@ func piNativeFixture(t *testing.T, reply any) (string, func()) {
 }
 
 func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
-	env.Set("SHUTTLE_CONFER_STATE_DIR", t.TempDir())
 	socket, closeFixture := piNativeFixture(t, map[string]any{"ok": true})
 	defer closeFixture()
 	if err := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), true); err != nil {
@@ -106,7 +105,7 @@ func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A launcher alias must not duplicate the same live native conversation.
-	jobs := filepath.Join(os.Getenv("SHUTTLE_CONFER_STATE_DIR"), "workspace", "jobs")
+	jobs := filepath.Join(env.Getenv("SHUTTLE_CONFER_STATE_DIR"), "workspace", "jobs")
 	if err := os.MkdirAll(jobs, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -133,8 +132,8 @@ func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
 }
 
 func TestPiNativeRegistrationReplacesDeadSameSessionSocket(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	dir := socketTempDir(t)
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -180,8 +179,7 @@ func TestPiNativeRegistrationReplacesDeadSameSessionSocket(t *testing.T) {
 }
 
 func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
-	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Parallel()
 	tests := []struct {
 		name   string
 		reply  map[string]any
@@ -197,7 +195,8 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+			t.Parallel()
+			env := testEnv(t)
 			socket, closeFixture := piNativeFixture(t, func(request map[string]any) any {
 				requestID, _ := request["requestId"].(string)
 				if tc.reply["requestId"] == "" {
@@ -223,8 +222,8 @@ func TestPiNativeSendCorrelatesSessionAndRequest(t *testing.T) {
 }
 
 func TestPiMailboxSupportsPassiveContext(t *testing.T) {
+	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
 	if err := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
