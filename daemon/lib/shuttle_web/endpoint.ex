@@ -7,6 +7,9 @@ defmodule ShuttleWeb.Endpoint do
 
   use Phoenix.Endpoint, otp_app: :shuttle
 
+  # Wrap Phoenix's error boundary as well as the ordinary endpoint pipeline.
+  @before_compile ShuttleWeb.FileSecurityPlug
+
   plug(Plug.RequestId)
   # Per-request lines at debug: every board and hub polls several routes a
   # second, so at info they would be most of the log. Failures log themselves
