@@ -1,5 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
+import { inLane } from '../requestLanes.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
@@ -222,9 +223,7 @@ export class Overview {
   private readonly visits = new Map<string, number>()
   private readonly openedCards = new Map<string, KanbanCard>()
   private readonly fetchedCards = new Map<string, KanbanCard>()
-  private readonly cardLoads = new Map<string, Promise<KanbanCard | undefined>>()
-  private readonly cardQueue: Array<{ uid: string; run(): Promise<void> }> = []
-  private activeCardReads = 0
+  private readonly cardLoads = new Map<string, { pending: Promise<KanbanCard | undefined>; promote: () => void }>()
   private readonly cardRetries = new Map<string, { attempts: number; at: number }>()
   private readonly missingCards = new Set<string>()
   private readonly provisionalOpened = new Set<string>()
@@ -604,35 +603,38 @@ export class Overview {
     if (times.length) this.retryTimer = setTimeout(() => this.reconcile(), Math.max(1, Math.min(...times) - Date.now()))
   }
 
-  /** Clicks move ahead of queued preloads without duplicating or preempting active reads. */
+  /**
+   * Preloads wait in the slow request lane, where one read can take many
+   * seconds; a click reads at once, taking over its own queued preload. A
+   * read already under way is shared, never duplicated or preempted.
+   */
   private queueCard(card: KanbanCard, priority = false): Promise<KanbanCard | undefined> {
     const uid = uidOf(card)
     const prior = this.cardLoads.get(uid)
     if (prior) {
-      const index = priority ? this.cardQueue.findIndex(job => job.uid === uid) : -1
-      if (index > 0) this.cardQueue.unshift(this.cardQueue.splice(index, 1)[0])
-      return prior
+      if (priority) prior.promote()
+      return prior.pending
     }
     let complete!: (card: KanbanCard | undefined) => void
     const pending = new Promise<KanbanCard | undefined>(resolve => { complete = resolve })
-    this.cardLoads.set(uid, pending)
-    const job = { uid, run: async (): Promise<void> => {
+    let started = false
+    const queued = new AbortController()
+    const run = async (): Promise<void> => {
+      started = true
       const resolved = this.disposed ? undefined : this.knownCards().get(uid) ?? await this.loadCard(card)
       this.cardLoads.delete(uid)
       complete(resolved)
       if (!this.disposed) this.reconcile()
-    } }
-    if (priority) this.cardQueue.unshift(job)
-    else this.cardQueue.push(job)
-    this.pumpCards()
-    return pending
-  }
-  private pumpCards(): void {
-    while (this.activeCardReads < 4 && this.cardQueue.length) {
-      const job = this.cardQueue.shift()!
-      this.activeCardReads++
-      void job.run().finally(() => { this.activeCardReads--; this.pumpCards() })
     }
+    const promote = (): void => {
+      if (started) return
+      queued.abort()
+      void run()
+    }
+    this.cardLoads.set(uid, { pending, promote })
+    if (priority) void run()
+    else void inLane('slow', run, { signal: queued.signal }).catch(() => { /* Promoted to a click. */ })
+    return pending
   }
 
   private createFolio(uid: string, card: KanbanCard): Folio {

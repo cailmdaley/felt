@@ -2,6 +2,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { extractEmbeds } from '../attachments.js'
 import { basename, renderMarkdown } from '../utils.js'
 import { installWikilinks } from '../wikilinks.js'
+import { inLane } from '../requestLanes.js'
 import '../prose.css'
 import './fiber-prose.css'
 import type { Channel } from './documents.js'
@@ -28,14 +29,14 @@ export function renderFiberMarkdown(body: string, outcome: string, card: KanbanC
   }
 }
 
-/** Prefer the fiber directory; use the project directory only after a failed HEAD. */
+/** Prefer the fiber directory; use the project directory only after a failed HEAD, asked in the quiet lane. */
 export async function settleBodyFileLink(link: HTMLAnchorElement): Promise<void> {
   const altUrl = link.dataset.fileUrlAlt
   const altPath = link.dataset.filePathAlt
   const primary = link.getAttribute('href')
   if (!altUrl || !altPath || !primary) return
   try {
-    if ((await fetch(primary, { method: 'HEAD' })).ok) return
+    if ((await inLane('quiet', () => fetch(primary, { method: 'HEAD' }), { rank: 2 })).ok) return
   } catch {
     return
   }
