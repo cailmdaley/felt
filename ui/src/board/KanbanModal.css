@@ -2541,9 +2541,11 @@
     line-height: 1.55;
     -webkit-line-clamp: 1 !important;
   }
+  /* The row clips sideways only, so a verdict's touch target can reach past its plate vertically. */
   .kbn-card-meta {
     flex-wrap: nowrap;
-    overflow: hidden;
+    overflow-x: clip;
+    overflow-y: visible;
     gap: 5px;
   }
   .kbn-card-meta-spacer { flex: 0 1 auto; }
