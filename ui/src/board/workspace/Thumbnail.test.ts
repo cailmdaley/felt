@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 const renderer = vi.hoisted(() => ({ finishes: [] as Array<() => void> }))
 vi.mock('../FileViewerPanel.js', () => ({
+  readThumbnailMetadata: vi.fn(async () => {}),
   buildFileViewer: vi.fn((_base, _path, _owner, _frame, _scroll, options) => {
     const body = document.createElement('div'); body.append(document.createElement('iframe'))
     renderer.finishes.push(() => options.onState({ status: 'ready' }))

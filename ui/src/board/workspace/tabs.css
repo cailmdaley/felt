@@ -20,6 +20,9 @@
   pointer-events: none; user-select: none;
 }
 .ws-tab-preview[hidden] { display: none; }
+/* A pointer that leaves for a page goes straight into its frame, which would
+   swallow the leave; while a preview is up the frames let it reach the reader. */
+.ws-reader:has(> .ws-tab-preview:not([hidden])) iframe { pointer-events: none; }
 .ws-tab-preview-thumb {
   --ws-preview-aspect: 1.6;
   width: 100%; aspect-ratio: var(--ws-preview-aspect); overflow: hidden;

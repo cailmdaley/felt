@@ -7,6 +7,7 @@ import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
+  readThumbnailMetadata: vi.fn(async () => {}),
   buildFileViewer: vi.fn((_base: string, path: string, _owner: string, onLoad?: (frame: HTMLIFrameElement, refreshed: boolean) => void) => {
     const wrap = document.createElement('div')
     const iframe = document.createElement('iframe')

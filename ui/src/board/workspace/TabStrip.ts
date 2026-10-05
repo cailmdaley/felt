@@ -1,6 +1,7 @@
 import type { KeyIntent } from '../keymap.js'
 import type { Channel, WorkspaceDocument } from './documents.js'
 import { TabPreview } from './TabPreview.js'
+import { probeDocumentTitles } from './titleProbe.js'
 import { declaredTitle } from './DocumentTitles.js'
 import './tabs.css'
 import { ReceiptMotion } from './receiptMotion.js'
@@ -76,6 +77,7 @@ export class TabStrip {
   private disposed = false
   private visible = true
   private focus: number | null = null
+  private readonly shuttleBase: string | null
 
   constructor(onSelect: (index: number) => void, onExpand: () => void, options?: StripOptions) {
     this.onSelect = onSelect
@@ -85,6 +87,7 @@ export class TabStrip {
     this.el.dataset.part = 'tab-strip'
     this.el.setAttribute('role', 'tablist')
     this.el.setAttribute('aria-label', 'Documents')
+    this.shuttleBase = options?.shuttleBase ?? null
     this.preview = options ? new TabPreview(options.shuttleBase) : null
     this.preview?.attach(this.el)
     this.motion = typeof window.matchMedia === 'function'
@@ -122,6 +125,7 @@ export class TabStrip {
   render(labels: string[], keys?: string[], channel?: Channel): void {
     if (this.disposed) return
     if (channel) this.preview?.update(channel, labels)
+    if (channel && this.shuttleBase !== null) probeDocumentTitles(this.shuttleBase, channel.documents)
     const captions = indexCaptions(labels, channel)
     if (labels.length === this.records.length && labels.every((label, index) => label === this.records[index].label && (!keys || keys[index] === this.records[index].key))) {
       if (channel) this.records.forEach((record, index) => this.paintLabel(record.button, captions[index], record.label, channel.documents[index]))

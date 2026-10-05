@@ -115,6 +115,9 @@ export class TabPreview {
     if (from === this.suppressed) this.suppressed = null
     if (this.pending !== null) { clearTimeout(this.pending); this.pending = null }
     if (!this.open || to) return
+    // Leaving the index puts the preview away at once; crossing its own margin keeps a moment's grace.
+    const strip = e.currentTarget as HTMLElement
+    if (!(e.relatedTarget instanceof Node && strip.contains(e.relatedTarget))) { this.dismiss(); return }
     if (this.leaving !== null) clearTimeout(this.leaving)
     this.leaving = setTimeout(() => { this.leaving = null; this.dismiss() }, PREVIEW_GRACE_MS / 3)
   }

@@ -93,8 +93,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await type('.ws-channel-title', 15, 'EB Garamond')
   await type('.ws-nav-verdicts .ws-review-plate .kbn-ctl-btn', 15, 'EB Garamond')
   if (device === 'desktop') {
-    for (const selector of ['.ws-return', '.ws-sidebar-toggle', '.ws-tab-label', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
+    for (const selector of ['.ws-return', '.ws-tab:not(.ws-tab-anchor) .ws-tab-label', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
     await type('.ws-selected .ws-provenance', 11, 'IBM Plex Mono')
+    await type('.ws-head-position', 11, 'IBM Plex Mono')
   } else {
     await type('.ws-thumb-title', 15, 'EB Garamond')
     await type('.ws-thumb-arrival', 11, 'IBM Plex Mono')
@@ -566,26 +567,59 @@ test('Desk-opened channel reload and Back restore its Desk return control', asyn
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
 })
 
-test('Filmstrip previews share a safe budget, condense instantly, and retain selection through a fresh re-send', async p => {
+test('The running head indexes pages in words, previews on hover within the shared budget, and keeps selection through a fresh re-send', async p => {
   await open(p); await reportReady(p)
   const film = p.locator('.ws-tabs')
-  assert.ok(await film.evaluate(el => el.classList.contains('ws-strip-film')))
-  assert.ok((await film.boundingBox()).height <= 104)
-  await poll(p, () => document.querySelectorAll('.ws-tab-thumb iframe').length > 0)
-  for (const frame of await p.locator('.ws-tab-kind-html iframe').all()) {
+  const head = await p.locator('.ws-navbar').boundingBox()
+  assert.ok(head.height <= 48, `the head is one row: ${head.height}`)
+  assert.ok((await selected(p).boundingBox()).y <= 80, 'the page starts within 80 px of the top')
+  assert.equal(await p.locator('[data-part="chrome-plate"]').count(), 0, 'no chrome plates')
+  assert.equal(await film.locator('[data-part="thumbnail"]').count(), 0, 'the index carries no thumbnails')
+  const selectedTab = film.locator('.ws-tab[aria-selected="true"]')
+  const look = await selectedTab.evaluate(el => ({ background: getComputedStyle(el).backgroundColor, shadow: getComputedStyle(el).boxShadow, rule: getComputedStyle(el.querySelector('.ws-tab-label')).textDecorationLine }))
+  assert.deepEqual(look, { background: 'rgba(0, 0, 0, 0)', shadow: 'none', rule: 'underline' })
+  assert.equal(await tab(p, 'Constitution').textContent(), '§')
+  assert.ok(await tab(p, 'calibration-report').locator('.ws-tab-label').evaluate(el => el.classList.contains('ws-tab-title')))
+  assert.equal(await tab(p, 'calibration-report').getAttribute('title'), null, 'the preview, not a native tooltip, names a hovered page')
+  assert.equal(await p.locator('.ws-tab-fresh').count(), 0, 'first visits are quiet')
+  const preview = p.locator('.ws-tab-preview')
+  await p.mouse.move(700, 500)
+  await tab(p, 'response.pdf').hover()
+  await p.waitForTimeout(200)
+  assert.ok(await preview.isHidden(), 'a first hover waits')
+  await preview.waitFor({ state: 'visible' })
+  assert.match(await preview.locator('.ws-tab-preview-meta').textContent(), /sent/)
+  const anchor = await tab(p, 'response.pdf').boundingBox(), card = await preview.boundingBox()
+  assert.ok(Math.abs(card.x + card.width / 2 - (anchor.x + anchor.width / 2)) < 2 && card.y >= anchor.y + anchor.height, 'the preview hangs beneath its label')
+  assert.equal(await p.evaluate(() => document.activeElement?.closest('.ws-tab-preview')), null, 'the preview never takes focus')
+  await tab(p, 'calibration-report').hover()
+  assert.ok(await preview.isVisible(), 'a neighbour swaps in at once')
+  await poll(p, () => document.querySelectorAll('.ws-tab-preview iframe').length > 0)
+  for (const frame of await preview.locator('iframe').all()) {
     assert.equal(await frame.getAttribute('sandbox'), '')
     assert.equal(await frame.getAttribute('tabindex'), '-1')
   }
   assert.ok(await p.locator('.ws-thumbnail-body').count() <= 16)
-  await poll(p, () => document.querySelector('.ws-tab-kind-html.ws-thumbnail-ready'))
-  assert.equal(await p.locator('.ws-tab-kind-html .ws-thumbnail-face').evaluate(el => getComputedStyle(el).visibility), 'hidden')
-  assert.equal(await p.locator('.ws-tab-kind-html .kbn-thumbnail-glyph').evaluate(el => getComputedStyle(el).display), 'none')
-  assert.ok(await tab(p, 'calibration-report').locator('.ws-tab-label').evaluate(el => el.classList.contains('ws-tab-title')))
-  assert.match(await tab(p, 'calibration-report').getAttribute('title'), /report\.html$/)
-  assert.equal(await p.locator('.ws-tab-fresh').count(), 0, 'first visits are quiet')
+  await poll(p, () => document.querySelector('.ws-tab-preview .ws-tab-kind-html.ws-thumbnail-ready'))
+  assert.equal(await preview.locator('.ws-thumbnail-face').evaluate(el => getComputedStyle(el).visibility), 'hidden')
+  await p.keyboard.press('Escape')
+  assert.ok(await preview.isHidden(), 'Escape dismisses the preview')
+  assert.ok(await selected(p).isVisible(), 'and stops there')
+  await tab(p, 'brief.md').hover()
+  await preview.waitFor({ state: 'visible' })
+  // Straight into the report: its frame must not swallow the leave.
+  await p.mouse.move(700, 500)
+  await poll(p, () => document.querySelector('.ws-tab-preview').hidden)
+  if (process.env.WORKSPACE_SHOTS) {
+    await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+    await tab(p, 'calibration-report').hover(); await preview.waitFor({ state: 'visible' })
+    await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-preview-desktop.png` })
+    await p.mouse.move(700, 500)
+  }
   await report(p).evaluate(f => { window.__filmReport = f.contentWindow })
+  const before = await film.boundingBox()
   await p.locator('.ws-selected .ws-expand-button').click()
-  assert.ok(!await film.evaluate(el => el.classList.contains('ws-strip-film')))
+  assert.deepEqual(await film.boundingBox(), before, 'expanding leaves the head as it is')
   await p.locator('.ws-selected .ws-expand-button').click()
   await p.evaluate(() => {
     const original = window.fetch
@@ -612,8 +646,7 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-desktop.png` })
   }
   await p.setViewportSize({ width: 390, height: 844 })
-  await poll(p, () => !document.querySelector('.ws-tabs').classList.contains('ws-strip-film'))
-  assert.equal(await film.locator('.ws-tab-thumb:visible').count(), 0)
+  await poll(p, () => !document.querySelector('.ws-tabs').checkVisibility())
   if (process.env.WORKSPACE_SHOTS) {
     await p.locator('.ws-page-choice').click()
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-phone.png` })
@@ -753,8 +786,12 @@ async function verdictLook(locator) {
     const rgb = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3) }
     const luminance = color => rgb(color).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0)
     const style = getComputedStyle(el)
-    const ink = luminance(style.color), fill = luminance(style.backgroundColor === 'rgba(0, 0, 0, 0)' ? getComputedStyle(el.closest('.ws-verdict-toast') ?? document.body).backgroundColor : style.backgroundColor)
-    return { color: rgb(style.color), fill: rgb(style.backgroundColor), ratio: (Math.max(ink, fill) + .05) / (Math.min(ink, fill) + .05) }
+    // A bare verb in the head stands on the veil, whose opaque floor is the ground.
+    const fillColor = style.backgroundColor !== 'rgba(0, 0, 0, 0)' ? style.backgroundColor
+      : el.closest('.ws-verdict-toast') ? getComputedStyle(el.closest('.ws-verdict-toast')).backgroundColor
+      : getComputedStyle(el.closest('.ws-reader')?.querySelector('[data-part="veil"]') ?? document.body).getPropertyValue('--ws-ground').trim() || getComputedStyle(document.body).backgroundColor
+    const ink = luminance(style.color), fill = luminance(fillColor)
+    return { color: rgb(style.color), fill: rgb(fillColor), ratio: (Math.max(ink, fill) + .05) / (Math.min(ink, fill) + .05) }
   })
 }
 const tealish = ([r, g, b]) => g > r && b > r
