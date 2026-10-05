@@ -242,7 +242,7 @@ defmodule Shuttle.LogRotator do
   # the tmux respawn loop lands on when it starts the daemon with no baked
   # environment.
   defp daemon_log_path do
-    case System.get_env("SHUTTLE_LOG") do
+    case Shuttle.Env.get("SHUTTLE_LOG") do
       path when is_binary(path) and path != "" ->
         path
 

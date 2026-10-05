@@ -324,6 +324,6 @@ defmodule Shuttle.OriginRouter do
   """
   @spec forward_client() :: module()
   def forward_client do
-    Application.get_env(:shuttle, :write_forward_client, Shuttle.RemoteRegistry.Client.Default)
+    Shuttle.Env.app(:write_forward_client, Shuttle.RemoteRegistry.Client.Default)
   end
 end

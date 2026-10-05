@@ -51,5 +51,4 @@ defmodule ShuttleWeb.RemoteControllerTest do
     conn = post(api_conn(), "/api/v1/remotes/candide/reset", "{}")
     assert %{"error" => "registry_unavailable"} = json_response(conn, 503)
   end
-
 end

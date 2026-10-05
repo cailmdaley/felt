@@ -36,5 +36,8 @@ Application.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
 )
 
+# Per-test scoped env overrides (Shuttle.Env / Shuttle.Test.Env).
+Shuttle.Test.Env.start!()
+
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
 ExUnit.start(exclude: exclude)

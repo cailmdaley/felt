@@ -87,7 +87,7 @@ defmodule Shuttle.Host do
   @doc "Path host.json is read from: `$SHUTTLE_HOST_CONFIG_FILE`, else `~/.config/shuttle/host.json`."
   @spec config_path() :: String.t()
   def config_path do
-    case System.get_env(@config_env) do
+    case Shuttle.Env.get(@config_env) do
       v when is_binary(v) and v != "" -> Path.expand(v)
       _ -> Path.expand(@default_config_path)
     end
@@ -131,7 +131,7 @@ defmodule Shuttle.Host do
   @doc "The uid and source used by the TCP peer gate. Raises on an invalid uid."
   @spec expected_peer_uid_config!() :: {non_neg_integer(), :euid | :env}
   def expected_peer_uid_config! do
-    case System.get_env("SHUTTLE_PEER_UID") do
+    case Shuttle.Env.get("SHUTTLE_PEER_UID") do
       nil ->
         {effective_uid(), :euid}
 
@@ -272,7 +272,7 @@ defmodule Shuttle.Host do
   end
 
   defp resolve_listen(file_listen, class, path, fallback_port) do
-    env_listen = System.get_env("SHUTTLE_LISTEN")
+    env_listen = Shuttle.Env.get("SHUTTLE_LISTEN")
 
     cond do
       present?(env_listen) ->
@@ -290,7 +290,7 @@ defmodule Shuttle.Host do
   end
 
   defp class_default(:single_user, fallback_port) do
-    case System.get_env("SHUTTLE_PORT") do
+    case Shuttle.Env.get("SHUTTLE_PORT") do
       value when is_binary(value) ->
         if String.trim(value) == "" do
           {:ok, {:tcp, {127, 0, 0, 1}, fallback_port}}

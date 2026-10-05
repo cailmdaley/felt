@@ -57,7 +57,7 @@ defmodule Shuttle.CLI do
 
   # The single test seam covers both executable names; the runner receives the
   # actual binary name so stubs can preserve the process boundary.
-  defp configured_runner, do: Application.get_env(:shuttle, :felt_runner, Shuttle.Runner.Default)
+  defp configured_runner, do: Shuttle.Env.app(:felt_runner, Shuttle.Runner.Default)
 
   defp local_flag(verb) when verb in @local_verbs, do: ["--local"]
   defp local_flag(_verb), do: []

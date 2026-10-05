@@ -17,7 +17,7 @@ defmodule Shuttle.PollerTest do
   # ── Setup ──
 
   setup do
-    start_supervised!(MockRunner)
+    MockRunner.start!()
     MockRunner.reset()
     mock_felt_root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(mock_felt_root) end)

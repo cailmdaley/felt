@@ -122,7 +122,7 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
 
   describe "remote host routing" do
     setup do
-      start_supervised!(StubGetFileClient)
+      StubGetFileClient.start!()
       prior_client = Application.get_env(:shuttle, :write_forward_client)
       prior_remotes = Application.get_env(:shuttle, :remotes)
       Application.put_env(:shuttle, :write_forward_client, StubGetFileClient)

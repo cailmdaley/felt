@@ -425,7 +425,7 @@ defmodule Shuttle.FeltStores do
   # injection is by config rather than a threaded opt. Tests set
   # `:shuttle, :felt_stores_runner` to a mock; production defaults to the
   # bounded runner.
-  defp runner, do: Application.get_env(:shuttle, :felt_stores_runner, Shuttle.Runner.Default)
+  defp runner, do: Shuttle.Env.app(:felt_stores_runner, Shuttle.Runner.Default)
 
   defp resolved(path, store, fiber_id, uid) do
     %{store: store, fiber_id: fiber_id, path: path, uid: uid}

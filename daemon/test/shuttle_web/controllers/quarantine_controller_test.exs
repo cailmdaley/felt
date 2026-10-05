@@ -64,7 +64,7 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   # tunnel to the owning daemon's identical endpoint and relays its response.
   # The forwarded body strips `origin` (the owner runs its own local branch).
   test "release forwards to the owning remote when origin names one" do
-    start_supervised!(StubPostClient)
+    StubPostClient.start!()
 
     StubPostClient.set_response(
       {:ok, 200, Jason.encode!(%{"ok" => true, "boot_quarantine" => false})}

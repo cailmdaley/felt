@@ -128,7 +128,7 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   setup do
-    start_supervised!(Runner)
+    Runner.start!()
     start_supervised!(App)
     root = Path.join(System.tmp_dir!(), "app-workers-test-#{System.unique_integer([:positive])}")
     previous_root = Application.get_env(:shuttle, :app_workers_dir)

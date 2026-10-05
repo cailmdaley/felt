@@ -624,7 +624,7 @@ defmodule Shuttle.Poller do
         Keyword.get(
           opts,
           :boot_quarantine,
-          Application.get_env(:shuttle, :boot_quarantine, @default_boot_quarantine)
+          Shuttle.Env.app(:boot_quarantine, @default_boot_quarantine)
         ),
       # Boot-time version handshake: probe ONCE here, before the first
       # tick, so a skewed CLI is caught (and fresh dispatch held) before any
@@ -1713,7 +1713,7 @@ defmodule Shuttle.Poller do
   # via app env so tests inject a deterministic `session => %{last_event_at,
   # phase}` map without writing to the real events.jsonl.
   defp session_activity do
-    case Application.get_env(:shuttle, :waiting_phases_source) do
+    case Shuttle.Env.app(:waiting_phases_source) do
       fun when is_function(fun, 0) -> fun.()
       _ -> Shuttle.EventStream.session_activity()
     end
@@ -2343,7 +2343,7 @@ defmodule Shuttle.Poller do
   # `shuttle.host` and dispatch nothing, silently.
   @spec resolve_own_host_id(keyword()) :: String.t()
   defp resolve_own_host_id(cli_opts) do
-    case String.trim(System.get_env("SHUTTLE_HOST", "")) do
+    case String.trim(Shuttle.Env.get("SHUTTLE_HOST", "")) do
       "" -> shuttle_host_id(cli_opts)
       env -> env
     end
@@ -3491,7 +3491,7 @@ defmodule Shuttle.Poller do
 
       _ ->
         app_without_tmux? =
-          System.find_executable("tmux") == nil and
+          Shuttle.Env.find_executable("tmux") == nil and
             case fetch_fiber_full(fiber_id, state) do
               {:ok, fiber} -> get_in(fiber, ["shuttle", "surface"]) == "app"
               _ -> false
@@ -3627,7 +3627,8 @@ defmodule Shuttle.Poller do
       runner: state.runner,
       uid: Map.get(metadata, :uid),
       felt_store: Map.get(metadata, :felt_store),
-      heartbeat_interval_ms: state.heartbeat_interval_ms
+      heartbeat_interval_ms: state.heartbeat_interval_ms,
+      callers: Shuttle.Env.callers()
     ]
 
     case DynamicSupervisor.start_child(Shuttle.WatcherSupervisor, {WorkerWatcher, watcher_opts}) do

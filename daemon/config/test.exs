@@ -1,6 +1,9 @@
 import Config
 
 config :shuttle,
+  # Shuttle.Env consults per-test scoped overrides (Shuttle.Test.Env), so
+  # tests inject process-global config instead of mutating it.
+  scoped_env: true,
   start_poller: false,
   # Tests boot pollers constantly; quarantining every one would park the very
   # dispatches the suite asserts on. Quarantine tests pass `boot_quarantine:

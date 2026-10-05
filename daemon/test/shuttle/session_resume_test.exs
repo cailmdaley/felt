@@ -370,7 +370,7 @@ defmodule Shuttle.SessionResumeTest do
     end
 
     test "a remote session is started on its host, then attached over that host's ssh path" do
-      start_supervised!(StubPostClient)
+      StubPostClient.start!()
       prior_client = Application.get_env(:shuttle, :write_forward_client)
       prior_remotes = Application.get_env(:shuttle, :remotes)
       Application.put_env(:shuttle, :write_forward_client, StubPostClient)

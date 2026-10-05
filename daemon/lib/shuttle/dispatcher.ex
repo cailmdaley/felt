@@ -856,7 +856,7 @@ defmodule Shuttle.Dispatcher do
   # the daemon refuses with :already_running and the caller adopts instead.
   defp check_not_running(fiber_id, uid, runner, surface) do
     cond do
-      surface == "app" and System.find_executable("tmux") == nil -> :ok
+      surface == "app" and Shuttle.Env.find_executable("tmux") == nil -> :ok
       Shuttle.Tmux.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
       true -> :ok
     end

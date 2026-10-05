@@ -86,5 +86,4 @@ defmodule ShuttleWeb.ClaimControllerTest do
     assert forwarded["fiber_id"] == "tests/x"
     assert forwarded["tmux_session"] == "capture-x"
   end
-
 end

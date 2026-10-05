@@ -40,7 +40,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
   end
 
   setup do
-    start_supervised!(MockRunner)
+    MockRunner.start!()
     MockRunner.reset()
     root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(root) end)

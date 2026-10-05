@@ -300,7 +300,7 @@ defmodule Shuttle.Meeting do
              Keyword.get(
                opts,
                :now,
-               Application.get_env(:shuttle, :meeting_now, NaiveDateTime.local_now())
+               Shuttle.Env.app(:meeting_now, NaiveDateTime.local_now())
              )
            ),
          :ok <- dismiss_failed(context, opts),
@@ -470,7 +470,7 @@ defmodule Shuttle.Meeting do
   # Watch the new launch briefly so a hark that dies at once never gets a
   # scribe. A slow import or an unreadable tmux leaves it `starting`.
   defp await_launch(launch_id, paths, title, fiber, mode, opts) do
-    wait_ms = Application.get_env(:shuttle, :meeting_launch_wait_ms, @launch_wait_ms)
+    wait_ms = Shuttle.Env.app(:meeting_launch_wait_ms, @launch_wait_ms)
     deadline = System.monotonic_time(:millisecond) + wait_ms
     await_launch(launch_id, paths, title, fiber, mode, opts, deadline)
   end
@@ -820,7 +820,7 @@ defmodule Shuttle.Meeting do
   defp find_scribe_fiber(%{fiber: nil} = meeting, launch, opts)
        when is_binary(launch) and launch != "" do
     fibers =
-      Keyword.get(opts, :fibers, Application.get_env(:shuttle, :meeting_fibers, &served_fibers/0))
+      Keyword.get(opts, :fibers, Shuttle.Env.app(:meeting_fibers, &served_fibers/0))
 
     fiber =
       Enum.find_value(fibers.(), fn fiber ->
@@ -922,13 +922,13 @@ defmodule Shuttle.Meeting do
   defp launch_id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
   defp find_hark(opts) do
-    configured = Keyword.get(opts, :hark_path, Application.get_env(:shuttle, :hark_path))
+    configured = Keyword.get(opts, :hark_path, Shuttle.Env.app(:hark_path))
 
     candidates =
       case configured do
         false -> []
         path when is_binary(path) -> [path]
-        _ -> [System.find_executable("hark"), Path.expand("~/.local/bin/hark")]
+        _ -> [Shuttle.Env.find_executable("hark"), Path.expand("~/.local/bin/hark")]
       end
 
     Enum.find(candidates, &executable_file?/1)
@@ -948,8 +948,8 @@ defmodule Shuttle.Meeting do
   defp executable_file?(_), do: false
 
   defp hark_dir(opts) do
-    Keyword.get(opts, :hark_dir) || Application.get_env(:shuttle, :hark_dir) ||
-      case System.get_env("HARK_DIR") do
+    Keyword.get(opts, :hark_dir) || Shuttle.Env.app(:hark_dir) ||
+      case Shuttle.Env.get("HARK_DIR") do
         path when is_binary(path) and path != "" -> Path.expand(path)
         _ -> Path.expand("~/.hark")
       end
@@ -957,7 +957,7 @@ defmodule Shuttle.Meeting do
 
   defp home_dir(opts) do
     Keyword.get(opts, :home_dir) ||
-      case System.get_env("HOME") do
+      case Shuttle.Env.get("HOME") do
         path when is_binary(path) and path != "" -> path
         _ -> Path.expand("~")
       end
@@ -965,7 +965,7 @@ defmodule Shuttle.Meeting do
 
   defp run(opts, command, args) do
     runner =
-      Keyword.get(opts, :runner, Application.get_env(:shuttle, :meeting_runner, Runner.Default))
+      Keyword.get(opts, :runner, Shuttle.Env.app(:meeting_runner, Runner.Default))
 
     runner.cmd(command, args, stderr_to_stdout: true, timeout_ms: @command_timeout_ms)
   end

@@ -99,7 +99,7 @@ defmodule Shuttle.Remotes do
   """
   @spec configured() :: [Remote.t()]
   def configured do
-    case Application.get_env(:shuttle, :remotes) do
+    case Shuttle.Env.app(:remotes) do
       nil -> resolve(document(), Shuttle.TailnetPeers.peers(), tailscale_socket_configured?())
       entries when is_list(entries) -> normalize(entries, tailscale_socket_configured?())
       _ -> []
@@ -186,7 +186,7 @@ defmodule Shuttle.Remotes do
   """
   @spec launchd_label_prefix() :: String.t()
   def launchd_label_prefix do
-    with nil <- Application.get_env(:shuttle, :launchd_label_prefix),
+    with nil <- Shuttle.Env.app(:launchd_label_prefix),
          {:ok, %{"launchd_label_prefix" => prefix}} when is_binary(prefix) and prefix != "" <-
            read_document() do
       prefix
@@ -231,7 +231,7 @@ defmodule Shuttle.Remotes do
   """
   @spec https_proxy() :: {String.t(), pos_integer()} | nil
   def https_proxy do
-    case Application.get_env(:shuttle, :https_proxy) do
+    case Shuttle.Env.app(:https_proxy) do
       nil -> file_https_proxy()
       false -> nil
       value -> parse_proxy(value)
@@ -260,7 +260,7 @@ defmodule Shuttle.Remotes do
   @spec tailscale_socket_source() ::
           {:configured, term()} | {:system, nil} | {:default, String.t()} | {:none, nil}
   def tailscale_socket_source do
-    case Application.get_env(:shuttle, :tailscale_socket) do
+    case Shuttle.Env.app(:tailscale_socket) do
       nil -> doc_socket_source(document())
       false -> {:none, nil}
       value -> explicit_socket_source(value)
@@ -283,7 +283,7 @@ defmodule Shuttle.Remotes do
   """
   @spec tailscale_socket() :: String.t() | nil
   def tailscale_socket do
-    case Application.get_env(:shuttle, :tailscale_socket) do
+    case Shuttle.Env.app(:tailscale_socket) do
       false ->
         nil
 
@@ -333,8 +333,8 @@ defmodule Shuttle.Remotes do
           {:ok, String.t()} | {:refused, String.t(), String.t()} | :absent
   def default_tailscale_socket_check do
     home =
-      case Application.get_env(:shuttle, :tailscale_home) do
-        nil -> System.get_env("HOME")
+      case Shuttle.Env.app(:tailscale_home) do
+        nil -> Shuttle.Env.get("HOME")
         false -> nil
         home -> home
       end
@@ -344,7 +344,7 @@ defmodule Shuttle.Remotes do
          {:ok, ^path} <- Remote.normalize_socket_path(path),
          {:ok, _stat} <- File.lstat(path) do
       cond do
-        (Application.get_env(:shuttle, :os_type) || :os.type()) != {:unix, :linux} ->
+        (Shuttle.Env.app(:os_type) || :os.type()) != {:unix, :linux} ->
           {:refused, path, "default socket is Linux-only"}
 
         why = Shuttle.Host.private_socket_problem(path, home, Shuttle.Host.euid()) ->
@@ -363,7 +363,7 @@ defmodule Shuttle.Remotes do
 
     case explicit_socket_source(Map.get(defaults, "tailscale_socket")) do
       {:none, nil} ->
-        if proxy_set?(defaults) or Application.get_env(:shuttle, :https_proxy) not in [nil, false],
+        if proxy_set?(defaults) or Shuttle.Env.app(:https_proxy) not in [nil, false],
           do: {:none, nil},
           else: default_socket_source()
 
@@ -436,7 +436,7 @@ defmodule Shuttle.Remotes do
   @doc "Path the fleet is read from. Only the Go CLI writes it."
   @spec config_path() :: String.t()
   def config_path do
-    case System.get_env(@config_env) do
+    case Shuttle.Env.get(@config_env) do
       v when is_binary(v) and v != "" -> Path.expand(v)
       _ -> Path.expand(@default_config_path)
     end

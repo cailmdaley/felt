@@ -227,9 +227,9 @@ defmodule Shuttle.TmuxServer do
     {:error, {:tmux_server_unavailable, refusal_message(to_string(reason))}}
   end
 
-  defp kitty_impl, do: Application.get_env(:shuttle, :kitty_impl, Shuttle.Kitty)
+  defp kitty_impl, do: Shuttle.Env.app(:kitty_impl, Shuttle.Kitty)
 
   # The single darwin gate, injectable so the branch is exercised on Linux CI
   # (and the Linux passthrough on a macOS laptop).
-  defp os_type, do: Application.get_env(:shuttle, :os_type) || :os.type()
+  defp os_type, do: Shuttle.Env.app(:os_type) || :os.type()
 end

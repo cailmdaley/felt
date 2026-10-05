@@ -140,7 +140,7 @@ defmodule Shuttle.TailnetDial do
   by `nobody`) fails `Shuttle.Host.prepare_unix_socket!/1`'s ancestor check.
   """
   def socket_root do
-    case System.get_env("XDG_RUNTIME_DIR", "") do
+    case Shuttle.Env.get("XDG_RUNTIME_DIR", "") do
       "/" <> _ = dir -> if File.dir?(dir), do: Path.join(dir, "shuttle"), else: Shuttle.data_dir()
       _ -> Shuttle.data_dir()
     end

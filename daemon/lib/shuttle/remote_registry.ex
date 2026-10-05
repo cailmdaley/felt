@@ -1060,7 +1060,7 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   defp current_uid do
-    case System.get_env("UID") do
+    case Shuttle.Env.get("UID") do
       uid when is_binary(uid) and uid != "" ->
         uid
 
@@ -1479,7 +1479,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   defp current_tailscale_socket do
     # The resolved file path matters independently of its stat token: two
     # selected files can have the same `{mtime, size}` and different sockets.
-    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :tailscale_socket)}
+    key = {remotes_file_snapshot(), Shuttle.Env.app(:tailscale_socket)}
 
     case :persistent_term.get(@tailscale_socket_key, :unset) do
       {^key, socket} ->
@@ -1586,7 +1586,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # `SHUTTLE_REMOTES_FILE` cannot reuse a value from another file with matching
   # metadata, and `Shuttle.Remotes.https_proxy/0` owns the precedence decision.
   defp current_proxy do
-    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :https_proxy)}
+    key = {remotes_file_snapshot(), Shuttle.Env.app(:https_proxy)}
 
     case :persistent_term.get(@proxy_key, :unset) do
       {^key, proxy} ->
@@ -1651,7 +1651,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def tls_opts do
     cacerts =
       if @tailnet_dial_test_cacerts_enabled do
-        Application.get_env(:shuttle, :tailnet_dial_test_cacerts) || :public_key.cacerts_get()
+        Shuttle.Env.app(:tailnet_dial_test_cacerts) || :public_key.cacerts_get()
       else
         :public_key.cacerts_get()
       end

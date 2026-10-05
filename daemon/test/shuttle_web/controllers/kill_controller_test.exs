@@ -20,5 +20,4 @@ defmodule ShuttleWeb.KillControllerTest do
     assert conn.status == 400
     assert %{"error" => _} = json_response(conn, 400)
   end
-
 end

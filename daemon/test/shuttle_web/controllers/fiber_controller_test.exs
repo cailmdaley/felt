@@ -184,7 +184,7 @@ defmodule ShuttleWeb.FiberControllerTest do
   test "POST /api/v1/fiber/create forwards a remote-origin create to the owning daemon", %{
     tmp: tmp
   } do
-    start_supervised!(StubPostClient)
+    StubPostClient.start!()
 
     StubPostClient.set_response(
       {:ok, 200, Jason.encode!(%{"id" => "tests/remote-stash", "path" => "/candide/.felt/…"})}
@@ -236,7 +236,7 @@ defmodule ShuttleWeb.FiberControllerTest do
     # A remote IS configured here, so the test proves the fall-through
     # discriminates: "ghost" doesn't match "candide", so it stays local and the
     # forward plane is never touched.
-    start_supervised!(StubPostClient)
+    StubPostClient.start!()
     previous_remotes = Application.get_env(:shuttle, :remotes)
     previous_client = Application.get_env(:shuttle, :write_forward_client)
     Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])

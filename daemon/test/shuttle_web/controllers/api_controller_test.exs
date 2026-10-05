@@ -29,7 +29,7 @@ defmodule ShuttleWeb.APIControllerTest do
       restore_app_env(:action_query_runner, previous_action_runner)
     end)
 
-    start_supervised!(MockRunner)
+    MockRunner.start!()
     MockRunner.reset()
     mock_felt_root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(mock_felt_root) end)
@@ -684,7 +684,7 @@ defmodule ShuttleWeb.APIControllerTest do
   # the origin the caller routed to. The forwarded payload carries no origin (so
   # the remote runs its own local branch); only fiber_id + target cross the wire.
   test "transition forwards a remote-owned fiber to the owning daemon" do
-    start_supervised!(StubPostClient)
+    StubPostClient.start!()
 
     StubPostClient.set_response(
       {:ok, 200,
@@ -733,7 +733,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "successful remote transition refreshes the cached remote fiber feed" do
-    start_supervised!(StubPostClient)
+    StubPostClient.start!()
 
     StubPostClient.set_response(
       {:ok, 200,
@@ -803,7 +803,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "transition relays a remote owner's error status" do
-    start_supervised!(StubPostClient)
+    StubPostClient.start!()
 
     StubPostClient.set_response(
       {:ok, 409, Jason.encode!(%{"invoked" => false, "error" => "action_not_available"})}
