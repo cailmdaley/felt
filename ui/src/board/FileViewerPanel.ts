@@ -52,6 +52,8 @@ export interface FileViewerOptions {
   quietLoading?: boolean
   /** Listening controls use the same native element and lifecycle as video. */
   decorateAudio?: (audio: HTMLAudioElement) => () => void
+  /** Channel references are installed after every text-body replacement. */
+  decorateText?: (pane: HTMLElement) => void
 }
 
 /**
@@ -634,6 +636,19 @@ function buildTextViewer(
           `<pre class="md-code-block language-${escapeHtml(ext || 'plaintext')}">` +
           `<code class="language-${escapeHtml(ext || 'plaintext')}">${escapeHtml(text)}</code></pre>`
       }
+      if (options.decorateText && !MARKDOWN_EXTS.has(ext)) {
+        const block = pane.querySelector('code')!
+        const parts = text.split(/(`[^`\n]+`)/g)
+        if (parts.length > 1) {
+          block.replaceChildren(...parts.map((part, index) => {
+            if (index % 2 === 0) return document.createTextNode(part)
+            const code = document.createElement('code'); code.className = 'md-inline-code'
+            code.textContent = part.slice(1, -1)
+            return code
+          }))
+        }
+      }
+      options.decorateText?.(pane)
       wrap.scrollTop = scrollTop
       veil.remove()
       if (!hasContent) onReady?.(wrap)

@@ -11,6 +11,7 @@ import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
+import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
 
 export interface DocumentFrame {
   el: HTMLElement
@@ -36,6 +37,7 @@ type FrameState = {
   revision: number
   transferTime: number | null
   weight: number
+  references: ReferenceSurface | null
 }
 
 const RETAIN = 10
@@ -80,6 +82,7 @@ export class DocumentHost {
       state.frame.doc = doc
     }
     this.select(selected)
+    for (const state of this.frames.values()) state.references?.scan()
     for (const page of this.audioPages.values()) page.updateDocuments(documents)
     this.pruneFrames()
   }
@@ -159,8 +162,10 @@ export class DocumentHost {
     if (this.disposed || !state || state.frame.doc.kind !== 'fiber' || !state.frame.viewer) return
     this.saveScroll(state)
     state.stopScroll?.()
+    state.references?.dispose()
     state.frame.content.replaceChildren(element)
     state.frame.viewer = element
+    this.bindReferences(state, element)
     state.loaded = true
     this.clearNotice(state)
     this.bindScroller(state, element)
@@ -234,7 +239,7 @@ export class DocumentHost {
     const state: FrameState = {
       frame, pending: null, loaded: false, active: false, initialSuspended: false,
       scroll: readScroll(doc.key), readScroll: null, stopScroll: null,
-      notice: null, controller: null, revision: 0, transferTime: null, weight: 1,
+      notice: null, controller: null, revision: 0, transferTime: null, weight: 1, references: null,
     }
     this.placeholder(state)
     el.addEventListener('click', event => {
@@ -263,6 +268,7 @@ export class DocumentHost {
       state.frame.viewer = prose
       state.loaded = true
       this.bindScroller(state, prose)
+      this.bindReferences(state, prose)
     } else {
       this.buildViewer(state, false)
     }
@@ -300,6 +306,7 @@ export class DocumentHost {
           page.updateDocuments(this.documents)
           return () => { page.dispose(); this.audioPages.delete(audio) }
         },
+        decorateText: pane => this.bindReferences(state, pane),
         onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
         onDocumentKey: key => this.forwardKey(state, key),
         onWeight: weight => queueMicrotask(() => {
@@ -378,6 +385,8 @@ export class DocumentHost {
     state.revision++
     state.controller?.abort()
     state.controller = null
+    state.references?.dispose()
+    state.references = null
     state.stopScroll?.()
     state.stopScroll = null
     state.readScroll = null
@@ -502,6 +511,19 @@ export class DocumentHost {
       this.saveScroll(state)
       if (state.active) this.options.onScroll?.(state.frame.doc.key, position.y)
     })
+  }
+
+  private bindReferences(state: FrameState, root: HTMLElement): void {
+    state.references?.dispose()
+    const surface = referenceRuntime(root,
+      candidates => surface.resolve(referenceTargets(candidates, state.frame.doc, this.documents)),
+      (type, candidate) => {
+        if (!state.active || state.frame.doc.key !== this.selected || type !== 'select') return
+        const target = resolveChannelReference(candidate, state.frame.doc, this.documents)
+        if (target) this.options.onSelect(target.key)
+      })
+    state.references = surface
+    surface.scan()
   }
 
   private saveScroll(state: FrameState): void {
