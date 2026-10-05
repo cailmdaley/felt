@@ -95,6 +95,9 @@ export class Reader {
   /** The awaiting-review verdicts, beside the fiber's name, reachable from any page. */
   private readonly verdicts = element('span', 'ws-nav-verdicts')
   private verdictKey: string | null = null
+  /** The phone top bar's conversation dot: the worker pill's target, drawn as its state's pigment. */
+  private readonly conversation = element('span', 'ws-topbar-worker')
+  private conversationClock = 0
   private readonly position = element('span', 'ws-position')
   private readonly pageTitle = element('span', 'ws-thumb-title')
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
@@ -162,6 +165,7 @@ export class Reader {
     this.lead.dataset.part = 'chrome-plate'
     this.lead.append(this.returnButton, this.sidebarToggle, this.title, this.verdicts)
     this.trail = element('div', 'ws-nav-trail')
+    this.trail.append(this.conversation)
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     const tabPlate = element('div', 'ws-nav-tabs')
@@ -234,6 +238,7 @@ export class Reader {
     document.addEventListener('pointerdown', this.pointerInput, true)
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
+    this.phone.addEventListener('change', this.phoneChanged)
     this.wide.addEventListener('change', this.relayout)
     this.el.addEventListener('workspace-theme-change', this.themeChanged)
     this.el.addEventListener('mousedown', e => {
@@ -270,6 +275,7 @@ export class Reader {
     this.title.textContent = channel.name
     this.title.title = channel.name
     this.paintVerdicts()
+    this.paintConversation()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     if (!switching) this.tabs.arrive(arrivals)
@@ -416,6 +422,21 @@ export class Reader {
       this.pageSheet.setActions(key && card ? this.opts.verdictPlate?.(card) ?? null : null)
     }
     this.verdicts.hidden = !key || !this.verdicts.firstChild || this.document?.kind === 'fiber'
+  }
+  private paintConversation(): void {
+    const card = this.currentCard
+    const focused = this.conversation.contains(document.activeElement)
+    // Only the phone draws it; the desktop's worker control is the act zone's pill.
+    const pill = card && this.phone.matches ? this.opts.workerPill?.(card) ?? null : null
+    if (card && pill) {
+      pill.dataset.part = 'act'; pill.dataset.act = 'worker'
+      workerPlate(card, pill)
+    }
+    this.conversation.replaceChildren(...(pill ? [pill] : []))
+    this.conversation.hidden = !pill
+    if (focused) pill?.focus({ preventScroll: true })
+    window.clearTimeout(this.conversationClock)
+    if (pill) this.conversationClock = window.setTimeout(() => { if (this.active) this.paintConversation() }, 30000)
   }
   private paint(animate: boolean): void {
     this.paintVerdicts()
@@ -579,6 +600,7 @@ export class Reader {
       frame.el.style.setProperty('--ws-neighbour-fade-end', `${end}%`)
     }
   }
+  private readonly phoneChanged = (): void => { if (this.active) this.paintConversation() }
   private readonly relayout = (): void => {
     if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.renderSidebar()
@@ -904,6 +926,7 @@ export class Reader {
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
     cancelAnimationFrame(this.arrival)
+    window.clearTimeout(this.conversationClock)
     if (this.departure !== null) clearTimeout(this.departure)
     this.wide.removeEventListener('change', this.relayout)
     this.stopTitles()
@@ -919,6 +942,7 @@ export class Reader {
     document.removeEventListener('pointerdown', this.pointerInput, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
+    this.phone.removeEventListener('change', this.phoneChanged)
     this.el.removeEventListener('workspace-theme-change', this.themeChanged)
     this.el.remove()
   }
