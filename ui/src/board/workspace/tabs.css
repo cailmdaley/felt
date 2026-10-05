@@ -1,8 +1,8 @@
-/* The running head's index: bare serif labels in muted ink. The selected
+/* The running head's index: bare serif labels a step below the name, in muted ink. The selected
    label is in ink over one fine rule; there is no fill, plate or shadow. */
 .ws-tab-label {
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0;
+  font: var(--ws-index-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0;
   text-decoration: underline transparent var(--ws-line-width); text-underline-offset: var(--ws-tab-rule-offset);
   text-decoration-skip-ink: none;
 }

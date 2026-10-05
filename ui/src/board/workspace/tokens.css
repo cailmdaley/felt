@@ -76,7 +76,9 @@
   /* Half the space between two index labels. */
   --ws-tab-pad: 9px;
   --ws-tab-rule-offset: 6px;
-  --ws-tab-anchor-size: 17px;
+  --ws-tab-anchor-size: 16px;
+  /* The index sits a step below the head's names, so the fiber's name leads. */
+  --ws-index-size: 14px;
   --ws-preview-width: 224px;
   --ws-drag-latch: 4px;
 

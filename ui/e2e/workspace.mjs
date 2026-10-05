@@ -93,7 +93,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await type('.ws-channel-title', 15, 'EB Garamond')
   await type('.ws-nav-verdicts .ws-review-plate .kbn-ctl-btn', 15, 'EB Garamond')
   if (device === 'desktop') {
-    for (const selector of ['.ws-return', '.ws-tab:not(.ws-tab-anchor) .ws-tab-label', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
+    for (const selector of ['.ws-return', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
+    // The index sits a step below the head's names.
+    await type('.ws-tab:not(.ws-tab-anchor) .ws-tab-label', 14, 'EB Garamond')
     await type('.ws-selected .ws-provenance', 11, 'IBM Plex Mono')
     await type('.ws-head-position', 11, 'IBM Plex Mono')
   } else {
