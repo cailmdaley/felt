@@ -2234,10 +2234,17 @@
     opacity: 1;
     pointer-events: auto;
   }
+  /* A compact 28px plate; the 44px touch target reaches past it vertically. */
   .kbn-card-review-meta-actions .kbn-review-meta-btn {
-    height: 44px;
+    position: relative;
+    height: 28px;
     min-width: 44px;
-    padding: 8px;
+    padding: 0 10px;
+  }
+  .kbn-card-review-meta-actions .kbn-review-meta-btn::after {
+    content: '';
+    position: absolute;
+    inset: -8px 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
