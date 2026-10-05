@@ -325,6 +325,7 @@ export class DocumentHost {
     if (active) {
       state.initialSuspended = false
       resumeFileViewer(state.frame.viewer)
+      resumeFileViewer(state.pending)
     }
     else {
       state.initialSuspended = !state.loaded && !!state.frame.viewer

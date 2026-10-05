@@ -85,6 +85,21 @@ describe('native media documents', () => {
     expect(audio.currentTime).toBe(.5); expect(audio.paused).toBe(true)
   })
 
+  it('activates a refreshed media element when selection precedes its metadata load', async () => {
+    const track = document.createElement('div'); document.body.append(track)
+    host = new DocumentHost(track, { shuttleBase: '', buildProse: () => document.createElement('div'), onSelect: () => {} })
+    const audioDoc = doc('/song.mp3', 'audio'), videoDoc = doc('/film.mp4', 'video')
+    host.setChannel([audioDoc, videoDoc], audioDoc.key)
+    host.refresh(videoDoc.key)
+    const replacement = host.get(videoDoc.key)!.content.querySelectorAll('video')[1]
+    host.select(videoDoc.key)
+    replacement.dispatchEvent(new Event('loadedmetadata'))
+    await Promise.resolve()
+    expect(host.get(videoDoc.key)!.viewer!.querySelector('video')).toBe(replacement)
+    await replacement.play()
+    expect(replacement.paused).toBe(false)
+  })
+
   it('draws unsupported documents with file-info size and a download', async () => {
     const el = viewer('/archive.zip')
     await vi.waitFor(() => expect(el.textContent).toContain('2,048 bytes'))
