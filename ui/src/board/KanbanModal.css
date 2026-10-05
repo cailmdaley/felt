@@ -59,6 +59,7 @@
   /* NOW, AND WHAT IS OWED. The now-thread, a due date, a worker with its hand
      up, the drag band. Gold is the board's "attend to this, at this time". */
   --kbn-owed: #9A7B35;
+  --kbn-owed-ink: color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-ink) 30%);
   --kbn-owed-bright: #C49333;
 
   /* THE VERDICT — and the ONE meaning verdigris keeps. A fiber tempered, and
@@ -1355,10 +1356,19 @@
 }
 .kbn-flight-caption {
   margin: 0 0 6px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  font-weight: 400;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: calc(15px * var(--kbn-type-scale, 1));
+  font-weight: 500;
+  font-variant-caps: all-small-caps;
+  font-feature-settings: "smcp", "c2sc";
+  letter-spacing: 0.06em;
   color: var(--kbn-ink-muted);
+}
+.kbn-flight-band[data-flight-band="needsYou"] .kbn-flight-caption {
+  color: var(--kbn-owed-ink);
+}
+.kbn-flight-band[data-flight-band="needsYou"] .kbn-card {
+  border-left: 3px solid var(--kbn-owed);
 }
 .kbn-flight-band + .kbn-flight-band {
   margin-top: 4px;
