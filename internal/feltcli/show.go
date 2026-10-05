@@ -65,17 +65,15 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 
 			scopeID := felt.CommandScope(root, view.directory())
 
-			// An id that names a fiber in the enclosing store is shown from
-			// there: everything below runs against the store that holds it, with
-			// the fiber addressed by its id in that store's coordinates.
+			// Everything below runs against the store that holds the fiber, with
+			// the fiber addressed by its resolved id in that store's coordinates:
+			// an id naming a fiber in the enclosing store is shown from there,
+			// and a UID is read directly instead of walked for a second time.
 			target, err := felt.ResolveRef(storage, scopeID, args[0])
 			if err != nil {
 				return err
 			}
-			query := args[0]
-			if target.Elsewhere {
-				storage, scopeID, query = target.Storage, "", target.ID
-			}
+			storage, scopeID, query := target.Storage, "", target.ID
 
 			if selectorCount == 0 && !view.jsonOutput() && (detail == DepthName || detail == DepthCompact) {
 				// Both levels skip the relationship scan and the body-ref graph.

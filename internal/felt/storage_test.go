@@ -684,6 +684,33 @@ func TestStorageFindByUID(t *testing.T) {
 	}
 }
 
+// TestListMetadataByUIDMatchesFrontmatterOnly: the byte prefilter that keeps
+// a UID walk from parsing every fiber still answers exactly — a body that
+// mentions the UID is not a match, and the case of the query does not matter.
+func TestListMetadataByUIDMatchesFrontmatterOnly(t *testing.T) {
+	s := NewStorage(t.TempDir())
+	s.Init()
+
+	target, _ := New("nested/target", "Target")
+	mention, _ := New("mention", "Mention")
+	mention.Body = "Follows up on " + target.UID + ".\n"
+	s.Write(target)
+	s.Write(mention)
+
+	for _, query := range []string{target.UID, strings.ToLower(target.UID)} {
+		matches, err := s.ListMetadataByUID(query)
+		if err != nil {
+			t.Fatalf("ListMetadataByUID(%q): %v", query, err)
+		}
+		if len(matches) != 1 || matches[0].ID != target.ID {
+			t.Fatalf("ListMetadataByUID(%q) = %v, want only %q", query, matches, target.ID)
+		}
+	}
+	if matches, err := s.ListMetadataByUID(NewULID()); err != nil || len(matches) != 0 {
+		t.Fatalf("ListMetadataByUID(unknown) = %v, %v; want none", matches, err)
+	}
+}
+
 func TestLooksLikeUID(t *testing.T) {
 	if !LooksLikeUID(NewULID()) {
 		t.Error("LooksLikeUID(NewULID()) = false, want true")

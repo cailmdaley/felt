@@ -144,15 +144,9 @@ func resolveUIDRef(storage *Storage, uid string) (Ref, error) {
 		external := storage.ExternalRefs()
 		search = NewStorage(external.ProjectDir())
 	}
-	felts, err := search.ListMetadata()
+	matches, err := search.ListMetadataByUID(uid)
 	if err != nil {
 		return Ref{}, fmt.Errorf("listing fibers for UID %q: %w", uid, err)
-	}
-	var matches []*Felt
-	for _, f := range felts {
-		if f.MatchesUID(uid) {
-			matches = append(matches, f)
-		}
 	}
 	if len(matches) > 1 {
 		ids := make([]string, len(matches))
