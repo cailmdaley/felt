@@ -94,11 +94,12 @@ beforeEach(() => {
 afterEach(() => { workspace?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
-  it('opens the shared picker over Desk without entering Reader until selection, searching known file receipts', async () => {
+  it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
+    workspace.dispose()
+    document.body.replaceChildren()
     vi.spyOn(Date, 'now').mockReturnValue(1000)
-    workspace.overview.opened(cards[0])
-    workspace.overview.refresh()
-    await flush()
+    vi.mocked(fetch).mockClear()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const previous = document.createElement('button')
     document.body.append(previous); previous.focus()
     const route = window.location.hash
@@ -107,6 +108,13 @@ describe('workspace reader integration', () => {
     expect(window.location.hash).toBe(route)
     const find = document.querySelector<HTMLInputElement>('.ws-switcher input')!
     expect(document.activeElement).toBe(find)
+    find.value = 'table.html'; find.dispatchEvent(new Event('input'))
+    expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(0)
+    await flush()
+    expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(1)
+    expect(document.activeElement).toBe(find)
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/sent-files/all/'))).toHaveLength(1)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/v1/fibers/'))).toBe(false)
     find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(document.activeElement).toBe(previous)
     expect(document.querySelector('.ws-switcher')).toBeNull()

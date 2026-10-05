@@ -69,7 +69,7 @@ export class Workspace {
       shuttleBase: opts.shuttleBase,
       cards: opts.cards,
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
-      onOrder: () => this.reader?.refreshChannels(),
+      onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh() },
     })
     this.picker = new ConstitutionPicker({
       cards: () => {
@@ -99,6 +99,7 @@ export class Workspace {
     })
     root.append(this.reader.el)
     this.history.start()
+    this.overview.refresh()
     document.addEventListener('visibilitychange', this.visibility)
   }
 
@@ -106,6 +107,7 @@ export class Workspace {
   /** Opens over the Desk without navigating or waking the reader. */
   findConstitution(): void {
     this.picker.show(this.root)
+    this.overview.refresh()
   }
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
