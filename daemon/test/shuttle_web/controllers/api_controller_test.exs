@@ -3,10 +3,9 @@ defmodule ShuttleWeb.APIControllerTest do
   Tests for the daemon's API endpoints.
   """
 
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Shuttle.Test.PollerHelpers
   import Plug.Conn
   import Phoenix.ConnTest
@@ -17,26 +16,22 @@ defmodule ShuttleWeb.APIControllerTest do
   alias Shuttle.Test.FiberUid
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
 
-  alias Shuttle.Test.StubPostClient
+  alias Shuttle.Test.{Env, StubPostClient}
 
   # ── Setup ──
 
   setup do
-    previous_action_runner = Application.get_env(:shuttle, :action_query_runner)
-    Application.put_env(:shuttle, :action_query_runner, MockRunner)
-
-    on_exit(fn ->
-      restore_app_env(:action_query_runner, previous_action_runner)
-    end)
+    Env.put_app_env(:action_query_runner, MockRunner)
 
     MockRunner.start!()
     MockRunner.reset()
     mock_felt_root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(mock_felt_root) end)
 
-    start_supervised!(
-      {Poller,
-       runner: MockRunner, poll_interval_ms: 600_000, felt_stores: [MockRunner.felt_root()]}
+    start_poller!(
+      runner: MockRunner,
+      poll_interval_ms: 600_000,
+      felt_stores: [MockRunner.felt_root()]
     )
 
     Process.sleep(50)
@@ -44,15 +39,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   defp with_actions_host do
-    previous = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    on_exit(fn ->
-      case previous do
-        nil -> System.delete_env("SHUTTLE_STORES")
-        value -> System.put_env("SHUTTLE_STORES", value)
-      end
-    end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
   end
 
   test "GET /api/v1/agents degrades to []/200 when Shuttle output is unavailable" do
@@ -63,9 +50,7 @@ defmodule ShuttleWeb.APIControllerTest do
     # with 200 (the board's picker falls back to free text), never crash the
     # request. The mock keeps this result deterministic when a Shuttle binary is
     # available on PATH.
-    previous_felt_runner = Application.get_env(:shuttle, :felt_runner)
-    Application.put_env(:shuttle, :felt_runner, MockRunner)
-    on_exit(fn -> restore_app_env(:felt_runner, previous_felt_runner) end)
+    Env.put_app_env(:felt_runner, MockRunner)
 
     conn = get(api_conn(), "/api/v1/agents")
     assert conn.status == 200
@@ -78,9 +63,7 @@ defmodule ShuttleWeb.APIControllerTest do
     # agents can this host run" can only be answered by that host. A local
     # Shuttle CLI answering for a remote would be a confident wrong answer, so
     # this leg must forward; the stub fails the test if it instead shells locally.
-    previous_felt_runner = Application.get_env(:shuttle, :felt_runner)
-    Application.put_env(:shuttle, :felt_runner, MockRunner)
-    on_exit(fn -> restore_app_env(:felt_runner, previous_felt_runner) end)
+    Env.put_app_env(:felt_runner, MockRunner)
 
     remote_body = Jason.encode!([%{"id" => "claude-opus"}])
 
@@ -362,8 +345,7 @@ defmodule ShuttleWeb.APIControllerTest do
     closed_bare_oneshot(fiber_id)
     checkout = Path.join(tmp_dir, "checkout")
     File.mkdir_p!(checkout)
-    System.put_env("SHUTTLE_TEST_PROJECT", "checkout")
-    on_exit(fn -> System.delete_env("SHUTTLE_TEST_PROJECT") end)
+    Env.put_env("SHUTTLE_TEST_PROJECT", "checkout")
     raw = Path.join(tmp_dir, "$SHUTTLE_TEST_PROJECT")
 
     assert {200, %{"dispatched" => true}} = post_start(fiber_id, %{"project_dir" => raw})
@@ -389,13 +371,8 @@ defmodule ShuttleWeb.APIControllerTest do
     literal = Path.join(tmp_dir, "checkout$SHUTTLE_TEST_SUFFIX")
     File.mkdir_p!(literal)
     File.mkdir_p!(Path.join(tmp_dir, "checkoutother"))
-    System.put_env("SHUTTLE_TEST_SUFFIX", "other")
-    System.put_env("SHUTTLE_TEST_ROOT", literal)
-
-    on_exit(fn ->
-      System.delete_env("SHUTTLE_TEST_SUFFIX")
-      System.delete_env("SHUTTLE_TEST_ROOT")
-    end)
+    Env.put_env("SHUTTLE_TEST_SUFFIX", "other")
+    Env.put_env("SHUTTLE_TEST_ROOT", literal)
 
     assert {200, %{"dispatched" => true}} =
              post_start(fiber_id, %{"project_dir" => "$SHUTTLE_TEST_ROOT"})
@@ -600,7 +577,7 @@ defmodule ShuttleWeb.APIControllerTest do
 
     File.mkdir_p!(stub_dir)
     argv_log = Path.join(stub_dir, "argv.log")
-    real_felt = System.find_executable("felt") || "felt"
+    real_felt = Shuttle.Env.find_executable("felt") || "felt"
 
     # The transition pipeline shells felt to resolve the store/target and
     # shuttle for the write. Keep those process boundaries separate and capture
@@ -619,11 +596,9 @@ defmodule ShuttleWeb.APIControllerTest do
     File.chmod!(Path.join(stub_dir, "felt"), 0o755)
     File.chmod!(Path.join(stub_dir, "shuttle"), 0o755)
 
-    previous_path = System.get_env("PATH")
-    System.put_env("PATH", "#{stub_dir}:#{previous_path}")
+    Env.prepend_path(stub_dir)
 
     on_exit(fn ->
-      if previous_path, do: System.put_env("PATH", previous_path), else: System.delete_env("PATH")
       File.rm_rf!(stub_dir)
     end)
 
@@ -697,15 +672,8 @@ defmodule ShuttleWeb.APIControllerTest do
        })}
     )
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "candide", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, StubPostClient)
 
     conn =
       post(
@@ -764,25 +732,19 @@ defmodule ShuttleWeb.APIControllerTest do
        })}
     )
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "cineca", url: "http://localhost:4002"}])
-    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "cineca", url: "http://localhost:4002"}])
+    Env.put_app_env(:write_forward_client, StubPostClient)
 
-    start_supervised!({
+    Env.start_scoped!({
       Shuttle.RemoteFiberRegistry,
       # No disk persistence: this stub feed must not reach the real
       # `~/.shuttle/remote-fibers` store and outlive the test.
+      name: nil,
       remotes: [%Shuttle.Remote{name: "cineca", url: "http://localhost:4002"}],
       client: StubPostClient,
       auto_poll: false,
       store_dir: nil
     })
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
 
     conn =
       post(
@@ -809,15 +771,8 @@ defmodule ShuttleWeb.APIControllerTest do
       {:ok, 409, Jason.encode!(%{"invoked" => false, "error" => "action_not_available"})}
     )
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "cineca", url: "http://localhost:4002"}])
-    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "cineca", url: "http://localhost:4002"}])
+    Env.put_app_env(:write_forward_client, StubPostClient)
 
     conn =
       post(
@@ -981,7 +936,7 @@ defmodule ShuttleWeb.APIControllerTest do
     MockRunner.set_fiber("tests/state", fiber)
     MockRunner.set_shuttle("tests/state", oneshot_shuttle())
 
-    send(Shuttle.Poller, :run_poll_cycle)
+    send(Shuttle.Env.server(Shuttle.Poller), :run_poll_cycle)
 
     # Poll for the outcome rather than sleeping a fixed 100ms for it. The cycle
     # has to discover the fiber, decide it is eligible, launch a worker and
@@ -991,7 +946,7 @@ defmodule ShuttleWeb.APIControllerTest do
     assert wait_until(fn ->
              match?(
                [%{fiber_id: "tests/state"} | _],
-               Shuttle.Poller.snapshot(Shuttle.Poller)[:eligible]
+               Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller))[:eligible]
              )
            end)
 
@@ -1027,7 +982,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "state degrades to JSON when the poller is unavailable" do
-    :sys.suspend(Shuttle.Poller)
+    :sys.suspend(Shuttle.Env.server(Shuttle.Poller))
 
     try do
       conn = get(api_conn(), "/api/v1/state")
@@ -1037,7 +992,7 @@ defmodule ShuttleWeb.APIControllerTest do
       assert is_binary(body["host"])
       assert is_list(body["running_detail"])
     after
-      :sys.resume(Shuttle.Poller)
+      :sys.resume(Shuttle.Env.server(Shuttle.Poller))
     end
   end
 
@@ -1067,11 +1022,10 @@ defmodule ShuttleWeb.APIControllerTest do
     end
 
     # Controller calls Shuttle.RemoteRegistry.snapshots/0, which routes
-    # to the default-named GenServer. Start one under the default name
-    # for this test (the test config disables auto-start so this name
-    # is free until we claim it).
-    start_supervised!({
+    # to this test's instance (Shuttle.Env.server/1).
+    Env.start_scoped!({
       Shuttle.RemoteRegistry,
+      name: nil,
       remotes: [
         %Shuttle.Remote{name: "candide", url: "http://localhost:4001"}
       ],
@@ -1101,15 +1055,16 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "composite degrades remote snapshots when the remote registry is unavailable" do
-    start_supervised!({
+    Env.start_scoped!({
       Shuttle.RemoteRegistry,
+      name: nil,
       remotes: [
         %Shuttle.Remote{name: "candide", url: "http://localhost:4001"}
       ],
       tick_interval_ms: 60_000
     })
 
-    :sys.suspend(Shuttle.RemoteRegistry)
+    :sys.suspend(Shuttle.Env.server(Shuttle.RemoteRegistry))
 
     try do
       conn = get(api_conn(), "/api/v1/state/composite")
@@ -1119,12 +1074,12 @@ defmodule ShuttleWeb.APIControllerTest do
       assert body["remotes"]["_registry"]["last_error"] != nil
       assert body["remotes"]["_registry"]["recovery"]["state"] == "unavailable"
     after
-      :sys.resume(Shuttle.RemoteRegistry)
+      :sys.resume(Shuttle.Env.server(Shuttle.RemoteRegistry))
     end
   end
 
   test "composite degrades gracefully when no RemoteRegistry is running" do
-    # No RemoteRegistry started under the default name; controller
+    # No RemoteRegistry in this test's scope; controller
     # should still return a valid composite shape.
     conn = get(api_conn(), "/api/v1/state/composite")
     assert conn.status == 200
@@ -1135,7 +1090,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "composite degrades local snapshot when the poller is unavailable" do
-    :sys.suspend(Shuttle.Poller)
+    :sys.suspend(Shuttle.Env.server(Shuttle.Poller))
 
     try do
       conn = get(api_conn(), "/api/v1/state/composite")
@@ -1144,7 +1099,7 @@ defmodule ShuttleWeb.APIControllerTest do
       assert body["local"]["error"] == "poller_unavailable"
       assert body["remotes"] == %{}
     after
-      :sys.resume(Shuttle.Poller)
+      :sys.resume(Shuttle.Env.server(Shuttle.Poller))
     end
   end
 

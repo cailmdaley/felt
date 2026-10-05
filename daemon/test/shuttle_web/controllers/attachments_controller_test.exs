@@ -1,13 +1,16 @@
 defmodule ShuttleWeb.AttachmentsControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
+
+  alias Shuttle.Test.Env
 
   @endpoint ShuttleWeb.Endpoint
 
   @png <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, "a tiny png body">>
 
+  # Local rather than Shuttle.Test.StubPostClient: it also records the POST
+  # timeout, which the upload forward must raise above the default.
   defmodule ForwardClient do
     use Agent
 
@@ -34,12 +37,10 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
     File.write!(Path.join(fiber_dir, "paste.md"), "---\nname: Paste\n---\n\n")
 
     data_dir = Path.join(root, "data")
-    previous = Map.new(~w(SHUTTLE_STORES SHUTTLE_DATA_DIR), &{&1, System.get_env(&1)})
-    System.put_env("SHUTTLE_STORES", store)
-    System.put_env("SHUTTLE_DATA_DIR", data_dir)
+    Env.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_DATA_DIR", data_dir)
 
     on_exit(fn ->
-      Enum.each(previous, fn {key, value} -> restore_env(key, value) end)
       File.rm_rf(root)
     end)
 
@@ -264,15 +265,8 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
        {:ok, 200, Jason.encode!(%{"files" => [%{"path" => "/remote/attachments/x.png"}]})}}
     )
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "cluster", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, ForwardClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "cluster", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, ForwardClient)
 
     conn =
       upload(%{"fiber" => "tests/remote-only", "origin" => "cluster", "attachments" => [image()]})
@@ -296,15 +290,8 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
   test "a failed forward is a 502 naming the origin" do
     start_supervised!({ForwardClient, {:error, :econnrefused}})
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "cluster", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, ForwardClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "cluster", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, ForwardClient)
 
     conn = upload(%{"fiber" => "tests/paste", "origin" => "cluster", "attachments" => [image()]})
     assert conn.status == 502

@@ -1,28 +1,20 @@
 defmodule ShuttleWeb.FeltStoresControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
 
+  alias Shuttle.Test.Env
+
   @endpoint ShuttleWeb.Endpoint
 
   setup do
-    original = System.get_env("SHUTTLE_STORES_FILE")
-    original_remotes = Application.get_env(:shuttle, :remotes)
-
-    capability_env =
-      Map.new(
-        [:host_capabilities_os_type, :host_capabilities_runner],
-        &{&1, Application.fetch_env(:shuttle, &1)}
-      )
-
-    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :linux})
+    Env.put_app_env(:host_capabilities_os_type, {:unix, :linux})
 
     # SHUTTLE_STORES env WINS over the registry file (FeltStores resolution
     # order), so an operator shell exporting it leaks into every assertion
-    # here. Clear it for the test; restore after.
-    original_env_stores = System.get_env("SHUTTLE_STORES")
-    System.delete_env("SHUTTLE_STORES")
+    # here. Clear it for the test.
+    Env.delete_env("SHUTTLE_STORES")
 
     path =
       Path.join(
@@ -30,43 +22,28 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
         "shuttle-felt-stores-controller-#{System.unique_integer([:positive])}.json"
       )
 
-    System.put_env("SHUTTLE_STORES_FILE", path)
-    Application.put_env(:shuttle, :remotes, [])
+    Env.put_env("SHUTTLE_STORES_FILE", path)
+    Env.put_app_env(:remotes, [])
 
     on_exit(fn ->
       File.rm(path)
-
-      Enum.each(capability_env, fn
-        {key, {:ok, value}} -> Application.put_env(:shuttle, key, value)
-        {key, :error} -> Application.delete_env(:shuttle, key)
-      end)
-
-      case original do
-        nil -> System.delete_env("SHUTTLE_STORES_FILE")
-        value -> System.put_env("SHUTTLE_STORES_FILE", value)
-      end
-
-      case original_remotes do
-        nil -> Application.delete_env(:shuttle, :remotes)
-        value -> Application.put_env(:shuttle, :remotes, value)
-      end
-
-      case original_env_stores do
-        nil -> System.delete_env("SHUTTLE_STORES")
-        value -> System.put_env("SHUTTLE_STORES", value)
-      end
     end)
 
     :ok
   end
 
   test "shows the configured base stores as the local origin" do
-    path = Path.expand(System.get_env("SHUTTLE_STORES_FILE"))
+    path = Path.expand(Shuttle.Env.get("SHUTTLE_STORES_FILE"))
     File.mkdir_p!(Path.dirname(path))
 
+    # An absent home-relative store: tilde expansion without walking a real
+    # ~/loom, whose File.ls calls queue on the VM-wide file server.
     File.write!(
       path,
-      Jason.encode!(%{"version" => 1, "felt_stores" => ["~/loom", "/tmp/project"]})
+      Jason.encode!(%{
+        "version" => 1,
+        "felt_stores" => ["~/shuttle-test-absent-store", "/tmp/project"]
+      })
     )
 
     conn = get(api_conn(), "/api/v1/felt-stores")
@@ -79,17 +56,16 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     assert get_in(body, ["origins", host, "kind"]) == "local"
 
     assert get_in(body, ["origins", host, "felt_stores"]) == [
-             Path.expand("~/loom"),
+             Path.expand("~/shuttle-test-absent-store"),
              "/tmp/project"
            ]
   end
 
   # Mutation control: replace browser_capable with true or omit it from local_origin/1.
   test "local origins publish GUI session capability rather than binary presence" do
-    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :darwin})
+    Env.put_app_env(:host_capabilities_os_type, {:unix, :darwin})
 
-    Application.put_env(
-      :shuttle,
+    Env.put_app_env(
       :host_capabilities_runner,
       Shuttle.Test.HostCapabilityProbeRunner
     )
@@ -108,15 +84,13 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   end
 
   test "surfaces the curated picker-project list on the local origin" do
-    prev_projects_file = System.get_env("SHUTTLE_PROJECTS_FILE")
-
     projects_path =
       Path.join(
         System.tmp_dir!(),
         "shuttle-projects-controller-#{System.unique_integer([:positive])}.json"
       )
 
-    System.put_env("SHUTTLE_PROJECTS_FILE", projects_path)
+    Env.put_env("SHUTTLE_PROJECTS_FILE", projects_path)
     File.mkdir_p!(Path.dirname(projects_path))
 
     File.write!(
@@ -126,11 +100,6 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
 
     on_exit(fn ->
       File.rm(projects_path)
-
-      case prev_projects_file do
-        nil -> System.delete_env("SHUTTLE_PROJECTS_FILE")
-        value -> System.put_env("SHUTTLE_PROJECTS_FILE", value)
-      end
     end)
 
     conn = get(api_conn(), "/api/v1/felt-stores")
@@ -147,22 +116,29 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
       post(
         api_conn(),
         "/api/v1/felt-stores",
-        Jason.encode!(%{"felt_stores" => ["~/loom", "/tmp/project", "~/loom", "  "]})
+        Jason.encode!(%{
+          "felt_stores" => [
+            "~/shuttle-test-absent-store",
+            "/tmp/project",
+            "~/shuttle-test-absent-store",
+            "  "
+          ]
+        })
       )
 
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
     assert body["ok"] == true
-    assert body["felt_stores"] == [Path.expand("~/loom"), "/tmp/project"]
+    assert body["felt_stores"] == [Path.expand("~/shuttle-test-absent-store"), "/tmp/project"]
 
-    {:ok, persisted} = File.read(Path.expand(System.get_env("SHUTTLE_STORES_FILE")))
+    {:ok, persisted} = File.read(Path.expand(Shuttle.Env.get("SHUTTLE_STORES_FILE")))
     decoded = Jason.decode!(persisted)
-    assert decoded["felt_stores"] == [Path.expand("~/loom"), "/tmp/project"]
+    assert decoded["felt_stores"] == [Path.expand("~/shuttle-test-absent-store"), "/tmp/project"]
     assert decoded["version"] == 1
   end
 
   test "empty list clears the persisted file" do
-    path = Path.expand(System.get_env("SHUTTLE_STORES_FILE"))
+    path = Path.expand(Shuttle.Env.get("SHUTTLE_STORES_FILE"))
     File.mkdir_p!(Path.dirname(path))
     File.write!(path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/stale"]}))
 
@@ -185,7 +161,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   # able to reach the one the reader is looking at: a store list describes the
   # daemon that polls it, and only that daemon can save it.
   test "a write for a remote origin forwards to the owning daemon" do
-    path = Path.expand(System.get_env("SHUTTLE_STORES_FILE"))
+    path = Path.expand(Shuttle.Env.get("SHUTTLE_STORES_FILE"))
     saved = Jason.encode!(%{"ok" => true, "host" => "candide", "felt_stores" => ["/remote/loom"]})
 
     Shuttle.Test.ForwardStub.stub_forward(
@@ -290,30 +266,22 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   end
 
   defp with_candide(fun) do
-    previous = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :write_forward_client, ForbiddenClient)
+    Env.put_app_env(:write_forward_client, ForbiddenClient)
 
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "candide", url: "http://candide.example:4000"}
     ])
 
-    try do
-      fun.()
-    after
-      case previous do
-        nil -> Application.delete_env(:shuttle, :write_forward_client)
-        value -> Application.put_env(:shuttle, :write_forward_client, value)
-      end
-    end
+    fun.()
   end
 
   defp start_feed_registry(client) do
     dir = Path.join(System.tmp_dir!(), "fsc-store-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf(dir) end)
 
-    start_supervised!(
+    Env.start_scoped!(
       {Shuttle.RemoteFiberRegistry,
-       name: Shuttle.RemoteFiberRegistry,
+       name: nil,
        remotes: [%Shuttle.Remote{name: "candide", url: "http://candide.example:4000"}],
        client: client,
        auto_poll: false,
@@ -345,10 +313,9 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   end
 
   test "an owner without a browser capability field fails closed even on a GUI viewer" do
-    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :darwin})
+    Env.put_app_env(:host_capabilities_os_type, {:unix, :darwin})
 
-    Application.put_env(
-      :shuttle,
+    Env.put_app_env(
       :host_capabilities_runner,
       Shuttle.Test.HostCapabilityProbeRunner
     )

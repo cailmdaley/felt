@@ -12,13 +12,12 @@ defmodule ShuttleWeb.ConfigControllerTest do
   controller's own contract (status codes, the echoed state, the verbatim
   refusal) rather than a mocked CLI's.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
 
   alias Shuttle.ConfigFiles
-  alias Shuttle.Test.{ForwardStub, StubGetFileClient, StubPostClient}
+  alias Shuttle.Test.{Env, ForwardStub, StubGetFileClient, StubPostClient}
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -35,10 +34,6 @@ defmodule ShuttleWeb.ConfigControllerTest do
   @stores_doc ~s({"version":1,"felt_stores":["/tmp/one","/tmp/two"]})
 
   setup do
-    previous_files = Enum.map(@file_vars, fn {_id, var} -> {var, System.get_env(var)} end)
-    previous_compact = Enum.map(@compact_vars, &{&1, System.get_env(&1)})
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-
     dir =
       Path.join(System.tmp_dir!(), "shuttle-config-ctrl-#{System.unique_integer([:positive])}")
 
@@ -47,18 +42,15 @@ defmodule ShuttleWeb.ConfigControllerTest do
     paths =
       Map.new(@file_vars, fn {id, var} ->
         path = Path.join(dir, "#{id}.json")
-        System.put_env(var, path)
+        Env.put_env(var, path)
         {id, Path.expand(path)}
       end)
 
-    Enum.each(@compact_vars, &System.delete_env/1)
-    Application.put_env(:shuttle, :remotes, [])
+    Enum.each(@compact_vars, &Env.delete_env/1)
+    Env.put_app_env(:remotes, [])
 
     on_exit(fn ->
       File.rm_rf(dir)
-      Enum.each(previous_files, fn {var, value} -> restore_env(var, value) end)
-      Enum.each(previous_compact, fn {var, value} -> restore_env(var, value) end)
-      restore_app_env(:remotes, previous_remotes)
     end)
 
     {:ok, paths: paths}

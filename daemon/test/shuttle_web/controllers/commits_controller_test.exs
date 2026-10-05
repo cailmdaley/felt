@@ -6,7 +6,7 @@ defmodule ShuttleWeb.CommitsControllerTest do
   `Shuttle.CommitLedgerTest` covers the reader; this covers the envelope, both
   bounds, and the degradations.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
@@ -88,6 +88,21 @@ defmodule ShuttleWeb.CommitsControllerTest do
   end
 
   describe "composite" do
+    # This test's own remote-less registry, so the merge sees no other test's remotes.
+    setup do
+      dir =
+        Path.join(System.tmp_dir!(), "shuttle-commits-rtr-#{System.unique_integer([:positive])}")
+
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      Shuttle.Test.Env.start_scoped!(
+        {Shuttle.RemoteTemporalRegistry, name: nil, remotes: [], store_dir: dir},
+        Shuttle.RemoteTemporalRegistry
+      )
+
+      :ok
+    end
+
     test "stamps local records with this host and reports the local origin", %{path: path} do
       write_jsonl!(path, [commit_record(%{"sha" => "local", "at" => 100})])
 
