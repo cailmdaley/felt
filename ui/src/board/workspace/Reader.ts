@@ -95,8 +95,12 @@ export class Reader {
   private readonly verdicts = element('span', 'ws-nav-verdicts')
   private verdictKey: string | null = null
   private readonly position = element('span', 'ws-position')
-  /** The running head's page count, at its right end. */
-  private readonly headPosition = element('span', 'ws-position ws-head-position')
+  /** The map's page count, at the band's right end. */
+  private readonly bandPosition = element('span', 'ws-position ws-band-position')
+  /** The map beneath the stage: the tiles, centred under the selected page, and the page count. */
+  private readonly band = element('div', 'ws-band')
+  /** The phone's sense of place: one tick per page along the bottom bar's top edge. */
+  private readonly ticks = element('div', 'ws-page-ticks')
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
   private readonly headWorker = element('span', 'ws-head-worker')
   private workerClock = 0
@@ -162,14 +166,17 @@ export class Reader {
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.sidebarToggle, this.returnButton, this.title, this.verdicts)
-    this.headPosition.setAttribute('aria-hidden', 'true')
+    this.bandPosition.setAttribute('aria-hidden', 'true')
     this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
     this.headWorker.hidden = true
     const trail = element('div', 'ws-nav-trail')
-    trail.append(this.headWorker, this.headPosition)
+    trail.append(this.headWorker)
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
-    this.navbar.append(this.lead, this.tabs.el, trail)
+    this.navbar.append(this.lead, trail)
+    this.band.dataset.part = 'page-band'
+    this.band.append(element('span', 'ws-band-balance'), this.tabs.el, this.bandPosition, this.tabs.tip)
+    this.ticks.setAttribute('aria-hidden', 'true')
     this.prev = button('ws-thumb-button', '', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '', () => this.step(1), 'Next document')
     this.prev.innerHTML = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>'
@@ -188,7 +195,7 @@ export class Reader {
     const pageMeta = element('span', 'ws-thumb-meta')
     pageMeta.append(this.position, this.arrivalSummary)
     pageChoice.append(this.pageTitle, pageMeta)
-    thumb.append(this.prev, pageChoice, this.next, thumbMenu)
+    thumb.append(this.ticks, this.prev, pageChoice, this.next, thumbMenu)
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -219,10 +226,11 @@ export class Reader {
     this.picker = new ConstitutionPicker(pickerOptions)
     this.sidebarPicker.el.style.display = 'contents'
     this.sidebar.append(this.sidebarPicker.el)
+    const column = element('div', 'ws-stage-column')
+    column.append(this.stage, this.band)
     const main = element('div', 'ws-stage-row')
-    main.append(this.sidebar, this.stage)
+    main.append(this.sidebar, column)
     this.el.append(this.veil, this.navbar, main, thumb, this.announcement, this.pageSheet.el)
-    if (this.tabs.preview) this.el.append(this.tabs.preview.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -453,7 +461,8 @@ export class Reader {
     this.tabs.fresh(fresh)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
-    this.position.textContent = this.headPosition.textContent = `${index + 1} / ${ch.documents.length}`
+    this.position.textContent = this.bandPosition.textContent = `${index + 1} / ${ch.documents.length}`
+    this.paintTicks(index, ch.documents.length)
     const doc = ch.documents[index]
     if (doc) {
       const metadata = documentLabelMetadata(doc, ch.labels[index], ch.owner)
@@ -525,52 +534,27 @@ export class Reader {
     return Math.min(max, width)
   }
   private layoutNavbar(): void {
-    if (this.phone.matches) {
-      this.navbar.style.removeProperty('grid-template-columns')
-      this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
-      return
-    }
-    const style = getComputedStyle(this.navbar)
-    const gap = parseFloat(style.columnGap) || 32
-    const padLeft = parseFloat(style.paddingLeft) || 12
-    const width = this.navbar.clientWidth - padLeft - (parseFloat(style.paddingRight) || 12)
-    if (!width) return
-    const leadGap = parseFloat(getComputedStyle(this.lead).columnGap) || 0
-    const leadParts = [this.sidebarToggle, this.returnButton, this.title, this.verdicts].filter(el => el.offsetWidth > 0)
-    const lead = leadParts.reduce((sum, el) => sum + (el === this.title ? Math.min(this.measure('title-ceiling', 360), el.scrollWidth) : el.offsetWidth), 0) + Math.max(0, leadParts.length - 1) * leadGap
-    const position = this.headPosition.parentElement?.offsetWidth ?? this.headPosition.offsetWidth
-    const stripStyle = getComputedStyle(this.tabs.el)
-    const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + (parseFloat(stripStyle.paddingLeft) || 0) + (parseFloat(stripStyle.paddingRight) || 0) + 1
-    // The index is centred over the stage, which starts after the sidebar,
-    // as wide as it can be without crossing the lead or the page count;
-    // where that leaves too little, it takes the room between them.
-    const sidebar = this.sidebarShown ? this.sidebar.offsetWidth : 0
-    const centre = sidebar + (this.navbar.clientWidth - sidebar) / 2 - padLeft
-    const half = Math.min(centre - lead - gap, width - position - gap - centre)
-    // A run that fits is centred over the stage. A longer one takes all the
-    // room between the lead and the page count, and scrolls so the selected
-    // label sits over the page's centre.
-    if (tabs <= 2 * half) {
-      this.navbar.style.gridTemplateColumns = `${Math.floor(centre - tabs / 2 - gap)}px ${Math.ceil(tabs)}px minmax(0, 1fr)`
-      this.tabs.setFocus(null)
-      return
-    }
-    const start = Math.ceil(Math.min(lead, width * 0.45))
-    this.navbar.style.gridTemplateColumns = `${start}px minmax(0, 1fr) auto`
-    const bandLeft = start + gap
-    const band = width - position - gap - bandLeft
-    this.tabs.setFocus(centre - bandLeft >= this.measure('index-focus-margin', 80) && bandLeft + band - centre >= this.measure('index-focus-margin', 80) ? centre - bandLeft : null)
+    if (this.phone.matches) this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
+  }
+  /** One tick per page, the selected one in ink; a long run's ticks close up rather than wrap. */
+  private paintTicks(index: number, count: number): void {
+    if (count < 2) count = 0
+    if (this.ticks.childElementCount !== count) this.ticks.replaceChildren(...Array.from({ length: count }, () => element('i', 'ws-page-tick')))
+    ;[...this.ticks.children].forEach((tick, i) => tick.classList.toggle('ws-page-tick-current', i === index))
   }
   private layout(animate: boolean): void {
     this.layoutNavbar()
     const tabIndex = this.channel?.documents.findIndex(d => d.key === this.selected) ?? -1
-    if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     const ch = this.channel
-    if (!ch || !this.active) return
+    if (!ch || !this.active) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
     const W = this.stage.clientWidth, H = this.stage.clientHeight
-    if (!W || !H) return
+    if (!W || !H) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
     const inset = this.measure('stage-inset', 28), gap = this.measure('gap', 24)
-    const boxW = W - inset * 2, boxH = H - inset * 2
+    // Beside the sidebar the page keeps one page gap from the column and shrinks
+    // before that gutter grows; the right neighbour has the room left over.
+    // Without the sidebar the page is centred in the stage.
+    const docked = this.sidebarShown
+    const boxW = docked ? W - gap - inset : W - inset * 2, boxH = H - inset * 2
     if (!animate || this.motion.matches) {
       this.stage.classList.add('ws-instant')
       void this.stage.offsetWidth
@@ -579,7 +563,7 @@ export class Reader {
         this.instantRaf = requestAnimationFrame(() => this.stage.classList.remove('ws-instant'))
       })
     }
-    let x = 0, centre = 0
+    let x = 0, centre = 0, selectedWidth = 0
     ch.documents.forEach(doc => {
       const f = this.host.get(doc.key)
       if (!f) return
@@ -588,10 +572,13 @@ export class Reader {
       f.el.style.left = `${x}px`
       f.el.style.width = `${width}px`
       f.el.style.height = `${boxH}px`
-      if (sel) centre = x + width / 2
+      if (sel) { centre = x + width / 2; selectedWidth = width }
       x += width + gap
     })
-    const target = Math.round(W / 2 - centre)
+    const target = Math.round(docked ? gap - (centre - selectedWidth / 2) : W / 2 - centre)
+    // The map holds the selected tile under the page's centre.
+    this.tabs.setFocus(docked ? this.stage.offsetLeft + target + centre - this.band.offsetLeft - this.tabs.el.offsetLeft : null)
+    if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
     if (!this.swiping) this.track.style.transform = `translateX(${target}px)`
@@ -789,8 +776,7 @@ export class Reader {
   }
   private stagePlaces(): { page: number; tabs: number; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
-    const tabs = this.tabs.el.getBoundingClientRect().left
-    return { page, tabs, sidebar: this.sidebar.offsetWidth }
+    return { page, tabs: this.band.getBoundingClientRect().left, sidebar: this.sidebar.offsetWidth }
   }
   private slideSidebar(shown: boolean, before: { page: number; tabs: number; sidebar: number }): void {
     const after = this.stagePlaces()
@@ -803,7 +789,7 @@ export class Reader {
       if (el && Math.abs(from) >= 1) animations.push(el.animate([{ translate: `${from}px 0` }, { translate: '0 0' }], options))
     }
     glide(this.parallax, before.page - after.page)
-    glide(this.tabs.el, before.tabs - after.tabs)
+    glide(this.band, before.tabs - after.tabs)
     const width = Math.max(before.sidebar, after.sidebar)
     const hidden = { translate: `${-width}px 0`, opacity: 0 }, rest = { translate: '0 0', opacity: 1 }
     this.el.classList.add('ws-sidebar-sliding')
@@ -858,8 +844,6 @@ export class Reader {
     if (this.pageSheet.isOpen) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
-    // Any key puts the pointer's preview away; Escape stops there.
-    if (this.tabs.preview?.dismiss() && e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); return }
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
     const forward = shouldForwardDocumentKey(e)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildChannel, compareDocuments, documentActivity, docKey, firstSent } from './documents.js'
+import { buildChannel, compareDocuments, documentActivity, docKey, lastSent } from './documents.js'
 
 function shuffled<T>(items: readonly T[], seed: number): T[] {
   const out = [...items]
@@ -12,19 +12,21 @@ function shuffled<T>(items: readonly T[], seed: number): T[] {
 }
 const input = { uid: 'u', owner: 'host', name: 'Note', path: '/fiber/note.md', fiberDir: '/fiber', body: '' }
 describe('channel order properties', () => {
-  it('anchors prose, then unsent declarations in body order, then sends by first delivery; unknown times last', () => {
+  it('anchors prose, then sends by latest receipt, newest first, unknown times last, then unsent declarations in body order', () => {
     const channel = buildChannel({ ...input,
       embeds: [{ path: 'zeta.txt' }, { path: 'alpha.txt' }, { path: 'sent-embed.txt' }],
       fileModifiedAt: new Map([[docKey('host', '/fiber/alpha.txt', 'host'), new Date(600).toISOString()]]),
       sent: [{ path: 'b.txt', time: 10 }, { path: 'b.txt', time: 90 }, { path: 'a.txt', time: 20 }, { path: 'sent-embed.txt', time: 30 }, { path: 'bad.txt', time: NaN }],
       links: [{ path: 'linked.txt' }],
     })
-    expect(channel.documents.map(d => d.name)).toEqual(['Note', 'zeta.txt', 'alpha.txt', 'linked.txt', 'b.txt', 'a.txt', 'sent-embed.txt', 'bad.txt'])
-    expect(firstSent(channel.documents.at(-1)!)).toBeUndefined()
+    expect(channel.documents.map(d => d.name)).toEqual(['Note', 'b.txt', 'sent-embed.txt', 'a.txt', 'bad.txt', 'zeta.txt', 'alpha.txt', 'linked.txt'])
+    expect(lastSent(channel.documents[1])).toBe(90)
+    expect(lastSent(channel.documents[4])).toBeUndefined()
     expect(documentActivity(channel.documents.find(d => d.name === 'b.txt')!)).toBe(90)
   })
-  it('a re-send never moves a document', () => {
+  it('a re-send moves its document to the front', () => {
     const before = buildChannel({ ...input, sent: [{ path: 'old.html', time: 10 }, { path: 'new.html', time: 20 }] })
+    expect(before.documents.map(d => d.name)).toEqual(['Note', 'new.html', 'old.html'])
     const after = buildChannel({ ...input, previous: before, sent: [{ path: 'old.html', time: 10 }, { path: 'new.html', time: 20 }, { path: 'old.html', time: 99 }] })
     expect(after.documents.map(d => d.name)).toEqual(['Note', 'old.html', 'new.html'])
   })

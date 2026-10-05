@@ -69,17 +69,27 @@
   --ws-neighbour-fade-end: var(--ws-neighbour-fade);
   --ws-gap: 24px;
   --ws-inset: 12px;
-  --ws-tab-floor: 32px;
-  --ws-tab-ceiling: 220px;
-  --ws-tab-fade: 16px;
-  --ws-tab-gap: 0px;
-  /* Half the space between two index labels. */
-  --ws-tab-pad: 9px;
-  --ws-tab-rule-offset: 6px;
-  --ws-tab-anchor-size: 16px;
-  /* The index sits a step below the head's names, so the fiber's name leads. */
-  --ws-index-size: 14px;
-  --ws-preview-width: 224px;
+  /* The map: tiles of one size beneath the stage, the selected one lifted. */
+  --ws-tile-width: 80px;
+  --ws-tile-height: 56px;
+  --ws-tile-gap: 8px;
+  --ws-tile-pad: 6px;
+  --ws-tile-radius: 3px;
+  --ws-tile-lift: -3px;
+  --ws-tile-receded-opacity: 0.62;
+  --ws-tile-hover-opacity: 0.92;
+  --ws-tile-title-size: 11px;
+  --ws-tile-glyph-size: 9px;
+  --ws-tile-anchor-size: 26px;
+  --ws-tile-caption-size: 10px;
+  --ws-tile-caption-height: 15px;
+  /* Room above and below a tile inside the strip, for its lift, fresh mark and focus rule. */
+  --ws-tile-air: 6px;
+  --ws-band-foot: 10px;
+  --ws-band-height: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air) + var(--ws-band-foot));
+  --ws-band-side: 64px;
+  --ws-band-fade: 40px;
+  --ws-tip-height: 24px;
   --ws-drag-latch: 4px;
 
   --ws-reader-layer: 9000;
@@ -96,9 +106,6 @@
   --ws-head-end: var(--ws-stage-inset);
   --ws-head-gap: 10px;
   --ws-head-span: 32px;
-  --ws-title-ceiling: 360px;
-  /* The selected label is held over the page only while this much index lies on either side of it. */
-  --ws-index-focus-margin: 80px;
   --ws-stage-inset: 28px;
   --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
@@ -122,7 +129,7 @@
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  --ws-sidebar-width: 280px;
+  --ws-sidebar-width: 320px;
   /* The sidebar's open and close: one slide, on the standard curve. */
   --ws-sidebar-time: 220ms;
   --ws-sidebar-ease: cubic-bezier(0.2, 0, 0, 1);

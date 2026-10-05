@@ -12,6 +12,7 @@ import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
+import { noteAudioSketch } from './audioSketch.js'
 import { createMediaPoster, type MediaPoster } from './MediaPoster.js'
 import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
 
@@ -330,6 +331,7 @@ export class DocumentHost {
         decorateAudio: audio => {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
             (peaks, duration) => {
+              noteAudioSketch(doc.key, peaks, duration)
               if (!this.disposed && state.revision === revision) state.poster?.setAudio(peaks, duration)
             })
           this.audioPages.set(audio, page)

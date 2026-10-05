@@ -112,7 +112,7 @@ describe('Reader channel sidebar', () => {
     target.click()
     expect(open).toHaveBeenCalledOnce()
   })
-  it("draws the card's own worker pill bare at the head's right end, before the page count", () => {
+  it("draws the card's own worker pill bare at the head's right end; the page count rides the map", () => {
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 34 * 60000 }
     listedCards = [working]
     const open = vi.fn()
@@ -125,7 +125,9 @@ describe('Reader channel sidebar', () => {
     const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
     expect(head.hidden).toBe(false)
     expect(head.dataset.part).toBe('act')
-    expect(head.nextElementSibling?.classList.contains('ws-head-position')).toBe(true)
+    expect(head.nextElementSibling).toBeNull()
+    expect(reader.el.querySelector('.ws-navbar [role="tablist"]')).toBeNull()
+    expect(reader.el.querySelector('.ws-band [role="tablist"] + .ws-band-position')).not.toBeNull()
     const control = head.querySelector<HTMLElement>('.ws-worker-control')!
     expect(control.dataset.workerState).toBe('aloft')
     expect(control.querySelector('.ws-worker-dot')).not.toBeNull()
@@ -148,7 +150,7 @@ describe('Reader channel sidebar', () => {
     expect(reader.el.hasAttribute('data-ws-theme-boundary')).toBe(true)
     // The running head sits on the veil: there are no chrome plates to theme.
     expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(0)
-    for (const part of ['tab-strip', 'tab', 'tab-preview', 'page-sheet', 'page-sheet-panel']) {
+    for (const part of ['page-band', 'tab-strip', 'tab', 'tab-tip', 'page-sheet', 'page-sheet-panel']) {
       expect(reader.el.querySelector(`[data-part="${part}"]`)).not.toBeNull()
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')

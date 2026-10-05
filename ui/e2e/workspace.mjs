@@ -94,10 +94,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await type('.ws-nav-verdicts .ws-review-plate .kbn-ctl-btn', 15, 'EB Garamond')
   if (device === 'desktop') {
     for (const selector of ['.ws-return', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
-    // The index sits a step below the head's names.
-    await type('.ws-tab:not(.ws-tab-anchor) .ws-tab-label', 14, 'EB Garamond')
+    // A map tile's face names its page in the serif, small; the band's count is data.
+    await type('.ws-tab:not(.ws-tab-anchor) .ws-thumbnail-title', 11, 'EB Garamond')
     await type('.ws-selected .ws-provenance', 11, 'IBM Plex Mono')
-    await type('.ws-head-position', 11, 'IBM Plex Mono')
+    await type('.ws-band-position', 11, 'IBM Plex Mono')
   } else {
     await type('.ws-thumb-title', 15, 'EB Garamond')
     await type('.ws-thumb-arrival', 11, 'IBM Plex Mono')
@@ -585,65 +585,66 @@ test('Desk-opened channel reload and Back restore its Desk return control', asyn
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
 })
 
-test('The running head indexes pages in words, previews on hover within the shared budget, and keeps selection through a fresh re-send', async p => {
+test('The map beneath the stage indexes pages as legible tiles, captions a hover, and follows a re-send to the front', async p => {
   await open(p); await reportReady(p)
-  const film = p.locator('.ws-tabs')
+  const film = p.locator('.ws-band .ws-tabs')
   const head = await p.locator('.ws-navbar').boundingBox()
   assert.ok(head.height <= 48, `the head is one row: ${head.height}`)
   assert.ok((await selected(p).boundingBox()).y <= 80, 'the page starts within 80 px of the top')
   assert.equal(await p.locator('[data-part="chrome-plate"]').count(), 0, 'no chrome plates')
-  assert.equal(await film.locator('[data-part="thumbnail"]').count(), 0, 'the index carries no thumbnails')
+  assert.equal(await p.locator('.ws-navbar [role="tablist"], .ws-navbar .ws-position').count(), 0, 'the head carries no second list of pages and no count')
+  const band = await p.locator('.ws-band').boundingBox(), page = await selected(p).boundingBox()
+  assert.ok(band.y >= page.y + page.height, 'the map sits beneath the page')
+  // Every tile has a face at once: a title in the serif, or the constitution's §.
+  const faces = await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => ({
+    kind: t.dataset.kind, title: t.querySelector('.ws-thumbnail-title')?.textContent ?? '', mark: t.querySelector('.ws-thumbnail-kind')?.textContent ?? '',
+    box: t.getBoundingClientRect().height,
+  })))
+  for (const face of faces) {
+    assert.ok(face.kind === 'fiber' ? face.mark === '§' : face.title.length > 0, `a legible face: ${JSON.stringify(face)}`)
+    assert.ok(face.box >= 54 && face.box <= 58, `tiles share one height: ${face.box}`)
+  }
+  // A tile whose live thumbnail has loaded still names its page, on a strip at its foot.
+  await poll(p, () => document.querySelector('.ws-tab[data-kind="image"] .ws-thumbnail-ready'))
+  const captions = await film.locator('.ws-tab:has(.ws-thumbnail-ready)').evaluateAll(tabs => tabs.map(t => ({ caption: t.dataset.caption, drawn: getComputedStyle(t, '::before').content })))
+  for (const { caption, drawn } of captions) assert.ok(caption && drawn === JSON.stringify(caption), `a live tile is captioned: ${caption} / ${drawn}`)
   const selectedTab = film.locator('.ws-tab[aria-selected="true"]')
-  const look = await selectedTab.evaluate(el => ({ background: getComputedStyle(el).backgroundColor, shadow: getComputedStyle(el).boxShadow, rule: getComputedStyle(el.querySelector('.ws-tab-label')).textDecorationLine }))
-  assert.deepEqual(look, { background: 'rgba(0, 0, 0, 0)', shadow: 'none', rule: 'underline' })
-  assert.equal(await tab(p, 'Constitution').textContent(), '§')
+  const look = await selectedTab.evaluate(el => ({ border: getComputedStyle(el).borderTopColor, shadow: getComputedStyle(el).boxShadow !== 'none', lift: new DOMMatrix(getComputedStyle(el).transform).m42 }))
+  assert.ok(look.shadow && look.lift < 0, `the selected tile is lifted: ${JSON.stringify(look)}`)
+  const tileCentre = await selectedTab.evaluate(el => { const r = el.getBoundingClientRect(); return r.left + r.width / 2 })
+  assert.ok(Math.abs(tileCentre - (page.x + page.width / 2)) < 3, `the selected tile sits under the page: ${tileCentre} vs ${page.x + page.width / 2}`)
+  assert.match(await p.locator('.ws-band-position').textContent(), /^\d+ \/ \d+$/)
+  assert.equal(await tab(p, 'Constitution').locator('.ws-tab-label').textContent(), '§')
   assert.ok(await tab(p, 'calibration-report').locator('.ws-tab-label').evaluate(el => el.classList.contains('ws-tab-title')))
-  assert.equal(await tab(p, 'calibration-report').getAttribute('title'), null, 'the preview, not a native tooltip, names a hovered page')
+  assert.equal(await tab(p, 'calibration-report').getAttribute('title'), null, 'the caption, not a native tooltip, names a hovered page')
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0, 'first visits are quiet')
-  const preview = p.locator('.ws-tab-preview')
-  await p.mouse.move(700, 500)
-  // Time the first hover in the page, so a slow runner cannot blur the wait.
-  await p.evaluate(() => {
-    const strip = document.querySelector('.ws-tabs'), card = document.querySelector('.ws-tab-preview')
-    strip.addEventListener('pointerover', () => { window.__hoverAt ??= performance.now() })
-    new MutationObserver(() => { if (!card.hidden) window.__shownAt ??= performance.now() }).observe(card, { attributes: true, attributeFilter: ['hidden'] })
-  })
-  await tab(p, 'response.pdf').hover()
-  await preview.waitFor({ state: 'visible' })
-  const wait = await p.evaluate(() => window.__shownAt - window.__hoverAt)
-  assert.ok(wait >= 390, `a first hover waits: ${wait} ms`)
-  assert.match(await preview.locator('.ws-tab-preview-meta').textContent(), /sent/)
-  const anchor = await tab(p, 'response.pdf').boundingBox(), card = await preview.boundingBox()
-  assert.ok(Math.abs(card.x + card.width / 2 - (anchor.x + anchor.width / 2)) < 2 && card.y >= anchor.y + anchor.height, 'the preview hangs beneath its label')
-  assert.equal(await p.evaluate(() => document.activeElement?.closest('.ws-tab-preview')), null, 'the preview never takes focus')
-  await tab(p, 'calibration-report').hover()
-  assert.ok(await preview.isVisible(), 'a neighbour swaps in at once')
-  await poll(p, () => document.querySelectorAll('.ws-tab-preview iframe').length > 0)
-  for (const frame of await preview.locator('iframe').all()) {
+  assert.ok(await p.locator('.ws-thumbnail-body').count() <= 16, 'live tiles stay within the shared budget')
+  for (const frame of await film.locator('.ws-tab-kind-html iframe').all()) {
     assert.equal(await frame.getAttribute('sandbox'), '')
     assert.equal(await frame.getAttribute('tabindex'), '-1')
   }
-  assert.ok(await p.locator('.ws-thumbnail-body').count() <= 16)
-  await poll(p, () => document.querySelector('.ws-tab-preview .ws-tab-kind-html.ws-thumbnail-ready'))
-  assert.equal(await preview.locator('.ws-thumbnail-face').evaluate(el => getComputedStyle(el).visibility), 'hidden')
-  await p.keyboard.press('Escape')
-  assert.ok(await preview.isHidden(), 'Escape dismisses the preview')
-  assert.ok(await selected(p).isVisible(), 'and stops there')
+  const caption = p.locator('.ws-tab-tip')
+  await p.mouse.move(700, 400)
+  await tab(p, 'response.pdf').hover()
+  await caption.waitFor({ state: 'visible' })
+  assert.equal(await caption.textContent(), 'response.pdf')
+  const anchor = await tab(p, 'response.pdf').boundingBox(), tip = await caption.boundingBox()
+  assert.ok(Math.abs(tip.x + tip.width / 2 - (anchor.x + anchor.width / 2)) < 2 && tip.y + tip.height <= anchor.y && tip.y >= page.y + page.height - 2, 'the caption sits in the gap above its tile')
   await tab(p, 'brief.md').hover()
-  await preview.waitFor({ state: 'visible' })
-  // Straight into the report: its frame must not swallow the leave.
-  await p.mouse.move(700, 500)
-  await poll(p, () => document.querySelector('.ws-tab-preview').hidden)
+  assert.equal(await caption.textContent(), 'Field note', 'a neighbour is named at once')
+  await p.keyboard.press('Shift')
+  assert.ok(await caption.isHidden(), 'a key puts the caption away')
   if (process.env.WORKSPACE_SHOTS) {
     await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-    await tab(p, 'calibration-report').hover(); await preview.waitFor({ state: 'visible' })
-    await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-preview-desktop.png` })
-    await p.mouse.move(700, 500)
+    await tab(p, 'figure.png').hover(); await caption.waitFor({ state: 'visible' })
+    await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-map-desktop.png` })
   }
+  await p.mouse.move(700, 400)
+  await poll(p, () => document.querySelector('.ws-tab-tip').hidden)
   await report(p).evaluate(f => { window.__filmReport = f.contentWindow })
   const before = await film.boundingBox()
   await p.locator('.ws-selected .ws-expand-button').click()
-  assert.deepEqual(await film.boundingBox(), before, 'expanding leaves the head as it is')
+  assert.deepEqual(await film.boundingBox(), before, 'expanding leaves the map as it is')
   await p.locator('.ws-selected .ws-expand-button').click()
   await p.evaluate(() => {
     const original = window.fetch
@@ -664,13 +665,19 @@ test('The running head indexes pages in words, previews on hover within the shar
   await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__filmReport))
-  assert.deepEqual(await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), sendOrder, 'a re-send marks its tab fresh without moving it')
+  const resent = ['Constitution', 'Field note', ...sendOrder.filter(label => label !== 'Constitution' && label !== 'Field note')]
+  assert.deepEqual(await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), resent, 'a re-send moves its tile to the front, beside §, and marks it fresh')
   if (process.env.WORKSPACE_SHOTS) {
     await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-desktop.png` })
   }
   await p.setViewportSize({ width: 390, height: 844 })
   await poll(p, () => !document.querySelector('.ws-tabs').checkVisibility())
+  // The phone's sense of place: a tick per page on the bottom bar, the current one marked.
+  const ticks = await p.locator('.ws-thumbbar .ws-page-tick').evaluateAll(ticks => ticks.map(t => t.classList.contains('ws-page-tick-current')))
+  assert.equal(ticks.length, sendOrder.length)
+  assert.equal(ticks.indexOf(true), resent.indexOf(displayLabel('calibration-report')))
+  assert.equal(ticks.filter(Boolean).length, 1)
   if (process.env.WORKSPACE_SHOTS) {
     await p.locator('.ws-page-choice').click()
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-phone.png` })
@@ -680,6 +687,27 @@ test('The running head indexes pages in words, previews on hover within the shar
   await choose(p, 'brief.md')
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
 })
+
+for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps one gutter, and the map follows it (${width})`, async p => {
+  await open(p); await reportReady(p)
+  const geometry = async () => p.evaluate(() => {
+    const rect = el => el.getBoundingClientRect()
+    const page = rect(document.querySelector('.ws-page.ws-selected')), sidebar = rect(document.querySelector('.ws-sidebar'))
+    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage'))
+    return { gutter: page.left - sidebar.right, right: stage.right - page.right, page: page.left + page.width / 2, tile: tile.left + tile.width / 2,
+      ground: getComputedStyle(document.querySelector('.ws-sidebar')).backgroundColor }
+  })
+  for (const label of ['calibration-report', 'Constitution', 'remote-summary.pdf']) {
+    await choose(p, label)
+    await p.waitForTimeout(350)
+    const at = await geometry()
+    // The pointer's parallax may drift the page a few pixels.
+    assert.ok(Math.abs(at.gutter - 24) <= 4, `${label}: the page sits one gutter from the sidebar: ${JSON.stringify(at)}`)
+    assert.ok(at.right >= 24, `${label}: the page shrinks before it crowds the stage's far edge: ${JSON.stringify(at)}`)
+    assert.ok(Math.abs(at.tile - at.page) < 3, `${label}: the selected tile sits under the page: ${JSON.stringify(at)}`)
+    assert.notEqual(at.ground, 'rgba(0, 0, 0, 0)', 'the sidebar column has its own ground')
+  }
+}, { width, height: 900 }, 'true')
 
 for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals move only their tab and folio (${reducedMotion})`, async p => {
   await open(p); await reportReady(p)
@@ -705,7 +733,8 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
   })
   await p.clock.fastForward(15001)
   await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
-  assert.deepEqual(await p.locator('.ws-tabs .ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), sendOrder, 'tabs keep send order through a re-send')
+  const resent = ['Constitution', 'Field note', ...sendOrder.filter(label => label !== 'Constitution' && label !== 'Field note')]
+  assert.deepEqual(await p.locator('.ws-tabs .ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), resent, 'a re-send moves its tile to the front; selection stays with the report')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
   const tabs = await p.evaluate(() => window.__receiptAnimations.filter(a => a.tab))
@@ -1765,14 +1794,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     const headDot = await dot.evaluate(el => getComputedStyle(el).backgroundColor)
     const headLook = await head.evaluate(el => ({ border: getComputedStyle(el).borderTopWidth, background: getComputedStyle(el).backgroundColor }))
     assert.deepEqual(headLook, { border: '0px', background: 'rgba(0, 0, 0, 0)' }, 'the head draws the worker bare')
-    const headBox = await head.boundingBox(), position = await p.locator('.ws-head-position').boundingBox()
+    const headBox = await head.boundingBox()
     if (device === 'phone') {
       assert.ok(await head.locator('.ws-worker-state').isHidden(), 'the phone top bar shows the dot alone')
       assert.ok(headBox.width >= 44 && headBox.height >= 44, `the phone dot is a full target: ${JSON.stringify(headBox)}`)
       assert.ok(headBox.x + headBox.width >= viewport.width - 16, 'the phone dot sits at the right end of the top bar')
     } else {
       assert.match(await head.innerText(), /aloft\s*12 m/)
-      assert.ok(headBox.x + headBox.width <= position.x, 'the worker control precedes the page count')
+      assert.ok(headBox.x + headBox.width >= viewport.width - 48, `the worker control ends the head: ${JSON.stringify(headBox)}`)
     }
     await shot('aloft')
     await p.evaluate(async () => {
