@@ -104,7 +104,9 @@ export class Reader {
     this.trail = element('div', 'ws-nav-trail')
     this.trail.append(this.conversation)
     this.navbar = element('nav', 'ws-navbar')
-    this.navbar.append(this.lead, this.tabs.el, this.trail)
+    const tabPlate = element('div', 'ws-nav-tabs')
+    tabPlate.append(this.tabs.el)
+    this.navbar.append(this.lead, tabPlate, this.trail)
     this.prev = button('ws-thumb-button', '‹', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '›', () => this.step(1), 'Next document')
     const thumbMenu = button('ws-thumb-button', '⋯', () => {
@@ -349,7 +351,7 @@ export class Reader {
     if (!ch || !this.active) return
     const W = this.stage.clientWidth, H = this.stage.clientHeight
     if (!W || !H) return
-    const inset = this.measure('inset', 12), gap = this.measure('gap', 24)
+    const inset = this.measure('stage-inset', 28), gap = this.measure('gap', 24)
     const boxW = W - inset * 2, boxH = H - inset * 2
     if (!animate || this.motion.matches) {
       this.stage.classList.add('ws-instant')

@@ -23,9 +23,15 @@
      soft and unreadable under a blur. */
   --ws-veil: color-mix(in srgb, var(--kbn-parchment) 42%, transparent);
   --ws-veil-filter: blur(9px) saturate(1.05) brightness(1.02);
-  /* A page floats: one tight contact shadow and one long ambient one. */
-  --ws-float: 0 1px 2px color-mix(in srgb, var(--kbn-ink) 10%, transparent),
-    0 28px 64px -14px color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  /* Paper elevation: contact, middle distance, and ambient light on the Desk. */
+  --ws-shadow-contact: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent);
+  --ws-shadow-mid: 0 12px 24px -8px color-mix(in srgb, var(--ws-ink) 22%, transparent);
+  --ws-shadow-ambient: 0 36px 72px -16px color-mix(in srgb, var(--ws-ink) 32%, transparent);
+  --ws-paper-light: inset 0 1px 0 color-mix(in srgb, var(--ws-paper) 85%, white);
+  --ws-float: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-shadow-ambient);
+  --ws-shadow-low: 0 2px 5px color-mix(in srgb, var(--ws-ink) 10%, transparent);
+  --ws-chrome-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 8%, transparent),
+    0 8px 18px -6px color-mix(in srgb, var(--ws-ink) 18%, transparent);
   --ws-mask: var(--kbn-ink);
   --ws-agent: var(--kbn-agent);
   --ws-red: var(--ws-owed);
@@ -57,6 +63,10 @@
   --ws-control-radius: 7px;
   --ws-control-height: 32px;
   --ws-nav-height: 52px;
+  --ws-chrome-inset: 18px;
+  --ws-chrome-padding: 4px;
+  --ws-stage-inset: 28px;
+  --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
   --ws-label-height: 40px;
   --ws-thumb-height: 56px;
