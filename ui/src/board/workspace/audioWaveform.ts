@@ -3,6 +3,78 @@ const BINS = 1000
 const CACHE_PREFIX = 'shuttle:audio:peaks:'
 export interface Waveform { peaks: number[]; duration: number }
 const cache = new Map<string, Promise<Waveform | null>>()
+const durations = new Map<string, number>()
+const reads = new Map<string, Promise<number | null>>()
+
+/**
+ * Listening pages read in the background through two shared slots, newest
+ * request first. Over HTTP/1.1 a browser holds six connections per host, and
+ * a channel of songs (whole-file waveform reads, a duration for every sibling
+ * on every mounted page) would otherwise hold them all while Play waits.
+ */
+const READ_SLOTS = 2
+const waiting: Array<() => void> = []
+let reading = 0
+function nextRead(): void { while (reading < READ_SLOTS && waiting.length) waiting.pop()!() }
+function queuedRead<T>(signal: AbortSignal, read: () => Promise<T>, skipped: T): Promise<T> {
+  return new Promise<T>(resolve => {
+    if (signal.aborted) { resolve(skipped); return }
+    const start = (): void => {
+      signal.removeEventListener('abort', skip)
+      reading++
+      void read().catch(() => skipped).then(resolve).finally(() => { reading--; nextRead() })
+    }
+    const skip = (): void => {
+      const index = waiting.indexOf(start)
+      if (index >= 0) { waiting.splice(index, 1); resolve(skipped) }
+    }
+    signal.addEventListener('abort', skip, { once: true })
+    waiting.push(start)
+    nextRead()
+  })
+}
+
+/** A sibling's duration from one transient metadata read; `revision` names the bytes it describes. */
+export function loadDuration(src: string, revision: string, signal: AbortSignal): Promise<number | null> {
+  const identity = JSON.stringify([src, revision])
+  const known = durations.get(identity)
+  if (known !== undefined) return Promise.resolve(known)
+  return queuedRead(signal, () => {
+    const saved = durations.get(identity)
+    if (saved !== undefined) return Promise.resolve(saved)
+    let read = reads.get(identity)
+    if (!read) {
+      read = readDuration(src).then(duration => {
+        reads.delete(identity)
+        if (duration !== null) durations.set(identity, duration)
+        return duration
+      })
+      reads.set(identity, read)
+    }
+    return read
+  }, null)
+}
+
+/** A read that stalls gives up its slot rather than holding the queue. */
+const DURATION_TIMEOUT_MS = 15000
+const DURATION_ENDS = ['loadedmetadata', 'error', 'stalled'] as const
+
+function readDuration(src: string): Promise<number | null> {
+  return new Promise(resolve => {
+    const media = document.createElement('audio')
+    const finish = (): void => {
+      clearTimeout(timer)
+      const duration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : null
+      for (const event of DURATION_ENDS) media.removeEventListener(event, finish)
+      media.removeAttribute('src'); media.load()
+      resolve(duration)
+    }
+    const timer = setTimeout(finish, DURATION_TIMEOUT_MS)
+    media.preload = 'metadata'
+    for (const event of DURATION_ENDS) media.addEventListener(event, finish)
+    media.src = src
+  })
+}
 
 /** Maximum amplitude across channels in each evenly sized time bucket. */
 export function audioPeaks(channels: Float32Array[], bins = BINS): number[] {
@@ -37,7 +109,11 @@ async function boundedBytes(response: Response): Promise<ArrayBuffer> {
 }
 
 /** Decode once per identity and revision; playback keeps its native range URL. */
-export async function loadWaveform(key: string, src: string, signal: AbortSignal): Promise<Waveform | null> {
+export function loadWaveform(key: string, src: string, signal: AbortSignal): Promise<Waveform | null> {
+  return queuedRead(signal, () => readWaveform(key, src, signal), null)
+}
+
+async function readWaveform(key: string, src: string, signal: AbortSignal): Promise<Waveform | null> {
   try {
     const head = await fetch(src, { method: 'HEAD', signal })
     if (!head.ok || Number(head.headers.get('Content-Length')) > MAX_BYTES) return null

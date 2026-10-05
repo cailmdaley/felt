@@ -1,6 +1,6 @@
 import type { DocKey, WorkspaceDocument } from './documents.js'
 import { fileBytesUrl } from '../utils.js'
-import { loadWaveform } from './audioWaveform.js'
+import { loadDuration, loadWaveform } from './audioWaveform.js'
 import './audio.css'
 
 const KEEP_POSITION = 'shuttle:audio:keep-position'
@@ -29,7 +29,7 @@ export class AudioPage {
   private readonly compare = document.createElement('section')
   private readonly list = document.createElement('ul')
   private readonly controller = new AbortController()
-  private readonly metadata = new Map<DocKey, HTMLAudioElement>()
+  private durations: AbortController | null = null
   private readonly observer: ResizeObserver | null
   private peaks: number[] | null = null
   private waveformDuration: number | null = null
@@ -128,8 +128,8 @@ export class AudioPage {
     const signature = JSON.stringify(others.map(d => [d.key, d.provenance]))
     if (signature === this.signature) return
     this.signature = signature
-    for (const media of this.metadata.values()) { media.removeAttribute('src'); media.load() }
-    this.metadata.clear()
+    this.durations?.abort()
+    const durations = this.durations = new AbortController()
     this.list.replaceChildren()
     this.compare.hidden = others.length === 0
     for (const doc of others) {
@@ -140,23 +140,19 @@ export class AudioPage {
       label.textContent = embed?.kind === 'embed' ? embed.title! : doc.name
       const duration = document.createElement('span'); duration.className = 'ws-audio-duration'; duration.textContent = '—'
       select.append(label, duration); item.append(select); this.list.append(item)
-      const media = document.createElement('audio')
-      media.preload = 'metadata'
-      media.addEventListener('loadedmetadata', () => { duration.textContent = mediaTime(media.duration) }, { once: true })
-      media.src = fileBytesUrl(this.base, doc.path, doc.owner)
-      this.metadata.set(doc.key, media)
+      void loadDuration(fileBytesUrl(this.base, doc.path, doc.owner), JSON.stringify(doc.provenance), durations.signal).then(seconds => {
+        if (seconds !== null && !durations.signal.aborted) duration.textContent = mediaTime(seconds)
+      })
     }
   }
 
   dispose(): void {
     this.disposed = true
     this.cancelDrag?.()
-    this.controller.abort(); this.observer?.disconnect(); cancelAnimationFrame(this.animation)
+    this.controller.abort(); this.durations?.abort(); this.observer?.disconnect(); cancelAnimationFrame(this.animation)
     document.removeEventListener('workspace-theme-change', this.themeChanged)
     for (const event of ['timeupdate', 'loadedmetadata', 'durationchange', 'play', 'pause', 'ended', 'seeked']) this.audio.removeEventListener(event, this.update)
     for (const event of ['loadedmetadata', 'durationchange']) this.audio.removeEventListener(event, this.posterMetadata)
-    for (const media of this.metadata.values()) { media.removeAttribute('src'); media.load() }
-    this.metadata.clear()
     this.el.remove()
   }
 
