@@ -293,12 +293,18 @@ function themeImports(css: string): { body: string; allowed: string[] } {
       }
       const statement = css.slice(i, end)
       let target = statement.slice(7).trim()
-      if (target.toLowerCase().startsWith('url(')) target = target.slice(4).trim()
-      const url = target[0] === '"' || target[0] === "'" ? target.slice(1, quotedEnd(target, 0) - 1) : target.slice(0, target.indexOf(')'))
+      const functional = target.toLowerCase().startsWith('url(')
+      if (functional) target = target.slice(4).trim()
+      const quoted = target[0] === '"' || target[0] === "'"
+      const urlEnd = quoted ? quotedEnd(target, 0) : target.indexOf(')')
+      const url = quoted ? target.slice(1, urlEnd - 1) : target.slice(0, urlEnd)
+      const modifiers = target.slice(urlEnd + (quoted ? 0 : 1)).trim().replace(/^\)\s*/, '').replace(/;$/, '').trim()
       try {
-        const parsed = new URL(url)
-        if (parsed.protocol === 'https:' && parsed.hostname === 'fonts.googleapis.com' && !parsed.username && !parsed.password) allowed.push(statement)
-        else console.info('Shuttle theme: dropped @import (only Google Fonts is allowed)', statement)
+        const parsed = new URL(cssUnescape(url))
+        if (parsed.protocol === 'https:' && parsed.hostname === 'fonts.googleapis.com' && !parsed.username && !parsed.password && !parsed.port) {
+          // Emit the validated URL, never the authored spelling decoded by the browser.
+          allowed.push(`@import url(${JSON.stringify(parsed.href)})${modifiers ? ` ${modifiers}` : ''};`)
+        } else console.info('Shuttle theme: dropped @import (only Google Fonts is allowed)', statement)
       } catch { console.info('Shuttle theme: dropped invalid @import', statement) }
       i = end; continue
     }

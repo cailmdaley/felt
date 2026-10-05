@@ -1541,6 +1541,30 @@ test('Theme URLs allow only data, Google Fonts and relative resources inside the
   for (const forbidden of ['theme-probe.invalid', 'secret.png', '/api/v1/version', 'evil.test']) assert.ok(!result.includes(forbidden), forbidden)
 })
 
+test('Escaped theme imports cannot load unscoped CSS or target the composer', async p => {
+  await open(p); await choose(p, 'Constitution')
+  const composer = p.locator('.ws-selected [data-part="act"] textarea')
+  await composer.waitFor()
+  const before = await composer.evaluate(element => getComputedStyle(element).color)
+  const requests = []
+  await p.route('https://fonts.googleapis.com.evil.test/**', route => {
+    requests.push(route.request().url())
+    return route.fulfill({ contentType: 'text/css', body: 'textarea { color: rgb(123, 45, 67) !important; }' })
+  })
+  const compiled = await p.evaluate(() => {
+    const css = String.raw`@import "https://fonts.googleapis.com\2e evil.test/probe.css"; :scope { --probe: 1; }`
+    const output = window.__harness.scopeTheme(css, '[data-ws-theme="import-probe"]', 'import-probe')
+    const style = document.createElement('style'); style.textContent = output; document.head.append(style)
+    return output
+  })
+  await p.waitForTimeout(250)
+  assert.deepEqual(requests, [], 'CSS-decoded import host must pass the resource policy')
+  assert.ok(!compiled.includes('evil.test'))
+  assert.equal(await composer.evaluate(element => getComputedStyle(element).color), before)
+  const safe = await p.evaluate(() => window.__harness.scopeTheme(String.raw`@import "https://fonts.googleapis.com/css2?family=Roboto" screen; :scope { color: red; }`, ':scope', 'safe-import'))
+  assert.ok(safe.includes('@import url("https://fonts.googleapis.com/css2?family=Roboto") screen;'), 'permitted imports use a canonical URL')
+})
+
 test('Custom theme is scoped with private keyframes, hoisted fonts and conditional rules', async p => {
   const desk = await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity)
   await p.locator('[data-view="shelf"]').click()
@@ -1566,7 +1590,7 @@ test('Custom theme is scoped with private keyframes, hoisted fonts and condition
   assert.ok(!source.includes('example.invalid'), 'non-Google imports are removed before insertion')
   const fontImport = '@import url(https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap);'
   const allowed = await p.evaluate(css => window.__harness.scopeTheme(`${css} h1 { color: red }`, '[data-ws-theme="font-check"]', 'font-check'), fontImport)
-  assert.ok(allowed.startsWith(fontImport), 'Google Fonts import survives URL semicolons without loading an external stylesheet')
+  assert.ok(allowed.startsWith('@import url("https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap");'), 'Google Fonts import survives URL semicolons in canonical form')
   assert.ok(allowed.includes('@scope'), 'rules after an import remain scoped')
   assert.equal(await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity), desk, 'Desk is outside the theme scope')
   const other = p.locator('.ws-overview-folio[data-uid="01KVBR2G7CXDWMG85592QW78M9"]')
