@@ -149,7 +149,9 @@ defmodule Shuttle.Env do
     the child's `init/1`.
     """
     @spec callers() :: [pid()]
-    def callers, do: [self() | Process.get(:"$callers", [])]
+    # The resolved owner rides along, so the chain still reaches the test after
+    # an intermediate process (the starting Poller) has exited.
+    def callers, do: [self() | Process.get(:"$callers", [])] ++ List.wrap(owner())
 
     @doc "Adopt a `callers/0` chain as this process's `$callers`."
     @spec adopt_callers([pid()]) :: :ok
