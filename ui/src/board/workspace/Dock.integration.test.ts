@@ -34,6 +34,23 @@ beforeEach(async () => {
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+describe('Dock dispatch recovery', () => {
+  it.each(['New session', 'Resume'])('re-enables %s after a sessionless conflict only when worker state changes', async name => {
+    vi.mocked(fetch).mockResolvedValue(response({}, 409))
+    const verb = button(name)
+    verb.click()
+    await flush()
+    expect(verb.textContent).toBe('Already running')
+    expect(verb.disabled).toBe(true)
+    dock.syncRuntime(task())
+    expect(verb.disabled).toBe(true)
+    dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
+    expect(verb.disabled).toBe(false)
+    expect(verb.textContent).toBe(name)
+    expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
+  })
+})
+
 describe('Dock poll reconciliation', () => {
   it('re-seeds settings from polls and writes only the edited agent axis', async () => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!

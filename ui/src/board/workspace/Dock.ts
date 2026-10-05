@@ -26,6 +26,9 @@ interface ComposerSend {
   setBusy(on: boolean, except?: HTMLButtonElement): void
   sent(): void
 }
+function workerIdentity(card: KanbanCard): string {
+  return JSON.stringify([card.workerState, card.workerSurface, card.sessionUuid, card.tmuxSession, card.runtimePhase])
+}
 function clockTime(ms: number): string {
   // 24-hour regardless of locale: the line is a mono strip where two times sit
   // side by side, and `11:59 AM · 03:35 PM` is both wider and harder to subtract
@@ -409,6 +412,7 @@ export class Dock {
   private freshButton: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private savesPending = 0
+  private readonly blockedDispatches = new Map<HTMLButtonElement, { worker: string; label: string; error: HTMLElement }>()
   private epoch = 0
   private readonly timers = new Set<number>()
   private readonly shuttleBase: string
@@ -520,6 +524,7 @@ export class Dock {
     this.composerError = null
     this.freshButton = null
     this.settingsSync = null
+    this.blockedDispatches.clear()
     this.root?.replaceChildren()
   }
 
@@ -697,6 +702,16 @@ export class Dock {
       card = this.card
     }
     this.settingsSync?.(incoming)
+    for (const [button, blocked] of this.blockedDispatches) {
+      if (blocked.worker === workerIdentity(card)) continue
+      button.disabled = false
+      button.textContent = blocked.label
+      if (blocked.error.textContent === 'A worker is already running for this fiber.') {
+        blocked.error.textContent = ''
+        blocked.error.style.display = 'none'
+      }
+      this.blockedDispatches.delete(button)
+    }
     this.workerPillCard = card
     this.paintGuidance(card)
     const key = this.workerPillState(card)
@@ -1716,6 +1731,7 @@ export class Dock {
         return true
       }
 
+      this.blockedDispatches.set(btn, { worker: workerIdentity(card), label: original, error: errorEl })
       btn.textContent = 'Already running'
       btn.disabled = true
       errorEl.textContent = 'A worker is already running for this fiber.'
