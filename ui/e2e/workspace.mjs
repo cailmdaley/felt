@@ -587,6 +587,10 @@ test('Plain removes custom and bundled styling, persists, and can restore custom
   await p.locator('.ws-channel-title').click()
   await p.getByRole('button', { name: 'Plain', exact: true }).click()
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
+  await p.setViewportSize({ width: 390, height: 844 })
+  await p.locator('.ws-channel-title').click() // close the open picker
+  await p.locator('.ws-channel-title').click()
+  assert.ok((await p.getByRole('button', { name: 'Plain', exact: true }).boundingBox()).height >= 44, 'Plain has a phone-sized touch target')
 })
 
 test('Broken theme falls back to its bundled base', async p => {
