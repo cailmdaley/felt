@@ -186,7 +186,7 @@ defmodule Shuttle.FiberDocuments do
       `show <canonical-id>` misses. We enumerate the store with the same CLI and
       match on the canonical id. It also runs for every id no store resolves,
       so it lists metadata only and stats nothing: one `ls` per store, then a
-      `show` of the matched fiber when the body is wanted.
+      `show` of the matched fiber.
 
   Returns the same `{:ok, %{host, felt_stores, fibers: […]}}` envelope as
   `list/1` with zero or one fiber, so the client reuses the same response parser.
@@ -201,18 +201,14 @@ defmodule Shuttle.FiberDocuments do
   def get_shuttle(id, opts \\ []),
     do: get_with_cli(id, "shuttle", Keyword.delete(opts, :with_body))
 
-  # Identical concurrent reads share one lookup: a board that re-requests a
-  # fiber while the first request is still resolving costs one felt run.
   defp get_with_cli(id, cli, opts) do
     stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
     with_body? = cli == "felt" and Keyword.get(opts, :with_body, false)
 
-    SingleFlight.run({:fiber_get, cli, stores, id, with_body?}, fn ->
-      case fast_lookup(stores, id, with_body?, cli) do
-        {:ok, entry} -> {:ok, envelope(stores, [entry])}
-        :miss -> scan_lookup(stores, id, with_body?, cli)
-      end
-    end)
+    case fast_lookup(stores, id, with_body?, cli) do
+      {:ok, entry} -> {:ok, envelope(stores, [entry])}
+      :miss -> scan_lookup(stores, id, with_body?, cli)
+    end
   end
 
   # Direct `show` per store; first store that resolves the id wins.
@@ -263,13 +259,14 @@ defmodule Shuttle.FiberDocuments do
   # Enumerate each store and match the requested canonical id. The listing
   # carries no bodies and the match is made on in-memory entries: every miss
   # lands here, so its cost is one metadata `ls` per store, never a body dump or
-  # a stat per fiber, and concurrent misses share that listing. The matched
-  # fiber's body comes from a `show` of its felt traversal id, which resolves
-  # directly.
+  # a stat per fiber, and concurrent misses share that listing. The listing only
+  # picks the fiber; the answer comes from a fresh `show` of its felt traversal
+  # id, which resolves directly.
   defp scan_lookup(stores, id, with_body?, cli) do
     results =
       Enum.map(stores, fn store ->
-        with {:ok, rows} <- SingleFlight.run({:fiber_ls, cli, store}, fn -> ls_rows(store, cli) end) do
+        with {:ok, rows} <-
+               SingleFlight.run({:fiber_ls, cli, store}, fn -> ls_rows(store, cli) end) do
           {:ok, Enum.map(rows, &{store, &1})}
         end
       end)
@@ -301,14 +298,12 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  defp matched_entry(store, %{"id" => traversal_id}, true, cli) do
-    case show_store(store, traversal_id, true, cli) do
+  defp matched_entry(store, %{"id" => traversal_id}, with_body?, cli) do
+    case show_store(store, traversal_id, with_body?, cli) do
       {:ok, [entry | _]} -> {:ok, entry}
       _ -> {:error, %{felt_store: store, error: "#{cli} show #{traversal_id} failed after ls"}}
     end
   end
-
-  defp matched_entry(store, row, false, _cli), do: {:ok, hd(entry_for(store, row, :field))}
 
   defp list_store(store, with_body?, mode, cli \\ "felt") do
     with {:ok, rows} <- ls_rows(store, cli, with_body?) do

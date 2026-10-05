@@ -174,8 +174,8 @@ defmodule Shuttle.Application do
     core = [
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
-      # Shares one felt read among concurrent requests for the same fiber or
-      # store listing (`Shuttle.FiberDocuments`).
+      # Shares one felt read among concurrent board requests for the same
+      # fiber, and among concurrent misses for a store's listing.
       Shuttle.SingleFlight,
       Shuttle.Meeting.Control,
       # Owns the ETS table past sessions' bridge URLs are cached in, keyed on
