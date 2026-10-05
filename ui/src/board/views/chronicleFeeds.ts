@@ -20,7 +20,7 @@
  * an unmount stores into an instance nobody reads.
  */
 
-import { civilDayToLocalDate } from '../civilDay.js'
+import { civilDaySpan } from '../civilDay.js'
 import { activityChunks, type DayRange } from './chronicleWindow.js'
 import {
   buildSessionIndex,
@@ -201,10 +201,8 @@ function commitsKey(window: DayRange): string {
   return `${window.first}:${window.last}`
 }
 
-/** The instants a drawn window's commit ledger is asked over: local midnight
- *  of its first day to the last second of its last. */
+/** The instants a drawn window's commit ledger is asked over: the start of
+ *  its first day to the last second of its last. */
 function commitsSpan(window: DayRange): [number, number] {
-  const fromMs = civilDayToLocalDate(window.first)?.getTime() ?? 0
-  const toMs = (civilDayToLocalDate(window.last)?.getTime() ?? 0) + 86_399_000
-  return [fromMs, toMs]
+  return civilDaySpan(window.first, window.last)
 }

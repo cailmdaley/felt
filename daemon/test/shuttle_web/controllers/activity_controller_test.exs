@@ -682,10 +682,8 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  # Point the reader at a fixture. Clears SHUTTLE_DATA_DIR too, so resolution
-  # can never fall through to the real ~/.shuttle/events.jsonl on a dev machine.
+  # Point the reader at a fixture.
   defp with_events_file(path) do
-    Env.delete_env("SHUTTLE_DATA_DIR")
     Env.put_env("SHUTTLE_EVENTS_FILE", path)
   end
 end

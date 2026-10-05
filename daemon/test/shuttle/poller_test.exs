@@ -1265,7 +1265,6 @@ defmodule Shuttle.PollerTest do
     fiber = make_fiber("tests/slow-felt-read")
     MockRunner.set_fiber("tests/slow-felt-read", fiber)
     MockRunner.set_shuttle("tests/slow-felt-read", oneshot_shuttle())
-    MockRunner.set_ls_delay(1_000)
 
     {:ok, poller} =
       start_poller!(
@@ -1275,12 +1274,17 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    # Boot and its first cycle read undelayed; the delay applies to the
+    # cycle under test, whose listing is a command recorded after them.
+    settle_poller!(poller)
+    booted = length(MockRunner.commands())
+    MockRunner.set_ls_delay(1_000)
     send(poller, :run_poll_cycle)
 
     assert wait_until(fn ->
-             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "felt" and Enum.take(args, 2) == ["ls", "--json"]
-             end)
+             MockRunner.commands()
+             |> Enum.drop(booted)
+             |> Enum.any?(&match?({"shuttle", ["-C", _store, "ls", "--json" | _]}, &1))
            end)
 
     started_at_ms = System.monotonic_time(:millisecond)
@@ -1336,7 +1340,7 @@ defmodule Shuttle.PollerTest do
 
     assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
 
-    first_task = :sys.get_state(poller).poll_task_pid
+    %{poll_task_pid: first_task, poll_token: abandoned_token} = :sys.get_state(poller)
 
     assert wait_until(fn ->
              state = :sys.get_state(poller)
@@ -1362,19 +1366,28 @@ defmodule Shuttle.PollerTest do
     assert health.stalls >= 2
     assert is_binary(health.last_stalled_at)
 
-    # Capture a live cycle token, let its watchdog supersede it, then inject
-    # the abandoned task's shape. The current cycle remains authoritative.
-    old_token = :sys.get_state(poller).poll_token
+    # Hold one cycle in flight for the rest of the test: its read outlasts the
+    # test and its watchdog does not fire, so the current token cannot move
+    # under the assertions. Every cycle that starts after the swap carries the
+    # long watchdog; a different token than the one in flight at the swap is
+    # such a cycle.
+    MockRunner.set_ls_delay(60_000)
+    :sys.replace_state(poller, &%{&1 | stall_timeout_ms: 600_000})
+    token_at_swap = :sys.get_state(poller).poll_token
 
     assert wait_until(fn ->
              state = :sys.get_state(poller)
-             is_pid(state.poll_task_pid) and state.poll_token != old_token
+             is_pid(state.poll_task_pid) and state.poll_token not in [nil, token_at_swap]
            end)
 
-    current_token = :sys.get_state(poller).poll_token
-    send(poller, {:poll_world, old_token, {:error, :late_abandoned_cycle}})
+    # Inject the first, abandoned cycle's reply. The current cycle remains
+    # authoritative: its token stands and no cycle is counted as applied.
+    %{poll_token: current_token, poll_cycles: cycles} = :sys.get_state(poller)
+    send(poller, {:poll_world, abandoned_token, {:error, :late_abandoned_cycle}})
     _ = Poller.snapshot(poller)
-    assert :sys.get_state(poller).poll_token == current_token
+    state = :sys.get_state(poller)
+    assert state.poll_token == current_token
+    assert state.poll_cycles == cycles
   end
 
   test "poller supervision shuts down an in-flight read with its owner" do
@@ -2001,6 +2014,8 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    # The boot cycle's own `tmux ls` lands before the probe count below.
+    settle_poller!(poller)
     MockRunner.set_tmux_server_missing(true)
 
     assert {:error, {:tmux_server_unavailable, message}} =
@@ -5163,6 +5178,9 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    # The boot cycle runs before the fiber exists, so no poll re-dispatches it
+    # behind the test's own calls once its session is gone.
+    settle_poller!(poller)
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
@@ -5562,11 +5580,8 @@ defmodule Shuttle.PollerTest do
   end
 
   test "dispatch_fiber waits past the default GenServer timeout for slow successful dispatches" do
-    fiber_id = "tests/slow-api-dispatch"
-    fiber = make_fiber(fiber_id)
-    MockRunner.set_fiber(fiber_id, fiber)
-    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    MockRunner.set_new_session_delay(5_250)
+    # The worker-changing calls wait 30 s, well past GenServer's 5 s default...
+    assert Poller.dispatch_call_timeout_ms() == 30_000
 
     {:ok, poller} =
       start_poller!(
@@ -5576,14 +5591,61 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    started_at_ms = System.monotonic_time(:millisecond)
+    # The fibers arrive after the boot cycle, so only these calls dispatch them.
+    settle_poller!(poller)
+    slow_id = "tests/slow-api-dispatch"
+    MockRunner.set_fiber(slow_id, make_fiber(slow_id))
+    MockRunner.set_shuttle(slow_id, oneshot_shuttle())
+    late_id = "tests/late-api-dispatch"
+    MockRunner.set_fiber(late_id, make_fiber(late_id))
+    MockRunner.set_shuttle(late_id, oneshot_shuttle())
 
-    assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, [])
+    # ...a slow spawn still answers...
+    MockRunner.set_new_session_delay(300)
+    assert {:ok, session} = Poller.dispatch_fiber(poller, slow_id, [])
+    assert session == FiberUid.session(slow_id)
+    assert Poller.snapshot(poller).eligible |> Enum.any?(&(&1.fiber_id == slow_id))
 
-    elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
-    assert elapsed_ms >= 5_000
-    assert session == FiberUid.session(fiber_id)
-    assert Poller.snapshot(poller).eligible |> Enum.any?(&(&1.fiber_id == fiber_id))
+    # ...and the wait is that timeout, not GenServer's default: shrunk below a
+    # spawn's duration, the caller gives up first.
+    Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 200)
+    MockRunner.set_new_session_delay(600)
+
+    assert {:timeout, {GenServer, :call, _}} =
+             catch_exit(Poller.dispatch_fiber(poller, late_id, []))
+  end
+
+  test "every worker-changing call gives up at the configured dispatch timeout" do
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_call_timeouts,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 100)
+
+    # A suspended Poller never answers. Each call must give up at the shrunk
+    # 100 ms, well inside the 2 s window; GenServer's 5 s default or the 30 s
+    # production value would still be waiting when the window closes.
+    :sys.suspend(poller)
+
+    calls = [
+      dispatch_fiber: fn -> Poller.dispatch_fiber(poller, "tests/t", []) end,
+      claim_session: fn -> Poller.claim_session(poller, "tests/t", "s", []) end,
+      kill_session: fn -> Poller.kill_session(poller, "tests/t") end,
+      capture: fn -> Poller.capture(poller, "yap", []) end,
+      lifecycle_transition: fn -> Poller.lifecycle_transition(poller, :accept, "tests/t") end
+    ]
+
+    for {name, call} <- calls do
+      task = Task.async(fn -> catch_exit(call.()) end)
+
+      assert {:ok, {:timeout, {GenServer, :call, _}}} = Task.yield(task, 2_000),
+             "#{name} did not give up at the configured timeout"
+    end
   end
 
   # ── Multi-host tests ──

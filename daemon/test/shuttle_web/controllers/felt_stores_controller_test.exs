@@ -35,15 +35,13 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
   test "shows the configured base stores as the local origin" do
     path = Path.expand(Shuttle.Env.get("SHUTTLE_STORES_FILE"))
     File.mkdir_p!(Path.dirname(path))
+    # A `~` path is expanded; one that does not exist keeps the substore walk
+    # off the developer's real home tree.
+    home_store = "~/shuttle-test-absent-store-#{System.unique_integer([:positive])}"
 
-    # An absent home-relative store: tilde expansion without walking a real
-    # ~/loom, whose File.ls calls queue on the VM-wide file server.
     File.write!(
       path,
-      Jason.encode!(%{
-        "version" => 1,
-        "felt_stores" => ["~/shuttle-test-absent-store", "/tmp/project"]
-      })
+      Jason.encode!(%{"version" => 1, "felt_stores" => [home_store, "/tmp/project"]})
     )
 
     conn = get(api_conn(), "/api/v1/felt-stores")
@@ -56,7 +54,7 @@ defmodule ShuttleWeb.FeltStoresControllerTest do
     assert get_in(body, ["origins", host, "kind"]) == "local"
 
     assert get_in(body, ["origins", host, "felt_stores"]) == [
-             Path.expand("~/shuttle-test-absent-store"),
+             Path.expand(home_store),
              "/tmp/project"
            ]
   end

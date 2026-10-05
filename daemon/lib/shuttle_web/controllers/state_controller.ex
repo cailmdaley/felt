@@ -15,6 +15,9 @@ defmodule ShuttleWeb.StateController do
   # makes them strings so the JSON encoder need not know about them.
   import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
 
+  # How long a state read waits on the Poller or the RemoteRegistry before
+  # answering with a degraded body. `config :shuttle, :state_call_timeout_ms`
+  # overrides it.
   @state_timeout_ms 1_500
 
   def show(conn, _params) do
@@ -57,15 +60,18 @@ defmodule ShuttleWeb.StateController do
     end)
   end
 
+  defp state_timeout_ms,
+    do: Shuttle.Env.app(:state_call_timeout_ms, @state_timeout_ms)
+
   defp poller_state do
     {:ok,
-     Shuttle.Poller.orchestrator_state(Shuttle.Env.server(Shuttle.Poller), @state_timeout_ms)}
+     Shuttle.Poller.orchestrator_state(Shuttle.Env.server(Shuttle.Poller), state_timeout_ms())}
   catch
     :exit, reason -> {:error, reason}
   end
 
   defp local_snapshot do
-    Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), @state_timeout_ms)
+    Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), state_timeout_ms())
   catch
     :exit, reason ->
       %{
@@ -81,7 +87,7 @@ defmodule ShuttleWeb.StateController do
   defp remote_snapshots do
     Shuttle.RemoteRegistry.snapshots(
       Shuttle.Env.server(Shuttle.RemoteRegistry),
-      @state_timeout_ms
+      state_timeout_ms()
     )
   catch
     :exit, reason ->

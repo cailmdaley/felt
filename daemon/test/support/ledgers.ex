@@ -42,10 +42,8 @@ defmodule Shuttle.Test.Ledgers do
   Point a ledger controller at a throwaway `.jsonl` under `env_var`, and sweep
   it (plus the rotated sibling the reader also reads) afterwards.
 
-  Both overrides live in the test's scope (`Shuttle.Test.Env`).
-  SHUTTLE_DATA_DIR reads as unset for the test: the daemon resolves it as the
-  fallback root, so leaving a real one set would let ledger resolution find a
-  file this test never wrote.
+  The override lives in the test's scope (`Shuttle.Test.Env`); the suite pins
+  SHUTTLE_DATA_DIR, the fallback root, to an empty dir.
   """
   def ledger_setup!(env_var, prefix) do
     path =
@@ -54,7 +52,6 @@ defmodule Shuttle.Test.Ledgers do
         "#{prefix}_#{System.unique_integer([:positive])}.jsonl"
       )
 
-    Shuttle.Test.Env.delete_env("SHUTTLE_DATA_DIR")
     Shuttle.Test.Env.put_env(env_var, path)
 
     on_exit(fn ->

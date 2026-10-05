@@ -1,6 +1,6 @@
 import { CronExpressionParser } from 'cron-parser';
 import type { Fiber } from './KanbanFiber.js';
-import { dueCivilDay, isoDayLocal } from './civilDay.js';
+import { dueCivilDay, isoDayLocal, shiftCivilDay } from './civilDay.js';
 
 // The kanban's single classifier, in the view. Shuttle (the engine) speaks
 // engine vocabulary — eligible/blocked/running — and never names a kanban
@@ -175,13 +175,9 @@ export function lensCycles(
   nowMs: number = Date.now(),
 ): CycleLensChip[] {
   const today = isoDayLocal(nowMs);
-  // Stepped on the civil calendar from a noon anchor, not by adding 24h: a
-  // DST-long day would leave `nowMs + DAY_MS` on today, and the clamp would
-  // emit a backdate.
-  const tomorrowDate = new Date(nowMs);
-  tomorrowDate.setHours(12, 0, 0, 0);
-  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-  const tomorrow = isoDayLocal(tomorrowDate.getTime());
+  // Stepped on the civil calendar, not by adding 24h: a DST-long day would
+  // leave `nowMs + DAY_MS` on today, and the clamp would emit a backdate.
+  const tomorrow = shiftCivilDay(today, 1);
 
   const chips: CycleLensChip[] = [];
   for (const c of cycles) {

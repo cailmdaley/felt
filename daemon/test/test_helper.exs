@@ -20,6 +20,33 @@ System.put_env("SHUTTLE_AGENTS_FILE", Path.expand("fixtures/agents.json", __DIR_
 # file and set SHUTTLE_REMOTES_FILE themselves.
 System.put_env("SHUTTLE_REMOTES_FILE", Path.expand("fixtures/remotes/absent.json", __DIR__))
 
+# Pin the store registry away from the developer's real one: a fresh tmp
+# path and no SHUTTLE_STORES mean no configured stores. Without this pin, a
+# dispatch that names no store resolves the developer's real
+# ~/.config/shuttle/stores.json and walks that tree for symlinked substores,
+# which takes seconds on a large store, on the caller's process. Tests that
+# want configured stores set SHUTTLE_STORES or SHUTTLE_STORES_FILE.
+System.delete_env("SHUTTLE_STORES")
+
+stores_file =
+  Path.join(System.tmp_dir!(), "shuttle-test-stores-#{System.system_time(:nanosecond)}.json")
+
+System.put_env("SHUTTLE_STORES_FILE", stores_file)
+
+# The same for the project picker's registry, and for the daemon's host-local
+# state root (the default home of the event stream, ledgers, heartbeat and
+# remote caches, ~/.shuttle): an empty per-VM dir, so no default resolution
+# reaches the developer's real files. OperatorFilesGuardTest holds this.
+System.put_env(
+  "SHUTTLE_PROJECTS_FILE",
+  Path.join(System.tmp_dir!(), "shuttle-test-projects.json")
+)
+
+System.delete_env("SHUTTLE_PROJECTS")
+data_dir = Path.join(System.tmp_dir!(), "shuttle-test-data")
+File.mkdir_p!(data_dir)
+System.put_env("SHUTTLE_DATA_DIR", data_dir)
+
 # Pin the session ledger away from the developer's real ~/.shuttle. The
 # dispatch and claim paths append to it unconditionally, so without this the
 # suite would write junk pairings into the machine's actual ledger. Tests that
@@ -51,3 +78,7 @@ Shuttle.Test.Env.start!()
 
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
 ExUnit.start(exclude: exclude)
+
+# A test that saves stores without its own SHUTTLE_STORES_FILE writes the
+# suite-wide registry; remove it with the run.
+ExUnit.after_suite(fn _ -> File.rm(stores_file) end)
