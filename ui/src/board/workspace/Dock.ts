@@ -16,6 +16,8 @@ import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
 import { fiberPageColumn } from './fiberPageState.js'
+import { anchorPopover, type Release } from './anchoredPopover.js'
+import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import './tokens.css'
 import './dock.css'
 
@@ -555,6 +557,7 @@ export class Dock {
   }
 
   handleEscape(): boolean {
+    if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
     return Boolean(this.dismissConversation?.() || this.dismissMeeting?.() || this.dismissParent?.())
   }
@@ -826,6 +829,12 @@ export class Dock {
     more.textContent = '⋯'; more.setAttribute('aria-label', 'Fiber actions')
     const choices = document.createElement('div'); choices.className = 'kbn-ctl-menu'
     menu.append(more, choices)
+    let release: Release | null = null
+    menu.addEventListener('toggle', () => {
+      release?.(); release = null
+      if (menu.open && menu.isConnected) release = anchorPopover(choices, more, { placement: 'below-end' })
+    })
+    this.composerDisposers.push(() => { release?.(); release = null })
     this.verdictMenu = menu
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
@@ -1049,11 +1058,16 @@ export class Dock {
     menu.setAttribute('aria-label', 'Meeting kind')
     menu.hidden = true
 
-    function setOpen(open: boolean): void {
+    let release: Release | null = null
+    const setOpen = (open: boolean): void => {
+      if (open === !menu.hidden) return
       menu.hidden = !open
+      release?.(); release = null
+      if (open) release = anchorPopover(menu, opener, { placement: 'below-start' })
       opener.setAttribute('aria-expanded', String(open))
       wrap.classList.toggle('kbn-ctl-meet-open', open)
     }
+    this.composerDisposers.push(() => { release?.(); release = null })
 
     this.dismissMeeting = () => {
       if (menu.hidden) return false
@@ -1195,6 +1209,7 @@ export class Dock {
     effortSelect.className = 'kbn-ctl-select kbn-ctl-effort-select'
     effortSelect.setAttribute('aria-label', 'Effort')
     if (card.shuttleEffort) effortSelect.append(new Option(card.shuttleEffort, card.shuttleEffort))
+    this.composerDisposers.push(anchorSelect(agentSelect), anchorSelect(effortSelect))
 
     const chrome = ctlToggle('Chrome', 'kbn-ctl-chrome')
     chrome.input.id = 'kbn-detail-chrome'
@@ -1581,10 +1596,17 @@ export class Dock {
     dropdown.style.display = 'none'
     dropdown.setAttribute('role', 'listbox')
 
+    let release: Release | null = null
     const hideDropdown = (): void => {
+      release?.(); release = null
       dropdown.style.display = 'none'
       search.setAttribute('aria-expanded', 'false')
     }
+    const showDropdown = (): void => {
+      dropdown.style.display = ''
+      release ??= anchorPopover(dropdown, search, { placement: 'below-start', matchWidth: true })
+    }
+    this.composerDisposers.push(() => { release?.(); release = null })
     const closeSearch = (): void => {
       this.searchRenderToken++
       if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
@@ -1616,7 +1638,7 @@ export class Dock {
     }
     const openDropdown = (): void => {
       if (search.hidden) return
-      void this.searchParents(search.value.trim(), card.id, dropdown, onPick).then(() => {
+      void this.searchParents(search.value.trim(), card.id, dropdown, onPick, showDropdown).then(() => {
         if (dropdown.style.display !== 'none') search.setAttribute('aria-expanded', 'true')
       })
     }
@@ -2164,6 +2186,7 @@ export class Dock {
     excludeId: string,
     dropdown: HTMLElement,
     onSelect: (result: FiberSearchResult) => void,
+    reveal: () => void,
   ): Promise<void> {
     // Concurrent triggers (focus + debounced input) can resolve the shared
     // index promise in the same microtask batch — without a token the two
@@ -2181,7 +2204,7 @@ export class Dock {
         empty.className = 'kbn-detail-parent-option kbn-detail-parent-empty'
         empty.textContent = q ? 'No matches' : 'No fibers available'
         dropdown.append(empty)
-        dropdown.style.display = ''
+        reveal()
         return
       }
 
@@ -2206,10 +2229,10 @@ export class Dock {
         })
         dropdown.append(opt)
       }
-      dropdown.style.display = ''
+      reveal()
     } catch {
       dropdown.innerHTML = '<div class="kbn-detail-parent-option kbn-detail-parent-empty">Search failed</div>'
-      dropdown.style.display = ''
+      reveal()
     }
   }
 

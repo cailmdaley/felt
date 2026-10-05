@@ -74,6 +74,40 @@ describe('Dock click boundary', () => {
   })
 })
 
+describe('anchored pickers', () => {
+  it('opens the effort list anchored under its select and commits a pick through the select', async () => {
+    band.el.querySelector<HTMLButtonElement>('.kbn-detail-controls-toggle')!.click()
+    const effort = select('Effort')
+    effort.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+    const list = band.el.querySelector<HTMLElement>('.ws-select-picker')!
+    expect(list.previousElementSibling).toBe(effort)
+    expect(list.style.position).toBe('fixed')
+    expect(list.hasAttribute('data-anchored')).toBe(true)
+    expect(effort.getAttribute('aria-expanded')).toBe('true')
+    expect([...list.querySelectorAll('[role="option"]')].map(o => o.textContent)).toEqual(['low', 'medium', 'high'])
+    expect(document.activeElement?.textContent).toBe('medium')
+    const changed = vi.fn(); effort.addEventListener('change', changed)
+    ;[...list.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(o => o.textContent === 'high')!.click()
+    expect(effort.value).toBe('high')
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(band.el.querySelector('.ws-select-picker')).toBeNull()
+    expect(document.activeElement).toBe(effort)
+  })
+  it('anchors the Meeting menu to its microphone and releases it on close', () => {
+    const control = { canJoin: () => true, current: () => null, join: vi.fn() }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const meetingBand = meetingDock.bandFor(task())
+    document.body.append(meetingBand.el)
+    const opener = meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!
+    opener.click()
+    const menu = meetingBand.el.querySelector<HTMLElement>('.kbn-ctl-meet .kbn-ctl-menu')!
+    expect([menu.hidden, menu.style.position, menu.hasAttribute('data-anchored')]).toEqual([false, 'fixed', true])
+    opener.click()
+    expect([menu.hidden, menu.style.position, menu.hasAttribute('data-anchored')]).toEqual([true, '', false])
+    meetingDock.reset()
+  })
+})
+
 describe('Dock booting dispatch rejection', () => {
   it.each(['New session', 'Resume'])('explains a 503 booting %s without consuming the draft or retrying', async name => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!

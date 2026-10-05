@@ -245,6 +245,27 @@
   .ws-dock .kbn-ctl-image-remove { width: var(--ws-phone-target); height: var(--ws-phone-target); }
 }
 
+/* The agent and effort lists, opened as anchored popovers under their select. */
+.ws-dock .ws-select-picker {
+  display: flex; flex-direction: column; gap: 1px; box-sizing: border-box;
+  max-height: min(320px, 60vh); overflow-y: auto; padding: 4px;
+  border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius);
+  background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-shadow-low);
+}
+.ws-dock .ws-select-group { display: flex; flex-direction: column; gap: 1px; }
+.ws-dock .ws-select-group + .ws-select-group { margin-top: 4px; padding-top: 4px; border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-dock .ws-select-group-label { padding: 2px 8px; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-serif); font-variant-caps: all-small-caps; letter-spacing: .03em; }
+.ws-dock .ws-select-option {
+  display: block; width: 100%; padding: 4px 8px; border: 0; border-radius: var(--ws-control-radius);
+  background: transparent; color: var(--ws-ink); text-align: left; white-space: nowrap; cursor: pointer;
+  font: var(--ws-small-size)/1.8 var(--ws-mono);
+}
+.ws-dock .ws-select-option:hover:not(:disabled), .ws-dock .ws-select-option:focus-visible { background: var(--ws-hover); }
+.ws-dock .ws-select-option:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: calc(-1 * var(--ws-focus-width)); }
+.ws-dock .ws-select-option[aria-selected='true'] { background: var(--ws-fill); }
+.ws-dock .ws-select-option:disabled { color: var(--ws-ink-muted); cursor: default; }
+.ws-dock :is(.kbn-ctl-menu, .kbn-detail-parent-dropdown, .ws-select-picker)[data-anchored] { box-shadow: var(--ws-shadow-low); }
+
 /* Data stays mono; verbs are serif plates. */
 .ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-sends .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,
 .ws-dock .kbn-ctl-history-toggle { font: var(--ws-label-size)/1.4 var(--ws-serif) !important; }
@@ -277,3 +298,4 @@
   /* Two verbs take their own row, so the resting composer keeps its prompt legible. */
   .ws-dock .kbn-ctl-composer:has(.kbn-ctl-secondary) .kbn-ctl-composer-foot { grid-column: 1 / -1 !important; grid-row: auto !important; }
 }
+

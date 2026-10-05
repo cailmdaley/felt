@@ -22,6 +22,7 @@ import { workerPlate } from './workerPlate.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installBarSwipe, PhoneTopbar } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
+import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -107,6 +108,7 @@ export class Reader {
   private expanded = false
   private active = false
   private menu: HTMLElement | null = null
+  private menuRelease: Release | null = null
   private menuAnchor: HTMLElement | null = null
   private sidebar = element('aside', 'ws-sidebar')
   private readonly sidebarPicker: ConstitutionPicker
@@ -605,9 +607,7 @@ export class Reader {
     this.el.append(menu)
     this.menu = menu
     this.menuAnchor = anchor
-    const r = anchor.getBoundingClientRect()
-    menu.style.left = `${Math.max(12, Math.min(window.innerWidth - menu.offsetWidth - 12, r.right - menu.offsetWidth))}px`
-    menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 6)}px`
+    this.menuRelease = anchorPopover(menu, anchor, { placement: 'above-end', gap: 6, margin: 12 })
     if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
   }
   private syncPlainToggle(item?: HTMLButtonElement): void {
@@ -622,6 +622,7 @@ export class Reader {
   private closeMenu(): boolean {
     if (this.picker.isOpen) { this.picker.close(); return true }
     if (!this.menu) return false
+    this.menuRelease?.(); this.menuRelease = null
     this.menu.remove()
     this.menu = null
     this.menuAnchor = null

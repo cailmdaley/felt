@@ -784,6 +784,57 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
   }
 })
 
+async function anchoredInView(p, panel, trigger, label) {
+  await poll(p, () => true)
+  const [box, anchor, floor, open, hit] = await Promise.all([panel.boundingBox(), trigger.boundingBox(),
+    p.evaluate(() => { const bar = document.querySelector('[data-part="phone-bottom-bar"]'); const r = bar?.getBoundingClientRect(); return r && r.height && r.top > 0 ? r.top : innerHeight }),
+    panel.evaluate(el => el.matches(':popover-open')),
+    panel.evaluate(el => { const item = el.querySelector('button'); const r = item.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)) })])
+  const vw = p.viewportSize().width
+  assert.ok(open, `${label} rides the top layer`)
+  assert.ok(box.x >= 0 && box.x + box.width <= vw && box.y >= 0 && box.y + box.height <= floor + 0.5, `${label} stays inside the viewport: ${JSON.stringify(box)} floor ${floor}`)
+  assert.ok(hit, `${label} items are visible, not clipped`)
+  const touching = Math.abs(box.y - (anchor.y + anchor.height)) <= 8 || Math.abs(box.y + box.height - anchor.y) <= 8
+  assert.ok(touching, `${label} opens against its trigger: ${JSON.stringify({ box, anchor })}`)
+  return { box, anchor }
+}
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Fiber page popovers open anchored and inside the viewport: ${device}`, async p => {
+  await open(p); await choose(p, 'Constitution')
+  const mic = selected(p).locator('.kbn-ctl-meet-btn')
+  if (await mic.count()) {
+    await mic.click()
+    await anchoredInView(p, selected(p).locator('.kbn-ctl-meet .kbn-ctl-menu'), mic, 'Meeting menu')
+    await p.keyboard.press('Escape')
+  }
+  await selected(p).locator('.kbn-detail-controls-toggle').click()
+  for (const name of ['Effort', 'Agent']) {
+    const control = selected(p).locator(`select[aria-label="${name}"]`)
+    await control.scrollIntoViewIfNeeded()
+    if (device === 'phone') continue
+    await control.click()
+    const picker = selected(p).locator('.ws-select-picker')
+    const { box, anchor } = await anchoredInView(p, picker, control, `${name} list`)
+    assert.ok(Math.abs(box.x - anchor.x) <= 1, `${name} list aligns with its select`)
+    await p.keyboard.press('Escape')
+    assert.equal(await picker.count(), 0)
+  }
+  if (device === 'desktop') {
+    await p.locator('.ws-selected .ws-expand-button').click()
+    await poll(p, () => !!document.querySelector('.ws-page.ws-expanded'))
+    await p.waitForTimeout(400)
+    const effort = selected(p).locator('select[aria-label="Effort"]')
+    await effort.scrollIntoViewIfNeeded()
+    await effort.click()
+    const picker = selected(p).locator('.ws-select-picker')
+    const first = await anchoredInView(p, picker, effort, 'Effort list (expanded)')
+    await selected(p).locator('.ws-prose, .ws-content').first().evaluate(el => { const s = [el, ...el.querySelectorAll('*')].find(n => n.scrollHeight > n.clientHeight + 20 && getComputedStyle(n).overflowY !== 'visible'); if (s) s.scrollTop += 40 })
+    await p.waitForTimeout(100)
+    const after = await anchoredInView(p, picker, effort, 'Effort list (scrolled)')
+    assert.ok(Math.abs((after.box.y - after.anchor.y) - (first.box.y - first.anchor.y)) <= 1, 'the list follows its select through a scroll')
+    await p.keyboard.press('Escape')
+  }
+})
+
 test('Key discard then plate Temper replaces the pending verdict with one delayed write', async p => {
   await open(p); await reportReady(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
