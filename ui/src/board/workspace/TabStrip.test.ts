@@ -141,6 +141,17 @@ describe('TabStrip', () => {
     expect(selected.getAttribute('aria-label')).toBe('Declared title')
   })
 
+  it('captions filmstrip faces once beneath the preview, including the fiber page', () => {
+    const channel = buildChannel({ uid: 'caption', owner: 'caption-host', name: 'A named fiber', path: '/fiber.md', fiberDir: '/', body: 'Preview prose', embeds: [{ path: '/song.mp3' }] })
+    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '', onHeight: vi.fn() })
+    strips.push(strip)
+    strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+    for (const button of strip.buttons) {
+      expect(button.querySelector('.ws-thumbnail-title')?.textContent ?? '').toBe('')
+      expect(button.querySelector('.ws-tab-label')?.textContent).toBeTruthy()
+    }
+  })
+
   it('supports duplicate labels as distinct stable tabs and clears on dispose', () => {
     const strip = create()
     strip.render(['report.html', 'report.html'])

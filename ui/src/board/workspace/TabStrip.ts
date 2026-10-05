@@ -142,7 +142,7 @@ export class TabStrip {
           thumb = new Thumbnail({ key: `tab:${key}`, shuttleBase: this.options.shuttleBase,
             file: doc.kind === 'fiber' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
             fallback: `\n${extractEmbeds(channel.body).body.slice(0, 400) || channel.outcome || channel.name}`,
-            className: `ws-tab-thumb ws-tab-kind-${doc.kind}`,
+            className: `ws-tab-thumb ws-tab-kind-${doc.kind}`, captioned: true,
             priority: () => this.visible && !this.disposed && !this.compact && !this.phone?.matches && this.el.isConnected ? (this.onScreen(button) ? 3 : 1) : 0,
             distance: () => Math.abs(this.records.findIndex(r => r.key === recordKey) - this.selectedIndex),
             onAspect: aspect => {

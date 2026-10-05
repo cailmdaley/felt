@@ -97,7 +97,7 @@ export class Thumbnail {
     budget.thumbnails.add(this)
   }
   private get documentKey(): string | undefined { return this.file ? docKey(this.file.owner, this.file.fullPath, this.file.owner) : undefined }
-  setProse(prose: string, title: string): void { this.title.textContent = title; this.preview.textContent = prose.slice(0, 800) }
+  setProse(prose: string, title: string): void { this.title.textContent = this.opts.captioned ? '' : title; this.preview.textContent = prose.slice(0, 800) }
   private paintFace(): void {
     const metadata = this.documentKey ? declaredTitle(this.documentKey) : undefined
     this.title.textContent = this.opts.captioned ? '' : metadata?.title ?? this.file?.basename ?? ''
