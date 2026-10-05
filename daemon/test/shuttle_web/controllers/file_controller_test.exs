@@ -385,6 +385,159 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
+  describe "bounded file I/O" do
+    @tag :tmp_dir
+    test "large ranges use file offsets and a metadata ETag without reading the whole file", %{
+      tmp_dir: dir
+    } do
+      path = sparse_file(dir, 12 * 1024 * 1024)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      {conn, reads} =
+        Shuttle.Test.FileReadTrace.run(fn ->
+          api_conn() |> put_req_header("range", "bytes=2-5") |> get(url)
+        end)
+
+      assert conn.status == 206
+      assert conn.resp_body == <<0, 0, 0, 0>>
+      assert get_resp_header(conn, "content-range") == ["bytes 2-5/12582912"]
+      assert [etag] = get_resp_header(conn, "etag")
+      assert etag =~ ~r/^W\/"stat-/
+      assert reads == []
+      assert conn.state == :file
+    end
+
+    @tag :tmp_dir
+    test "open-ended ranges stop after four MiB", %{tmp_dir: dir} do
+      path = sparse_file(dir, 12 * 1024 * 1024)
+
+      conn =
+        api_conn()
+        |> put_req_header("range", "bytes=7-")
+        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+      assert conn.status == 206
+      assert byte_size(conn.resp_body) == 4 * 1024 * 1024
+      assert get_resp_header(conn, "content-range") == ["bytes 7-4194310/12582912"]
+      assert get_resp_header(conn, "content-length") == ["4194304"]
+    end
+
+    @tag :tmp_dir
+    test "large full GET delegates to send_file without a whole-file read", %{tmp_dir: dir} do
+      path = sparse_file(dir, 2 * 1024 * 1024)
+
+      {conn, reads} =
+        Shuttle.Test.FileReadTrace.run(fn ->
+          get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+        end)
+
+      assert conn.status == 200
+      assert conn.state == :file
+      assert reads == []
+    end
+
+    @tag :tmp_dir
+    test "HEAD reads no file body for either small or large files and ignores Range", %{
+      tmp_dir: dir
+    } do
+      for size <- [10, 2 * 1024 * 1024] do
+        path = sparse_file(dir, size)
+
+        {conn, reads} =
+          Shuttle.Test.FileReadTrace.run(fn ->
+            api_conn()
+            |> put_req_header("range", "bytes=2-5")
+            |> head("/api/v1/file?path=#{URI.encode_www_form(path)}")
+          end)
+
+        assert conn.status == 200
+        assert conn.resp_body == ""
+        assert get_resp_header(conn, "content-length") == [Integer.to_string(size)]
+        assert get_resp_header(conn, "content-range") == []
+        assert reads == []
+      end
+    end
+
+    @tag :tmp_dir
+    test "large suffix ranges and If-Range fallbacks keep file-backed responses", %{tmp_dir: dir} do
+      path = sparse_file(dir, 2 * 1024 * 1024)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+      first = api_conn() |> head(url)
+      [etag] = get_resp_header(first, "etag")
+      [date] = get_resp_header(first, "last-modified")
+
+      suffix = api_conn() |> put_req_header("range", "bytes=-3") |> get(url)
+      assert suffix.status == 206
+      assert suffix.resp_body == <<0, 0, 0>>
+      assert suffix.state == :file
+      assert get_resp_header(suffix, "content-range") == ["bytes 2097149-2097151/2097152"]
+
+      for {validator, status} <- [
+            {date, 206},
+            {etag, 200},
+            {"Thu, 01 Jan 1970 00:00:00 GMT", 200}
+          ] do
+        {conn, reads} =
+          Shuttle.Test.FileReadTrace.run(fn ->
+            api_conn()
+            |> put_req_header("range", "bytes=0-1")
+            |> put_req_header("if-range", validator)
+            |> get(url)
+          end)
+
+        assert conn.status == status
+        assert conn.state == :file
+        assert reads == []
+      end
+    end
+
+    @tag :tmp_dir
+    test "large metadata validators track mtime, size, and inode", %{tmp_dir: dir} do
+      path = sparse_file(dir, 2 * 1024 * 1024)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+      token = fn -> api_conn() |> head(url) |> get_resp_header("etag") end
+      stamp = {{2020, 1, 1}, {0, 0, 0}}
+      File.touch!(path, stamp)
+      original = token.()
+      File.touch!(path, {{2021, 1, 1}, {0, 0, 0}})
+      assert token.() != original
+      File.touch!(path, stamp)
+      File.write!(path, "x", [:append])
+      assert token.() != original
+      replacement = sparse_file(dir, 2 * 1024 * 1024)
+      # Keep the old inode allocated until the replacement has been created.
+      File.rename!(replacement, path <> ".old")
+      sparse_file(dir, 2 * 1024 * 1024)
+      File.touch!(path, stamp)
+      assert token.() != original
+    end
+
+    @tag :tmp_dir
+    test "large matching validators return 304 without a body read", %{tmp_dir: dir} do
+      path = sparse_file(dir, 2 * 1024 * 1024)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+      first = api_conn() |> head(url)
+      [etag] = get_resp_header(first, "etag")
+
+      {conn, reads} =
+        Shuttle.Test.FileReadTrace.run(fn ->
+          api_conn() |> put_req_header("if-none-match", etag) |> get(url)
+        end)
+
+      assert conn.status == 304
+      assert conn.resp_body == ""
+      assert reads == []
+    end
+  end
+
+  defp sparse_file(dir, size) do
+    path = Path.join(dir, "media-#{size}.mp4")
+    {:ok, file} = :file.open(String.to_charlist(path), [:write, :binary, :raw])
+    :ok = :file.pwrite(file, size - 1, <<0>>)
+    :ok = :file.close(file)
+    path
+  end
+
   describe "remote forward" do
     test "forwards a remote-owned path to the owning daemon and relays bytes" do
       stub_forward(

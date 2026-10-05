@@ -25,9 +25,10 @@ defmodule ShuttleWeb.FileController do
   404 for a missing file, while `/file-info` reports `exists: false`; neither
   500s the reader.
 
-  **Conditional and range reads on both owner legs.** A weak `ETag` hashes the
-  served file bytes, so same-size rewrites with the same mtime still invalidate
-  it. `If-None-Match` can return a bodyless 304; byte ranges return 206 or 416,
+  **Conditional and range reads on both owner legs.** Small GETs use a content
+  digest; files above one MiB use a weak size/mtime/inode validator without
+  reading their bytes. Small HEADs omit the digest rather than read the body.
+  `If-None-Match` can return a bodyless 304; byte ranges return 206 or 416,
   and `If-Range` dates can authorize a range while weak entity tags cannot. The
   owner-routed leg forwards these request headers and relays the owner's
   validators and range metadata. `/file-info` remains available for
@@ -37,9 +38,12 @@ defmodule ShuttleWeb.FileController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [relay_bytes: 2, relay_file_bytes: 2, file_token: 1]
+    only: [relay_bytes: 2, relay_file_bytes: 2]
 
   alias Shuttle.OriginRouter
+
+  @digest_limit 1024 * 1024
+  @range_limit 4 * 1024 * 1024
 
   @media_types %{
     ".mp3" => "audio/mpeg",
@@ -110,8 +114,8 @@ defmodule ShuttleWeb.FileController do
 
   defp serve_info(conn, path) do
     with_regular_file(conn, path,
-      found: fn mtime, size ->
-        info_json(conn, %{exists: true, modified_at: mtime, size: size})
+      found: fn stat ->
+        info_json(conn, %{exists: true, modified_at: stat.mtime, size: stat.size})
       end,
       missing: fn -> info_json(conn, %{exists: false}) end
     )
@@ -125,7 +129,7 @@ defmodule ShuttleWeb.FileController do
 
   defp serve_local(conn, path) do
     with_regular_file(conn, path,
-      found: fn mtime, size -> serve_with_validators(conn, path, mtime, size) end,
+      found: fn stat -> serve_with_validators(conn, path, stat) end,
       missing: fn -> conn |> put_status(404) |> json(%{error: "file not found"}) end
     )
   end
@@ -137,59 +141,91 @@ defmodule ShuttleWeb.FileController do
     if Path.type(path) != :absolute do
       conn |> put_status(400) |> json(%{error: "path must be absolute"})
     else
-      case file_token(path) do
-        {mtime, size} -> found.(mtime, size)
-        nil -> missing.()
+      case File.stat(path, time: :posix) do
+        {:ok, %File.Stat{type: :regular} = stat} -> found.(stat)
+        _ -> missing.()
       end
     end
   end
 
-  # Hash and serve the same bytes so a rewrite is visible even when its size
-  # and filesystem timestamp are unchanged.
-  defp serve_with_validators(conn, path, mtime, _size) do
-    case File.read(path) do
-      {:ok, body} -> serve_representation(conn, path, body, mtime, weak_etag(body))
-      {:error, _reason} -> file_not_found(conn)
+  defp serve_with_validators(conn, path, stat) do
+    cond do
+      stat.size > @digest_limit ->
+        etag = ~s(W/"stat-#{stat.mtime}-#{stat.size}-#{stat.inode}")
+        serve_representation(conn, path, nil, stat.mtime, stat.size, etag)
+
+      head_request?(conn) ->
+        serve_representation(conn, path, nil, stat.mtime, stat.size, nil)
+
+      true ->
+        # Hash and serve the same small snapshot, including same-second rewrites.
+        case File.read(path) do
+          {:ok, body} ->
+            serve_representation(conn, path, body, stat.mtime, byte_size(body), weak_etag(body))
+
+          {:error, _reason} ->
+            file_not_found(conn)
+        end
     end
   end
 
-  defp serve_representation(conn, path, body, mtime, etag) do
-    size = byte_size(body)
-
+  defp serve_representation(conn, path, body, mtime, size, etag) do
     conn =
       conn
-      |> put_resp_header("etag", etag)
       |> put_resp_header("last-modified", http_date(mtime))
       |> put_resp_header("cache-control", "public, max-age=300")
 
-    if not_modified?(conn, etag, mtime) do
-      send_resp(conn, 304, "")
-    else
-      case requested_range(conn, etag, mtime, size) do
-        {:partial, first, last} -> send_partial(conn, path, body, size, first, last)
-        :unsatisfiable -> send_unsatisfiable(conn, path, size)
-        :ignore -> send_full(conn, path, body)
-      end
+    conn = if etag, do: put_resp_header(conn, "etag", etag), else: conn
+
+    cond do
+      not_modified?(conn, etag, mtime) ->
+        send_resp(conn, 304, "")
+
+      head_request?(conn) ->
+        send_full(conn, path, nil, size)
+
+      true ->
+        case requested_range(conn, etag, mtime, size) do
+          {:partial, first, last} -> send_partial(conn, path, body, size, first, last)
+          :unsatisfiable -> send_unsatisfiable(conn, path, size)
+          :ignore -> send_full(conn, path, body, size)
+        end
     end
   end
 
-  defp send_full(conn, path, body) do
-    conn
-    |> representation_headers(path)
-    |> put_resp_header("content-length", Integer.to_string(byte_size(body)))
-    |> send_resp(200, body)
+  defp send_full(conn, path, body, size) do
+    conn =
+      conn
+      |> representation_headers(path)
+      |> put_resp_header("content-length", Integer.to_string(size))
+
+    cond do
+      head_request?(conn) -> send_resp(conn, 200, "")
+      is_binary(body) -> send_resp(conn, 200, body)
+      true -> send_file(conn, 200, path, 0, size)
+    end
   end
 
   defp send_partial(conn, path, body, size, first, last) do
     length = last - first + 1
-    partial = binary_part(body, first, length)
 
-    conn
-    |> representation_headers(path)
-    |> put_resp_header("content-range", "bytes #{first}-#{last}/#{size}")
-    |> put_resp_header("content-length", Integer.to_string(length))
-    |> send_resp(206, partial)
+    conn =
+      conn
+      |> representation_headers(path)
+      |> put_resp_header("content-range", "bytes #{first}-#{last}/#{size}")
+      |> put_resp_header("content-length", Integer.to_string(length))
+
+    if is_binary(body) do
+      send_resp(conn, 206, binary_part(body, first, length))
+    else
+      send_file(conn, 206, path, first, length)
+    end
   end
+
+  # Plug.Head rewrites conn.method to GET; Bandit and the test adapter retain
+  # the wire method so HEAD can skip all representation-body I/O.
+  defp head_request?(%{adapter: {_, %{method: "HEAD"}}}), do: true
+  defp head_request?(conn), do: conn.method == "HEAD"
 
   defp send_unsatisfiable(conn, path, size) do
     conn
@@ -272,7 +308,8 @@ defmodule ShuttleWeb.FileController do
         suffix_range(String.to_integer(suffix), size)
 
       [_, first, ""] ->
-        bounded_range(String.to_integer(first), size - 1, size)
+        first = String.to_integer(first)
+        bounded_range(first, min(size - 1, first + @range_limit - 1), size)
 
       [_, first, last] ->
         bounded_range(String.to_integer(first), String.to_integer(last), size)
@@ -296,7 +333,7 @@ defmodule ShuttleWeb.FileController do
     end
   end
 
-  # Only the content digest decides a 304. `If-Modified-Since` alone never does:
+  # Only the ETag decides a 304. `If-Modified-Since` alone never does:
   # whole-second timestamps can't see a same-second rewrite, and a false 304
   # freezes a report that is being rewritten while someone reads it.
   defp not_modified?(conn, etag, _mtime) do
@@ -310,7 +347,7 @@ defmodule ShuttleWeb.FileController do
     String.split(header, ",")
     |> Enum.any?(fn candidate ->
       candidate = String.trim(candidate)
-      candidate == "*" or weak_tag(candidate) == weak_tag(etag)
+      candidate == "*" or (etag != nil and weak_tag(candidate) == weak_tag(etag))
     end)
   end
 
