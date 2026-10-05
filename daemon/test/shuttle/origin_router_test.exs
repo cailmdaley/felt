@@ -2,6 +2,7 @@ defmodule Shuttle.OriginRouterTest do
   use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
+  require Logger
 
   alias Shuttle.{OriginRouter, Remote}
 
@@ -33,16 +34,20 @@ defmodule Shuttle.OriginRouterTest do
     test "a matching local/known-remote origin never logs" do
       # The capture sees every process's logs, including concurrent async
       # tests', so only the lines this process emitted count: route/2 logs on
-      # its caller.
+      # its caller. A control line logged here proves the filter sees them.
       own_pid = "pid=#{:erlang.pid_to_list(self())}"
 
       log =
         capture_log([format: "$metadata| $message\n", metadata: [:pid]], fn ->
           OriginRouter.route("candide", own_host_id: "laptop", remotes: @remotes)
           OriginRouter.route(nil, own_host_id: "laptop", remotes: @remotes)
+          Logger.warning("origin-router-test control line")
         end)
 
-      assert log |> String.split("\n", trim: true) |> Enum.filter(&(&1 =~ own_pid)) == []
+      assert [control] =
+               log |> String.split("\n", trim: true) |> Enum.filter(&(&1 =~ own_pid))
+
+      assert control =~ "origin-router-test control line"
     end
 
     test "C6: routes through the same normalize_remotes primitive the registries use — a keyword-list remote entry resolves identically to a map one" do
