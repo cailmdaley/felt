@@ -1,6 +1,7 @@
 import type { WorkspaceDocument, DocKey } from './documents.js'
 import { DOCUMENT_KEY_INTENTS, keyIntent } from '../keymap.js'
 import { frameBridge, type DocumentKey } from './DocumentBridge.js'
+import type { SwipeSignal } from './PhoneGestures.js'
 export { withWorkspaceKeyBridge } from './DocumentBridge.js'
 import {
   buildFileViewer, disposeFileViewer, loadFileViewerOnce, playFileViewerAudio, resumeFileViewer, suspendFileViewer,
@@ -56,6 +57,7 @@ export class DocumentHost {
   private selected: DocKey | null = null
   private inlineAudio: { source: DocKey; target: DocKey } | null = null
   private disposed = false
+  private swipeAt = -Infinity
   private readonly stopTitles: () => void
   private readonly track: HTMLElement
   private readonly options: {
@@ -64,6 +66,8 @@ export class DocumentHost {
     onSelect: (key: DocKey) => void
     /** Active-document positions, including restoration, from local or validated bridge scrolls. */
     onScroll?: (key: DocKey, y: number) => void
+    /** Page swipes recognised inside the selected HTML document. */
+    onSwipe?: (signal: SwipeSignal) => void
     onFrame?: (frame: DocumentFrame) => void
     /** The controller owns fetching fiber bodies; it calls updateProse on success. */
     onRefreshProse?: (doc: WorkspaceDocument) => void | Promise<void>
@@ -342,6 +346,7 @@ export class DocumentHost {
         onReferenceIntent: (type, candidate) => this.referenceIntent(state, type, candidate),
         onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
         onDocumentKey: key => this.forwardKey(state, key),
+        onDocumentSwipe: signal => this.forwardSwipe(state, signal),
         onWeight: weight => queueMicrotask(() => {
           if (this.disposed || state.revision !== revision) return
           state.weight = weight
@@ -664,6 +669,17 @@ export class DocumentHost {
     event.stopImmediatePropagation()
     if (intent === 'audioPlay') toggleAudio(media)
     else seekAudio(media, media.currentTime + (intent === 'audioBack' ? -5 : 5))
+  }
+
+  /** Follow updates are bounded to one per frame interval; releases always pass. */
+  private forwardSwipe(state: FrameState, signal: SwipeSignal): void {
+    if (this.disposed || state.frame.doc.key !== this.selected || !state.active || state.frame.doc.kind !== 'html') return
+    if (signal.phase === 'move') {
+      const now = performance.now()
+      if (now - this.swipeAt < 8) return
+      this.swipeAt = now
+    }
+    this.options.onSwipe?.(signal)
   }
 
   private forwardKey(state: FrameState, data: DocumentKey): void {

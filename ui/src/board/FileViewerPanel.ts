@@ -16,6 +16,7 @@ import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
+import type { SwipeSignal } from './workspace/PhoneGestures.js'
 import {
   AUDIO_EXTS,
   IMAGE_EXTS,
@@ -45,6 +46,8 @@ export interface FileViewerOptions {
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
   transformHtml?: (html: string) => string
   onDocumentKey?: (key: DocumentKey) => void
+  /** A page swipe recognised inside the document; the reader decides whether it pages. */
+  onDocumentSwipe?: (signal: SwipeSignal) => void
   onWeight?: (slots: number) => void
   onState?: (state: FileViewerState) => void
   /** Declared metadata shares the inert preview's source read. */
@@ -490,6 +493,8 @@ function buildHtmlViewer(
         options.onReferenceIntent?.(message.type as 'select' | 'play' | 'pause', candidate)
       } else if (message.type === 'key' && embedded.bridge === bridge && embedded.active && typeof message.payload.key === 'string') {
         options.onDocumentKey?.(message.payload as unknown as DocumentKey)
+      } else if (message.type === 'swipe' && embedded.bridge === bridge && embedded.active) {
+        options.onDocumentSwipe?.(message.payload as unknown as SwipeSignal)
       } else if (message.type === 'media') {
         charge(true)
         if (embedded.bridge !== bridge || !embedded.active) bridge.command('pause')

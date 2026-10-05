@@ -20,7 +20,7 @@ import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
 import { ReceiptArrivals } from './receiptMotion.js'
-import { installBarSwipe, PhoneTopbar } from './PhoneGestures.js'
+import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
 
 export interface ReaderOptions {
@@ -95,6 +95,8 @@ export class Reader {
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
   private readonly stopSwipe: () => void
+  private swipeSettle: ReturnType<typeof setTimeout> | null = null
+  private swiping = false
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
@@ -174,7 +176,6 @@ export class Reader {
     pageChoice.setAttribute('aria-expanded', 'false')
     pageChoice.append(this.pageTitle, this.arrivalSummary, this.position)
     thumb.append(this.prev, pageChoice, this.next, thumbMenu)
-    this.stopSwipe = installBarSwipe(thumb, () => this.active && this.phone.matches, delta => this.step(delta))
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -215,7 +216,9 @@ export class Reader {
       onSelect: key => opts.onSelect(key),
       onFrame: frame => this.prepareFrame(frame),
       onScroll: (key, y) => this.topbar.scroll(key, y),
+      onSwipe: signal => this.swipe(signal),
     })
+    this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
     window.addEventListener('resize', this.relayout)
@@ -334,6 +337,38 @@ export class Reader {
   }
   private step(delta: number): void {
     if (this.channel) this.selectIndex(this.channel.documents.findIndex(d => d.key === this.selected) + delta)
+  }
+  private get swipeable(): boolean {
+    return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
+      && (window.visualViewport?.scale ?? 1) <= 1.01 && (this.channel?.documents.length ?? 0) > 1
+  }
+  /** The track follows a latched page swipe, then settles on the page the release chose. */
+  private swipe(signal: SwipeSignal): void {
+    const ch = this.channel
+    const index = ch?.documents.findIndex(d => d.key === this.selected) ?? -1
+    const width = this.stage.clientWidth
+    if (!ch || index < 0 || !width || (!this.swiping && (signal.phase !== 'move' || !this.swipeable))) return
+    const hasPrevious = index > 0, hasNext = index < ch.documents.length - 1
+    if (signal.phase === 'move') {
+      if (this.swipeSettle !== null) { clearTimeout(this.swipeSettle); this.swipeSettle = null }
+      this.swiping = true
+      this.stage.classList.remove('ws-swipe-release')
+      this.stage.classList.add('ws-swiping')
+      this.track.style.transform = `translateX(${this.trackX + swipeFollow(signal.dx, width, hasPrevious, hasNext)}px)`
+      return
+    }
+    this.swiping = false
+    const delta = signal.phase === 'end' && this.swipeable ? swipeOutcome(signal.dx, signal.velocity, width, hasPrevious, hasNext) : 0
+    const travelled = signal.phase === 'end' ? Math.abs(swipeFollow(signal.dx, width, hasPrevious, hasNext)) : 0
+    const settle = swipeSettleTime(delta ? width - travelled : travelled, signal.phase === 'end' ? signal.velocity : 0, this.measure('crossing', 280))
+    this.stage.classList.remove('ws-swiping')
+    if (!this.motion.matches) {
+      this.stage.style.setProperty('--ws-swipe-settle', `${settle}ms`)
+      this.stage.classList.add('ws-swipe-release')
+      this.swipeSettle = setTimeout(() => { this.swipeSettle = null; this.stage.classList.remove('ws-swipe-release') }, settle + 40)
+    }
+    if (delta) this.step(delta)
+    else this.layout(true)
   }
   private paintWorker(): void {
     const card = this.currentCard
@@ -493,7 +528,7 @@ export class Reader {
     const target = Math.round(W / 2 - centre)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
-    this.track.style.transform = `translateX(${target}px)`
+    if (!this.swiping) this.track.style.transform = `translateX(${target}px)`
     // Fade the visible margin, not an outer edge already clipped off-screen.
     for (const doc of ch.documents) {
       const frame = this.host.get(doc.key)

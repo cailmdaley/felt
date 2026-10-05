@@ -1,14 +1,28 @@
 import { describe, expect, it } from 'vitest'
-import { barSwipeIntent, PhoneTopbar } from '../src/board/workspace/PhoneGestures.js'
+import { PhoneTopbar, swipeFollow, swipeOutcome, swipeSettleTime } from '../src/board/workspace/PhoneGestures.js'
 
-describe('bottom bar horizontal intent', () => {
-  it('latches strictly beyond 12 px and below 30 degrees', () => {
-    expect(barSwipeIntent(12, 0)).toBe(0)
-    expect(barSwipeIntent(13, 0)).toBe(-1)
-    expect(barSwipeIntent(-30, 12)).toBe(1)
-    expect(barSwipeIntent(30, 18)).toBe(0)
-    expect(barSwipeIntent(0, 100)).toBe(0)
-    expect(barSwipeIntent(5, 30)).toBe(0)
+describe('page swipe release', () => {
+  it('commits past 28% of the width or on a flick, toward an existing neighbour', () => {
+    expect(swipeOutcome(-120, 0, 390, true, true)).toBe(1)
+    expect(swipeOutcome(120, 0, 390, true, true)).toBe(-1)
+    expect(swipeOutcome(-100, 0, 390, true, true)).toBe(0)
+    expect(swipeOutcome(-40, -0.5, 390, true, true)).toBe(1)
+    expect(swipeOutcome(-20, -2, 390, true, true)).toBe(0)
+    expect(swipeOutcome(-200, 0.5, 390, true, true)).toBe(0)
+    expect(swipeOutcome(200, 0, 390, false, true)).toBe(0)
+    expect(swipeOutcome(-200, 0, 390, true, false)).toBe(0)
+  })
+  it('follows the finger toward a neighbour and resists past the ends', () => {
+    expect(swipeFollow(-80, 390, true, true)).toBe(-80)
+    expect(swipeFollow(-900, 390, true, true)).toBe(-390)
+    const resisted = swipeFollow(200, 390, false, true)
+    expect(resisted).toBeGreaterThan(0)
+    expect(resisted).toBeLessThan(390 * 0.18)
+  })
+  it('settles faster for faster releases within the crossing', () => {
+    expect(swipeSettleTime(300, 0, 280)).toBe(280)
+    expect(swipeSettleTime(300, 3, 280)).toBe(160)
+    expect(swipeSettleTime(200, 1.5, 280)).toBeLessThan(280)
   })
 })
 
