@@ -28,6 +28,8 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
   const browserPans = (touchAction: string): boolean => touchAction === 'auto' || touchAction === 'manipulation'
     || (/pan-(x|left|right)/.test(touchAction) && /pan-(y|up|down)/.test(touchAction))
   const along = (touch: Touch): number => screen && Number.isFinite(touch.screenX) ? touch.screenX : touch.clientX
+  // Both axes in the same space: a frame that moves under the finger (the phone top bar hiding) must not read as vertical travel.
+  const across = (touch: Touch): number => screen && Number.isFinite(touch.screenY) ? touch.screenY : touch.clientY
   const claimed = (target: EventTarget | null): boolean => {
     const selection = win.getSelection()
     if (selection && !selection.isCollapsed) return true
@@ -57,7 +59,7 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
     const touch = event.touches.length === 1 ? event.touches[0] : null
     if (!touch || !event.isTrusted || !enabled()) return
     if (touch.clientX < limits.edge || touch.clientX > win.innerWidth - limits.edge || claimed(event.target)) return
-    drag = { id: touch.identifier, x: along(touch), y: touch.clientY, at: event.timeStamp, dx: 0, latched: false, samples: [] }
+    drag = { id: touch.identifier, x: along(touch), y: across(touch), at: event.timeStamp, dx: 0, latched: false, samples: [] }
   }
   /** A touch whose start the content handled is the content's. */
   const started = (event: TouchEvent): void => {
@@ -75,7 +77,7 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
     const touch = drag && touchOf(event)
     if (!drag || !touch || drag.latched || !event.isTrusted) return
     if (event.defaultPrevented) { drag = null; return }
-    const dx = along(touch) - drag.x, dy = touch.clientY - drag.y
+    const dx = along(touch) - drag.x, dy = across(touch) - drag.y
     if (Math.max(Math.abs(dx), Math.abs(dy)) < limits.slop) return
     if (event.timeStamp - drag.at > limits.hold || Math.abs(dx) < Math.abs(dy) * limits.ratio || !enabled()) { drag = null; return }
     drag.latched = true
