@@ -10,6 +10,8 @@ import type { WorkspaceDocument } from './documents.js'
 const TITLED: Partial<Record<WorkspaceDocument['kind'], number>> = { html: 0, text: 1, pdf: 2, audio: 3 }
 /** At most this many peeks are in flight; the rest wait by kind, then index order. */
 const CONCURRENT = 2
+/** A peek that could not read waits this long before a render may try it again. */
+export const PROBE_RETRY_MS = 60_000
 const probed = new Set<string>()
 const queue: Array<{ rank: number; run: () => Promise<void> }> = []
 let running = 0
@@ -31,11 +33,17 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
     const rank = TITLED[doc.kind]
     if (rank === undefined || probed.has(doc.key) || declaredTitle(doc.key)) continue
     probed.add(doc.key)
-    queue.push({ rank, run: () => readThumbnailMetadata(fileBytesUrl(shuttleBase, doc.path, doc.owner), new AbortController().signal, (source, etag) => {
-      if (declaredTitle(doc.key)) return
-      const text = doc.kind === 'html' || doc.kind === 'text'
-      cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
-    }) })
+    queue.push({ rank, run: async () => {
+      let read = false
+      await readThumbnailMetadata(fileBytesUrl(shuttleBase, doc.path, doc.owner), new AbortController().signal, (source, etag) => {
+        read = true
+        if (declaredTitle(doc.key)) return
+        const text = doc.kind === 'html' || doc.kind === 'text'
+        cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
+      })
+      // A peek that could not read (an unreachable owner, a refused request) is tried again on a later render.
+      if (!read) setTimeout(() => probed.delete(doc.key), PROBE_RETRY_MS)
+    } })
   }
   queue.sort((a, b) => a.rank - b.rank)
   pump()
