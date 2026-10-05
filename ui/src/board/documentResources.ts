@@ -173,7 +173,7 @@ function shared<T>(id: string, priority: ResourcePriority, work: (signal: AbortS
   return promise
 }
 
-/** Abort when the caller does, or when `ms` passes before `answered` is called. */
+/** Abort when the caller does, or when `ms` passes before `answered` is called, body included. */
 function deadline(signal: AbortSignal | null | undefined, ms: number | null): { signal: AbortSignal; answered: () => void } {
   const controller = new AbortController()
   const abort = (): void => controller.abort(signal?.reason)
@@ -289,17 +289,18 @@ export const fetchDocument: DocumentFetch = (url, init) => {
 
 async function readWhole(entry: Entry, init: RequestInit, priority: ResourcePriority): Promise<Response> {
   const etag = ifNoneMatch(init.headers)
-  // A selected body may be large and slow; a background read is held to the deadline until it answers.
+  // A selected body may be large and slow; a background read finishes, body and all, within the deadline.
   const limit = deadline(init.signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
-  let response: Response
-  try { response = await fetch(entry.src, { ...init, signal: limit.signal }) } finally { limit.answered() }
-  if (response.status === 304) {
-    if (entry.text && entry.text.value.etag === etag) entry.text.at = Date.now()
+  try {
+    const response = await fetch(entry.src, { ...init, signal: limit.signal })
+    if (response.status === 304) {
+      if (entry.text && entry.text.value.etag === etag) entry.text.at = Date.now()
+      return response
+    }
+    if (response.status === 404) entry.missing = Date.now()
+    if (response.ok) { entry.missing = undefined; holdText(entry, { text: await response.clone().text(), etag: etagOf(response) }) }
     return response
-  }
-  if (response.status === 404) entry.missing = Date.now()
-  if (response.ok) { entry.missing = undefined; holdText(entry, { text: await response.clone().text(), etag: etagOf(response) }) }
-  return response
+  } finally { limit.answered() }
 }
 
 function ifNoneMatch(headers: HeadersInit | undefined): string | undefined {
@@ -355,10 +356,10 @@ export function bytes(src: string, priority: ResourcePriority, options: { maxByt
   const entry = entryFor(src)
   return shared(`bytes\0${resourceKey(src)}`, priority, async signal => {
     const limit = deadline(signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
-    let response: Response
-    try { response = await fetch(entry.src, { signal: limit.signal }) } finally { limit.answered() }
-    if (!response.ok) return null
-    return boundedBytes(response, options.maxBytes)
+    try {
+      const response = await fetch(entry.src, { signal: limit.signal })
+      return response.ok ? await boundedBytes(response, options.maxBytes) : null
+    } finally { limit.answered() }
   }, options.signal).catch(() => null)
 }
 

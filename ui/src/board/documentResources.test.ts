@@ -1,7 +1,7 @@
 import fc from 'fast-check'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  fact, fetchDocument, head, peek, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS,
+  bytes, fact, fetchDocument, head, peek, recallText, resetDocumentResources, resourceKey, RESOURCE_DEADLINE_MS, RESOURCE_FRESH_MS,
   RESOURCE_PRIORITY, text, type ResourcePriority,
 } from './documentResources.js'
 import { resetLanes } from './requestLanes.js'
@@ -83,6 +83,24 @@ describe('the request queue', () => {
     expect(await abandoned).toBeNull()
     release(); await Promise.all(busy)
     expect(order).toEqual(['/api/v1/file?path=/busy-a', '/api/v1/file?path=/busy-b', '/api/v1/file?path=/song'])
+  })
+
+  it('frees a lane slot when an owner stalls after its headers, mid-body', async () => {
+    vi.useFakeTimers()
+    // Headers arrive at once; the body never finishes, and errors only when the request is aborted.
+    const stalled = (init?: RequestInit): Response => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('<h1>')); init?.signal?.addEventListener('abort', () => controller.error(init.signal!.reason)) },
+    }), { headers: { ETag: 'W/"sha256-s"' } })
+    const fetcher = vi.fn(async (src: string, init?: RequestInit) => src.includes('stalled') ? stalled(init) : new Response(JSON.stringify({ exists: true, size: 1, modified_at: 1 })))
+    vi.stubGlobal('fetch', fetcher)
+    const reads = [text('/api/v1/file?path=/stalled-a.html', RESOURCE_PRIORITY.neighbour), bytes('/api/v1/file?path=/stalled-b.wav', RESOURCE_PRIORITY.neighbour, { maxBytes: 1e6 })]
+    await vi.advanceTimersByTimeAsync(0)
+    const waiting = head('/api/v1/file?path=/fine')
+    await vi.advanceTimersByTimeAsync(RESOURCE_DEADLINE_MS - 1)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await Promise.all(reads)).toEqual([null, null])
+    expect(await waiting).toMatchObject({ exists: true })
   })
 
   it('frees a lane slot when an owner hangs past the deadline', async () => {
