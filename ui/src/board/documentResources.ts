@@ -54,8 +54,13 @@ const ENTRY_LIMIT = 600
 /** Whole bodies stay after their readers leave, up to this many characters in all. */
 const TEXT_BUDGET = 24 * 1024 * 1024
 const FACT_LIMIT = 8
+/**
+ * A read in flight. A more urgent asker moves it up the queue while it still
+ * waits; it is cancelled once every asker that can abandon it has.
+ */
+interface Pending { promise: Promise<unknown>; join: (priority: ResourcePriority, asker?: AbortSignal) => void }
 const entries = new Map<string, Entry>()
-const inFlight = new Map<string, Promise<unknown>>()
+const inFlight = new Map<string, Pending>()
 let textHeld = 0
 
 /**
@@ -116,13 +121,53 @@ export function queued<T>(priority: ResourcePriority, work: () => Promise<T>, si
   return inLane('quiet', work, { rank: priority, signal })
 }
 
-/** One read per question: a second asker joins the first. */
-function shared<T>(id: string, read: () => Promise<T>): Promise<T> {
-  const pending = inFlight.get(id) as Promise<T> | undefined
-  if (pending) return pending
-  const next = read().finally(() => { if (inFlight.get(id) === next) inFlight.delete(id) })
-  inFlight.set(id, next)
-  return next
+/**
+ * One read per question, queued at `priority`: a second asker joins the
+ * first, a more urgent one moves a read that has not started up the queue,
+ * and the read is cancelled when every asker holding a signal has aborted
+ * and none came without one.
+ */
+function shared<T>(id: string, priority: ResourcePriority, work: (signal: AbortSignal) => Promise<T>, asker?: AbortSignal): Promise<T> {
+  const pending = inFlight.get(id)
+  if (pending) { pending.join(priority, asker); return pending.promise as Promise<T> }
+  let settle!: (outcome: T | Promise<T>) => void
+  const promise = new Promise<T>(resolve => { settle = resolve })
+  const cancelled = new AbortController()
+  let started = false
+  let rank = priority
+  let waiting = new AbortController()
+  let kept = false
+  let askers = 0
+  const run = (): void => {
+    const own = waiting
+    queued(rank, () => { started = true; return work(cancelled.signal) }, own.signal)
+      .then(settle, error => { if (!own.signal.aborted || cancelled.signal.aborted) settle(Promise.reject(error)) })
+  }
+  const entry: Pending = {
+    promise,
+    join: (next, signal) => {
+      if (!signal) kept = true
+      else if (!signal.aborted) {
+        askers++
+        signal.addEventListener('abort', () => {
+          if (--askers > 0 || kept) return
+          if (inFlight.get(id) === entry) inFlight.delete(id)
+          cancelled.abort(signal.reason)
+          waiting.abort(signal.reason)
+        }, { once: true })
+      }
+      if (started || next >= rank) return
+      rank = next
+      waiting.abort()
+      waiting = new AbortController()
+      run()
+    },
+  }
+  inFlight.set(id, entry)
+  void promise.catch(() => {}).finally(() => { if (inFlight.get(id) === entry) inFlight.delete(id) })
+  entry.join(priority, asker)
+  run()
+  return promise
 }
 
 /** Abort when the caller does, or when `ms` passes before `answered` is called. */
@@ -144,8 +189,8 @@ const etagOf = (response: Response): string | undefined => response.headers.get(
 export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.title, options: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<Head | null> {
   const entry = entryFor(src)
   if (!options.fresh && isFresh(entry.head)) return Promise.resolve(entry.head!.value)
-  return shared(`head\0${resourceKey(src)}`, () => queued(priority, async () => {
-    const limit = deadline(options.signal, RESOURCE_DEADLINE_MS)
+  return shared(`head\0${resourceKey(src)}`, priority, async signal => {
+    const limit = deadline(signal, RESOURCE_DEADLINE_MS)
     try {
       const response = await fetch(entry.src.replace(/\/file\?/, '/file-info?'), { cache: 'no-store', signal: limit.signal })
       if (!response.ok) return null
@@ -158,7 +203,7 @@ export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY
       entry.head = { value, at: Date.now() }
       return value
     } finally { limit.answered() }
-  }, options.signal).catch(() => null))
+  }, options.signal).catch(() => null)
 }
 
 /**
@@ -166,14 +211,14 @@ export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY
  * A fresh whole body answers without a request. Null when the document
  * cannot be read.
  */
-export function peek(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.title, options: { fresh?: boolean; now?: number } = {}): Promise<Peek | null> {
+export function peek(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.title, options: { fresh?: boolean; now?: number; signal?: AbortSignal } = {}): Promise<Peek | null> {
   const entry = entryFor(src)
   const now = options.now ?? Date.now()
   if (!options.fresh) {
     if (isFresh(entry.peek, now)) return Promise.resolve(entry.peek!.value)
     if (isFresh(entry.text, now)) return Promise.resolve(peekOfText(entry))
   }
-  return shared(`peek\0${resourceKey(src)}`, () => queued(priority, () => readPeek(entry)).catch(() => null))
+  return shared(`peek\0${resourceKey(src)}`, priority, signal => readPeek(entry, signal), options.signal).catch(() => null)
 }
 
 function peekOfText(entry: Entry): Peek {
@@ -185,11 +230,11 @@ function peekOfText(entry: Entry): Peek {
 }
 
 /** Native viewers own their byte streams; a peek stops after 64 KiB even if Range is ignored. */
-async function readPeek(entry: Entry): Promise<Peek | null> {
+async function readPeek(entry: Entry, signal: AbortSignal): Promise<Peek | null> {
   const known = entry.peek?.value.etag ?? entry.text?.value.etag
   const headers: Record<string, string> = { Range: `bytes=0-${PEEK_BYTES - 1}` }
   if (known) headers['If-None-Match'] = known
-  const limit = deadline(undefined, RESOURCE_DEADLINE_MS)
+  const limit = deadline(signal, RESOURCE_DEADLINE_MS)
   try {
     const response = await fetch(entry.src, { cache: 'no-store', headers, signal: limit.signal })
     if (response.status === 304) {
@@ -224,26 +269,28 @@ async function readPeek(entry: Entry): Promise<Peek | null> {
 export const fetchDocument: DocumentFetch = (url, init) => {
   const entry = entryFor(url)
   const priority = init.rank ?? RESOURCE_PRIORITY.selected
-  const etag = ifNoneMatch(init.headers)
-  const read = queued(priority, async () => {
-    // A selected body may be large and slow; a background read is held to the deadline until it answers.
-    const limit = deadline(init.signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
-    let response: Response
-    try { response = await fetch(entry.src, { ...init, signal: limit.signal }) } finally { limit.answered() }
-    if (response.status === 304) {
-      if (entry.text && entry.text.value.etag === etag) entry.text.at = Date.now()
-      return response
-    }
-    if (response.ok) holdText(entry, { text: await response.clone().text(), etag: etagOf(response) })
-    return response
-  }, init.signal ?? undefined)
+  const read = queued(priority, () => readWhole(entry, init, priority), init.signal ?? undefined)
   const id = `text\0${resourceKey(url)}`
   if (!inFlight.has(id)) {
-    const joined: Promise<TextBody | null> = read.then(() => entry.text?.value ?? null, () => null)
-      .finally(() => { if (inFlight.get(id) === joined) inFlight.delete(id) })
+    const joined: Pending = { promise: read.then(() => entry.text?.value ?? null, () => null), join: () => {} }
     inFlight.set(id, joined)
+    void joined.promise.finally(() => { if (inFlight.get(id) === joined) inFlight.delete(id) })
   }
   return read
+}
+
+async function readWhole(entry: Entry, init: RequestInit, priority: ResourcePriority): Promise<Response> {
+  const etag = ifNoneMatch(init.headers)
+  // A selected body may be large and slow; a background read is held to the deadline until it answers.
+  const limit = deadline(init.signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
+  let response: Response
+  try { response = await fetch(entry.src, { ...init, signal: limit.signal }) } finally { limit.answered() }
+  if (response.status === 304) {
+    if (entry.text && entry.text.value.etag === etag) entry.text.at = Date.now()
+    return response
+  }
+  if (response.ok) holdText(entry, { text: await response.clone().text(), etag: etagOf(response) })
+  return response
 }
 
 function ifNoneMatch(headers: HeadersInit | undefined): string | undefined {
@@ -261,12 +308,11 @@ function ifNoneMatch(headers: HeadersInit | undefined): string | undefined {
 export function text(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.thumbnail, options: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<TextBody | null> {
   const entry = entryFor(src)
   if (!options.fresh && isFresh(entry.text)) return Promise.resolve(entry.text!.value)
-  return shared(`text\0${resourceKey(src)}`, async () => {
+  return shared(`text\0${resourceKey(src)}`, priority, async signal => {
     const etag = entry.text?.value.etag
-    const response = await fetchDocument(src, { cache: 'no-store', rank: priority, signal: options.signal, headers: etag ? { 'If-None-Match': etag } : undefined })
-    if (response.status === 304) return entry.text?.value ?? null
-    return response.ok ? entry.text?.value ?? null : null
-  }).catch(() => null)
+    const response = await readWhole(entry, { cache: 'no-store', signal, headers: etag ? { 'If-None-Match': etag } : undefined }, priority)
+    return response.ok || response.status === 304 ? entry.text?.value ?? null : null
+  }, options.signal).catch(() => null)
 }
 
 /** The text held for a document, however old, without a request. */
@@ -281,13 +327,13 @@ export function recallText(src: string): TextBody | undefined {
  */
 export function bytes(src: string, priority: ResourcePriority, options: { maxBytes: number; signal?: AbortSignal }): Promise<ArrayBuffer | null> {
   const entry = entryFor(src)
-  return shared(`bytes\0${resourceKey(src)}`, () => queued(priority, async () => {
-    const limit = deadline(options.signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
+  return shared(`bytes\0${resourceKey(src)}`, priority, async signal => {
+    const limit = deadline(signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
     let response: Response
     try { response = await fetch(entry.src, { signal: limit.signal }) } finally { limit.answered() }
     if (!response.ok) return null
     return boundedBytes(response, options.maxBytes)
-  }, options.signal).catch(() => null))
+  }, options.signal).catch(() => null)
 }
 
 async function boundedBytes(response: Response, maxBytes: number): Promise<ArrayBuffer | null> {

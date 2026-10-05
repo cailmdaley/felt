@@ -103,16 +103,15 @@ export function buildFileViewer(
     img.src = src
     img.alt = basename(fullPath)
     let disposed = false
-    const controller = new AbortController()
     img.addEventListener('load', () => {
       if (!disposed) options.onState?.({ status: 'ready' })
     })
     img.addEventListener('error', () => {
-      void head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal }).then(info => {
+      void head(src, RESOURCE_PRIORITY.selected, { fresh: true }).then(info => {
         if (!disposed) options.onState?.({ status: 'error', error: headError(info), hasContent: false })
       })
     })
-    viewerDisposers.set(wrap, () => { disposed = true; controller.abort() })
+    viewerDisposers.set(wrap, () => { disposed = true })
     wrap.append(img)
     return wrap
   }
@@ -187,7 +186,7 @@ export function buildFileViewer(
   // So ASK. The cache's head settles what the iframe's own events cannot tell
   // apart. Ordering is not a race: `failed` re-attaches the veil if `load`
   // already removed it, so whichever resolves second still tells the truth.
-  void head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal }).then(info => {
+  void head(src, RESOURCE_PRIORITY.selected, { fresh: true }).then(info => {
     if (controller.signal.aborted) return
     checked = true
     if (!info) failed('the daemon could not be reached')
@@ -231,10 +230,9 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   media.addEventListener('pause', () => { state.inline = false })
   media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
   let disposed = false
-  const controller = new AbortController()
   media.addEventListener('error', () => {
     // The cache's head distinguishes a missing resource from a codec failure.
-    void head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal }).then(info => {
+    void head(src, RESOURCE_PRIORITY.selected, { fresh: true }).then(info => {
       if (!disposed) options.onState?.({ status: 'error', error: info?.exists ? new Error('media format is not supported by this browser') : headError(info), hasContent: false })
     })
   })
@@ -245,7 +243,6 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   viewerDisposers.set(wrap, () => {
     disposeAudio?.()
     disposed = true
-    controller.abort()
     media.pause()
     players.delete(media)
     mediaViewers.delete(wrap)
@@ -270,10 +267,10 @@ function buildUnsupportedViewer(base: string, path: string, owner: string, optio
   download.download = basename(path)
   download.textContent = 'Download'
   box.append(detail, download)
-  const controller = new AbortController()
-  viewerDisposers.set(box, () => controller.abort())
-  void head(fileBytesUrl(base, path, owner), RESOURCE_PRIORITY.selected, { signal: controller.signal }).then(info => {
-    if (controller.signal.aborted) return
+  let disposed = false
+  viewerDisposers.set(box, () => { disposed = true })
+  void head(fileBytesUrl(base, path, owner), RESOURCE_PRIORITY.selected).then(info => {
+    if (disposed) return
     if (!info?.exists) { options.onState?.({ status: 'error', error: headError(info), hasContent: false }); return }
     if (info.size !== undefined) detail.textContent = `Not drawn here · ${info.size.toLocaleString()} bytes`
     options.onState?.({ status: 'ready' })
@@ -323,11 +320,12 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       // The page's own text, from the cache the reader shares, drawn without scripts.
       frame.setAttribute('sandbox', '')
       frame.allow = "autoplay 'none'"
-      frame.addEventListener('load', () => finish(true), { once: true })
       void documentText(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(body => {
         if (disposed) return
         if (!body) { finish(false); return }
         options.onThumbnailSource?.(body.text, body.etag)
+        // An empty frame has already loaded about:blank; only the page's own load counts.
+        frame.addEventListener('load', () => finish(true), { once: true })
         frame.srcdoc = htmlWithBase(body.text, src)
       })
     } else {
@@ -341,7 +339,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     wrap.append(frame)
   } else if (kind === 'audio') {
     // A recording is its face: the title and the duration its peek declares, with no media element.
-    void peek(src, RESOURCE_PRIORITY.thumbnail).then(first => {
+    void peek(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(first => {
       if (disposed) return
       if (!first) { finish(false); return }
       options.onThumbnailSource?.(first.bytes, first.etag)
@@ -387,7 +385,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
 
 /** A document's first 64 KiB from the cache, so concurrent surfaces read it once. */
 export async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>, priority: ResourcePriority = RESOURCE_PRIORITY.thumbnail, fresh = false): Promise<void> {
-  const first = await peek(src, priority, { fresh })
+  const first = await peek(src, priority, { fresh, signal })
   // Native playback and preview do not depend on metadata.
   if (first && !signal.aborted) onSource(first.bytes, first.etag)
 }

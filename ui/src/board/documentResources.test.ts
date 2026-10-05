@@ -67,6 +67,24 @@ describe('the request queue', () => {
     release(); await Promise.all(busy)
   })
 
+  it('moves a waiting read up when the selected page asks for it, and cancels one every asker abandoned', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const order: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (src: string) => { order.push(src); if (src.includes('busy')) await gate; return body(src) }))
+    const busy = [peek('/api/v1/file?path=/busy-a'), peek('/api/v1/file?path=/busy-b')]
+    const thumbnail = new AbortController()
+    const abandoned = peek('/api/v1/file?path=/hovered', RESOURCE_PRIORITY.thumbnail, { signal: thumbnail.signal })
+    const title = peek('/api/v1/file?path=/song', RESOURCE_PRIORITY.duration)
+    const selected = peek('/api/v1/file?path=/song', RESOURCE_PRIORITY.selected)
+    expect(await selected).not.toBeNull()
+    expect(await title).toBe(await selected)
+    thumbnail.abort()
+    expect(await abandoned).toBeNull()
+    release(); await Promise.all(busy)
+    expect(order).toEqual(['/api/v1/file?path=/busy-a', '/api/v1/file?path=/busy-b', '/api/v1/file?path=/song'])
+  })
+
   it('frees a lane slot when an owner hangs past the deadline', async () => {
     vi.useFakeTimers()
     const fetcher = vi.fn((src: string, init?: RequestInit) => src.includes('hung')
