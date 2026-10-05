@@ -216,8 +216,11 @@ export function workspaceExample(now: number): WorkspaceExample {
   const other = `${project}/deliverables/archive.zip`
   const missing = `${project}/deliverables/not-produced.csv`
   const remotePdf = '/scratch/fixture-store/covariance/remote-summary.pdf'
-  const longReport = Array.from({ length: 80 }, (_, index) => `<p>Report line ${index + 1}: the response remains stable across the independent validation patches.</p>`).join('\n')
+  const reportLine = (index: number): string => `<p>Report line ${index + 1}: the response remains stable across the independent validation patches.</p>`
   const wideTable = `<div id="wide-table" style="overflow-x:auto"><table style="border-collapse:collapse;white-space:nowrap"><tr>${Array.from({ length: 16 }, (_, i) => `<th style="padding:4px 12px">bin ${i + 1}</th>`).join('')}</tr><tr>${Array.from({ length: 16 }, (_, i) => `<td style="padding:4px 12px">${(0.99 + i / 1000).toFixed(3)}</td>`).join('')}</tr></table></div>`
+  // A reveal.js-style deck and a script-driven carousel own their sideways gestures.
+  const pageGestures = `<div id="gesture-deck" style="touch-action:pan-y;height:120px;background:#eee8dc">Deck</div><div id="gesture-carousel" style="height:120px;background:#e4ece4">Carousel</div><script>document.getElementById('gesture-carousel').addEventListener('touchmove',e=>e.preventDefault(),{passive:false})</script>`
+  const longReport = Array.from({ length: 80 }, (_, index) => (index === 40 ? pageGestures : '') + reportLine(index)).join('\n')
   const reportHTML = `<!doctype html><html><head><meta charset="utf-8"><title>Calibration report</title><style>body{font:16px/1.5 sans-serif;margin:32px}h1{color:#514637}</style></head><body><h1 id="report-sentinel">Calibration report</h1><p id="report-identity"></p><p>Read <code>brief.md</code> and <a href="../../../../deliverables/brief.md">the field note</a>; listen to <code>tone.mp3</code> or <code>tone.wav</code>.</p>${wideTable}${longReport}<script>document.getElementById('report-identity').textContent='instance:'+crypto.randomUUID()</script></body></html>`
   const file = (owner: string, path: string, mime: string, body: Blob | string): WorkspaceFileFixture => ({
     owner,

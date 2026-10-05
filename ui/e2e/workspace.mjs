@@ -1416,6 +1416,16 @@ test('Phone page swipe steps from documents and the bar; edges, vertical pans an
   assert.ok(await (await reportDocument(p)).evaluate(() => { const el = document.getElementById('wide-table'); return el.scrollWidth > el.clientWidth }), 'the fixture table scrolls sideways')
   await swipe(p, 300, table.y + table.height / 2, 100, table.y + table.height / 2)
   assert.equal(await key(), original, 'a horizontally scrollable table keeps its swipe')
+  for (const id of ['gesture-deck', 'gesture-carousel']) {
+    await (await reportDocument(p)).evaluate(id => document.getElementById(id).scrollIntoView({ block: 'center' }), id)
+    // Hiding the top bar moves the report under the finger; swipe once it has settled.
+    await poll(p, () => document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
+    await p.waitForTimeout(400)
+    const gesture = await report(p).contentFrame().locator(`#${id}`).boundingBox()
+    await swipe(p, 300, gesture.y + gesture.height / 2, 100, gesture.y + gesture.height / 2)
+    assert.equal(await key(), original, `${id} keeps its own sideways gesture`)
+  }
+  await (await reportDocument(p)).evaluate(() => window.scrollTo(0, 0))
   const bar = await p.locator('.ws-thumbbar').boundingBox()
   await swipe(p, 220, bar.y + 22, 80, bar.y + 26)
   assert.equal(await key(), next, 'the bottom bar remains a swipe surface')

@@ -9,9 +9,14 @@ export const SWIPE = { edge: 24, slop: 10, ratio: 1.75, hold: 500, window: 100 }
  * vertical scrolling stays native until the gesture is decisively sideways.
  * Starts within `edge` px of either side belong to Safari's edge-back; content
  * that pans sideways itself (scrollable regions, sliders, media, editing, a
- * live selection, pinch zoom) keeps the touch. It closes over nothing, because
- * documents receive it serialized; `screen` measures travel in screen space,
- * which a frame needs because it moves under the finger while following.
+ * live selection, pinch zoom) keeps the touch, as does content whose
+ * touch-action withholds horizontal panning from the browser (reveal.js decks,
+ * carousels: their scripts own the sideways gesture) and content that has
+ * already called preventDefault on the touch. That last check runs in a
+ * bubble-phase listener on the window, after the content's own handlers; the
+ * recognizer latches there. It closes over nothing, because documents receive
+ * it serialized; `screen` measures travel in screen space, which a frame needs
+ * because it moves under the finger while following.
  */
 export function installPageSwipe(root: Document | HTMLElement, signal: (signal: SwipeSignal) => void,
   enabled: () => boolean, limits: { edge: number; slop: number; ratio: number; hold: number; window: number }, screen = false): () => void {
@@ -19,6 +24,9 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
   const win = doc.defaultView as Window
   const boundary = root === doc ? null : root as HTMLElement
   let drag: { id: number; x: number; y: number; at: number; dx: number; latched: boolean; samples: Array<[number, number]> } | null = null
+  // Content that leaves both pans to the browser leaves the sideways gesture to the reader too.
+  const browserPans = (touchAction: string): boolean => touchAction === 'auto' || touchAction === 'manipulation'
+    || (/pan-(x|left|right)/.test(touchAction) && /pan-(y|up|down)/.test(touchAction))
   const along = (touch: Touch): number => screen && Number.isFinite(touch.screenX) ? touch.screenX : touch.clientX
   const claimed = (target: EventTarget | null): boolean => {
     const selection = win.getSelection()
@@ -26,9 +34,11 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
     if ((win.visualViewport?.scale ?? 1) > 1.01) return true
     let el = (target as Node | null)?.nodeType === 1 ? target as Element : (target as Node | null)?.parentElement ?? null
     for (; el && el !== boundary; el = el.parentElement) {
+      // The reader's own swipe surfaces may withhold horizontal panning for the reader's sake.
+      if (el.matches('[data-ws-swipe="on"]')) return false
       if (el.matches('input,textarea,select,audio,video,iframe,embed,object,[role="slider"],[contenteditable]:not([contenteditable="false"]),[data-ws-swipe="off"]')) return true
       const style = win.getComputedStyle(el)
-      if (style.touchAction === 'none' || (/pan-(x|left|right)/.test(style.touchAction) && !/pan-y/.test(style.touchAction))) return true
+      if (!browserPans(style.touchAction || 'auto')) return true
       if (el.scrollWidth > el.clientWidth + 1 && (/auto|scroll/.test(style.overflowX) || el === doc.scrollingElement)) return true
     }
     return false
@@ -49,16 +59,31 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
     if (touch.clientX < limits.edge || touch.clientX > win.innerWidth - limits.edge || claimed(event.target)) return
     drag = { id: touch.identifier, x: along(touch), y: touch.clientY, at: event.timeStamp, dx: 0, latched: false, samples: [] }
   }
+  /** A touch whose start the content handled is the content's. */
+  const started = (event: TouchEvent): void => {
+    if (drag && !drag.latched && event.defaultPrevented && touchOf(event)) drag = null
+  }
+  /** Capture follows a latched swipe ahead of the content. */
   const move = (event: TouchEvent): void => {
     const touch = drag && touchOf(event)
     if (!drag || !touch) return
     if (event.touches.length > 1 || !event.isTrusted) { abandon(); return }
+    if (drag.latched) follow(event, touch)
+  }
+  /** Bubble decides the latch, once the content has had its say. */
+  const decide = (event: TouchEvent): void => {
+    const touch = drag && touchOf(event)
+    if (!drag || !touch || drag.latched || !event.isTrusted) return
+    if (event.defaultPrevented) { drag = null; return }
     const dx = along(touch) - drag.x, dy = touch.clientY - drag.y
-    if (!drag.latched) {
-      if (Math.max(Math.abs(dx), Math.abs(dy)) < limits.slop) return
-      if (event.timeStamp - drag.at > limits.hold || Math.abs(dx) < Math.abs(dy) * limits.ratio || !enabled()) { drag = null; return }
-      drag.latched = true
-    }
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < limits.slop) return
+    if (event.timeStamp - drag.at > limits.hold || Math.abs(dx) < Math.abs(dy) * limits.ratio || !enabled()) { drag = null; return }
+    drag.latched = true
+    follow(event, touch)
+  }
+  const follow = (event: TouchEvent, touch: Touch): void => {
+    if (!drag) return
+    const dx = along(touch) - drag.x
     if (event.cancelable) event.preventDefault()
     drag.dx = dx
     drag.samples.push([event.timeStamp, dx])
@@ -85,10 +110,14 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
   }
   const passive = { capture: true, passive: true }
   const active = { capture: true, passive: false }
+  const bubble = { capture: false, passive: true }
+  const bubbleActive = { capture: false, passive: false }
   root.addEventListener('touchstart', start as EventListener, passive)
   root.addEventListener('touchmove', move as EventListener, active)
   root.addEventListener('touchend', end as EventListener, passive)
   root.addEventListener('touchcancel', end as EventListener, passive)
+  win.addEventListener('touchstart', started as EventListener, bubble)
+  win.addEventListener('touchmove', decide as EventListener, bubbleActive)
   win.addEventListener('keydown', escape, true)
   return () => {
     abandon()
@@ -96,6 +125,8 @@ export function installPageSwipe(root: Document | HTMLElement, signal: (signal: 
     root.removeEventListener('touchmove', move as EventListener, active)
     root.removeEventListener('touchend', end as EventListener, passive)
     root.removeEventListener('touchcancel', end as EventListener, passive)
+    win.removeEventListener('touchstart', started as EventListener, bubble)
+    win.removeEventListener('touchmove', decide as EventListener, bubbleActive)
     win.removeEventListener('keydown', escape, true)
   }
 }

@@ -176,6 +176,7 @@ export class Reader {
     }, 'Document menu')
     const thumb = element('div', 'ws-thumbbar')
     thumb.dataset.part = 'phone-bottom-bar'
+    thumb.dataset.wsSwipe = 'on'
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
     const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
     pageChoice.setAttribute('aria-haspopup', 'dialog')
