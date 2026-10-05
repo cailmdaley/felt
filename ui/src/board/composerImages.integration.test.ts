@@ -37,6 +37,7 @@ const dispatched = { ok: true, status: 200, json: async () => ({ tmux_session: '
 let composer: HTMLElement
 let fetch: ReturnType<typeof vi.fn>
 let panel: Dock
+const saved = vi.fn()
 
 interface PanelInternals {
   buildComposer(c: ReturnType<typeof card>, swallow: (el: HTMLElement) => void): HTMLElement
@@ -47,7 +48,8 @@ interface PanelInternals {
  *  control and a start prompt waiting for the card. */
 function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = {}): void {
   document.body.innerHTML = ''
-  panel = new Dock('https://daemon.example', vi.fn(), undefined, undefined,
+  saved.mockClear()
+  panel = new Dock('https://daemon.example', saved, undefined, undefined,
     opts.meeting ? { meeting: opts.meeting } : undefined)
   const internals = panel as unknown as PanelInternals
   if (opts.pendingStart) {
@@ -100,11 +102,11 @@ describe('resuming while the daemon starts', () => {
     expect(textarea().value).toBe('continue with this correction')
     expect(resume().disabled).toBe(false)
     expect(fresh().disabled).toBe(false)
-    expect(closeSpy).not.toHaveBeenCalled()
+    expect(saved).not.toHaveBeenCalled()
     expect(fetch).toHaveBeenCalledTimes(1)
 
     resume().click()
-    await vi.waitFor(() => expect(closeSpy).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledTimes(1))
     expect(fetch).toHaveBeenCalledTimes(2)
     for (const [url, options] of fetch.mock.calls) {
       expect(url).toBe('https://daemon.example/api/v1/dispatch')
