@@ -129,6 +129,8 @@ describe('shared reads', () => {
     expect(header(fetcher.mock.calls[1][1], 'If-None-Match')).toBe('W/"sha256-a"')
     expect(await peek(src, RESOURCE_PRIORITY.title, { fresh: true })).toBe(first)
     expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(await peek(src, RESOURCE_PRIORITY.duration, { stale: true, now: Date.now() + 10 * RESOURCE_FRESH_MS })).toBe(first)
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
   it('keeps a missing document as an answer while fresh, but not a failed read', async () => {

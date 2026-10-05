@@ -212,15 +212,16 @@ export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY
 
 /**
  * The first 64 KiB of a document, for titles, previews and audio metadata.
- * A fresh whole body answers without a request. Null when the document
- * cannot be read.
+ * A fresh whole body answers without a request; with `stale`, so does any
+ * peek already held. Null when the document cannot be read.
  */
-export function peek(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.title, options: { fresh?: boolean; now?: number; signal?: AbortSignal } = {}): Promise<Peek | null> {
+export function peek(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.title, options: { fresh?: boolean; stale?: boolean; now?: number; signal?: AbortSignal } = {}): Promise<Peek | null> {
   const entry = entryFor(src)
   const now = options.now ?? Date.now()
   if (!options.fresh) {
     if (knownMissing(entry, now)) return Promise.resolve(null)
-    if (isFresh(entry.peek, now)) return Promise.resolve(entry.peek!.value)
+    // A reader content with a version already seen, such as a list's durations, takes any peek held.
+    if (entry.peek && (options.stale || isFresh(entry.peek, now))) return Promise.resolve(entry.peek.value)
     if (isFresh(entry.text, now)) return Promise.resolve(peekOfText(entry))
   }
   return shared(`peek\0${resourceKey(src)}`, priority, signal => readPeek(entry, signal), options.signal).catch(() => null)

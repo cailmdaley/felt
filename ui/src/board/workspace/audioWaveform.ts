@@ -8,9 +8,13 @@ const DECODE_RATE = 8000
 const CACHE_PREFIX = 'shuttle:audio:peaks:'
 export interface Waveform { peaks: number[]; duration: number }
 
-/** A recording's duration, from the peek that names it when its header says, else from one metadata read. */
+/**
+ * A recording's duration, from the peek that names it when its header says,
+ * else from one metadata read. Any peek already held will do: a listed
+ * duration need not revalidate, and the playing page reads its own.
+ */
 export async function loadDuration(src: string, signal: AbortSignal, priority: ResourcePriority = RESOURCE_PRIORITY.duration): Promise<number | null> {
-  const head = await peek(src, priority)
+  const head = await peek(src, priority, { stale: true })
   if (!head || signal.aborted) return null
   return fact(src, 'duration', head.etag ?? `size:${head.size}`, async () =>
     durationFromHead(head.bytes, head.size) ?? queued(RESOURCE_PRIORITY.duration, () => readDuration(src), signal))
