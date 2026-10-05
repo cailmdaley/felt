@@ -235,6 +235,45 @@ describe('workspace reader integration', () => {
     expect(textareaB.value).toBe('host B draft')
   })
 
+  it('retargets a renamed owner+uid band through Workspace.update without losing its draft', async () => {
+    let liveCards = [card({ id: 'a/task', uid: 'stable-task', originId: 'host-a',
+      path: 'a/task/task.md', fiberDir: '/notes/a/task', feltStore: '/notes/.felt',
+      shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', shuttleHost: 'host-a', shuttleProjectDir: '/work/a' })]
+    bodyCards = liveCards
+    workspace.dispose()
+    const transition = vi.fn()
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => liveCards, origin: () => 'Desk', onVisibility: visibility,
+      dock: new Dock('', changed, transition),
+    })
+    workspace.open(liveCards[0])
+    await flush()
+    const band = document.querySelector<HTMLElement>('.ws-fiber-prose .ws-dock')!
+    const draft = band.querySelector<HTMLTextAreaElement>('textarea')!
+    draft.value = 'Keep this draft'
+    liveCards = [{ ...liveCards[0], id: 'b/task', path: 'b/task/task.md', fiberDir: '/notes/b/task',
+      feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b',
+      workerState: 'running', tmuxSession: 'new-worker', sessionUuid: 'new-session', runtimePhase: 'working' }]
+    workspace.update()
+    expect(band.querySelector('textarea')).toBe(draft)
+    expect(draft.value).toBe('Keep this draft')
+    expect(band.querySelector('.kbn-card-worker')?.textContent).toBe('Aloft')
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
+    button('New session').click()
+    expect(confirm).toHaveBeenCalledOnce()
+    button('Temper').click()
+    expect(transition).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'b/task', uid: 'stable-task', path: 'b/task/task.md', fiberDir: '/notes/b/task',
+      feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b', originId: 'host-a',
+    }), 'tempered')
+    vi.mocked(fetch).mockClear()
+    button('Resume').click()
+    await flush()
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/dispatch'))!
+    expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: 'Keep this draft' })
+  })
+
   it('Escape gives inline and reader popovers first refusal, then collapses and returns', async () => {
     workspace.open(cards[0])
     await flush()

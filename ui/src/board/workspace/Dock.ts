@@ -453,10 +453,6 @@ export class Dock {
     // A plain note has no composer to preserve when it becomes Shuttle-managed.
     const promoted = this.card !== null && !isAgentCard(this.card) && isAgentCard(card)
     if (this.card && (this.card.uid ?? this.card.id) === (card.uid ?? card.id) && this.card.originId === card.originId && !promoted) {
-      // Controls hold this copy, so renamed fibers keep drafts but write to their current address.
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir'] as const) {
-        Object.assign(this.card, { [key]: card[key] })
-      }
       this.syncRuntime(card)
       return
     }
@@ -687,9 +683,10 @@ export class Dock {
    */
   syncRuntime(card: KanbanCard | null): void {
     for (const band of this.bands.values()) band.syncRuntime(card)
-    if (!card || !this.isOpen || !this.workerContainer || this.card?.id !== card.id || this.card.originId !== card.originId) return
+    if (!card || !this.card || !this.workerContainer ||
+      (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     if (this.card) {
-      for (const key of ['workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
