@@ -6,6 +6,7 @@ import {
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
 import { fileBytesUrl } from '../utils.js'
+import { cacheDocumentTitle } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
 
@@ -294,6 +295,7 @@ export class DocumentHost {
           page.updateDocuments(this.documents)
           return () => { page.dispose(); this.audioPages.delete(audio) }
         },
+        onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
           if (this.disposed || state.revision !== revision) return

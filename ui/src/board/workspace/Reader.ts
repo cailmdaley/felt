@@ -6,8 +6,10 @@ import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
-import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
+import { DocumentSeen } from './DocumentSeen.js'
+import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 
 export interface ReaderOptions {
@@ -54,6 +56,9 @@ export class Reader {
   readonly stage = element('div', 'ws-stage')
   readonly host: DocumentHost
   private readonly opts: ReaderOptions
+  private readonly stopTitles: () => void
+  private readonly seen = new DocumentSeen()
+  private channelReady = false
   private readonly tabs: TabStrip
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
@@ -92,9 +97,19 @@ export class Reader {
 
   constructor(opts: ReaderOptions) {
     this.opts = opts
+    this.stopTitles = watchDocumentTitles(key => {
+      const ch = this.channel
+      if (!ch?.documents.some(d => d.key === key)) return
+      ch.labels = documentLabels(ch.documents, ch.labels[0] === 'Constitution')
+      this.tabs.render(ch.labels, ch.documents.map(d => d.key), ch)
+      if (this.active) this.paint(false)
+    })
     this.el.setAttribute('aria-label', 'Document reader')
     this.el.inert = true
-    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
+    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), {
+      shuttleBase: opts.shuttleBase,
+      onHeight: height => this.el.style.setProperty('--ws-strip-h', `${height}px`),
+    })
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
@@ -163,9 +178,11 @@ export class Reader {
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
-  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true): void {
+  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
+    const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
+    this.channelReady = ready
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
@@ -180,9 +197,10 @@ export class Reader {
     this.title.title = channel.name
     const pill = card ? this.opts.workerPill?.(card) : null
     this.conversation.replaceChildren(...(pill ? [pill] : []))
-    this.tabs.render(channel.labels)
+    this.tabs.setVisible(true)
+    this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     this.host.setChannel(channel.documents, selected)
-    this.paint(!switching && animate)
+    this.paint(!switching && !reordered && animate)
     this.renderSidebar()
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
@@ -205,6 +223,7 @@ export class Reader {
   hide(animate = false): void {
     this.cancelResize?.()
     this.active = false
+    this.tabs.setVisible(false)
     this.closeMenu()
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
@@ -260,6 +279,8 @@ export class Reader {
       frame.el.classList.toggle('ws-expanded', doc.key === this.selected && this.expanded)
       this.fillLabel(frame, ch.labels[i])
     })
+    this.tabs.setCompact(this.expanded)
+    this.tabs.fresh(this.seen.observe(ch, this.selected ?? '', this.channelReady))
     this.tabs.mark(index, animate)
     this.position.textContent = `${index + 1} / ${ch.documents.length}`
     this.prev.disabled = index <= 0
@@ -298,6 +319,7 @@ export class Reader {
     parts.title.hidden = doc.kind === 'fiber'
     parts.title.textContent = metadata.title
     parts.title.title = doc.path
+    parts.title.classList.toggle('ws-declared-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title))
     if (parts.provenance.title !== metadata.summary) {
       parts.provenance.textContent = metadata.summary
       parts.provenance.title = metadata.summary
@@ -594,6 +616,7 @@ export class Reader {
     cancelAnimationFrame(this.arrival)
     if (this.departure !== null) clearTimeout(this.departure)
     this.wide.removeEventListener('change', this.relayout)
+    this.stopTitles()
     this.tabs.dispose()
     this.picker.dispose()
     this.sidebarPicker.dispose()

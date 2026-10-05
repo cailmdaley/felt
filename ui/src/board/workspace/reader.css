@@ -72,6 +72,7 @@
   white-space: nowrap; overflow: hidden; color: var(--ws-ink-muted) !important;
   font-size: var(--ws-label-size) !important; text-align: center; border: var(--ws-line-width) solid transparent !important;
 }
+.ws-tab-fresh::after { content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 5px; border-radius: 50%; background: var(--kbn-owed); }
 .ws-tab:hover { color: var(--ws-ink) !important; background: var(--ws-hover); }
 .ws-tab[aria-selected='true'] { color: var(--ws-ink) !important; background: var(--ws-fill); border-color: var(--ws-hairline) !important; }
 .ws-tab.ws-clipped { mask-image: linear-gradient(90deg, var(--ws-mask) calc(100% - var(--ws-tab-fade)), transparent); }
@@ -103,6 +104,7 @@
 }
 .ws-kind-glyph { flex: none; color: var(--ws-ink-muted); }
 .ws-label-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font-size: var(--ws-label-size); }
+.ws-label-title.ws-declared-title { font: 19px/1.2 var(--ws-serif); letter-spacing: 0; }
 .ws-provenance { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-icon-button { width: var(--ws-control-height); height: var(--ws-control-height); flex: none; border-radius: var(--ws-control-radius); }
 .ws-icon-button:hover { background: var(--ws-hover); color: var(--ws-ink); }

@@ -136,6 +136,27 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
+  it('owner-routes file mtimes in Unix seconds for embeds and body links, keeping selection on reorder', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('table.html') ? 2000000000 : 1900000000 }))
+      return original(input, init)
+    })
+    workspace.open(cards[0]); await flush()
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    expect(document.querySelectorAll('.ws-tab')[1].getAttribute('aria-label')).toBe('table.html')
+    const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
+    expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
+    document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
+    document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!.click()
+    await flush()
+    const selectedKey = document.querySelector('.ws-selected')?.getAttribute('data-key')
+    expect(workspace.reader.host.get(selectedKey!)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
+  })
   it('loads receipts from each channel owner with conditional revalidation and last-good retention', async () => {
     const shared = [
       card({ id: 'work/shared', uid: 'shared-uid', name: 'Shared A', originId: 'host-a', fiberDir: '/notes/shared', path: 'work/shared/shared.md' }),
@@ -211,9 +232,11 @@ describe('workspace reader integration', () => {
     const iframe = frame.content.querySelector('iframe')!
     expect(frame.el.classList.contains('ws-selected')).toBe(true)
     expect(window.location.hash).toContain(encodeURIComponent(reportKey))
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    const reportIndex = workspace.reader.host.get(reportKey) ? [...document.querySelectorAll('.ws-tab')].findIndex(tab => tab.getAttribute('aria-selected') === 'true') : -1
+    const away = reportIndex === document.querySelectorAll('.ws-tab').length - 1 ? 'ArrowLeft' : 'ArrowRight'
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: away, altKey: true, bubbles: true }))
     expect(frame.el.classList.contains('ws-receded')).toBe(true)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: away === 'ArrowLeft' ? 'ArrowRight' : 'ArrowLeft', altKey: true, bubbles: true }))
     document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!.click()
     expect(frame.el.classList.contains('ws-expanded')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -237,7 +260,7 @@ describe('workspace reader integration', () => {
     expect(outcome.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Note')!
+    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Note')!
     proseTab.click()
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
@@ -446,20 +469,20 @@ describe('workspace reader integration', () => {
     })
     workspace.open(orderedCards[0])
     await flush()
-    const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.textContent ?? '')
+    const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.getAttribute('aria-label') ?? '')
     const firstOrder = labels()
     expect(firstOrder).toEqual(['Note', 'shared', 'table.html'])
 
     workspace.open(orderedCards[1])
     await flush()
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
-    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.textContent).toBe('shared')
-    const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.textContent === 'Note')!
+    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
+    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('shared')
+    const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
     expect(prose.querySelector('.ws-prose-contents')?.textContent).toBe('3 pages2 reports')
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
+    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
   })
 
   it('uses the shared Reader keymap for single-step tab roving focus', async () => {
