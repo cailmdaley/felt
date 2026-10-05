@@ -4,17 +4,17 @@ defmodule Shuttle.Test.RecordingRunner do
   assert the daemon shells the right `shuttle mark-runtime` command without
   executing either CLI.
 
-  Globally named, and `start/0` resets an already-running Agent, so use it only
-  from NON-async tests.
+  ExUnit supervises the globally named Agent and waits for its shutdown before
+  the next test starts. Use it only from non-async tests.
   """
 
   @behaviour Shuttle.Runner
 
   def start do
-    case Agent.start_link(fn -> [] end, name: __MODULE__) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, {:already_started, pid}} -> Agent.update(pid, fn _ -> [] end) && {:ok, pid}
-    end
+    ExUnit.Callbacks.start_supervised(%{
+      id: __MODULE__,
+      start: {Agent, :start_link, [fn -> [] end, [name: __MODULE__]]}
+    })
   end
 
   @impl true
