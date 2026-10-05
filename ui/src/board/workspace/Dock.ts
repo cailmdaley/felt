@@ -1695,7 +1695,7 @@ export class Dock {
         this.showStartPrompt(errorEl, card, body, text, mode, btn)
         return false
       }
-      const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`)
+      const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status)
       this.showDispatchError(errorEl, btn, original, msg)
       return false
     }

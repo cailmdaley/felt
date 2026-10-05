@@ -11,7 +11,7 @@ An agent that is already helping should attach its own conversation when support
 ## Before making changes
 
 Inspect the operating system, current project directory, installed tools, and existing configuration.
-These commands are read-only when the tools are present:
+Use these commands when the tools are present; `shuttle host --json` can seed the host identity on first use:
 
 ```sh
 command -v felt shuttle tmux claude codex pi
@@ -32,12 +32,14 @@ Ask whether other people have accounts on this machine if that isn't established
 ## Install the tools
 
 Use the prebuilt release unless the user is developing Shuttle.
+This guide targets **2.0.0-rc.1**; explain that it is a release candidate before installing it.
+Keep the explicit version pin: the latest stable release does not provide this setup flow.
 Install `tmux` with the machine's package manager, and confirm that the chosen agent is installed and signed in.
 Then install felt, Shuttle, and the daemon:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.0.0-rc.1 SHUTTLE_DAEMON=1 sh
 felt --version
 shuttle --help
 tmux -V

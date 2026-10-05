@@ -116,6 +116,20 @@ Refresh the credential before concluding shuttle is broken.
 It reads `~/.config/shuttle/remotes.json`; entries with a `checkout` field are deploy targets.
 Release users install packaged releases through the [installer](../shuttle/installation.md).
 
+To deploy a release candidate across the configured fleet, pin its tag:
+
+```sh
+bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
+```
+
+The helper resolves the tag to one commit and builds it in a persistent detached Git worktree beside each configured checkout.
+The regular checkout's branch and local edits stay in place.
+Version tags stamp both CLIs and the daemon with the release version.
+Keep deployment worktrees while their releases or harness integrations are in use; the supervisor and plugin receipts refer to those paths.
+If Pi loads a Felt package from another revision, the helper reports the mismatch without replacing that package choice.
+Use Pi's native package commands to select the deployed source directory, then rerun the host's deployment check.
+Use `--hosts local,hub-a` to deploy a subset.
+
 Push the verified revision, then deploy it on each host:
 
 1. Pull the checkout and run `make build` in the host's login shell.

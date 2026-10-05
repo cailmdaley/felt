@@ -63,35 +63,30 @@ This repository ships the `felt` and `shuttle` Go CLIs, plus the optional Shuttl
 
 ## Install
 
-Install the release binaries:
+Install **2.0.0-rc.1** to test the upcoming 2.0 release:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.1 sh
 ```
 
-Or use Homebrew:
+Homebrew installs the latest stable 1.x release, which does not include the 2.0 setup flow:
 
 ```sh
 brew install cailmdaley/tap/felt
 ```
 
-To build from source with Go:
-
-```sh
-go install github.com/cailmdaley/felt/cmd/felt@latest
-go install github.com/cailmdaley/felt/cmd/shuttle@latest
-```
+To build from source, follow [Build from a checkout](https://cailmdaley.github.io/felt/shuttle/installation/#build-from-a-checkout).
 
 The install script needs only `curl` and `tar`. It supports macOS and Linux on x86_64 and arm64.
 It installs both Go CLIs to `/usr/local/bin` if writable, else `~/.local/bin`; override the
 location with `FELT_INSTALL_DIR`. If `claude`, `codex`, or `pi` is on your `PATH`, it also
-registers the shared plugin and package. Later, `felt update` replaces both Go binaries together
-and refreshes the plugin wiring.
+registers the shared plugin and package. Rerun the pinned installer to reinstall this candidate;
+`felt update` always selects the stable channel.
 
 Add the optional shuttle daemon with `SHUTTLE_DAEMON=1`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE_DAEMON=1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.1 SHUTTLE_DAEMON=1 sh
 ```
 
 Put `SHUTTLE_DAEMON=1` after the pipe, on `sh`, so the installer sees it. The daemon release

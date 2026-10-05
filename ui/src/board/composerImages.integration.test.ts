@@ -86,6 +86,36 @@ const button = (label: string): HTMLButtonElement =>
 const resume = (): HTMLButtonElement => button('Resume')
 const fresh = (): HTMLButtonElement => button('New session')
 
+describe('resuming while the daemon starts', () => {
+  it('keeps the draft and permits only an explicit retry after a readiness rejection', async () => {
+    fetch
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ error: 'booting', ready: false }) })
+      .mockResolvedValueOnce(dispatched)
+    textarea().value = 'continue with this correction'
+
+    resume().click()
+    await vi.waitFor(() => expect(error().textContent)
+      .toBe('The daemon is starting. Nothing was launched; try again shortly.'))
+    expect(composer.isConnected).toBe(true)
+    expect(textarea().value).toBe('continue with this correction')
+    expect(resume().disabled).toBe(false)
+    expect(fresh().disabled).toBe(false)
+    expect(closeSpy).not.toHaveBeenCalled()
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    resume().click()
+    await vi.waitFor(() => expect(closeSpy).toHaveBeenCalledTimes(1))
+    expect(fetch).toHaveBeenCalledTimes(2)
+    for (const [url, options] of fetch.mock.calls) {
+      expect(url).toBe('https://daemon.example/api/v1/dispatch')
+      expect(JSON.parse(options.body)).toMatchObject({
+        fiber_id: 'work/task', origin: 'cluster', resume_mode: 'previous',
+        user_message: 'continue with this correction',
+      })
+    }
+  })
+})
+
 describe('the composer takes pasted images', () => {
   it('shows a chip per pasted image, with a working remove control', () => {
     expect(composer.querySelector<HTMLElement>('.kbn-ctl-images')!.hidden).toBe(true)

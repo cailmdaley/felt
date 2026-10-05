@@ -12,30 +12,6 @@ You can use felt on its own, with any editor and no background service.
 It uses the same fibers, starts agents in your project, and shows their progress and results in a browser board.
 Start with felt for notes, or go to [Set up Shuttle](shuttle/setup.md) if you want agents to run tasks.
 
-<video controls preload="metadata" playsinline
-  poster="assets/shuttle-board-tour-poster.jpg"
-  aria-label="Narrated tour of the Shuttle board: creating a task, starting a new session or resuming one, joining a meeting, opening a worker with Aloft, and reviewing a result">
-  <source src="assets/shuttle-board-tour.mp4" type="video/mp4">
-  <track kind="captions" srclang="en" label="English" default src="assets/shuttle-board-tour.vtt">
-  <a href="assets/shuttle-board-tour.mp4">Download the narrated board tour (MP4)</a>.
-</video>
-
-<!-- tour-transcript:start -->
-<details class="tour-transcript">
-<summary>Transcript of the board tour (1:35)</summary>
-<p><span class="tour-time">0:00</span> <em>Title card.</em> Here is the Shuttle board, and how to use its main controls.</p>
-<p><span class="tour-time">0:04</span> <em>The Desk screenshot, with fictional workshop tasks in Drafts, In flight and Awaiting review.</em> These Desk lanes show drafts not yet started, work in flight, and results awaiting your review.</p>
-<p><span class="tour-time">0:11</span> <em>The Drafts lane head, with its round plus button ringed.</em> To write a task yourself, click the plus on Drafts.</p>
-<p><span class="tour-time">0:16</span> <em>Control guide of the Stash a constitution form: Title, optional Body, Host, Project and Agent, Kind (One-shot or Standing), and the Stash button.</em> The Stash form asks for a title, optional details, a project and an agent. One-shot is a single task. Standing repeats on a schedule. With One-shot selected, Stash saves a draft card.</p>
-<p><span class="tour-time">0:31</span> <em>The In flight lane head, with its round star button ringed.</em> Or click the star on In flight, and describe an idea in your own words.</p>
-<p><span class="tour-time">0:36</span> <em>Control guide of the New idea dialog: a large text box, a Meeting toggle, Host, Project and Agent, and the Spawn button.</em> Pick a project and press Spawn. An agent turns your words into a task, and its card appears a moment later.</p>
-<p><span class="tour-time">0:44</span> <em>Control guide of an open card: a strip naming its agent and place, a message box with Meeting, New session and Resume, the next launch’s settings, History, and Discard and Temper.</em> Click any card to open it. The strip under its title, showing who works it and where, unfolds its actions. Write a message for the worker if you like, then choose how to send it. New session starts a fresh conversation, which reads the task and its notes from the top. If a worker is still running, the board asks before cutting it off. Resume requests the task’s previous conversation. Use it when finished work needs one more change.</p>
-<p><span class="tour-time">1:11</span> <em>A running card in In flight, Prepare the workshop guide, with its Aloft badge ringed.</em> On a running card, Aloft opens the worker’s conversation, in a terminal, a browser, or a desktop app.</p>
-<p><span class="tour-time">1:19</span> <em>Review the draft programme in Awaiting review: its outcome, then its Temper and Discard buttons, ringed in turn.</em> When a worker finishes, its outcome waits here for you. Read it, then press Temper to accept the result, or Discard to set it aside.</p>
-<p><span class="tour-time">1:28</span> <em>End card: Set up Shuttle, at cailmdaley.github.io/felt/shuttle/setup/.</em> To try it, set up Shuttle on one machine, and start with one small task.</p>
-</details>
-<!-- tour-transcript:end -->
-
 ## Set up with your agent
 
 We recommend asking your existing agent to help you set up Shuttle.
@@ -53,7 +29,7 @@ To use felt for notes on its own, follow the commands below.
 Install felt on macOS or Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.1 sh
 ```
 
 The installer includes both the `felt` and `shuttle` commands.
@@ -119,7 +95,13 @@ Its browser **board** lets you read and edit tasks, follow running agents, and r
 Agents write results and continuation notes back into the fiber, so another session can continue unfinished work.
 You can run this on one machine or [connect several machines](shuttle/remotes.md).
 
-![Shuttle board showing tasks for a small workshop](assets/shuttle-board-example.png)
+<video controls preload="metadata" playsinline
+  poster="assets/shuttle-board-tour-poster.jpg"
+  aria-label="Narrated tour of the Shuttle board: creating a task, starting a new session or resuming one, opening a worker with Aloft, and reviewing a result">
+  <source src="assets/shuttle-board-tour.mp4" type="video/mp4">
+  <track kind="captions" srclang="en" label="English" default src="assets/shuttle-board-tour.vtt">
+  <a href="assets/shuttle-board-tour.mp4">Download the narrated board tour (MP4)</a>.
+</video>
 
 The example board follows the same workshop: venue research, a draft programme, and a participant guide.
 

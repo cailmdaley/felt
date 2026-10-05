@@ -448,6 +448,122 @@ defmodule Shuttle.RemoteRegistryTest do
                MockRunner.calls()
     end
 
+    defp recovery_at_ssh_check(name, responses, opts \\ []) do
+      MockClient.set("http://localhost:4001/api/v1/state", {:error, {:http_status, 503}})
+      MockRunner.set("ssh", responses)
+
+      remote = %Remote{
+        candide_remote(poll_interval_ms: 1)
+        | tunnel: %{manager: :none, multiplex: false, label: nil}
+      }
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          Keyword.merge(
+            [
+              name: name,
+              remotes: [remote],
+              client: MockClient,
+              runner: MockRunner,
+              auto_poll: false,
+              tick_interval_ms: 60_000,
+              failure_threshold: 1,
+              restart_wait_ms: 60_000
+            ],
+            opts
+          )
+        )
+
+      # Failed HTTP poll, no local tunnel, then SSH health check.
+      Enum.each(1..3, fn _ -> :ok = RemoteRegistry.poll_now(name) end)
+    end
+
+    test "a healthy supervised daemon needs no tmux session" do
+      recovery_at_ssh_check(:reg_supervised, [{"session=absent\nhttp=healthy\n", 0}],
+        restart_wait_ms: 1
+      )
+
+      entry = RemoteRegistry.snapshot(:reg_supervised, "candide")
+      assert entry.recovery.last_action == "remote daemon healthy; waiting for route"
+      assert [{"ssh", args}] = MockRunner.calls()
+      refute List.last(args) =~ "tmux"
+      refute List.last(args) =~ "shuttle-launch"
+
+      assert {"http=healthy\n", 0} =
+               System.cmd("/bin/sh", ["-c", "curl() { return 0; }; " <> List.last(args)])
+
+      MockClient.set("http://localhost:4001/api/v1/state", {:ok, snapshot_with_running([])})
+      Process.sleep(2)
+      :ok = RemoteRegistry.poll_now(:reg_supervised)
+      assert RemoteRegistry.snapshot(:reg_supervised, "candide").recovery.state == :healthy
+      assert [{"ssh", _}] = MockRunner.calls()
+    end
+
+    test "a bound daemon with readiness-gated state waits through boot" do
+      recovery_at_ssh_check(:reg_booting, [{"http=booting\n", 0}], restart_wait_ms: 20)
+
+      assert RemoteRegistry.snapshot(:reg_booting, "candide").recovery.last_action ==
+               "remote daemon booting; waiting"
+
+      :ok = RemoteRegistry.poll_now(:reg_booting)
+      assert [{"ssh", args}] = MockRunner.calls()
+      assert List.last(args) =~ "/api/v1/state"
+      assert List.last(args) =~ "/api/v1/version"
+      refute List.last(args) =~ "shuttle-launch"
+
+      assert {"http=booting\n", 0} =
+               System.cmd("/bin/sh", [
+                 "-c",
+                 "curl() { case \"$*\" in */state*) return 22;; *) return 0;; esac; }; " <>
+                   List.last(args)
+               ])
+
+      MockClient.set("http://localhost:4001/api/v1/state", {:ok, snapshot_with_running([])})
+      Process.sleep(25)
+      :ok = RemoteRegistry.poll_now(:reg_booting)
+      assert RemoteRegistry.snapshot(:reg_booting, "candide").recovery.state == :healthy
+      assert [{"ssh", _}] = MockRunner.calls()
+    end
+
+    @tag :tmp_dir
+    test "a queued restart probes again and leaves a responding daemon alone", %{tmp_dir: dir} do
+      recovery_at_ssh_check(:reg_recovered_before_restart, [
+        {"http=unhealthy\n", 0},
+        {"daemon=responding\n", 0}
+      ])
+
+      :ok = RemoteRegistry.poll_now(:reg_recovered_before_restart)
+
+      assert RemoteRegistry.snapshot(:reg_recovered_before_restart, "candide").recovery.last_action ==
+               "remote daemon responding; waiting"
+
+      :ok = RemoteRegistry.poll_now(:reg_recovered_before_restart)
+      assert [{"ssh", _}, {"ssh", args}] = MockRunner.calls()
+      script = List.last(args)
+
+      # Execute the generated guard in the Linux-compatible shell. A responding
+      # /version must suppress the real launcher; a failed probe must launch it.
+      bin = Path.join(dir, ".local/bin")
+      File.mkdir_p!(bin)
+      launcher = Path.join(bin, "shuttle-launch")
+      File.write!(launcher, "#!/bin/sh\ntouch \"$HOME/launched\"\n")
+      File.chmod!(launcher, 0o755)
+
+      assert {"daemon=responding\n", 0} =
+               System.cmd("/bin/sh", ["-c", "curl() { return 0; }; " <> script],
+                 env: [{"HOME", dir}]
+               )
+
+      refute File.exists?(Path.join(dir, "launched"))
+
+      assert {_, 0} =
+               System.cmd("/bin/sh", ["-c", "curl() { return 7; }; " <> script],
+                 env: [{"HOME", dir}]
+               )
+
+      assert File.exists?(Path.join(dir, "launched"))
+    end
+
     test "escalates through SSH check, remote restart, and backoff" do
       MockClient.set(
         "http://localhost:4001/api/v1/state",
@@ -534,14 +650,14 @@ defmodule Shuttle.RemoteRegistryTest do
     # failed backoff probe: bounce → probe → ssh check → restart →
     # probe → unreachable → backoff probe. MockRunner's default
     # response ({"", 0}) makes launchctl succeed and the SSH check
-    # report an absent session, so every step runs and the HTTP probes
+    # report an unreachable daemon, so every step runs and the HTTP probes
     # (scripted to fail) sink each attempt.
     defp run_failed_cascade(reg) do
       :ok = RemoteRegistry.poll_now(reg)
       Process.sleep(2)
       # probe after bounce fails
       :ok = RemoteRegistry.poll_now(reg)
-      # ssh check (session absent -> restart)
+      # ssh check (daemon unreachable -> restart)
       :ok = RemoteRegistry.poll_now(reg)
       # restart remote
       :ok = RemoteRegistry.poll_now(reg)
@@ -957,6 +1073,9 @@ defmodule Shuttle.RemoteRegistryTest do
 
       assert script =~
                "curl -sf --max-time 3 --unix-socket '/srv/shuttle/sock/daemon.sock' http://localhost/api/v1/state"
+
+      assert script =~
+               "--unix-socket '/srv/shuttle/sock/daemon.sock' http://localhost/api/v1/version"
 
       refute script =~ "127.0.0.1:0"
     end

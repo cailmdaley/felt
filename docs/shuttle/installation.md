@@ -86,11 +86,14 @@ needs:
 
 ## Fetch the release
 
+These commands select **2.0.0-rc.1** for prerelease testing.
+Stable updates and Homebrew do not select release candidates automatically.
+
 The install script always installs both Go CLIs. Set `SHUTTLE_DAEMON=1` to
 also unpack the daemon release:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | SHUTTLE_DAEMON=1 sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.1 SHUTTLE_DAEMON=1 sh
 ```
 
 !!! warning "Environment variables go after the pipe"
@@ -163,7 +166,7 @@ login and restarts itself when it dies. No checkout, no toolchain. Run the steps
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.0.0-rc.1 SHUTTLE_DAEMON=1 sh
 ```
 
 `SHUTTLE_DAEMON=1` goes *after* the pipe, for the reason in the warning above: in front
@@ -280,23 +283,23 @@ Nothing else goes: the release, your store, and the daemon's state in
 <a id="release-candidates"></a>
 ### Pin a release
 
-The installer and `felt update` select the latest stable GitHub release by
-default. Set `FELT_VERSION` when you need an exact tag; it skips the
+The installer selects the latest stable GitHub release by default; `felt update` always selects stable.
+Set `FELT_VERSION` for the installer when you need an exact tag; it skips the
 `releases/latest` lookup and fetches the matching `felt` and `shuttle` CLIs,
 and the daemon release when requested:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
-  | FELT_VERSION=2.0.0 SHUTTLE_DAEMON=1 sh
+  | FELT_VERSION=2.0.0-rc.1 SHUTTLE_DAEMON=1 sh
 ```
 
-Replace `2.0.0` with the tag you want. Both variables sit after the pipe, for
+Replace `2.0.0-rc.1` with the tag you want. Both variables sit after the pipe, for
 the reason above: an install that silently drops `FELT_VERSION` fetches the
 latest stable instead. The tag is accepted with or without its leading `v`. If
 it has no `shuttled_<os>_<arch>.tar.gz` asset for your platform, the install
 names the tag and missing asset rather than leaving a bare `curl` error.
 
-Releases before 2.0.0 packaged a single CLI and require the installer from their own Git tag.
+The 1.x releases packaged a single CLI and require the installer from their own Git tag.
 The current installer requires both `felt` and `shuttle` in the CLI archive.
 
 Prerelease tags and release candidates are excluded from latest and Homebrew
@@ -309,10 +312,9 @@ are actually running:
 curl -s http://127.0.0.1:4000/api/v1/version    # mix_vsn is the release tag
 ```
 
-To return to the latest stable, run `felt update` without a pin to replace
-both Go CLIs together. The daemon has no self-update — run the install line
-again without `FELT_VERSION` and the stable daemon tarball replaces
-`$SHUTTLE_HOME`.
+Keep the version pin while testing this candidate.
+The stable channel is still 1.x and uses different commands, configuration paths, and packaging.
+Returning to it requires that tag's installer and service configuration; an unpinned update is not a rollback procedure for 2.0.
 
 ## Build from a checkout
 

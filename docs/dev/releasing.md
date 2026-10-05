@@ -179,7 +179,7 @@ daemon:
 PROBE_ROOT="$(mktemp -d)"
 HOME="$PROBE_ROOT/felt-home" PATH=/usr/bin:/bin \
   FELT_INSTALL_DIR="$PROBE_ROOT/cli" \
-  FELT_VERSION=2.0.0 SHUTTLE_DAEMON=1 \
+  FELT_VERSION=2.0.0-rc.1 SHUTTLE_DAEMON=1 \
   SHUTTLE_HOME="$PROBE_ROOT/shuttle" sh ./install.sh
 "$PROBE_ROOT/cli/felt" --version
 SHUTTLE_RELEASE="$PROBE_ROOT/shuttle" "$PROBE_ROOT/cli/shuttle" version
@@ -194,7 +194,7 @@ upload, while the [Linux container acceptance test](layout.md#the-stranger-test-
 builds from a clean image and polls `/api/v1/version` until its contract is
 healthy.
 
-Release candidates: `scripts/release.sh 1.1.0-rc.1` — any `X.Y.Z-<suffix>`
+Release candidates: `scripts/release.sh 2.0.0-rc.1` — any `X.Y.Z-<suffix>`
 version cuts a prerelease. Three things then keep it away from everyone who
 didn't ask for it, and all three key off the `-` in the tag: goreleaser marks
 the GitHub release `prerelease: auto`; `install.sh` and `felt update` resolve
