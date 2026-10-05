@@ -134,8 +134,9 @@ Push the verified revision, then deploy it on each host:
 
 1. Pull the checkout and run `make build` in the host's login shell.
 2. Re-render an installed daemon supervisor that an older template wrote — a
-   pre-split one (it bakes `FELT_STORES`) or one that predates `TMUX_TMPDIR`
-   (the word appears nowhere in it) — through `shuttle daemon install`, keeping
+   pre-split one (it bakes `FELT_STORES`), one that predates `TMUX_TMPDIR`
+   (the word appears nowhere in it), or one without an open-file limit
+   (no `NumberOfFiles` or `LimitNOFILE`) — through `shuttle daemon install`, keeping
    its label, stores, port, log, `PATH`, and `SSH_AUTH_SOCK` and capturing
    `TMUX_TMPDIR` from the login shell.
 3. Run `felt setup <harness>` for each harness that carries felt's plugin, so

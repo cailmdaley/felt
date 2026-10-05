@@ -103,6 +103,29 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     refute Map.has_key?(hd(body["fibers"])["fiber"], "body")
   end
 
+  test "GET /api/v1/fibers?body=true still finds each fiber's report", %{store: store} do
+    # `felt ls --body` omits the native `report_path` that the metadata listing
+    # carries, so the body listing must find the report itself.
+    write_fiber!(store, "tests/reported", """
+    ---
+    name: Reported
+    status: open
+    ---
+
+    Body.
+    """)
+
+    File.write!(Path.join([store, ".felt", "tests", "reported", "report.html"]), "<p>r</p>\n")
+    report = real_report_path(store, "tests/reported")
+
+    conn = get(api_conn(), "/api/v1/fibers?body=true")
+
+    assert conn.status == 200
+
+    assert [%{"report_path" => ^report, "fiber" => %{"body" => "Body."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+  end
+
   test "GET /api/v1/fibers?body=true includes felt bodies", %{store: store} do
     write_fiber!(store, "tests/body", """
     ---
@@ -847,6 +870,25 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = Jason.decode!(conn.resp_body)["fibers"]
   end
 
+  test "GET /api/v1/fibers/:id?body=true scans metadata only, then shows the match for its body",
+       %{store: store} do
+    # Every miss of the fast path runs the scan, so it must stay a metadata
+    # listing: the fake answers `ls --body` with nothing, and serves the body
+    # only from a `show` of the matched row's traversal id.
+    install_scan_fake_felt!(store)
+
+    conn = get(api_conn(), "/api/v1/fibers/01JZSCANNED000000000000000?body=true")
+
+    assert conn.status == 200
+
+    assert [
+             %{
+               "path" => "shapepipe/review-ngmix/review-ngmix.md",
+               "fiber" => %{"id" => "01JZSCANNED000000000000000", "body" => "Scanned body."}
+             }
+           ] = Jason.decode!(conn.resp_body)["fibers"]
+  end
+
   test "GET /api/v1/fibers/:id returns an empty fiber list for an unknown id", %{store: store} do
     write_fiber!(store, "tests/present", """
     ---
@@ -1146,6 +1188,43 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         ;;
       *)
         printf '\\n'
+        ;;
+    esac
+    """)
+
+    File.chmod!(bin, 0o755)
+
+    old_path = System.get_env("PATH")
+    System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
+    on_exit(fn -> restore_env("PATH", old_path) end)
+  end
+
+  # A felt whose fast path misses the uid, so `get/2` must scan. `ls` without
+  # `--body` lists the fiber; `ls --body` lists nothing; `show` resolves only
+  # the traversal id.
+  defp install_scan_fake_felt!(store) do
+    bin_dir = Path.join(Path.dirname(store), "fake-bin")
+    File.mkdir_p!(bin_dir)
+    bin = Path.join(bin_dir, "felt")
+
+    File.write!(bin, """
+    #!/bin/sh
+    dir=$(pwd)
+    row='"id":"shapepipe/review-ngmix","uid":"01JZSCANNED000000000000000","name":"Ngmix review","status":"open"'
+    path="$dir/.felt/shapepipe/review-ngmix/review-ngmix.md"
+    case "$1 $2" in
+      "ls "*)
+        case " $* " in
+          *" --body "*) printf '[]\\n' ;;
+          *) printf '[{%s,"path":"%s"}]\\n' "$row" "$path" ;;
+        esac
+        ;;
+      "show shapepipe/review-ngmix")
+        printf '{%s,"path":"%s","body":"Scanned body."}\\n' "$row" "$path"
+        ;;
+      *)
+        echo "no fiber found matching \\"$2\\"" >&2
+        exit 1
         ;;
     esac
     """)

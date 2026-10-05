@@ -168,6 +168,58 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 	}
 }
 
+func TestSupervisorTemplatesSetFileDescriptorHeadroom(t *testing.T) {
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	options := supervisorOptions{
+		Label: defaultDaemonLabel, ShuttleBin: "/bin/shuttle", StoresFile: "/tmp/stores.json",
+		Path: "/bin", Log: "/tmp/shuttle.log",
+	}
+	for _, tc := range []struct {
+		osName string
+		name   string
+	}{
+		{"Darwin", "io.shuttle.daemon.plist.template"},
+		{"Linux", "io.shuttle.daemon.service.template"},
+	} {
+		t.Run(tc.osName, func(t *testing.T) {
+			source, err := os.ReadFile(filepath.Join("..", "..", "daemon", "share", tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered, err := renderSupervisorTemplate(tc.osName, string(source), options, release)
+			if err != nil {
+				t.Fatalf("render template: %v", err)
+			}
+			if tc.osName == "Darwin" {
+				flat := strings.Join(strings.Fields(rendered), " ")
+				want := "<key>SoftResourceLimits</key> <dict> <key>NumberOfFiles</key> <integer>8192</integer> </dict>"
+				if count := strings.Count(flat, "<key>SoftResourceLimits</key>"); count != 1 || strings.Count(flat, want) != 1 {
+					t.Errorf("SoftResourceLimits NumberOfFiles setting is not exactly one 8192 limit")
+				}
+				// The hard limit stays launchd's default, so the daemon's children
+				// (a tmux server and its workers) keep their headroom.
+				if strings.Contains(flat, "HardResourceLimits") {
+					t.Errorf("plist caps HardResourceLimits; the daemon's children inherit that cap")
+				}
+			} else {
+				count := 0
+				for _, line := range strings.Split(rendered, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "LimitNOFILE=") {
+						count++
+						if line != "LimitNOFILE=8192" {
+							t.Errorf("systemd file descriptor limit = %q; want 8192", line)
+						}
+					}
+				}
+				if count != 1 {
+					t.Errorf("systemd LimitNOFILE directive occurs %d times; want exactly once", count)
+				}
+			}
+		})
+	}
+}
+
 func TestDaemonInstallLinuxPrintOmitsDarwinSSHAgentDefault(t *testing.T) {
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	share := filepath.Join(release.Dir, "share")
@@ -579,9 +631,12 @@ func supervisorTemplateFixtures() map[string]string {
 <key>CODEX_HOME</key>
 <string>__CODEX_HOME__</string>
 </dict>
+<key>SoftResourceLimits</key>
+<dict><key>NumberOfFiles</key><integer>8192</integer></dict>
 </dict></plist>
 `,
 		"io.shuttle.daemon.service.template": `[Service]
+LimitNOFILE=8192
 WorkingDirectory=__WORKING_DIRECTORY__
 ExecStart="__SHUTTLE_BIN__" daemon start --force
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ]; then :; fi'

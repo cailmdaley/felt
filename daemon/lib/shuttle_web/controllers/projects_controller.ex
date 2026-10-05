@@ -161,21 +161,21 @@ defmodule ShuttleWeb.ProjectsController do
     end
   end
 
+  # An unreadable projects.json is not an empty one: appending to `[]` would
+  # overwrite the list with this one path.
   defp persist(conn, path, initialized) do
-    existing = Projects.registered_projects()
-    already? = path in existing
-
-    case Projects.save(existing ++ [path]) do
-      {:ok, projects} ->
-        json(conn, %{
-          ok: true,
-          path: path,
-          registered: not already?,
-          initialized: initialized,
-          host: Poller.own_host_id(),
-          projects: projects
-        })
-
+    with {:ok, existing} <- Projects.read_registered_projects(),
+         already? = path in existing,
+         {:ok, projects} <- Projects.save(existing ++ [path]) do
+      json(conn, %{
+        ok: true,
+        path: path,
+        registered: not already?,
+        initialized: initialized,
+        host: Poller.own_host_id(),
+        projects: projects
+      })
+    else
       {:error, reason} ->
         failed(conn, "failed to persist projects: #{inspect(reason)}")
     end

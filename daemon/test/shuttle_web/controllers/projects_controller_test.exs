@@ -174,6 +174,22 @@ defmodule ShuttleWeb.ProjectsControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] =~ "must be a path string"
   end
 
+  test "an unreadable project list refuses to append rather than overwrite it", %{root: root} do
+    other = Path.join(root, "sub")
+    File.mkdir_p!(other)
+    post_project(root, 200)
+
+    file = System.get_env("SHUTTLE_PROJECTS_FILE")
+    File.chmod!(file, 0o000)
+    on_exit(fn -> File.chmod(file, 0o644) end)
+
+    body = post_project(other, 500)
+    assert body["error"] =~ "eacces"
+
+    File.chmod!(file, 0o644)
+    assert Shuttle.Projects.registered_projects() == [Path.expand(root)]
+  end
+
   defp post_project(path, expected_status) do
     conn = post(api_conn(), "/api/v1/projects", Jason.encode!(%{"path" => path}))
     assert conn.status == expected_status
