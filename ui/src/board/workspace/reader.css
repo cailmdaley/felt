@@ -56,7 +56,7 @@
   font-variant-caps: all-small-caps; letter-spacing: .025em;
 }
 .ws-channel-title {
-  font: 500 var(--ws-section-size)/1.2 var(--ws-serif); padding: var(--ws-small-gap); border-radius: var(--ws-control-radius);
+  font: 500 var(--ws-label-size)/1.2 var(--ws-serif); padding: var(--ws-small-gap); border-radius: var(--ws-control-radius);
   flex: 1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; min-width: 0;
 }
 .ws-return:hover { color: var(--ws-ink) !important; }
@@ -270,7 +270,7 @@
   .ws-reader .ws-review-plate .kbn-ctl-btn { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); }
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; }
   .ws-return::before { content: '‹'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: var(--ws-section-size); text-indent: 0; }
-  .ws-channel-title { text-align: center; flex: 1; height: 44px; font-size: var(--ws-section-size); }
+  .ws-channel-title { text-align: center; flex: 1; height: 44px; font-size: var(--ws-label-size); }
   .ws-channel-title::after { display: none; }
   .ws-worker-pill .kbn-card-worker { display: grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; background: none; }
   .ws-worker-pill .kbn-card-worker:not(:has(.ws-worker-dot))::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--ws-machine); }
@@ -281,7 +281,7 @@
   .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) minmax(0, 1fr) var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); height: calc(var(--ws-thumb-height) + env(safe-area-inset-bottom)); flex: none; border-top: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); touch-action: pan-y; user-select: none; }
   .ws-page-choice { min-width: 0; height: 55px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1px; padding: 0 4px; }
   .ws-thumb-title, .ws-thumb-arrival { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ws-thumb-title { font: var(--ws-prose-size)/1.1 var(--ws-serif); }
+  .ws-thumb-title { font: var(--ws-label-size)/1.1 var(--ws-serif); }
   .ws-thumb-arrival, .ws-position { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: 0; color: var(--ws-ink-muted); }
   .ws-thumb-button { width: var(--ws-phone-target); height: var(--ws-phone-target); font-size: var(--ws-section-size) !important; }
   .ws-position { text-align: center; color: var(--ws-ink-muted); }
