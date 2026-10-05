@@ -543,7 +543,7 @@ export class DocumentHost {
     const doc = state.frame.doc
     const src = fileBytesUrl(this.options.shuttleBase, doc.path, doc.owner)
     try {
-      const info = await head(src, RESOURCE_PRIORITY.selected, { fresh: true })
+      const info = await head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal })
       if (this.disposed || state.controller !== controller) return
       if (!info) throw new Error('the daemon could not be reached')
       if (!info.exists) throw new Error('file request failed: 404')

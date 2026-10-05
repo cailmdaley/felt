@@ -391,6 +391,18 @@ describe('refresh and failure states', () => {
     expect(frame.el.classList.contains('ws-stale')).toBe(false)
   })
 
+  it('cancels a retry check when its page goes, rather than leaving it to hold a request', async () => {
+    const signals: AbortSignal[] = []
+    vi.stubGlobal('fetch', vi.fn((_src: string, init?: RequestInit) => { signals.push(init!.signal!); return new Promise<Response>(() => {}) }))
+    host.setChannel([docs[0]], docs[0].key)
+    await ready()
+    host.refresh(docs[0].key)
+    await vi.waitFor(() => expect(signals).toHaveLength(1))
+    expect(signals[0].aborted).toBe(false)
+    host.dispose()
+    expect(signals[0].aborted).toBe(true)
+  })
+
   it('offers a download for an image this browser cannot decode', async () => {
     const image = { ...docs[0], kind: 'image' as const, path: '/figure.heic', name: 'figure.heic' }
     host.setChannel([image], image.key)

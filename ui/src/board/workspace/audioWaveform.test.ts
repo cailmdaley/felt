@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resetDocumentResources, RESOURCE_FRESH_MS } from '../documentResources.js'
+import { peek, resetDocumentResources, RESOURCE_FRESH_MS } from '../documentResources.js'
 import { resetLanes } from '../requestLanes.js'
 import { audioPeaks, loadWaveform } from './audioWaveform.js'
 
@@ -57,6 +57,20 @@ describe('audio waveform', () => {
     expect(realtime).not.toHaveBeenCalled()
     expect(offline).toEqual(Array(13).fill(8000))
   })
+  it('drops a waveform lookup its page abandoned while it waited in the queue', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const fetcher = vi.fn(async (src: string) => { if (src.includes('busy')) await gate; return new Response(new Uint8Array([1]), { status: 206, headers: { ETag: 'W/"sha256-w"' } }) })
+    vi.stubGlobal('fetch', fetcher)
+    const busy = [peek('/api/v1/file?path=/busy-a'), peek('/api/v1/file?path=/busy-b')]
+    const page = new AbortController()
+    const waveform = loadWaveform('gone', '/api/v1/file?path=/gone.mp3', page.signal, false)
+    page.abort()
+    expect(await waveform).toBeNull()
+    release(); await Promise.all(busy)
+    expect(fetcher.mock.calls.map(([src]) => src)).not.toContain('/api/v1/file?path=/gone.mp3')
+  })
+
   it('draws a neighbour only from a waveform already decoded, never downloading it', async () => {
     const decode = vi.fn(async () => ({ duration: 3, numberOfChannels: 1, getChannelData: () => new Float32Array([.5]) }))
     vi.stubGlobal('OfflineAudioContext', class { decodeAudioData = decode })

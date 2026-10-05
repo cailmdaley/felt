@@ -65,7 +65,7 @@ export function audioPeaks(channels: Float32Array[], bins = BINS): number[] {
  * keeps its native range URL.
  */
 export async function loadWaveform(key: string, src: string, signal: AbortSignal, decode = true): Promise<Waveform | null> {
-  const head = await peek(src, decode ? RESOURCE_PRIORITY.selected : RESOURCE_PRIORITY.neighbour)
+  const head = await peek(src, decode ? RESOURCE_PRIORITY.selected : RESOURCE_PRIORITY.neighbour, { signal })
   if (!head || signal.aborted || (head.size ?? 0) > MAX_BYTES) return null
   const validator = peekVersion(head)
   const storageKey = CACHE_PREFIX + JSON.stringify([key, validator])
