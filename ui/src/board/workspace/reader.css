@@ -65,7 +65,7 @@
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
 /* The right end: the worker control, then the page count. */
-.ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-head-gap); min-width: 0; }
+.ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0; }
 .ws-head-worker { flex: none; display: flex; align-items: baseline; }
 .ws-head-worker[hidden] { display: none; }
 /* The card's own pill, bare: a pigmented dot, the state in the serif, the time in mono. */
