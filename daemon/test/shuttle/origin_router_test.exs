@@ -31,13 +31,18 @@ defmodule Shuttle.OriginRouterTest do
     end
 
     test "a matching local/known-remote origin never logs" do
+      # The capture sees every process's logs, including concurrent async
+      # tests', so only the lines this process emitted count: route/2 logs on
+      # its caller.
+      own_pid = "pid=#{:erlang.pid_to_list(self())}"
+
       log =
-        capture_log(fn ->
+        capture_log([format: "$metadata| $message\n", metadata: [:pid]], fn ->
           OriginRouter.route("candide", own_host_id: "laptop", remotes: @remotes)
           OriginRouter.route(nil, own_host_id: "laptop", remotes: @remotes)
         end)
 
-      assert log == ""
+      assert log |> String.split("\n", trim: true) |> Enum.filter(&(&1 =~ own_pid)) == []
     end
 
     test "C6: routes through the same normalize_remotes primitive the registries use — a keyword-list remote entry resolves identically to a map one" do
