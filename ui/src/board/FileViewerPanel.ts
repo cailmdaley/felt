@@ -36,8 +36,6 @@ export interface FileViewerOptions {
   kind?: 'html' | 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'other'
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
-  title?: string
-  provenance?: string
   /** Inactive viewers read once for a preview, without periodic subscriptions. */
   active?: boolean
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
@@ -222,19 +220,10 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   wrap.className = `kbn-fileview-media kbn-fileview-${kind}`
   const page = document.createElement('div')
   page.className = 'kbn-media-page'
-  const mark = document.createElement('div')
-  mark.className = 'kbn-media-kind'
-  mark.textContent = kind === 'audio' ? '♪  AUDIO' : '▹  VIDEO'
-  const title = document.createElement('h1')
-  title.className = 'kbn-media-title'
-  title.textContent = options.title || basename(path)
-  const provenance = document.createElement('p')
-  provenance.className = 'kbn-media-provenance'
-  provenance.textContent = options.provenance || path
   const media = document.createElement(kind)
   media.controls = true
   media.preload = 'metadata'
-  media.setAttribute('aria-label', title.textContent)
+  media.setAttribute('aria-label', basename(path))
   if (media instanceof HTMLVideoElement) media.playsInline = true
   const timeline = document.createElement('progress')
   timeline.className = 'kbn-media-progress'
@@ -260,7 +249,7 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
       if (!disposed) options.onState?.({ status: 'error', error: new Error(res.ok ? 'media format is not supported by this browser' : `file request failed: ${res.status}`), hasContent: false })
     }).catch(error => { if (!disposed) options.onState?.({ status: 'error', error, hasContent: false }) })
   })
-  page.append(mark, title, provenance, media)
+  page.append(media)
   if (kind === 'audio') page.append(timeline)
   wrap.append(page)
   media.src = src
@@ -279,15 +268,13 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
 function buildUnsupportedViewer(base: string, path: string, owner: string, options: FileViewerOptions): HTMLElement {
   const box = document.createElement('div')
   box.className = 'kbn-fileview-unsupported ws-document-state'
-  const name = document.createElement('h3')
-  name.textContent = options.title || basename(path)
   const detail = document.createElement('p')
   detail.textContent = 'Not drawn here'
   const download = document.createElement('a')
   download.href = fileBytesUrl(base, path, owner)
   download.download = basename(path)
   download.textContent = 'Download'
-  box.append(name, detail, download)
+  box.append(detail, download)
   const controller = new AbortController()
   viewerDisposers.set(box, () => controller.abort())
   void fetch(fileInfoUrl(base, path, owner), { signal: controller.signal, cache: 'no-store' }).then(async response => {

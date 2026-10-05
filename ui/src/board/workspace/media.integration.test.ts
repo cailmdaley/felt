@@ -43,15 +43,17 @@ const viewer = (path: string, options = {}) => {
 }
 
 describe('native media documents', () => {
-  it('classifies all audio/video suffixes and gives the page its title and provenance', () => {
+  it('classifies all audio/video suffixes without duplicating frame metadata in the page', () => {
     for (const ext of ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus']) {
-      const el = viewer(`/song.${ext}`, { title: 'Song', provenance: 'sent · host-a' })
-      expect(el.querySelector('h1')?.textContent).toBe('Song')
-      expect(el.querySelector('.kbn-media-provenance')?.textContent).toBe('sent · host-a')
+      const el = viewer(`/song.${ext}`)
+      expect(el.querySelector('h1,.kbn-media-kind,.kbn-media-provenance')).toBeNull()
+      expect(el.querySelector('audio')?.getAttribute('aria-label')).toBe(`song.${ext}`)
       expect(el.querySelector('audio')?.controls).toBe(true)
     }
     for (const ext of ['mp4', 'm4v', 'mov', 'webm']) {
-      const video = viewer(`/film.${ext}`).querySelector('video')!
+      const el = viewer(`/film.${ext}`)
+      expect(el.querySelector('h1,.kbn-media-kind,.kbn-media-provenance')).toBeNull()
+      const video = el.querySelector('video')!
       expect(video.controls && video.playsInline).toBe(true)
       expect(video.preload).toBe('metadata')
     }
@@ -111,7 +113,7 @@ describe('native media documents', () => {
     const updated = { ...audioDoc, provenance: [...audioDoc.provenance, { kind: 'sent' as const, time: 2, worker: 'sol' }] }
     host.setChannel([updated, videoDoc], updated.key)
     expect(host.get(updated.key)!.viewer!.querySelector('audio')).toBe(audio)
-    expect(host.get(updated.key)!.viewer!.querySelector('.kbn-media-provenance')?.textContent).toContain('2 receipts')
+    expect(host.get(updated.key)!.viewer!.querySelector('.kbn-media-title,.kbn-media-provenance')).toBeNull()
   })
 
   it('activates a refreshed media element when selection precedes its metadata load', async () => {
@@ -129,10 +131,18 @@ describe('native media documents', () => {
     expect(replacement.paused).toBe(false)
   })
 
+  it('leaves native PDF content and its accessible name without an in-page metadata block', () => {
+    const el = viewer('/scan.pdf')
+    expect(el.querySelector('iframe')?.title).toBe('scan.pdf')
+    expect(el.querySelector('h1,h3,.kbn-media-title,.kbn-media-provenance')).toBeNull()
+    expect(el.querySelector('iframe')?.src).toContain('/file?')
+  })
+
   it('draws unsupported documents with file-info size and a download', async () => {
     const el = viewer('/archive.zip')
     await vi.waitFor(() => expect(el.textContent).toContain('2,048 bytes'))
-    expect(el.querySelector('iframe')).toBeNull()
+    expect(el.querySelector('iframe,h1,h3,.kbn-media-provenance')).toBeNull()
+    expect(el.textContent).not.toContain('archive.zip')
     expect(el.querySelector('a')?.download).toBe('archive.zip')
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/file-info?'), expect.anything())
   })

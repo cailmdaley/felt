@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileViewerOptions } from '../FileViewerPanel.js'
 import type { WorkspaceDocument } from './documents.js'
 import { DocumentHost, withWorkspaceKeyBridge } from './DocumentHost.js'
+import { Reader } from './Reader.js'
+import { buildChannel } from './documents.js'
 
 const render = vi.hoisted(() => ({
   calls: [] as Array<{ viewer: HTMLElement; path: string; owner: string; options: FileViewerOptions; frame?: (frame: HTMLIFrameElement, refreshed: boolean) => void; text?: (pane: HTMLElement) => void }>,
@@ -41,6 +43,52 @@ const ready = async (call = render.calls.at(-1)!) => {
   call.options.onState!({ status: 'ready' })
   await Promise.resolve()
 }
+
+describe('say it once label bars', () => {
+  it.each([false, true])('updates last-changed and owner-aware arrivals without rerendering or reloading (phone=%s)', phone => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query === '(max-width: 600px)', addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const prose = vi.fn(() => document.createElement('div'))
+    const reader = new Reader({ shuttleBase: '', buildProse: prose, onRefreshProse: vi.fn(), onSelect: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [] })
+    document.body.append(reader.el)
+    const now = Date.now()
+    const input = { uid: 'task', owner: 'host-a', name: 'Task name', path: '/task.md', fiberDir: '/', body: '', isConstitution: true,
+      modifiedAt: new Date(now - 3600000).toISOString(),
+      sent: [{ path: '/report.html', time: now - 3600000, worker: 'sol' }, { path: '/foreign.pdf', owner: 'host-b', time: now - 3600000, worker: 'sol' }],
+    }
+    try {
+      const first = buildChannel(input)
+      reader.show(first, first.documents[0].key, 'Board')
+      const fiber = reader.host.get(first.documents[0].key)!
+      const page = fiber.viewer
+      const report = reader.host.get(first.documents[1].key)!
+      const reportViewer = report.viewer
+      const calls = render.calls.length
+      expect(fiber.label.querySelector('.ws-label-title')?.textContent).toBe('')
+      expect(fiber.label.querySelector('.ws-kind-glyph')?.textContent).toBe('')
+      expect(fiber.label.textContent).toContain('Last changed 1h ago')
+      expect(fiber.label.textContent).not.toMatch(/Constitution|fiber page|Task name|host-a/)
+      expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago')
+      expect(reader.host.get(first.documents[2].key)!.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago · host-b')
+      expect(reader.el.querySelector('.ws-labelbar .ws-agent')).toBeNull()
+      const next = buildChannel({ ...input, modifiedAt: new Date(now - 120000).toISOString(),
+        sent: [...input.sent, { path: '/report.html', time: now - 60000, worker: 'sol' }], previous: first })
+      reader.show(next, next.documents[0].key, 'Board')
+      expect(fiber.label.textContent).toContain('Last changed 2m ago')
+      expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1m ago · 2 receipts')
+      expect(fiber.viewer).toBe(page)
+      expect(report.viewer).toBe(reportViewer)
+      expect(prose).toHaveBeenCalledTimes(1)
+      expect(render.calls).toHaveLength(calls)
+      const unknown = buildChannel({ ...input, modifiedAt: undefined, previous: next })
+      reader.show(unknown, unknown.documents[0].key, 'Board')
+      expect(fiber.label.textContent).toContain('Last changed unknown')
+      expect(fiber.viewer).toBe(page)
+    } finally { reader.dispose() }
+  })
+})
 
 describe('stable document frames', () => {
   it('creates placeholders, mounts just selection and neighbours, and never reparents on reorder', async () => {

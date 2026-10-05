@@ -6,7 +6,7 @@ import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
-import type { Channel, DocKey, WorkspaceDocument } from './documents.js'
+import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
 
 export interface ReaderOptions {
@@ -67,7 +67,6 @@ export class Reader {
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
-  private agent = ''
   private selected: DocKey | null = null
   private expanded = false
   private active = false
@@ -168,7 +167,6 @@ export class Reader {
     this.title.title = channel.name
     const pill = card ? this.opts.workerPill?.(card) : null
     this.conversation.replaceChildren(...(pill ? [pill] : []))
-    this.agent = card?.workerAgent ?? card?.shuttleAgent ?? ''
     this.tabs.render(channel.labels)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && animate)
@@ -278,29 +276,18 @@ export class Reader {
   }
   private fillLabel(frame: DocumentFrame, label: string): void {
     const doc = frame.doc
-    const sent = doc.provenance.filter(p => p.kind === 'sent')
-    const latest = sent.at(-1)
-    const embed = doc.provenance.find(p => p.kind === 'embed')
-    // Provenance reads in the mono register; the machine that sent it wears cobalt.
-    const segments: Array<string | HTMLElement> = [doc.kind === 'fiber' ? 'fiber page' : embed ? 'embedded' : 'linked from body']
-    if (latest?.kind === 'sent') {
-      const age = Math.max(0, Math.round((Date.now() - latest.time) / 60000))
-      segments[0] = `sent ${age < 60 ? `${age}m` : age < 1440 ? `${Math.floor(age / 60)}h` : `${Math.floor(age / 1440)}d`} ago`
-      if (sent.length > 1) segments.push(`${sent.length} receipts`)
-      const agent = latest.worker ?? this.agent
-      if (agent) segments.push(element('span', 'ws-agent', agent))
-    } else if (embed?.kind === 'embed' && embed.title) segments.push(embed.title)
-    segments.push(doc.owner)
+    const metadata = documentLabelMetadata(doc, label, this.channel?.owner ?? doc.owner)
     const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
-    const summary = segments.map(part => typeof part === 'string' ? part : part.textContent).join(' · ')
-    parts.glyph.textContent = glyph
-    parts.title.textContent = label
+    parts.glyph.hidden = doc.kind === 'fiber'
+    parts.glyph.textContent = doc.kind === 'fiber' ? '' : glyph
+    parts.title.hidden = doc.kind === 'fiber'
+    parts.title.textContent = metadata.title
     parts.title.title = doc.path
-    if (parts.provenance.title !== summary) {
-      parts.provenance.replaceChildren(...segments.flatMap((part, i) => i ? [' · ', part] : [part]))
-      parts.provenance.title = summary
+    if (parts.provenance.title !== metadata.summary) {
+      parts.provenance.textContent = metadata.summary
+      parts.provenance.title = metadata.summary
     }
     parts.expand.textContent = this.expanded ? '⤡' : '⤢'
     parts.expand.setAttribute('aria-label', this.expanded ? 'Restore size' : 'Expand document')

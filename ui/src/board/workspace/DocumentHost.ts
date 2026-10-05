@@ -78,13 +78,6 @@ export class DocumentHost {
       const state = this.frames.get(doc.key) ?? this.create(doc)
       // Provenance and labels can change without touching the live document.
       state.frame.doc = doc
-      for (const viewer of [state.frame.viewer, state.pending]) {
-        const title = viewer?.querySelector('.kbn-media-title')
-        const provenance = viewer?.querySelector('.kbn-media-provenance')
-        if (title) title.textContent = documentTitle(doc)
-        if (provenance) provenance.textContent = documentProvenance(doc)
-        viewer?.querySelector('audio,video')?.setAttribute('aria-label', documentTitle(doc))
-      }
     }
     this.select(selected)
   }
@@ -275,8 +268,6 @@ export class DocumentHost {
         quietLoading: true,
         active: state.active,
         kind: doc.kind === 'fiber' ? undefined : doc.kind,
-        title: documentTitle(doc),
-        provenance: documentProvenance(doc),
         transformHtml: withWorkspaceKeyBridge,
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
@@ -511,20 +502,6 @@ export class DocumentHost {
     // Bubble through the same app handler; keys never focus a document.
     this.track.dispatchEvent(forwarded)
   }
-}
-
-function documentTitle(doc: WorkspaceDocument): string {
-  const embed = doc.provenance.find(p => p.kind === 'embed' && p.title)
-  return embed?.kind === 'embed' ? embed.title || doc.name : doc.name
-}
-
-function documentProvenance(doc: WorkspaceDocument): string {
-  const receipts = doc.provenance.filter(p => p.kind === 'sent')
-  const latest = receipts.at(-1)
-  const source = latest?.kind === 'sent'
-    ? `sent · ${receipts.length} ${receipts.length === 1 ? 'receipt' : 'receipts'}${latest.worker ? ` · ${latest.worker}` : ''}`
-    : doc.provenance.some(p => p.kind === 'embed') ? 'embedded' : 'linked from body'
-  return `${source} · ${doc.owner}`
 }
 
 function readScroll(key: DocKey): ScrollPosition {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildChannel, defaultSelection, docKey, documentKind, documentLabels, fallbackSelection,
+  buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
   fiberKey, normalizeAbsolutePath, parseDocKey, type ChannelInput, type WorkspaceDocument,
 } from './documents.js'
 
@@ -40,6 +40,30 @@ describe('document identity and kinds', () => {
     for (const ext of ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus']) expect(documentKind(`/x/sound.${ext}`)).toBe('audio')
     for (const ext of ['mp4', 'm4v', 'mov', 'webm']) expect(documentKind(`/x/movie.${ext}`)).toBe('video')
     expect(documentKind('/x/archive.zip')).toBe('other')
+  })
+})
+
+describe('frame metadata', () => {
+  const now = Date.parse('2026-10-05T12:00:00Z')
+  it('carries genuine modification time and never substitutes creation or previous metadata', () => {
+    const first = buildChannel({ ...base, modifiedAt: '2026-10-05T11:00:00Z' })
+    expect(first.documents[0].modifiedAt).toBe('2026-10-05T11:00:00Z')
+    expect(documentLabelMetadata(first.documents[0], 'Constitution', base.owner, now)).toEqual({ title: '', summary: 'Last changed 1h ago' })
+    const unknown = buildChannel({ ...base, previous: first }).documents[0]
+    expect(unknown.modifiedAt).toBeUndefined()
+    expect(documentLabelMetadata(unknown, 'Note', base.owner, now)).toEqual({ title: '', summary: 'Last changed unknown' })
+    expect(documentLabelMetadata({ ...unknown, modifiedAt: 'invalid' }, 'Note', base.owner, now).summary).toBe('Last changed unknown')
+  })
+
+  it('shows arrival and receipts without agent or same-owner host, and names foreign owners', () => {
+    const report = { ...file(base.owner, '/report.html'), provenance: [
+      { kind: 'embed' as const, title: 'Results' },
+      { kind: 'sent' as const, time: now - 7200000, worker: 'sol' },
+      { kind: 'sent' as const, time: now - 3600000, worker: 'sol' },
+    ] }
+    expect(documentLabelMetadata(report, 'report', base.owner, now)).toEqual({ title: 'Results', summary: 'sent 1h ago · 2 receipts' })
+    expect(documentLabelMetadata({ ...report, owner: 'host-b' }, 'report', base.owner, now).summary).toBe('sent 1h ago · 2 receipts · host-b')
+    expect(documentLabelMetadata({ ...report, provenance: report.provenance.slice(0, 1) }, 'report', base.owner, now)).toEqual({ title: 'Results', summary: 'embedded' })
   })
 })
 

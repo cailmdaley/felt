@@ -128,7 +128,10 @@ export class Workspace {
     const card = this.opts.cards().find(c => (c.uid ?? c.id) === this.current?.channel.uid && c.originId === this.current.channel.owner)
     if (!card) return
     this.current.card = card
-    this.current.channel = { ...this.current.channel, name: card.name, outcome: card.outcome ?? this.current.channel.outcome }
+    this.current.channel = {
+      ...this.current.channel, name: card.name, outcome: card.outcome ?? this.current.channel.outcome,
+      documents: this.current.channel.documents.map(doc => doc.kind === 'fiber' ? { ...doc, modifiedAt: card.modifiedAt } : doc),
+    }
     this.show(this.current)
   }
 
@@ -176,7 +179,7 @@ export class Workspace {
     if (!state) {
       state = {
         card,
-        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined }),
+        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, modifiedAt: card.modifiedAt }),
         links: [], selectionVersion: 0, loaded: false, metadataKnown,
       }
       this.channels.set(key, state)
@@ -367,7 +370,7 @@ export class Workspace {
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
-      sent, links, previous: before,
+      sent, links, previous: before, modifiedAt: card.modifiedAt,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {
       state.selected = fallbackSelection(before.documents.map(d => d.key), state.channel.documents.map(d => d.key), state.selected)

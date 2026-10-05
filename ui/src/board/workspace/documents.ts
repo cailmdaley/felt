@@ -15,6 +15,8 @@ export interface WorkspaceDocument {
   name: string
   kind: 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other'
   provenance: Provenance[]
+  /** Owner-daemon file modification time; absent when unknown. */
+  modifiedAt?: string
 }
 
 export interface Channel {
@@ -38,6 +40,8 @@ export interface ChannelInput {
   outcome?: string
   /** True when the fiber carries a `shuttle:` block. */
   isConstitution?: boolean
+  /** The fiber's genuine owner-daemon modification time, never its creation time. */
+  modifiedAt?: string
   embeds?: { path: string; title?: string }[]
   sent?: { path: string; owner?: string; session?: string; time: number; worker?: string }[]
   links?: { path: string; owner?: string; title?: string }[]
@@ -123,6 +127,7 @@ export function buildChannel(input: ChannelInput): Channel {
     key: fiberKey(input.owner, input.uid), owner: input.owner,
     path: normalizeAbsolutePath(input.path, input.fiberDir), name: input.name,
     kind: 'fiber', provenance: [{ kind: 'fiber' }],
+    ...(input.modifiedAt !== undefined ? { modifiedAt: input.modifiedAt } : {}),
   }
   documents.set(prose.key, prose)
 
@@ -198,6 +203,25 @@ export function buildChannel(input: ChannelInput): Channel {
   }
   if (input.outcome !== undefined) channel.outcome = input.outcome
   return channel
+}
+
+/** The frame owns document naming and arrival metadata; renderers own content only. */
+export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string, now = Date.now()): { title: string; summary: string } {
+  const age = (time: number): string => {
+    const minutes = Math.max(0, Math.round((now - time) / 60000))
+    return `${minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`} ago`
+  }
+  if (doc.kind === 'fiber') {
+    const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN
+    return { title: '', summary: Number.isFinite(time) ? `Last changed ${age(time)}` : 'Last changed unknown' }
+  }
+  const sent = doc.provenance.filter(p => p.kind === 'sent')
+  const latest = sent.filter(p => Number.isFinite(p.time)).sort((a, b) => b.time - a.time)[0]
+  const embed = doc.provenance.find(p => p.kind === 'embed')
+  const segments = [sent.length ? latest ? `sent ${age(latest.time)}` : 'sent · time unknown' : embed ? 'embedded' : 'linked from body']
+  if (sent.length > 1) segments.push(`${sent.length} receipts`)
+  if (doc.owner !== channelOwner) segments.push(doc.owner)
+  return { title: embed?.kind === 'embed' && embed.title ? embed.title : label, summary: segments.join(' · ') }
 }
 
 export function defaultSelection(channel: Channel): DocKey {
