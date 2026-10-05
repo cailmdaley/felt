@@ -275,6 +275,141 @@ test('Phone overview single column, reader tabs, footer stepping and Back', asyn
   assert.ok(await p.getByRole('searchbox', { name: 'Find work or files' }).isVisible())
 }, { width: 390, height: 844 })
 
+test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
+  await open(p)
+  const title = p.locator('.ws-channel-title')
+  const sidebar = p.locator('.ws-sidebar')
+  await title.focus()
+  await p.keyboard.press('c')
+  assert.ok(await sidebar.isVisible())
+  assert.equal(await p.getByRole('button', { name: 'Hide constitutions', exact: true }).getAttribute('aria-expanded'), 'true')
+  await title.focus()
+  await p.keyboard.press('/')
+  const find = sidebar.getByRole('searchbox', { name: 'Find a constitution', exact: true })
+  assert.ok(await find.evaluate(e => e === document.activeElement))
+  for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report', 'TONE.MP3']) {
+    await find.fill(query)
+    if (!query.includes('/')) assert.equal(await sidebar.locator('.ws-channel-row').count(), 1, `sidebar matches ${query}`)
+    assert.ok((await sidebar.locator('.ws-channel-name').allTextContents()).includes(name), `sidebar includes the constitution matching ${query}`)
+  }
+  await find.press('Enter')
+  assert.equal(await p.locator('.ws-channel-title').innerText(), name)
+  assert.ok(await sidebar.isVisible(), 'selection keeps the sidebar open')
+  await title.focus(); await p.keyboard.press('/')
+  assert.ok(await find.evaluate(e => e === document.activeElement))
+  await find.press('Escape')
+  assert.ok(await sidebar.isVisible(), 'Escape from sidebar Find does not return to Desk')
+  assert.ok(await title.evaluate(e => e === document.activeElement), 'Escape restores Find opener focus')
+  await p.keyboard.press('c')
+  assert.equal(await sidebar.isVisible(), false)
+  await p.keyboard.press('Meta+Backslash')
+  assert.ok(await sidebar.isVisible(), 'Cmd-Backslash remains a sidebar alias')
+  await p.keyboard.press('Meta+Backslash')
+  assert.equal(await sidebar.isVisible(), false)
+})
+
+test('Reader slash opens constitution picker; Escape restores focus and Enter chooses file match', async p => {
+  await open(p)
+  const title = p.locator('.ws-channel-title')
+  await title.focus(); await p.keyboard.press('/')
+  const picker = p.locator('.ws-switcher')
+  // Both search and text inputs are valid native Find fields; focus is the contract.
+  const input = picker.locator('input[aria-label="Find a constitution"]')
+  await input.waitFor()
+  assert.ok(await input.evaluate(e => e === document.activeElement))
+  await input.fill('remote-summary.pdf')
+  assert.equal(await picker.locator('.ws-channel-row').count(), 1)
+  assert.equal(await picker.locator('.ws-channel-name').innerText(), name)
+  await input.press('Escape')
+  assert.equal(await picker.count(), 0)
+  assert.ok(await title.evaluate(e => e === document.activeElement))
+  assert.equal(await p.locator('.ws-sidebar').isVisible(), false)
+  await p.keyboard.press('/')
+  await input.fill('transfer.txt')
+  assert.equal(await picker.locator('.ws-channel-row').count(), 1)
+  assert.equal(await picker.locator('.ws-channel-name').innerText(), 'Remote covariance review')
+  await input.press('Enter')
+  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Remote covariance review')
+  assert.equal(await picker.count(), 0)
+})
+
+test('Sidebar current row follows repeated j/k, Alt navigation and browser Back immediately', async p => {
+  await open(p)
+  await p.locator('.ws-channel-title').focus()
+  await p.keyboard.press('c')
+  const sidebar = p.locator('.ws-sidebar')
+  const rows = sidebar.locator('.ws-channel-row')
+  assert.ok(await sidebar.isVisible())
+  const names = await rows.locator('.ws-channel-name').allTextContents()
+  assert.ok(names.length >= 4, 'navigation exercises several constitutions')
+  await rows.first().click()
+  await poll(p, first => document.querySelector('.ws-channel-title')?.textContent === first, names[0])
+  await assertCurrent(names[0])
+  let index = 0
+  for (const [key, delta] of [['j', 1], ['j', 1], ['j', 1], ['k', -1], ['k', -1], ['Alt+ArrowDown', 1], ['Alt+ArrowUp', -1]]) {
+    await p.keyboard.press(key)
+    index += delta
+    await assertCurrent(names[index])
+  }
+  await p.goBack()
+  await poll(p, previous => document.querySelector('.ws-channel-title')?.textContent === previous, names[index + 1])
+  await assertCurrent(names[index + 1])
+
+  async function assertCurrent(expected) {
+    // One browser observation after each key: title and current row must agree
+    // together, without polling away a stale selection marker.
+    const state = await sidebar.evaluate(sidebar => {
+      const current = [...sidebar.querySelectorAll('.ws-channel-row[aria-current="true"]')]
+      const row = current[0]
+      const list = sidebar.querySelector('.ws-channel-list')
+      const bounds = row?.getBoundingClientRect()
+      const viewport = list.getBoundingClientRect()
+      const other = sidebar.querySelector('.ws-channel-row:not([aria-current="true"])')
+      const material = el => {
+        const css = getComputedStyle(el)
+        return [css.backgroundColor, css.boxShadow, css.transform].join('|')
+      }
+      return {
+        count: current.length,
+        name: row?.querySelector('.ws-channel-name')?.textContent,
+        reader: document.querySelector('.ws-channel-title')?.textContent,
+        distinguished: !!row && !!other && material(row) !== material(other),
+        inView: !!bounds && bounds.top >= viewport.top - 1 && bounds.bottom <= viewport.bottom + 1,
+      }
+    })
+    assert.equal(state.count, 1)
+    assert.equal(state.name, expected)
+    assert.equal(state.reader, expected)
+    assert.ok(state.distinguished, 'current row has a distinct selected surface')
+    assert.ok(state.inView, 'reduced-motion nearest scrolling keeps the current row visible')
+  }
+}, { width: 1440, height: 460 })
+
+test('Desk slash opens the same constitution picker without opening reader; Escape and Enter work', async p => {
+  const opener = p.locator('[data-view="shelf"]')
+  await opener.focus(); await p.keyboard.press('/')
+  assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0, 'Find does not enter the reader')
+  const picker = p.locator('.ws-switcher')
+  const input = picker.locator('input[aria-label="Find a constitution"]')
+  await input.waitFor()
+  assert.ok(await input.evaluate(e => e === document.activeElement))
+  for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report', 'tone.mp3']) {
+    await input.fill(query)
+    if (!query.includes('/')) assert.equal(await picker.locator('.ws-channel-row').count(), 1, `Desk picker matches ${query}`)
+    assert.ok((await picker.locator('.ws-channel-name').allTextContents()).includes(name), `Desk picker includes the constitution matching ${query}`)
+  }
+  await input.press('Escape')
+  assert.equal(await picker.count(), 0)
+  assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
+  assert.ok(await opener.evaluate(e => e === document.activeElement), 'Desk Find restores opener focus')
+  await p.keyboard.press('/')
+  await input.fill('tone.mp3')
+  await input.press('Enter')
+  await reportReady(p)
+  assert.equal(await p.locator('.ws-channel-title').innerText(), name)
+  assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
+})
+
 // Say-it-once checks are scoped to the selected page and its chrome. Tabs,
 // the constitution switcher/title and the in-constitution document list repeat
 // names intentionally: they select/navigate. The navbar and control-band pills
