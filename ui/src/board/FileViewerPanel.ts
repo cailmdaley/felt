@@ -186,6 +186,36 @@ export function buildFileViewer(
 type MediaState = { media: HTMLMediaElement; active: boolean }
 const mediaViewers = new WeakMap<HTMLElement, MediaState>()
 const players = new Set<HTMLMediaElement>()
+type EmbeddedMediaState = { active: boolean; players: Set<HTMLMediaElement>; unbind: () => void }
+const embeddedMediaViewers = new WeakMap<HTMLElement, EmbeddedMediaState>()
+
+function bindEmbeddedMedia(wrap: HTMLElement, iframe: HTMLIFrameElement): void {
+  const state = embeddedMediaViewers.get(wrap)
+  if (!state) return
+  state.unbind()
+  for (const media of state.players) { media.pause(); players.delete(media) }
+  state.players.clear()
+  try {
+    const content = iframe.contentDocument
+    if (!content) return
+    const play = (event: Event): void => {
+      const media = event.target as HTMLMediaElement
+      if (!['AUDIO', 'VIDEO'].includes(media.tagName)) return
+      state.players.add(media)
+      players.add(media)
+      if (!state.active) { media.pause(); return }
+      for (const other of players) if (other !== media) other.pause()
+    }
+    content.addEventListener('play', play, true)
+    for (const media of content.querySelectorAll<HTMLMediaElement>('audio,video')) {
+      state.players.add(media)
+      players.add(media)
+      if (!state.active) media.pause()
+      else if (!media.paused) for (const other of players) if (other !== media) other.pause()
+    }
+    state.unbind = () => content.removeEventListener('play', play, true)
+  } catch { /* Cross-origin frames keep their browser-owned controls. */ }
+}
 
 function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', options: FileViewerOptions): HTMLElement {
   const wrap = document.createElement('div')
@@ -304,7 +334,10 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     frame.inert = true
     frame.tabIndex = -1
     frame.setAttribute('scrolling', 'no')
-    if (kind === 'html') frame.setAttribute('sandbox', '')
+    if (kind === 'html') {
+      frame.setAttribute('sandbox', '')
+      frame.allow = "autoplay 'none'"
+    }
     // Native PDF viewers need their plugin; the host makes the whole slot inert.
     frame.addEventListener('load', () => {
       if (kind === 'html') { finish(true); return }
@@ -370,6 +403,8 @@ export function suspendFileViewer(viewer: HTMLElement | null): void {
     liveViewSubscriptions.get(viewer)?.suspend()
     const state = mediaViewers.get(viewer)
     if (state) { state.active = false; state.media.pause() }
+    const embedded = embeddedMediaViewers.get(viewer)
+    if (embedded) { embedded.active = false; for (const media of embedded.players) media.pause() }
   }
 }
 
@@ -379,6 +414,8 @@ export function resumeFileViewer(viewer: HTMLElement | null): void {
     void liveViewSubscriptions.get(viewer)?.resume()
     const state = mediaViewers.get(viewer)
     if (state) state.active = true
+    const embedded = embeddedMediaViewers.get(viewer)
+    if (embedded) embedded.active = true
   }
 }
 
@@ -395,6 +432,8 @@ function buildHtmlViewer(
 ): HTMLElement {
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
+  const embedded: EmbeddedMediaState = { active: options.active !== false, players: new Set(), unbind: () => {} }
+  embeddedMediaViewers.set(wrap, embedded)
 
   const veil = loadingVeil(fullPath, options)
   let disposed = false
@@ -416,6 +455,7 @@ function buildHtmlViewer(
     failed = false
     veil.remove()
     prepareIframeExternalLinks(initialFrame)
+    bindEmbeddedMedia(wrap, initialFrame)
     onFrameLoad?.(initialFrame, false)
     options.onState?.({ status: 'ready' })
   })
@@ -445,6 +485,7 @@ function buildHtmlViewer(
         if (disposed || loaded || currentGeneration !== generation) return
         loaded = true
         prepareIframeExternalLinks(next)
+        bindEmbeddedMedia(wrap, next)
         const panelScroll = wrap.parentElement?.scrollTop ?? 0
         try {
           next.contentWindow?.scrollTo(0, iframe.contentWindow?.scrollY ?? 0)
@@ -484,7 +525,14 @@ function buildHtmlViewer(
     },
   )
   liveViewSubscriptions.set(wrap, stop)
-  viewerDisposers.set(wrap, () => { disposed = true; generation++; stagingFrame?.remove() })
+  viewerDisposers.set(wrap, () => {
+    disposed = true
+    generation++
+    stagingFrame?.remove()
+    embedded.unbind()
+    for (const media of embedded.players) { media.pause(); players.delete(media) }
+    embeddedMediaViewers.delete(wrap)
+  })
   return wrap
 }
 

@@ -4,6 +4,14 @@ import { buildFileViewer, disposeFileViewer, suspendFileViewer, resumeFileViewer
 import { DocumentHost } from './DocumentHost.js'
 import type { WorkspaceDocument } from './documents.js'
 
+vi.mock('../LiveFileRefresh.js', () => ({
+  watchLiveFile: (_url: string, content: (html: string) => void) => {
+    queueMicrotask(() => content('<!doctype html><html><body>Listening room</body></html>'))
+    return Object.assign(() => {}, { suspend: () => {}, resume: async () => {}, loadOnce: async () => {} })
+  },
+  refreshLiveFile: async () => {},
+}))
+
 let host: DocumentHost | undefined
 const viewers: HTMLElement[] = []
 const playing = new WeakSet<HTMLMediaElement>()
@@ -61,6 +69,23 @@ describe('native media documents', () => {
     expect(video.currentTime).toBe(.4); expect(video.paused).toBe(true)
     suspendFileViewer(first)
     await audio.play(); expect(audio.paused).toBe(true)
+  })
+
+  it('also pauses players inside HTML reports and includes them in exclusive playback', async () => {
+    const report = viewer('/listening-room.html')
+    const iframe = report.querySelector('iframe')!
+    await vi.waitFor(() => expect(iframe.srcdoc).toContain('Listening room'))
+    const embedded = document.createElement('audio')
+    iframe.contentDocument!.body.append(embedded)
+    iframe.dispatchEvent(new Event('load'))
+    const native = viewer('/song.mp3').querySelector('audio')!
+    await embedded.play(); expect(embedded.paused).toBe(false)
+    await native.play(); expect(embedded.paused).toBe(true)
+    await embedded.play(); expect(native.paused).toBe(true)
+    embedded.currentTime = .3
+    suspendFileViewer(report); expect(embedded.paused).toBe(true)
+    resumeFileViewer(report)
+    expect(embedded.paused).toBe(true); expect(embedded.currentTime).toBe(.3)
   })
 
   it('keeps the element through receding and parking and takes Space without stealing typing', async () => {
