@@ -29,9 +29,9 @@ let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
 const channels = [alpha, beta, gamma]
 
-function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes): Reader {
+function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerPill?: (card: KanbanCard) => HTMLElement | null): Reader {
   const reader = new Reader({
-    shuttleBase: '', themes,
+    shuttleBase: '', themes, workerPill,
     buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(),
     onSelect: vi.fn(),
@@ -93,6 +93,20 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
+  it('gives a sidebar worker separate state and elapsed text without replacing its conversation target', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 60000 }
+    listedCards = [working]
+    const target = document.createElement('button'), open = vi.fn()
+    target.addEventListener('click', open)
+    const reader = makeReader(working, undefined, () => target)
+    expect(reader.el.querySelector('.ws-sidebar .ws-worker-control')).toBe(target)
+    expect(target.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
+    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1 m')
+    expect(target.dataset.part).toBe('act')
+    target.click()
+    expect(open).toHaveBeenCalledOnce()
+  })
   it('binds retained sidebar roots only while active and visible, through revisions, filtering and hide/show', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const bound = new Map<HTMLElement, KanbanCard>()

@@ -654,7 +654,7 @@ export class Reader {
     const pill = this.opts.workerPill?.(card)
     if (pill) {
       pill.dataset.part = 'act'; pill.dataset.act = 'worker'
-      meta.append(pill)
+      meta.append(workerPlate(card, pill))
     }
     face.append(meta)
     return face
