@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -38,25 +39,50 @@ func bridgeTempDir(t *testing.T) string {
 	return dir
 }
 
-func buildBridgeBinary(t *testing.T, fake bool) string {
+var bridgeBinaries struct {
+	once        sync.Once
+	cli, native string
+	err         error
+}
+
+// bridgeBinaryPaths builds the shuttle CLI and the fake native Codex once per
+// test binary, into the TestMain fence so they leave with it, and returns
+// their paths.
+func bridgeBinaryPaths(t *testing.T) (cli, native string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "bridge")
-	args := []string{"build", "-o", path, "../../cmd/shuttle"}
-	if fake {
-		args = []string{"build", "-tags", "bridge_test", "-o", path, "./testdata/codex_bridge"}
+	b := &bridgeBinaries
+	b.once.Do(func() {
+		dir := filepath.Join(testFenceDir, "codex-bridge-bin")
+		b.cli, b.native = filepath.Join(dir, "shuttle"), filepath.Join(dir, "native")
+		builds := [][]string{
+			{"build", "-o", b.cli, "../../cmd/shuttle"},
+			{"build", "-tags", "bridge_test", "-o", b.native, "./testdata/codex_bridge"},
+		}
+		errs := make(chan error, len(builds))
+		for _, args := range builds {
+			go func() {
+				if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
+					errs <- fmt.Errorf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+					return
+				}
+				errs <- nil
+			}()
+		}
+		for range builds {
+			b.err = errors.Join(b.err, <-errs)
+		}
+	})
+	if b.err != nil {
+		t.Fatalf("build: %v", b.err)
 	}
-	if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
-		t.Fatalf("build: %v\n%s", err, out)
-	}
-	return path
+	return b.cli, b.native
 }
 
 func newBridgeHarness(t *testing.T, extraEnv ...string) *bridgeHarness {
 	t.Helper()
 	dir := bridgeTempDir(t)
 	h := &bridgeHarness{socket: filepath.Join(dir, "private", "app-server.sock"), envFile: filepath.Join(dir, "native.json"), done: make(chan error, 1)}
-	native := buildBridgeBinary(t, true)
-	cli := buildBridgeBinary(t, false)
+	cli, native := bridgeBinaryPaths(t)
 	inR, inW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -93,9 +119,15 @@ func newBridgeHarness(t *testing.T, extraEnv ...string) *bridgeHarness {
 	return h
 }
 
+// bridgeWaitLimit bounds every wait on a bridge, native or relay process. Each
+// wait returns as soon as its event lands; the bound only decides how long a
+// broken bridge takes to fail, so it is sized for a heavily loaded host and
+// must stay above bridgeStartupTimeout, which TimeoutStopsNative sits through.
+const bridgeWaitLimit = 20 * time.Second
+
 func bridgeEventually(t *testing.T, what string, fn func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(bridgeWaitLimit)
 	for time.Now().Before(deadline) {
 		if fn() {
 			return
@@ -110,7 +142,7 @@ func (h *bridgeHarness) wait(t *testing.T) error {
 	select {
 	case err := <-h.done:
 		return err
-	case <-time.After(12 * time.Second):
+	case <-time.After(bridgeStartupTimeout + bridgeWaitLimit):
 		t.Fatal("bridge did not exit")
 		return nil
 	}
@@ -136,6 +168,7 @@ func (h *bridgeHarness) native(t *testing.T) map[string]string {
 }
 
 func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
+	t.Parallel()
 	h := newBridgeHarness(t)
 	input := `{"id":1,"blob":"` + strings.Repeat("x", 1<<20) + `"}` + "\n"
 	write := make(chan error, 1)
@@ -147,7 +180,7 @@ func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
 		if got != input {
 			t.Fatalf("echo size=%d want=%d", len(got), len(input))
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(bridgeWaitLimit):
 		t.Fatal("echo timeout")
 	}
 	if err := <-write; err != nil {
@@ -169,6 +202,7 @@ func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeNativeExitCleansEndpoint(t *testing.T) {
+	t.Parallel()
 	h := newBridgeHarness(t)
 	h.native(t)
 	bridgeEventually(t, "endpoint", func() bool { _, e := os.Stat(h.socket); return e == nil })
@@ -180,6 +214,7 @@ func TestCodexDesktopBridgeNativeExitCleansEndpoint(t *testing.T) {
 }
 
 func TestBridgeEndpointCreatedBetweenStatAndNativeExit(t *testing.T) {
+	t.Parallel()
 	socket := filepath.Join(bridgeTempDir(t), "native.sock")
 	parentDone := make(chan struct{})
 	var listener net.Listener
@@ -214,6 +249,7 @@ func TestBridgeEndpointCreatedBetweenStatAndNativeExit(t *testing.T) {
 }
 
 func TestBridgeEndpointAbsentAfterNativeExitStopsPolling(t *testing.T) {
+	t.Parallel()
 	parentDone := make(chan struct{})
 	close(parentDone)
 	calls := 0
@@ -227,6 +263,7 @@ func TestBridgeEndpointAbsentAfterNativeExitStopsPolling(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeAlreadyIsolatedProcess(t *testing.T) {
+	t.Parallel()
 	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_TEST_ALREADY_ISOLATED=1")
 	h.native(t)
 	h.input.Close()
@@ -235,9 +272,10 @@ func TestCodexDesktopBridgeAlreadyIsolatedProcess(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
+	t.Parallel()
 	h := newBridgeHarness(t)
 	h.native(t)
-	cli, native := buildBridgeBinary(t, false), buildBridgeBinary(t, true)
+	cli, native := bridgeBinaryPaths(t)
 	command := exec.Command(cli, "codex-desktop-bridge", "--codex", native, "--socket", h.socket, "--", "app-server")
 	output, err := command.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "another bridge already owns") {
@@ -246,7 +284,7 @@ func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
 	if _, err := h.input.Write([]byte("{}\n")); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.output.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+	if err := h.output.SetReadDeadline(time.Now().Add(bridgeWaitLimit)); err != nil {
 		t.Fatal(err)
 	}
 	line, err := bufio.NewReader(h.output).ReadString('\n')
@@ -259,6 +297,7 @@ func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeUnexpectedNativeExitKillsDescendants(t *testing.T) {
+	t.Parallel()
 	marker := filepath.Join(bridgeTempDir(t), "descendant.json")
 	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_DESCENDANT_FILE="+marker)
 	h.native(t)
@@ -285,6 +324,7 @@ func TestCodexDesktopBridgeUnexpectedNativeExitKillsDescendants(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
+	t.Parallel()
 	h := newBridgeHarness(t)
 	h.input.Close()
 	h.wait(t)
@@ -295,6 +335,7 @@ func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
+	t.Parallel()
 	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_NO_SOCKET=1")
 	h.native(t)
 	if err := h.wait(t); err == nil {
@@ -307,8 +348,10 @@ func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeBlockedStdoutShutdown(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"stdin-eof", "parent-exit"} {
 		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
 			h := newBridgeHarness(t, "SHUTTLE_BRIDGE_LARGE_REPLY=1")
 			h.native(t)
 			if _, err := h.input.Write([]byte("{\"id\":1}\n")); err != nil {
@@ -322,7 +365,7 @@ func TestCodexDesktopBridgeBlockedStdoutShutdown(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-			case <-time.After(4 * time.Second):
+			case <-time.After(bridgeWaitLimit):
 				t.Fatal("no output")
 			}
 			if mode == "stdin-eof" {
@@ -337,6 +380,7 @@ func TestCodexDesktopBridgeBlockedStdoutShutdown(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeRefusesPreexistingEndpoint(t *testing.T) {
+	t.Parallel()
 	dir := bridgeTempDir(t)
 	socket := filepath.Join(dir, "existing.sock")
 	ln, err := net.Listen("unix", socket)
@@ -345,7 +389,7 @@ func TestCodexDesktopBridgeRefusesPreexistingEndpoint(t *testing.T) {
 	}
 	defer ln.Close()
 	before, _ := os.Lstat(socket)
-	cli, native := buildBridgeBinary(t, false), buildBridgeBinary(t, true)
+	cli, native := bridgeBinaryPaths(t)
 	command := exec.Command(cli, "codex-desktop-bridge", "--codex", native, "--socket", socket, "--", "app-server")
 	out, err := command.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "pre-existing") {
@@ -358,13 +402,15 @@ func TestCodexDesktopBridgeRefusesPreexistingEndpoint(t *testing.T) {
 }
 
 func TestCodexDesktopBridgeExecFailureReapsRelay(t *testing.T) {
+	t.Parallel()
 	dir := bridgeTempDir(t)
 	native := filepath.Join(dir, "not-executable")
 	socket := filepath.Join(dir, "private", "app-server.sock")
 	if err := os.WriteFile(native, []byte("#!/bin/sh\nexit 0\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(buildBridgeBinary(t, false), "codex-desktop-bridge", "--codex", native, "--socket", socket, "--", "app-server")
+	cli, _ := bridgeBinaryPaths(t)
+	command := exec.Command(cli, "codex-desktop-bridge", "--codex", native, "--socket", socket, "--", "app-server")
 	out, err := command.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "exec native Codex") {
 		t.Fatalf("err=%v out=%s", err, out)
@@ -387,9 +433,10 @@ func TestCodexDesktopBridgeExecFailureReapsRelay(t *testing.T) {
 }
 
 func TestCodexDesktopBridgePassthroughPreservesPIDAndExitCode(t *testing.T) {
-	native := buildBridgeBinary(t, true)
+	t.Parallel()
+	cli, native := bridgeBinaryPaths(t)
 	marker := filepath.Join(t.TempDir(), "native.json")
-	command := exec.Command(buildBridgeBinary(t, false), "codex-desktop-bridge", "--codex", native, "--", "--version")
+	command := exec.Command(cli, "codex-desktop-bridge", "--codex", native, "--", "--version")
 	command.Env = append(os.Environ(), "SHUTTLE_BRIDGE_PASSTHROUGH=1", "SHUTTLE_BRIDGE_ENV_FILE="+marker)
 	err := command.Run()
 	var exitErr *exec.ExitError
@@ -410,6 +457,7 @@ func TestCodexDesktopBridgePassthroughPreservesPIDAndExitCode(t *testing.T) {
 }
 
 func TestClassifyCodexInvocation(t *testing.T) {
+	t.Parallel()
 	if mode, err := classifyCodexInvocation([]string{"--version"}); err != nil || mode != bridgePassthrough {
 		t.Fatalf("mode=%v err=%v", mode, err)
 	}
