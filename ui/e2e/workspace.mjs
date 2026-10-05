@@ -205,6 +205,26 @@ test('Hostile report keys cannot queue verdicts or open controls; trusted and po
   await poll(p, key => document.querySelector('.ws-selected')?.dataset.key !== key, key)
 })
 
+test('Report reference batches are size-capped and limited to four responses a second', async p => {
+  await open(p); await reportReady(p)
+  const inner = await reportDocument(p)
+  await p.waitForTimeout(1100)
+  await inner.evaluate(() => {
+    window.__referenceResponses = 0
+    window.addEventListener('message', event => { if (event.data?.type === 'references:resolved') window.__referenceResponses++ })
+    for (let i = 0; i < 20; i++) parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'references', payload: { candidates: ['brief.md'] } }, '*')
+  })
+  await p.waitForTimeout(100)
+  assert.equal(await inner.evaluate(() => window.__referenceResponses), 4)
+  await p.waitForTimeout(1100)
+  await inner.evaluate(() => {
+    window.__referenceResponses = 0
+    for (const candidates of [Array(501).fill('brief.md'), ['a'.repeat(257)]]) parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'references', payload: { candidates } }, '*')
+  })
+  await p.waitForTimeout(100)
+  assert.equal(await inner.evaluate(() => window.__referenceResponses), 0)
+})
+
 test('Channel references select from HTML, markdown, plain text and the fiber with coherent history', async p => {
   await open(p); await reportReady(p)
   const key = await selected(p).getAttribute('data-key')

@@ -479,8 +479,8 @@ function buildHtmlViewer(
         charge(message.payload.media === true)
         ready(frame, bridge)
       } else if (message.type === 'references' && embedded.bridge === bridge) {
-        const candidates = message.payload.candidates
-        if (!Array.isArray(candidates) || candidates.length > 4096 || candidates.some(candidate => typeof candidate !== 'string' || candidate.length > 4096)) return
+        // The frame bridge validates the bounded candidate batch before dispatch.
+        const candidates = message.payload.candidates as string[]
         const targets = options.resolveReferences?.(candidates) ?? []
         resolved = new Set(targets.map(target => target.candidate))
         bridge.command('references:resolved', { targets })
