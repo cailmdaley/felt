@@ -34,3 +34,12 @@ it('caches each document and ETag; tabs, frames and filename collision fallbacks
   expect(documentLabels(fallback.documents)).toEqual(['Note', 'one/result.txt', 'two/result.txt'])
   stop()
 })
+
+it('reads a title again when a stat validator stays put but the bytes change', () => {
+  const stat = 'W/"stat-1790000000-40-42"'
+  expect(cacheDocumentTitle('host:/stat.md', '/stat.md', '# First take', stat).title).toBe('First take')
+  expect(cacheDocumentTitle('host:/stat.md', '/stat.md', '# Second take', stat).title).toBe('Second take')
+  const digest = 'W/"sha256-' + 'c'.repeat(64) + '"'
+  expect(cacheDocumentTitle('host:/digest.md', '/digest.md', '# Kept', digest).title).toBe('Kept')
+  expect(cacheDocumentTitle('host:/digest.md', '/digest.md', '# Not reread', digest).title).toBe('Kept')
+})

@@ -205,7 +205,7 @@ const etagOf = (response: Response): string | undefined => response.headers.get(
  * digests do; its `stat-` validator (mtime to the second, size, inode) misses
  * a same-size rewrite within one second, so it never earns a 304.
  */
-const provesContent = (etag: string | undefined): etag is string => !!etag && !/^W\/"stat-/.test(etag)
+export const provesContent = (etag: string | undefined): etag is string => !!etag && !/^W\/"stat-/.test(etag)
 
 /** The version of a document a peek describes, for facts derived from it. */
 export function peekVersion(value: Peek): string {

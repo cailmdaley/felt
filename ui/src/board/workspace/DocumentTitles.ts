@@ -1,3 +1,4 @@
+import { provesContent } from '../documentResources.js'
 export interface DocumentTitle { title?: string; preview: string; etag?: string }
 const titles = new Map<string, DocumentTitle>()
 const versions = new Map<string, DocumentTitle>()
@@ -109,13 +110,17 @@ export function extractDocumentTitle(path: string, source: string | Uint8Array):
   return { preview: '' }
 }
 
-/** A source arrives from the thumbnail's own read; extraction is once per identity and ETag. */
+/**
+ * A source arrives from the thumbnail's own read; extraction is once per
+ * identity and content version: the digest ETag, else a hash of the source,
+ * since a stat validator can stay put while the bytes change.
+ */
 export function cacheDocumentTitle(key: string, path: string, source: string | Uint8Array, etag?: string): DocumentTitle {
   let hash = 2166136261
-  if (!etag) {
+  if (!provesContent(etag)) {
     for (let i = 0; i < source.length; i++) hash = Math.imul(hash ^ (typeof source === 'string' ? source.charCodeAt(i) : source[i]), 16777619)
   }
-  const version = JSON.stringify([key, etag ?? hash])
+  const version = JSON.stringify([key, provesContent(etag) ? etag : `${etag ?? ''}|${hash}`])
   const next = versions.get(version) ?? { ...extractDocumentTitle(path, source), etag }
   versions.set(version, next)
   if (versions.size > 512) versions.delete(versions.keys().next().value!)
