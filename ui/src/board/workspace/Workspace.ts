@@ -8,7 +8,8 @@ import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
-import { fileInfoUrl, renderMarkdown, showToast } from '../utils.js'
+import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
+import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
@@ -531,19 +532,15 @@ export class Workspace {
     if (state.metadataRead) return state.metadataRead
     const files = state.channel.documents.filter(d => d.kind !== 'fiber')
     let changed = false
-    const read = Promise.all(files.map(doc => inLane('quiet', async () => {
-      if (this.disposed) return
-      try {
-        const response = await fetch(fileInfoUrl(this.opts.shuttleBase, doc.path, doc.owner), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
-        if (!response.ok) return
-        const info = await response.json()
-        const time = typeof info.modified_at === 'number' ? info.modified_at * 1000 : typeof info.modified_at === 'string' ? Date.parse(info.modified_at) : NaN
-        const before = state.fileModifiedAt.get(doc.key)
-        if (info.exists && Number.isFinite(time)) state.fileModifiedAt.set(doc.key, new Date(time).toISOString())
-        else state.fileModifiedAt.delete(doc.key)
-        if (state.fileModifiedAt.get(doc.key) !== before) changed = true
-      } catch { /* An unreachable owner keeps its last known metadata. */ }
-    }, { rank: 1 }))).then(() => changed).finally(() => { state.metadataRead = undefined })
+    const read = Promise.all(files.map(async doc => {
+      const info = await head(fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
+      // An unreachable owner keeps its last known metadata.
+      if (!info || this.disposed) return
+      const before = state.fileModifiedAt.get(doc.key)
+      if (info.modifiedAt) state.fileModifiedAt.set(doc.key, info.modifiedAt)
+      else state.fileModifiedAt.delete(doc.key)
+      if (state.fileModifiedAt.get(doc.key) !== before) changed = true
+    })).then(() => changed).finally(() => { state.metadataRead = undefined })
     state.metadataRead = read
     return read
   }

@@ -771,6 +771,107 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = Jason.decode!(by_slug.resp_body)["fibers"]
   end
 
+  test "GET /api/v1/fibers/:id reads a polled ULID through its slug, and checks the answer",
+       %{store: store} do
+    polled = "01JZ0000000000000000000002"
+    other = "01JZ0000000000000000000003"
+    stale = "01JZ0000000000000000000004"
+
+    for {slug, uid} <- [{"tests/by-slug", polled}, {"tests/other", other}, {"tests/stale", stale}] do
+      write_fiber!(store, slug, """
+      ---
+      id: #{uid}
+      name: #{slug}
+      status: active
+      shuttle:
+        enabled: true
+        host: test-host
+      ---
+
+      Body of #{slug}.
+      """)
+    end
+
+    warm_poller!(store)
+    assert {_store, "tests/by-slug"} = Shuttle.FiberAddresses.lookup(polled)
+    log = install_logging_felt!(store)
+
+    conn = get(api_conn(), "/api/v1/fibers/#{polled}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^polled, "body" => "Body of tests/by-slug."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/by-slug -j\n"
+
+    # A stale slug answers with another fiber's UID; the read falls through to
+    # the UID itself rather than serving the wrong document.
+    Shuttle.FiberAddresses.put_polled(%{stale => {store, "tests/other"}})
+
+    File.write!(log, "")
+    conn = get(api_conn(), "/api/v1/fibers/#{stale}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^stale, "body" => "Body of tests/stale."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/other -j\nshow #{stale} -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id reads an unpolled ULID through the slug its first read found",
+       %{store: store} do
+    uid = "01JZ0000000000000000000005"
+
+    write_fiber!(store, "tests/unpolled", """
+    ---
+    id: #{uid}
+    name: Unpolled
+    status: open
+    ---
+
+    Unpolled body.
+    """)
+
+    log = install_logging_felt!(store)
+
+    # The second request is lowercase and still finds the learned address.
+    for requested <- [uid, String.downcase(uid)] do
+      conn = get(api_conn(), "/api/v1/fibers/#{requested}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "body" => "Unpolled body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow tests/unpolled -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id learns a symlinked fiber's traversal id, not its canonical slug",
+       %{store: store} do
+    uid = "01JZ0000000000000000000006"
+    project = Path.join(Path.dirname(store), "shapepipe")
+
+    write_fiber!(project, "review-ngmix", """
+    ---
+    id: #{uid}
+    name: Ngmix review
+    status: open
+    ---
+
+    Ngmix body.
+    """)
+
+    File.mkdir_p!(Path.join(store, ".felt"))
+    File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "shapepipe"]))
+    log = install_logging_felt!(store)
+
+    for _ <- 1..2 do
+      conn = get(api_conn(), "/api/v1/fibers/#{uid}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "slug" => "review-ngmix", "body" => "Ngmix body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow shapepipe/review-ngmix -j\n"
+  end
+
   test "GET /api/v1/fibers/:id?body=true includes the felt body alongside full metadata",
        %{store: store} do
     write_fiber!(store, "tests/single-body", """
@@ -1157,6 +1258,28 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
   # the (here empty) whole-store scan. Lets a controller test distinguish the
   # fast path from the scan fallback by RESULT alone, no timing. `$(pwd)` (not
   # `$PWD`, which `cd:` leaves stale) gives felt's per-call working store.
+  # A felt that records each invocation's arguments, then runs the real felt.
+  defp install_logging_felt!(store) do
+    real = System.find_executable("felt") || flunk("felt not on PATH")
+    bin_dir = Path.join(Path.dirname(store), "logging-bin")
+    log = Path.join(Path.dirname(store), "felt-calls.log")
+    File.mkdir_p!(bin_dir)
+    File.write!(log, "")
+    bin = Path.join(bin_dir, "felt")
+
+    File.write!(bin, """
+    #!/bin/sh
+    printf '%s\\n' "$*" >> '#{log}'
+    exec '#{real}' "$@"
+    """)
+
+    File.chmod!(bin, 0o755)
+    old_path = System.get_env("PATH")
+    System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
+    on_exit(fn -> restore_env("PATH", old_path) end)
+    log
+  end
+
   defp install_body_read_fake_felt!(store) do
     bin_dir = Path.join(Path.dirname(store), "fake-bin")
     File.mkdir_p!(bin_dir)
