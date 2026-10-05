@@ -13,15 +13,16 @@ const name = 'Calibrate the shear response'
 const tests = []
 const test = (name, run, viewport) => tests.push({ name, run, viewport })
 const selected = p => p.locator('.ws-page.ws-selected')
-const tab = (p, label) => p.getByRole('tab', { name: label, exact: true })
+const displayLabel = label => label === 'calibration-report' ? 'Calibration report' : label
+const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true })
 async function open(p, expected = 'calibration-report') {
   await p.locator('.kbn-card').filter({ hasText: name }).click()
   await tab(p, 'calibration-report').waitFor()
-  await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === label, expected)
+  await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(expected))
 }
 async function choose(p, label) {
   await tab(p, label).click()
-  await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === label, label)
+  await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
 const reportPage = p => p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/.felt/research/workspace/calibration-report/report.html"]')
@@ -88,6 +89,48 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   assert.ok(await iframe.evaluate(f => f.contentWindow === window.__reportWindow && f.contentWindow.__sentinel === 'kept' && f.contentDocument.querySelector('#report-identity').textContent === window.__reportIdentity))
 })
 
+test('Filmstrip previews share a safe budget, condense instantly, and retain selection through a fresh re-send', async p => {
+  await open(p); await reportReady(p)
+  const film = p.locator('.ws-tabs')
+  assert.ok(await film.evaluate(el => el.classList.contains('ws-strip-film')))
+  assert.ok((await film.boundingBox()).height <= 104)
+  await poll(p, () => document.querySelectorAll('.ws-tab-thumb iframe').length > 0)
+  for (const frame of await p.locator('.ws-tab-kind-html iframe').all()) {
+    assert.equal(await frame.getAttribute('sandbox'), '')
+    assert.equal(await frame.getAttribute('tabindex'), '-1')
+  }
+  assert.ok(await p.locator('.ws-thumbnail-body').count() <= 16)
+  assert.equal(await p.locator('.ws-tab-fresh').count(), 0, 'first visits are quiet')
+  await report(p).evaluate(f => { window.__filmReport = f.contentWindow })
+  await p.locator('.ws-selected .ws-expand-button').click()
+  assert.ok(!await film.evaluate(el => el.classList.contains('ws-strip-film')))
+  await p.locator('.ws-selected .ws-expand-button').click()
+  await p.evaluate(() => {
+    const original = window.fetch
+    window.fetch = async (...args) => {
+      const response = await original(...args)
+      if (String(args[0]).includes('/api/v1/sent-files?')) {
+        const payload = await response.json()
+        const receipt = payload.files.find(file => file.fullPath.endsWith('/brief.md'))
+        payload.files.push({ ...receipt, timestamp: Date.now() + 1000, sessionId: 'fresh-filmstrip-receipt' })
+        return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
+      }
+      return response
+    }
+  })
+  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await open(p)
+  await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'brief.md')
+  assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
+  assert.ok(await report(p).evaluate(f => f.contentWindow === window.__filmReport))
+  assert.equal(await film.locator('.ws-tab').nth(1).getAttribute('aria-label'), 'brief.md')
+  await choose(p, 'brief.md')
+  assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
+  await p.setViewportSize({ width: 390, height: 844 })
+  assert.ok(!await film.evaluate(el => el.classList.contains('ws-strip-film')))
+  assert.equal(await film.locator('.ws-tab-thumb:visible').count(), 0)
+})
+
 test('j/k step constitutions in the switcher order', async p => {
   await open(p)
   await p.locator('.ws-channel-title').click()
@@ -124,16 +167,16 @@ test('Fiber composer isolates keys; settings and history use mocked daemon', asy
 
 test('Body embed appears once in channel and its channel link opens report', async p => {
   await open(p); await choose(p, 'Constitution')
-  assert.equal(await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^calibration-report$/ }).count(), 1)
-  await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^calibration-report$/ }).click()
-  await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === 'calibration-report')
+  assert.equal(await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^Calibration report$/ }).count(), 1)
+  await selected(p).locator('.ws-prose-documents button').filter({ hasText: /^Calibration report$/ }).click()
+  await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === 'Calibration report')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
 })
 
 test('Body file link opens a linked document', async p => {
   await open(p); await choose(p, 'Constitution')
   await selected(p).getByRole('link', { name: 'mask table' }).click()
-  await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === 'mask.csv')
+  await poll(p, () => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === 'mask.csv')
   assert.equal(await tab(p, 'mask.csv').getAttribute('aria-selected'), 'true')
 })
 

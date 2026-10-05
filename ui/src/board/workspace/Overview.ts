@@ -4,9 +4,8 @@ import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
-import { chooseEvictions, chooseLoads, LOAD_POLICY } from '../views/shelfLoad.js'
-import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
-import { documentKind } from './documents.js'
+import { LOAD_POLICY } from '../views/shelfLoad.js'
+import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
 import { docKey, parseDocKey, type DocKey } from './documents.js'
 import './tokens.css'
 import './overview.css'
@@ -150,17 +149,6 @@ interface RibbonItem {
   thumb: Thumbnail
 }
 interface Group { el: HTMLElement; grid: HTMLElement; count: HTMLElement }
-interface Thumbnail {
-  key: string
-  el: HTMLElement
-  file?: Receipt
-  state: 'idle' | 'loading' | 'live' | 'failed'
-  near: boolean
-  lastVisible: number
-  body?: HTMLElement
-  timer?: ReturnType<typeof setTimeout>
-  generation: number
-}
 
 /** Persistent contact sheet; receipts are raw, owner-aware, and never path-deduped. */
 export class Overview {
@@ -377,7 +365,10 @@ export class Overview {
     this.el.hidden = !visible
     this.el.inert = !visible
     if (visible) { this.el.scrollTop = this.scroll; this.schedule() }
-    else if (this.raf !== undefined) { cancelAnimationFrame(this.raf); this.raf = undefined }
+    else {
+      if (this.raf !== undefined) { cancelAnimationFrame(this.raf); this.raf = undefined }
+      for (const thumb of this.thumbnails.values()) thumb.schedule()
+    }
   }
   show(): void { this.setVisible(true) }
   hide(): void { this.setVisible(false) }
@@ -416,7 +407,7 @@ export class Overview {
     this.observer?.disconnect()
     this.resizeObserver?.disconnect()
     if (this.raf !== undefined) cancelAnimationFrame(this.raf)
-    for (const thumb of this.thumbnails.values()) this.unmount(thumb)
+    for (const thumb of this.thumbnails.values()) thumb.dispose()
     this.thumbnails.clear()
     window.removeEventListener('resize', this.schedule)
     document.removeEventListener('keydown', this.keydown)
@@ -730,24 +721,15 @@ export class Overview {
   }
 
   private createThumbnail(key: string, file: Receipt | undefined, fallback: string): Thumbnail {
-    const el = node('div', 'ws-overview-thumb')
-    el.setAttribute('aria-hidden', 'true'); el.inert = true
-    const kind = file ? documentKind(file.fullPath) : 'fiber'
-    const glyph = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
-    const face = node('div', 'ws-overview-thumb-face', `${glyph} ${file?.basename ?? fallback}`)
-    el.append(face)
-    const thumb: Thumbnail = { key, el, file, state: 'idle', near: false, lastVisible: 0, generation: 0 }
-    this.thumbnails.set(key, thumb); this.observer?.observe(el)
+    const thumb: Thumbnail = new Thumbnail({ key, file, fallback, shuttleBase: this.opts.shuttleBase, className: 'ws-overview-thumb',
+      priority: () => this.visible && !this.disposed ? this.priority(thumb) : 0,
+      distance: () => this.distance(thumb),
+    })
+    this.thumbnails.set(key, thumb); this.observer?.observe(thumb.el)
     return thumb
   }
   private removeThumbnail(thumb: Thumbnail): void {
-    this.observer?.unobserve(thumb.el); this.unmount(thumb); thumb.el.remove(); this.thumbnails.delete(thumb.key)
-  }
-  private unmount(thumb: Thumbnail): void {
-    thumb.generation++
-    clearTimeout(thumb.timer); thumb.timer = undefined
-    disposeFileViewer(thumb.body ?? null)
-    thumb.body?.remove(); thumb.body = undefined; thumb.state = 'idle'
+    this.observer?.unobserve(thumb.el); thumb.dispose(); this.thumbnails.delete(thumb.key)
   }
   private readonly schedule = (): void => {
     if (this.disposed || !this.visible || this.raf !== undefined) return
@@ -767,66 +749,11 @@ export class Overview {
     if (this.onScreen(thumb)) return 2
     return (this.observer ? thumb.near : false) ? 1 : 0
   }
-  /**
-   * Mount the nearest drawable thumbnails within the budget. A candidate may
-   * displace only a live body of strictly lower priority, so a dense sheet
-   * whose ring holds more than the budget settles instead of trading bodies
-   * back and forth on every load.
-   */
   private pump(): void {
     if (this.disposed || !this.visible) return
-    this.scaleThumbnails()
-    const all = [...this.thumbnails.values()]
-    const drawable = (t: Thumbnail): boolean => !!t.file
-    const candidates = all.filter(t => t.state === 'idle' && drawable(t) && this.priority(t) > 0)
-    if (!candidates.length) return
-    const best = Math.max(...candidates.map(t => this.priority(t)))
-    const alive = all.filter(t => t.state === 'live' || t.state === 'loading')
-    if (alive.length >= LOAD_POLICY.maxLive) {
-      const victims = chooseEvictions(alive.map(t => ({ key: t.key, lastVisible: t.lastVisible, exempt: t.state === 'loading' || this.priority(t) >= best })),
-        { maxLive: LOAD_POLICY.maxLive - 1, evictTo: LOAD_POLICY.evictTo })
-      for (const key of victims) this.unmount(this.thumbnails.get(key)!)
-    }
-    const population = all.filter(t => t.state === 'live' || t.state === 'loading')
-    const slots = Math.min(LOAD_POLICY.maxConcurrent - population.filter(t => t.state === 'loading').length, LOAD_POLICY.maxLive - population.length)
-    const ranked = candidates.filter(t => this.priority(t) === best)
-    for (const key of chooseLoads(ranked.map(t => ({ key: t.key, distance: this.distance(t) })), slots)) this.mount(this.thumbnails.get(key)!)
+    pumpThumbnails()
   }
   private scaleThumbnails(): void {
-    for (const thumb of this.thumbnails.values()) {
-      if (!thumb.body) continue
-      const content = thumb.body.querySelector<HTMLElement>('iframe,pre')
-      if (!content) continue
-      const width = thumb.body.classList.contains('kbn-thumbnail-pdf') ? 900 : content.tagName === 'IFRAME' ? 1040 : 760
-      const scale = (thumb.el.clientWidth || 176) / width
-      content.style.width = `${width}px`
-      content.style.transform = `scale(${scale})`
-      if (content.tagName === 'IFRAME') content.style.height = `${Math.ceil((thumb.el.clientHeight || 116) / scale)}px`
-    }
-  }
-  private mount(thumb: Thumbnail): void {
-    const file = thumb.file
-    if (!file || thumb.state !== 'idle') return
-    const generation = ++thumb.generation
-    thumb.state = 'loading'
-    const current = (): boolean => !this.disposed && thumb.generation === generation
-    const finish = (ok: boolean): void => {
-      if (!current() || thumb.state !== 'loading') return
-      clearTimeout(thumb.timer); thumb.timer = undefined
-      thumb.state = ok ? 'live' : 'failed'
-      if (!ok) { disposeFileViewer(thumb.body ?? null); thumb.body?.remove(); thumb.body = undefined }
-      this.schedule()
-    }
-    thumb.timer = setTimeout(() => finish(false), file.owner === 'local' ? LOAD_POLICY.softTimeoutLocalMs : LOAD_POLICY.softTimeoutRemoteMs)
-    const kind = documentKind(file.fullPath)
-    thumb.body = buildFileViewer(this.opts.shuttleBase, file.fullPath, file.owner, undefined, undefined, {
-      kind: kind === 'fiber' ? undefined : kind,
-      thumbnail: true,
-      active: false,
-      onState: state => { this.scaleThumbnails(); finish(state.status === 'ready') },
-    })
-    thumb.body.classList.add('ws-overview-thumb-body')
-    thumb.el.append(thumb.body)
-    this.scaleThumbnails()
+    for (const thumb of this.thumbnails.values()) thumb.scale()
   }
 }

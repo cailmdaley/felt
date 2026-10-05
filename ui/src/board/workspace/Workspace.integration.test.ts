@@ -239,7 +239,7 @@ describe('workspace reader integration', () => {
     expect(band.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Note')!
+    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Note')!
     proseTab.click()
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
@@ -447,15 +447,15 @@ describe('workspace reader integration', () => {
     })
     workspace.open(orderedCards[0])
     await flush()
-    const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.textContent ?? '')
+    const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.getAttribute('aria-label') ?? '')
     const firstOrder = labels()
     expect(firstOrder).toEqual(['Note', 'shared', 'table.html'])
 
     workspace.open(orderedCards[1])
     await flush()
     expect(labels()).toEqual(['Note', 'shared', 'table.html'])
-    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.textContent).toBe('shared')
-    const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.textContent === 'Note')!
+    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('shared')
+    const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     const proseLabels = [...prose.querySelectorAll<HTMLButtonElement>('.ws-prose-documents button')].map(button => button.textContent ?? '')

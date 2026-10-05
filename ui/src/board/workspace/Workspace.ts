@@ -411,7 +411,8 @@ export class Workspace {
           const response = await fetch(fileInfoUrl(this.opts.shuttleBase, doc.path, doc.owner), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
           if (!response.ok) continue
           const info = await response.json()
-          if (info.exists && typeof info.modified_at === 'string' && Number.isFinite(Date.parse(info.modified_at))) state.fileModifiedAt.set(doc.key, info.modified_at)
+          const time = typeof info.modified_at === 'number' ? info.modified_at * 1000 : typeof info.modified_at === 'string' ? Date.parse(info.modified_at) : NaN
+          if (info.exists && Number.isFinite(time)) state.fileModifiedAt.set(doc.key, new Date(time).toISOString())
           else state.fileModifiedAt.delete(doc.key)
         } catch { /* An unreachable owner keeps its last known metadata. */ }
       }

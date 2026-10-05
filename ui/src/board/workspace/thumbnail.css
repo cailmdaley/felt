@@ -1,0 +1,4 @@
+.ws-thumbnail { position: relative; overflow: hidden; pointer-events: none; user-select: none; background: var(--ws-paper); }
+.ws-thumbnail-face { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ws-ink-faint); font: italic 15px/1.3 var(--ws-serif); padding: 12px; text-align: center; overflow: hidden; overflow-wrap: anywhere; }
+.ws-thumbnail-body { position: absolute; inset: 0; border: 0; transform-origin: 0 0; pointer-events: none; background: var(--ws-paper); }
+.ws-thumbnail pre { margin: 0; padding: 26px 30px; font: 14px/1.55 var(--ws-mono); color: var(--ws-ink-soft); white-space: pre-wrap; overflow-wrap: anywhere; }

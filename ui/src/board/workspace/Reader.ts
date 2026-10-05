@@ -97,7 +97,10 @@ export class Reader {
     this.opts = opts
     this.el.setAttribute('aria-label', 'Document reader')
     this.el.inert = true
-    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
+    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), {
+      shuttleBase: opts.shuttleBase,
+      onHeight: height => this.el.style.setProperty('--ws-strip-h', `${height}px`),
+    })
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
@@ -185,7 +188,8 @@ export class Reader {
     this.title.title = channel.name
     const pill = card ? this.opts.workerPill?.(card) : null
     this.conversation.replaceChildren(...(pill ? [pill] : []))
-    this.tabs.render(channel.labels, channel.documents.map(d => d.key))
+    this.tabs.setVisible(true)
+    this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
     this.renderSidebar()
@@ -210,6 +214,7 @@ export class Reader {
   hide(animate = false): void {
     this.cancelResize?.()
     this.active = false
+    this.tabs.setVisible(false)
     this.closeMenu()
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
@@ -265,6 +270,7 @@ export class Reader {
       frame.el.classList.toggle('ws-expanded', doc.key === this.selected && this.expanded)
       this.fillLabel(frame, ch.labels[i])
     })
+    this.tabs.setCompact(this.expanded)
     this.tabs.fresh(this.seen.observe(ch, this.selected ?? '', this.channelReady))
     this.tabs.mark(index, animate)
     this.position.textContent = `${index + 1} / ${ch.documents.length}`
