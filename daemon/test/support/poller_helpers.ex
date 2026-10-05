@@ -6,7 +6,7 @@ defmodule Shuttle.Test.PollerHelpers do
   `import Shuttle.Test.PollerHelpers` from a NON-async test module.
   """
 
-  import ExUnit.Callbacks, only: [start_supervised!: 1]
+  import ExUnit.Callbacks, only: [start_supervised!: 1, on_exit: 1]
 
   @doc """
   Minimal shuttle: block YAML for a oneshot fiber ready for dispatch.
@@ -47,6 +47,13 @@ defmodule Shuttle.Test.PollerHelpers do
   hands the lifecycle to ExUnit; `restart: :temporary` so a poller that stops
   itself mid-test (crash-recovery cases) is not auto-restarted. Returns
   `{:ok, pid}` so existing `{:ok, poller} = ...` call sites are unchanged.
+
+  The poller's worker watchers live under the app-wide
+  `Shuttle.WatcherSupervisor`, not under the poller, and the poller does not
+  trap exits, so stopping it leaves them heartbeating `runner` (a test's named
+  Agent) into later tests, where each heartbeat's `tmux has-session` and
+  process scan consumes that test's scripted answers. An `on_exit` stops every
+  watcher whose poller is this one.
   """
   def start_poller!(opts) do
     opts = Keyword.put_new_lazy(opts, :daemon_heartbeat_file, &test_heartbeat_file/0)
@@ -58,7 +65,24 @@ defmodule Shuttle.Test.PollerHelpers do
         restart: :temporary
       })
 
+    poller_refs = Enum.reject([pid, Keyword.get(opts, :name)], &is_nil/1)
+    on_exit(fn -> stop_watchers_of(poller_refs) end)
+
     {:ok, pid}
+  end
+
+  defp stop_watchers_of(poller_refs) do
+    for {_, watcher, _, _} <- DynamicSupervisor.which_children(Shuttle.WatcherSupervisor),
+        is_pid(watcher),
+        watcher_poller(watcher) in poller_refs do
+      DynamicSupervisor.terminate_child(Shuttle.WatcherSupervisor, watcher)
+    end
+  end
+
+  defp watcher_poller(watcher) do
+    :sys.get_state(watcher, 5_000).poller
+  catch
+    :exit, _ -> nil
   end
 
   @doc "The suite-wide heartbeat path test Pollers write when a test names none."
