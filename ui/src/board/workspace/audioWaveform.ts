@@ -10,15 +10,21 @@ export interface Waveform { peaks: number[]; duration: number }
 
 /**
  * A recording's duration, from the peek that names it when its header says,
- * else from one metadata read. Any peek already held will do: a listed
- * duration need not revalidate, and the playing page reads its own.
+ * else from one metadata read. A listed duration need not revalidate, so any
+ * peek already held will do, until the channel reports a new `revision` of
+ * the file (its modification time or receipts); then the peek is read afresh.
  */
-export async function loadDuration(src: string, signal: AbortSignal, priority: ResourcePriority = RESOURCE_PRIORITY.duration): Promise<number | null> {
-  const head = await peek(src, priority, { stale: true })
+export async function loadDuration(src: string, signal: AbortSignal, options: { revision?: string; priority?: ResourcePriority } = {}): Promise<number | null> {
+  const moved = options.revision !== undefined && revisions.has(src) && revisions.get(src) !== options.revision
+  if (options.revision !== undefined) revisions.set(src, options.revision)
+  while (revisions.size > 2000) revisions.delete(revisions.keys().next().value!)
+  const head = await peek(src, options.priority ?? RESOURCE_PRIORITY.duration, moved ? { fresh: true, signal } : { stale: true, signal })
   if (!head || signal.aborted) return null
   return fact(src, 'duration', peekVersion(head), async () =>
     durationFromHead(head.bytes, head.size) ?? queued(RESOURCE_PRIORITY.duration, () => readDuration(src), signal))
 }
+/** The revision each recording's duration was last asked under. */
+const revisions = new Map<string, string>()
 
 /** A read that stalls gives up its slot rather than holding the queue. */
 const DURATION_TIMEOUT_MS = 15000

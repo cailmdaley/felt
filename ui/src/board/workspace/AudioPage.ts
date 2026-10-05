@@ -136,7 +136,7 @@ export class AudioPage {
 
   updateDocuments(documents: WorkspaceDocument[]): void {
     const others = documents.filter(d => d.kind === 'audio' && d.key !== this.doc.key)
-    const signature = JSON.stringify(others.map(d => [d.key, d.provenance]))
+    const signature = JSON.stringify(others.map(d => [d.key, d.provenance, d.modifiedAt]))
     if (signature === this.signature) return
     this.signature = signature
     this.durations?.abort()
@@ -151,7 +151,7 @@ export class AudioPage {
       label.textContent = embed?.kind === 'embed' ? embed.title! : doc.name
       const duration = document.createElement('span'); duration.className = 'ws-audio-duration'; duration.textContent = '—'
       select.append(label, duration); item.append(select); this.list.append(item)
-      void loadDuration(fileBytesUrl(this.base, doc.path, doc.owner), durations.signal).then(seconds => {
+      void loadDuration(fileBytesUrl(this.base, doc.path, doc.owner), durations.signal, { revision: `${doc.modifiedAt ?? ''}|${JSON.stringify(doc.provenance)}` }).then(seconds => {
         if (seconds !== null && !durations.signal.aborted) duration.textContent = mediaTime(seconds)
       })
     }

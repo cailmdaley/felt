@@ -105,6 +105,30 @@ it('times a channel of songs from the peeks that name them, two at a time and wi
   for (const listening of pages) listening.dispose()
 })
 
+it('times a sibling again when its file changes', async () => {
+  const wav = new Uint8Array(44)
+  const view = new DataView(wav.buffer)
+  wav.set([...'RIFF'].map(c => c.charCodeAt(0)), 0); wav.set([...'WAVE'].map(c => c.charCodeAt(0)), 8)
+  wav.set([...'fmt '].map(c => c.charCodeAt(0)), 12); view.setUint32(16, 16, true); view.setUint32(28, 1000, true)
+  wav.set([...'data'].map(c => c.charCodeAt(0)), 36)
+  let seconds = 75
+  const fetcher = vi.fn(async (_src: string) => {
+    view.setUint32(40, seconds * 1000, true)
+    return new Response(wav.slice(), { status: 206, headers: { ETag: `W/"sha256-${seconds}"`, 'Content-Range': `bytes 0-43/${44 + seconds * 1000}` } })
+  })
+  vi.stubGlobal('fetch', fetcher)
+  const sibling: WorkspaceDocument = { ...doc, key: 'host-a:/take.wav', path: '/take.wav', name: 'take.wav', modifiedAt: '2026-10-05T10:00:00.000Z' }
+  const audio = document.createElement('audio'); document.body.append(audio)
+  page = new AudioPage(audio, doc, '', vi.fn())
+  const duration = (): string | null | undefined => page.el.querySelector('.ws-audio-duration')?.textContent
+  page.updateDocuments([doc, sibling])
+  await vi.waitFor(() => expect(duration()).toBe('1:15'))
+  seconds = 90
+  page.updateDocuments([doc, { ...sibling, modifiedAt: '2026-10-05T10:05:00.000Z' }])
+  await vi.waitFor(() => expect(duration()).toBe('1:30'))
+  expect(fetcher).toHaveBeenCalledTimes(2)
+})
+
 it('decodes its recording only once it is selected', async () => {
   const audio = document.createElement('audio')
   document.body.append(audio)
