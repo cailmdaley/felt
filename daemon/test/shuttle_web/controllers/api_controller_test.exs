@@ -16,7 +16,7 @@ defmodule ShuttleWeb.APIControllerTest do
   alias Shuttle.Test.FiberUid
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
 
-  alias Shuttle.Test.{Env, StubPostClient}
+  alias Shuttle.Test.{Env, FakeCli, StubPostClient}
 
   # ── Setup ──
 
@@ -585,38 +585,29 @@ defmodule ShuttleWeb.APIControllerTest do
       "closed"
     )
 
-    stub_dir =
+    argv_log =
       Path.join(
         System.tmp_dir!(),
-        "shuttle-transition-stub-#{System.unique_integer([:positive])}"
+        "shuttle-transition-argv-#{System.unique_integer([:positive])}"
       )
-
-    File.mkdir_p!(stub_dir)
-    argv_log = Path.join(stub_dir, "argv.log")
-    real_felt = Shuttle.Env.find_executable("felt") || "felt"
 
     # The transition pipeline shells felt to resolve the store/target and
     # shuttle for the write. Keep those process boundaries separate and capture
     # the complete Shuttle argv.
-    File.write!(Path.join(stub_dir, "felt"), """
-    #!/usr/bin/env bash
-    exec "#{real_felt}" "$@"
-    """)
+    FakeCli.install!(%{
+      "felt" => """
+      #!/usr/bin/env bash
+      exec "#{FakeCli.real!("felt")}" "$@"
+      """,
+      "shuttle" => """
+      #!/usr/bin/env bash
+      printf '%s\\n' "$@" >> "$SHUTTLE_ARGV_LOG"
+      exit 0
+      """
+    })
 
-    File.write!(Path.join(stub_dir, "shuttle"), """
-    #!/usr/bin/env bash
-    printf '%s\\n' "$@" >> "#{argv_log}"
-    exit 0
-    """)
-
-    File.chmod!(Path.join(stub_dir, "felt"), 0o755)
-    File.chmod!(Path.join(stub_dir, "shuttle"), 0o755)
-
-    Env.prepend_path(stub_dir)
-
-    on_exit(fn ->
-      File.rm_rf!(stub_dir)
-    end)
+    Env.put_env("SHUTTLE_ARGV_LOG", argv_log)
+    on_exit(fn -> File.rm(argv_log) end)
 
     conn =
       post(

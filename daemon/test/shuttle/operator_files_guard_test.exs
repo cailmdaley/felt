@@ -21,7 +21,7 @@ defmodule Shuttle.OperatorFilesGuardTest do
 
     parent = self()
     spawn(fn -> send(parent, {:paths, task.()}) end)
-    assert_receive {:paths, paths}
+    assert_receive {:paths, paths}, 5_000
 
     # Fixtures in this checkout are fine wherever the checkout lives.
     under_home =

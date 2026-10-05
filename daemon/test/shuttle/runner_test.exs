@@ -11,10 +11,11 @@ defmodule Shuttle.RunnerTest do
     Shuttle.Test.FakeCli.install!(%{
       "tmux" => """
       #!/usr/bin/env bash
-      printf '%s' "$TMUX" > #{env_path}
+      printf '%s' "$TMUX" > "$TMUX_ENV_FILE"
       """
     })
 
+    Shuttle.Test.Env.put_env("TMUX_ENV_FILE", env_path)
     Shuttle.Test.Env.put_env("TMUX", "/private/tmp/tmux-test/private,1,0")
     on_exit(fn -> File.rm(env_path) end)
 

@@ -235,16 +235,13 @@ defmodule Shuttle.TailnetPeersTest do
       assert {:error, "cli", "no executable tailscale CLI found"} = TailnetPeers.read_status()
     end
 
-    @tag :tmp_dir
-    test "an executable CLI is run", %{tmp_dir: tmp_dir} do
-      cli = Path.join(tmp_dir, "tailscale")
+    test "an executable CLI is run" do
+      cli =
+        Shuttle.Test.FakeCli.script!(
+          "tailscale",
+          "#!/bin/sh\necho 'warning: noise'\necho '{\"BackendState\":\"Stopped\"}'\n"
+        )
 
-      File.write!(
-        cli,
-        "#!/bin/sh\necho 'warning: noise'\necho '{\"BackendState\":\"Stopped\"}'\n"
-      )
-
-      File.chmod!(cli, 0o755)
       Shuttle.Test.Env.delete_app_env(:tailscale_socket)
       Shuttle.Test.Env.put_app_env(:tailscale_cli_locations, [cli])
 
