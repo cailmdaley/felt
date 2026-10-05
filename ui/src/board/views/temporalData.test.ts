@@ -15,9 +15,9 @@ import {
 
 /**
  * The temporal fetchers' WIRE FORM: every route speaks timezone-free instants,
- * so the daemon's zone cannot shift a browser's window. The suite runs twice,
- * under America/Los_Angeles and Europe/Paris, so the local-midnight resolution
- * is exercised in two zones on every run.
+ * so the daemon's zone cannot shift a browser's window. The local-midnight
+ * resolution runs in the host zone, which `npm test` pins to
+ * America/Los_Angeles; civilDay.properties.test.ts carries it across the rest.
  */
 
 /** Reply per URL substring; anything unmatched answers 404. */
