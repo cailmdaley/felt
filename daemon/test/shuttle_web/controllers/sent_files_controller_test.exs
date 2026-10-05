@@ -561,13 +561,14 @@ defmodule ShuttleWeb.SentFilesControllerTest do
   end
 
   # Point the reader's primary path (Shuttle owns the stream now) at a fixture for
-  # the controller's local branch. Clear the legacy Portolan vars and
-  # SHUTTLE_DATA_DIR so resolution is unambiguous and never leaks to the real
-  # ~/.shuttle/events.jsonl on the dev machine. Scoped to the test.
+  # the controller's local branch. Clear the legacy Portolan vars so resolution
+  # is unambiguous, and give the test its own (absent) session ledger: the
+  # suite-wide one is appended to by concurrent tests, and its change token is
+  # part of the ETag. Scoped to the test.
   defp with_events_file(path) do
-    keys = ~w(SHUTTLE_EVENTS_FILE SHUTTLE_DATA_DIR PORTOLAN_EVENTS_FILE PORTOLAN_DATA_DIR)
-    Enum.each(keys, &Shuttle.Test.Env.delete_env/1)
+    Enum.each(~w(PORTOLAN_EVENTS_FILE PORTOLAN_DATA_DIR), &Shuttle.Test.Env.delete_env/1)
     Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", path)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", path <> ".sessions")
   end
 
   defp with_session_ledger(path) do
