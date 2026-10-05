@@ -9,9 +9,32 @@ vi.mock('../FileViewerPanel.js', () => ({
   }),
   disposeFileViewer: vi.fn(),
 }))
+import { cacheDocumentTitle } from './DocumentTitles.js'
+import { docKey } from './documents.js'
 import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
 let thumbs: Thumbnail[] = []
 afterEach(() => { for (const thumb of thumbs) thumb.dispose(); thumbs = []; renderer.finishes = []; vi.unstubAllGlobals() })
+it.each(['report.html', 'index.html'])('omits the generic %s fallback title from its face', basename => {
+  const path = `/reports/${basename}`
+  const thumb = new Thumbnail({ key: path, shuttleBase: '', file: { fullPath: path, owner: 'host', basename }, fallback: '', priority: () => 0, distance: () => 0 })
+  thumbs.push(thumb)
+  expect(thumb.el.querySelector('.ws-thumbnail-title')?.textContent).toBe('')
+})
+it('retains a declared title when it loads for a generic filename', () => {
+  const path = '/reports/report.html'
+  const thumb = new Thumbnail({ key: path, shuttleBase: '', file: { fullPath: path, owner: 'host', basename: 'report.html' }, fallback: '', priority: () => 0, distance: () => 0 })
+  thumbs.push(thumb)
+  expect(thumb.el.querySelector('.ws-thumbnail-title')?.textContent).toBe('')
+  cacheDocumentTitle(docKey('host', path, 'host'), path, '<title>Declared report</title><p>Report preview</p>')
+  expect(thumb.el.querySelector('.ws-thumbnail-title')?.textContent).toBe('Declared report')
+})
+it('suppresses setProse titles on captioned fiber faces while retaining their preview', () => {
+  const thumb = new Thumbnail({ key: 'captioned-fiber', shuttleBase: '', fallback: 'unused', captioned: true, priority: () => 0, distance: () => 0 })
+  thumbs.push(thumb)
+  thumb.setProse('Fiber body preview', 'Fiber name')
+  expect(thumb.el.querySelector('.ws-thumbnail-title')?.textContent).toBe('')
+  expect(thumb.el.querySelector('.ws-thumbnail-preview')?.textContent).toBe('Fiber body preview')
+})
 it('shares four loading and sixteen live slots across overview and tab previews, without equal-priority churn', () => {
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
   let overviewVisible = true
