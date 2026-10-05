@@ -103,6 +103,29 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     refute Map.has_key?(hd(body["fibers"])["fiber"], "body")
   end
 
+  test "GET /api/v1/fibers?body=true still finds each fiber's report", %{store: store} do
+    # `felt ls --body` omits the native `report_path` that the metadata listing
+    # carries, so the body listing must find the report itself.
+    write_fiber!(store, "tests/reported", """
+    ---
+    name: Reported
+    status: open
+    ---
+
+    Body.
+    """)
+
+    File.write!(Path.join([store, ".felt", "tests", "reported", "report.html"]), "<p>r</p>\n")
+    report = real_report_path(store, "tests/reported")
+
+    conn = get(api_conn(), "/api/v1/fibers?body=true")
+
+    assert conn.status == 200
+
+    assert [%{"report_path" => ^report, "fiber" => %{"body" => "Body."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+  end
+
   test "GET /api/v1/fibers?body=true includes felt bodies", %{store: store} do
     write_fiber!(store, "tests/body", """
     ---

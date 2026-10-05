@@ -163,8 +163,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
   # Identical concurrent reads share one lookup: a board that re-requests a
   # fiber while the first request is still resolving costs one felt run. Only
-  # this read path coalesces; daemon-internal reads that follow a write run
-  # their own lookup.
+  # this read path coalesces whole answers. Daemon-internal reads that follow a
+  # write run their own lookup: a miss may share a store listing in flight, but
+  # the answer always comes from a fresh `show`.
   defp show_local(conn, id, with_body?, routed?) do
     case Shuttle.SingleFlight.run({:fiber_get, id, with_body?}, fn ->
            Shuttle.FiberDocuments.get(id, with_body: with_body?)

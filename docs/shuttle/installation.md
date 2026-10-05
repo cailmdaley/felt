@@ -152,8 +152,8 @@ running. Under its root sit `bin/`, `erts-*/`, `lib/`, `releases/` and
 launchd plist and systemd unit templates. The supervisor invokes the installed
 Go `shuttle` CLI with the release path, and `shuttle daemon install` renders
 the same templates in a checkout or fetched install. Both templates raise the
-daemon's open-file limit to 8192 (`NumberOfFiles` for launchd, `LimitNOFILE`
-for systemd). launchd's default soft limit of 256 is fewer descriptors than a
+daemon's open-file limit to 8192 (the soft `NumberOfFiles` for launchd, leaving
+the hard limit at its default; `LimitNOFILE` for systemd). launchd's default soft limit of 256 is fewer descriptors than a
 busy board's sockets and `felt` pipes can need.
 
 What the tarball leaves behind is the repo's *development* surface: the `make`

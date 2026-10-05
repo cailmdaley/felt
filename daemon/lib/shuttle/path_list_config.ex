@@ -68,7 +68,9 @@ defmodule Shuttle.PathListConfig do
     end
   end
 
-  defp read_registered(spec) do
+  @doc "The persisted list, `{:error, reason}` when the file exists but cannot be read."
+  @spec read_registered(spec()) :: {:ok, path_list()} | {:error, File.posix()}
+  def read_registered(spec) do
     key = spec.json_key
 
     case File.read(config_path(spec)) do

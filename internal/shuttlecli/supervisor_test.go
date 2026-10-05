@@ -192,11 +192,14 @@ func TestSupervisorTemplatesSetFileDescriptorHeadroom(t *testing.T) {
 			}
 			if tc.osName == "Darwin" {
 				flat := strings.Join(strings.Fields(rendered), " ")
-				for _, limit := range []string{"SoftResourceLimits", "HardResourceLimits"} {
-					want := "<key>" + limit + "</key> <dict> <key>NumberOfFiles</key> <integer>8192</integer> </dict>"
-					if count := strings.Count(flat, "<key>"+limit+"</key>"); count != 1 || strings.Count(flat, want) != 1 {
-						t.Errorf("%s NumberOfFiles setting is not exactly one 8192 limit", limit)
-					}
+				want := "<key>SoftResourceLimits</key> <dict> <key>NumberOfFiles</key> <integer>8192</integer> </dict>"
+				if count := strings.Count(flat, "<key>SoftResourceLimits</key>"); count != 1 || strings.Count(flat, want) != 1 {
+					t.Errorf("SoftResourceLimits NumberOfFiles setting is not exactly one 8192 limit")
+				}
+				// The hard limit stays launchd's default, so the daemon's children
+				// (a tmux server and its workers) keep their headroom.
+				if strings.Contains(flat, "HardResourceLimits") {
+					t.Errorf("plist caps HardResourceLimits; the daemon's children inherit that cap")
 				}
 			} else {
 				count := 0
@@ -629,8 +632,6 @@ func supervisorTemplateFixtures() map[string]string {
 <string>__CODEX_HOME__</string>
 </dict>
 <key>SoftResourceLimits</key>
-<dict><key>NumberOfFiles</key><integer>8192</integer></dict>
-<key>HardResourceLimits</key>
 <dict><key>NumberOfFiles</key><integer>8192</integer></dict>
 </dict></plist>
 `,

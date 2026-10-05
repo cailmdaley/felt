@@ -307,8 +307,10 @@ defmodule Shuttle.FiberDocuments do
 
   defp list_store(store, with_body?, mode, cli \\ "felt") do
     with {:ok, rows} <- ls_rows(store, cli, with_body?) do
-      # The listing carries felt's native `report_path`, so no row is stat'ed.
-      {:ok, rows |> filter_rows(mode) |> Enum.flat_map(&entry_for(store, &1, :field))}
+      # A metadata listing carries felt's native `report_path`, so its rows are
+      # never stat'ed; `ls --body` omits that field, so a body listing stats.
+      report_mode = if with_body?, do: :stat, else: :field
+      {:ok, rows |> filter_rows(mode) |> Enum.flat_map(&entry_for(store, &1, report_mode))}
     end
   end
 
