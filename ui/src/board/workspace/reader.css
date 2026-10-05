@@ -23,7 +23,7 @@
 .ws-reader.ws-dormant .ws-veil, .ws-reader.ws-dormant .ws-navbar, .ws-reader.ws-dormant .ws-stage-row,
 .ws-reader.ws-dormant .ws-thumbbar, .ws-reader.ws-dormant .ws-stage { transition: none; }
 .ws-reader.ws-arriving .ws-stage, .ws-reader.ws-departing .ws-stage { transform: var(--ws-settle); }
-.ws-reader button { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; }
+:where(.ws-reader button) { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; }
 .ws-reader button:focus, .ws-reader a:focus { outline: none; }
 .ws-reader button:not(.ws-channel-row):focus, .ws-reader a:focus { box-shadow: none; }
 .ws-reader:not(.ws-keyboard) :is(button,a,input,textarea,select):focus-visible { outline: none; }
@@ -188,7 +188,6 @@
 .ws-sidebar .ws-constitution-card .kbn-card-name { font: 500 var(--ws-prose-size)/1.2 var(--ws-serif); }
 .ws-sidebar .ws-constitution-card .kbn-card-outcome { -webkit-line-clamp: var(--ws-sidebar-outcome-lines); font: var(--ws-label-size)/1.35 var(--ws-serif); pointer-events: none; }
 .ws-sidebar .ws-constitution-card .kbn-card-meta { justify-content: space-between; gap: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); }
-.ws-sidebar .ws-constitution-card .kbn-card-worker { font: var(--ws-small-size)/1.3 var(--ws-mono); }
 .ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; }
 .ws-sidebar .ws-channel-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-paper); border-color: var(--ws-ink-faint); transform: translateY(var(--ws-sidebar-lift)); }
