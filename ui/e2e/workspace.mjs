@@ -144,6 +144,48 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
 })
 
+for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals move only their tab and folio (${reducedMotion})`, async p => {
+  await open(p); await reportReady(p)
+  await report(p).evaluate(f => { window.__arrivalReport = f.contentWindow })
+  await p.evaluate(() => {
+    window.__receiptAnimations = []
+    const animate = Element.prototype.animate
+    Element.prototype.animate = function(frames, options) {
+      if (this.matches('.ws-tab,.ws-overview-folio')) window.__receiptAnimations.push({ tab: this.matches('.ws-tab'), frames, options })
+      return animate.call(this, frames, options)
+    }
+    const fetch = window.fetch
+    const delivery = Date.now() + 1000
+    window.fetch = async (...args) => {
+      const response = await fetch(...args)
+      if (!String(args[0]).includes('/api/v1/sent-files')) return response
+      const payload = await response.json()
+      const receipt = payload.files.find(file => file.fullPath.endsWith('/brief.md'))
+      if (receipt) payload.files.push({ ...receipt, timestamp: delivery, sessionId: 'arrival-receipt' })
+      return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
+    }
+  })
+  await p.clock.fastForward(15001)
+  await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
+  assert.equal(await p.locator('.ws-tabs .ws-tab').nth(1).getAttribute('aria-label'), 'Field note')
+  assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
+  assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
+  const tabs = await p.evaluate(() => window.__receiptAnimations.filter(a => a.tab))
+  assert.equal(tabs.length, reducedMotion === 'reduce' ? 0 : 1)
+  if (tabs.length) { assert.equal(tabs[0].options.duration, 280); assert.equal(tabs[0].options.easing, 'ease') }
+  await p.locator('.ws-return').click()
+  await p.locator('[data-view="shelf"]').click()
+  await poll(p, () => document.querySelector('.ws-overview-ribbon [title*="brief.md"]'))
+  if (reducedMotion !== 'reduce') await poll(p, () => window.__receiptAnimations.some(a => !a.tab))
+  const folios = await p.evaluate(() => window.__receiptAnimations.filter(a => !a.tab))
+  assert.equal(folios.length, reducedMotion === 'reduce' ? 0 : 1)
+  if (folios.length) {
+    assert.equal(folios[0].options.duration, 400)
+    assert.equal(folios[0].frames[1].transform, 'translateY(-4px)')
+    assert.notEqual(folios[0].frames[1].boxShadow, 'none')
+  }
+}, undefined, 'false', reducedMotion)
+
 test('j/k step constitutions in Board folio order', async p => {
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
@@ -665,7 +707,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await poll(p, () => document.querySelector('.ws-worker-control')?.textContent.includes('12 m'))
     const dot = p.locator('.ws-worker-pill .ws-worker-dot')
-    assert.equal(await dot.evaluate(e => getComputedStyle(e).animationName), 'none', 'reduced motion suppresses breathing')
+    assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('.ws-worker-pill .ws-worker-dot')).animationName), 'none', 'reduced motion suppresses breathing')
     assert.ok(await p.locator('.ws-worker-pill .ws-turn-active').count())
     await shot('aloft')
     await p.evaluate(async () => {
@@ -688,8 +730,8 @@ test('Only the owner-reported working phase breathes, on a 2.4 s opacity cycle',
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   const dot = p.locator('.ws-worker-pill .ws-worker-dot')
   await dot.waitFor()
-  const timing = await dot.evaluate(e => {
-    const css = getComputedStyle(e)
+  const timing = await p.evaluate(() => {
+    const css = getComputedStyle(document.querySelector('.ws-worker-pill .ws-worker-dot'))
     return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction }
   })
   assert.deepEqual(timing, { name: 'ws-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
@@ -779,7 +821,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    assert.match((await navbar.innerText()).trim(), /^aloft\s*12 m$/i, 'navbar names state and elapsed time, not agent')
+    assert.match((await navbar.textContent()).trim(), /^aloft\s*12 m$/i, 'navbar names state and elapsed time, not agent; phone presents the dot')
     await choose(p, 'Constitution')
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')

@@ -17,6 +17,7 @@ import { overviewHostMarks } from './Overview.js'
 import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
+import { ReceiptArrivals } from './receiptMotion.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -73,6 +74,7 @@ export class Reader {
   private readonly opts: ReaderOptions
   private readonly stopTitles: () => void
   private readonly seen = new DocumentSeen()
+  private readonly receipts = new ReceiptArrivals()
   private channelReady = false
   private readonly tabs: TabStrip
   private readonly navbar: HTMLElement
@@ -207,6 +209,7 @@ export class Reader {
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
+    const arrivals = this.receipts.observe(channel, ready)
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
     this.channel = channel
@@ -224,6 +227,7 @@ export class Reader {
     this.paintWorker()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
+    if (!switching) this.tabs.arrive(arrivals)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
     this.renderSidebar()
@@ -298,8 +302,12 @@ export class Reader {
     const card = this.currentCard
     const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview' && this.document?.kind !== 'fiber'
     const control = card ? review ? this.opts.verdictPlate?.(card) : workerPlate(card, this.opts.workerPill?.(card) ?? null) : null
+    const focused = this.conversation.contains(document.activeElement)
+      ? document.activeElement?.matches('.kbn-ctl-temper') ? '.kbn-ctl-temper'
+        : document.activeElement?.matches('.kbn-ctl-discard') ? '.kbn-ctl-discard' : '.kbn-card-worker' : null
     this.conversation.classList.toggle('ws-worker-review', review)
     this.conversation.replaceChildren(...(control ? [control] : []))
+    if (focused) this.conversation.querySelector<HTMLElement>(focused)?.focus({ preventScroll: true })
   }
   private paint(animate: boolean): void {
     this.paintWorker()
