@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access } from 'node:fs/promises'
+import { access, mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
@@ -24,7 +24,8 @@ async function choose(p, label) {
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.textContent === label, label)
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
-const report = p => p.locator('.ws-page').filter({ has: p.locator('.ws-label-title', { hasText: 'calibration-report' }) }).locator('iframe')
+const reportPage = p => p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/.felt/research/workspace/calibration-report/report.html"]')
+const report = p => reportPage(p).locator('iframe')
 async function reportReady(p) {
   await poll(p, () => [...document.querySelectorAll('.ws-page iframe')].some(f => f.contentDocument?.querySelector('#report-sentinel')))
   return report(p)
@@ -64,7 +65,7 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   assert.ok(await p.locator('.ws-page.ws-expanded').count())
   await p.locator('.ws-page.ws-expanded .ws-labelbar').dblclick()
   assert.equal(await p.locator('.ws-page.ws-expanded').count(), 0)
-  const edge = p.locator('.ws-page').filter({ has: p.locator('.ws-label-title', { hasText: 'calibration-report' }) }).locator('.ws-edge-right')
+  const edge = reportPage(p).locator('.ws-edge-right')
   const box = await edge.boundingBox()
   const width = await iframe.evaluate(f => f.closest('.ws-page').getBoundingClientRect().width)
   await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -274,6 +275,116 @@ test('Phone overview single column, reader tabs, footer stepping and Back', asyn
   assert.ok(await p.getByRole('searchbox', { name: 'Find work or files' }).isVisible())
 }, { width: 390, height: 844 })
 
+// Say-it-once checks are scoped to the selected page and its chrome. Tabs,
+// the constitution switcher/title and the in-constitution document list repeat
+// names intentionally: they select/navigate. The navbar and control-band pills
+// are two conversation actions, not two passive worker summaries. Expanded
+// settings may repeat values in editable controls; the folded summary is their
+// single passive home. Parked/receded pages and the inert Desk aren't a second
+// readable screen, so global text counts would enforce the wrong contract.
+const inventory = []
+const shots = process.env.WORKSPACE_SHOTS || '/tmp/workspace-say-once'
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+  test(`Say it once: ${device} fiber, media, PDF and unsupported metadata`, async p => {
+    await open(p); await choose(p, 'Constitution')
+    const header = selected(p).locator('.ws-prose-header')
+    assert.equal((await header.innerText()).trim().toLowerCase(), 'closed', 'fiber header carries status alone')
+    assert.equal(await header.locator(':scope > *').count(), 1)
+    const settings = selected(p).locator('.kbn-detail-controls-toggle')
+    assert.equal(await settings.getAttribute('aria-expanded'), 'false')
+    assert.match(await settings.innerText(), /claude-opus/)
+    assert.match(await settings.innerText(), /high/)
+    assert.match(await settings.innerText(), /umber-workstation/)
+    assert.match(await settings.innerText(), /\/fixture-store\/workspace/)
+    assert.equal(await selected(p).locator('.kbn-ctl-agent').count(), 1)
+    assert.equal(await selected(p).locator('.kbn-ctl-effort').count(), 1)
+    assert.equal(await selected(p).locator('.kbn-ctl-place').count(), 1)
+    assert.equal(await selected(p).locator('.ws-agent,.ws-prose-agent,.ws-prose-host,.ws-dock-status').count(), 0)
+    const passive = await selected(p).evaluate(page => {
+      const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT)
+      const text = []
+      while (walker.nextNode()) {
+        const parent = walker.currentNode.parentElement
+        if (parent.checkVisibility({ visibilityProperty: true }) && !parent.closest('.kbn-detail-controls,.kbn-ctl-history')) text.push(walker.currentNode.textContent)
+      }
+      return text.join(' ')
+    })
+    assert.doesNotMatch(passive, /claude-opus|\bhigh\b|umber-workstation|\/fixture-store\/workspace/, 'launch metadata has no passive home outside settings')
+    const worker = selected(p).locator('.ws-dock-worker')
+    const pillCount = await worker.locator('.kbn-card-worker').count()
+    assert.ok(pillCount <= 1, 'band has at most one shared conversation action')
+    assert.equal(await worker.locator(':scope > *').count(), pillCount, 'no passive worker-line duplicate when there is no worker')
+    assert.doesNotMatch(await worker.innerText(), /claude-opus|umber-workstation|fixture-store/)
+    const navbar = p.locator('.ws-worker-pill')
+    assert.doesNotMatch(await navbar.innerText(), /claude-opus|umber-workstation|fixture-store/)
+    assert.match(await selected(p).locator('.ws-provenance').innerText(), /changed 47m ago/i, 'fiber time comes from modified_at, not updated_at or receipts')
+    assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /fiber page|umber-workstation|claude-opus/)
+    await capture('fiber')
+    // Expanded editable values are an action exception, not passive duplicates.
+    await settings.click()
+    assert.ok(await selected(p).getByRole('combobox', { name: 'Agent', exact: true }).isVisible())
+    await settings.click()
+    for (const [state, label] of [['media', 'tone.mp3'], ['pdf', 'response.pdf'], ['unsupported', 'archive.zip']]) {
+      await choose(p, label)
+      if (state === 'media') await poll(p, () => document.querySelector('.ws-selected audio')?.readyState >= 1)
+      if (state === 'pdf') await selected(p).locator('iframe').waitFor()
+      if (state === 'unsupported') await selected(p).getByRole('link', { name: 'Download', exact: true }).waitFor()
+      await poll(p, () => {
+        const viewer = document.querySelector('.ws-selected .ws-document-viewer')
+        return viewer && getComputedStyle(viewer).opacity === '1'
+      })
+      assert.equal(await selected(p).locator('.ws-label-title').innerText(), label)
+      const provenance = await selected(p).locator('.ws-provenance').innerText()
+      assert.match(provenance, /sent 2m ago/)
+      assert.doesNotMatch(provenance, /claude-opus|umber-workstation/)
+      assert.equal(await selected(p).locator('.ws-content .kbn-media-title,.ws-content .kbn-media-provenance,.ws-content h1,.ws-content h3').count(), 0, 'document title/provenance belongs only in the label bar')
+      assert.doesNotMatch(await selected(p).locator('.ws-content').innerText(), /sent \d|receipts|claude-opus|umber-workstation|tone\.mp3|response\.pdf|archive\.zip/)
+      await capture(state)
+    }
+    await choose(p, 'remote-summary.pdf')
+    assert.match(await selected(p).locator('.ws-provenance').innerText(), /basalt-login-02/, 'foreign document owner remains in label')
+    assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
+    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await p.locator('.kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    assert.match((await navbar.innerText()).trim(), /^aloft$/i, 'navbar names state, not agent')
+    await choose(p, 'Constitution')
+    const remoteWorker = selected(p).locator('.ws-dock-worker')
+    assert.match((await remoteWorker.innerText()).trim(), /^aloft$/i)
+    assert.equal(await remoteWorker.locator('.kbn-card-worker').count(), 1)
+    const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
+    assert.equal(await cadence.count(), 1)
+    assert.ok((await cadence.innerText()).trim(), 'standing cadence lives in the settings line')
+    const outsideSettings = await selected(p).evaluate(page => {
+      const copy = page.cloneNode(true)
+      copy.querySelector('.kbn-detail-controls')?.remove()
+      return copy.textContent
+    })
+    assert.ok(!outsideSettings.includes(await cadence.innerText()), 'cadence is not repeated outside its editable settings')
+
+    async function capture(state) {
+      await mkdir(shots, { recursive: true })
+      const facts = await p.evaluate(() => {
+        const page = document.querySelector('.ws-page.ws-selected')
+        const texts = selector => [...document.querySelectorAll(selector)].map(e => e.textContent.trim())
+        return {
+          header: texts('.ws-selected .ws-prose-header'),
+          band: texts('.ws-selected .ws-dock-worker'),
+          settings: texts('.ws-selected .kbn-detail-controls-toggle'),
+          navbar: texts('.ws-worker-pill'),
+          title: texts('.ws-selected .ws-label-title'),
+          provenance: texts('.ws-selected .ws-provenance'),
+          inPageTitles: page.querySelectorAll('.ws-content h1,.ws-content h3,.ws-content .kbn-media-title').length,
+          inPageProvenance: page.querySelectorAll('.ws-content .kbn-media-provenance').length,
+        }
+      })
+      const screenshot = resolve(shots, `${device}-${state}.png`)
+      await p.screenshot({ path: screenshot })
+      inventory.push({ device, state, ...facts, screenshot })
+      console.log(`INVENTORY ${JSON.stringify(inventory.at(-1))}`)
+    }
+  }, viewport)
+}
+
 const started = performance.now()
 let passed = 0
 try {
@@ -299,5 +410,7 @@ try {
     else { passed++; console.log(`PASS ${name}`) }
   }
 } finally { await browser.close() }
+await mkdir(shots, { recursive: true })
+await writeFile(resolve(shots, 'inventory.json'), JSON.stringify(inventory, null, 2))
 console.log(`${passed} passed, ${tests.length - passed} failed; ${((performance.now() - started) / 1000).toFixed(1)}s`)
 if (passed !== tests.length) process.exitCode = 1

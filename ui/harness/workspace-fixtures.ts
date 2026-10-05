@@ -171,11 +171,15 @@ export function workspaceExample(now: number): WorkspaceExample {
         tags: ['workspace', 'research'],
         created_at: iso(-fiber.age * day),
         updated_at: iso(-minute),
+        // Distinct from frontmatter stamps and receipt times: real file mtime.
+        modified_at: iso(-47 * minute),
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
         shuttle: {
-          kind: 'oneshot',
+          kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
+          schedule: fiber.id === 'pipeline/spin/remote-review' ? { expr: '0 9 * * *', tz: 'UTC' } : undefined,
           host: fiber.host,
           agent: 'claude-opus',
+          effort: 'high',
           project_dir: project,
         },
       },
