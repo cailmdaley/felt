@@ -151,7 +151,7 @@ export class AudioPage {
       label.textContent = embed?.kind === 'embed' ? embed.title! : doc.name
       const duration = document.createElement('span'); duration.className = 'ws-audio-duration'; duration.textContent = '—'
       select.append(label, duration); item.append(select); this.list.append(item)
-      void loadDuration(fileBytesUrl(this.base, doc.path, doc.owner), JSON.stringify(doc.provenance), durations.signal).then(seconds => {
+      void loadDuration(fileBytesUrl(this.base, doc.path, doc.owner), durations.signal).then(seconds => {
         if (seconds !== null && !durations.signal.aborted) duration.textContent = mediaTime(seconds)
       })
     }

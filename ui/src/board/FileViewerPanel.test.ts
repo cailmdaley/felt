@@ -2,8 +2,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl } from './FileViewerPanel.js'
 import { envelope } from './workspace/DocumentBridge.js'
+import { resetDocumentResources } from './documentResources.js'
 const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
-afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals() })
+afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals(); resetDocumentResources() })
 
 const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), recover: null as null | (() => void), stop: vi.fn() }))
 vi.mock('./LiveFileRefresh.js', () => ({ watchLiveFile: vi.fn((_url, content, error, options) => {
@@ -157,25 +158,26 @@ describe('workspace file viewer hooks', () => {
     expect(viewer.textContent).toContain('two')
   })
 
-  it('waits for both native frame load and a successful HEAD before reporting ready', async () => {
+  it('waits for both native frame load and the owner confirming the file before reporting ready', async () => {
     let settle!: (value: Response) => void
-    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { settle = resolve })))
+    const fetcher = vi.fn((_src: string) => new Promise<Response>((resolve) => { settle = resolve }))
+    vi.stubGlobal('fetch', fetcher)
     const onState = vi.fn()
     const viewer = buildFileViewer('', '/report.pdf', 'host-a', undefined, undefined, { onState })
     viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
     expect(onState).not.toHaveBeenCalled()
-    settle(new Response('', { status: 200 }))
-    await Promise.resolve()
-    expect(onState).toHaveBeenCalledWith({ status: 'ready' })
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/file-info?path=%2Freport.pdf&origin=host-a')
+    settle(new Response(JSON.stringify({ exists: true, size: 598, modified_at: 1 })))
+    await vi.waitFor(() => expect(onState).toHaveBeenCalledWith({ status: 'ready' }))
   })
 
   it('reports missing native documents even when an HTTP error page loads', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: false }))))
     const onState = vi.fn()
-    const viewer = buildFileViewer('', '/report.pdf', 'host-a', undefined, undefined, { onState })
-    await Promise.resolve()
+    const viewer = buildFileViewer('', '/missing.pdf', 'host-a', undefined, undefined, { onState })
     viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
-    expect(onState).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', hasContent: false }))
+    await vi.waitFor(() => expect(onState).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', hasContent: false })))
+    expect(viewer.textContent).toContain('404 Not Found')
     expect(onState).not.toHaveBeenCalledWith({ status: 'ready' })
   })
 })

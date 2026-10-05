@@ -4,6 +4,7 @@ import { buildFileViewer, disposeFileViewer, suspendFileViewer, resumeFileViewer
 import { DocumentHost } from './DocumentHost.js'
 import { envelope } from './DocumentBridge.js'
 import type { WorkspaceDocument } from './documents.js'
+import { resetDocumentResources } from '../documentResources.js'
 
 vi.mock('../LiveFileRefresh.js', () => ({
   liveFileWatched: () => false,
@@ -39,7 +40,7 @@ beforeEach(() => {
 afterEach(() => {
   host?.dispose(); host = undefined
   for (const viewer of viewers.splice(0)) disposeFileViewer(viewer)
-  vi.restoreAllMocks(); vi.unstubAllGlobals()
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); resetDocumentResources()
 })
 const viewer = (path: string, options = {}) => {
   const el = buildFileViewer('', path, 'host-a', undefined, undefined, options)
@@ -158,12 +159,19 @@ describe('native media documents', () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/file-info?'), expect.anything())
   })
 
-  it('uses inert audio duration, video first frame and native PDF page-one thumbnails', () => {
-    const audio = viewer('/song.mp3', { thumbnail: true, onState: vi.fn() })
-    const media = audio.querySelector('audio')!
-    Object.defineProperty(media, 'duration', { value: 61 })
-    media.dispatchEvent(new Event('loadedmetadata'))
-    expect(audio.textContent).toContain('1:01'); expect(media.controls).toBe(false)
+  it('times an audio thumbnail from its peek, with a video first frame and native PDF page-one thumbnails', async () => {
+    // A WAV head: 1000 bytes a second over a 61 000-byte data chunk.
+    const wav = new Uint8Array(44)
+    const data = new DataView(wav.buffer)
+    wav.set([...'RIFF'].map(c => c.charCodeAt(0)), 0); wav.set([...'WAVE'].map(c => c.charCodeAt(0)), 8)
+    wav.set([...'fmt '].map(c => c.charCodeAt(0)), 12); data.setUint32(16, 16, true); data.setUint32(28, 1000, true)
+    wav.set([...'data'].map(c => c.charCodeAt(0)), 36); data.setUint32(40, 61_000, true)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(wav, { status: 206, headers: { ETag: 'W/"song"' } })))
+    const onState = vi.fn()
+    const audio = viewer('/song.wav', { thumbnail: true, onState })
+    await vi.waitFor(() => expect(audio.textContent).toContain('1:01'))
+    expect(audio.querySelector('audio')).toBeNull()
+    expect(onState).toHaveBeenCalledWith({ status: 'ready' })
     const video = viewer('/film.webm', { thumbnail: true }).querySelector('video')!
     expect(video.muted).toBe(true); expect(video.controls).toBe(false)
     const pdf = viewer('/paper.pdf', { thumbnail: true }).querySelector('iframe')!

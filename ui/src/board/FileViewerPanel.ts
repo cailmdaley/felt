@@ -6,8 +6,10 @@
  * as PDF stay in their own iframe. HTML, markdown, and text subscribe to the
  * shared conditional file poller; their DOM changes only when the body does.
  *
- * File bytes and validators use owner-routed `GET /api/v1/file`; HTML bases
- * and thumbnails use `/api/v1/file-assets/:origin/*path` for relative resources.
+ * Native elements stream owner-routed `GET /api/v1/file` by URL; every other
+ * read of a document's content, existence or metadata goes through the
+ * document cache (`documentResources`). HTML pages and thumbnails resolve
+ * relative resources against `/api/v1/file-assets/:origin/*path`.
  */
 
 import './FileViewerPanel.css'
@@ -15,7 +17,8 @@ import './prose.css'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
-import { peekDocument, PEEK_PRIORITY, type PeekPriority } from './documentResources.js'
+import { head, peek, recallText, RESOURCE_PRIORITY, text as documentText, type Head, type ResourcePriority } from './documentResources.js'
+import { loadDuration } from './workspace/audioWaveform.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import type { SwipeSignal } from './workspace/PhoneGestures.js'
 import {
@@ -27,7 +30,6 @@ import {
   escapeHtml,
   fileBytesUrl,
   fileExt,
-  fileInfoUrl,
   renderMarkdown,
 } from './utils.js'
 
@@ -106,10 +108,8 @@ export function buildFileViewer(
       if (!disposed) options.onState?.({ status: 'ready' })
     })
     img.addEventListener('error', () => {
-      void fetch(src, { method: 'HEAD', signal: controller.signal }).then((res) => {
-        if (!disposed) options.onState?.({ status: 'error', error: new Error(`file request failed: ${res.status}`), hasContent: false })
-      }).catch((error: unknown) => {
-        if (!disposed) options.onState?.({ status: 'error', error, hasContent: false })
+      void head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal }).then(info => {
+        if (!disposed) options.onState?.({ status: 'error', error: headError(info), hasContent: false })
       })
     })
     viewerDisposers.set(wrap, () => { disposed = true; controller.abort() })
@@ -184,16 +184,16 @@ export function buildFileViewer(
   // nothing saying why.
   iframe.addEventListener('error', () => failed('the daemon could not be reached'))
 
-  // So ASK. A HEAD settles what the iframe's own events cannot tell us apart.
-  // Ordering is not a race: `failed` re-attaches the veil if `load` already
-  // removed it, so whichever resolves second still tells the truth.
-  void fetch(src, { method: 'HEAD', signal: controller.signal })
-    .then((res) => {
-      checked = true
-      if (!res.ok) failed(`${res.status}${res.statusText ? ` ${res.statusText}` : ''}`)
-      else ready()
-    })
-    .catch(() => failed('the daemon could not be reached'))
+  // So ASK. The cache's head settles what the iframe's own events cannot tell
+  // apart. Ordering is not a race: `failed` re-attaches the veil if `load`
+  // already removed it, so whichever resolves second still tells the truth.
+  void head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal }).then(info => {
+    if (controller.signal.aborted) return
+    checked = true
+    if (!info) failed('the daemon could not be reached')
+    else if (!info.exists) failed('404 Not Found')
+    else ready()
+  })
   viewerDisposers.set(wrap, () => { disposed = true; controller.abort() })
 
   return wrap
@@ -233,10 +233,10 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   let disposed = false
   const controller = new AbortController()
   media.addEventListener('error', () => {
-    // The metadata probe distinguishes a missing resource from a codec failure.
-    void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => {
-      if (!disposed) options.onState?.({ status: 'error', error: new Error(res.ok ? 'media format is not supported by this browser' : `file request failed: ${res.status}`), hasContent: false })
-    }).catch(error => { if (!disposed) options.onState?.({ status: 'error', error, hasContent: false }) })
+    // The cache's head distinguishes a missing resource from a codec failure.
+    void head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal }).then(info => {
+      if (!disposed) options.onState?.({ status: 'error', error: info?.exists ? new Error('media format is not supported by this browser') : headError(info), hasContent: false })
+    })
   })
   page.append(media)
   wrap.append(page)
@@ -255,6 +255,11 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   return wrap
 }
 
+/** Why a document a native viewer could not show failed, from its head. */
+function headError(info: Head | null): Error {
+  return new Error(info ? 'file request failed: 404' : 'the daemon could not be reached')
+}
+
 function buildUnsupportedViewer(base: string, path: string, owner: string, options: FileViewerOptions): HTMLElement {
   const box = document.createElement('div')
   box.className = 'kbn-fileview-unsupported ws-document-state'
@@ -267,14 +272,12 @@ function buildUnsupportedViewer(base: string, path: string, owner: string, optio
   box.append(detail, download)
   const controller = new AbortController()
   viewerDisposers.set(box, () => controller.abort())
-  void fetch(fileInfoUrl(base, path, owner), { signal: controller.signal, cache: 'no-store' }).then(async response => {
-    if (!response.ok) throw new Error(`file request failed: ${response.status}`)
-    const info = await response.json() as { exists?: boolean; size?: number }
+  void head(fileBytesUrl(base, path, owner), RESOURCE_PRIORITY.selected, { signal: controller.signal }).then(info => {
     if (controller.signal.aborted) return
-    if (!info.exists) throw new Error('file request failed: 404')
-    if (typeof info.size === 'number' && Number.isFinite(info.size)) detail.textContent = `Not drawn here · ${info.size.toLocaleString()} bytes`
+    if (!info?.exists) { options.onState?.({ status: 'error', error: headError(info), hasContent: false }); return }
+    if (info.size !== undefined) detail.textContent = `Not drawn here · ${info.size.toLocaleString()} bytes`
     options.onState?.({ status: 'ready' })
-  }).catch(error => { if (!controller.signal.aborted) options.onState?.({ status: 'error', error, hasContent: false }) })
+  })
   return box
 }
 
@@ -315,26 +318,40 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     frame.inert = true
     frame.tabIndex = -1
     frame.setAttribute('scrolling', 'no')
+    frame.addEventListener('error', () => finish(false), { once: true })
     if (kind === 'html') {
+      // The page's own text, from the cache the reader shares, drawn without scripts.
       frame.setAttribute('sandbox', '')
       frame.allow = "autoplay 'none'"
-    }
-    // Native PDF viewers need their plugin; the host makes the whole slot inert.
-    frame.addEventListener('load', () => {
-      if (kind === 'html') { finish(true); return }
-      void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => finish(res.ok)).catch(() => finish(false))
-    }, { once: true })
-    frame.addEventListener('error', () => finish(false), { once: true })
-    frame.src = kind === 'pdf' ? `${src}#page=1&view=FitH&toolbar=0` : htmlAssetUrl(src)
-    const onSource = options.onThumbnailSource
-    if (onSource) {
-      void readThumbnailMetadata(src, controller.signal, kind === 'html'
-        ? (bytes, etag) => onSource(typeof bytes === 'string' ? bytes : new TextDecoder().decode(bytes), etag)
-        : onSource)
+      frame.addEventListener('load', () => finish(true), { once: true })
+      void documentText(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(body => {
+        if (disposed) return
+        if (!body) { finish(false); return }
+        options.onThumbnailSource?.(body.text, body.etag)
+        frame.srcdoc = htmlWithBase(body.text, src)
+      })
+    } else {
+      // Native PDF viewers need their plugin; the host makes the whole slot inert.
+      frame.addEventListener('load', () => {
+        void head(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(info => finish(!!info?.exists))
+      }, { once: true })
+      frame.src = `${src}#page=1&view=FitH&toolbar=0`
+      if (options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
     }
     wrap.append(frame)
-  } else if (kind === 'audio' || kind === 'video') {
-    const media = document.createElement(kind)
+  } else if (kind === 'audio') {
+    // A recording is its face: the title and the duration its peek declares, with no media element.
+    void peek(src, RESOURCE_PRIORITY.thumbnail).then(first => {
+      if (disposed) return
+      if (!first) { finish(false); return }
+      options.onThumbnailSource?.(first.bytes, first.etag)
+      finish(true)
+      void loadDuration(src, controller.signal).then(seconds => {
+        if (seconds !== null && !disposed) duration.textContent = formatMediaTime(seconds)
+      })
+    })
+  } else if (kind === 'video') {
+    const media = document.createElement('video')
     native = media
     media.preload = 'metadata'
     media.muted = true
@@ -347,20 +364,18 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     media.addEventListener('error', () => finish(false), { once: true })
     if (media instanceof HTMLVideoElement) media.playsInline = true
     media.src = src
-    if (kind === 'audio' && options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
     wrap.append(media)
   } else if (kind === 'text') {
-    void fetch(src, { signal: controller.signal }).then(async res => {
-      if (!res.ok) throw new Error('Thumbnail unavailable')
-      const source = await res.text()
+    void documentText(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(body => {
       if (disposed) return
-      options.onThumbnailSource?.(source, res.headers.get('ETag') ?? undefined)
+      if (!body) { finish(false); return }
+      options.onThumbnailSource?.(body.text, body.etag)
       const pre = document.createElement('pre')
       pre.inert = true
-      pre.textContent = source.slice(0, 12000)
+      pre.textContent = body.text.slice(0, 12000)
       wrap.append(pre)
       finish(true)
-    }).catch(() => finish(false))
+    })
   } else queueMicrotask(() => finish(true))
   viewerDisposers.set(wrap, () => {
     disposed = true
@@ -370,11 +385,11 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
   return wrap
 }
 
-/** A document's first 64 KiB, read through the shared peek so concurrent surfaces read it once. */
-export async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>, priority: PeekPriority = PEEK_PRIORITY.thumbnail, fresh = false): Promise<void> {
-  const peek = await peekDocument(src, priority, { fresh })
+/** A document's first 64 KiB from the cache, so concurrent surfaces read it once. */
+export async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>, priority: ResourcePriority = RESOURCE_PRIORITY.thumbnail, fresh = false): Promise<void> {
+  const first = await peek(src, priority, { fresh })
   // Native playback and preview do not depend on metadata.
-  if (peek && !signal.aborted) onSource(peek.bytes, peek.etag)
+  if (first && !signal.aborted) onSource(first.bytes, first.etag)
 }
 
 function formatMediaTime(seconds: number): string {
@@ -508,7 +523,7 @@ function buildHtmlViewer(
     src,
     (html) => {
       if (disposed) return
-      options.onThumbnailSource?.(html)
+      options.onThumbnailSource?.(html, recallText(src)?.etag)
       veil.classList.remove('kbn-fileview-loading-error')
       const withBase = htmlWithBase(html, src)
       const srcdoc = options.transformHtml?.(withBase) ?? withWorkspaceKeyBridge(withBase)
@@ -643,7 +658,7 @@ function buildTextViewer(
   const stop = watchLiveFile(
     src,
     (text) => {
-      options.onThumbnailSource?.(text)
+      options.onThumbnailSource?.(text, recallText(src)?.etag)
       const scrollTop = hasContent ? wrap.scrollTop : 0
       if (MARKDOWN_EXTS.has(ext)) {
         pane.classList.add('kbn-detail-prose')

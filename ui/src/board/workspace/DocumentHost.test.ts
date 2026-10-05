@@ -6,6 +6,7 @@ import { DocumentHost, withWorkspaceKeyBridge } from './DocumentHost.js'
 import { Reader } from './Reader.js'
 import { buildChannel } from './documents.js'
 import { connectDocumentFrame, envelope } from './DocumentBridge.js'
+import { resetDocumentResources } from '../documentResources.js'
 
 const render = vi.hoisted(() => ({
   calls: [] as Array<{ viewer: HTMLElement; path: string; owner: string; options: FileViewerOptions; frame?: (frame: HTMLIFrameElement, refreshed: boolean) => void; text?: (pane: HTMLElement) => void }>,
@@ -40,9 +41,9 @@ beforeEach(() => {
   track = document.createElement('div')
   document.body.append(track)
   host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame, onScroll })
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: true, size: 1, modified_at: 1 }))))
 })
-afterEach(() => { host.dispose(); vi.unstubAllGlobals() })
+afterEach(() => { host.dispose(); vi.unstubAllGlobals(); resetDocumentResources() })
 const ready = async (call = render.calls.at(-1)!) => {
   call.options.onState!({ status: 'ready' })
   await Promise.resolve()
@@ -385,9 +386,7 @@ describe('refresh and failure states', () => {
     expect(frame.content.textContent).toContain('host-a is unreachable — showing last loaded copy')
     expect(frame.content.querySelector('button')!.textContent).toBe('Retry')
     host.refresh(docs[0].key)
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(render.refresh).toHaveBeenCalledWith('/api/v1/file?path=%2Fdoc%2F0.html&origin=host-a')
+    await vi.waitFor(() => expect(render.refresh).toHaveBeenCalledWith('/api/v1/file?path=%2Fdoc%2F0.html&origin=host-a'))
     expect(frame.viewer).toBe(viewer)
     expect(frame.el.classList.contains('ws-stale')).toBe(false)
   })

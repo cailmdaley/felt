@@ -1,5 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { fileBytesUrl } from '../utils.js'
+import { fetchDocument, RESOURCE_PRIORITY } from '../documentResources.js'
 import { scopeTheme } from './themeScope.js'
 import './themes/surface.css'
 
@@ -208,8 +209,8 @@ export class ChannelThemes {
     let customAvailable = false
     entry.pending = (async () => {
       try {
-        const res = await fetch(fileBytesUrl(this.base, path, owner), {
-          cache: 'no-store', signal: AbortSignal.timeout(25000),
+        const res = await fetchDocument(fileBytesUrl(this.base, path, owner), {
+          cache: 'no-store', signal: AbortSignal.timeout(25000), rank: RESOURCE_PRIORITY.selected,
           headers: entry.etag ? { 'If-None-Match': entry.etag } : undefined,
         })
         if (this.disposed || entry.card.fiberDir + '/theme.css' !== path || entry.card.originId !== owner || res.status === 304) return

@@ -1,12 +1,18 @@
+import { fetchDocument, recallText, RESOURCE_PRIORITY, type DocumentFetch, type TextBody } from './documentResources.js'
+
 /**
- * One change-aware watcher for every live file-reading surface.
+ * One change-aware watcher for every live file-reading surface, layered on the
+ * document cache: it reads through `fetchDocument`, and a URL watched again
+ * starts from the text the cache still holds, revalidated by ETag.
  *
  * A watcher sends conditional GETs against the file endpoint's content-digest
  * ETag; its first read lets the browser revalidate a cached copy. Every 200 also gets a client-side content fingerprint, and views
  * update only when that fingerprint moves — so a forced re-read, or an owner
  * that answers without a digest validator, repaints nothing when the body is
  * unchanged. Watchers for the same URL share one request; inactive tabs pause
- * until activation revalidates them, and hidden pages do no work.
+ * until activation revalidates them, and hidden pages do no work. An active
+ * watcher reads as the selected page; an inactive preview's first read waits
+ * its turn as a neighbour.
  */
 
 export const LIVE_FILE_POLL_INTERVAL_MS = 4_000
@@ -52,7 +58,9 @@ export interface LiveFileWatchOptions {
 }
 
 export interface LiveFileRefreshOptions {
-  fetch?: typeof fetch
+  fetch?: DocumentFetch
+  /** The text already held for a URL; an injected `fetch` starts with none. */
+  recall?: (url: string) => TextBody | undefined
   now?: () => number
   isVisible?: () => boolean
   setInterval?: typeof globalThis.setInterval
@@ -66,7 +74,8 @@ export interface LiveFileRefreshOptions {
  * contract can be tested without a browser.
  */
 export class LiveFileRefresh {
-  private readonly fetchFile: typeof fetch
+  private readonly fetchFile: DocumentFetch
+  private readonly recall: (url: string) => TextBody | undefined
   private readonly now: () => number
   private readonly isVisible: () => boolean
   private readonly schedule: typeof globalThis.setInterval
@@ -77,7 +86,8 @@ export class LiveFileRefresh {
   private stopListening: (() => void) | null = null
 
   constructor(options: LiveFileRefreshOptions = {}) {
-    this.fetchFile = options.fetch ?? globalThis.fetch.bind(globalThis)
+    this.fetchFile = options.fetch ?? fetchDocument
+    this.recall = options.recall ?? (options.fetch ? () => undefined : recallText)
     this.now = options.now ?? Date.now
     this.isVisible = options.isVisible ?? (() => typeof document === 'undefined' || !document.hidden)
     this.schedule = options.setInterval ?? globalThis.setInterval.bind(globalThis)
@@ -91,12 +101,14 @@ export class LiveFileRefresh {
 
   watch(url: string, onContent: (content: string) => void, onError?: (error: unknown) => void, options: LiveFileWatchOptions = {}): LiveFileSubscription {
     let file = this.files.get(url)
+    let held: TextBody | undefined
     if (!file) {
+      held = this.recall(url)
       file = {
         subscribers: new Set(),
-        etag: null,
-        fingerprint: null,
-        content: null,
+        etag: held?.etag ?? null,
+        fingerprint: held ? contentFingerprint(held.text) : null,
+        content: held?.text ?? null,
         failures: 0,
         nextPollAt: 0,
         inFlight: null,
@@ -114,6 +126,8 @@ export class LiveFileRefresh {
     file.subscribers.add(subscriber)
     if (file.content !== null) this.deliverContent(subscriber, file.content)
     else if (subscriber.active || subscriber.initializing) void this.pollFile(url, file, false, subscriber.initializing)
+    // Held text shows at once; a page being read confirms it with the owner.
+    if (held && subscriber.active) void this.pollFile(url, file)
 
     let disposed = false
     const stop = (() => {
@@ -141,7 +155,7 @@ export class LiveFileRefresh {
       subscriber.active = true
       subscriber.initializing = false
       if (file.content !== null) this.deliverContent(subscriber, file.content)
-      return this.refresh(url)
+      return this.revalidate(url)
     }
     stop.loadOnce = () => {
       if (disposed || subscriber.active || subscriber.initializing) return Promise.resolve()
@@ -179,6 +193,14 @@ export class LiveFileRefresh {
     } finally {
       if (file.forceRefresh === pending) file.forceRefresh = null
     }
+  }
+
+  /** Ask the owner now, conditionally: an unchanged file answers 304. */
+  private async revalidate(url: string): Promise<void> {
+    const file = this.files.get(url)
+    if (!file || !this.isVisible()) return
+    file.nextPollAt = 0
+    await this.pollFile(url, file, true)
   }
 
   private async forceRead(url: string, file: WatchedFile): Promise<void> {
@@ -240,6 +262,7 @@ export class LiveFileRefresh {
           cache,
           headers,
           signal: controller.signal,
+          rank: this.hasActiveSubscribers(file) ? RESOURCE_PRIORITY.selected : RESOURCE_PRIORITY.neighbour,
         })
         if (this.files.get(url) !== file) return
 

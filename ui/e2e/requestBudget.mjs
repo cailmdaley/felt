@@ -70,7 +70,19 @@ try {
   const later = await snapshot()
   const idle = tally(later.requests.slice(opened.requests.length), later.rewrites.slice(opened.rewrites.length))
   print('idle minute', idle)
+  // Step onto three recordings: each selected one decodes its waveform once.
+  for (let step = 0; step < 3; step++) {
+    await p.keyboard.press('ArrowRight')
+    await p.clock.runFor(3_000)
+    await p.waitForTimeout(300)
+  }
+  const stepped = await snapshot()
+  const steps = tally(stepped.requests.slice(later.requests.length), stepped.rewrites.slice(later.rewrites.length))
+  print('three steps', steps)
+  const whole = tally(stepped.requests, stepped.rewrites)
+  print('whole session', whole)
   if (!reportOnly) {
+    for (const [path, entry] of whole) assert.ok(entry.bytes <= 1, `${path} read whole ${entry.bytes} times in the session`)
     for (const [path, entry] of open) assert.ok(entry.bytes <= 1, `${path} read whole ${entry.bytes} times on open`)
     assert.equal(sum(idle, 'bytes'), 0, 'an idle minute reads no document bodies')
     assert.equal(sum(idle, 'peeks'), 0, 'an idle minute reads no peeks')

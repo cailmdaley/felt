@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card, expectPinnedZone, ownerFiberResponse } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { docKey } from './documents.js'
+import { resetDocumentResources } from '../documentResources.js'
+import { resetLanes } from '../requestLanes.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
 import { Overview, overviewDayGroup, overviewHostMarks } from './Overview.js'
 import type { ChannelThemes } from './ChannelThemes.js'
@@ -80,7 +82,7 @@ beforeEach(() => {
   overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onOrder })
   document.body.append(overview.el)
 })
-afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); resetDocumentResources(); resetLanes() })
 
 describe('Overview receipt membership and identity', () => {
   it('binds retained news and folio roots by channel, releasing them on hide, removal and disposal', async () => {
@@ -374,7 +376,9 @@ describe('Overview stable lenses, visits, and DOM', () => {
     await refresh(); activate(); await settle()
     const thumbnail = folio('alpha').querySelector('.ws-overview-thumb')!
     const iframe = thumbnail.querySelector('iframe')!
-    expect(iframe.src).toContain('/api/v1/file-assets/host-a/notes/alpha/report.html')
+    // The page's text from the document cache, its relative resources resolved against the owner's assets.
+    await vi.waitFor(() => expect(iframe.srcdoc).toContain('Preview text'))
+    expect(iframe.srcdoc).toContain('/api/v1/file-assets/host-a/notes/alpha/report.html')
     expect(iframe.getAttribute('sandbox')).toBe('')
     expect(iframe.inert).toBe(true); expect(iframe.tabIndex).toBe(-1)
     iframe.dispatchEvent(new Event('load')); draw()

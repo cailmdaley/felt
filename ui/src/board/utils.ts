@@ -330,16 +330,6 @@ export function fiberDocUrl(shuttleBase: string, id: string): string {
 }
 
 /**
- * Build the owner-routed metadata URL used to check an artifact without
- * downloading its bytes. The daemon returns `{exists, modified_at, size}`;
- * `cache: no-store` belongs on the request, not in this URL builder.
- */
-export function fileInfoUrl(base: string, fullPath: string, originId: string): string {
-  const abs = fullPath.startsWith('/') ? fullPath : `/${fullPath}`
-  return withOrigin(`${base}/api/v1/file-info?path=${encodePathParam(abs)}`, originId)
-}
-
-/**
  * Make a fresh browser navigation for an artifact while preserving its source
  * path and owner query. Replacing the prior marker keeps repeated refreshes
  * from growing the URL forever.
