@@ -86,6 +86,7 @@ export class Reader {
   private readonly lead: HTMLElement
   private readonly trail: HTMLElement
   private keyboardInput = false
+  private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly conversation = element('div', 'ws-worker-pill')
@@ -202,14 +203,6 @@ export class Reader {
     })
     this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
-    if (opts.themes) for (const picker of [this.picker, this.sidebarPicker]) {
-      const plain = button('ws-menu-item ws-plain-toggle', 'Plain', () => {
-        if (this.currentCard) opts.themes!.togglePlain(this.currentCard)
-        for (const el of this.el.querySelectorAll('[data-part="plain-toggle"]')) el.setAttribute('aria-pressed', String(!!this.currentCard && opts.themes!.isPlain(this.currentCard)))
-      }, 'Plain')
-      plain.dataset.part = 'plain-toggle'
-      picker.el.append(plain)
-    }
     this.sidebarPicker.el.style.display = 'contents'
     this.sidebar.append(this.sidebarPicker.el)
     const main = element('div', 'ws-stage-row')
@@ -232,6 +225,7 @@ export class Reader {
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
     this.wide.addEventListener('change', this.relayout)
+    this.el.addEventListener('workspace-theme-change', this.themeChanged)
     this.el.addEventListener('mousedown', e => {
       if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
     })
@@ -581,7 +575,7 @@ export class Reader {
     this.closeMenu()
     if (same) return
     const menu = element('div', 'ws-menu')
-    menu.setAttribute('aria-label', 'Document actions')
+    menu.setAttribute('aria-label', 'Document and constitution actions')
     const url = doc.kind === 'fiber' ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of [['Open in new tab', false], ['Download', true]] as const) {
       const a = element('a', 'ws-menu-item', label)
@@ -601,7 +595,18 @@ export class Reader {
     for (const p of [...sends].reverse()) {
       if (p.kind === 'sent') receipts.append(element('div', '', `${new Date(p.time).toLocaleString()} · ${p.worker ?? ''} · ${p.session ?? ''}`))
     }
-    menu.append(receipts, element('code', 'ws-path', `${doc.owner}:${doc.path}`))
+    menu.append(receipts)
+    if (this.currentCard && this.opts.themes) {
+      const plain = button('ws-menu-item ws-plain-toggle', "Plain (drop this constitution's theme)", () => {
+        if (!this.currentCard) return
+        this.opts.themes!.togglePlain(this.currentCard)
+        this.syncPlainToggle(plain)
+      }, "Plain (drop this constitution's theme)")
+      plain.dataset.part = 'plain-toggle'
+      this.syncPlainToggle(plain)
+      menu.append(plain)
+    }
+    menu.append(element('code', 'ws-path', `${doc.owner}:${doc.path}`))
     this.el.append(menu)
     this.menu = menu
     this.menuAnchor = anchor
@@ -609,6 +614,14 @@ export class Reader {
     menu.style.left = `${Math.max(12, Math.min(window.innerWidth - menu.offsetWidth - 12, r.right - menu.offsetWidth))}px`
     menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 6)}px`
     if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
+  }
+  private syncPlainToggle(item?: HTMLButtonElement): void {
+    const toggle = item ?? this.menu?.querySelector<HTMLButtonElement>('[data-part="plain-toggle"]')
+    const card = this.currentCard
+    const themes = this.opts.themes
+    if (!toggle || !themes) return
+    toggle.hidden = !card || !themes.hasTheme(card)
+    toggle.setAttribute('aria-pressed', String(!!card && themes.isPlain(card)))
   }
   private closeMenu(): boolean {
     if (this.picker.isOpen) { this.picker.close(); return true }
@@ -627,7 +640,6 @@ export class Reader {
     if (this.sidebarShown) { this.sidebarPicker.focus(); return }
     if (this.picker.isOpen) { this.picker.close(); return }
     this.closeMenu()
-    this.picker.el.querySelector('[data-part="plain-toggle"]')?.setAttribute('aria-pressed', String(!!this.currentCard && !!this.opts.themes?.isPlain(this.currentCard)))
     this.picker.show(this.el, this.title)
   }
   /** The source column is captured before the live Desk starts receding. */
@@ -675,7 +687,6 @@ export class Reader {
     this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
     this.sidebar.inert = !shown
     this.sidebarPicker.refresh(shown)
-    this.sidebarPicker.el.querySelector('[data-part="plain-toggle"]')?.setAttribute('aria-pressed', String(!!this.currentCard && !!this.opts.themes?.isPlain(this.currentCard)))
     this.sidebarFlight.refresh()
     if (!shown) this.setSidebarVisible(false, false)
   }
@@ -794,6 +805,7 @@ export class Reader {
     document.removeEventListener('pointerdown', this.pointerInput, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
+    this.el.removeEventListener('workspace-theme-change', this.themeChanged)
     this.el.remove()
   }
 }

@@ -258,6 +258,31 @@ describe('Reader channel sidebar', () => {
     expect(reader.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('false')
   })
 
+  it('puts the theme toggle in the page menu, reachable with the sidebar open and hidden without a theme', () => {
+    let hasTheme = false
+    let plain = false
+    const themes = {
+      bind: vi.fn(), unbind: vi.fn(), hasTheme: () => hasTheme, isPlain: () => plain,
+      togglePlain: vi.fn(() => { plain = !plain }),
+    } as unknown as ChannelThemes
+    const reader = makeReader(alpha, themes)
+    reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+    expect(reader.el.querySelector('.ws-sidebar [data-part="plain-toggle"]')).toBeNull()
+    expect(reader.el.querySelector('.ws-switcher [data-part="plain-toggle"]')).toBeNull()
+
+    reader.el.querySelector<HTMLButtonElement>('.ws-menu-button')!.click()
+    const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-menu [data-part="plain-toggle"]')!
+    expect(toggle.textContent).toBe("Plain (drop this constitution's theme)")
+    expect(toggle.hidden).toBe(true)
+    hasTheme = true
+    reader.el.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
+    expect(toggle.hidden).toBe(false)
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    toggle.click()
+    expect(themes.togglePlain).toHaveBeenCalledWith(alpha)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('focuses the sidebar find from the title when open and opens a switcher when closed', () => {
     viewport.wide = true
     const open = makeReader()
