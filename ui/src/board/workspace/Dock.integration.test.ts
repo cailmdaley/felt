@@ -51,6 +51,51 @@ describe('Dock dispatch recovery', () => {
   })
 })
 
+describe('Dock session history', () => {
+  it('reloads on each unfold and retargets open history when the live session or tmux changes', async () => {
+    const sessions = ['old-session']
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (String(url).includes('/sessions/composite')) return response({ records: sessions.map((session, at) => ({
+        at, fiber: 'a/task', uid: 'task-uid', session, host: 'owner', harness: 'codex', kind: 'dispatch',
+      })) })
+      if (String(url).includes('/sessions/links')) return response({ links: sessions.map(session => ({ session, harness: 'codex', availability: 'available_local' })) })
+      return response()
+    })
+    const toggle = (): HTMLButtonElement => band.el.querySelector('.kbn-ctl-history-toggle')!
+    const historyReads = (): number => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/sessions/composite')).length
+    toggle().focus(); toggle().click()
+    await flush()
+    expect(historyReads()).toBe(1)
+    expect(band.el.querySelectorAll('.kbn-ctl-session')).toHaveLength(1)
+    toggle().click()
+    sessions.push('new-session')
+    toggle().focus(); toggle().click()
+    await flush()
+    expect(historyReads()).toBe(2)
+    expect(document.activeElement).toBe(toggle())
+    expect(band.el.querySelectorAll('.kbn-ctl-session')).toHaveLength(2)
+    dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker-one' }))
+    await flush()
+    expect(historyReads()).toBe(3)
+    const row = (): HTMLElement => band.el.querySelector('[data-session="new-session"]')!
+    expect(row().textContent).toContain('attach')
+    row().querySelector<HTMLButtonElement>('button')!.click()
+    await flush()
+    expect(writes().at(-1)).toEqual({ tmux_session: 'worker-one', shuttle_host: 'owner' })
+    dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker-two' }))
+    await flush()
+    expect(historyReads()).toBe(4)
+    row().querySelector<HTMLButtonElement>('button')!.click()
+    await flush()
+    expect(writes().at(-1)).toEqual({ tmux_session: 'worker-two', shuttle_host: 'owner' })
+    dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker-two' }))
+    expect(historyReads()).toBe(4)
+    toggle().click()
+    dock.syncRuntime(task({ workerState: undefined, sessionUuid: 'new-session', tmuxSession: undefined }))
+    expect(historyReads()).toBe(4)
+  })
+})
+
 describe('Dock poll reconciliation', () => {
   it('re-seeds settings from polls and writes only the edited agent axis', async () => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!

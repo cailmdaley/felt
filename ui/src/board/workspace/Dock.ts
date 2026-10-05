@@ -412,6 +412,7 @@ export class Dock {
   private composerError: HTMLElement | null = null
   private freshButton: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
+  private historySync: (() => void) | null = null
   private savesPending = 0
   private readonly blockedDispatches = new Map<HTMLButtonElement, { worker: string; label: string; error: HTMLElement }>()
   private epoch = 0
@@ -525,6 +526,7 @@ export class Dock {
     this.composerError = null
     this.freshButton = null
     this.settingsSync = null
+    this.historySync = null
     this.blockedDispatches.clear()
     this.root?.replaceChildren()
   }
@@ -703,6 +705,7 @@ export class Dock {
       card = this.card
     }
     this.settingsSync?.(incoming)
+    this.historySync?.()
     for (const [button, blocked] of this.blockedDispatches) {
       if (blocked.worker === workerIdentity(card)) continue
       button.disabled = false
@@ -802,15 +805,37 @@ export class Dock {
       if (ledger.hidden) this.dismissParent?.()
     })
     settings.append(toggle, ledger)
-    const history = card.uid ? buildSessionHistory({
-      shuttleBase: this.shuttleBase,
-      uid: card.uid,
-      fiberHost: card.shuttleHost,
-      liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined,
-      liveTmux: card.tmuxSession,
-      desktop: atDesktop(navigator.userAgent, coarsePointer()),
-      onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
-    }) : null
+    let history: HTMLElement | null = null
+    const historyKey = (): string => JSON.stringify([card.uid, card.shuttleHost, hasLiveWorker(card), card.sessionUuid, card.tmuxSession])
+    let historyRevision = historyKey()
+    const refreshHistory = (open: boolean): void => {
+      if (!card.uid) return
+      const focusToggle = document.activeElement === history?.querySelector('.kbn-ctl-history-toggle')
+      const next = buildSessionHistory({
+        shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
+        liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession,
+        desktop: atDesktop(navigator.userAgent, coarsePointer()),
+        onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
+      })
+      history?.replaceWith(next)
+      history = next
+      const unfold = next.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')!
+      if (open) unfold.click()
+      if (focusToggle) unfold.focus({ preventScroll: true })
+      // Every unfold gets a fresh ledger and current attach/resume targets.
+      unfold.addEventListener('click', event => {
+        if (unfold.getAttribute('aria-expanded') === 'true') return
+        event.stopImmediatePropagation()
+        refreshHistory(true)
+      }, true)
+    }
+    refreshHistory(false)
+    this.historySync = () => {
+      const revision = historyKey()
+      if (revision === historyRevision) return
+      historyRevision = revision
+      refreshHistory(history?.classList.contains('kbn-ctl-history-open') ?? false)
+    }
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
     const discard = ctlButton('Discard', 'kbn-ctl-discard')
@@ -819,7 +844,7 @@ export class Dock {
       btn.addEventListener('click', () => this.onTransition(card, target))
     }
     foot.append(errorEl, statusEl, discard, temper)
-    body.append(settings, ...(history ? [history] : []), foot)
+    body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
   }
 
   private buildComposer(card: KanbanCard, swallow: (el: HTMLElement) => void): HTMLElement {
