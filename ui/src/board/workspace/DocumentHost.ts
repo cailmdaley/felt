@@ -50,6 +50,9 @@ const RETAIN = 10
 const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
 
 /** Stable frames, a fleet-wide live-document budget, and selected-only polling. */
+/** Scrollers whose position this host has written at least once. */
+const boundScrollers = new WeakSet<HTMLElement>()
+
 export class DocumentHost {
   private readonly frames = new Map<DocKey, FrameState>()
   private readonly live = new Map<DocKey, FrameState>()
@@ -554,14 +557,20 @@ export class DocumentHost {
 
   private bindScroller(state: FrameState, scroller: HTMLElement): void {
     state.stopScroll?.()
-    scroller.scrollTop = state.scroll.y
-    scroller.scrollLeft = state.scroll.x
-    // A fresh prose frame receives its reading geometry later in the same turn.
-    queueMicrotask(() => {
-      if (this.disposed || !state.frame.viewer?.contains(scroller)) return
+    // Writing a scroll offset forces layout mid-build. A scroller bound for the
+    // first time already sits at the origin, so a page opening at the top skips it.
+    const restore = state.scroll.x !== 0 || state.scroll.y !== 0 || boundScrollers.has(scroller)
+    boundScrollers.add(scroller)
+    if (restore) {
       scroller.scrollTop = state.scroll.y
       scroller.scrollLeft = state.scroll.x
-    })
+      // A fresh prose frame receives its reading geometry later in the same turn.
+      queueMicrotask(() => {
+        if (this.disposed || !state.frame.viewer?.contains(scroller)) return
+        scroller.scrollTop = state.scroll.y
+        scroller.scrollLeft = state.scroll.x
+      })
+    }
     const save = (): void => {
       this.saveScroll(state)
       if (state.active) this.options.onScroll?.(state.frame.doc.key, state.scroll.y)
