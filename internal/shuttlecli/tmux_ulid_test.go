@@ -3,6 +3,7 @@ package shuttlecli
 import "testing"
 
 func TestShuttleTmuxSessionNameRequiresULID(t *testing.T) {
+	t.Parallel()
 	const ulid = "01M3PGXMZSRH00ZCNWZ63XWZDF"
 	cases := map[string]string{
 		ulid:                         "leaf-" + ulid + "-shuttle",

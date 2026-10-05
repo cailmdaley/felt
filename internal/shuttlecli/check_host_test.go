@@ -11,7 +11,9 @@ import (
 // to our own identity is drift. A different machine's name is a cross-host
 // install, which is a feature and must stay silent.
 func TestCheckHostDrift(t *testing.T) {
-	withOwnHost(t, "studio-air")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "studio-air")
 
 	cases := []struct {
 		name string
@@ -27,8 +29,9 @@ func TestCheckHostDrift(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := shuttleFeltWithBlock(t, map[string]any{"agent": "claude-sonnet", "host": tc.host})
-			issues := testApp(t).checkHostDrift([]*felt.Felt{f})
+			issues := newApp(env).checkHostDrift([]*felt.Felt{f})
 			if tc.warn {
 				if len(issues) != 1 {
 					t.Fatalf("host %q: got %d issues, want 1", tc.host, len(issues))
@@ -49,10 +52,12 @@ func TestCheckHostDrift(t *testing.T) {
 // A fiber with no shuttle: block is not a shuttle fiber, so there is no
 // identity to compare and nothing to say about it.
 func TestCheckHostDriftIgnoresNonShuttleFibers(t *testing.T) {
-	withOwnHost(t, "studio-air")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "studio-air")
 
 	f := shuttleFeltWithBlock(t, nil)
-	if issues := testApp(t).checkHostDrift([]*felt.Felt{f}); len(issues) != 0 {
+	if issues := newApp(env).checkHostDrift([]*felt.Felt{f}); len(issues) != 0 {
 		t.Fatalf("unexpected issues %v", issues)
 	}
 }

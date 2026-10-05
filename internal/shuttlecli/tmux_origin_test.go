@@ -110,6 +110,7 @@ const launchctlPrintSkhdRooted = `pid/85804 = {
 `
 
 func TestParseResourceCoalitionName(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		out  string
@@ -144,6 +145,7 @@ func TestParseResourceCoalitionName(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := parseResourceCoalitionName(tc.out); got != tc.want {
 				t.Fatalf("parseResourceCoalitionName() = %q, want %q", got, tc.want)
 			}
@@ -152,6 +154,7 @@ func TestParseResourceCoalitionName(t *testing.T) {
 }
 
 func TestClassifyCoalition(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, want string }{
 		{daemonLaunchdLabel, tmuxOriginDaemonBorn},
 		{"application.net.kovidgoyal.kitty.1919153.1919664", tmuxOriginKittyBorn},
@@ -170,6 +173,7 @@ func TestClassifyCoalition(t *testing.T) {
 // The end-to-end contract the fixtures exist for: the captured daemon output
 // must classify as daemon_born, and nothing else may.
 func TestFixturesClassify(t *testing.T) {
+	t.Parallel()
 	if got := classifyCoalition(parseResourceCoalitionName(launchctlPrintDaemonBorn)); got != tmuxOriginDaemonBorn {
 		t.Fatalf("captured daemon-born output classified %q", got)
 	}
@@ -179,6 +183,7 @@ func TestFixturesClassify(t *testing.T) {
 }
 
 func TestCoalitionRoot(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, want string }{
 		{"application.com.runningwithcrayons.Alfred.1904711.1905105", "com.runningwithcrayons.Alfred"},
 		{"application.net.kovidgoyal.kitty.1919153.1919664", "net.kovidgoyal.kitty"},
@@ -195,6 +200,7 @@ func TestCoalitionRoot(t *testing.T) {
 // A server rooted by another app is a warning that names the app, never a
 // failed receipt: a server started from another granted terminal is legitimate.
 func TestTmuxOriginWarningNamesTheRootingApp(t *testing.T) {
+	t.Parallel()
 	name := "application.com.runningwithcrayons.Alfred.1904711.1905105"
 	report := tmuxOriginReport{Origin: classifyCoalition(name), Coalition: name, RootedBy: coalitionRoot(name)}
 	warning := tmuxOriginWarning(report)
@@ -214,6 +220,7 @@ func TestTmuxOriginWarningNamesTheRootingApp(t *testing.T) {
 // (restart the server from a terminal) no other surface would ever suggest, and
 // leaving it healthy means the human keeps dismissing "erlexec" prompts forever.
 func TestCollectTmuxServerReceiptFailsOnlyOnDaemonBorn(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "darwin" {
 		t.Skip("the tmux-server receipt is macOS-only; there is nothing to report here")
 	}
@@ -229,6 +236,7 @@ func TestCollectTmuxServerReceiptFailsOnlyOnDaemonBorn(t *testing.T) {
 		{tmuxOriginAbsent, receiptHealthy},
 	} {
 		t.Run(tc.origin, func(t *testing.T) {
+			t.Parallel()
 			a := stubTmuxOrigin(t, tmuxOriginReport{Origin: tc.origin, ServerPID: "22457"})
 
 			rec := a.collectTmuxServerReceipt()
@@ -250,6 +258,7 @@ func TestCollectTmuxServerReceiptFailsOnlyOnDaemonBorn(t *testing.T) {
 
 // A daemon-born server makes Shuttle doctor report a host mismatch with the tmux remedy.
 func TestRuntimeReceiptSurfacesDaemonBornTmuxServer(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "darwin" {
 		t.Skip("the tmux-server receipt is macOS-only")
 	}
@@ -268,9 +277,11 @@ func TestRuntimeReceiptSurfacesDaemonBornTmuxServer(t *testing.T) {
 // The tmux line must not displace another Shuttle doctor finding; independent
 // problems both reach the human.
 func TestTmuxRepairDoesNotReplaceAnotherComponentsRepair(t *testing.T) {
+	t.Parallel()
 	tmuxRec := &ReceiptTmuxServer{Status: receiptMismatch, Repair: tmuxOriginRepair, Origin: tmuxOriginDaemonBorn}
 
 	t.Run("appends to another component's repair", func(t *testing.T) {
+		t.Parallel()
 		r := DoctorReceipt{Status: receiptMismatch, Repair: "port is held by another uid"}
 		foldDoctorRepair(&r, tmuxRec.Status, tmuxRec.Repair)
 		if !strings.Contains(r.Repair, "port is held by another uid") {
@@ -282,6 +293,7 @@ func TestTmuxRepairDoesNotReplaceAnotherComponentsRepair(t *testing.T) {
 	})
 
 	t.Run("fills an empty repair", func(t *testing.T) {
+		t.Parallel()
 		r := DoctorReceipt{Status: receiptMismatch}
 		foldDoctorRepair(&r, tmuxRec.Status, tmuxRec.Repair)
 		if r.Repair != tmuxOriginRepair {
@@ -294,7 +306,7 @@ func TestTmuxRepairDoesNotReplaceAnotherComponentsRepair(t *testing.T) {
 // stubTmuxOrigin is an app whose tmux server reports report.
 func stubTmuxOrigin(t *testing.T, report tmuxOriginReport) *app {
 	t.Helper()
-	a := testApp(t)
+	a := newApp(testEnv(t))
 	a.detectTmuxOrigin = func() tmuxOriginReport { return report }
 	return a
 }
