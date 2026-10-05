@@ -2,6 +2,7 @@ import './app.css'
 import { KanbanModal } from './board/KanbanModal.js'
 import { showToast } from './board/utils.js'
 import { daemonFetch, isDaemonBooting } from './board/daemonApi.js'
+import { loadMath } from './board/mathDollars.js'
 
 /**
  * Entry point — mounts the kanban board against the Shuttle daemon.
@@ -77,6 +78,11 @@ const board = new KanbanModal({
 })
 
 board.mount(host)
-const prefetchForms = () => { void import('./forms/mountForms.js').catch(() => { /* Retried on first use. */ }) }
-if ('requestIdleCallback' in window) requestIdleCallback(prefetchForms, { timeout: 5000 })
-else setTimeout(prefetchForms, 2000)
+// Once the board is idle, fetch what it holds back from first paint: the forms
+// and KaTeX. Either one also loads on first use.
+const prefetch = () => {
+  void import('./forms/mountForms.js').catch(() => { /* Retried on first use. */ })
+  void loadMath().catch(() => { /* Retried on the next formula. */ })
+}
+if ('requestIdleCallback' in window) requestIdleCallback(prefetch, { timeout: 5000 })
+else setTimeout(prefetch, 2000)

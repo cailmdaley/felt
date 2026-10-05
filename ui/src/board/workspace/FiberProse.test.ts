@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { loadMath } from '../mathDollars.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { Channel } from './documents.js'
 import { buildFiberProse, installBodyFileLinks, ledeHtml, renderFiberMarkdown, settleBodyFileLink } from './FiberProse.js'
@@ -31,6 +32,7 @@ const channel: Channel = {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('fiber prose', () => {
+  beforeAll(loadMath)
   it('shares embed removal, outcome math and owner-aware markdown with the modal', () => {
     const rendered = renderFiberMarkdown(channel.body, channel.outcome!, card)
     expect(rendered.attachments).toHaveLength(1)
