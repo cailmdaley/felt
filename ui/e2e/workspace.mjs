@@ -1274,6 +1274,15 @@ test('Phone page swipe steps from documents and the bar; edges, vertical pans an
   assert.notEqual(await key(), brief, 'board-rendered prose below the table still pages')
 }, { width: 390, height: 844 })
 
+test('Phone page bar steps aside while a page field holds the keyboard', async p => {
+  await open(p); await choose(p, 'Constitution')
+  const field = selected(p).locator('textarea').first()
+  await field.focus()
+  assert.equal(await p.locator('.ws-thumbbar').isVisible(), false, 'the bar would sit under the keyboard accessory')
+  await field.evaluate(el => el.blur())
+  assert.ok(await p.locator('.ws-thumbbar').isVisible())
+}, { width: 390, height: 844 })
+
 test('Phone page swipe follows the finger, snaps back short of the threshold and commits past it', async p => {
   await open(p); await reportReady(p)
   const original = await selected(p).getAttribute('data-key')

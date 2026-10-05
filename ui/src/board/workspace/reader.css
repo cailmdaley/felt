@@ -298,6 +298,8 @@
   /* A wide table scrolls inside itself, so the page keeps its width and its swipe. */
   .ws-content .kbn-detail-prose table { display: block; width: max-content; max-width: 100%; overflow-x: auto; }
   .ws-menu-item { min-height: var(--ws-phone-target); }
+  /* While the keyboard is up the field owns the screen; the page bar would sit under Safari's input accessory. */
+  .ws-reader:has(.ws-content :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"]), [contenteditable="true"]):focus) .ws-thumbbar { display: none; }
 }
 @media (pointer: coarse) {
   .ws-worker-pill .kbn-card-worker { min-height: var(--ws-phone-target); display: inline-flex; align-items: center; }
