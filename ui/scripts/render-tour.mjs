@@ -18,21 +18,18 @@
  * rings and the WebVTT cue for that sentence, so editing a sentence cannot
  * drift the captions. Generated speech is cached by voice and text under
  * TOUR_TTS_CACHE (default: the system temp directory), and the assembled
- * track is loudness-normalized to -16 LUFS, -1.5 dBTP. The same sentences
- * become the transcript between the tour-transcript markers in docs/index.md
- * and docs/shuttle/index.md.
+ * track is loudness-normalized to -16 LUFS, -1.5 dBTP.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const assets = join(root, 'docs/assets')
-const pages = [join(root, 'docs/index.md'), join(root, 'docs/shuttle/index.md')]
 const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg'
 const ffprobe = process.env.FFPROBE_PATH || 'ffprobe'
 const VOICE = process.env.TOUR_VOICE || 'fantine'
@@ -103,20 +100,17 @@ const ring = (x, y, w, h, during) => ({ x, y, w, h, during })
 
 /**
  * The tour. A scene is a title card, a shot (a camera on a screenshot) or a
- * guide (a drawn diagram); `say` is its narration, one caption per sentence,
- * and `shows` describes the picture for the transcript. A ring's `during`
- * lists the sentences it is drawn through; without it, the ring stays on.
+ * guide (a drawn diagram); `say` is its narration, one caption per sentence.
+ * A ring's `during` lists the sentences it is drawn through; without it,
+ * the ring stays on.
  */
 const scenes = [
   { card: true, title: 'The Shuttle board', lines: ['What each button does', 'Screenshots of the real board over a fictional workshop, and control guides'],
-    shows: 'Title card.',
     say: ['Here is the Shuttle board, and how to use its main controls.'] },
   { image: 'shuttle-board-example.png', from: FULL, to: at(10, 12, 1420), move: 6,
-    shows: 'The Desk screenshot, with fictional workshop tasks in Drafts, In flight and Awaiting review.',
     say: ['These Desk lanes show drafts not yet started, work in flight, and results awaiting your review.'] },
   { image: 'shuttle-board-example.png', from: at(10, 12, 1420), to: at(0, 0, 640),
     rings: [ring(...Object.values(shot(431, 61, 36, 36)))],
-    shows: 'The Drafts lane head, with its round plus button ringed.',
     say: ['To write a task yourself, click the plus on Drafts.'] },
   { guide: [
       ...guideHead('Drafts + opens “Stash a constitution”'),
@@ -135,7 +129,6 @@ const scenes = [
       text(200, 682, 'The form also has Tags, Effort and Parent fiber.', { size: 15, color: MUTED }),
     ],
     rings: [ring(232, 230, 816, 240, [0]), ring(232, 486, 816, 66, [1]), ring(916, 592, 132, 60, [2])],
-    shows: 'Control guide of the Stash a constitution form: Title, optional Body, Host, Project and Agent, Kind (One-shot or Standing), and the Stash button.',
     say: [
       'The Stash form asks for a title, optional details, a project and an agent.',
       'One-shot is a single task. Standing repeats on a schedule.',
@@ -143,7 +136,6 @@ const scenes = [
     ] },
   { image: 'shuttle-board-example.png', from: at(0, 0, 640), to: at(470, 0, 660),
     rings: [ring(...Object.values(shot(907, 61, 36, 36)))],
-    shows: 'The In flight lane head, with its round star button ringed.',
     say: ['Or click the star on In flight, and describe an idea in your own words.'] },
   { guide: [
       ...guideHead('The In flight star opens “New idea”'),
@@ -157,7 +149,6 @@ const scenes = [
       ...button(808, 600, 104, 44, 'Cancel'), ...button(924, 600, 116, 44, 'Spawn', 'cobalt'),
     ],
     rings: [ring(502, 474, 266, 56, [0]), ring(916, 592, 132, 60, [0, 1])],
-    shows: 'Control guide of the New idea dialog: a large text box, a Meeting toggle, Host, Project and Agent, and the Spawn button.',
     say: [
       'Pick a project and press Spawn.',
       'An agent turns your words into a task, and its card appears a moment later.',
@@ -188,7 +179,6 @@ const scenes = [
       ring(232, 282, 816, 144, [2]),
       ring(700, 356, 174, 56, [3, 4]), ring(868, 356, 166, 56, [5, 6]),
     ],
-    shows: 'Control guide of an open card: a strip naming its agent and place, a message box with Meeting, New session and Resume, the next launch’s settings, History, and Discard and Temper.',
     say: [
       'Click any card to open it.',
       'The strip under its title, showing who works it and where, unfolds its actions.',
@@ -200,17 +190,14 @@ const scenes = [
     ] },
   { image: 'shuttle-board-example.png', from: at(10, 12, 1420), to: at(470, 60, 500),
     rings: [ring(...Object.values(shot(881, 195, 54, 26)))],
-    shows: 'A running card in In flight, Prepare the workshop guide, with its Aloft badge ringed.',
     say: ['On a running card, Aloft opens the worker’s conversation, in a terminal, a browser, or a desktop app.'] },
   { image: 'shuttle-board-example.png', from: at(470, 60, 500), to: at(935, 60, 500),
     rings: [ring(...Object.values(shot(980, 155, 420, 33)), [0]), ring(...Object.values(shot(1175, 194, 116, 28)), [1])],
-    shows: 'Review the draft programme in Awaiting review: its outcome, then its Temper and Discard buttons, ringed in turn.',
     say: [
       'When a worker finishes, its outcome waits here for you.',
       'Read it, then press Temper to accept the result, or Discard to set it aside.',
     ] },
   { card: true, title: 'Set up Shuttle', lines: ['Start with one machine and one small task', 'cailmdaley.github.io/felt/shuttle/setup/'],
-    shows: 'End card: Set up Shuttle, at cailmdaley.github.io/felt/shuttle/setup/.',
     say: ['To try it, set up Shuttle on one machine, and start with one small task.'] },
 ]
 
@@ -248,7 +235,6 @@ const fmt = s => {
   const sec = String(Math.floor(ms / 1000) % 60).padStart(2, '0')
   return `${h}:${m}:${sec}.${String(ms % 1000).padStart(3, '0')}`
 }
-const html = s => s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
 
 await mkdir(CACHE, { recursive: true })
 const work = await mkdtemp(join(tmpdir(), 'shuttle-tour-'))
@@ -345,7 +331,6 @@ try {
       '-r', String(FPS), '-c:v', 'libx264', '-preset', 'slow', '-crf', '14', '-pix_fmt', 'yuv420p', ...COLOR, segment], { stdio: 'inherit' })
     segments.push(segment)
     scene.start = start
-    scene.duration = d
     start += d
   }
 
@@ -380,22 +365,7 @@ try {
   const vtt = ['WEBVTT', '', ...cues.flatMap((cue, i) => [String(i + 1), `${fmt(cue.start)} --> ${fmt(cue.end)}`, cue.text, ''])]
   await writeFile(join(assets, 'shuttle-board-tour.vtt'), vtt.join('\n'))
 
-  const clock = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
-  const transcript = [
-    '<!-- tour-transcript:start -->',
-    '<details class="tour-transcript">',
-    `<summary>Transcript of the board tour (${clock(start)})</summary>`,
-    ...scenes.map(scene => `<p><span class="tour-time">${clock(scene.start)}</span> <em>${html(scene.shows)}</em> ${html(scene.say.join(' '))}</p>`),
-    '</details>',
-    '<!-- tour-transcript:end -->',
-  ].join('\n')
-  const marked = /<!-- tour-transcript:start -->[\s\S]*<!-- tour-transcript:end -->/
-  for (const page of pages) {
-    const doc = await readFile(page, 'utf8')
-    if (!marked.test(doc)) throw new Error(`${page} lacks the tour-transcript markers`)
-    await writeFile(page, doc.replace(marked, transcript))
-  }
-  console.log(`wrote ${video} (${start.toFixed(1)} s, voice ${VOICE}), poster, captions and transcripts`)
+  console.log(`wrote ${video} (${start.toFixed(1)} s, voice ${VOICE}), poster and captions`)
 } finally {
   await rm(work, { recursive: true, force: true })
 }

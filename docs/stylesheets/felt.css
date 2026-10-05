@@ -473,20 +473,13 @@
   overflow-wrap: anywhere;
 }
 
-/* The board tour: a ruled frame like a figure, and a transcript whose
-   timestamps read as machine values. */
+/* The board tour has a ruled frame like a figure. */
 .md-typeset video {
   display: block;
   width: 100%;
   height: auto;
   border: 1px solid var(--felt-rule);
   border-radius: 2px;
-}
-
-.md-typeset .tour-time {
-  font-family: var(--md-code-font-family);
-  font-size: 0.85em;
-  color: var(--felt-ink-quiet);
 }
 
 /* Inline code keeps the report's gilt tint rather than the block's rag, so
