@@ -1,5 +1,7 @@
 const MAX_BYTES = 60 * 1024 * 1024
 const BINS = 1000
+/** Samples per second the waveform is decoded at: enough for 1000 peaks, a fifth of a CD's memory. */
+const DECODE_RATE = 8000
 const CACHE_PREFIX = 'shuttle:audio:peaks:'
 export interface Waveform { peaks: number[]; duration: number }
 const cache = new Map<string, Promise<Waveform | null>>()
@@ -108,12 +110,16 @@ async function boundedBytes(response: Response): Promise<ArrayBuffer> {
   return bytes.buffer
 }
 
-/** Decode once per identity and revision; playback keeps its native range URL. */
-export function loadWaveform(key: string, src: string, signal: AbortSignal): Promise<Waveform | null> {
-  return queuedRead(signal, () => readWaveform(key, src, signal), null)
+/**
+ * Decode once per identity and revision, and only when asked: without
+ * `decode`, only a waveform already decoded this session is returned.
+ * Playback keeps its native range URL.
+ */
+export function loadWaveform(key: string, src: string, signal: AbortSignal, decode = true): Promise<Waveform | null> {
+  return queuedRead(signal, () => readWaveform(key, src, signal, decode), null)
 }
 
-async function readWaveform(key: string, src: string, signal: AbortSignal): Promise<Waveform | null> {
+async function readWaveform(key: string, src: string, signal: AbortSignal, decode: boolean): Promise<Waveform | null> {
   try {
     const head = await fetch(src, { method: 'HEAD', signal })
     if (!head.ok || Number(head.headers.get('Content-Length')) > MAX_BYTES) return null
@@ -131,14 +137,15 @@ async function readWaveform(key: string, src: string, signal: AbortSignal): Prom
         }
       } catch { /* Storage is optional. */ }
     }
+    if (!decode || typeof OfflineAudioContext === 'undefined') return null
     const read = (async (): Promise<Waveform | null> => {
-      let context: AudioContext | null = null
       try {
         const response = await fetch(src, { signal })
         if (!response.ok) return null
         const bytes = await boundedBytes(response)
-        context = new AudioContext()
-        const buffer = await context.decodeAudioData(bytes)
+        // An offline context decodes without opening an audio device session;
+        // a low rate keeps a long recording's decoded samples small.
+        const buffer = await new OfflineAudioContext(1, 1, DECODE_RATE).decodeAudioData(bytes)
         if (signal.aborted) return null
         const result = { duration: buffer.duration, peaks: audioPeaks(Array.from({ length: buffer.numberOfChannels }, (_, i) => buffer.getChannelData(i))) }
         if (etag) try {
@@ -149,7 +156,6 @@ async function readWaveform(key: string, src: string, signal: AbortSignal): Prom
         } catch { /* Quota or storage denial does not interrupt listening. */ }
         return result
       } catch { return null }
-      finally { if (context) await context.close().catch(() => {}) }
     })()
     if (etag) {
       cache.set(identity, read)
