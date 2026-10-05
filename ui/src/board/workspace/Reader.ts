@@ -16,6 +16,8 @@ export interface ReaderOptions {
   onConversation(): void
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
+  /** The overview's compact rows, independent of channel stepping's entry order. */
+  switcherCards?(): KanbanCard[]
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -32,14 +34,26 @@ function button(cls: string, text: string, action: () => void, label = text): HT
   return b
 }
 
+/** Wide desktops open the channel sidebar unless the reader chose otherwise. */
+export const SIDEBAR_MEDIA = '(min-width: 1280px)'
+const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
+
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
   readonly el = element('section', 'ws-reader ws-dormant')
+  /** The vellum the reader floats on; the only blurred layer, and it never moves. */
+  private readonly veil = element('div', 'ws-veil')
+  private departure: ReturnType<typeof setTimeout> | null = null
+  private arrival = 0
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
   readonly host: DocumentHost
   private readonly opts: ReaderOptions
   private readonly tabs: TabStrip
+  private readonly navbar: HTMLElement
+  private readonly lead: HTMLElement
+  private readonly trail: HTMLElement
+  private keyboardInput = false
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly conversation: HTMLButtonElement
@@ -50,6 +64,7 @@ export class Reader {
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
+  private agent = ''
   private selected: DocKey | null = null
   private expanded = false
   private active = false
@@ -57,7 +72,12 @@ export class Reader {
   private menuAnchor: HTMLElement | null = null
   private switcher = false
   private sidebar = element('aside', 'ws-sidebar')
-  private sidebarOpen = false
+  private readonly sidebarFind = element('input', 'ws-channel-find')
+  private sidebarList: HTMLElement = element('div', 'ws-channel-list')
+  /** The persisted choice; absent, the sidebar follows the viewport width. */
+  private sidebarChoice: boolean | null = null
+  private readonly sidebarToggle: HTMLButtonElement
+  private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
   private liveWidth: number | null = null
   private cancelResize: (() => void) | null = null
   private instantRaf = 0
@@ -72,13 +92,15 @@ export class Reader {
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand())
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
+    this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Channels')
+    this.sidebarToggle.title = 'Channels (⌘\\)'
     this.conversation = button('ws-conversation', 'Conversation', () => opts.onConversation())
-    const lead = element('div', 'ws-nav-lead')
-    lead.append(this.returnButton, this.title)
-    const trail = element('div', 'ws-nav-trail')
-    trail.append(this.conversation)
-    const nav = element('nav', 'ws-navbar')
-    nav.append(lead, this.tabs.el, trail)
+    this.lead = element('div', 'ws-nav-lead')
+    this.lead.append(this.returnButton, this.sidebarToggle, this.title)
+    this.trail = element('div', 'ws-nav-trail')
+    this.trail.append(this.conversation)
+    this.navbar = element('nav', 'ws-navbar')
+    this.navbar.append(this.lead, this.tabs.el, this.trail)
     this.prev = button('ws-thumb-button', '‹', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '›', () => this.step(1), 'Next document')
     const thumbMenu = button('ws-thumb-button', '⋯', () => {
@@ -91,9 +113,14 @@ export class Reader {
     this.announcement.setAttribute('aria-atomic', 'true')
     this.stage.append(this.track)
     this.sidebar.setAttribute('aria-label', 'Channels')
+    this.sidebarFind.type = 'search'
+    this.sidebarFind.placeholder = 'Find a channel'
+    this.sidebarFind.setAttribute('aria-label', 'Find a channel')
+    this.sidebarFind.addEventListener('input', () => this.fillSidebar())
+    this.sidebar.append(this.sidebarFind, this.sidebarList)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
-    this.el.append(nav, main, thumb, this.announcement)
+    this.el.append(this.veil, this.navbar, main, thumb, this.announcement)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -106,14 +133,18 @@ export class Reader {
     window.addEventListener('resize', this.relayout)
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
+    document.addEventListener('pointerdown', this.pointerInput, true)
+    document.addEventListener('keydown', this.keyboardModality, true)
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
+    this.wide.addEventListener('change', this.relayout)
     this.el.addEventListener('mousedown', e => {
       if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
     })
     try {
       this.sizes = JSON.parse(sessionStorage.getItem('shuttle:workspace:sizes') ?? '{}')
-      this.sidebarOpen = localStorage.getItem('shuttle:workspace:sidebar') === 'true'
+      const choice = localStorage.getItem(SIDEBAR_STORAGE)
+      if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
     } catch { /* Storage is optional. */ }
   }
 
@@ -125,8 +156,9 @@ export class Reader {
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
     this.channel = channel
     this.selected = selected
+    const arriving = !this.active
     this.active = true
-    this.el.classList.remove('ws-dormant')
+    if (arriving) this.arrive(origin === 'Board')
     this.el.inert = false
     this.el.removeAttribute('aria-hidden')
     this.returnButton.textContent = `‹ ${origin}`
@@ -136,12 +168,13 @@ export class Reader {
     const state = card?.runtimePhase ?? card?.workerState ?? card?.status ?? 'open'
     const dot = element('span', `ws-state-dot ws-state-${state}`)
     this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'))
-    this.conversation.title = `${card?.workerAgent ?? card?.shuttleAgent ?? ''} · ${state}`
+    this.agent = card?.workerAgent ?? card?.shuttleAgent ?? ''
+    this.conversation.title = `${this.agent} · ${state}`
     this.tabs.render(channel.labels)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && animate)
     this.renderSidebar()
-    if (switching) this.returnButton.focus({ preventScroll: true })
+    if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
 
@@ -154,14 +187,48 @@ export class Reader {
     this.paint(true)
   }
 
-  hide(): void {
+  /**
+   * Leave the reader. Toward the Desk or Chronicle the veil lifts and the page
+   * sinks back as one motion before the pages park; toward the Board, whose
+   * sheet wears the same veil, it goes at once.
+   */
+  hide(animate = false): void {
     this.cancelResize?.()
     this.active = false
     this.closeMenu()
-    this.host.parkAll()
-    this.el.classList.add('ws-dormant')
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
+    cancelAnimationFrame(this.arrival)
+    if (this.departure !== null) clearTimeout(this.departure)
+    this.departure = null
+    const settle = (): void => {
+      this.departure = null
+      this.host.parkAll()
+      // Dormant first: it suspends transitions, so the veil resets without replaying.
+      this.el.classList.add('ws-dormant')
+      this.el.classList.remove('ws-departing')
+    }
+    this.el.classList.remove('ws-arriving', 'ws-veil-held')
+    if (!animate || this.motion.matches || this.el.classList.contains('ws-dormant')) { settle(); return }
+    this.el.classList.add('ws-departing')
+    this.departure = setTimeout(settle, this.measure('veil-time', 180))
+  }
+  /** The veil fades in while the stage settles up; over the Board's veil only the stage moves. */
+  private arrive(veilHeld: boolean): void {
+    if (this.departure !== null) { clearTimeout(this.departure); this.departure = null }
+    const fromRest = this.el.classList.contains('ws-dormant')
+    this.el.classList.remove('ws-departing')
+    if (!fromRest || this.motion.matches) { this.el.classList.remove('ws-dormant'); return }
+    // Take the starting pose while dormant (no transitions), then wake and release it.
+    this.el.classList.toggle('ws-veil-held', veilHeld)
+    this.el.classList.add('ws-arriving')
+    void this.el.offsetWidth
+    this.el.classList.remove('ws-dormant')
+    cancelAnimationFrame(this.arrival)
+    this.arrival = requestAnimationFrame(() => {
+      this.arrival = 0
+      this.el.classList.remove('ws-arriving', 'ws-veil-held')
+    })
   }
 
   private selectIndex(index: number): void {
@@ -215,22 +282,27 @@ export class Reader {
     const sent = doc.provenance.filter(p => p.kind === 'sent')
     const latest = sent.at(-1)
     const embed = doc.provenance.find(p => p.kind === 'embed')
-    let summary = doc.kind === 'fiber' ? 'fiber prose' : embed ? 'embedded' : 'linked from body'
+    // Provenance reads in the mono register; the machine that sent it wears cobalt.
+    const segments: Array<string | HTMLElement> = [doc.kind === 'fiber' ? 'fiber page' : embed ? 'embedded' : 'linked from body']
     if (latest?.kind === 'sent') {
       const age = Math.max(0, Math.round((Date.now() - latest.time) / 60000))
-      summary = `sent ${age < 60 ? `${age}m` : age < 1440 ? `${Math.floor(age / 60)}h` : `${Math.floor(age / 1440)}d`} ago`
-      if (sent.length > 1) summary += ` · ${sent.length} receipts`
-      if (latest.worker) summary += ` · ${latest.worker}`
-    } else if (embed?.kind === 'embed' && embed.title) summary += ` · ${embed.title}`
-    summary += ` · ${doc.owner}`
+      segments[0] = `sent ${age < 60 ? `${age}m` : age < 1440 ? `${Math.floor(age / 60)}h` : `${Math.floor(age / 1440)}d`} ago`
+      if (sent.length > 1) segments.push(`${sent.length} receipts`)
+      const agent = latest.worker ?? this.agent
+      if (agent) segments.push(element('span', 'ws-agent', agent))
+    } else if (embed?.kind === 'embed' && embed.title) segments.push(embed.title)
+    segments.push(doc.owner)
     const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', text: '≡', other: '□' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
+    const summary = segments.map(part => typeof part === 'string' ? part : part.textContent).join(' · ')
     parts.glyph.textContent = glyph
     parts.title.textContent = label
     parts.title.title = doc.path
-    parts.provenance.textContent = summary
-    parts.provenance.title = summary
+    if (parts.provenance.title !== summary) {
+      parts.provenance.replaceChildren(...segments.flatMap((part, i) => i ? [' · ', part] : [part]))
+      parts.provenance.title = summary
+    }
     parts.expand.textContent = this.expanded ? '⤡' : '⤢'
     parts.expand.setAttribute('aria-label', this.expanded ? 'Restore size' : 'Expand document')
   }
@@ -247,7 +319,28 @@ export class Reader {
     if (doc.kind === 'image' && img?.naturalWidth && img.naturalHeight) width = Math.max(320, (height - this.measure('label-height', 40)) * img.naturalWidth / img.naturalHeight)
     return Math.min(max, width)
   }
+  private layoutNavbar(): void {
+    if (this.phone.matches) { this.navbar.style.removeProperty('grid-template-columns'); return }
+    const style = getComputedStyle(this.navbar)
+    const gap = parseFloat(style.columnGap) || 12
+    const padLeft = parseFloat(style.paddingLeft) || 12
+    const width = this.navbar.clientWidth - padLeft - (parseFloat(style.paddingRight) || 12)
+    if (!width) return
+    const lead = this.returnButton.offsetWidth + this.sidebarToggle.offsetWidth + 2 * gap + Math.min(280, Math.max(100, this.title.scrollWidth))
+    const trail = this.conversation.offsetWidth
+    const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + Math.max(0, this.tabs.buttons.length - 1) * 2 + 4
+    // A fitting strip is centred over the stage, which starts after the sidebar;
+    // a longer strip takes the remaining band, bounded by both controls.
+    const sidebar = this.sidebarShown ? this.sidebar.offsetWidth : 0
+    const centre = sidebar + (this.navbar.clientWidth - sidebar) / 2 - padLeft
+    const leadBand = Math.floor(centre - tabs / 2 - gap)
+    const trailBand = width - leadBand - tabs - 2 * gap
+    this.navbar.style.gridTemplateColumns = leadBand >= lead && trailBand >= trail
+      ? `${leadBand}px ${tabs}px minmax(0, 1fr)`
+      : `${Math.min(lead, width * 0.32)}px minmax(0, 1fr) ${trail}px`
+  }
   private layout(animate: boolean): void {
+    this.layoutNavbar()
     const ch = this.channel
     if (!ch || !this.active) return
     const W = this.stage.clientWidth, H = this.stage.clientHeight
@@ -362,7 +455,7 @@ export class Reader {
     const r = anchor.getBoundingClientRect()
     menu.style.left = `${Math.max(12, Math.min(window.innerWidth - menu.offsetWidth - 12, r.right - menu.offsetWidth))}px`
     menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 6)}px`
-    menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
+    if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
   }
   private closeMenu(): boolean {
     if (!this.menu) return false
@@ -372,14 +465,17 @@ export class Reader {
     this.switcher = false
     return true
   }
+  private readonly pointerInput = (): void => { this.keyboardInput = false }
+  private readonly keyboardModality = (): void => { this.keyboardInput = true }
   private readonly outside = (e: PointerEvent): void => {
     if (this.menu && !this.menu.contains(e.target as Node) && !this.menuAnchor?.contains(e.target as Node)) this.closeMenu()
   }
   private channelList(filter = ''): HTMLElement {
     const list = element('div', 'ws-channel-list')
-    for (const card of this.opts.cards()) {
+    for (const card of (this.opts.switcherCards?.() ?? this.opts.cards())) {
       if (!`${card.name} ${card.path}`.toLowerCase().includes(filter.toLowerCase())) continue
-      const row = button('ws-channel-row', card.name, () => { this.closeMenu(); this.opts.onChannel(card) })
+      const row = button('ws-channel-row', '', () => { this.closeMenu(); this.opts.onChannel(card) }, card.name)
+      row.append(element('span', 'ws-channel-name', card.name))
       row.title = card.outcome ?? card.path
       row.setAttribute('aria-current', String((card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner))
       row.append(element('small', '', card.originId))
@@ -388,6 +484,7 @@ export class Reader {
     return list
   }
   private openSwitcher(): void {
+    if (this.sidebarShown) { this.sidebarFind.focus(); return }
     if (this.switcher) { this.closeMenu(); return }
     this.closeMenu()
     const menu = element('div', 'ws-menu ws-switcher')
@@ -406,17 +503,45 @@ export class Reader {
     menu.style.top = `${rect.bottom + 6}px`
     find.focus()
   }
+  /** Re-list the channel rows after the overview's order changes. */
+  refreshChannels(): void {
+    if (this.active && this.sidebarShown) this.fillSidebar()
+  }
+  private get sidebarShown(): boolean {
+    return !this.phone.matches && (this.sidebarChoice ?? this.wide.matches)
+  }
+  private toggleSidebar(): void {
+    this.sidebarChoice = !this.sidebarShown
+    try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
+    this.closeMenu()
+    this.renderSidebar(); this.layout(false)
+  }
   private renderSidebar(): void {
-    this.el.classList.toggle('ws-with-sidebar', this.sidebarOpen && !this.phone.matches)
-    if (this.sidebarOpen) this.sidebar.replaceChildren(this.channelList())
+    const shown = this.sidebarShown
+    this.el.classList.toggle('ws-with-sidebar', shown)
+    this.sidebarToggle.setAttribute('aria-pressed', String(shown))
+    this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide channels' : 'Show channels')
+    this.sidebar.inert = !shown
+    if (shown) this.fillSidebar()
+  }
+  /** Rows refresh in place; the list keeps its scroll and the find its text. */
+  private fillSidebar(): void {
+    const top = this.sidebarList.scrollTop
+    const next = this.channelList(this.sidebarFind.value)
+    this.sidebarList.replaceWith(next)
+    this.sidebarList = next
+    next.scrollTop = top
+    const current = next.querySelector<HTMLElement>('[aria-current="true"]')
+    if (current && (current.offsetTop < next.scrollTop || current.offsetTop + current.offsetHeight > next.scrollTop + next.clientHeight)) {
+      next.scrollTop = Math.max(0, current.offsetTop - next.clientHeight / 3)
+    }
   }
   private readonly keydown = (e: KeyboardEvent): void => {
+    this.keyboardInput = true
     if (!this.active || e.isComposing || document.querySelector('.kbn-detail-overlay,[data-state="open"][role="dialog"]')) return
-    if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+    if ((e.metaKey || e.ctrlKey) && (e.key === '\\' || e.code === 'Backslash')) {
       e.preventDefault(); e.stopImmediatePropagation()
-      this.sidebarOpen = !this.sidebarOpen
-      try { localStorage.setItem('shuttle:workspace:sidebar', String(this.sidebarOpen)) } catch { /* Storage is optional. */ }
-      this.renderSidebar(); this.layout(false)
+      this.toggleSidebar()
       return
     }
     if (this.handleKey(e.key, e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {
@@ -448,10 +573,15 @@ export class Reader {
     this.observer?.disconnect()
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
+    cancelAnimationFrame(this.arrival)
+    if (this.departure !== null) clearTimeout(this.departure)
+    this.wide.removeEventListener('change', this.relayout)
     this.tabs.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
+    document.removeEventListener('pointerdown', this.pointerInput, true)
+    document.removeEventListener('keydown', this.keyboardModality, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
     this.el.remove()

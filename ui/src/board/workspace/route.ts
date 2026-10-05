@@ -1,7 +1,8 @@
 import type { DocKey } from './documents.js'
 
 export type WorkspaceRoute =
-  | { kind: 'overview' }
+  /** `hash` names the view the entry addresses, known before an asynchronous pop lands. */
+  | { kind: 'overview'; hash?: string }
   | { kind: 'channel'; uid: string; owner: string; doc?: DocKey }
 
 const OVERVIEW_HASH = '#/board'
@@ -111,6 +112,20 @@ export class WorkspaceHistory {
     this.onRoute(route)
   }
 
+  /** Establish an addressable view as the next channel stack's return point. */
+  view(hash = OVERVIEW_HASH): void {
+    this.ensureStarted()
+    this.pendingOwnPop = null
+    this.queuedEnter = null
+    this.depth = 0
+    this.base = true
+    this.baseHash = hash
+    this.currentHash = hash
+    this.current = { kind: 'overview', hash }
+    window.history.pushState(withRouteState(window.history.state, { depth: 0, base: true, baseHash: hash }), '', hash)
+    this.onRoute(this.current)
+  }
+
   select(doc: DocKey): void {
     if (this.pendingOwnPop !== null) {
       if (this.queuedEnter) this.queuedEnter = { ...this.queuedEnter, doc }
@@ -126,10 +141,10 @@ export class WorkspaceHistory {
 
   leave(): void {
     if (this.current?.kind !== 'channel') return
-    const overview: WorkspaceRoute = { kind: 'overview' }
     if (this.base && this.depth > 0) {
       const depth = this.depth
       const destination = this.baseHash
+      const overview: WorkspaceRoute = { kind: 'overview', hash: destination }
       this.pendingOwnPop = destination
       window.history.go(-depth)
       this.current = overview
@@ -139,6 +154,7 @@ export class WorkspaceHistory {
       return
     }
     window.history.replaceState(withRouteState(window.history.state, { depth: 0, base: true, baseHash: OVERVIEW_HASH }), '', OVERVIEW_HASH)
+    const overview: WorkspaceRoute = { kind: 'overview', hash: OVERVIEW_HASH }
     this.current = overview
     this.currentHash = OVERVIEW_HASH
     this.depth = 0
@@ -198,7 +214,7 @@ export class WorkspaceHistory {
     }
 
     this.currentHash = hash
-    const next = route ?? (this.current ? { kind: 'overview' } : null)
+    const next: WorkspaceRoute | null = route ? (route.kind === 'overview' ? { ...route, hash } : route) : (this.current ? { kind: 'overview', hash } : null)
     if (!next) { this.current = null; this.depth = 0; this.base = true; this.baseHash = hash; return }
     this.current = next
     this.adoptDepth(state, next, hash)

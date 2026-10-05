@@ -81,7 +81,7 @@ describe('workspace reader integration', () => {
   it('body links append one page without losing embeds, and Conversation uses only its bridge', async () => {
     workspace.open(cards[0])
     await flush()
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Prose')!
+    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Note')!
     proseTab.click()
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
@@ -133,6 +133,19 @@ describe('workspace reader integration', () => {
     expect(window.location.hash).toContain('no-card@host-b')
   })
 
+  it('mouse entry does not focus chrome, but keyboard entry does', async () => {
+    workspace.open(cards[0])
+    await flush()
+    expect(document.activeElement).not.toBe(document.querySelector('.ws-return'))
+    const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
+    const press = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
+    control.dispatchEvent(press)
+    expect(press.defaultPrevented).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
+    await flush()
+    expect(document.activeElement).toBe(document.querySelector('.ws-return'))
+  })
+
   it('steps channels in supplied Desk order and ignores messages from unrelated frames', async () => {
     workspace.open(cards[0])
     await flush()
@@ -144,5 +157,55 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
     expect(window.location.hash).toContain('beta@host-b')
     expect(visibility).toHaveBeenCalledWith(true)
+  })
+
+  it('restores overview scroll after returning from a channel opened on the Board', async () => {
+    workspace.mountOverview(document.body)
+    workspace.showBoard()
+    await flush()
+    workspace.overview.opened(cards[0])
+    const overview = workspace.overview.el
+    overview.scrollTop = 432
+    overview.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"]')!.click()
+    await flush()
+    expect(workspace.reader.isActive).toBe(true)
+    expect(overview.hidden).toBe(true)
+
+    overview.scrollTop = 0
+    const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
+    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await returned
+    await flush()
+    expect(window.location.hash).toBe('#/board')
+    expect.soft(overview.hidden).toBe(false)
+    expect(overview.scrollTop).toBe(432)
+  })
+
+  it('resumes the last Board channel after Desk suspension, but not after an explicit return', async () => {
+    workspace.mountOverview(document.body)
+    workspace.showBoard()
+    await flush()
+    workspace.overview.opened(cards[0])
+    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"]')!.click()
+    await flush()
+    expect(workspace.reader.isActive).toBe(true)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+
+    workspace.suspend('desk')
+    expect(workspace.reader.isActive).toBe(false)
+    expect(window.location.hash).toBe('#/desk')
+    workspace.showBoard()
+    await flush()
+    expect(workspace.reader.isActive).toBe(true)
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+
+    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await flush()
+    workspace.showBoard()
+    await flush()
+    expect(workspace.reader.isActive).toBe(false)
+    expect(workspace.overview.el.hidden).toBe(false)
+    expect(window.location.hash).toBe('#/board')
   })
 })

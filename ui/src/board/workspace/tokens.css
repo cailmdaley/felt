@@ -1,21 +1,40 @@
 :root {
-  --ws-ground: #f5f4ed;
-  --ws-paper: #fbfaf5;
-  --ws-ink: #244a72;
-  --ws-ink-muted: #536f89;
-  --ws-hairline: rgba(36, 74, 114, 0.24);
-  --ws-red: #b23a2a;
-  --ws-hover: rgba(36, 74, 114, 0.05);
-  --ws-fill: rgba(36, 74, 114, 0.09);
-  --ws-grid: rgba(36, 74, 114, 0.055);
-  --ws-grid-major: rgba(36, 74, 114, 0.085);
-  --ws-mask: #000;
+  /* The Desk's materials and pigments (KanbanModal.css :root), opened up.
+     Every colour here is defined from a --kbn-* token, so the workspace
+     cannot drift from the Desk. */
+  --ws-ground: color-mix(in srgb, var(--kbn-parchment) 60%, var(--kbn-paper));
+  --ws-paper: var(--kbn-paper);
+  --ws-sheet: var(--kbn-sheet);
+  --ws-ink: var(--kbn-ink);
+  --ws-ink-soft: var(--kbn-ink-soft);
+  --ws-ink-muted: var(--kbn-ink-muted);
+  --ws-ink-faint: var(--kbn-ink-faint);
+  --ws-hairline: var(--kbn-rule-strong);
+  --ws-hairline-soft: var(--kbn-rule);
+  --ws-fill: var(--kbn-plate);
+  --ws-hover: color-mix(in srgb, var(--kbn-plate) 55%, transparent);
+  --ws-machine: var(--kbn-agent);
+  --ws-machine-halo: color-mix(in srgb, var(--kbn-agent) 20%, transparent);
+  --ws-fresh: var(--kbn-owed-bright);
+  --ws-owed: var(--kbn-owed);
+  --ws-focus: color-mix(in srgb, var(--kbn-you) 55%, transparent);
+  /* The vellum veil: the Desk's parchment, thinned so the Desk shows through
+     soft and unreadable under a blur. */
+  --ws-veil: color-mix(in srgb, var(--kbn-parchment) 70%, transparent);
+  --ws-veil-filter: blur(20px) saturate(1.15) brightness(1.03);
+  /* A page floats: one tight contact shadow and one long ambient one. */
+  --ws-float: 0 1px 2px color-mix(in srgb, var(--kbn-ink) 10%, transparent),
+    0 24px 56px -16px color-mix(in srgb, var(--kbn-ink) 22%, transparent);
+  --ws-mask: var(--kbn-ink);
 
   --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
-  --ws-sans: var(--font-sans, system-ui, sans-serif);
-  --ws-mono: var(--font-mono, ui-monospace, monospace);
+  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
+  /* The Desk's mono register (view tabs, counts): small, tracked, upright. */
+  --ws-mono-tracking: 0.08em;
 
   --ws-crossing: 280ms;
+  --ws-veil-time: 180ms;
+  --ws-settle: translateY(6px) scale(0.985);
   --ws-ease: ease;
   --ws-receded-scale: 0.94;
   --ws-receded-opacity: 0.55;
@@ -29,7 +48,8 @@
 
   --ws-reader-layer: 9000;
   --ws-line-width: 1px;
-  --ws-focus-width: 2px;
+  --ws-focus-width: 1px;
+  --ws-focus-offset: 2px;
   --ws-radius: 10px;
   --ws-control-radius: 7px;
   --ws-control-height: 32px;
@@ -42,21 +62,21 @@
   --ws-small-gap: 6px;
 
   --ws-chrome-size: 14px;
-  --ws-title-size: 17px;
-  --ws-label-size: 12.5px;
-  --ws-small-size: 11.5px;
+  --ws-title-size: 19px;
+  --ws-label-size: 12px;
+  --ws-small-size: 11px;
   --ws-heading-size: 30px;
   --ws-section-size: 23px;
   --ws-lede-size: 21px;
   --ws-prose-size: 18px;
   --ws-prose-width: 760px;
-  --ws-prose-padding: 44px 40px 72px;
+  --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
 
-  --ws-grid-major-size: 120px;
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  --ws-sidebar-width: 280px;
+  --ws-sidebar-width: 240px;
+  --ws-row-size: 16px;
   --ws-html-width: 1040px;
   --ws-pdf-width: 900px;
 }

@@ -478,11 +478,13 @@ export class KanbanModal {
     const wanted = new URLSearchParams(window.location.search).get('view')
     if (wanted && listViews().some((v) => v.id === wanted)) this.setView(wanted as BoardViewId)
     else if (window.location.hash.startsWith('#/board')) this.setView('shelf')
+    else if (window.location.hash === '#/chronicle') this.setView('chronicle')
     this.workspace = new Workspace(this.container!, {
       shuttleBase: this.shuttleBase,
       cards: () => this.workspaceCards(),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
+      onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
       onConversation: (card) => this.openWorkspaceConversation(card),
     })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
@@ -532,6 +534,7 @@ export class KanbanModal {
     this.resizeRaf = window.requestAnimationFrame(() => {
       this.resizeRaf = null
       this.expandOutcomesToFillSpace()
+      this.placeVeil()
     })
   }
 
@@ -625,13 +628,14 @@ export class KanbanModal {
       if (active) this.body.setAttribute('aria-hidden', 'true')
       else this.body.removeAttribute('aria-hidden')
     }
-    if (active) return
+    if (active) { this.workspace?.hideOverview(); return }
     if (this.pendingDeskData && this.activeViewId === 'desk') {
       const data = this.pendingDeskData
       this.pendingDeskData = null
       this.render(data)
     }
     if (this.activeViewId !== 'desk') this.mountOrRefreshActiveView()
+    if (this.activeViewId !== 'desk' || !this.workspaceReturnCard) return
     const address = this.workspaceReturnCard
     const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
     const target = this.workspaceReturnFocus?.isConnected ? this.workspaceReturnFocus
@@ -730,7 +734,11 @@ export class KanbanModal {
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
    * a stray click or repeated hotkey never tears a view down and back up.
    */
-  private setView(id: BoardViewId): void {
+  private setView(id: BoardViewId, navigate = true): void {
+    if (navigate && this.workspace) {
+      if (id === 'shelf') this.workspace.showBoard()
+      else this.workspace.suspend(id)
+    }
     if (id === this.activeViewId) return
     this.activeView?.unmount()
     this.activeView = null
@@ -785,9 +793,19 @@ export class KanbanModal {
   /** Paint the selected tab and show exactly one of Desk / view host. */
   private syncViewChrome(): void {
     const onDesk = this.activeViewId === 'desk'
+    // The Board's sheet is a vellum veil over the Desk, which stays drawn
+    // beneath it, untouchable and out of the accessibility tree.
+    const veiled = this.activeViewId === 'shelf'
     // Leaving the Desk mid-drag takes the horizon with it.
     if (!onDesk) this.syncDragHorizon(false)
-    if (this.deskEl) this.deskEl.style.display = onDesk ? '' : 'none'
+    if (this.deskEl) {
+      this.deskEl.style.display = onDesk || veiled ? '' : 'none'
+      this.deskEl.inert = veiled
+      if (veiled) this.deskEl.setAttribute('aria-hidden', 'true')
+      else this.deskEl.removeAttribute('aria-hidden')
+    }
+    this.body?.classList.toggle('kbn-body-veiled', veiled)
+    this.placeVeil()
     // The chips ride in the tab strip, which every view shares — but the lens
     // they engage only means anything on the Desk.
     if (this.lensSlotEl) this.lensSlotEl.style.display = onDesk ? '' : 'none'
@@ -803,6 +821,13 @@ export class KanbanModal {
         tab.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
       }
     }
+  }
+
+  /** The veiled view host starts under the tab strip and covers the rest of the page. */
+  private placeVeil(): void {
+    if (!this.container || !this.tabsEl || this.activeViewId !== 'shelf') return
+    const top = this.tabsEl.getBoundingClientRect().bottom - this.container.getBoundingClientRect().top
+    this.container.style.setProperty('--kbn-veil-top', `${Math.max(0, Math.round(top))}px`)
   }
 
   /**
@@ -883,6 +908,7 @@ export class KanbanModal {
     return {
       response,
       cards,
+      workspace: this.workspace ?? undefined,
       shuttleBase: this.shuttleBase,
       // The fetchers ARE the context's temporal half — closures over their own
       // cache, so spreading them is the same object, not a rebind.
@@ -2156,11 +2182,16 @@ export class KanbanModal {
     // `deskEl` docstring true: the Desk that comes back is the one the user
     // left, scroll positions and clamps intact, repainted from fresh data at
     // the moment it can see what it is doing.
+    // The Board veils a Desk that must exist: its first paint happens beneath
+    // the veil, and later data waits for the Desk to be in front again.
+    const veiledFirstPaint = this.activeViewId === 'shelf' && !this.deskEl.hasChildNodes()
     if (this.activeViewId !== 'desk') {
       this.lastResponse = data
-      this.pendingDeskData = data
       this.mountOrRefreshActiveView()
-      return
+      if (!veiledFirstPaint) {
+        this.pendingDeskData = data
+        return
+      }
     }
     this.pendingDeskData = null
 
@@ -2518,7 +2549,8 @@ export class KanbanModal {
 
   private handleKanbanKeyDown(e: KeyboardEvent): void {
     if (!this.body) return
-    if (this.workspace?.isActive) return
+    // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
+    if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
     // Escape releases an engaged lens and goes no further — "back out of what
     // I'm looking at", and the lens is the nearest thing being looked through.
     if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk') {
