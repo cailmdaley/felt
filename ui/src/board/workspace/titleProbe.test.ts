@@ -11,6 +11,8 @@ vi.mock('../FileViewerPanel.js', () => ({
     if (body) onSource(new TextEncoder().encode(body))
   }),
 }))
+const watched = new Set<string>()
+vi.mock('../LiveFileRefresh.js', () => ({ liveFileWatched: (url: string) => watched.has(decodeURIComponent(url)) }))
 const { probeDocumentTitles, PROBE_RETRY_MS } = await import('./titleProbe.js')
 const { declaredTitle } = await import('./DocumentTitles.js')
 const { buildChannel } = await import('./documents.js')
@@ -60,5 +62,20 @@ describe('title probe', () => {
     probeDocumentTitles('', build('2026-10-05T11:00:00Z', 2000).documents)
     await vi.waitFor(() => expect(declaredTitle(key)?.title).toBe('Third draft'))
     expect(reads.length - reads0).toBe(3)
+  })
+
+  it('leaves a report the stage is already reading to name itself, and keeps a peek when its file time first arrives', async () => {
+    const reads0 = reads.length
+    const build = (modifiedAt?: string) => buildChannel({ uid: 'mounted', owner: 'mounted-host', name: 'Mounted', path: '/f.md', fiberDir: '/', body: '',
+      embeds: [{ path: '/mounted.html' }, { path: '/beside.html' }],
+      ...(modifiedAt ? { fileModifiedAt: new Map([['mounted-host:/beside.html', modifiedAt]]) } : {}),
+    })
+    watched.add('/api/v1/file?path=/mounted.html&origin=mounted-host')
+    probeDocumentTitles('', build().documents)
+    await vi.waitFor(() => expect(reads.length - reads0).toBe(1))
+    expect(reads.at(-1)).toContain('/beside.html')
+    probeDocumentTitles('', build('2026-10-05T10:00:00Z').documents)
+    await Promise.resolve(); await Promise.resolve()
+    expect(reads.length - reads0).toBe(1)
   })
 })

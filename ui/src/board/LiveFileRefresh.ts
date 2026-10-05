@@ -155,6 +155,11 @@ export class LiveFileRefresh {
     return stop
   }
 
+  /** True while a reader surface watches this URL. */
+  watched(url: string): boolean {
+    return this.files.has(url)
+  }
+
   /** Poll every due file now; hidden pages do no work. */
   async pollNow(): Promise<void> {
     if (!this.isVisible()) return
@@ -340,6 +345,10 @@ export function watchLiveFile(
   options: LiveFileWatchOptions = {},
 ): LiveFileSubscription {
   return liveFileRefresh.watch(url, onContent, onError, options)
+}
+
+export function liveFileWatched(url: string): boolean {
+  return liveFileRefresh.watched(url)
 }
 
 export function refreshLiveFile(url: string): Promise<void> {
