@@ -9,14 +9,16 @@ defmodule Shuttle.FiberAddresses do
   the UID on every answer read this way, so a stale address costs a fallback
   read, never a wrong document.
 
-  Owns the ETS table; readers never call the poller. Learned addresses are
-  dropped wholesale past `@max_learned`, and a restart clears the table: each
-  costs one walk per UID read again.
+  Owns two ETS tables, the poller's addresses and the learned ones, so the
+  learned cap counts learned rows alone; readers never call the poller.
+  Learned addresses are dropped wholesale past `@max_learned`, and a restart
+  clears both tables: each costs one walk per UID read again.
   """
 
   use GenServer
 
-  @table :shuttle_fiber_addresses
+  @polled :shuttle_fiber_addresses_polled
+  @learned :shuttle_fiber_addresses_learned
   @max_learned 20_000
 
   @type address :: {store :: String.t(), id :: String.t()}
@@ -26,7 +28,9 @@ defmodule Shuttle.FiberAddresses do
 
   @impl true
   def init(:ok) do
-    :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+    for table <- [@polled, @learned],
+        do: :ets.new(table, [:named_table, :public, :set, read_concurrency: true])
+
     {:ok, nil}
   end
 
@@ -34,7 +38,7 @@ defmodule Shuttle.FiberAddresses do
   @spec lookup(String.t()) :: address() | nil
   def lookup(id) when is_binary(id) do
     with {:ok, uid} <- uid(id) do
-      fetch({:polled, uid}) || fetch({:learned, uid})
+      fetch(@polled, uid) || fetch(@learned, uid)
     else
       _ -> nil
     end
@@ -49,11 +53,11 @@ defmodule Shuttle.FiberAddresses do
     polled =
       for {id, address} <- addresses, {:ok, uid} <- [uid(id)], into: %{}, do: {uid, address}
 
-    :ets.insert(@table, Enum.map(polled, fn {uid, address} -> {{:polled, uid}, address} end))
+    :ets.insert(@polled, Map.to_list(polled))
 
-    for uid <- :ets.select(@table, [{{{:polled, :"$1"}, :_}, [], [:"$1"]}]),
+    for uid <- :ets.select(@polled, [{{:"$1", :_}, [], [:"$1"]}]),
         not Map.has_key?(polled, uid),
-        do: :ets.delete(@table, {:polled, uid})
+        do: :ets.delete(@polled, uid)
 
     :ok
   rescue
@@ -64,10 +68,9 @@ defmodule Shuttle.FiberAddresses do
   @spec learn(String.t(), String.t(), String.t()) :: :ok
   def learn(uid, store, id) when is_binary(uid) and is_binary(store) and is_binary(id) do
     with {:ok, uid} <- uid(uid), true <- id != "" do
-      if :ets.info(@table, :size) >= @max_learned,
-        do: :ets.match_delete(@table, {{:learned, :_}, :_})
+      if :ets.info(@learned, :size) >= @max_learned, do: :ets.delete_all_objects(@learned)
 
-      :ets.insert(@table, {{:learned, uid}, {store, id}})
+      :ets.insert(@learned, {uid, {store, id}})
     end
 
     :ok
@@ -82,9 +85,9 @@ defmodule Shuttle.FiberAddresses do
     if Shuttle.ULID.valid?(uid), do: {:ok, uid}, else: :error
   end
 
-  defp fetch(key) do
-    case :ets.lookup(@table, key) do
-      [{^key, address}] -> address
+  defp fetch(table, uid) do
+    case :ets.lookup(table, uid) do
+      [{^uid, address}] -> address
       _ -> nil
     end
   rescue

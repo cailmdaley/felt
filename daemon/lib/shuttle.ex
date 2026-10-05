@@ -177,8 +177,8 @@ defmodule Shuttle.Application do
       # Shares one felt read among concurrent board requests for the same
       # fiber, and among concurrent misses for a store's listing.
       Shuttle.SingleFlight,
-      # Owns the ETS table of slugs learned from UID reads, so a UID felt had
-      # to walk the store for once is read through its slug afterwards.
+      # Owns the ETS tables of fiber addresses, polled and learned, so a read
+      # by UID goes through a known `{store, id}` instead of a store walk.
       Shuttle.FiberAddresses,
       Shuttle.Meeting.Control,
       # Owns the ETS table past sessions' bridge URLs are cached in, keyed on
