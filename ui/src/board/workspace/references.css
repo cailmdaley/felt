@@ -11,7 +11,7 @@ a.ws-channel-reference:has(code) { font: inherit; }
   position: relative; display: inline-grid; place-items: center; vertical-align: middle;
   width: 24px; height: 24px; margin: 0 4px 0 0; padding: 0;
   border: 0; border-radius: 2px; background: transparent; color: var(--ws-ink, #30281e);
-  font: 13px/1 Georgia, serif; cursor: pointer;
+  font: var(--ws-label-size)/1 var(--ws-serif); cursor: pointer;
 }
 button.ws-reference-play::after {
   content: ''; position: absolute; bottom: 1px; left: 0;
