@@ -7,8 +7,9 @@
   --ws-sheet: var(--kbn-sheet);
   --ws-ink: var(--kbn-ink);
   --ws-ink-soft: var(--kbn-ink-soft);
-  --ws-ink-muted: var(--kbn-ink-muted);
-  --ws-ink-faint: var(--kbn-ink-faint);
+  /* Small metadata must remain legible on the darker vellum, not only on paper. */
+  --ws-ink-muted: color-mix(in srgb, var(--kbn-ink-muted) 70%, var(--kbn-ink-soft));
+  --ws-ink-faint: var(--ws-ink-muted);
   --ws-hairline: var(--kbn-rule-strong);
   --ws-hairline-soft: var(--kbn-rule);
   --ws-fill: var(--kbn-plate);
@@ -16,18 +17,18 @@
   --ws-machine: var(--kbn-agent);
   --ws-machine-halo: color-mix(in srgb, var(--kbn-agent) 20%, transparent);
   --ws-fresh: var(--kbn-owed-bright);
-  --ws-owed: var(--kbn-owed);
-  --ws-focus: color-mix(in srgb, var(--kbn-you) 55%, transparent);
+  --ws-owed: color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-ink-soft));
+  --ws-focus: var(--kbn-you);
   /* The vellum veil: the Desk's parchment, thinned so the Desk shows through
      soft and unreadable under a blur. */
-  --ws-veil: color-mix(in srgb, var(--kbn-parchment) 60%, transparent);
-  --ws-veil-filter: blur(20px) saturate(1.15) brightness(1.03);
+  --ws-veil: color-mix(in srgb, var(--kbn-parchment) 42%, transparent);
+  --ws-veil-filter: blur(9px) saturate(1.05) brightness(1.02);
   /* A page floats: one tight contact shadow and one long ambient one. */
   --ws-float: 0 1px 2px color-mix(in srgb, var(--kbn-ink) 10%, transparent),
-    0 24px 56px -16px color-mix(in srgb, var(--kbn-ink) 22%, transparent);
+    0 28px 64px -14px color-mix(in srgb, var(--kbn-ink) 28%, transparent);
   --ws-mask: var(--kbn-ink);
   --ws-agent: var(--kbn-agent);
-  --ws-red: var(--kbn-owed);
+  --ws-red: var(--ws-owed);
 
   --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
   --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);

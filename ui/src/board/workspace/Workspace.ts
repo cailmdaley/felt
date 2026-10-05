@@ -29,6 +29,7 @@ interface ChannelState {
   selectionVersion: number
   routedFile?: DocKey
   loaded: boolean
+  metadataKnown: boolean
   error?: string
 }
 export type WorkspaceView = 'desk' | 'chronicle' | 'board'
@@ -63,7 +64,7 @@ export class Workspace {
     this.overview = new Overview({
       shuttleBase: opts.shuttleBase,
       cards: opts.cards,
-      onOpen: (card, doc) => this.open(card, 'Board', doc),
+      onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
       onOrder: () => this.reader?.refreshChannels(),
     })
     this.reader = new Reader({
@@ -74,7 +75,7 @@ export class Workspace {
       onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
       workerPill: card => this.dock.workerPillFor(card),
       onEscapeLayer: () => this.current ? this.dock.bandFor(this.current.card).handleEscape() : false,
-      onChannel: card => this.open(card, this.origin),
+      onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),
       onRefreshProse: async doc => {
         const state = [...this.channels.values()].find(s => s.channel.documents[0]?.key === doc.key)
@@ -95,10 +96,10 @@ export class Workspace {
     this.open(card, this.opts.origin(), this.ensure(card).channel.documents[0].key)
   }
 
-  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey): void {
+  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true): void {
     this.origin = origin
-    const state = this.ensure(card)
-    this.overview.opened(card)
+    const state = this.ensure(card, authoritative)
+    this.overview.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected)
   }
 
@@ -165,7 +166,7 @@ export class Workspace {
     this.reader.host.updateProse(key, this.prose(key))
   }
 
-  private ensure(card: KanbanCard): ChannelState {
+  private ensure(card: KanbanCard, metadataKnown = true): ChannelState {
     const uid = card.uid ?? card.id
     const key = channelId(uid, card.originId)
     let state = this.channels.get(key)
@@ -173,10 +174,10 @@ export class Workspace {
       state = {
         card,
         channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined }),
-        links: [], selectionVersion: 0, loaded: false,
+        links: [], selectionVersion: 0, loaded: false, metadataKnown,
       }
       this.channels.set(key, state)
-    } else state.card = card
+    } else { state.card = card; state.metadataKnown ||= metadataKnown }
     return state
   }
   private fiberPath(card: KanbanCard): string {
@@ -203,13 +204,15 @@ export class Workspace {
       else state = this.ensure({
         id: route.uid, uid: route.uid, name: route.uid, path: '', originId: route.owner,
         status: '', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
-      })
+      }, false)
     }
     this.current = state
     if (this.origin === 'Board') this.lastBoardRoute = route
+    // Reserve the body read before the receipt feed can preload this same fiber.
+    const bodyRead = this.load(state)
     // The sidebar and switcher list the overview's rows, so a direct entry reads them too.
+    this.overview.opened(state.card, state.metadataKnown)
     this.overview.refresh()
-    this.overview.opened(state.card)
     this.overview.setVisible(false)
     const wanted = route.doc ?? state.selected
     const loadedBefore = state.loaded
@@ -224,7 +227,7 @@ export class Workspace {
       band.openStartPrompt(prompt.card, prompt.failure)
       if (!window.matchMedia('(max-width: 600px)').matches) band.el.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true })
     }
-    await this.load(state)
+    await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
     if (state.selectionVersion === selectionVersion) {
       if (wanted && state.channel.documents.some(d => d.key === wanted)) state.selected = wanted
@@ -281,10 +284,11 @@ export class Workspace {
   }
   private async openFiber(id: string, owner: string): Promise<void> {
     const epoch = this.routeEpoch
-    const known = this.opts.cards().find(c => c.id === id && c.originId === owner) ?? this.opts.cards().find(c => c.id === id || c.uid === id)
+    const known = this.opts.cards().find(c => (c.id === id || c.uid === id) && c.originId === owner)
+      ?? this.opts.cards().find(c => c.uid === id)
     if (known) { this.open(known, this.origin); return }
     try {
-      const entry = await readFiber(this.opts.shuttleBase, id, owner)
+      const entry = await readFiber(this.opts.shuttleBase, id, owner, undefined, 'discover')
       if (!this.disposed && epoch === this.routeEpoch) this.open(cardFromCompositeEntry(entry), this.origin)
     } catch { showToast(`Couldn’t open ${id} on ${owner}`, 'error') }
   }
@@ -311,6 +315,7 @@ export class Workspace {
     const key = channelId(state.channel.uid, state.channel.owner)
     const pending = this.loads.get(key)
     if (pending) return pending
+    this.overview.resolving(state.channel.uid, true)
     const promise = (async () => {
       const controller = new AbortController()
       const timeout = window.setTimeout(() => controller.abort(), 25000)
@@ -326,6 +331,8 @@ export class Workspace {
           }
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
           state.card = metadata
+          state.metadataKnown = true
+          this.overview.resolved(metadata)
         }
         state.channel = { ...state.channel, body: entry.fiber.body ?? '', outcome: entry.fiber.outcome ?? state.card.outcome }
         state.loaded = true
@@ -338,7 +345,7 @@ export class Workspace {
       if (this.disposed) return
       this.rebuild(state)
       this.refreshProse(state)
-    })().finally(() => { this.loads.delete(key) })
+    })().finally(() => { this.loads.delete(key); this.overview.resolving(state.channel.uid, false) })
     this.loads.set(key, promise)
     return promise
   }

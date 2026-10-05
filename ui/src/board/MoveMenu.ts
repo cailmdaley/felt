@@ -14,8 +14,8 @@
  * subline is in the queue pane, where a row is a card name and joining the end
  * of its chain is not visible from that name.
  *
- * It is raised by a LONG PRESS on the card itself, rather than by a control in
- * the conversation dock — the gesture sits where the object is. The menu mounts
+ * It is raised by a LONG PRESS on the card itself — the gesture sits where
+ * the object is. The menu mounts
  * on `document.body`, outside the card's scrolling column, so it is not clipped.
  */
 import type { KanbanCard } from './KanbanTypes.js'
