@@ -39,6 +39,46 @@ defmodule ShuttleWeb.FileControllerTest do
       assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
     end
 
+    @tag :tmp_dir
+    test "serves a sibling asset to an opaque report origin without ACAO", %{tmp_dir: dir} do
+      report_dir = Path.join(dir, "report")
+      report_path = Path.join(report_dir, "index.html")
+      css_path = Path.join(report_dir, "foo.css")
+      File.mkdir_p!(report_dir)
+      File.write!(report_path, ~s(<link rel="stylesheet" href="foo.css">))
+      File.write!(css_path, "body { color: red; }")
+
+      report_url = URI.parse("http://127.0.0.1" <> file_asset_url("local", report_path))
+      sibling_url = report_url |> URI.merge("foo.css") |> Map.fetch!(:path)
+      assert sibling_url == file_asset_url("local", css_path)
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/css")
+        |> get(sibling_url)
+
+      assert conn.status == 200
+      assert conn.resp_body == "body { color: red; }"
+      assert get_resp_header(conn, "content-type") |> List.first() =~ "text/css"
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+    end
+
+    @tag :tmp_dir
+    test "404 for a missing sibling asset from an opaque report origin", %{tmp_dir: dir} do
+      path = Path.join([dir, "report", "missing.css"])
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/css")
+        |> get(file_asset_url("local", path))
+
+      assert conn.status == 404
+      assert %{"error" => "file not found"} = json_response(conn, 404)
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+    end
+
     test "uses browser media types for common audio and video extensions" do
       for {extension, content_type} <- [
             {"mp3", "audio/mpeg"},
@@ -561,6 +601,18 @@ defmodule ShuttleWeb.FileControllerTest do
                "http://localhost:4001/api/v1/file?path=%2Fabs%2Fon%2Fcandide.png"
     end
 
+    test "forwards relative report assets through the owner's existing /file route" do
+      stub_forward("candide", "http://localhost:4001", {:ok, 200, "text/css", "body {}"})
+
+      conn = get(api_conn(), file_asset_url("candide", "/project/report/foo.css"))
+
+      assert conn.status == 200
+      assert conn.resp_body == "body {}"
+      assert get_resp_header(conn, "content-type") == ["text/css"]
+      assert StubGetFileClient.last().url ==
+               "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport%2Ffoo.css"
+    end
+
     test "forwards conditional headers and relays a remote 304 with its validators" do
       etag = ~s(W/"remote-file")
 
@@ -765,6 +817,19 @@ defmodule ShuttleWeb.FileControllerTest do
       assert conn.status == 502
       assert %{"error" => _} = json_response(conn, 502)
     end
+  end
+
+  defp file_asset_url(origin, path) do
+    encoded_origin = URI.encode(origin, fn char -> URI.char_unreserved?(char) end)
+
+    encoded_path =
+      path
+      |> String.split("/", trim: true)
+      |> Enum.map_join("/", fn segment ->
+        URI.encode(segment, fn char -> URI.char_unreserved?(char) end)
+      end)
+
+    "/api/v1/file-assets/#{encoded_origin}/#{encoded_path}"
   end
 
   defp tmp_path(ext),

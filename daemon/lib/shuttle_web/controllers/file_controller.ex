@@ -1,7 +1,8 @@
 defmodule ShuttleWeb.FileController do
   @moduledoc """
   Serve file/asset bytes by absolute path: `GET /api/v1/file?path=…&origin=…`,
-  and metadata-only change probes via `GET /api/v1/file-info?path=…&origin=…`.
+  report-relative assets via `GET /api/v1/file-assets/:origin/*path`, and
+  metadata-only change probes via `GET /api/v1/file-info?path=…&origin=…`.
 
   Reader pages and overview thumbnails fetch HTML, text, and native media
   bytes from their owning host. The fiber route supplies markdown; this file
@@ -21,9 +22,10 @@ defmodule ShuttleWeb.FileController do
   through as-is. There is deliberately no felt-store sandbox: the constitution
   wants paper builds outside any store to render, and the trust model is the
   localhost/trusted-cluster daemon the rest of the API already assumes (it shells
-  out to felt over arbitrary stores). A relative path is a 400; `/file` returns
-  404 for a missing file, while `/file-info` reports `exists: false`; neither
-  500s the reader.
+  out to felt over arbitrary stores). The report-asset route restores the leading
+  slash omitted by URL paths, then uses this same owner-routing and absolute-path
+  validation. A relative path is a 400; `/file` returns 404 for a missing file,
+  while `/file-info` reports `exists: false`; neither 500s the reader.
 
   **Conditional and range reads on both owner legs.** Small GETs use a content
   digest; files above one MiB use a weak size/mtime/inode validator without
@@ -87,6 +89,20 @@ defmodule ShuttleWeb.FileController do
   def show(conn, _params) do
     conn |> put_status(400) |> json(%{error: "path is required"})
   end
+
+  @doc """
+  Serve a report-relative asset under an owner-prefixed URL.
+
+  The route wildcard omits the filesystem root; restoring it here sends the
+  path through `/file`'s owner routing, absolute-path validation, and byte
+  serving unchanged.
+  """
+  def asset(conn, %{"origin" => origin, "path" => segments})
+      when is_binary(origin) and is_list(segments) and segments != [] do
+    show(conn, %{"origin" => origin, "path" => Path.join(["/" | segments])})
+  end
+
+  def asset(conn, _params), do: show(conn, %{})
 
   @doc """
   Return cheap metadata for a file without reading its bytes.
