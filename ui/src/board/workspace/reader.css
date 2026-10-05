@@ -124,6 +124,7 @@
   position: fixed; z-index: 5; min-width: var(--ws-menu-width); max-width: min(var(--ws-menu-ceiling), calc(100vw - var(--ws-gap)));
   max-height: calc(100dvh - var(--ws-gap)); overflow: auto; padding: var(--ws-small-gap);
   background: var(--ws-paper); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-radius);
+  box-shadow: var(--ws-float);
 }
 .ws-menu-item { display: block; width: 100%; text-align: left; text-decoration: none; color: var(--ws-ink); padding: var(--ws-small-gap) var(--ws-inset); border-radius: var(--ws-control-radius); }
 .ws-menu-item { font-size: var(--ws-small-size); }
