@@ -7,6 +7,7 @@ import {
 import { refreshLiveFile } from '../LiveFileRefresh.js'
 import { fileBytesUrl } from '../utils.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
+import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
 
 export interface DocumentFrame {
   el: HTMLElement
@@ -30,6 +31,7 @@ type FrameState = {
   notice: HTMLElement | null
   controller: AbortController | null
   revision: number
+  transferTime: number | null
 }
 
 const RETAIN = 10
@@ -55,6 +57,7 @@ export function withWorkspaceKeyBridge(html: string): string {
 export class DocumentHost {
   private readonly frames = new Map<DocKey, FrameState>()
   private readonly live = new Map<DocKey, FrameState>()
+  private readonly audioPages = new Map<HTMLAudioElement, AudioPage>()
   private documents: WorkspaceDocument[] = []
   private selected: DocKey | null = null
   private disposed = false
@@ -88,6 +91,7 @@ export class DocumentHost {
       state.frame.doc = doc
     }
     this.select(selected)
+    for (const page of this.audioPages.values()) page.updateDocuments(documents)
   }
 
   select(key: DocKey): void {
@@ -96,6 +100,12 @@ export class DocumentHost {
     if (index < 0) {
       this.parkAll()
       return
+    }
+    const previous = this.selected ? this.frames.get(this.selected) : undefined
+    const oldAudio = previous?.frame.viewer?.querySelector('audio')
+    const target = this.frames.get(key)!
+    if (key !== this.selected && target.frame.doc.kind === 'audio' && oldAudio && keepAudioPosition() && this.documents.some(d => d.key === this.selected)) {
+      target.transferTime = oldAudio.currentTime
     }
     this.selected = key
     const current = new Set(this.documents.map((doc) => doc.key))
@@ -125,6 +135,7 @@ export class DocumentHost {
       this.mount(state)
       this.live.delete(id)
       this.live.set(id, state)
+      this.transferAudioPosition(state)
     }
     while (this.live.size > RETAIN) {
       const victim = [...this.live.keys()].find((id) => !visible.includes(id))
@@ -216,7 +227,7 @@ export class DocumentHost {
     const state: FrameState = {
       frame, pending: null, loaded: false, active: false, initialSuspended: false,
       scroll: readScroll(doc.key), readScroll: null, stopScroll: null,
-      notice: null, controller: null, revision: 0,
+      notice: null, controller: null, revision: 0, transferTime: null,
     }
     this.placeholder(state)
     el.addEventListener('click', event => {
@@ -277,6 +288,12 @@ export class DocumentHost {
         active: state.active,
         kind: doc.kind === 'fiber' ? undefined : doc.kind,
         transformHtml: withWorkspaceKeyBridge,
+        decorateAudio: audio => {
+          const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect)
+          this.audioPages.set(audio, page)
+          page.updateDocuments(this.documents)
+          return () => { page.dispose(); this.audioPages.delete(audio) }
+        },
         // A shared watcher may deliver cached text synchronously during build.
         onState: (result) => queueMicrotask(() => {
           if (this.disposed || state.revision !== revision) return
@@ -323,6 +340,7 @@ export class DocumentHost {
     state.loaded = true
     state.initialSuspended = false
     this.clearNotice(state)
+    this.transferAudioPosition(state)
     if (!state.active) suspendFileViewer(viewer)
   }
 
@@ -478,19 +496,27 @@ export class DocumentHost {
     }
   }
 
-  /** Space belongs to a selected media page, without changing the app keymap. */
+  private transferAudioPosition(state: FrameState): void {
+    const audio = state.frame.viewer?.querySelector('audio')
+    if (audio && audio.readyState >= 1 && state.transferTime !== null) {
+      seekAudio(audio, state.transferTime)
+      state.transferTime = null
+    }
+  }
+
+  /** Audio keys do not take Space away from the reader. */
   private readonly onMediaKey = (event: KeyboardEvent): void => {
-    if (!this.selected || event.key !== ' ' || event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
+    if (!this.selected || !['p', ',', '.'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || (event.key === 'p' && event.repeat)) return
     const state = this.frames.get(this.selected)
     if (!state?.active || state.frame.el.closest('[inert]') || blockingDialogOpen() || this.track.closest('.ws-reader')?.querySelector('.ws-menu')) return
     const intent = keyIntent(event, 'reader')
-    if (intent !== 'pageDown' && intent !== 'pageUp') return
-    const media = state.frame.viewer?.querySelector('audio,video') as HTMLMediaElement | null
+    if (!intent || !['audioPlay', 'audioBack', 'audioForward'].includes(intent)) return
+    const media = state.frame.viewer?.querySelector('audio')
     if (!media) return
     event.preventDefault()
     event.stopImmediatePropagation()
-    if (media.paused) void media.play().catch(() => { /* Native controls remain available after a refused autoplay. */ })
-    else media.pause()
+    if (intent === 'audioPlay') toggleAudio(media)
+    else seekAudio(media, media.currentTime + (intent === 'audioBack' ? -5 : 5))
   }
 
   private readonly onMessage = (event: MessageEvent): void => {

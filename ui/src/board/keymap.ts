@@ -1,5 +1,5 @@
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help'
+export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward'
 export interface KeyBinding {
   keys: readonly string[]
   intent: KeyIntent
@@ -32,6 +32,9 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['g'], 'first', 'First folio'), bind(['G'], 'last', 'Last folio'), bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['?'], 'help', 'Keyboard help'),
   ],
   reader: [
+    bind(['p'], 'audioPlay', 'Audio: play / pause'),
+    bind([','], 'audioBack', 'Audio: back 5 seconds'),
+    bind(['.'], 'audioForward', 'Audio: forward 5 seconds'),
     bind(['c'], 'sidebar', 'Toggle constitution sidebar'),
     bind(['/'], 'find', 'Find a constitution or file'),
     { ...bind(['\\'], 'sidebar', 'Toggle constitution sidebar'), command: true },

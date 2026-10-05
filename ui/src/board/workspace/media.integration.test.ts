@@ -29,6 +29,9 @@ beforeEach(() => {
   })
   vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function (this: HTMLMediaElement) { return !playing.has(this) })
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 0))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: true, size: 2048 }))))
 })
 afterEach(() => {
@@ -90,7 +93,7 @@ describe('native media documents', () => {
     expect(embedded.paused).toBe(true); expect(embedded.currentTime).toBe(.3)
   })
 
-  it('keeps the element through receding and parking and takes Space without stealing typing', async () => {
+  it('keeps the element through receding and parking and takes p without stealing typing or Space', async () => {
     const track = document.createElement('div'); document.body.append(track)
     host = new DocumentHost(track, { shuttleBase: '', buildProse: () => document.createElement('div'), onSelect: () => {} })
     const audioDoc = doc('/song.mp3', 'audio'), videoDoc = doc('/film.mp4', 'video')
@@ -98,6 +101,8 @@ describe('native media documents', () => {
     const audio = host.get(audioDoc.key)!.viewer!.querySelector('audio')!
     audio.dispatchEvent(new Event('loadedmetadata'))
     document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    expect(audio.paused).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }))
     expect(audio.paused).toBe(false)
     audio.currentTime = .5
     host.select(videoDoc.key); expect(audio.paused).toBe(true)
@@ -105,7 +110,7 @@ describe('native media documents', () => {
     expect(host.get(audioDoc.key)!.viewer!.querySelector('audio')).toBe(audio)
     expect(audio.paused).toBe(true); expect(audio.currentTime).toBe(.5)
     const field = document.createElement('textarea'); document.body.append(field)
-    field.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }))
     expect(audio.paused).toBe(true)
     host.parkAll(); host.setChannel([audioDoc, videoDoc], audioDoc.key)
     expect(host.get(audioDoc.key)!.viewer!.querySelector('audio')).toBe(audio)

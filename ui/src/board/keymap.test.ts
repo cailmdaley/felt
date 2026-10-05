@@ -18,7 +18,7 @@ describe('shared keyboard table', () => {
       }
     }
   }
-  it.each(['1', '2', '3', ',', 'Tab'])('leaves chassis key %s alone', key => {
+  it.each(['1', '2', '3', 'Tab'])('leaves chassis key %s alone', key => {
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event(key), surface)).toBeNull()
   })
   it.each(['input', 'textarea', 'select'])('ignores typing in %s, including reader Alt-arrows', tag => {

@@ -43,6 +43,8 @@ export interface FileViewerOptions {
   onState?: (state: FileViewerState) => void
   /** Paint paper until load rather than a loading message. */
   quietLoading?: boolean
+  /** Listening controls use the same native element and lifecycle as video. */
+  decorateAudio?: (audio: HTMLAudioElement) => () => void
 }
 
 /**
@@ -244,7 +246,9 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   page.append(media)
   wrap.append(page)
   media.src = src
+  const disposeAudio = media instanceof HTMLAudioElement ? options.decorateAudio?.(media) : undefined
   viewerDisposers.set(wrap, () => {
+    disposeAudio?.()
     disposed = true
     controller.abort()
     media.pause()
