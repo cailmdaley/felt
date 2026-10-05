@@ -66,7 +66,7 @@ func (a *app) daemonEndpoint(path string) (string, error) {
 func (a *app) daemonHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// The socket is local; an $HTTP_PROXY must never capture it.
-	proxy := transport.Proxy
+	proxy := a.httpProxy
 	transport.Proxy = func(req *http.Request) (*url.URL, error) {
 		if req.URL.Host == daemonSocketHost || proxy == nil {
 			return nil, nil

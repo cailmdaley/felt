@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -373,7 +374,7 @@ func mustDaemonEndpoint(t *testing.T, a *app, path string) string {
 // through the socket: the synthetic base URL plus a path reaches the server,
 // and an $HTTP_PROXY does not capture it.
 func TestGetDaemon_DialsUnixSocket(t *testing.T) {
-	// serial: the daemon client's proxy is net/http's ProxyFromEnvironment, which reads $HTTP_PROXY from the process
+	t.Parallel()
 	env := testEnv(t)
 	// /tmp, not t.TempDir(): macOS temp paths alone approach the 104-byte
 	// sun_path limit.
@@ -400,9 +401,9 @@ func TestGetDaemon_DialsUnixSocket(t *testing.T) {
 	t.Cleanup(func() { srv.Close() })
 
 	setHostEnvIn(t, env, filepath.Join(dir, "absent.json"), nil, map[string]string{"SHUTTLE_LISTEN": "unix://" + sock})
-	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
-
 	a := newApp(env)
+	// A proxy that would capture every request it is asked about.
+	a.httpProxy = func(*http.Request) (*url.URL, error) { return url.Parse("http://127.0.0.1:9") }
 	body, err := a.getDaemon(mustDaemonEndpoint(t, a, "/api/v1/state?x=1"), daemonReadTimeout)
 	if err != nil {
 		t.Fatalf("getDaemon: %v", err)

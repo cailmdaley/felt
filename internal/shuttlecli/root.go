@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"runtime"
@@ -127,6 +129,12 @@ type app struct {
 	// eventNow and eventRand stamp and break ties between hook events.
 	eventNow  func() time.Time
 	eventRand func() int
+	// httpProxy picks the proxy for a daemon request that is not the local
+	// socket: net/http's ProxyFromEnvironment.
+	httpProxy func(*http.Request) (*url.URL, error)
+	// versionProbeTimeout bounds each `shuttle --version` the binary receipt
+	// runs against a candidate executable.
+	versionProbeTimeout time.Duration
 }
 
 func newApp(env *sysenv.Env) *app {
@@ -140,6 +148,8 @@ func newApp(env *sysenv.Env) *app {
 		daemonLifecycleTimeout:    5 * time.Second,
 		eventNow:                  time.Now,
 		eventRand:                 func() int { return rand.Intn(32768) },
+		httpProxy:                 http.ProxyFromEnvironment,
+		versionProbeTimeout:       3 * time.Second,
 	}
 	a.tmuxSessionExists = a.tmuxHasSession
 	a.killTmuxSession = a.tmuxKillSession

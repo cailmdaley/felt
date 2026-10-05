@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -11,9 +10,8 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-// serial: feltcli's embedded ls and show print to the process stdout, which
-// captureStdout swaps.
 func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	fiber := &felt.Felt{
 		ID:        "work/task",
@@ -36,10 +34,7 @@ func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 
-	var err error
-	listJSON := captureStdout(t, func() {
-		_, err = runCommand(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle")
-	})
+	listJSON, err := runCommand(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle")
 	if err != nil {
 		t.Fatalf("shuttle ls: %v", err)
 	}
@@ -51,9 +46,7 @@ func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 		t.Fatalf("shuttle ls JSON differs from golden\nwant:\n%s\ngot:\n%s", golden, listJSON)
 	}
 
-	showJSON := captureStdout(t, func() {
-		_, err = runCommand(t, dir, "show", "work/task", "--json")
-	})
+	showJSON, err := runCommand(t, dir, "show", "work/task", "--json")
 	if err != nil {
 		t.Fatalf("shuttle show: %v", err)
 	}
@@ -72,25 +65,4 @@ func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 	if !ok || facet["resolved"] == nil {
 		t.Fatalf("resolved Shuttle facet missing from show JSON: %#v", shown["shuttle"])
 	}
-}
-
-// captureStdout returns what fn wrote to the process's stdout.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	os.Stdout = w
-	fn()
-	os.Stdout = old
-	if err := w.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	return buf.String()
 }

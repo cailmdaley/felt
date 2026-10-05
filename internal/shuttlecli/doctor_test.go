@@ -8,10 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
-	// serial: its fake --version probes run under shuttleExecutableBuild's fixed 3 s timeout, which the package's parallel subprocess load starves
+	t.Parallel()
 	env := testEnv(t)
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -30,7 +31,11 @@ func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
 	goBinShuttle := filepath.Join(home, "go", "bin", "shuttle")
 	writeShuttleVersion(t, goBinShuttle, "build-old")
 
-	receipt := newApp(env).collectShuttleBinaryReceiptAt(currentPath, "build-current", home, pathDir, "")
+	a := newApp(env)
+	// The fake --version probes share the machine with every parallel test's
+	// subprocesses; a slow one is not a broken one.
+	a.versionProbeTimeout = time.Minute
+	receipt := a.collectShuttleBinaryReceiptAt(currentPath, "build-current", home, pathDir, "")
 	if receipt.ResolvedPath != newApp(env).resolveBinaryPath(currentTarget) || receipt.Build != "build-current" {
 		t.Fatalf("running binary receipt = %+v", receipt)
 	}

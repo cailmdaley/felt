@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type ReceiptShuttleBinary struct {
@@ -70,7 +69,7 @@ func (a *app) collectShuttleBinaryReceiptAt(executable, build, home, pathValue, 
 }
 
 func (a *app) shuttleExecutableBuild(path string) (string, string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), a.versionProbeTimeout)
 	defer cancel()
 	output, err := a.env.CommandContext(ctx, path, "--version").CombinedOutput()
 	if err != nil {
