@@ -185,9 +185,11 @@
   font-family: var(--ws-serif); transition: transform var(--ws-crossing) var(--ws-ease);
 }
 .ws-sidebar .ws-constitution-card .kbn-card-id { display: none; }
-.ws-sidebar .ws-constitution-card .kbn-card-name { font: 500 var(--ws-row-size)/1.2 var(--ws-serif); }
-.ws-sidebar .ws-constitution-card .kbn-card-outcome { -webkit-line-clamp: var(--ws-sidebar-outcome-lines); font: var(--ws-sidebar-outcome-size)/1.35 var(--ws-serif); pointer-events: none; }
-.ws-sidebar .ws-constitution-card .kbn-card-meta { justify-content: space-between; gap: var(--ws-small-gap); }
+.ws-sidebar .ws-constitution-card .kbn-card-name { font: 500 var(--ws-prose-size)/1.2 var(--ws-serif); }
+.ws-sidebar .ws-constitution-card .kbn-card-outcome { -webkit-line-clamp: var(--ws-sidebar-outcome-lines); font: var(--ws-label-size)/1.35 var(--ws-serif); pointer-events: none; }
+.ws-sidebar .ws-constitution-card .kbn-card-meta { justify-content: space-between; gap: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); }
+.ws-sidebar .ws-constitution-card .kbn-card-worker { font: var(--ws-small-size)/1.3 var(--ws-mono); }
+.ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; }
 .ws-sidebar .ws-channel-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-paper); border-color: var(--ws-ink-faint); transform: translateY(var(--ws-sidebar-lift)); }
 .ws-sidebar .ws-constitution-card[aria-current='true'] {
