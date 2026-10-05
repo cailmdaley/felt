@@ -211,12 +211,25 @@ export class Workspace {
   queueVerdict(requested: KanbanCard, verdict: Verdict): void {
     const uid = requested.uid ?? requested.id, owner = requested.originId
     const state = this.channels.get(channelId(uid, owner))
-    const resolve = (): KanbanCard => this.opts.cards().find(card => (card.uid ?? card.id) === uid && card.originId === owner) ?? state?.card ?? requested
-    const card = resolve()
+    const resolve = (): KanbanCard | undefined => this.opts.cards().find(card => (card.uid ?? card.id) === uid && card.originId === owner)
+    const indexed = resolve()
+    // Linked fibers can be outside the board index; cached metadata only labels the toast.
+    if (!indexed && !state?.metadataKnown) return
+    const card = indexed ?? requested
     const review = fiberPageColumn(card) === 'awaitingReview'
     const material = this.current?.channel.uid === uid && this.current.channel.owner === owner ? this.themes.material(this.reader.el) : undefined
-    this.verdicts.queue(card, verdict, () => {
-      const live = resolve()
+    this.verdicts.queue(card, verdict, async () => {
+      let live = resolve()
+      if (!live && !indexed) {
+        try {
+          live = cardFromCompositeEntry(await readFiber(this.opts.shuttleBase, uid, owner))
+        } catch { /* An unreachable or missing identity cannot authorize a write. */ }
+      }
+      if (this.disposed) return
+      if (!live || (live.uid ?? live.id) !== uid || live.originId !== owner) {
+        showToast(`${card.name} is no longer available; verdict not written`, 'error')
+        return
+      }
       // A worker may start during the undo window; never stop it from a stale review.
       if (review && fiberPageColumn(live) !== 'awaitingReview') {
         showToast(`${live.name} no longer awaits review; verdict not written`, 'error')

@@ -125,6 +125,45 @@ describe('workspace reader integration', () => {
     expect(commit).toHaveBeenCalledExactlyOnceWith(live, 'tempered')
     vi.useRealTimers()
   })
+  it.each(['replacement', 'removed', 'other origin'])('drops a delayed verdict when its indexed identity is %s', async change => {
+    workspace.dispose()
+    const reviewing = card({ id: 'work/review', uid: 'UID-A', originId: 'host-a',
+      status: 'closed', shuttleKind: 'oneshot' })
+    let live = [reviewing]
+    bodyCards = live
+    const commit = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
+      onVisibility: visibility, dock: new Dock('', changed, commit) })
+    workspace.open(reviewing); await flush()
+    vi.useFakeTimers()
+    workspace.queueVerdict(reviewing, 'composted')
+    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
+    live = change === 'removed' ? [] : [{ ...reviewing,
+      ...(change === 'replacement' ? { uid: 'UID-B' } : { originId: 'host-b' }) }]
+    bodyCards = live
+    vi.advanceTimersByTime(6000); await flush()
+    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
+    expect(commit).not.toHaveBeenCalled()
+  })
+  it.each(['same identity', 'replacement', 'missing'])('rechecks an off-index linked fiber against its owner: %s', async result => {
+    workspace.dispose()
+    const linked = card({ id: 'work/linked', uid: 'linked-uid', originId: 'host-a',
+      status: 'closed', shuttleKind: 'oneshot' })
+    bodyCards = [linked]
+    const commit = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [], origin: () => 'Desk',
+      onVisibility: visibility, dock: new Dock('', changed, commit) })
+    workspace.open(linked); await flush()
+    vi.useFakeTimers()
+    workspace.queueVerdict(linked, 'tempered')
+    const renamed = { ...linked, id: 'work/moved', path: 'work/moved/moved.md' }
+    bodyCards = result === 'missing' ? [] : [result === 'replacement' ? { ...linked, uid: 'replacement-uid' } : renamed]
+    vi.mocked(fetch).mockClear()
+    vi.advanceTimersByTime(6000); await flush()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/api/v1/fibers/linked-uid?body=true&origin=host-a&routed=1'))).toBe(true)
+    if (result === 'same identity') expect(commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: linked.uid, id: renamed.id, originId: linked.originId }), 'tempered')
+    else expect(commit).not.toHaveBeenCalled()
+  })
   it('keeps the originating Desk column and bands through j/k and returns the current card', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
