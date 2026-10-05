@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { KanbanCard } from './KanbanTypes.js'
 import { Dock, type MeetingJoinControl } from './workspace/Dock.js'
 import { card } from './testFixtures'
 
@@ -285,6 +286,14 @@ describe('the composer takes pasted images', () => {
     expect(panel.bandFor(task)).toBe(firstBand)
     expect(firstBand.el.querySelector('textarea')).toBe(input)
     expect(input.value).toBe('half a thought')
+    expect(firstBand.el.querySelectorAll('.kbn-ctl-image')).toHaveLength(1)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+    const renamed = { ...task, id: 'work/renamed', path: '/stores/cluster/.felt/work/renamed.md', name: 'Renamed task' }
+    expect(panel.bandFor(renamed)).toBe(firstBand)
+    expect(firstBand.el.querySelector('textarea')).toBe(input)
+    expect(input.value).toBe('half a thought')
+    expect((firstBand as unknown as { card: KanbanCard }).card).toMatchObject({ id: renamed.id, path: renamed.path })
     expect(firstBand.el.querySelectorAll('.kbn-ctl-image')).toHaveLength(1)
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()
     expect(panel.bandFor(card({ id: 'work/task', uid: 'task-uid', originId: 'other-host' }))).not.toBe(firstBand)

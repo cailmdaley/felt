@@ -183,7 +183,7 @@ describe('Overview metadata recovery and navigation', () => {
     expect(opens.mock.calls.map(([c]) => c.uid)).toEqual(['beta'])
     expect(fiberReads()).toHaveLength(2)
   })
-  it('bounds both preloads and clicks to four reads and suppresses a superseded queued click', async () => {
+  it('prioritizes queued clicks over preloads within four reads and suppresses a superseded click', async () => {
     files = Array.from({ length: 7 }, (_, i) => receipt(`uid${i}`))
     const pending = new Map<string, ReturnType<typeof deferred<Response>>>()
     let active = 0, peak = 0
@@ -195,17 +195,22 @@ describe('Overview metadata recovery and navigation', () => {
       return item.promise.finally(() => { active-- })
     })
     sheet().refresh(); await settle()
-    expect(fiberReads()).toHaveLength(4)
-    folio('uid5')!.click(); folio('uid6')!.click()
+    expect([...pending.keys()]).toEqual(['uid0', 'uid1', 'uid2', 'uid3'])
+    folio('uid5')!.click(); folio('uid6')!.click(); folio('uid6')!.click()
     expect(fiberReads()).toHaveLength(4)
     pending.get('uid0')!.resolve(json(envelope('uid0'))); await settle()
-    pending.get('uid1')!.resolve(json(envelope('uid1'))); await settle()
-    pending.get('uid2')!.resolve(json(envelope('uid2'))); await settle()
+    expect([...pending.keys()]).toEqual(['uid0', 'uid1', 'uid2', 'uid3', 'uid6'])
     pending.get('uid6')!.resolve(json(envelope('uid6'))); await settle()
+    expect(opens.mock.calls.map(([c]) => c.uid)).toEqual(['uid6'])
+    expect(pending.has('uid5')).toBe(true)
     pending.get('uid5')!.resolve(json(envelope('uid5'))); await settle()
     expect(opens.mock.calls.map(([c]) => c.uid)).toEqual(['uid6'])
+    for (const uid of ['uid1', 'uid2', 'uid3', 'uid4']) pending.get(uid)!.resolve(json(envelope(uid)))
+    await settle()
     expect(peak).toBe(4)
+    expect(active).toBe(0)
     expect(fiberReads()).toHaveLength(7)
+    expect(new Set(fiberReads()).size).toBe(7)
   })
   it('keeps an unreachable clicked placeholder provisional and retryable', async () => {
     files = [receipt('alpha')]

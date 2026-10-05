@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { card, expectPinnedZone } from '../testFixtures.js'
+import { card, expectPinnedZone, ownerFiberResponse } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { docKey } from './documents.js'
 import { Overview, overviewDayGroup, overviewHostMarks } from './Overview.js'
@@ -66,7 +66,9 @@ beforeEach(() => {
   cards = [card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha result', path: '.felt/science/shear/alpha/alpha.md', originId: 'host-a', fiberDir: '/notes/alpha', outcome: 'A checked measurement.' }),
     card({ id: 'work/beta', uid: 'beta', name: 'Beta pipeline', path: '.felt/tools/pipeline/beta/beta.md', originId: 'host-b' })]
   feed = { files: [], origins: { 'host-b': {}, 'host-a': {} } }
-  fetchMock = vi.fn(async (url: string) => new Response(url.includes('/sent-files/all/composite') ? JSON.stringify(feed) : 'safe text', { status: 200 }))
+  fetchMock = vi.fn(async (url: string) => url.includes('/sent-files/all/composite')
+    ? new Response(JSON.stringify(feed), { status: 200 })
+    : new Response('', { status: 404 }))
   vi.stubGlobal('fetch', fetchMock)
   onOpen = vi.fn(); onOrder = vi.fn()
   overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onOrder })
@@ -134,30 +136,32 @@ describe('Overview receipt membership and identity', () => {
     expect(overview.orderedCards()).toEqual([]) // Session membership is not persisted.
   })
 
-  it('resolves a missing fiber on click through the shared parser without changing the file owner', async () => {
+  it('resolves an unknown fiber from a complete owner response and preserves the receipt byte owner', async () => {
     feed.files = [receipt('missing', '/remote/report.html', now(), 'bytes-host')]
+    fetchMock.mockImplementation(async (url: string) => url.includes('/sent-files/')
+      ? new Response(JSON.stringify(feed))
+      : new Response(JSON.stringify(ownerFiberResponse({
+        id: 'missing', uid: 'missing', owner: 'bytes-host', name: 'Resolved measurement', body: 'The owner serves this note.',
+      }))))
     await refresh()
-    expect(name('missing')).toBe('Other · missing')
-    fetchMock.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes('/sent-files/') ? feed : {
-      host: 'fiber-host', fibers: [{ origin: 'fiber-host', felt_store: '/store', path: '.felt/work/missing/missing.md', dir: '/store/.felt/work/missing',
-        fiber: { id: 'missing', name: 'Resolved measurement', path: '/store/.felt/work/missing/missing.md', status: 'closed' } }],
-    })))
+    expect(name('missing')).toBe('Resolved measurement')
     overview.el.querySelector<HTMLButtonElement>('.ws-overview-rib')!.click()
     await settle()
     expect(fetchMock.mock.calls.some(([url]) => url.includes('/api/v1/fibers/missing?body=true&origin=bytes-host'))).toBe(true)
     expect(onOpen).toHaveBeenCalledOnce()
     const [opened, key] = onOpen.mock.calls[0]
     expect(opened.name).toBe('Resolved measurement')
-    expect(opened.originId).toBe('fiber-host')
+    expect(opened.originId).toBe('bytes-host')
     expect(key).toBe('bytes-host:/remote/report.html')
   })
 
-  it('still opens an owner-aware Other fallback when a missing fiber cannot be resolved', async () => {
+  it('groups a confirmed missing receipt as Unfiled on its byte-owning host', async () => {
     feed.files = [receipt('missing', '/remote/report.html', now(), 'bytes-host')]
     await refresh()
-    fetchMock.mockResolvedValue(new Response('', { status: 404 }))
+    expect(name('other:bytes-host')).toBe('Unfiled · bytes-host')
+    expect(overview.orderedCards().map(c => c.uid)).toEqual(['other:bytes-host'])
     overview.el.querySelector<HTMLButtonElement>('.ws-overview-rib')!.click(); await settle()
-    expect(onOpen.mock.calls[0][0]).toMatchObject({ uid: 'missing', originId: 'bytes-host', name: 'Other · missing' })
+    expect(onOpen.mock.calls[0][0]).toMatchObject({ uid: 'other:bytes-host', originId: 'bytes-host', name: 'Unfiled · bytes-host' })
     expect(onOpen.mock.calls[0][1]).toBe('bytes-host:/remote/report.html')
   })
 
@@ -225,8 +229,11 @@ describe('Overview stable lenses, visits, and DOM', () => {
   it('names and groups a folio placed before the board metadata arrived', async () => {
     const known = cards
     cards = []
-    feed.files = [receipt('alpha', '/result.html')]; await refresh()
-    expect(name('alpha')).toContain('Other')
+    feed.files = [receipt('alpha', '/result.html')]
+    fetchMock.mockImplementation(async (url: string) => url.includes('/sent-files/')
+      ? new Response(JSON.stringify(feed)) : new Response('', { status: 503 }))
+    await refresh()
+    expect(name('alpha')).toBe('Resolving fiber · host-a')
     cards = known; overview.cardsChanged()
     expect(name('alpha')).toContain('Alpha result')
     lens('projects'); expect(groups()).toEqual(['science / shear'])

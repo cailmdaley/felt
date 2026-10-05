@@ -55,6 +55,44 @@ export function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
   return { ...base, totals: over.totals ?? surfaceTotals(base) }
 }
 
+/** A complete owner-addressed `shuttle show` feed envelope for reader tests. */
+export function ownerFiberResponse(options: {
+  owner: string
+  id: string
+  uid?: string
+  name: string
+  body: string
+  outcome?: string
+  status?: string
+  path?: string
+  store?: string
+  dir?: string
+}): Record<string, unknown> {
+  const path = options.path ?? `.felt/${options.id}/${options.id.split('/').at(-1)}.md`
+  const store = options.store ?? `/stores/${options.owner}`
+  return {
+    host: options.owner,
+    generated_at: '2026-10-05T00:00:00Z',
+    fibers: [{
+      origin: options.owner,
+      felt_store: store,
+      path,
+      dir: options.dir ?? `${store}/.felt/${options.id}`,
+      fiber: {
+        id: options.id,
+        uid: options.uid ?? options.id,
+        name: options.name,
+        status: options.status ?? 'closed',
+        created_at: '2026-01-01T09:00:00Z',
+        body: options.body,
+        outcome: options.outcome ?? '',
+        shuttle: { kind: 'oneshot', host: options.owner, agent: 'codex-sol' },
+      },
+    }],
+    origins: { [options.owner]: { kind: 'local', stale: false, fiber_count: 1 } },
+  }
+}
+
 // The real Chronicle column layout: 28 back, 14 forward, today fixed at a
 // known LOCAL day. Built from the production helper so the fixture is the same
 // shape in both zones `npm test` pins.
