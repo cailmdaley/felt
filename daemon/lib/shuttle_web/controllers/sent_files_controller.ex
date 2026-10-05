@@ -9,26 +9,26 @@ defmodule ShuttleWeb.SentFilesController do
   ground truth (see finding 01KVC1N5XMAAMYXDAGR4V6QA9G).
 
   **Owner-routed via `Shuttle.OriginRouter`, exactly like `/file`.** The composite
-  board stamps each fiber with its `origin`; the panel carries that origin back. A
-  local-owned fiber's trail is read here from this host's events.jsonl; a
-  remote-owned fiber forwards to the owning daemon's identical `/sent-files`
-  (origin stripped) over the SSH tunnel — only that daemon tails its own host's
-  events.jsonl — and relays its JSON verbatim (`OriginRouter.forward_get/4`).
+  board stamps each fiber with its `origin`; the document workspace carries that
+  origin back. A local-owned fiber's trail is read here from this host's
+  `events.jsonl`; a remote-owned fiber forwards to the owning daemon's identical
+  `/sent-files` (origin stripped) over the SSH tunnel — only that daemon tails
+  its own host's `events.jsonl` — and relays its JSON verbatim
+  (`OriginRouter.forward_get/4`).
 
   A missing `uid` is a 400; a missing/empty events file yields `{"files": []}`,
   not a 500.
 
   **Neither leg rescans the stream.** `Shuttle.SentFiles` reads an in-memory
   projection kept by `Shuttle.EventStream`, which seeds once at boot and then
-  reads only appended bytes. That, not the ETag below, is what makes the
-  detail panel's poll and the unconditional remote leg affordable.
+  reads only appended bytes. That, not the ETag below, keeps reader polls and
+  unconditional remote requests affordable.
 
   **The local leg carries a weak `ETag`** over the request and both sources'
   change tokens: the `events.jsonl` pair and the session ledger. The ledger
   matters for native sessions whose event predates the fiber↔session claim.
   Each source's rotated sibling is included because the reader reads it. The
-  detail panel's live poll therefore re-reads the trail whenever either source
-  changes. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
+  document reader refreshes the trail whenever either source changes. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
   forwards no request headers and drops response headers, so a client's
   `If-None-Match` never reaches the owning daemon and its `ETag` never comes
   back — which is exactly why the reader itself, not the conditional request,

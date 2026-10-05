@@ -56,25 +56,24 @@ try {
     const destination = mobile ? 'chatgpt://' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     assert.equal(await appMark.getAttribute('href'), destination)
     await appCard.locator('.kbn-card-name').click()
-    await page.locator('.ws-conversation').click()
-    const dock = page.locator('.ws-dock')
+    const dock = page.locator('.ws-selected .ws-dock')
     await dock.waitFor({ state: 'visible' })
-    const detailPill = dock.locator('.kbn-detail-aloft')
+    const detailPill = dock.locator('.ws-dock-worker .kbn-card-worker')
     assert.equal(await detailPill.textContent(), 'Aloft')
     assert.equal(await detailPill.getAttribute('href'), destination)
-    // The dock pill uses its control scale while keeping one typography across
+    // The fiber-page pill uses its control scale while keeping one typography across
     // worker states, just as the compact Desk pill does at its own scale.
     await detailPill.evaluate(detail => {
       const original = detail.className
       const typography = ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform']
-      detail.className = 'kbn-card-worker kbn-detail-aloft'
+      detail.className = 'kbn-card-worker kbn-card-worker-aloft'
       const baseline = Object.fromEntries(typography.map(property => [property, getComputedStyle(detail)[property]]))
       for (const variant of ['aloft', 'waiting', 'attention', 'blocked']) {
-        detail.className = `kbn-card-worker kbn-detail-aloft${variant === 'aloft' ? '' : ` kbn-card-worker-${variant}`}`
+        detail.className = `kbn-card-worker kbn-card-worker-${variant}`
         const style = getComputedStyle(detail)
         for (const property of typography) {
           if (style[property] !== baseline[property]) {
-            throw new Error(`${variant} ${property}: expected dock baseline ${baseline[property]}, got ${style[property]}`)
+            throw new Error(`${variant} ${property}: expected fiber-page baseline ${baseline[property]}, got ${style[property]}`)
           }
         }
       }
@@ -88,5 +87,5 @@ try {
     }
     await page.close()
   }
-  console.log('App Aloft marker and detail passed on desktop and phone')
+  console.log('App Aloft marker and fiber-page pill passed on desktop and phone')
 } finally { await browser.close() }

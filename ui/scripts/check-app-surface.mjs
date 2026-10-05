@@ -1,5 +1,5 @@
-/** Real Capture form and conversation-dock browser check against the offline board
- * harness. Run `npm run harness:board` then `node scripts/check-app-surface.mjs`.
+/** Capture, Stash, and fiber-page controls in the offline board harness.
+ * Run `npm run harness:board` then `node scripts/check-app-surface.mjs`.
  * CHROME_PATH selects an installed Chromium; SCREENSHOT_DIR saves both sizes.
  */
 import assert from 'node:assert/strict'
@@ -8,13 +8,10 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
 
-async function openDock(page) {
-  const conversation = page.locator('.ws-conversation')
-  await conversation.waitFor({ state: 'visible' })
-  await conversation.click()
-  const dock = page.locator('.ws-dock')
-  await dock.waitFor({ state: 'visible' })
-  return dock
+async function openControls(page) {
+  const controls = page.locator('.ws-selected .ws-dock')
+  await controls.waitFor({ state: 'visible' })
+  return controls
 }
 
 const browser = await chromium.launch({
@@ -62,7 +59,7 @@ try {
     }
   })
   await page.getByText('App conversation continuity', { exact: true }).click()
-  const dock = await openDock(page)
+  const dock = await openControls(page)
   const drawer = dock.locator('.kbn-detail-controls-toggle')
   const verdicts = await dock.locator('.kbn-ctl-foot .kbn-ctl-btn').allInnerTexts()
   assert.deepEqual(verdicts, ['Discard', 'Temper'], 'the drawer offers both verdicts, Temper under Resume')
@@ -76,14 +73,14 @@ try {
   assert.equal(await appChoice.getAttribute('aria-checked'), 'true', 'existing app conversation retains its mode')
   assert.ok(await detailSurface.isVisible(), 'existing task visibly identifies its session type')
   const detailBox = await detailSurface.boundingBox()
-  assert.ok(detailBox && detailBox.x >= 0 && detailBox.x + detailBox.width <= 390, 'phone: detail session choice fits')
+  assert.ok(detailBox && detailBox.x >= 0 && detailBox.x + detailBox.width <= 390, 'phone: fiber-page session choice fits')
   if (process.env.SCREENSHOT_DIR) {
-    await page.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'detail-phone.png') })
+    await page.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'fiber-page-phone.png') })
   }
   // History: folded, and read only when unfolded.
   const historyToggle = page.locator('.kbn-ctl-history-toggle')
   assert.equal(await historyToggle.getAttribute('aria-expanded'), 'false', 'history starts folded')
-  assert.equal(await page.locator('.kbn-ctl-sessions').isVisible(), false, 'folded history shows no list')
+  assert.equal(await page.locator('.kbn-ctl-session-list').isVisible(), false, 'folded history shows no list')
   assert.equal(await page.locator('.kbn-ctl-session').count(), 0, 'nothing drawn before the unfold')
   if (process.env.SCREENSHOT_DIR) {
     await page.locator('.kbn-ctl-history').screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'history-folded-phone.png') })
@@ -164,13 +161,13 @@ try {
   )
   const linkReads = (await page.evaluate(() => window.sessionReads)).filter(url => url.includes('/sessions/links'))
   assert.ok(linkReads.length > 0 && linkReads.every(url => !url.includes('basalt-login-02')), `stale host not asked: ${linkReads}`)
-  const historyBox = await page.locator('.kbn-ctl-sessions').boundingBox()
+  const historyBox = await page.locator('.kbn-ctl-session-list').boundingBox()
   assert.ok(historyBox && historyBox.x + historyBox.width <= 390, 'phone: the history fits')
   if (process.env.SCREENSHOT_DIR) {
     await page.locator('.kbn-ctl-history').screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'history-open-phone.png') })
   }
   await historyToggle.click()
-  assert.equal(await page.locator('.kbn-ctl-sessions').isVisible(), false, 'the fold closes again')
+  assert.equal(await page.locator('.kbn-ctl-session-list').isVisible(), false, 'the fold closes again')
   assert.equal(await page.locator('.kbn-ctl-history-count').innerText(), '8', 'and keeps its count')
 
   // Editing a live worker's settings must never substitute for a launch gesture.
@@ -206,7 +203,7 @@ try {
 
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByText('Run the 2D B-mode null tests', { exact: true }).click()
-  await openDock(page)
+  await openControls(page)
   await dock.locator('.kbn-detail-controls-toggle').click()
   await page.evaluate(() => {
     window.settingWrites = []
@@ -244,10 +241,10 @@ try {
   )
   assert.ok(!(await dueField.isVisible()), 'a standing role has no due field — it runs on its cron')
 
-  // Escape in the parent search cancels the search without closing the dock.
+  // Escape in the parent search cancels the search without closing the fiber controls.
   await page.locator('.kbn-ctl-parent').click()
   await page.getByRole('combobox', { name: 'Search parent fiber', exact: true }).press('Escape')
-  assert.equal(await dock.locator('.kbn-detail-controls').count(), 1, 'Escape in the parent search keeps the dock open')
+  assert.equal(await dock.locator('.kbn-detail-controls').count(), 1, 'Escape in the parent search keeps the fiber controls open')
   assert.ok(await page.locator('.kbn-ctl-parent').isVisible(), 'Escape puts the parent id back')
 
   // A refused kind write puts the control back on what the wire says.
@@ -278,7 +275,7 @@ try {
   assert.equal((await page.evaluate(() => window.settingWrites)).length, 0, 'opening Meeting starts nothing')
   await page.keyboard.press('Escape')
   assert.ok(!(await page.getByRole('menu', { name: 'Meeting kind', exact: true }).isVisible()), 'Escape closes the menu')
-  assert.equal(await dock.locator('.kbn-detail-controls').count(), 1, 'Escape in the menu keeps the dock open')
+  assert.equal(await dock.locator('.kbn-detail-controls').count(), 1, 'Escape in the menu keeps the fiber controls open')
   await message.fill('null tests review')
   await meeting.click()
   await page.getByRole('menuitem', { name: 'Room', exact: true }).click()
@@ -303,7 +300,7 @@ try {
   // Discard is the `tempered: false` verdict.
   await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await page.getByText('File the conference travel reimbursement', { exact: true }).click()
-  await openDock(page)
+  await openControls(page)
   await dock.locator('.kbn-detail-controls-toggle').click()
   await page.evaluate(() => {
     window.settingWrites = []
@@ -354,7 +351,7 @@ try {
   })
   await phone.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await phone.getByText('App conversation continuity', { exact: true }).click()
-  const phoneDock = await openDock(phone)
+  const phoneDock = await openControls(phone)
   await phoneDock.locator('.kbn-detail-controls-toggle').click()
   await phoneDock.locator('.kbn-ctl-history-toggle').click()
   const phoneClaim = phoneDock.locator('.kbn-ctl-session[data-session="f466597a-56d0-4047-8585-2159281ca18b"]')
@@ -370,27 +367,19 @@ try {
   )
   await phone.close()
 
-  // On a phone the dock is a bottom sheet over the reader. Its own slot
-  // scrolls through the expanded controls while the fiber prose remains a
-  // separate page in the workspace.
+  // On a phone the fiber controls remain part of the selected reader page.
   const touch = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })
   const touchErrors = []
   touch.on('pageerror', error => touchErrors.push(error.message))
   await touch.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
   await touch.getByText('App conversation continuity', { exact: true }).click()
-  const touchDock = await openDock(touch)
-  const prose = touch.locator('.ws-stage .kbn-detail-prose').first()
+  const touchDock = await openControls(touch)
+  const reader = touch.locator('.ws-page.ws-selected')
+  const prose = reader.locator('.ws-prose')
   await prose.waitFor({ state: 'visible' })
-  assert.equal(await prose.evaluate(el => el.closest('.ws-dock')), null, 'phone: fiber prose stays in the reader page')
-  const slot = touch.locator('.ws-dock-slot')
-  const sheet = await slot.evaluate(el => {
-    const rect = el.getBoundingClientRect()
-    const style = getComputedStyle(el)
-    return { position: style.position, left: rect.left, right: rect.right, bottom: rect.bottom, height: rect.height }
-  })
-  assert.equal(sheet.position, 'fixed', 'phone: the conversation dock is a fixed bottom sheet')
-  assert.ok(sheet.left <= 1 && sheet.right >= 389 && Math.abs(sheet.bottom - 844) <= 1, `phone: the dock spans the viewport bottom (${JSON.stringify(sheet)})`)
-  assert.ok(sheet.height <= 844 - 64 + 1, 'phone: the dock leaves the reader navbar above the sheet')
+  assert.ok(await reader.locator('.ws-dock').isVisible(), 'phone: controls are inline on the fiber page')
+  assert.notEqual(await touchDock.evaluate(el => getComputedStyle(el).position), 'fixed', 'phone: controls stay in reader flow')
+  const scroller = reader.locator('.ws-prose-scroll')
   await touchDock.locator('.kbn-detail-controls-toggle').click()
   await touchDock.locator('.kbn-ctl-history-toggle').click()
   await touchDock.locator('.kbn-ctl-session').first().waitFor()
@@ -400,34 +389,32 @@ try {
   const overflowing = await touchDock.locator('.kbn-ctl-session').evaluateAll(rows =>
     rows.filter(r => r.scrollWidth > r.clientWidth).map(r => r.dataset.session))
   assert.deepEqual(overflowing, [], 'every History row fits the phone width, a long host name included')
-  await slot.evaluate(el => { el.scrollTop = 0 })
-  const before = await slot.evaluate(el => ({ top: el.scrollTop, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight }))
-  assert.ok(before.scrollHeight > before.clientHeight, 'phone: expanded dock content scrolls inside its sheet')
+  await scroller.evaluate(el => { el.scrollTop = 0 })
+  const before = await scroller.evaluate(el => ({ top: el.scrollTop, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight }))
+  assert.ok(before.scrollHeight > before.clientHeight, 'phone: the selected fiber page scrolls through expanded controls')
   const cdp = await touch.context().newCDPSession(touch)
   const swipe = yDistance => cdp.send('Input.synthesizeScrollGesture', { x: 195, y: 420, yDistance, speed: 3000, gestureSourceType: 'touch' })
   await swipe(-2400)
   await touch.waitForTimeout(300)
-  const after = await slot.evaluate(el => el.scrollTop)
-  assert.ok(after > before.top, `phone: an upward touch swipe scrolls the dock sheet (${before.top} → ${after})`)
+  const after = await scroller.evaluate(el => el.scrollTop)
+  assert.ok(after > before.top, `phone: an upward touch swipe scrolls the fiber page (${before.top} → ${after})`)
   const verdictsReachable = await touchDock.locator('.kbn-ctl-foot .kbn-ctl-btn').evaluateAll(buttons => {
-    const bounds = buttons[0].closest('.ws-dock-slot').getBoundingClientRect()
+    const bounds = buttons[0].closest('.ws-page').getBoundingClientRect()
     return buttons.every(button => {
       const rect = button.getBoundingClientRect()
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
       return rect.top >= bounds.top && rect.bottom <= bounds.bottom && !!hit && button.contains(hit)
     })
   })
-  assert.ok(verdictsReachable, 'phone: Discard and Temper are reachable at the bottom of the dock')
+  assert.ok(verdictsReachable, 'phone: Discard and Temper remain reachable on the fiber page')
   if (process.env.SCREENSHOT_DIR) {
-    await touch.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'dock-bottom-phone.png') })
+    await touch.screenshot({ path: resolve(process.env.SCREENSHOT_DIR, 'fiber-controls-phone.png') })
   }
-  await touch.locator('.ws-conversation').click()
-  await touchDock.waitFor({ state: 'detached' })
-  assert.ok(await prose.isVisible(), 'phone: closing the dock leaves the reader page visible')
+  assert.ok(await prose.isVisible(), 'phone: inline controls leave the fiber prose visible')
   assert.deepEqual(touchErrors, [])
   await touch.close()
 
-  console.log('Capture/Stash/session choices, Stash parent Escape and phone submit, desktop/phone geometry, live settings without dispatch, dock strip, history fold and row actions (resume with pending state, app, copy, phone web; desktop and phone), phone dock sheet scrolls to verdicts while reader prose stays separate, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
+  console.log('Capture/Stash/session choices, phone submit, live settings without dispatch, inline fiber controls, history fold and session actions, phone reader scrolling, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
 } finally {
   await browser.close()
 }

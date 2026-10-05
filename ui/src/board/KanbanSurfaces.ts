@@ -199,8 +199,8 @@ interface KanbanSurfaceRendererOptions {
     horizon: HorizonKind,
     opts?: { cold?: boolean; due?: string | null },
   ) => void | Promise<void>
-  /** Reshape a fiber to a resting `kind:pinned` role — the drag-onto-the-
-   *  Pinned-strip gesture. The off-the-shelf twin of `setSurface`/`transition`. */
+  /** Reshape a fiber to a resting `kind:pinned` role with the Pinned-strip
+   *  gesture, alongside `setSurface` and `transition`. */
   pin: (card: KanbanCard) => void | Promise<void>
   /** Author a sequence edge — `card.depends_on = tailId`, the card-onto-card
    *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
@@ -641,14 +641,12 @@ export class KanbanSurfaceRenderer {
       for (const card of pinned) row.append(this.renderPinnedChip(card, staleness[card.originId]))
     }
     section.append(row)
-    // The "onto the shelf" half of the Pinned strip: dropping a card here
-    // reshapes it to a resting `kind:pinned` role via `reshape` — the off-write
-    // twin of dragging a pinned card onto In-flight (which dispatches it), and
-    // a `/lifecycle` reshape rather than the `/felt-edit` field the Now and
-    // Resting shelves write. A card already on the strip is handled inside
-    // pinRole, which banners "already pinned" rather than no-opping silently.
-    // NO `rowDrop`: a peek row never arms `dragSourceId`, so the shelf stays
-    // inert for it and the release passes through — deliberately.
+    // Dropping a card on the Pinned strip reshapes it to a resting
+    // `kind:pinned` role via `reshape` — the sibling of dragging a pinned card
+    // onto In-flight (which dispatches it), and a `/lifecycle` reshape rather
+    // than the `/felt-edit` field that Now and Resting write. A card already on
+    // the strip is handled inside `pinRole`, which reports "already pinned".
+    // No `rowDrop`: a peek row never arms `dragSourceId`, so it cannot land here.
     this.installSectionDragHandlers(section, {
       skipColHead: false,
       commit: (card) => void this.o.pin(card),
@@ -1044,11 +1042,9 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Install drop handlers on a shelf (Now, Resting, Pinned) — drop anywhere
-   *  inside it that isn't a column header and `commit` writes the shelf's
-   *  meaning for the card. `rowDrop`, when given, also accepts a peek-list row
-   *  (which leaves the queue and takes that horizon); its absence keeps the
-   *  shelf inert for a row, since a row never arms `dragSourceId`. */
+  /** Install drop handlers on a section (Now, Resting, Pinned). A drop outside
+   *  a column header calls `commit`; `rowDrop` also accepts a peek-list row,
+   *  which leaves the queue and takes that horizon. */
   private installSectionDragHandlers(
     section: HTMLElement,
     spec: {
@@ -1074,8 +1070,8 @@ export class KanbanSurfaceRenderer {
     section.addEventListener('drop', (e) => {
       if (overHead(e)) return
       section.classList.remove('kbn-section-drop')
-      // A peek-list row landing here leaves the queue; the shelf still means
-      // what it means (Now surfaces the card, Resting keeps it at rest).
+      // A peek-list row landing here leaves the queue; Now surfaces the card,
+      // while Resting keeps it at rest.
       if (rowInFlight() && spec.rowDrop) {
         e.preventDefault()
         this.handleQueueRowDropOut({ horizon: spec.rowDrop })
@@ -1717,7 +1713,8 @@ export class KanbanSurfaceRenderer {
 
   /**
    * Render one grid card. Clicking it opens the document workspace reader;
-   * conversation actions live in the dock.
+   * the worker pill opens its conversation, and fiber controls live inline on
+   * the fiber page.
    */
   private renderCard(
     card: KanbanCard,
@@ -1772,8 +1769,8 @@ export class KanbanSurfaceRenderer {
     glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
     glyph.textContent = isAgentCard(card) ? '◐' : '✓'
 
-    // The title is plain text — clicking the card opens its document in the
-    // workspace reader. Conversation actions for the fiber live in the dock.
+    // Clicking the title opens the document workspace reader. The fiber page
+    // carries its controls inline, and the worker pill opens the conversation.
     const name = document.createElement('span')
     name.className = 'kbn-card-name'
     name.textContent = card.name

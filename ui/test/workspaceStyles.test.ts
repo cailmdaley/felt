@@ -17,6 +17,15 @@ describe('workspace style contracts', () => {
     for (const token of [...dock.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
     expect(dock).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(|url\(/i)
   })
+  it('styles empty control states and the Resume action', () => {
+    const dock = read('dock.css').replace(/\/\*[\s\S]*?\*\//g, '')
+    for (const selector of [
+      '.ws-dock .kbn-ctl-date.kbn-ctl-empty',
+      '.ws-dock .kbn-ctl-resume',
+      '.ws-dock .kbn-detail-parent-empty',
+    ]) expect(dock).toContain(selector)
+    expect(dock).not.toContain('.kbn-meeting-stamp')
+  })
   it('parks documents under an opaque cover without removing their layout', () => {
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => m[1].includes('.ws-parked')).map(m => m[2]).join('\n')
     expect(rules).toContain('background: var(--ws-paper)')

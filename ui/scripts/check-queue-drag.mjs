@@ -6,7 +6,8 @@
  * The board itself is the production renderer and stylesheet. This script
  * wraps only the harness's mocked composite response to add a review head, a
  * queued row, and its child; it never contacts a Shuttle daemon or writes to
- * a fiber store. Chromium performs a native mouse drag.
+ * a fiber store. Clicking a row opens its document reader; Chromium performs
+ * a native mouse drag for the queue-to-card move.
  */
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
@@ -80,15 +81,15 @@ try {
   await sourceRow.waitFor()
   assert.equal(await queueChip.getAttribute('aria-expanded'), 'true')
 
-  // Queue rows are also the only visible representation of their fibers. A
-  // click must open that row's own detail, not the review head underneath.
+  // Queue rows are the only visible representation of some fibers. A click
+  // opens that row's own channel, not the review head underneath.
   await sourceRow.click()
-  const detail = page.getByRole('dialog', { name: `Fiber: ${sourceName}` })
-  await detail.waitFor()
-  assert.match(await detail.innerText(), /Requeue this review item/)
-  assert.doesNotMatch(await detail.innerText(), /Felt-maintenance ledger sweep/)
+  const reader = page.locator('.ws-page.ws-selected')
+  await reader.waitFor()
+  assert.equal(await page.locator('.ws-channel-title').innerText(), sourceName)
+  assert.doesNotMatch(await reader.innerText(), /Felt-maintenance ledger sweep/)
   await page.keyboard.press('Escape')
-  await detail.waitFor({ state: 'detached' })
+  await reader.waitFor({ state: 'detached' })
   assert.equal(await queueChip.getAttribute('aria-expanded'), 'true', 'opening the row leaves its queue unfolded')
   await sourceRow.waitFor({ state: 'visible' })
 
@@ -234,7 +235,7 @@ try {
   assert.deepEqual(errors, [], `the browser reported no page errors: ${errors.join('; ')}`)
 
   assert.doesNotMatch(columnHighlight, /kbn-col-drop/, `hovering the individual card does not mark the whole In flight column as the destination: ${columnHighlight}`)
-  console.log('Queue row click and native queue-to-card drop passed; writes:', JSON.stringify(writes))
+  console.log('Queue row opens its reader and native queue-to-card drop passed; writes:', JSON.stringify(writes))
 } finally {
   await browser.close()
 }

@@ -15,12 +15,6 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 `#/desk`, `#/chronicle`, and `#/board` deep-link the views.
 A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
-!!! note "The tab named Board, and the board"
-    Hotkey `3` is titled **Board** for the reader. Internally it is the
-    *shelf* in the view registry; `?view=shelf` also deep-links it. This page uses "the
-    board" for the whole surface at `:4000` and "the Board tab" for the third
-    view.
-
 ## Desk — the kanban
 
 Three surfaces: the **Now** board of cards that need something, a **Pinned**
@@ -113,11 +107,15 @@ app put an image beside it.
 <a id="attach"></a>
 ### Open a worker
 
-The Aloft, Waiting, and Needs you controls open the worker's conversation.
+Worker pills on Desk cards, the reader navbar, and the fiber page open the worker's conversation. Fiber controls remain inline.
 For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
 Claude sessions with Remote Control can open in the browser or Claude app, using your browser's preference in Settings.
 Codex app workers use their native desktop link, with remote-access guidance on mobile.
 See [Opening conversations](conversations.md) for the choices, prerequisites, and quick-access terminal setup.
+
+### Desk keyboard
+
+Bare keys act on the Desk when focus is outside an editable field. `h` / `←` and `l` / `→` move between columns and regions; `j` / `↓` and `k` / `↑` select the next or previous card. `g` and `G` select the first or last card in the current column. `Enter` / `o` opens the constitution, `Esc` / `u` clears selection, `/` opens Find, and `?` shows keyboard help. Movement skips empty regions and stops at the ends.
 
 ## Chronicle — where the time went
 

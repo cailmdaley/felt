@@ -80,7 +80,7 @@ It has three views:
 
 - **Desk:** task cards, running workers, and results awaiting your review.
 - **Chronicle:** activity, sessions, and commits over time.
-- **Board:** a canvas of files workers have sent, such as plots and reports.
+- **Board:** a document overview and reader for each fiber's channel. The fiber page carries its controls inline; its worker pill opens the conversation.
 
 [The board guide](board.md) covers editing, review, and the controls in each view.
 The command line also supports task lifecycle operations if you prefer working from a terminal.

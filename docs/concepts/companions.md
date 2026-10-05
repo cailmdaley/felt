@@ -19,35 +19,38 @@ travel with the fiber through `nest`, `unnest`, git, and sync.
 
 ## Embedding an artifact
 
-Inline any companion in the body where it helps the reader, using an
-`:::{embed}` directive:
+Declare a companion in the body with an `:::{embed}` directive:
 
 ```markdown
 :::{embed} residuals.png
 :::
 
 :::{embed} build/paper.pdf
-:height: 600
 :title: Latest build
 :::
 ```
 
 Paths resolve relative to the fiber's directory. Absolute paths also work.
+The Board reader lists declared files on the fiber page and opens each as a
+separate document; the directive itself does not appear in the rendered prose.
+A `:title:` option supplies the document's label.
 
-The renderer dispatches by file extension:
-
-| Extension | Rendered as |
+| Extension | Board reader |
 |---|---|
+| `.html` `.htm` | live HTML document |
+| `.md` | rendered prose |
+| plain text and source files | scrollable text or code |
 | `.png` `.jpg` `.jpeg` `.gif` `.webp` `.svg` `.avif` | image |
+| `.pdf` | native PDF viewer |
 | `.wav` `.mp3` `.m4a` `.ogg` `.flac` `.aac` | audio player |
-| everything else, `.pdf` and `.html` included | fixed-height iframe |
+| `.mp4` `.mov` `.webm` | video player |
+| other formats | file details and download |
 
 !!! note "Who does the rendering"
-    The shuttle board's fiber viewer understands the `:::{embed}` directive —
-    see [the shuttle layer](../shuttle/index.md). The `felt` CLI itself treats
-    the directive as ordinary body text. A plain markdown viewer or an Obsidian
-    vault shows it as a literal block. Use it where the board (or your own
-    renderer) reads it.
+    The Board's document workspace reads `:::{embed}` directives — see
+    [the Shuttle board guide](../shuttle/board.md). The `felt` CLI treats the
+    directive as ordinary body text. A plain markdown viewer or an Obsidian
+    vault shows it as a literal block.
 
 ## The `report.html` convention
 
@@ -66,14 +69,14 @@ felt implies nothing further. It does not open the file, render it, or require
 it. Most fibers need no report; work whose story is commits plus an outcome
 line does fine without one.
 
-To make the report the first thing a reader meets, embed it explicitly at the
-top of the body:
+To make the report the first document selected when the channel opens, declare
+it at the top of the body:
 
 ```markdown
 :::{embed} report.html
 :::
 
-The jackknife covariance is now the default. …
+The jackknife covariance is the default. …
 ```
 
 HTML beats markdown here: sections, tables, inlined plots, and collapsible
@@ -82,19 +85,17 @@ so the report renders wherever the fiber is opened, including on a different
 machine.
 
 shuttle workers follow a shape for these reports — current state, standing
-findings, open questions, pointers to depth — rewritten whole each session,
-never appended. See
-[Optional: report.html](../shuttle/constitutions.md#optional-reporthtml).
+findings, open questions, pointers to depth — rewritten whole each session.
+See [Optional: report.html](../shuttle/constitutions.md#optional-reporthtml).
 
 ## Sent files (shuttle only)
 
 A shuttle worker can also push a file at you directly, with
 `shuttle send-file <path> [path...]`.
 `shuttle hook event` records that push on the host's event stream
-(`~/.shuttle/events.jsonl`), and the board surfaces it two ways: a per-card
-sent-files trail in the fiber viewer, and the [Board
-canvas](../shuttle/board.md#board-what-the-work-produced), where every send from
-the last month renders as a card.
+(`~/.shuttle/events.jsonl`). The Board overview shows recent sends in its
+receipt ribbon and folios; the reader groups repeated sends under each
+document's Receipts menu. See [the Board guide](../shuttle/board.md#board-what-the-work-produced).
 
 The two channels overlap — the file a worker sends is very often its own
 `report.html`, a companion. What differs is durability.

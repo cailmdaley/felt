@@ -1,5 +1,5 @@
 /**
- * Shared file renderer for workspace documents and the Shelf reader.
+ * Shared renderer for document workspace pages and Board overview thumbnails.
  *
  * Images and audio use native elements, markdown and text render in a scrolling
  * pane, HTML renders in a scrollable iframe, and browser-native formats such

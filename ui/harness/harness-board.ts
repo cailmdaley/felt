@@ -131,8 +131,8 @@ const shuttleBlockElsewhere = () => ({
   project_dir: '/leonardo_work/spt3g/papers',
 })
 
-/** A shuttle block carrying a concluded run's `runtime` stamps — what the
- *  dock's session-window line reads (dispatched → handed off → span). */
+/** A shuttle block carrying a concluded run's `runtime` stamps — the
+ *  fiber controls' session-window summary (dispatched → handed off → span). */
 const shuttleBlockWithRun = (dispatchedMsAgo: number, ranForMs: number) => ({
   ...shuttleBlock(),
   runtime: {
@@ -377,7 +377,7 @@ const RESTING: MockFiber[] = [
   })),
 ]
 
-// A standing role, for the humanized-cron chip in the conversation dock.
+// A standing role, for the humanized-cron summary in the fiber controls.
 const STANDING: MockFiber[] = [
   {
     id: 'loom/email/morning-post/run',
@@ -1046,8 +1046,9 @@ const MOCK_ORIGINS: TemporalOrigins = {
 /**
  * The fleet's sent files, as `GET /api/v1/sent-files/all/composite` serves
  * them: path, basename, instant, session, the sending fiber, and the host that
- * holds the bytes. One of each kind the Shelf draws, and one from the stale
- * remote. Their bodies do not load over `file://`, so the Shelf shows faces.
+ * holds the bytes. One of each kind shown in the Board overview, including a
+ * receipt from a stale remote. Their bodies do not load over `file://`, so the
+ * overview shows thumbnails.
  */
 const MOCK_SENT_FILES = [
   { fullPath: '/work/shear/results/b-mode-null.png', uid: 'work/euclid/photoz-systematics/reread', at: -40 * 60_000 },

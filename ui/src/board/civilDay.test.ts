@@ -306,8 +306,8 @@ describe('civilDayToLocalDate', () => {
 });
 
 describe('formatSpanMinutes', () => {
-  // The bare form — no `pad`, no `empty` — is what the conversation dock's
-  // session window renders. The padded and em-dash variants the views use are
+  // The bare form — no `pad`, no `empty` — is what the fiber controls' session
+  // summary renders. The padded and em-dash variants the views use are
   // pinned in chronicleJoin.test.ts.
   it('renders a whole hour with an unpadded zero, not a bare hour', () => {
     expect(formatSpanMinutes(120)).toBe('2h 0m');
@@ -321,7 +321,7 @@ describe('formatSpanMinutes', () => {
 
   // Without `empty` a negative span shows as itself. It means the caller handed
   // over an inverted pair, which is worth seeing rather than hiding behind a
-  // placeholder — the conversation dock clamps at its call site instead.
+  // placeholder — the fiber controls clamp at their call site instead.
   it('does not hide a negative span when no empty placeholder is given', () => {
     expect(formatSpanMinutes(-5)).toBe('-5m');
   });
