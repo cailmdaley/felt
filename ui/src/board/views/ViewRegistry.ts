@@ -186,7 +186,7 @@ export function isBlockingDialog(
  * change here.
  */
 export const BLOCKING_DIALOG_SELECTOR =
-  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"], .kbn-detail-overlay'
+  '[role="dialog"][data-state="open"], [role="dialog"][aria-modal="true"]'
 
 /**
  * Is a dialog currently layered over the board?
