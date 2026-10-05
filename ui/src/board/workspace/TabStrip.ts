@@ -60,6 +60,7 @@ export class TabStrip {
     this.onExpand = onExpand
     this.el = document.createElement('div')
     this.el.className = 'ws-tabs'
+    this.el.dataset.part = 'tab-strip'
     this.el.setAttribute('role', 'tablist')
     this.el.setAttribute('aria-label', 'Documents')
     this.motion = typeof window.matchMedia === 'function'

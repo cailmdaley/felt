@@ -1,5 +1,5 @@
 /** CSSOM scopes selectors; only global font definitions and namespaced animations escape. */
-export function scopeTheme(css: string, scope: string, namespace: string): string {
+export function scopeTheme(css: string, scope: string, namespace: string, defaults: ReadonlyMap<string, string> = new Map()): string {
   const sheet = new CSSStyleSheet()
   const imports = themeImports(css)
   sheet.replaceSync(imports.body)
@@ -48,7 +48,7 @@ export function scopeTheme(css: string, scope: string, namespace: string): strin
       const text = `${style.selectorText} { ${declarations(style.style)} ${nested} }`
       // @scope uses the browser's selector parser, including :scope, selector lists,
       // nesting and functional pseudo-classes. No selector is rewritten as text.
-      return scoped ? `@scope (${scope}) to ([data-part="act"], :scope [data-ws-theme]) { ${text} }` : text
+      return scoped ? `@scope (${scope}) to ([data-part="act"], :scope [data-ws-theme], :scope [data-ws-theme-boundary]) { ${text} }` : text
     }
     if (rule.type === CSSRule.FONT_FACE_RULE) return rule.cssText
     if (rule.type === CSSRule.KEYFRAMES_RULE) {
@@ -66,7 +66,15 @@ export function scopeTheme(css: string, scope: string, namespace: string): strin
     console.info('Shuttle theme: omitted unsupported rule', rule.cssText)
     return ''
   }).join('\n')
-  return imports.allowed.join('\n') + '\n' + emit(sheet.cssRules, true)
+  // Custom properties inherit independently of all: initial. Every channel,
+  // including a Plain one, starts authored variables at the document defaults.
+  const resetDeclarations = (names: string[]): string => names.map(name => `${CSS.escape(name)}: ${defaults.get(name)?.trim() || 'initial'};`).join('\n')
+  // An earliest layer lets even layered :scope declarations beat the defaults.
+  const reset = aliases.size ? `@layer shuttle-theme-defaults {
+    :where([data-ws-theme-boundary]) { ${resetDeclarations([...aliases.keys()])} }
+    :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) { ${resetDeclarations([...aliases.keys()].filter(name => name !== '--ws-paper' && name !== '--ws-ink'))} }
+  }` : ''
+  return [imports.allowed.join('\n'), reset, emit(sheet.cssRules, true)].join('\n')
 }
 
 const ANIMATION_PROPERTIES = ['animation', 'animation-name', '-webkit-animation', '-webkit-animation-name']

@@ -21,11 +21,17 @@ export class Verdicts {
     document.body.append(this.el)
     window.addEventListener('keydown', this.keydown, true)
   }
-  queue(card: KanbanCard, verdict: Verdict, commit: () => void): void {
+  queue(card: KanbanCard, verdict: Verdict, commit: () => void, material?: { paper: string; ink: string }): void {
     const key = JSON.stringify([card.originId, card.uid ?? card.id])
     this.undo(key)
     const toast = document.createElement('div')
     toast.className = 'ws-verdict-toast'
+    toast.dataset.part = 'act'; toast.dataset.act = 'toast'
+    if (material) {
+      toast.dataset.wsActMaterial = ''
+      toast.style.setProperty('--ws-paper', material.paper)
+      toast.style.setProperty('--ws-ink', material.ink)
+    }
     toast.setAttribute('aria-atomic', 'true')
     const name = document.createElement('em')
     name.textContent = card.name

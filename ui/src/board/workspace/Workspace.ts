@@ -212,7 +212,7 @@ export class Workspace {
         return
       }
       this.dock.verdict(card, verdict)
-    })
+    }, this.themes.material(this.reader.el))
   }
   private focusComposer(): void {
     const state = this.current

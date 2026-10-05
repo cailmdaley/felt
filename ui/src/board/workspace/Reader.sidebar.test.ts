@@ -4,6 +4,7 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { Reader, SIDEBAR_MEDIA } from './Reader.js'
+import { ChannelThemes } from './ChannelThemes.js'
 import type { Channel, DocKey } from './documents.js'
 
 const alpha = card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a' })
@@ -28,9 +29,9 @@ let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
 const channels = [alpha, beta, gamma]
 
-function makeReader(current: KanbanCard = alpha): Reader {
+function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes): Reader {
   const reader = new Reader({
-    shuttleBase: '',
+    shuttleBase: '', themes,
     buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(),
     onSelect: vi.fn(),
@@ -92,6 +93,91 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
+  it('binds retained sidebar roots only while active and visible, through revisions, filtering and hide/show', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const bound = new Map<HTMLElement, KanbanCard>()
+    const bind = vi.fn((el: HTMLElement, card: KanbanCard) => bound.set(el, card))
+    const unbind = vi.fn((el: HTMLElement) => bound.delete(el))
+    const themes = { bind, unbind, isPlain: () => false, togglePlain: vi.fn() } as unknown as ChannelThemes
+    const reader = makeReader(alpha, themes)
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
+    expect(bound.get(row)).toBe(alpha)
+    expect(row.dataset.part).toBe('sidebar-card')
+    expect(row.hasAttribute('data-ws-theme-boundary')).toBe(true)
+    expect(reader.el.hasAttribute('data-ws-theme-boundary')).toBe(true)
+    expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(2)
+    for (const part of ['tab-strip', 'tab', 'thumbnail', 'thumbnail-face', 'page-sheet', 'page-sheet-panel']) {
+      expect(reader.el.querySelector(`[data-part="${part}"]`)).not.toBeNull()
+    }
+    expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
+    expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
+    expect(reader.el.querySelector('.ws-worker-pill')?.getAttribute('data-act')).toBe('worker')
+    const revised = { ...alpha, outcome: 'A new result' }
+    listedCards = [revised, beta]
+    reader.refreshChannels()
+    expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
+    expect(bound.get(row)).toBe(revised)
+    expect([...bound.keys()]).toEqual(expect.arrayContaining([reader.el, row]))
+    const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
+    toggle.click()
+    expect(bound.size).toBe(1)
+    toggle.click()
+    expect(bound.get(row)).toBe(revised)
+    const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar input')!
+    find.value = 'Beta'; find.dispatchEvent(new Event('input'))
+    expect(bound.has(row)).toBe(false)
+    reader.hide()
+    expect(bound.size).toBe(0)
+    reader.show(channel(beta), fiberKey(beta), 'Board', beta)
+    expect(bound.size).toBe(2)
+    disposeReader(reader)
+    expect(bound.size).toBe(0)
+  })
+
+  it('keeps a foreign sidebar flight themed after its retained row unbinds, then releases the stylesheet', async () => {
+    const animateDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate')
+    const animationsDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getAnimations')
+    const animations = new Map<HTMLElement, { animation: Animation; finish(): void }>()
+    Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: function (this: HTMLElement) {
+      let finish!: () => void
+      const finished = new Promise<void>(resolve => { finish = resolve })
+      const animation = { finished, cancel: finish } as unknown as Animation
+      animations.set(this, { animation, finish }); return animation
+    } })
+    Object.defineProperty(HTMLElement.prototype, 'getAnimations', { configurable: true, value: function (this: HTMLElement) {
+      return animations.has(this) ? [animations.get(this)!.animation] : []
+    } })
+    const themes = new ChannelThemes('')
+    try {
+      const reader = makeReader(alpha, themes)
+      const source = document.createElement('div'); document.body.append(source)
+      const rect = (): DOMRect => new DOMRect(10, 20, 280, 120)
+      source.getBoundingClientRect = rect
+      reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="beta"]')!.getBoundingClientRect = rect
+      reader.captureSidebar([{ card: beta, source }])
+      const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
+      toggle.click()
+      toggle.click()
+      const ghost = reader.el.querySelector<HTMLElement>('.ws-sidebar-flight [data-channel-uid="beta"]')!
+      const scope = ghost.dataset.wsTheme
+      expect(scope).toBeTruthy()
+      const row = reader.el.querySelector<HTMLElement>('.ws-sidebar:not(.ws-sidebar-flight) [data-channel-uid="beta"]')!
+      expect(row.dataset.wsTheme).toBeUndefined()
+      expect(document.querySelector(`style[data-ws-theme-sheet="${scope}"]`)).not.toBeNull()
+      animations.get(ghost)!.finish()
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      expect(ghost.isConnected).toBe(false)
+      expect(document.querySelector(`style[data-ws-theme-sheet="${scope}"]`)).toBeNull()
+      disposeReader(reader)
+    } finally {
+      themes.dispose()
+      if (animateDescriptor) Object.defineProperty(HTMLElement.prototype, 'animate', animateDescriptor)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'animate')
+      if (animationsDescriptor) Object.defineProperty(HTMLElement.prototype, 'getAnimations', animationsDescriptor)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'getAnimations')
+    }
+  })
+
   it('defaults open at wide widths and closed at narrow widths, with a labelled Constitutions lead control', () => {
     storage.clear()
     viewport.wide = true

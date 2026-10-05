@@ -7,6 +7,9 @@ export interface ConstitutionPickerOptions {
   revealCurrent?: boolean
   renderCard?(card: KanbanCard): HTMLElement
   group?(card: KanbanCard): string | undefined
+  /** The retained root, after placement and revision patching, on every refresh. */
+  onRow?(el: HTMLElement, card: KanbanCard): void
+  onRemove?(el: HTMLElement): void
   onOpen(card: KanbanCard): void
 }
 
@@ -69,7 +72,7 @@ export class ConstitutionPicker {
     this.selected = selected
     const visible = cards.filter(matches)
     const keys = new Set(visible.map(identity))
-    for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.rows.delete(key) }
+    for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.opts.onRemove?.(row.el); this.rows.delete(key) }
     let cursor = this.list.firstChild
     let previousGroup: string | undefined
     const groups = new Set<string>()
@@ -124,6 +127,7 @@ export class ConstitutionPicker {
       if (!this.opts.renderCard && row.owner.textContent !== card.originId) row.owner.textContent = card.originId
       if (row.el !== cursor) this.list.insertBefore(row.el, cursor)
       cursor = row.el.nextSibling
+      this.opts.onRow?.(row.el, card)
     }
     for (const [group, caption] of this.captions) if (!groups.has(group)) { caption.remove(); this.captions.delete(group) }
     if (reveal && selected && selected !== this.revealed) {
@@ -150,5 +154,7 @@ export class ConstitutionPicker {
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
     this.el.remove()
+    for (const row of this.rows.values()) this.opts.onRemove?.(row.el)
+    this.rows.clear()
   }
 }

@@ -47,6 +47,8 @@ describe('shared verdict controls', () => {
     const band = controls.bandFor(review)
     const plate = controls.verdictPlateFor(review)
     document.body.append(band.el, plate)
+    expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('composer')
+    expect(plate.dataset.part).toBe('act'); expect(plate.dataset.act).toBe('verdict')
     band.el.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
     plate.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([

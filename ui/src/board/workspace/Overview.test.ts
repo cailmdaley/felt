@@ -5,6 +5,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { docKey } from './documents.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
 import { Overview, overviewDayGroup, overviewHostMarks } from './Overview.js'
+import type { ChannelThemes } from './ChannelThemes.js'
 
 const rect = (top: number, left = 0, width = 176, height = 116): DOMRect => ({
   x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}),
@@ -82,6 +83,32 @@ beforeEach(() => {
 afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Overview receipt membership and identity', () => {
+  it('binds retained news and folio roots by channel, releasing them on hide, removal and disposal', async () => {
+    overview.dispose()
+    const bound = new Map<HTMLElement, KanbanCard>()
+    const themes = { bind: vi.fn((el: HTMLElement, card: KanbanCard) => bound.set(el, card)),
+      unbind: vi.fn((el: HTMLElement) => bound.delete(el)) } as unknown as ChannelThemes
+    overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen, themes })
+    document.body.append(overview.el)
+    feed.files = [receipt('alpha', '/report.html')]
+    await refresh()
+    const news = overview.el.querySelector<HTMLElement>('[data-part="since-row"]')!
+    const face = folio('alpha')
+    expect(bound.get(news)).toBe(cards[0]); expect(bound.get(face)).toBe(cards[0])
+    expect(news.hasAttribute('data-ws-theme-boundary')).toBe(true)
+    expect(face.hasAttribute('data-ws-theme-boundary')).toBe(true)
+    expect(face.dataset.density).toBe('full')
+    cards = [{ ...cards[0], outcome: 'Revised outcome' }]
+    overview.cardsChanged()
+    expect(overview.el.querySelector('[data-part="since-row"]')).toBe(news)
+    expect(bound.get(news)).toBe(cards[0])
+    overview.hide(); expect(bound.size).toBe(0)
+    overview.show(); expect(bound.get(news)).toBe(cards[0]); expect(bound.get(face)).toBe(cards[0])
+    overview.opened(cards[0])
+    expect(news.isConnected).toBe(false); expect(bound.has(news)).toBe(false)
+    overview.dispose(); expect(bound.size).toBe(0)
+  })
+
   it('reads the raw 30-day feed, ignores invalid/old records, joins uid and dedupes normalized owner+path', async () => {
     feed.files = [receipt('alpha', '/notes/alpha/./report.html', now() - 1000), receipt('alpha', '/notes/alpha/report.html'),
       receipt('beta', '/notes/alpha/report.html', now(), 'host-b'), receipt('alpha', '/old.html', now() - 31 * 86400000),

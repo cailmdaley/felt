@@ -27,6 +27,9 @@ export class ChannelThemes {
   private readonly warnings = new Set<string>()
   private disposed = false
   private readonly actDefaults: HTMLStyleElement
+  private readonly defaults = new Map<string, string>()
+  private readonly changes = new Set<HTMLElement>()
+  private changeQueued = false
   private readonly base: string
   constructor(base: string) {
     this.base = base
@@ -35,13 +38,20 @@ export class ChannelThemes {
     this.actDefaults = document.createElement('style')
     this.actDefaults.dataset.wsActDefaults = ''
     const defaults = getComputedStyle(document.documentElement)
-    const reset: string[] = []
     for (let i = 0; i < defaults.length; i++) {
       const name = defaults.item(i)
-      if (name.startsWith('--') && name !== '--ws-paper' && name !== '--ws-ink') reset.push(`${name}: ${defaults.getPropertyValue(name)};`)
+      if (name.startsWith('--')) this.defaults.set(name, defaults.getPropertyValue(name).trim())
     }
-    this.actDefaults.textContent = `[data-ws-theme] [data-part="act"] {
-      ${reset.join('\n')}
+    const declarations = (entries: Iterable<[string, string]>): string => [...entries].map(([name, value]) => `${name}: ${value || 'initial'};`).join('\n')
+    this.actDefaults.textContent = `@layer shuttle-theme-defaults {
+    :where([data-ws-theme-boundary]:not(.ws-reader)) {
+      all: initial; display: revert; direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
+      ${declarations(this.defaults)}
+      color: var(--ws-ink); font-family: var(--ws-serif); line-height: 1.4; box-sizing: border-box;
+    }
+    }
+    :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) {
+      ${declarations([...this.defaults].filter(([name]) => name !== '--ws-paper' && name !== '--ws-ink'))}
       --ws-ink-soft: var(--ws-ink); --ws-ink-muted: var(--ws-ink); --ws-ink-faint: var(--ws-ink);
       --ws-hairline: color-mix(in srgb, var(--ws-ink) 35%, transparent);
       --ws-hairline-soft: color-mix(in srgb, var(--ws-ink) 20%, transparent);
@@ -54,6 +64,7 @@ export class ChannelThemes {
       --ws-red: var(--ws-owed); --ws-machine: var(--ws-agent);
       --ws-machine-halo: color-mix(in srgb, var(--ws-agent) 20%, transparent);
       color: var(--ws-ink); font-style: normal; font-weight: normal; text-shadow: none;
+      direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
     }`
     document.head.append(this.actDefaults)
     try {
@@ -72,6 +83,7 @@ export class ChannelThemes {
   }
   bind(root: HTMLElement, card: KanbanCard): void {
     if (this.disposed) return
+    root.dataset.wsThemeBoundary = ''
     const key = this.key(card)
     const old = this.roots.get(root)
     if (old?.key !== key) this.unbind(root)
@@ -95,9 +107,28 @@ export class ChannelThemes {
   unbind(root: HTMLElement): void {
     const old = this.roots.get(root)
     this.roots.delete(root)
+    const changed = root.hasAttribute('data-ws-theme') || root.hasAttribute('data-ws-theme-name')
     delete root.dataset.wsTheme
     delete root.dataset.wsThemeName
     if (old) this.paint(old)
+    if (changed) this.changed(root)
+  }
+  /** Only the queued verdict's paper and ink cross into the body-level ACT toast. */
+  material(root: HTMLElement): { paper: string; ink: string } | undefined {
+    const entry = this.roots.get(root)
+    if (!entry || this.plain.has(entry.key) || !root.classList.contains('ws-reader')) return
+    const style = getComputedStyle(root)
+    return { paper: style.getPropertyValue('--ws-paper').trim(), ink: style.getPropertyValue('--ws-ink').trim() }
+  }
+  private changed(root: HTMLElement): void {
+    this.changes.add(root)
+    if (this.changeQueued) return
+    this.changeQueued = true
+    queueMicrotask(() => {
+      this.changeQueued = false
+      const roots = [...this.changes]; this.changes.clear()
+      if (!this.disposed) for (const el of roots) el.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
+    })
   }
   private key(card: KanbanCard): string { return JSON.stringify([card.originId, card.uid ?? card.id]) }
   private baseName(card: KanbanCard): string {
@@ -114,28 +145,38 @@ export class ChannelThemes {
     if (typeof CSSStyleSheet.prototype.replaceSync !== 'function') { entry.compiled = ''; return }
     const base = bundled[`./themes/${entry.base}.css`] ?? ''
     try {
-      if (entry.custom) scopeTheme(entry.custom, selector, entry.scope)
-      entry.compiled = scopeTheme(base + '\n' + entry.custom, selector, entry.scope)
+      if (entry.custom) scopeTheme(entry.custom, selector, entry.scope, this.defaults)
+      entry.compiled = scopeTheme(base + '\n' + entry.custom, selector, entry.scope, this.defaults)
     } catch (error) {
       console.warn('Shuttle theme: CSS could not be parsed; using the bundled base', error)
       entry.custom = ''
-      entry.compiled = scopeTheme(base, selector, entry.scope)
+      entry.compiled = scopeTheme(base, selector, entry.scope, this.defaults)
     }
   }
   private paint(entry: ThemeEntry): void {
     const roots = [...this.roots].filter(([, theme]) => theme === entry).map(([root]) => root)
     const plain = this.plain.has(entry.key)
     for (const root of roots) {
-      if (plain) { delete root.dataset.wsTheme; root.dataset.wsThemeName = 'plain' }
-      else { root.dataset.wsTheme = entry.scope; root.dataset.wsThemeName = entry.base }
+      const scope = plain ? undefined : entry.scope, name = plain ? 'plain' : entry.base
+      if (root.dataset.wsTheme !== scope || root.dataset.wsThemeName !== name) this.changed(root)
+      if (plain) delete root.dataset.wsTheme
+      else root.dataset.wsTheme = entry.scope
+      root.dataset.wsThemeName = name
     }
-    if (!roots.length || plain) { entry.style?.remove(); entry.style = undefined; return }
+    if (!roots.length || plain) {
+      if (entry.style) for (const root of roots) this.changed(root)
+      entry.style?.remove(); entry.style = undefined
+      return
+    }
+    let installed = false
     if (!entry.style) {
       entry.style = document.createElement('style')
       entry.style.dataset.wsThemeSheet = entry.scope
       document.head.append(entry.style)
+      installed = true
     }
-    if (entry.style.textContent !== entry.compiled) entry.style.textContent = entry.compiled
+    if (entry.style.textContent !== entry.compiled) { entry.style.textContent = entry.compiled; installed = true }
+    if (installed) for (const root of roots) this.changed(root)
   }
   private refresh(entry: ThemeEntry): Promise<void> {
     if (entry.pending) return entry.pending

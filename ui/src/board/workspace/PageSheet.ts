@@ -24,8 +24,10 @@ export class PageSheet {
   constructor(base: string, onChoose: (key: DocKey) => void) {
     this.base = base; this.onChoose = onChoose
     this.el.className = 'ws-page-sheet'
+    this.el.dataset.part = 'page-sheet'
     this.el.setAttribute('aria-label', 'Pages in this constitution')
     this.panel.className = 'ws-page-sheet-panel'
+    this.panel.dataset.part = 'page-sheet-panel'
     const grabber = document.createElement('button')
     grabber.type = 'button'; grabber.className = 'ws-page-sheet-grabber'
     grabber.setAttribute('aria-label', 'Close pages')
@@ -129,6 +131,7 @@ export class PageSheet {
       if (!row) {
         const button = document.createElement('button')
         button.type = 'button'; button.className = 'ws-page-sheet-row'; button.dataset.key = doc.key
+        button.dataset.part = 'page-sheet-row'
         const thumb = new Thumbnail({ key: `sheet:${doc.key}`, shuttleBase: this.base,
           file: doc.kind === 'fiber' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
           fallback: channel.outcome ?? channel.name, captioned: true, className: 'ws-page-sheet-thumb',

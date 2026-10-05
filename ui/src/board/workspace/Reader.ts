@@ -111,6 +111,8 @@ export class Reader {
   private readonly sidebarPicker: ConstitutionPicker
   private readonly picker: ConstitutionPicker
   private readonly sidebarFlight: SidebarFlight
+  private readonly sidebarRows = new Map<HTMLElement, KanbanCard>()
+  private readonly flightRoots = new Set<HTMLElement>()
   /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
@@ -134,6 +136,7 @@ export class Reader {
       if (this.active) this.paint(false)
     })
     this.el.setAttribute('aria-label', 'Document reader')
+    this.el.dataset.wsThemeBoundary = ''
     this.veil.dataset.part = 'veil'
     this.conversation.dataset.part = 'act'
     this.el.inert = true
@@ -146,11 +149,14 @@ export class Reader {
     this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
     this.sidebarToggle.title = 'Constitutions (⌘\\)'
     this.lead = element('div', 'ws-nav-lead')
+    this.lead.dataset.part = 'chrome-plate'
     this.lead.append(this.returnButton, this.sidebarToggle, this.title)
     this.trail = element('div', 'ws-nav-trail')
     this.trail.append(this.conversation)
     this.navbar = element('nav', 'ws-navbar')
+    this.navbar.dataset.part = 'phone-topbar'
     const tabPlate = element('div', 'ws-nav-tabs')
+    tabPlate.dataset.part = 'chrome-plate'
     tabPlate.append(this.tabs.el)
     this.navbar.append(this.lead, tabPlate, this.trail)
     this.prev = button('ws-thumb-button', '‹', () => this.step(-1), 'Previous document')
@@ -160,6 +166,7 @@ export class Reader {
       if (doc) this.openMenu(doc, thumbMenu)
     }, 'Document menu')
     const thumb = element('div', 'ws-thumbbar')
+    thumb.dataset.part = 'phone-bottom-bar'
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
     const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
     pageChoice.setAttribute('aria-haspopup', 'dialog')
@@ -186,6 +193,12 @@ export class Reader {
     this.sidebarPicker = new ConstitutionPicker({
       ...pickerOptions, cards: sidebarCards, revealCurrent: true,
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
+      onRow: (el, card) => {
+        this.sidebarRows.set(el, card)
+        if (this.active && this.sidebarShown) this.opts.themes?.bind(el, card)
+        else this.opts.themes?.unbind(el)
+      },
+      onRemove: el => { this.sidebarRows.delete(el); this.opts.themes?.unbind(el) },
     })
     this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
@@ -258,7 +271,7 @@ export class Reader {
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
     this.renderSidebar()
-    if (arriving) this.sidebarFlight.setVisible(this.sidebarShown)
+    if (arriving) this.setSidebarVisible(this.sidebarShown)
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
@@ -279,8 +292,9 @@ export class Reader {
    */
   hide(animate = false): void {
     this.cancelResize?.()
-    this.sidebarFlight.setVisible(false, animate)
+    this.setSidebarVisible(false, animate)
     this.active = false
+    this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
     this.pageSheet.hide()
     this.tabs.setVisible(false)
@@ -335,6 +349,7 @@ export class Reader {
       ? document.activeElement?.matches('.kbn-ctl-temper') ? '.kbn-ctl-temper'
         : document.activeElement?.matches('.kbn-ctl-discard') ? '.kbn-ctl-discard' : '.kbn-card-worker' : null
     this.conversation.classList.toggle('ws-worker-review', review)
+    this.conversation.dataset.act = review ? 'verdict' : 'worker'
     this.conversation.replaceChildren(...(control ? [control] : []))
     if (focused) this.conversation.querySelector<HTMLElement>(focused)?.focus({ preventScroll: true })
   }
@@ -620,6 +635,8 @@ export class Reader {
   private sidebarCard(card: KanbanCard): HTMLElement {
     const face = buildCardPaper(card)
     face.classList.add('ws-constitution-card')
+    face.dataset.part = 'sidebar-card'
+    face.dataset.wsThemeBoundary = ''
     face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
     const meta = element('div', 'kbn-card-meta')
     const host = element('small', 'ws-channel-owner')
@@ -628,7 +645,10 @@ export class Reader {
     host.title = card.originId
     meta.append(host)
     const pill = this.opts.workerPill?.(card)
-    if (pill) meta.append(pill)
+    if (pill) {
+      pill.dataset.part = 'act'; pill.dataset.act = 'worker'
+      meta.append(pill)
+    }
     face.append(meta)
     return face
   }
@@ -644,9 +664,9 @@ export class Reader {
     this.sidebarChoice = !this.sidebarShown
     try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
     this.closeMenu()
-    if (!this.sidebarShown) this.sidebarFlight.setVisible(false)
+    if (!this.sidebarShown) this.setSidebarVisible(false)
     this.renderSidebar(); this.layout(false)
-    if (this.sidebarShown) this.sidebarFlight.setVisible(true)
+    if (this.sidebarShown) this.setSidebarVisible(true)
   }
   private renderSidebar(): void {
     const shown = this.sidebarShown
@@ -657,7 +677,22 @@ export class Reader {
     this.sidebarPicker.refresh(shown)
     this.sidebarPicker.el.querySelector('[data-part="plain-toggle"]')?.setAttribute('aria-pressed', String(!!this.currentCard && !!this.opts.themes?.isPlain(this.currentCard)))
     this.sidebarFlight.refresh()
-    if (!shown) this.sidebarFlight.setVisible(false, false)
+    if (!shown) this.setSidebarVisible(false, false)
+  }
+  /** Travelling copies keep their channel's stylesheet until their own flight ends. */
+  private setSidebarVisible(visible: boolean, animate = true): void {
+    this.sidebarFlight.setVisible(visible, animate)
+    if (!this.opts.themes) return
+    for (const ghost of this.el.querySelectorAll<HTMLElement>('.ws-sidebar-flight .ws-channel-row')) {
+      if (this.flightRoots.has(ghost)) continue
+      const card = [...this.sidebarRows.values()].find(card => (card.uid ?? card.id) === ghost.dataset.channelUid && card.originId === ghost.dataset.channelOwner)
+      if (!card) continue
+      this.flightRoots.add(ghost); this.opts.themes.bind(ghost, card)
+      const flights = ghost.getAnimations().filter(animation => !('animationName' in animation) && !('transitionProperty' in animation))
+      void Promise.allSettled(flights.map(animation => animation.finished)).then(() => {
+        if (this.flightRoots.delete(ghost)) this.opts.themes?.unbind(ghost)
+      })
+    }
   }
   /** Rows refresh in place; the list keeps its scroll and the find its text. */
   private fillSidebar(): void {
@@ -750,6 +785,8 @@ export class Reader {
     this.tabs.dispose()
     this.picker.dispose()
     this.sidebarPicker.dispose()
+    for (const ghost of this.flightRoots) this.opts.themes?.unbind(ghost)
+    this.flightRoots.clear()
     this.sidebarFlight.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
