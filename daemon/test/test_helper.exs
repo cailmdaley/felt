@@ -1,3 +1,13 @@
+# One temp root per test VM. Fixture names under System.tmp_dir!() carry
+# System.unique_integer/1, which restarts in every VM, so two `mix test` runs on
+# one machine would otherwise share (and rm_rf) each other's fixtures. Short on
+# purpose: unix socket paths under it must fit sun_path.
+test_tmp = Path.join(System.tmp_dir!(), "st-#{System.pid()}")
+File.rm_rf!(test_tmp)
+File.mkdir_p!(test_tmp)
+System.put_env("TMPDIR", test_tmp)
+System.at_exit(fn _ -> File.rm_rf(test_tmp) end)
+
 # Pin the agent registry for the whole suite: keep it off whatever
 # ~/.config/shuttle/agents.json the developer has. The fixture carries the same
 # records as the built-in layer, so the effective registry is the shipped one.
