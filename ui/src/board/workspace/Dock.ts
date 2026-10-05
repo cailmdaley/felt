@@ -871,15 +871,12 @@ export class Dock {
     message.rows = 1
     message.placeholder = 'What should the worker do next?'
     message.setAttribute('aria-label', 'Message for the next worker')
-    // The resting composer is one line; focus or a draft gives it room to grow.
+    // The field is one line, focused or not; only text that wraps grows it.
     const fit = (): void => {
-      box.classList.toggle('kbn-ctl-composer-draft', Boolean(message.value))
-      message.style.height = 'auto'
-      if (message.value || message === document.activeElement) message.style.height = `${message.scrollHeight}px`
+      message.style.height = ''
+      if (message.value && message.scrollHeight > message.clientHeight) message.style.height = `${message.scrollHeight}px`
     }
     message.addEventListener('input', fit)
-    message.addEventListener('focus', fit)
-    message.addEventListener('blur', fit)
 
     // Two lines under the box: a send's outcome (and the project-directory
     // prompt a refused start raises), and the images turned away. Neither
@@ -989,9 +986,8 @@ export class Dock {
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
     const meeting = this.meeting ? this.buildMeeting(card, err, send) : null
-    if (meeting) meeting.classList.add('kbn-ctl-microphone')
     sends.append(fresh, resume)
-    foot.append(sends)
+    foot.append(...(meeting ? [meeting] : []), sends)
 
     this.composerSend = send
     this.composerError = err
@@ -1019,7 +1015,7 @@ export class Dock {
       const resumeSession = event.altKey ? !previous : previous
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
     })
-    box.append(...(meeting ? [meeting] : []), message, strip.el, foot)
+    box.append(message, strip.el, foot)
     wrap.append(box, imageErr, err)
     return wrap
   }
