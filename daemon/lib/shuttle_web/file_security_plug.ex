@@ -1,9 +1,13 @@
 defmodule ShuttleWeb.FileSecurityPlug do
   @moduledoc """
-  Sandbox every file and report-asset response, independent of extension,
-  content type, status, or owner. Wraps the endpoint before Phoenix's error
-  boundary so parser exceptions and halted gates carry the same policy as file
-  bytes. Other API routes are unchanged.
+  Sandbox every API response, independent of route, extension, content type,
+  status, or owner. The API serves no top-level page, so the policy is
+  default-deny: any request whose percent-decoded first path segment is `api`,
+  or whose path does not decode, gets the CSP sandbox and `nosniff`. Matching
+  decoded segments is what the router itself does, so no spelling of a file
+  route reaches its controller unsandboxed. Wraps the endpoint before Phoenix's
+  error boundary so parser exceptions and halted gates carry the same policy as
+  file bytes. The SPA routes outside `/api` are unchanged.
 
   The serving hub owns this policy; relayed owner headers cannot weaken it.
   """
@@ -33,14 +37,23 @@ defmodule ShuttleWeb.FileSecurityPlug do
   def init(opts), do: opts
 
   @impl true
-  def call(%{path_info: ["api", "v1", route | _]} = conn, _opts)
-      when route in ["file", "file-assets"] do
-    register_before_send(conn, fn conn ->
+  def call(conn, _opts) do
+    if api_path?(conn.path_info) do
+      register_before_send(conn, fn conn ->
+        conn
+        |> put_resp_header("content-security-policy", @sandbox_policy)
+        |> put_resp_header("x-content-type-options", "nosniff")
+      end)
+    else
       conn
-      |> put_resp_header("content-security-policy", @sandbox_policy)
-      |> put_resp_header("x-content-type-options", "nosniff")
-    end)
+    end
   end
 
-  def call(conn, _opts), do: conn
+  defp api_path?([]), do: false
+
+  defp api_path?([first | _]) do
+    URI.decode(first) == "api"
+  rescue
+    ArgumentError -> true
+  end
 end

@@ -41,6 +41,30 @@ defmodule ShuttleWeb.FileControllerTest do
       assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
     end
 
+    # The router decodes path segments before matching, so every spelling that
+    # reaches FileController must carry the policy too.
+    @tag :tmp_dir
+    test "sandboxes percent-encoded spellings of the file routes", %{tmp_dir: dir} do
+      path = Path.join(dir, "probe.xml")
+      File.write!(path, "<x:script xmlns:x='http://www.w3.org/1999/xhtml'>1</x:script>")
+      query = "path=#{URI.encode_www_form(path)}"
+      asset = String.trim_leading(path, "/")
+
+      for url <- [
+            "/api/v1/fil%65?#{query}",
+            "/%61pi/v1/file?#{query}",
+            "/api/v%31/file?#{query}",
+            "/api/v1/file-asset%73/local/#{asset}"
+          ] do
+        conn = get(api_conn(), url)
+
+        assert conn.status == 200, url
+        assert conn.resp_body =~ "x:script", url
+        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy], url
+        assert get_resp_header(conn, "x-content-type-options") == ["nosniff"], url
+      end
+    end
+
     # Negative control: omitting the document sandbox policy makes these checks go red.
     @tag :tmp_dir
     test "sandboxes local HTML document responses without CORS access", %{tmp_dir: dir} do
@@ -691,9 +715,13 @@ defmodule ShuttleWeb.FileControllerTest do
 
     @tag :tmp_dir
     @tag :file_security
-    test "does not sandbox file-info or other API responses", %{tmp_dir: dir} do
+    test "sandboxes every API response but not the board page", %{tmp_dir: dir} do
       conn = get(api_conn(), "/api/v1/file-info?path=#{URI.encode_www_form(dir)}")
       assert conn.status == 200
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+
+      conn = get(api_conn(), "/")
       assert get_resp_header(conn, "content-security-policy") == []
     end
   end
