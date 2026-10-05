@@ -755,7 +755,7 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.host.get(tableKey)!.el).toBe(frame)
   })
 
-  it('gates neither the page list nor the selection on file metadata', async () => {
+  it('paints a routed page while file metadata is still unanswered', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/file-info?') ? new Promise<Response>(() => {}) : original(input, init))
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
@@ -763,7 +763,6 @@ describe('workspace reader integration', () => {
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
-    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).toContain('table.html')
   })
 
   it('sends a routed page the loaded channel does not hold to the report', async () => {

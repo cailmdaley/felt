@@ -503,14 +503,10 @@ export class Workspace {
       await receiptRead
       if (this.disposed) return
       this.rebuild(state)
+      await this.readFileMetadata(state)
+      if (this.disposed) return
+      this.rebuild(state)
       this.refreshProse(state)
-      // Modification times only label pages; the channel never waits for them.
-      void this.readFileMetadata(state).then(() => {
-        if (this.disposed) return
-        this.rebuild(state)
-        this.refreshProse(state)
-        if (this.current === state && this.isActive) this.show(state, false)
-      })
     })().finally(() => { this.loads.delete(key); this.overview.resolving(state.channel.uid, false) })
     this.loads.set(key, promise)
     return promise
