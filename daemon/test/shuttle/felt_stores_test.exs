@@ -46,6 +46,28 @@ defmodule Shuttle.FeltStoresTest do
 
       assert FeltStores.configured_stores() == [Path.expand(store)]
     end
+
+    # Under EMFILE the registry exists but cannot be opened. Caching `[]` from
+    # that read made every later request re-walk the store tree inline.
+    test "an unreadable registry keeps the last good expansion" do
+      System.delete_env("SHUTTLE_STORES")
+      store = tmp_dir()
+      File.mkdir_p!(Path.join(store, ".felt"))
+      registry = Path.join(tmp_dir(), "stores.json")
+      File.write!(registry, Jason.encode!(%{"felt_stores" => [store]}))
+      System.put_env("SHUTTLE_STORES_FILE", registry)
+
+      assert FeltStores.configured_stores() == [Path.expand(store)]
+
+      File.chmod!(registry, 0o000)
+      on_exit(fn -> File.chmod(registry, 0o644) end)
+
+      assert FeltStores.configured_stores() == [Path.expand(store)]
+      assert FeltStores.refresh_expanded_stores() == [Path.expand(store)]
+
+      File.chmod!(registry, 0o644)
+      assert FeltStores.configured_stores() == [Path.expand(store)]
+    end
   end
 
   describe "store_for_fiber/1" do

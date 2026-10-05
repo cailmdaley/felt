@@ -54,15 +54,26 @@ defmodule Shuttle.FeltStores do
   # Cached by base list, so a config change never serves the old expansion.
   # `:infinity` sorts above every integer, so the read path takes the cached
   # branch whenever an entry for this base exists.
+  #
+  # A registry that exists but cannot be read (EMFILE under load) is not an
+  # empty one. Caching `[]` from such a read would make every later call see a
+  # changed base and re-walk the whole tree on its request process, so the last
+  # good expansion is served until a read succeeds.
   defp cached_expansion(max_age_ms) do
-    base = configured_base_stores()
     now = System.monotonic_time(:millisecond)
 
-    case :persistent_term.get(@expanded_cache_key, :none) do
-      {^base, expanded, walked_at} when now - walked_at < max_age_ms ->
+    case {PathListConfig.read_configured(@spec_),
+          :persistent_term.get(@expanded_cache_key, :none)} do
+      {{:ok, base}, {base, expanded, walked_at}} when now - walked_at < max_age_ms ->
         expanded
 
-      _ ->
+      {{:error, _reason}, {_base, expanded, _walked_at}} ->
+        expanded
+
+      {{:error, _reason}, :none} ->
+        []
+
+      {{:ok, base}, _cached} ->
         expanded = expand_with_symlinked_substores(base)
         :persistent_term.put(@expanded_cache_key, {base, expanded, now})
         expanded
