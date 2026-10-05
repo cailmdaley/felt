@@ -1667,6 +1667,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.locator('.ws-return').click()
     await chooseDeskColumn(p, 1)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    // Opening the reader is navigation, not a state change: wait for it before the short poll.
+    await p.locator('.ws-selected .ws-dock .ws-worker-control').waitFor()
     await poll(p, () => document.querySelector('.ws-selected .ws-dock .ws-worker-control')?.textContent.includes('12 m'))
     const dot = p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-worker-dot')
     assert.ok(await dot.isVisible(), 'the act zone pill shows its worker dot')
