@@ -372,14 +372,6 @@ interface AgentRecord {
   alias_of?: string | null
 }
 
-/** Who works this channel and where, beside the worker pill. */
-function workerLine(card: KanbanCard): string {
-  const agent = card.workerAgent ?? card.shuttleAgent
-  const where = card.shuttleHost ?? card.originId
-  const who = agent ? `${agent} on ${where}` : where
-  return hasLiveWorker(card) ? who : `${who} · no worker`
-}
-
 export interface DockOptions {
   meeting?: MeetingJoinControl
   /** Whether the Desk draws this card's worker phase (it does in flight). */
@@ -405,7 +397,7 @@ export class Dock {
   private composerDisposers: (() => void)[] = []
   private workerPill: HTMLElement | null = null
   private workerPillCard: KanbanCard | null = null
-  private statusPill: HTMLElement | null = null
+  private workerContainer: HTMLElement | null = null
   private workerPillKey = ''
   private guidance: HTMLElement | null = null
   private dismissMeeting: (() => boolean) | null = null
@@ -471,14 +463,10 @@ export class Dock {
     // opening targets without replacing the textarea or settings fields.
     this.card = { ...card }
     const view = this.card
-    // The worker line: the way into the real conversation, then who and where.
-    const worker = document.createElement('div')
-    worker.className = 'ws-dock-worker'
-    this.statusPill = document.createElement('span')
-    this.statusPill.className = 'ws-dock-status'
-    this.statusPill.textContent = workerLine(card)
-    worker.append(this.statusPill)
-    this.el.append(worker)
+    // The worker line is only the shared action pill into its conversation.
+    this.workerContainer = document.createElement('div')
+    this.workerContainer.className = 'ws-dock-worker'
+    this.el.append(this.workerContainer)
     this.guidance = document.createElement('p')
     this.guidance.className = 'kbn-detail-app-guide'
     this.el.append(this.guidance)
@@ -522,7 +510,7 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.workerPillCard = this.transcriptCard = null
-    this.workerPill = this.statusPill = this.transcriptPane = this.guidance = null
+    this.workerPill = this.workerContainer = this.transcriptPane = this.guidance = null
     this.workerPillKey = ''
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -697,7 +685,7 @@ export class Dock {
    */
   syncRuntime(card: KanbanCard | null): void {
     for (const band of this.bands.values()) band.syncRuntime(card)
-    if (!card || !this.isOpen || !this.statusPill || this.card?.id !== card.id || this.card.originId !== card.originId) return
+    if (!card || !this.isOpen || !this.workerContainer || this.card?.id !== card.id || this.card.originId !== card.originId) return
     if (this.card) {
       for (const key of ['workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status'] as const) {
         Object.assign(this.card, { [key]: card[key] })
@@ -705,7 +693,6 @@ export class Dock {
       card = this.card
     }
     this.workerPillCard = card
-    this.statusPill.textContent = workerLine(card)
     this.paintGuidance(card)
     const key = this.workerPillState(card)
     if (key === this.workerPillKey) return
@@ -713,7 +700,7 @@ export class Dock {
     this.dismissConversation?.()
     const next = this.buildWorkerPill(card)
     if (this.workerPill && next) this.workerPill.replaceWith(next)
-    else if (next) this.statusPill.before(next)
+    else if (next) this.workerContainer.append(next)
     else this.workerPill?.remove()
     this.workerPill = next
   }

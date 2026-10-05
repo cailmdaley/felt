@@ -69,7 +69,11 @@ describe('the shared navbar and inline worker pill', () => {
     expect(inline.tagName).toBe('BUTTON')
     expect(navbar.tagName).toBe('BUTTON')
     expect(inline.className).toBe(navbar.className)
+    expect(inline.textContent).toBe('Aloft')
     expect(inline.textContent).toBe(navbar.textContent)
+    expect(inline.textContent).not.toContain('codex-sol')
+    expect(band.el.querySelector('.ws-dock-worker')?.childElementCount).toBe(1)
+    expect(band.el.querySelector('.ws-dock-worker')?.textContent).toBe('Aloft')
     navbar.click()
     inline.click()
     expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a'], ['shuttle-debug', 'host-a']])
@@ -106,15 +110,39 @@ describe('the shared navbar and inline worker pill', () => {
     current = departed
     show(departed)
     expect(band.el.querySelector('.kbn-card-worker')).toBeNull()
+    expect(band.el.querySelector('.ws-dock-worker')?.textContent).toBe('')
     expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')).toBeNull()
+  })
+
+  it('shows app worker state in the navbar while preserving its native destination', () => {
+    const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
+    const app = worker({
+      tmuxSession: undefined,
+      workerSurface: 'app',
+      sessionUuid: 'app-session',
+      desktopLink: route,
+      runtimePhase: 'waiting',
+      lastActivityAt: Date.now() - 61_000,
+    })
+    const band = dock.bandFor(app)
+    show(app)
+    const inline = band.el.querySelector<HTMLAnchorElement>('.kbn-card-worker')!
+    const navbar = reader.el.querySelector<HTMLAnchorElement>('.ws-worker-pill .kbn-card-worker')!
+    expect(inline.textContent).toBe('Waiting')
+    expect(navbar.textContent).toBe('Waiting')
+    expect(navbar.textContent).not.toContain('codex-sol')
+    expect(navbar.href).toBe(route)
   })
 
   it('repaints Waiting as Aloft in both locations and suppresses phase outside In flight', () => {
     const waiting = worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 })
     const band = dock.bandFor(waiting)
     show(waiting)
-    expect(band.el.querySelector('.kbn-card-worker')?.textContent).toBe('Waiting')
+    const waitingPill = band.el.querySelector('.kbn-card-worker')
+    expect(waitingPill?.textContent).toBe('Waiting')
     expect(reader.el.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('Waiting')
+    dock.syncRuntime(worker({ runtimePhase: 'waiting', lastActivityAt: waiting.lastActivityAt }))
+    expect(band.el.querySelector('.kbn-card-worker')).toBe(waitingPill)
 
     current = worker({ runtimePhase: 'working', lastActivityAt: Date.now() })
     dock.syncRuntime(current)

@@ -42,11 +42,13 @@ describe('fiber prose', () => {
     expect(ledeHtml('')).toBe('')
   })
 
-  it('shows a compact header and selects documents rather than embedding them', async () => {
+  it('shows status alone in the header and selects documents rather than embedding them', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
     const onSelect = vi.fn(), onFiber = vi.fn(), onFile = vi.fn()
     const pane = buildFiberProse(card, channel, { shuttleBase: '', onSelect, onFiber, onFile })
-    expect(pane.querySelector('header')?.textContent).toBe('activesolhost-a')
+    expect(pane.querySelector('header')?.textContent).toBe('active')
+    expect(pane.querySelector('.ws-prose-status')?.textContent).toBe('active')
+    expect(pane.querySelector('.ws-prose-agent, .ws-prose-host')).toBeNull()
     expect(pane.querySelector('h1')?.textContent).toBe('Task')
     expect(pane.querySelector('iframe')).toBeNull()
     expect(pane.querySelectorAll('.ws-prose-documents button')).toHaveLength(1)

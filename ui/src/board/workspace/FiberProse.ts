@@ -78,16 +78,11 @@ export function buildFiberProse(
   article.className = 'ws-prose ws-fiber-prose kbn-detail-prose'
   const header = document.createElement('header')
   header.className = 'ws-prose-header'
-  for (const [name, value] of [
-    ['status', card.status],
-    ['agent', card.shuttleAgent],
-    ['host', channel.owner],
-  ]) {
-    if (!value) continue
-    const span = document.createElement('span')
-    span.className = `ws-prose-${name}`
-    span.textContent = value
-    header.append(span)
+  if (card.status) {
+    const status = document.createElement('span')
+    status.className = 'ws-prose-status'
+    status.textContent = card.status
+    header.append(status)
   }
   const title = document.createElement('h1')
   title.textContent = channel.name
