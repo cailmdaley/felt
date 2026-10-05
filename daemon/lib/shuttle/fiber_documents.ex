@@ -213,19 +213,21 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  # A caller that knows a UID's slug names it as `:address`: felt shows a slug
-  # directly, where a UID costs a walk of the whole store. The answer counts
-  # only when it carries the requested UID, so a stale address falls through
-  # to the lookup by UID.
+  # A caller that knows where felt can read a UID names that `{store, id}`
+  # as `:address` (`Shuttle.FiberAddresses`): felt shows an id directly, where
+  # a UID costs a walk of the whole store. The answer counts only when it
+  # carries the requested UID, so a stale address falls through to the lookup
+  # by UID.
   defp address_lookup(_stores, _id, nil, _with_body?, _cli), do: :miss
 
-  defp address_lookup(stores, id, address, with_body?, cli) do
-    case fast_lookup(stores, address, with_body?, cli) do
-      {:ok, %{fiber: %{"uid" => uid}} = entry} when is_binary(uid) ->
-        if String.upcase(uid) == String.upcase(id), do: {:ok, entry}, else: :miss
-
-      _ ->
-        :miss
+  defp address_lookup(stores, id, {store, address}, with_body?, cli) do
+    with true <- store in stores,
+         {:ok, [%{fiber: %{"uid" => uid}} = entry | _]} when is_binary(uid) <-
+           show_store(store, address, with_body?, cli),
+         true <- String.upcase(uid) == String.upcase(id) do
+      {:ok, entry}
+    else
+      _ -> :miss
     end
   end
 
@@ -259,6 +261,7 @@ defmodule Shuttle.FiberDocuments do
       {output, 0} ->
         case Jason.decode(output) do
           {:ok, %{} = fiber} ->
+            learn_address(store, fiber)
             fiber = if with_body?, do: fiber, else: Map.delete(fiber, "body")
             # The single-fiber path may not carry the native `report_path`
             # field, so it stats for report existence. The high-volume list path
@@ -273,6 +276,13 @@ defmodule Shuttle.FiberDocuments do
         :miss
     end
   end
+
+  # felt's `id` here is the traversal id `show` resolves in this store; the
+  # canonical slug can differ across a symlinked substore.
+  defp learn_address(store, %{"uid" => uid, "id" => id}) when is_binary(uid) and is_binary(id),
+    do: Shuttle.FiberAddresses.learn(uid, store, id)
+
+  defp learn_address(_store, _fiber), do: :ok
 
   # Enumerate each store and match the requested canonical id. The listing
   # carries no bodies and the match is made on in-memory entries: every miss

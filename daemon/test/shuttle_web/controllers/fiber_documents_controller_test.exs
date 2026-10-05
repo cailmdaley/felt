@@ -792,8 +792,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       """)
     end
 
-    poller = warm_poller!(store)
-    assert Shuttle.Poller.slug_for_uid(polled) == "tests/by-slug"
+    warm_poller!(store)
+    assert {_store, "tests/by-slug"} = Shuttle.FiberAddresses.lookup(polled)
     log = install_logging_felt!(store)
 
     conn = get(api_conn(), "/api/v1/fibers/#{polled}?body=true")
@@ -805,9 +805,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     # A stale slug answers with another fiber's UID; the read falls through to
     # the UID itself rather than serving the wrong document.
-    :sys.replace_state(poller, fn state ->
-      %{state | uid_slug_index: Map.put(state.uid_slug_index, stale, "tests/other")}
-    end)
+    Shuttle.FiberAddresses.put_polled(%{stale => {store, "tests/other"}})
 
     File.write!(log, "")
     conn = get(api_conn(), "/api/v1/fibers/#{stale}?body=true")
@@ -834,14 +832,44 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     log = install_logging_felt!(store)
 
-    for _ <- 1..2 do
-      conn = get(api_conn(), "/api/v1/fibers/#{uid}?body=true")
+    # The second request is lowercase and still finds the learned address.
+    for requested <- [uid, String.downcase(uid)] do
+      conn = get(api_conn(), "/api/v1/fibers/#{requested}?body=true")
 
       assert [%{"fiber" => %{"id" => ^uid, "body" => "Unpolled body."}}] =
                Jason.decode!(conn.resp_body)["fibers"]
     end
 
     assert File.read!(log) == "show #{uid} -j\nshow tests/unpolled -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id learns a symlinked fiber's traversal id, not its canonical slug",
+       %{store: store} do
+    uid = "01JZ0000000000000000000006"
+    project = Path.join(Path.dirname(store), "shapepipe")
+
+    write_fiber!(project, "review-ngmix", """
+    ---
+    id: #{uid}
+    name: Ngmix review
+    status: open
+    ---
+
+    Ngmix body.
+    """)
+
+    File.mkdir_p!(Path.join(store, ".felt"))
+    File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "shapepipe"]))
+    log = install_logging_felt!(store)
+
+    for _ <- 1..2 do
+      conn = get(api_conn(), "/api/v1/fibers/#{uid}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "slug" => "review-ngmix", "body" => "Ngmix body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow shapepipe/review-ngmix -j\n"
   end
 
   test "GET /api/v1/fibers/:id?body=true includes the felt body alongside full metadata",

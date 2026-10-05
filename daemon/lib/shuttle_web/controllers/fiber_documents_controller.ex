@@ -167,18 +167,16 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # write run their own lookup: a miss may share a store listing in flight, but
   # the answer always comes from a fresh `show`.
   #
-  # The board addresses fibers by UID. A UID with a known slug reads through
+  # The board addresses fibers by UID. A UID with a known address reads through
   # it, a direct felt read instead of a walk of the store (`Shuttle.FiberAddresses`).
   defp show_local(conn, id, with_body?, routed?) do
     case Shuttle.SingleFlight.run({:fiber_get, id, with_body?}, fn ->
            Shuttle.FiberDocuments.get(id,
              with_body: with_body?,
-             address: Shuttle.FiberAddresses.slug_for(id)
+             address: Shuttle.FiberAddresses.lookup(id)
            )
          end) do
       {:ok, body} ->
-        Shuttle.FiberAddresses.learn(id, body)
-
         case owning_remote(body, routed?) do
           nil -> json(conn, body)
           remote -> relay_bytes(conn, forward_show(remote, id, with_body?))
