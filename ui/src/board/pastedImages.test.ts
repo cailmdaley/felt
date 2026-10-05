@@ -201,7 +201,6 @@ describe('a send with images', () => {
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ tmux_session: 'w' }) })
     vi.stubGlobal('fetch', fetch)
     const panel = new Dock('http://daemon', vi.fn())
-    vi.spyOn(panel, 'close').mockImplementation(() => {})
     const images = new PastedImages()
     images.add([file('a.png', 'image/png')])
     const target = card({ id: 'work/task', originId: 'local' })

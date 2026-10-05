@@ -12,8 +12,8 @@ describe('shared keyboard table', () => {
   for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
     for (const binding of surfaceBindings[surface]) {
       for (const key of binding.keys) {
-        it(`${surface}: ${binding.alt ? 'Alt+' : ''}${key} → ${binding.intent}`, () => {
-          expect(keyIntent(event(key === 'Shift+ ' ? ' ' : key, { altKey: binding.alt, shiftKey: key === 'Shift+ ' || /^[GJK?]$/.test(key) }), surface)).toBe(binding.intent)
+        it(`${surface}: ${binding.command ? 'Cmd+' : ''}${binding.alt ? 'Alt+' : ''}${key} → ${binding.intent}`, () => {
+          expect(keyIntent(event(key === 'Shift+ ' ? ' ' : key, { altKey: binding.alt, metaKey: binding.command, shiftKey: key === 'Shift+ ' || /^[GJK?]$/.test(key) }), surface)).toBe(binding.intent)
         })
       }
     }
@@ -35,7 +35,7 @@ describe('shared keyboard table', () => {
     expect(keyIntent(event('j', {}, child), 'reader')).toBeNull()
     expect(shouldForwardDocumentKey(event('j', {}, child))).toBe(false)
     child.setAttribute('contenteditable', 'false')
-    expect(keyIntent(event('j', {}, child), 'reader')).toBe('next')
+    expect(keyIntent(event('j', {}, child), 'reader')).toBe('scrollDown')
   })
   it('recognizes editable targets from another document realm', () => {
     const frame = document.createElement('iframe')

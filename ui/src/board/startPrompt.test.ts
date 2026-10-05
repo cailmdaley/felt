@@ -258,7 +258,6 @@ describe('the conversation dock answers a refused start with the prompt', () => 
     }))
     const refreshed = vi.fn()
     const panel = new Dock('http://daemon', refreshed)
-    const close = vi.spyOn(panel, 'close').mockImplementation(() => {})
     const requeue = panel as unknown as {
       runRequeue: (c: ReturnType<typeof card>, directive: string, mode: 'fresh',
         btn: HTMLButtonElement, error: HTMLElement) => Promise<void>
@@ -276,7 +275,6 @@ describe('the conversation dock answers a refused start with the prompt', () => 
     await requeue.runRequeue(task, 'go', 'fresh', btn as unknown as HTMLButtonElement,
       errorEl as unknown as HTMLElement)
 
-    expect(close).not.toHaveBeenCalled()
     expect(errorEl.style.display).toBe('')
     expect(btn.disabled).toBe(false)
     expect(btn.textContent).toBe('New session')
@@ -286,7 +284,7 @@ describe('the conversation dock answers a refused start with the prompt', () => 
     expect(bodies[0]).not.toHaveProperty('project_dir')
 
     el(errorEl.find('kbn-ctl-send')).fire('click')
-    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce())
+    await vi.waitFor(() => expect(refreshed).toHaveBeenCalledOnce())
     expect(bodies[1]).toMatchObject({
       fiber_id: 'work/task',
       origin: 'owner-host',

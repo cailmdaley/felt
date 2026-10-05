@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { centeredScrollLeft, TAB_CROSSING_MS, TabStrip } from './TabStrip.js'
+import type { KeyIntent } from '../keymap.js'
 
 let strips: TabStrip[] = []
 afterEach(() => {
@@ -47,22 +48,23 @@ describe('TabStrip', () => {
     expect(onExpand).toHaveBeenCalledOnce()
   })
 
-  it('moves selection with arrows, Home and End while retaining one keyboard stop', () => {
+  it('handles shared reader intents with roving focus and one keyboard stop', () => {
     const onSelect = vi.fn()
     const strip = create(onSelect)
     strip.render(['One', 'Two', 'Three'])
     strip.buttons[0].focus()
-    strip.buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+    expect(strip.handleIntent('next' satisfies KeyIntent)).toBe(true)
     expect(onSelect).toHaveBeenLastCalledWith(1)
     expect(strip.buttons.map((button) => button.tabIndex)).toEqual([-1, 0, -1])
     expect(document.activeElement).toBe(strip.buttons[1])
 
-    strip.buttons[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
+    expect(strip.handleIntent('last')).toBe(true)
     expect(onSelect).toHaveBeenLastCalledWith(2)
     expect(document.activeElement).toBe(strip.buttons[2])
-    strip.buttons[2].dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }))
+    expect(strip.handleIntent('first')).toBe(true)
     expect(onSelect).toHaveBeenLastCalledWith(0)
     expect(strip.buttons.map((button) => button.tabIndex)).toEqual([0, -1, -1])
+    expect(strip.handleIntent('scrollDown')).toBe(false)
   })
 
   it('is a no-op for unchanged labels and preserves focused nodes during reconciliation', () => {

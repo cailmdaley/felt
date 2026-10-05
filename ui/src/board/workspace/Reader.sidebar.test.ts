@@ -86,30 +86,33 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
-  it('follows the wide viewport by default and hides when it is narrow', () => {
+  it('defaults closed at wide and narrow widths, with a labelled Channels lead control', () => {
     viewport.wide = true
     const wide = makeReader()
-    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
-    expect(wide.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-pressed')).toBe('true')
+    const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
+    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(wideToggle.textContent).toBe('▥ Channels')
+    expect(wideToggle.title).toBe('Channels (⌘\\)')
+    expect(wideToggle.getAttribute('aria-expanded')).toBe('false')
     disposeReader(wide)
 
     viewport.wide = false
     const narrow = makeReader()
     expect(narrow.el.classList.contains('ws-with-sidebar')).toBe(false)
-    expect(narrow.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-pressed')).toBe('false')
+    expect(narrow.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('toggles by click and Cmd+\\, persists the choice, and applies stored choices on construction', () => {
+  it('toggles by click and Cmd+\\, persists the choice, and applies stored choices at any desktop width', () => {
     viewport.wide = true
     const reader = makeReader()
     const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     toggle.click()
-    expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
-    expect(storage.get('shuttle:workspace:sidebar')).toBe('false')
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(storage.get('shuttle:workspace:sidebar')).toBe('true')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
+    expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(storage.get('shuttle:workspace:sidebar')).toBe('false')
     disposeReader(reader)
 
     storage.set('shuttle:workspace:sidebar', 'false')
@@ -129,12 +132,13 @@ describe('Reader channel sidebar', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const reader = makeReader()
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
-    expect(reader.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-pressed')).toBe('false')
+    expect(reader.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('focuses the sidebar find from the title when open and opens a switcher when closed', () => {
     viewport.wide = true
     const open = makeReader()
+    open.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     open.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     expect(document.activeElement).toBe(open.el.querySelector('.ws-sidebar .ws-channel-find'))
     expect(open.el.querySelector('.ws-switcher')).toBeNull()
@@ -152,6 +156,7 @@ describe('Reader channel sidebar', () => {
   it('lists channels in overview order, marks the current channel, filters, and opens the chosen card', () => {
     viewport.wide = true
     const reader = makeReader(beta)
+    reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     const rows = [...reader.el.querySelectorAll<HTMLButtonElement>('.ws-channel-row')]
     expect(rowNames(reader)).toEqual(['Beta', 'Alpha', 'Gamma'])
     expect(rows.map((row) => row.getAttribute('aria-current'))).toEqual(['true', 'false', 'false'])
@@ -168,6 +173,7 @@ describe('Reader channel sidebar', () => {
   it('refreshes sidebar rows without clearing the find text', () => {
     viewport.wide = true
     const reader = makeReader()
+    reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar .ws-channel-find')!
     find.value = 'a'
     find.dispatchEvent(new Event('input'))
@@ -177,5 +183,40 @@ describe('Reader channel sidebar', () => {
     reader.refreshChannels()
     expect(find.value).toBe('a')
     expect(rowNames(reader)).toEqual(['Gamma', 'Alpha'])
+  })
+
+  it('keeps the selected tab visible when opening the sidebar changes layout', () => {
+    const reader = makeReader()
+    const base = channel(alpha)
+    const documents = Array.from({ length: 4 }, (_, index) => ({
+      ...base.documents[0], key: `fiber:host-a:alpha-${index}`, name: `Page ${index + 1}`,
+    }))
+    const pages: Channel = { ...base, documents, labels: documents.map(doc => doc.name) }
+    reader.show(pages, documents[3].key, 'Desk', alpha)
+
+    const strip = reader.el.querySelector<HTMLElement>('.ws-tabs')!
+    const selected = reader.el.querySelectorAll<HTMLButtonElement>('.ws-tab')[3]
+    Object.defineProperty(strip, 'clientWidth', {
+      configurable: true, get: () => reader.el.classList.contains('ws-with-sidebar') ? 100 : 120,
+    })
+    Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 500 })
+    Object.defineProperty(selected, 'offsetLeft', { configurable: true, value: 310 })
+    Object.defineProperty(selected, 'offsetWidth', { configurable: true, value: 80 })
+
+    window.dispatchEvent(new Event('resize'))
+    expect(strip.scrollLeft).toBe(290)
+    reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+    expect(strip.scrollLeft).toBe(300)
+    expect(strip.scrollLeft).toBeLessThanOrEqual(310)
+    expect(strip.scrollLeft + strip.clientWidth).toBeGreaterThanOrEqual(390)
+  })
+
+  it('switches focus-ring modality from keyboard to pointer input', () => {
+    const reader = makeReader()
+    expect(reader.el.classList.contains('ws-keyboard')).toBe(false)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
+    expect(reader.el.classList.contains('ws-keyboard')).toBe(true)
+    document.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    expect(reader.el.classList.contains('ws-keyboard')).toBe(false)
   })
 })

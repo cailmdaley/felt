@@ -63,8 +63,8 @@ afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreA
 
 describe('Desk keyboard selection', () => {
   it('moves through both flight bands, the three columns, Pinned and Resting without wrapping', () => {
-    press('j'); expect(selected()).toBe('draft-uid')
-    press('l'); expect(selected()).toBe('head-uid')
+    press('j'); expect(selected()).toBe('review')
+    press('h'); expect(selected()).toBe('head-uid')
     press('j'); expect(selected()).toBe('working')
     press('j'); expect(selected()).toBe('working')
     press('g'); expect(selected()).toBe('head-uid')
@@ -77,7 +77,7 @@ describe('Desk keyboard selection', () => {
     press('u'); expect(selected()).toBeUndefined()
   })
   it('treats a folded queue as one stop and expanded members as stops', () => {
-    press('j'); press('l'); press('j'); expect(selected()).toBe('working')
+    press('j'); press('h'); press('j'); expect(selected()).toBe('working')
     press('k')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('j'); expect(selected()).toBe('child-uid')
@@ -86,7 +86,7 @@ describe('Desk keyboard selection', () => {
     expect(window.location.hash).toContain('child-uid')
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
-    press('j')
+    press('j'); press('h'); press('h')
     const updated = data()
     updated.now.drafts = [card({ id: 'd2' }), card({ id: 'renamed', uid: 'draft-uid' })]
     draw(updated)
@@ -95,7 +95,7 @@ describe('Desk keyboard selection', () => {
     press('k'); expect(selected()).toBe('d2')
   })
   it('opens with Enter and restores the opened card after reader return and a deferred refresh', () => {
-    press('j'); press('j'); press('Enter')
+    press('j'); press('h'); press('h'); press('j'); press('Enter')
     expect(inside.workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('d2')
     const updated = data()
@@ -125,7 +125,7 @@ describe('Desk keyboard selection', () => {
     const pager = document.querySelector<HTMLElement>('.kbn-now-board')!
     Object.defineProperty(pager, 'clientWidth', { configurable: true, value: 390 })
     press('j'); press('l')
-    expect(scroll).toHaveBeenCalledWith({ left: 390, behavior: 'instant' })
+    expect(scroll).toHaveBeenCalledWith({ left: 780, behavior: 'instant' })
     expect(intoView).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' })
     press('l'); press('l'); press('l')
     expect(selected()).toBe('resting')
@@ -140,8 +140,24 @@ describe('Desk keyboard selection', () => {
     const dialog = document.createElement('div'); dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); document.body.append(dialog)
     press('j'); expect(selected()).toBeUndefined()
     dialog.remove()
-    press('j'); expect(selected()).toBe('draft-uid')
+    press('j'); expect(selected()).toBe('review')
     expect(press('1').defaultPrevented).toBe(true)
+  })
+
+  it('chooses the first movement target by review, Needs-you flight, then drafts', () => {
+    press('ArrowDown'); expect(selected()).toBe('review')
+    press('u')
+
+    const flight = data()
+    flight.now.awaitingReview = []
+    flight.now.inFlight = [card({ id: 'needs-you', uid: 'needs-you', status: 'active', runtimePhase: 'attention' })]
+    draw(flight)
+    press('ArrowDown'); expect(selected()).toBe('needs-you')
+    press('u')
+
+    const drafts = response({ now: { drafts: [card({ id: 'draft', uid: 'draft' })], inFlight: [], awaitingReview: [] } })
+    draw(drafts)
+    press('ArrowDown'); expect(selected()).toBe('draft')
   })
 })
 
