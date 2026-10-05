@@ -2255,7 +2255,9 @@ export class KanbanModal {
     this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
-    this.deskKeyboard?.refresh(true)
+    // A redraw repaints the selection in place: the Desk scrolls only when the
+    // selection moves, never under a pointer on its way to another card.
+    this.deskKeyboard?.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
     // Expand line-clamp on outcomes in now-section columns with spare
