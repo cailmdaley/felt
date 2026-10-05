@@ -181,7 +181,7 @@
 .ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-track { background: var(--ws-ink); border-color: var(--ws-ink); }
 .ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-track::after { left: 11px; background: var(--ws-paper); }
 /* The kinds are words; the chosen one wears the selection plate. */
-.ws-dock .kbn-ctl-meet-modes { gap: 0; padding: 0; border-color: transparent; background: transparent; }
+.ws-dock .kbn-ctl-meet-modes { gap: 0; padding: 0; border: 0; background: transparent; }
 .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment { min-height: var(--ctl-h); padding-inline: 8px; }
 .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment:hover:not(:disabled, [aria-checked='true']) { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-dock .kbn-detail-directive::placeholder { color: var(--ws-ink-muted); }
@@ -275,7 +275,7 @@
   .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
   .ws-dock .kbn-ctl-composer-foot { grid-column: 1; grid-row: 3; flex-wrap: wrap; justify-content: flex-end; }
   .ws-dock .kbn-ctl-meet-noun { display: none; }
-  .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment { padding-inline: 7px; }
+  .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment { min-width: var(--ws-phone-target); padding-inline: 7px; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--ws-label-size); }
   .ws-dock :is(.kbn-ctl-menu-item, .kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
   .ws-dock .kbn-ctl-image { width: 80px; height: 80px; }
