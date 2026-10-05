@@ -18,10 +18,10 @@ System.put_env("SHUTTLE_REMOTES_FILE", Path.expand("fixtures/remotes/absent.json
 # want configured stores set SHUTTLE_STORES or SHUTTLE_STORES_FILE.
 System.delete_env("SHUTTLE_STORES")
 
-System.put_env(
-  "SHUTTLE_STORES_FILE",
+stores_file =
   Path.join(System.tmp_dir!(), "shuttle-test-stores-#{System.system_time(:nanosecond)}.json")
-)
+
+System.put_env("SHUTTLE_STORES_FILE", stores_file)
 
 # Pin the session ledger away from the developer's real ~/.shuttle. The
 # dispatch and claim paths append to it unconditionally, so without this the
@@ -51,3 +51,7 @@ Application.put_env(
 
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
 ExUnit.start(exclude: exclude)
+
+# A test that saves stores without its own SHUTTLE_STORES_FILE writes the
+# suite-wide registry; remove it with the run.
+ExUnit.after_suite(fn _ -> File.rm(stores_file) end)
