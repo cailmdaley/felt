@@ -51,19 +51,8 @@
   }
 }
 
-[data-part="tab"] {
-  color: var(--ws-ink-muted);
-  font-family: var(--ws-mono);
-  letter-spacing: var(--ws-mono-tracking);
-  text-transform: uppercase;
-}
+[data-part="tab"] { color: var(--ws-ink-muted); border-radius: 0; }
 [data-part="tab"][aria-selected="true"] { color: var(--ws-ink); }
-[data-part="tab"] .ws-tab-label {
-  font-family: var(--ws-mono);
-  font-size: 12px;
-  letter-spacing: var(--ws-mono-tracking);
-  text-transform: uppercase;
-}
 
 [data-part="label-bar"] {
   color: var(--ws-ink-muted);
@@ -153,12 +142,7 @@
   box-shadow: none;
 }
 
-[data-part="tab-strip"] {
-  color: var(--ws-ink-muted);
-  font-family: var(--ws-mono);
-  letter-spacing: var(--ws-mono-tracking);
-  text-transform: uppercase;
-}
+[data-part="tab-strip"] { color: var(--ws-ink-muted); }
 .ws-thumbnail[data-part="thumbnail"] {
   background-color: var(--ws-paper);
   border-color: var(--ws-hairline);
