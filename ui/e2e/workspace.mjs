@@ -254,7 +254,9 @@ test('Report reference batches are size-capped and limited to four responses a s
   const inner = await reportDocument(p)
   // Keep ordinary scanner decoration out of the malicious sender's rate budget.
   await inner.evaluate(() => document.querySelectorAll('code,a[href]').forEach(element => element.remove()))
-  await p.waitForTimeout(1100)
+  // The parent defers an over-budget batch until its window reopens, so the
+  // scanner's last batch can hold a slot for up to two windows.
+  await p.waitForTimeout(2100)
   await inner.evaluate(() => {
     window.__referenceResponses = 0
     window.addEventListener('message', event => { if (event.data?.type === 'references:resolved') window.__referenceResponses++ })
