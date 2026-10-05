@@ -2,7 +2,7 @@
  * One change-aware watcher for every live file-reading surface.
  *
  * A watcher sends conditional GETs against the file endpoint's content-digest
- * ETag. Every 200 also gets a client-side content fingerprint, and views
+ * ETag; its first read lets the browser revalidate a cached copy. Every 200 also gets a client-side content fingerprint, and views
  * update only when that fingerprint moves — so a forced re-read, or an owner
  * that answers without a digest validator, repaints nothing when the body is
  * unchanged. Watchers for the same URL share one request; inactive tabs pause
@@ -155,6 +155,11 @@ export class LiveFileRefresh {
     return stop
   }
 
+  /** True while a reader surface watches this URL. */
+  watched(url: string): boolean {
+    return this.files.has(url)
+  }
+
   /** Poll every due file now; hidden pages do no work. */
   async pollNow(): Promise<void> {
     if (!this.isVisible()) return
@@ -224,12 +229,15 @@ export class LiveFileRefresh {
     // fingerprint instead.
     const headers: Record<string, string> = {}
     if (file.etag && DIGEST_ETAG.test(file.etag)) headers['If-None-Match'] = file.etag
+    // A watcher's first read may be answered from the browser's copy after a
+    // revalidation; every later read, and any forced one, goes to the owner.
+    const cache: RequestCache = file.content === null && !force ? 'no-cache' : 'no-store'
 
     let request: Promise<void>
     request = (async () => {
       try {
         const response = await this.fetchFile(url, {
-          cache: 'no-store',
+          cache,
           headers,
           signal: controller.signal,
         })
@@ -340,6 +348,10 @@ export function watchLiveFile(
   options: LiveFileWatchOptions = {},
 ): LiveFileSubscription {
   return liveFileRefresh.watch(url, onContent, onError, options)
+}
+
+export function liveFileWatched(url: string): boolean {
+  return liveFileRefresh.watched(url)
 }
 
 export function refreshLiveFile(url: string): Promise<void> {

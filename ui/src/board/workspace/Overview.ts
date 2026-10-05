@@ -1,5 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
+import { inLane } from '../requestLanes.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
@@ -26,6 +27,9 @@ export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
 const RECEIPT_OVERLAP_MS = 60000
 const MAX_CHANGE_ROWS = 8
+/** Metadata read backoff: an unreachable owner retries within 30 s; a fiber its owner says does not exist waits 30 s, doubling to 5 min. */
+const RETRY_MS = 30000
+const MISSING_RETRY_MS = 300000
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
 const SEEN_STORAGE = 'shuttle.workspace.overview.seen'
@@ -219,9 +223,7 @@ export class Overview {
   private readonly visits = new Map<string, number>()
   private readonly openedCards = new Map<string, KanbanCard>()
   private readonly fetchedCards = new Map<string, KanbanCard>()
-  private readonly cardLoads = new Map<string, Promise<KanbanCard | undefined>>()
-  private readonly cardQueue: Array<{ uid: string; run(): Promise<void> }> = []
-  private activeCardReads = 0
+  private readonly cardLoads = new Map<string, { pending: Promise<KanbanCard | undefined>; promote: () => void }>()
   private readonly cardRetries = new Map<string, { attempts: number; at: number }>()
   private readonly missingCards = new Set<string>()
   private readonly provisionalOpened = new Set<string>()
@@ -343,7 +345,10 @@ export class Overview {
   /** Metadata paints immediately; one coalesced feed read finishes asynchronously. */
   refresh(): void {
     if (this.disposed) return
-    if (!this.request) for (const retry of this.cardRetries.values()) retry.at = 0
+    // A poll retries transient failures at once. An owner that answered "not
+    // found" keeps its backoff until the next visit, because every read of a
+    // missing fiber asks each host in turn.
+    if (!this.request) for (const [uid, retry] of this.cardRetries) if (!this.missingCards.has(uid)) retry.at = 0
     this.reconcile()
     if (this.request) return
     const controller = new AbortController()
@@ -427,6 +432,7 @@ export class Overview {
     if (this.disposed) return
     if (visible === this.visible) { if (visible) this.startVisit(); return }
     if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; this.leaveVisit() }
+    else for (const retry of this.cardRetries.values()) retry.at = 0
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
@@ -597,35 +603,38 @@ export class Overview {
     if (times.length) this.retryTimer = setTimeout(() => this.reconcile(), Math.max(1, Math.min(...times) - Date.now()))
   }
 
-  /** Clicks move ahead of queued preloads without duplicating or preempting active reads. */
+  /**
+   * Preloads wait in the slow request lane, where one read can take many
+   * seconds; a click reads at once, taking over its own queued preload. A
+   * read already under way is shared, never duplicated or preempted.
+   */
   private queueCard(card: KanbanCard, priority = false): Promise<KanbanCard | undefined> {
     const uid = uidOf(card)
     const prior = this.cardLoads.get(uid)
     if (prior) {
-      const index = priority ? this.cardQueue.findIndex(job => job.uid === uid) : -1
-      if (index > 0) this.cardQueue.unshift(this.cardQueue.splice(index, 1)[0])
-      return prior
+      if (priority) prior.promote()
+      return prior.pending
     }
     let complete!: (card: KanbanCard | undefined) => void
     const pending = new Promise<KanbanCard | undefined>(resolve => { complete = resolve })
-    this.cardLoads.set(uid, pending)
-    const job = { uid, run: async (): Promise<void> => {
+    let started = false
+    const queued = new AbortController()
+    const run = async (): Promise<void> => {
+      started = true
       const resolved = this.disposed ? undefined : this.knownCards().get(uid) ?? await this.loadCard(card)
       this.cardLoads.delete(uid)
       complete(resolved)
       if (!this.disposed) this.reconcile()
-    } }
-    if (priority) this.cardQueue.unshift(job)
-    else this.cardQueue.push(job)
-    this.pumpCards()
-    return pending
-  }
-  private pumpCards(): void {
-    while (this.activeCardReads < 4 && this.cardQueue.length) {
-      const job = this.cardQueue.shift()!
-      this.activeCardReads++
-      void job.run().finally(() => { this.activeCardReads--; this.pumpCards() })
     }
+    const promote = (): void => {
+      if (started) return
+      queued.abort()
+      void run()
+    }
+    this.cardLoads.set(uid, { pending, promote })
+    if (priority) void run()
+    else void inLane('slow', run, { signal: queued.signal }).catch(() => { /* Promoted to a click. */ })
+    return pending
   }
 
   private createFolio(uid: string, card: KanbanCard): Folio {
@@ -942,9 +951,11 @@ export class Overview {
       const current = this.knownCards().get(uid)
       if (current) return current
       if (!this.disposed) {
-        if (error instanceof Error && error.message.startsWith('Fiber not found on ')) this.missingCards.add(uid)
+        const missing = error instanceof Error && error.message.startsWith('Fiber not found on ')
+        if (missing) this.missingCards.add(uid)
         const attempts = (this.cardRetries.get(uid)?.attempts ?? 0) + 1
-        this.cardRetries.set(uid, { attempts, at: Date.now() + Math.min(30000, 1000 * 2 ** Math.min(attempts - 1, 5)) })
+        const wait = missing ? Math.min(MISSING_RETRY_MS, RETRY_MS * 2 ** Math.min(attempts - 1, 4)) : Math.min(RETRY_MS, 1000 * 2 ** Math.min(attempts - 1, 5))
+        this.cardRetries.set(uid, { attempts, at: Date.now() + wait })
       }
       return undefined
     }

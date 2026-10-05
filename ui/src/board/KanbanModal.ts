@@ -45,6 +45,7 @@ import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
 import type { SidebarEntry } from './workspace/SidebarFlight.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
+import { inLane } from './requestLanes.js'
 import type {
   ColumnKind,
   HorizonKind,
@@ -145,6 +146,8 @@ interface KanbanModalOptions {
 
 /** The Desk's own hotkey. The others come from the view registry, so a view
  *  names its own key and nothing here has to agree with it twice. */
+/** A host that refused its agent registry is asked again after this long. */
+const AGENT_RETRY_MS = 60_000
 const DESK_HOTKEY = '1'
 
 interface KanbanScrollSnapshot {
@@ -2255,7 +2258,9 @@ export class KanbanModal {
     this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
-    this.deskKeyboard?.refresh(true)
+    // A redraw repaints the selection in place: the Desk scrolls only when the
+    // selection moves, never under a pointer on its way to another card.
+    this.deskKeyboard?.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
     // Expand line-clamp on outcomes in now-section columns with spare
@@ -2364,17 +2369,20 @@ export class KanbanModal {
       if (!isAgentCard(card) || !card.shuttleAgent) continue
       const origin = card.originId
       if (this.fleetDefaultAgents.has(origin) || this.fleetDefaultAgentLoads.has(origin)) continue
+      if ((this.fleetDefaultAgentMisses.get(origin) ?? -Infinity) > Date.now() - AGENT_RETRY_MS) continue
       this.fleetDefaultAgentLoads.add(origin)
-      void daemonFetch(`${this.shuttleBase}/api/v1/agents?origin=${encodeURIComponent(origin)}`)
-        .then(async (response) => {
-          if (!response.ok) return
-          const agent = registryDefaultAgent(await response.json())
+      void inLane('quiet', () => daemonFetch(`${this.shuttleBase}/api/v1/agents?origin=${encodeURIComponent(origin)}`)
+        .then(async response => ({ ok: response.ok, body: response.ok ? await response.json() as unknown : null })))
+        .then(({ ok, body }) => {
+          if (!ok) { this.fleetDefaultAgentMisses.set(origin, Date.now()); return }
+          this.fleetDefaultAgentMisses.delete(origin)
+          const agent = registryDefaultAgent(body)
           if (!agent) return
           const fallback = this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT
           this.fleetDefaultAgents.set(origin, agent)
           if (agent !== fallback && this.lastResponse && this.container) this.render(this.lastResponse)
         })
-        .catch(() => {})
+        .catch(() => { this.fleetDefaultAgentMisses.set(origin, Date.now()) })
         .finally(() => this.fleetDefaultAgentLoads.delete(origin))
     }
   }
@@ -2419,6 +2427,8 @@ export class KanbanModal {
   private lastResponse: KanbanResponse | null = null
   private readonly fleetDefaultAgents = new Map<string, string>()
   private readonly fleetDefaultAgentLoads = new Set<string>()
+  /** When each unreachable host last refused its registry; renders retry it after AGENT_RETRY_MS. */
+  private readonly fleetDefaultAgentMisses = new Map<string, number>()
   /**
    * A response that arrived while a temporal view was up, waiting for the Desk
    * to be visible again. The Desk is `display:none` behind a view, and every

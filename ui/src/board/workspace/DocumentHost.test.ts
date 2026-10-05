@@ -23,7 +23,7 @@ vi.mock('../FileViewerPanel.js', () => ({
   }),
   disposeFileViewer: render.dispose, suspendFileViewer: render.suspend, resumeFileViewer: render.resume, loadFileViewerOnce: render.once,
 }))
-vi.mock('../LiveFileRefresh.js', () => ({ refreshLiveFile: render.refresh }))
+vi.mock('../LiveFileRefresh.js', () => ({ refreshLiveFile: render.refresh, liveFileWatched: () => false }))
 
 const doc = (n: number, owner = 'host-a'): WorkspaceDocument => ({
   key: `${owner}:/doc/${n}.html`, owner, path: `/doc/${n}.html`, name: `${n}.html`, kind: 'html', provenance: [],

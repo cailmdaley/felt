@@ -22,6 +22,7 @@
  */
 
 import { fetchFiberIndex } from './fiberSearch.js'
+import { inLane } from './requestLanes.js'
 
 export interface FiberIndexEntry {
   id: string
@@ -36,7 +37,8 @@ const indexCache = new Map<string, Promise<FiberIndexEntry[]>>()
 export function fiberIndex(shuttleBase: string): Promise<FiberIndexEntry[]> {
   const hit = indexCache.get(shuttleBase)
   if (hit) return hit
-  const p = fetchFiberIndex(shuttleBase).catch((e: unknown) => {
+  // Every fiber on the host, read in the slow lane: links decorate when it lands.
+  const p = inLane('slow', () => fetchFiberIndex(shuttleBase)).catch((e: unknown) => {
     indexCache.delete(shuttleBase)
     throw e
   })

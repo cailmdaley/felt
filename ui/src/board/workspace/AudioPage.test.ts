@@ -4,7 +4,7 @@ import { AudioPage } from './AudioPage.js'
 import { loadWaveform } from './audioWaveform.js'
 import type { WorkspaceDocument } from './documents.js'
 
-vi.mock('./audioWaveform.js', () => ({ loadWaveform: vi.fn(async () => null) }))
+vi.mock('./audioWaveform.js', async original => ({ ...await original<typeof import('./audioWaveform.js')>(), loadWaveform: vi.fn(async () => null) }))
 const doc: WorkspaceDocument = { key: 'host-a:/song.wav', owner: 'host-a', path: '/song.wav', name: 'Song', kind: 'audio', provenance: [] }
 let page: AudioPage
 let context: { fillStyle: string; scale: ReturnType<typeof vi.fn>; fillRect: ReturnType<typeof vi.fn>; save: ReturnType<typeof vi.fn>; beginPath: ReturnType<typeof vi.fn>; rect: ReturnType<typeof vi.fn>; clip: ReturnType<typeof vi.fn>; restore: ReturnType<typeof vi.fn> }
@@ -67,4 +67,53 @@ it('redraws retained paused canvas with computed played ink after its channel ch
   page.dispose()
   root.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
   expect(context.fillRect).toHaveBeenCalledTimes(changedDraws)
+})
+
+it('reads a channel of songs two at a time, so Play never waits behind the compare list', async () => {
+  const songs: WorkspaceDocument[] = Array.from({ length: 13 }, (_, i) => ({ ...doc, key: `host-a:/song-${i}.mp3`, path: `/song-${i}.mp3`, name: `song-${i}.mp3` }))
+  const reads: HTMLAudioElement[] = []
+  vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
+  const create = document.createElement.bind(document)
+  vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+    const el = create(tag)
+    if (tag === 'audio') reads.push(el as HTMLAudioElement)
+    return el
+  }) as typeof document.createElement)
+  const open = (): HTMLAudioElement[] => reads.filter(media => media.hasAttribute('src'))
+  // The selected page and its two receded neighbours, as the reader mounts them.
+  const pages = songs.slice(0, 3).map(song => {
+    const root = document.createElement('section'), audio = document.createElement('audio')
+    root.append(audio); document.body.append(root)
+    const listening = new AudioPage(audio, song, '', vi.fn())
+    listening.updateDocuments(songs)
+    return listening
+  })
+  expect(open().length).toBeLessThanOrEqual(2)
+  for (let settled = 0; settled < 60 && open().length; settled++) {
+    for (const media of open()) {
+      Object.defineProperty(media, 'duration', { value: 75, configurable: true })
+      media.dispatchEvent(new Event('loadedmetadata'))
+    }
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(open().length).toBeLessThanOrEqual(2)
+  }
+  expect(reads.length - pages.length).toBeLessThanOrEqual(songs.length)
+  for (const listening of pages) {
+    expect([...listening.el.querySelectorAll('.ws-audio-duration')].map(span => span.textContent)).toEqual(Array(12).fill('1:15'))
+    listening.dispose()
+  }
+})
+
+it('decodes its recording only once it is selected', async () => {
+  const audio = document.createElement('audio')
+  document.body.append(audio)
+  page = new AudioPage(audio, doc, '', vi.fn())
+  expect(vi.mocked(loadWaveform).mock.calls.at(-1)?.[3]).toBe(false)
+  const calls = vi.mocked(loadWaveform).mock.calls.length
+  page.setSelected(false)
+  expect(loadWaveform).toHaveBeenCalledTimes(calls)
+  page.setSelected(true)
+  expect(vi.mocked(loadWaveform).mock.calls.at(-1)?.[3]).toBe(true)
+  page.setSelected(true)
+  expect(loadWaveform).toHaveBeenCalledTimes(calls + 1)
 })

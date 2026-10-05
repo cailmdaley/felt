@@ -871,6 +871,73 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
+  describe "large documents" do
+    @tag :tmp_dir
+    test "a whole GET names a large document by its digest and an unchanged poll is a 304",
+         %{tmp_dir: dir} do
+      path = Path.join(dir, "report.html")
+      body = :binary.copy("<p>report</p>", div(2 * 1024 * 1024, 13) + 1)
+      File.write!(path, body)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+      digest = :crypto.hash(:sha256, body) |> Base.encode16(case: :lower)
+
+      first = get(api_conn(), url)
+      assert first.status == 200
+      assert first.state == :file
+      assert get_resp_header(first, "etag") == [~s(W/"sha256-#{digest}")]
+
+      again = api_conn() |> put_req_header("if-none-match", ~s(W/"sha256-#{digest}")) |> get(url)
+      assert again.status == 304
+      assert again.resp_body == ""
+
+      File.write!(path, "<p>rewritten</p>", [:append])
+
+      changed =
+        api_conn() |> put_req_header("if-none-match", ~s(W/"sha256-#{digest}")) |> get(url)
+
+      assert changed.status == 200
+      refute get_resp_header(changed, "etag") == [~s(W/"sha256-#{digest}")]
+    end
+
+    @tag :tmp_dir
+    test "ranged and HEAD reads of a large document never read it to make a digest", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "report.html")
+      File.write!(path, :binary.copy("x", 2 * 1024 * 1024))
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      {conns, reads} =
+        Shuttle.Test.FileReadTrace.run(fn ->
+          [
+            api_conn() |> put_req_header("range", "bytes=0-65535") |> get(url),
+            api_conn() |> head(url)
+          ]
+        end)
+
+      assert Enum.map(conns, & &1.status) == [206, 200]
+      assert Enum.all?(conns, &(hd(get_resp_header(&1, "etag")) =~ ~r/^W\/"stat-/))
+      assert reads == []
+    end
+
+    @tag :tmp_dir
+    test "a settled version's digest is remembered; a file still being written is not", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "report.html")
+      File.write!(path, "draft")
+      {:ok, stat} = File.stat(path, time: :posix)
+      settled = max(stat.mtime, stat.ctime) + 2
+      digest = :crypto.hash(:sha256, "draft") |> Base.encode16(case: :lower)
+
+      assert ShuttleWeb.FileDigests.digest(path, stat, settled - 1) == {:ok, digest}
+      assert ShuttleWeb.FileDigests.lookup(path, stat) == nil
+      assert ShuttleWeb.FileDigests.digest(path, stat, settled) == {:ok, digest}
+      assert ShuttleWeb.FileDigests.lookup(path, stat) == digest
+      assert ShuttleWeb.FileDigests.lookup(path, %{stat | ctime: stat.ctime + 1}) == nil
+    end
+  end
+
   defp sparse_file(dir, size) do
     path = Path.join(dir, "media-#{size}.mp4")
     {:ok, file} = :file.open(String.to_charlist(path), [:write, :binary, :raw])

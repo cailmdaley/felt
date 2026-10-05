@@ -15,6 +15,7 @@ import './prose.css'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
+import { peekDocument, PEEK_PRIORITY, type PeekPriority } from './documentResources.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import type { SwipeSignal } from './workspace/PhoneGestures.js'
 import {
@@ -369,24 +370,11 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
   return wrap
 }
 
-/** Native viewers own their byte streams; metadata peeks stop after the first 64 KiB even if Range is ignored. */
-export async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>, priority: RequestPriority = 'auto'): Promise<void> {
-  try {
-    const response = await fetch(src, { signal, priority, headers: { Range: 'bytes=0-65535' } })
-    if (!response.ok || !response.body) return
-    const reader = response.body.getReader()
-    const bytes = new Uint8Array(65536)
-    let length = 0
-    try {
-      while (length < bytes.length) {
-        const chunk = await reader.read()
-        if (chunk.done) break
-        const part = chunk.value.subarray(0, bytes.length - length)
-        bytes.set(part, length); length += part.length
-      }
-    } finally { await reader.cancel() }
-    onSource(bytes.subarray(0, length), response.headers.get('ETag') ?? undefined)
-  } catch { /* Native playback and preview do not depend on metadata. */ }
+/** A document's first 64 KiB, read through the shared peek so concurrent surfaces read it once. */
+export async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>, priority: PeekPriority = PEEK_PRIORITY.thumbnail, fresh = false): Promise<void> {
+  const peek = await peekDocument(src, priority, { fresh })
+  // Native playback and preview do not depend on metadata.
+  if (peek && !signal.aborted) onSource(peek.bytes, peek.etag)
 }
 
 function formatMediaTime(seconds: number): string {

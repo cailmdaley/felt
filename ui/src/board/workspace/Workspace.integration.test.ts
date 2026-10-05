@@ -5,6 +5,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { Workspace } from './Workspace.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
+import { resetLanes } from '../requestLanes.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -100,7 +101,7 @@ beforeEach(() => {
   visibility.mockClear()
   workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
-afterEach(() => { workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
   it('replaces key verdicts with clicks and commits only the live identity after a move', async () => {
@@ -272,6 +273,16 @@ describe('workspace reader integration', () => {
     await flush()
     const selectedKey = document.querySelector('.ws-selected')?.getAttribute('data-key')
     expect(workspace.reader.host.get(selectedKey!)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
+  })
+  it('opens on its report while owner file times are still being read', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?') ? new Promise<Response>(() => {}) : original(input, init))
+    workspace.open(cards[0]); await flush()
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).toContain('table.html')
+    // The metadata reads wait in the quiet lane, two at a time over HTTP/1.1.
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))).toHaveLength(2)
   })
   it('loads receipts from each channel owner with conditional revalidation and last-good retention', async () => {
     const shared = [

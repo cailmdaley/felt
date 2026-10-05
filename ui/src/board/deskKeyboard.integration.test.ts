@@ -171,6 +171,21 @@ describe('Desk keyboard selection', () => {
     draw(updated)
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardOrigin).toBe('b')
   })
+  it('keeps the selection painted through a poll without scrolling the Desk out from under the pointer', () => {
+    for (const phone of [false, true]) {
+      mobile = phone
+      draw(data())
+      press('j'); press('j')
+      const chosen = selected()
+      intoView.mockClear(); scroll.mockClear()
+      const polled = data()
+      polled.now.inFlight.reverse()
+      draw(polled)
+      expect(selected()).toBe(chosen)
+      expect(intoView).not.toHaveBeenCalled()
+      expect(scroll).not.toHaveBeenCalled()
+    }
+  })
   it('pages the phone to the selected column and opens folded lower bands, with reduced motion', () => {
     mobile = true; reduced = true
     draw(data())
