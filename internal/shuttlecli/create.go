@@ -41,7 +41,7 @@ func (a *app) refuseExistingBlock(fiberID string, f *felt.Felt, b *shuttle.Block
 }
 
 // printShuttleValidationErrors renders a constructed block's validation failures
-// CLI-style and returns a terminal error. Writes to os.Stderr (felt's verbs print directly, not via cmd.OutOrStdout).
+// CLI-style to the invocation's stderr and returns a terminal error.
 func (a *app) printShuttleValidationErrors(errs shuttle.ValidationErrors) error {
 	fmt.Fprintln(a.env.Stderr, "shuttle: validation failed:")
 	for _, e := range errs {

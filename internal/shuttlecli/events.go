@@ -31,7 +31,7 @@ const (
 // shuttleStatePath resolves one host-local state file the way the Elixir side
 // resolves it — an explicit env var, else the data directory, else ~/.shuttle:
 //
-//	$<envVar> → <shuttle.DataDir(sysenv.OS())>/<leaf>
+//	$<envVar> → <shuttle.DataDir(a.env)>/<leaf>
 //
 // explicit reports whether the env var named the path — an explicit path is
 // explicit intent, so it also overrides the write gate below. The path is ""

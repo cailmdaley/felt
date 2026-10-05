@@ -200,7 +200,7 @@ type hostSettings struct {
 	Listen       string `json:"listen"`
 	ListenSource string `json:"listen_source"`
 	File         string `json:"file"`
-	// DataDir is shuttle.DataDir(sysenv.OS()): the resolved host-local state directory, so
+	// DataDir is shuttle.DataDir(a.env): the resolved host-local state directory, so
 	// a shell (the stop-marker writers) applies the same trim and leading-~
 	// rule the CLI and the daemon share. Empty when it cannot be resolved.
 	DataDir string `json:"data_dir"`

@@ -125,13 +125,25 @@ account configuration, MCP credentials, or credential backups either. Fixtures
 use a fresh home and config with synthetic data and a controlled environment;
 they must not fall back to installed harness executables.
 
+Production code under `internal/` reads the process — environment variables,
+home and working directory, executable lookup, child processes, standard
+streams — only through a `*sysenv.Env` (`internal/sysenv`) handed down from
+the command's entry point; `cmd/felt` and `cmd/shuttle` build it from the live
+process, and each invocation gets a fresh command tree. A test builds an
+isolated env instead (`sysenv.New`, or `sysenvtest.FromProcess` plus
+`sysenvtest.FakeCommand` for fake executables on its own PATH), so tests run
+with `t.Parallel()` and none mutates process state. `internal/sysenv`'s
+`TestProductionReadsTheProcessOnlyThroughEnv` fails on a direct read outside
+the seam; its allowlist names each deliberate exception and why.
+
 The felt CLI and shuttle CLI unit-test binaries each run behind a `TestMain`
 fence (`internal/feltcli/testmain_test.go` and
-`internal/shuttlecli/testmain_test.go`). The felt CLI fences its home, cache,
+`internal/shuttlecli/testmain_test.go`), and each package's `testEnv(t)`
+carries the same fence as a per-test env. The felt CLI fences its home, cache,
 and config paths; the shuttle CLI fences its home, Shuttle config files, host
 identity, and daemon URL. A test never reaches the machine's live daemon or its
-fleet; one that needs a daemon starts an `httptest` server and sets
-`SHUTTLE_DAEMON_URL` itself.
+fleet; one that needs a daemon starts an `httptest` server and points its
+env's `SHUTTLE_DAEMON_URL` at it.
 
 Real harness smoke is an explicit integration operation against the operator's
 runtime. Even starting an idle CLI or running plugin setup can initialize or
