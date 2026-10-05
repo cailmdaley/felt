@@ -1,14 +1,9 @@
 package feltcli
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -51,63 +46,18 @@ func homeOf(t *testing.T, env *sysenv.Env) string {
 	return home
 }
 
-// fakeCommand is sysenvtest.FakeCommand with each distinct script written
-// once per test binary and linked into env's bin. macOS assesses every new
-// executable file on its first exec — about half a second, queued
-// machine-wide, so dozens of fresh fakes in parallel tests cost seconds each
-// — and a link to a file it has already assessed skips that. A fake reads
-// anything test-specific (a log path, a state directory) from env.
+// fakeCommand is sysenvtest.FakeCommand: a fake reads anything
+// test-specific (a log path, a state directory) from env, so one script text
+// serves every test and macOS assesses it once.
 func fakeCommand(t *testing.T, env *sysenv.Env, name, script string) string {
 	t.Helper()
-	path := filepath.Join(sysenvtest.FakeBin(t, env), name)
-	linkScript(t, path, script)
-	return path
+	return sysenvtest.FakeCommand(t, env, name, script)
 }
 
-// linkScript makes path a link to the shared, read-only file holding script
-// (run under /bin/sh when it has no "#!" line), replacing whatever is there.
+// linkScript is sysenvtest.LinkScript.
 func linkScript(t *testing.T, path, script string) {
 	t.Helper()
-	if !strings.HasPrefix(script, "#!") {
-		script = "#!/bin/sh\n" + script
-	}
-	shared := sharedScript(t, script)
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(shared, path); err != nil {
-		t.Fatal(err)
-	}
-}
-
-var sharedScripts struct {
-	sync.Mutex
-	paths map[string]string // script → file
-}
-
-func sharedScript(t *testing.T, script string) string {
-	t.Helper()
-	sharedScripts.Lock()
-	defer sharedScripts.Unlock()
-	if path, ok := sharedScripts.paths[script]; ok {
-		return path
-	}
-	dir := filepath.Join(testScratch, "fakes")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256([]byte(script))
-	path := filepath.Join(dir, hex.EncodeToString(sum[:12]))
-	// Read-only, so a write through one test's link fails loudly instead of
-	// changing every other test's fake.
-	if err := os.WriteFile(path, []byte(script), 0o555); err != nil {
-		t.Fatal(err)
-	}
-	if sharedScripts.paths == nil {
-		sharedScripts.paths = map[string]string{}
-	}
-	sharedScripts.paths[script] = path
-	return path
+	sysenvtest.LinkScript(t, path, script)
 }
 
 // fakeCallLog fakes name first on env's PATH with a script that appends each

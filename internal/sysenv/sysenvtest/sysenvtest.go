@@ -6,6 +6,11 @@ package sysenvtest
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,19 +77,70 @@ func (b *Buffer) Reset() {
 // FakeCommand writes an executable named name holding script into a bin
 // directory private to env and puts that directory first on env's PATH, so
 // env.LookPath and env.Command find it ahead of any real tool of that name.
-// It returns the executable's path. A script with no "#!" line runs under
-// /bin/sh.
+// It returns the executable's path; the file is shared as LinkScript says.
 func FakeCommand(t testing.TB, env *sysenv.Env, name, script string) string {
 	t.Helper()
-	bin := FakeBin(t, env)
+	path := filepath.Join(FakeBin(t, env), name)
+	LinkScript(t, path, script)
+	return path
+}
+
+// LinkScript makes path an executable holding script (run under /bin/sh when
+// it has no "#!" line), replacing whatever is there. The file is a hard link
+// to a read-only copy shared by every test that writes the same script, so a
+// write through one test's link fails loudly instead of changing another's.
+func LinkScript(t testing.TB, path, script string) {
+	t.Helper()
 	if !strings.HasPrefix(script, "#!") {
 		script = "#!/bin/sh\n" + script
 	}
-	path := filepath.Join(bin, name)
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatalf("writing fake %s: %v", name, err)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
 	}
-	return path
+	if source, err := cachedScript(script); err == nil && os.Link(source, path) == nil {
+		return
+	}
+	if err := os.WriteFile(path, []byte(script), 0o555); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+}
+
+// cachedScript is a read-only executable holding script in a cache shared by
+// every test run on this machine, named by its content's hash. LinkScript
+// hard-links it into place: macOS assesses a new executable
+// on its first exec (about a second on a loaded machine) and remembers the
+// verdict for that file, so a script every test fakes is assessed once
+// rather than once per test.
+func cachedScript(script string) (string, error) {
+	sum := sha256.Sum256([]byte(script))
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("sysenvtest-%d", os.Getuid()))
+	path := filepath.Join(dir, hex.EncodeToString(sum[:16]))
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		return path, nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(dir, ".script-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(script); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Chmod(0o555); err != nil {
+		tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // fakeBins remembers each env's private bin directory.
