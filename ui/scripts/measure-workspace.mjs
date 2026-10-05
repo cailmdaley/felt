@@ -25,7 +25,8 @@ const devices = list('--devices').length ? list('--devices') : ['desktop', 'phon
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 if (!cards.length) throw new Error('--cards needs a Desk card name')
 
-const browser = await chromium.launch({ executablePath: chrome, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] })
+const launch = () => chromium.launch({ executablePath: chrome, headless: true, args: ['--autoplay-policy=no-user-gesture-required'] })
+let browser = await launch()
 const VIEWPORTS = {
   desktop: { viewport: { width: 1440, height: 900 } },
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 },
@@ -108,8 +109,14 @@ async function timed(page, action) {
   const before = await page.evaluate(() => { window.__settle = {}; return `${document.querySelector('.ws-channel-title')?.textContent ?? ''}|${document.querySelector('.ws-page.ws-selected')?.dataset.key}` })
   const start = await page.evaluate(() => performance.now())
   await action()
-  const handle = await page.waitForFunction(settled, [start, before], { timeout: TIMEOUT, polling: 'raf' })
-  return handle.jsonValue()
+  // A page that never settles counts as the timeout, so a stall stays in the medians.
+  try {
+    const handle = await page.waitForFunction(settled, [start, before], { timeout: TIMEOUT, polling: 'raf' })
+    return handle.jsonValue()
+  } catch (error) {
+    if (!/Timeout/.test(error.message)) throw error
+    return TIMEOUT
+  }
 }
 
 async function openCard(page, name) {
@@ -226,6 +233,7 @@ const median = xs => { const v = xs.filter(x => x != null).sort((a, b) => a - b)
 const results = []
 for (const device of devices) {
   for (let run = 0; run < runs; run++) {
+    if (!browser.isConnected()) browser = await launch()
     const s = await session(device, `${device}#${run}`)
     try {
       const cold = await scenario(s, false)
@@ -234,7 +242,7 @@ for (const device of devices) {
       console.error(`${device} run ${run}: open ${Math.round(cold.openMs)}/${Math.round(warm.openMs)} ms`)
     } catch (error) {
       console.error(`${device} run ${run} failed: ${error.message}`)
-    } finally { await s.context.close() }
+    } finally { await s.context.close().catch(() => {}) }
   }
 }
 await browser.close()
