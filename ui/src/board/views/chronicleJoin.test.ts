@@ -2,19 +2,20 @@
  * The chronicle's two load-bearing pure steps: which fiber an activity bucket
  * belongs to, and which calendar column it lands in.
  *
- * The timezone is the experiment for the second half. `npm test` runs this file
- * twice — TZ=America/Los_Angeles (negative offset) and TZ=Europe/Paris
- * (positive offset) — because a UTC-only run passes against the broken code.
- * Each zone catches a different sign of the same defect:
+ * The timezone is the experiment for the second half, so the folding tests
+ * name their zones explicitly and run in two — America/Los_Angeles (negative
+ * offset) and Europe/Paris (positive) — because a UTC-only run passes against
+ * the broken code. Each zone catches a different sign of the same defect:
  *
  *   • west of Greenwich, a late-evening instant has already crossed into the
  *     NEXT UTC day, so a `m / 86_400_000` bucketing files it a day early;
  *   • east of Greenwich, an early-morning instant is still in the PREVIOUS UTC
  *     day, so the same bucketing files it a day late.
  *
- * Both cases are asserted in both zones, and the day used is a DST transition
- * day — 23 hours long — so an implementation that strides by a fixed 86.4e6 ms
- * also drifts off the column it should have landed on.
+ * The day used is each zone's spring-forward day — 23 hours long — so an
+ * implementation that strides by a fixed 86.4e6 ms also drifts off the column
+ * it should have landed on. The rail rule itself, over every zone, is a
+ * property in ../civilDay.properties.test.ts.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -33,7 +34,7 @@ import {
   firstParagraph,
   groupNarration,
   lifelineExtent,
-  railDate,
+  railNoonMs,
   readCycleBand,
   retirePendingCycles,
   type PendingCycle,
@@ -52,7 +53,6 @@ import type { ActivityBucket } from './TemporalData.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import {
   card as baseCard,
-  expectPinnedZone,
   commit as baseCommit,
   pairings as basePairings,
   DAY_INDEX,
@@ -60,23 +60,26 @@ import {
   TODAY_IDX,
   WINDOW_DAYS,
 } from '../testFixtures.js'
-import { civilDayToLocalDate, formatSpanMinutes, isoDayLocal } from '../civilDay.js'
+import {
+  civilDayAt,
+  formatSpanMinutes,
+  isoDayLocal,
+  shiftCivilDay,
+  wallClock,
+  zone,
+  type Zone,
+} from '../civilDay.js'
 
-const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone
+/** Each zone with its 2026 spring-forward day — both 23 hours long. */
+const DST_ZONES: Array<{ z: Zone; dstDay: string }> = [
+  { z: zone('America/Los_Angeles'), dstDay: '2026-03-08' },
+  { z: zone('Europe/Paris'), dstDay: '2026-03-29' },
+]
 
-/** The spring-forward day in the zone this run is pinned to: 2026-03-08 in
- *  US Pacific, 2026-03-29 in Central European. Both are 23 hours long. */
-const DST_DAY =
-  TZ === 'America/Los_Angeles'
-    ? { y: 2026, m: 2, d: 8 }
-    : { y: 2026, m: 2, d: 29 }
-
-/** A local wall-clock time on a given day, as epoch ms. The `Date` constructor
- *  reads its arguments in the ambient zone, which is exactly what we want:
- *  these are "23:30 wherever the reader is", the values a civil-day grouping
- *  has to get right. */
-function localMs(day: { y: number; m: number; d: number }, h: number, min = 0): number {
-  return new Date(day.y, day.m, day.d + 0, h, min, 0, 0).getTime()
+/** A wall-clock time on a civil day in a zone, as epoch ms: "23:30 wherever
+ *  the reader is", the values a civil-day grouping has to get right. */
+function wallMs(day: string, h: number, min: number, z: Zone): number {
+  return civilDayAt(day, h, z)! + min * 60_000
 }
 
 function bucket(m: number, over: Partial<ActivityBucket> = {}): ActivityBucket {
@@ -255,10 +258,10 @@ describe('attributing activity to fibers', () => {
 
 // ── Per-day aggregation, across a DST transition ─────────────────────────────
 
-describe('folding buckets into civil days', () => {
-  it('runs under a pinned, non-UTC timezone', () => {
-    expectPinnedZone()
-  })
+describe.each(DST_ZONES)('folding buckets into civil days in $z.id', ({ z, dstDay }) => {
+  const before = shiftCivilDay(dstDay, -1)
+  const after = shiftCivilDay(dstDay, 1)
+  const at = (day: string, h: number, min = 0) => wallMs(day, h, min, z)
 
   // The page groups by 6am RAILS, not midnights, so that it agrees with the
   // rest of the board about which day a piece of work belongs to. Both halves of the old
@@ -266,60 +269,57 @@ describe('folding buckets into civil days', () => {
   // tomorrow in UTC west of Greenwich, the small-hours one still yesterday east
   // of it — and the rail adds its own claim on top: 01:00 is the night before.
   it('keeps a late evening on its own day and folds the small hours backwards', () => {
-    const before = { ...DST_DAY, d: DST_DAY.d - 1 }
-    const after = { ...DST_DAY, d: DST_DAY.d + 1 }
     const days = aggregateByCivilDay([
-      bucket(localMs(before, 23, 30), { n: 3 }),
+      bucket(at(before, 23, 30), { n: 3 }),
       // 00:30 the morning after the transition day: before 6am, so it belongs
       // to the transition day's rail, NOT to its own calendar date.
-      bucket(localMs(after, 0, 30), { n: 5 }),
-    ])
-    expect(days.get(isoDayLocal(localMs(before, 12)))?.agent).toBe(3)
-    expect(days.get(isoDayLocal(localMs(DST_DAY, 12)))?.agent).toBe(5)
-    expect(days.has(isoDayLocal(localMs(after, 12)))).toBe(false)
+      bucket(at(after, 0, 30), { n: 5 }),
+    ], z)
+    expect(days.get(before)?.agent).toBe(3)
+    expect(days.get(dstDay)?.agent).toBe(5)
+    expect(days.has(after)).toBe(false)
   })
 
   it('splits a rail at 06:00, not at midnight', () => {
     const days = aggregateByCivilDay([
-      bucket(localMs(DST_DAY, 5, 59), { n: 1 }), // still the previous rail
-      bucket(localMs(DST_DAY, 6, 1), { n: 2 }), // the new one
-    ])
-    const yesterday = { ...DST_DAY, d: DST_DAY.d - 1 }
-    expect(days.get(isoDayLocal(localMs(yesterday, 12)))?.agent).toBe(1)
-    expect(days.get(isoDayLocal(localMs(DST_DAY, 12)))?.agent).toBe(2)
+      bucket(at(dstDay, 5, 59), { n: 1 }), // still the previous rail
+      bucket(at(dstDay, 6, 1), { n: 2 }), // the new one
+    ], z)
+    expect(days.get(before)?.agent).toBe(1)
+    expect(days.get(dstDay)?.agent).toBe(2)
   })
 
   it('gives the 23-hour transition rail exactly one column, and its neighbours their own', () => {
-    const before = { ...DST_DAY, d: DST_DAY.d - 1 }
-    const after = { ...DST_DAY, d: DST_DAY.d + 1 }
     const days = aggregateByCivilDay([
-      bucket(localMs(before, 22), { n: 1 }), // before's rail
-      bucket(localMs(DST_DAY, 1), { n: 2 }), // still before's rail — pre-6am
-      bucket(localMs(DST_DAY, 12), { n: 4 }), // the transition rail
-      bucket(localMs(DST_DAY, 23), { n: 8 }), // ditto
-      bucket(localMs(after, 4), { n: 16 }), // ditto — the small hours after it
-      bucket(localMs(after, 9), { n: 32 }), // and finally the next rail
-    ])
+      bucket(at(before, 22), { n: 1 }), // before's rail
+      bucket(at(dstDay, 1), { n: 2 }), // still before's rail — pre-6am
+      bucket(at(dstDay, 12), { n: 4 }), // the transition rail
+      bucket(at(dstDay, 23), { n: 8 }), // ditto
+      bucket(at(after, 4), { n: 16 }), // ditto — the small hours after it
+      bucket(at(after, 9), { n: 32 }), // and finally the next rail
+    ], z)
     expect(days.size).toBe(3)
     // The transition rail is 23 hours long and still exactly one cell.
-    expect(days.get(isoDayLocal(localMs(DST_DAY, 12)))?.agent).toBe(4 + 8 + 16)
-    expect(days.get(isoDayLocal(localMs(before, 12)))?.agent).toBe(1 + 2)
-    expect(days.get(isoDayLocal(localMs(after, 12)))?.agent).toBe(32)
+    expect(days.get(dstDay)?.agent).toBe(4 + 8 + 16)
+    expect(days.get(before)?.agent).toBe(1 + 2)
+    expect(days.get(after)?.agent).toBe(32)
   })
 
   it('separates the drawn kinds within a day, and drops notify entirely', () => {
     const days = aggregateByCivilDay([
-      bucket(localMs(DST_DAY, 9), { k: 'agent', n: 12 }),
-      bucket(localMs(DST_DAY, 10), { k: 'attention', n: 1 }),
-      bucket(localMs(DST_DAY, 11), { k: 'notify', n: 1 }),
-      bucket(localMs(DST_DAY, 14), { k: 'agent', n: 7 }),
-    ])
-    const cell = days.get(isoDayLocal(localMs(DST_DAY, 12)))
+      bucket(at(dstDay, 9), { k: 'agent', n: 12 }),
+      bucket(at(dstDay, 10), { k: 'attention', n: 1 }),
+      bucket(at(dstDay, 11), { k: 'notify', n: 1 }),
+      bucket(at(dstDay, 14), { k: 'agent', n: 7 }),
+    ], z)
+    const cell = days.get(dstDay)
     expect(cell?.agent).toBe(19)
     expect(cell?.attention).toBe(1)
     // The notify bucket contributes to no figure — it is not a drawn state.
   })
+})
 
+describe('folding buckets into civil days', () => {
   it('ignores a bucket with an unusable timestamp', () => {
     expect(aggregateByCivilDay([bucket(Number.NaN)]).size).toBe(0)
   })
@@ -420,7 +420,7 @@ describe('dropping fibers that finished before the window', () => {
   })
 
   it('keeps it when it worked inside the window after all', () => {
-    const buckets = [bucket(civilDayToLocalDate(WINDOW_DAYS[15].iso)!.getTime() + 12 * 3_600_000)]
+    const buckets = [bucket(civilDayAt(WINDOW_DAYS[15].iso, 12)!)]
     expect(saysNothingHere(closedLongAgo(), buckets, DAY_INDEX)).toBe(false)
   })
 
@@ -451,7 +451,7 @@ describe('dropping fibers that finished before the window', () => {
 
 /** A fixed "now" inside the fixture window, so the open-ended case (which
  *  resolves its end against the clock) is deterministic. */
-const CYCLE_NOW = civilDayToLocalDate(WINDOW_DAYS[TODAY_IDX].iso)!.getTime() + 12 * 3_600_000
+const CYCLE_NOW = civilDayAt(WINDOW_DAYS[TODAY_IDX].iso, 12)!
 
 describe('placing a cycle band on the day grid', () => {
   const place = (start: string | null, due: string | undefined) =>
@@ -586,27 +586,25 @@ describe('stacking overlapping cycles into lanes', () => {
 })
 
 describe('which day the page calls today', () => {
+  const LA = zone('America/Los_Angeles')
+  const railDay = (day: string, h: number, min = 0) =>
+    isoDayLocal(railNoonMs(wallMs(day, h, min, LA), LA), LA)
+
   it('is the rail that is running, not the calendar date, before 6am', () => {
     // 01:00 — the board is still on yesterday's rail, and so must this page
     // be, or the night's work inks a column past its own today line.
-    const smallHours = new Date(2026, 6, 15, 1, 0, 0).getTime()
-    expect(isoDayLocal(railDate(smallHours).getTime())).toBe('2026-07-14')
+    expect(railDay('2026-07-15', 1)).toBe('2026-07-14')
   })
 
   it('is the calendar date once the rail has opened', () => {
-    expect(isoDayLocal(railDate(new Date(2026, 6, 15, 6, 1, 0).getTime()).getTime())).toBe(
-      '2026-07-15',
-    )
-    expect(isoDayLocal(railDate(new Date(2026, 6, 15, 23, 30, 0).getTime()).getTime())).toBe(
-      '2026-07-15',
-    )
+    expect(railDay('2026-07-15', 6, 1)).toBe('2026-07-15')
+    expect(railDay('2026-07-15', 23, 30)).toBe('2026-07-15')
   })
 
   it('lands at noon, the one wall-clock hour every DST day has', () => {
     // A spring-forward day has no 02:00; anchoring the rail date at midnight
     // and striding from it is how a day goes missing.
-    const d = railDate(new Date(DST_DAY.y, DST_DAY.m, DST_DAY.d, 14, 0, 0).getTime())
-    expect(d.getHours()).toBe(12)
+    expect(wallClock(railNoonMs(wallMs('2026-03-08', 14, 0, LA), LA), LA).hour).toBe(12)
   })
 })
 
@@ -614,7 +612,7 @@ describe('which day the page calls today', () => {
 
 describe('composing an era’s look-back', () => {
   it('counts minutes, not events — a busy minute is still one minute', () => {
-    const t = localMs(DST_DAY, 10)
+    const t = Date.parse('2026-03-08T18:00:00Z')
     const buckets = [
       bucket(t, { k: 'agent', n: 40 }),
       bucket(t, { k: 'agent', n: 7 }), // same minute, second bucket
@@ -626,7 +624,7 @@ describe('composing an era’s look-back', () => {
   })
 
   it('counts only what falls inside the span', () => {
-    const t = localMs(DST_DAY, 10)
+    const t = Date.parse('2026-03-08T18:00:00Z')
     const buckets = [bucket(t - 600_000, { k: 'agent' }), bucket(t, { k: 'agent' })]
     expect(foldActiveMinutes(buckets, { fromMs: t - 1, toMs: t + 2 }).agent).toBe(1)
   })
@@ -647,7 +645,7 @@ describe('composing an era’s look-back', () => {
   const commit = (over: Partial<CommitRecord> & Pick<CommitRecord, 'sha'>): CommitRecord =>
     // Host-agnostic: `host` stays null (the shared default), so the
     // host-scoping rung is not what these cases are testing.
-    baseCommit({ at: localMs(DST_DAY, 12), subject: 'a subject', repo: 'felt', session: 's1', ...over })
+    baseCommit({ at: Date.parse('2026-03-08T20:00:00Z'), subject: 'a subject', repo: 'felt', session: 's1', ...over })
 
   /** Session→fiber pairings with no host of their own, so any host's commit may
    *  read them — the ledger's own `bySession` shape. */

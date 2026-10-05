@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { railCivilDay } from '../civilDay.js'
+import { railCivilDay, shiftCivilDay } from '../civilDay.js'
 import { ChronicleFeeds, TEMPORAL_REFRESH_MS } from './chronicleFeeds.js'
 import { activityChunks, windowOf, type DayRange } from './chronicleWindow.js'
-import { shiftCivilDay } from './railTime.js'
 import type { TemporalFetchers } from './TemporalData.js'
 
 /**

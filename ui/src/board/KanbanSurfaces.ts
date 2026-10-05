@@ -2,11 +2,17 @@ import { appWorkerLink, terminalWorkerPill, workerVariant } from './appConversat
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
-  civilDayToLocalDate,
+  civilWeekday,
   dueCivilDay,
   dueSortMs,
+  formatCivilDay,
+  formatInstant,
+  hostZone,
   instantMs,
   isoDayLocal,
+  shiftCivilDay,
+  TIME_OF_DAY,
+  type Zone,
 } from './civilDay.js'
 import type {
   ColumnKind,
@@ -1910,7 +1916,7 @@ export class KanbanSurfaceRenderer {
       heldEl.type = 'button'
       heldEl.className = 'kbn-card-held'
       const since = card.heldSince
-        ? ` since ${new Date(card.heldSince).toLocaleTimeString()}`
+        ? ` since ${formatInstant(card.heldSince, TIME_OF_DAY)}`
         : ''
       const host = card.shuttleHost
       heldEl.setAttribute(
@@ -2640,30 +2646,25 @@ export interface TimelineDay {
 /**
  * The strip of day columns, from `past` days back to `future` days ahead.
  *
- * Strides by CALENDAR day, not by 86_400_000 ms. A fixed-millisecond stride
- * drifts an hour across a DST transition and eventually skips or repeats a
- * civil day — and a skipped column is a card that VANISHES, because its due
- * day finds no column to land on. `setDate(getDate() + 1)` is local-calendar
- * arithmetic: it always lands on the next civil day, 23- or 25-hour.
- * `today` is injectable so the DST crossings are testable.
+ * Strides by CALENDAR day (`shiftCivilDay`), never by 86_400_000 ms of an
+ * instant. A fixed-millisecond stride drifts an hour across a DST transition
+ * and eventually skips or repeats a civil day — and a skipped column is a card
+ * that VANISHES, because its due day finds no column to land on. `today` is a
+ * civil day, and the strip is built from it with no zone in sight.
  */
 export function buildTimelineDays(
   past: number,
   future: number,
-  today: Date = new Date(),
+  today: string = isoDayLocal(Date.now()),
 ): TimelineDay[] {
   const days: TimelineDay[] = []
-  const cursor = new Date(today.getTime())
-  cursor.setHours(0, 0, 0, 0)
-  cursor.setDate(cursor.getDate() - past)
   for (let offset = -past; offset <= future; offset += 1) {
-    const d = new Date(cursor.getTime())
-    cursor.setDate(cursor.getDate() + 1)
-    const dow = d.getDay()
+    const iso = shiftCivilDay(today, offset)
+    const dow = civilWeekday(iso)
     days.push({
-      iso: isoDayLocal(d.getTime()),
-      label: String(d.getDate()),
-      weekdayLabel: d.toLocaleDateString(undefined, { weekday: 'short' }),
+      iso,
+      label: String(Number(iso.slice(8, 10))),
+      weekdayLabel: formatCivilDay(iso, { weekday: 'short' }) ?? '',
       isToday: offset === 0,
       isPast: offset < 0,
       isWeekend: dow === 0 || dow === 6,
@@ -2694,9 +2695,7 @@ function buildDayCell(day: TimelineDay): HTMLElement {
 /** `Aug 12` — a civil day said the short way, for a chip that has no room for
  *  more. Falls back to the raw ISO if the day will not parse. */
 function shortDayLabel(iso: string): string {
-  const d = civilDayToLocalDate(iso)
-  if (!d) return iso
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return formatCivilDay(iso, { month: 'short', day: 'numeric' }) ?? iso
 }
 
 /** What the aim readout says while a day cell is the target. Today is a
@@ -2817,9 +2816,9 @@ export function splitStashByReturn(
  *  occurrence for a sleeping role, otherwise its `due:` day. Absent for a
  *  card `splitStashByReturn` would have called undated; such a card sorts
  *  last via `ascByKey`'s undefined-last rule, rather than crash. */
-function returnMs(card: KanbanCard): number | undefined {
+function returnMs(card: KanbanCard, z: Zone): number | undefined {
   if (isSleepingOnSchedule(card)) return card.nextLaunchAt ? instantMs(card.nextLaunchAt) : undefined
-  return dueSortMs(card.due)
+  return dueSortMs(card.due, z)
 }
 
 /** Re-sort clusters already built by `clusterStashCards` so the dated half of
@@ -2827,9 +2826,9 @@ function returnMs(card: KanbanCard): number | undefined {
  *  clustering doesn't give you on its own. Cluster membership (and the
  *  warm/cold split) is untouched; only the order of clusters and the cards
  *  within each is affected. */
-export function sortDatedByReturn(clusters: StashCluster[]): StashCluster[] {
+export function sortDatedByReturn(clusters: StashCluster[], z: Zone = hostZone()): StashCluster[] {
   const byReturn = (a: KanbanCard, b: KanbanCard): number =>
-    ascByKey(returnMs(a), returnMs(b)) || byCreatedAtDesc(a, b)
+    ascByKey(returnMs(a, z), returnMs(b, z)) || byCreatedAtDesc(a, b)
   return clusters
     .map((c) => ({ ...c, cards: [...c.cards].sort(byReturn) }))
     .sort((a, b) => a.cold !== b.cold ? (a.cold ? 1 : -1) : byReturn(a.cards[0], b.cards[0]))
@@ -2882,21 +2881,16 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
 export function formatLaunchDay(iso: string): string {
   const ms = instantMs(iso)
   if (ms === undefined) return ''
-  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return formatInstant(ms, { month: 'short', day: 'numeric' })
 }
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
  *  the same way Chronicle places the card's due mark — otherwise one board
  *  would name two different days for one due, Thursday on the column and
- *  Wednesday on the chip. The day is materialized as a local date, never
- *  re-parsed as an instant (see civilDay.ts). */
+ *  Wednesday on the chip. The day is said as a civil day, never re-parsed as
+ *  an instant (see civilDay.ts). */
 export function formatDue(iso: string): string {
-  const date = civilDayToLocalDate(dueCivilDay(iso))
-  if (!date) return iso
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })
+  return formatCivilDay(dueCivilDay(iso), { month: 'short', day: 'numeric' }) ?? iso
 }
 
 /**

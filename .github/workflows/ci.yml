@@ -138,9 +138,8 @@ jobs:
       - name: Check production dependency advisories
         run: npm audit --omit=dev
 
-      # npm test deliberately runs the board suite twice under pinned
-      # America/Los_Angeles and Europe/Paris offsets. The civil-day logic can
-      # pass in one timezone and fail in the other, so this is a release gate.
+      # npm test runs the board suite under a pinned America/Los_Angeles; the
+      # civil-day properties inside it cover every other zone. A release gate.
       - name: Run board tests
         run: npm test
 

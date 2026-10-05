@@ -272,7 +272,7 @@ function buildUnsupportedViewer(base: string, path: string, owner: string, optio
     const info = await response.json() as { exists?: boolean; size?: number }
     if (controller.signal.aborted) return
     if (!info.exists) throw new Error('file request failed: 404')
-    if (typeof info.size === 'number' && Number.isFinite(info.size)) detail.textContent = `Not drawn here · ${info.size.toLocaleString()} bytes`
+    if (typeof info.size === 'number' && Number.isFinite(info.size)) detail.textContent = `Not drawn here · ${new Intl.NumberFormat().format(info.size)} bytes`
     options.onState?.({ status: 'ready' })
   }).catch(error => { if (!controller.signal.aborted) options.onState?.({ status: 'error', error, hasContent: false }) })
   return box
