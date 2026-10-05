@@ -80,6 +80,7 @@ func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map
   printf 'STORES_FILE=%s\n' "$SHUTTLE_STORES_FILE"
   shift 2
   for arg do printf 'ARG=%s\n' "$arg"; done
+  printf 'CODEX_HOME=%s\n' "$CODEX_HOME"
 } >> "$SHUTTLE_CAPTURE_FILE"
 `
 	if err := os.WriteFile(filepath.Join(localBin, "shuttle"), []byte(fakeShuttle), 0o755); err != nil {
@@ -436,4 +437,156 @@ func shellFunction(t *testing.T, script, name string) string {
 		t.Fatalf("function %s is unterminated", name)
 	}
 	return script[start:start+end+2] + "\n"
+}
+
+func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	source := filepath.Join(root, "source with 'quote")
+	origin := filepath.Join(root, "origin")
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	for _, dir := range []string{source, origin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(origin, "init", "--bare")
+	git(source, "init")
+	tracked := filepath.Join(source, "tracked")
+	if err := os.WriteFile(tracked, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(source, "add", "tracked")
+	git(source, "commit", "-m", "release")
+	commit := git(source, "rev-parse", "HEAD")
+	git(source, "tag", "v2.0.0-rc.1")
+	git(source, "remote", "add", "origin", origin)
+	git(source, "push", "origin", "HEAD", "--tags")
+	git(source, "switch", "-c", "active-work")
+	if err := os.WriteFile(tracked, []byte("my edits\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "revision_checkout_cmd") + "\nrevision_checkout_cmd \"$SOURCE\" | bash\n"
+	run := func() ([]byte, error) {
+		cmd := exec.Command("bash", "-c", harness)
+		cmd.Env = append(os.Environ(), "SOURCE="+source, "TARGET_COMMIT="+commit)
+		return cmd.CombinedOutput()
+	}
+	for i := 0; i < 2; i++ {
+		if out, err := run(); err != nil {
+			t.Fatalf("prepare revision: %v\n%s", err, out)
+		}
+	}
+	if got := git(source, "branch", "--show-current"); got != "active-work" {
+		t.Fatalf("source branch changed to %q", got)
+	}
+	if got, _ := os.ReadFile(tracked); string(got) != "my edits\n" {
+		t.Fatalf("source edits lost: %q", got)
+	}
+	worktree := source + ".deploy/" + commit
+	if got, _ := os.ReadFile(filepath.Join(worktree, "tracked")); string(got) != "release\n" {
+		t.Fatalf("worktree did not contain release: %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "tracked"), []byte("retained edits\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(); err == nil || !strings.Contains(string(out), "local edits") {
+		t.Fatalf("dirty worktree was not refused: %v\n%s", err, out)
+	}
+}
+
+func TestDeployBuildCommandStampsBothCLIs(t *testing.T) {
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := t.TempDir()
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + `
+make() {
+  [ "$*" = 'build SKIP_UI=1' ] || return 3
+  [ "$SHUTTLE_VERSION" = 2.0.0-rc.1 ] || return 4
+  go build -o "$OUTPUT/felt" ./cmd/felt && go build -o "$OUTPUT/shuttle" ./cmd/shuttle
+}
+
+eval "$(build_checkout_cmd "$SOURCE" 1)"
+`
+	cmd := exec.Command("bash", "-c", harness)
+	cmd.Env = append(os.Environ(), "SOURCE="+repo, "OUTPUT="+output, "DEPLOY_VERSION=2.0.0-rc.1", "TARGET_COMMIT=abc1234")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build command: %v\n%s", err, out)
+	}
+	for _, name := range []string{"felt", "shuttle"} {
+		out, err := exec.Command(filepath.Join(output, name), "--version").CombinedOutput()
+		if err != nil || !strings.Contains(string(out), "2.0.0-rc.1") {
+			t.Errorf("%s release version: %v\n%s", name, err, out)
+		}
+	}
+}
+
+func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
+	old := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "old"))
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "revision"))
+	template, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := supervisorOptions{
+		Label: defaultDaemonLabel, ShuttleBin: "/opt/shuttle", Stores: "/srv/store",
+		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
+		SSHSocket: "/tmp/agent.sock", TmuxTmpdir: "/tmp/tmux operator",
+		CodexSocket: "/tmp/codex.sock", CodexHome: "/tmp/codex home",
+	}
+	rendered, err := renderSupervisorTemplate("Linux", string(template), options, old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": []byte(rendered)})
+	if len(calls) != 1 {
+		t.Fatalf("current supervisor was not retargeted: %v", calls)
+	}
+	for name, want := range map[string]string{
+		"--stores": options.Stores, "--path": options.Path, "--log": options.Log,
+		"--ssh-auth-sock": options.SSHSocket, "--tmux-tmpdir": options.TmuxTmpdir,
+		"--codex-socket": options.CodexSocket,
+	} {
+		if got := installFlag(t, calls[0], name); got != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+	if calls[0][0] != "STORES_FILE="+options.StoresFile || calls[0][len(calls[0])-1] != "CODEX_HOME="+options.CodexHome {
+		t.Fatalf("supervisor environment not retained: %v", calls[0])
+	}
+}
+
+func TestDeployRefRejectsWrongDaemonVersion(t *testing.T) {
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `TARGET_SHA=abc123
+DEPLOY_VERSION=2.0.0-rc.1
+DEPLOY_STARTED_AT=2026-01-01T00:00:00
+SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0
+version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true,"mix_vsn":"0.1.0"}'; }
+` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "wait_for_sha") + "\nwait_for_sha ''\n"
+	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "expected 2.0.0-rc.1") {
+		t.Fatalf("wrong daemon version accepted: %v\n%s", err, out)
+	}
 }
