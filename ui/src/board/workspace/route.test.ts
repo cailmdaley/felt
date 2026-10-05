@@ -113,7 +113,7 @@ describe('workspace routes', () => {
     history.enter('one', 'host')
     history.enter('two', 'host')
     const returned = nextPop(() => history.leave())
-    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview' })
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/board' })
     await returned
     await Promise.resolve()
     expect(window.location.hash).toBe('#/board')
@@ -149,7 +149,7 @@ describe('workspace routes', () => {
     history.leave()
     expect(go).not.toHaveBeenCalled()
     expect(window.location.hash).toBe('#/board')
-    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview' })
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/board' })
   })
 
   it('ignores a same-URL sheet pop, then applies the next route pop', async () => {
@@ -167,7 +167,7 @@ describe('workspace routes', () => {
     expect(window.location.hash).toBe(formatRoute({ kind: 'channel', uid: 'one', owner: 'host' }))
 
     await nextPop(() => window.history.back())
-    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview' })
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/board' })
     expect(onRoute).toHaveBeenCalledTimes(3)
   })
 })

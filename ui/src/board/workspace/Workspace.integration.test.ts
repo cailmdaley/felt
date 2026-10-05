@@ -159,7 +159,7 @@ describe('workspace reader integration', () => {
     expect(visibility).toHaveBeenCalledWith(true)
   })
 
-  it.fails('restores overview scroll after returning from a channel opened on the Board', async () => {
+  it('restores overview scroll after returning from a channel opened on the Board', async () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()
     await flush()

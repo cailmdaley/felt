@@ -174,11 +174,12 @@ export class Workspace {
   private async applyRoute(route: WorkspaceRoute): Promise<void> {
     const epoch = ++this.routeEpoch
     if (route.kind === 'overview') {
-      const view = VIEW_HASHES[window.location.hash]
+      const hash = route.hash ?? window.location.hash
+      const view = VIEW_HASHES[hash]
       this.reader.hide(view !== 'board')
       if (view === 'board') this.lastBoardRoute = null
       if (view) this.opts.onView?.(view)
-      this.overview.setVisible(window.location.hash === '#/board')
+      this.overview.setVisible(view === 'board')
       this.opts.onVisibility(false)
       this.stopTimer()
       return
