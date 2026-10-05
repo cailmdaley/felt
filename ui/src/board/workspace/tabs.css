@@ -64,7 +64,17 @@
 }
 .ws-tile-sketch i { flex: 1; min-width: 1px; max-width: 2px; border-radius: 1px; background: currentColor; }
 .ws-tile-sketch[data-form='duration'] { font: var(--ws-tile-glyph-size)/1 var(--ws-mono); letter-spacing: 0; font-variant-numeric: tabular-nums; }
-/* A live thumbnail fills the tile once it loads; the face beneath hides. */
+/* A live thumbnail fills the tile once it loads and the face beneath hides, so the
+   title rides the tile's foot on a strip of paper: a flat figure or a report that
+   reads as texture is still named. */
+.ws-tab[data-caption]:has(.ws-thumbnail-ready)::before {
+  content: attr(data-caption); position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  height: var(--ws-tile-caption-height); padding: 0 var(--ws-tile-pad); border-radius: 0 0 var(--ws-tile-radius) var(--ws-tile-radius);
+  background: color-mix(in srgb, var(--ws-paper) 92%, transparent); border-top: var(--ws-line-width) solid var(--ws-hairline-soft);
+  color: var(--ws-ink-muted); font: 500 var(--ws-tile-caption-size)/var(--ws-tile-caption-height) var(--ws-serif); letter-spacing: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; pointer-events: none;
+}
+.ws-tab[aria-selected='true'][data-caption]:has(.ws-thumbnail-ready)::before { color: var(--ws-ink); }
 .ws-tab .ws-tab-thumb .kbn-thumbnail-image img { object-fit: cover; }
 .ws-tab .ws-tab-thumb :is(.kbn-thumbnail-glyph, .kbn-thumbnail-name) { display: none; }
 

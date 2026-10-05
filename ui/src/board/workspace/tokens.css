@@ -81,6 +81,8 @@
   --ws-tile-title-size: 11px;
   --ws-tile-glyph-size: 9px;
   --ws-tile-anchor-size: 26px;
+  --ws-tile-caption-size: 10px;
+  --ws-tile-caption-height: 15px;
   /* Room above and below a tile inside the strip, for its lift, fresh mark and focus rule. */
   --ws-tile-air: 6px;
   --ws-band-foot: 10px;

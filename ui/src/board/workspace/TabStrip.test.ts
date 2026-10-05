@@ -165,6 +165,7 @@ describe('TabStrip', () => {
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
     const face = (i: number): Element => strip.buttons[i].querySelector('[data-part="thumbnail-face"]')!
     expect(strip.buttons.map(b => b.dataset.kind)).toEqual(['fiber', 'html', 'audio', 'pdf', 'audio'])
+    expect(strip.buttons.map(b => b.dataset.caption)).toEqual([undefined, 'The composer’s desk', 'etude', 'score', 'coda'])
     expect(face(0).querySelector('.ws-thumbnail-kind')?.textContent).toBe('§')
     expect(face(1).querySelector('.ws-thumbnail-title')?.textContent).toBe('The composer’s desk')
     expect(face(2).querySelector('.ws-thumbnail-title')?.textContent).toBe('etude')

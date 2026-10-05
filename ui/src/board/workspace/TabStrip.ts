@@ -280,6 +280,8 @@ export class TabStrip {
     button.classList.toggle('ws-tab-anchor', doc?.kind === 'fiber')
     if (doc) button.dataset.kind = doc.kind
     else delete button.dataset.kind
+    if (doc && doc.kind !== 'fiber') button.dataset.caption = caption
+    else delete button.dataset.caption
     if (!doc || this.shuttleBase === null) return
     if (!record.thumb) record.thumb = this.thumbnail(record, doc)
     else record.thumb.retitle()

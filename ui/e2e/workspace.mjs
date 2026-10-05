@@ -604,6 +604,10 @@ test('The map beneath the stage indexes pages as legible tiles, captions a hover
     assert.ok(face.kind === 'fiber' ? face.mark === '§' : face.title.length > 0, `a legible face: ${JSON.stringify(face)}`)
     assert.ok(face.box >= 54 && face.box <= 58, `tiles share one height: ${face.box}`)
   }
+  // A tile whose live thumbnail has loaded still names its page, on a strip at its foot.
+  await poll(p, () => document.querySelector('.ws-tab[data-kind="image"] .ws-thumbnail-ready'))
+  const captions = await film.locator('.ws-tab:has(.ws-thumbnail-ready)').evaluateAll(tabs => tabs.map(t => ({ caption: t.dataset.caption, drawn: getComputedStyle(t, '::before').content })))
+  for (const { caption, drawn } of captions) assert.ok(caption && drawn === JSON.stringify(caption), `a live tile is captioned: ${caption} / ${drawn}`)
   const selectedTab = film.locator('.ws-tab[aria-selected="true"]')
   const look = await selectedTab.evaluate(el => ({ border: getComputedStyle(el).borderTopColor, shadow: getComputedStyle(el).boxShadow !== 'none', lift: new DOMMatrix(getComputedStyle(el).transform).m42 }))
   assert.ok(look.shadow && look.lift < 0, `the selected tile is lifted: ${JSON.stringify(look)}`)

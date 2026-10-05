@@ -70,6 +70,8 @@
 .ws-head-worker { flex: none; display: flex; align-items: baseline; }
 .ws-head-worker[hidden] { display: none; }
 /* The card's own pill, bare: a pigmented dot, the state in the serif, the time in mono. */
+/* Dot, state and time are three words, wherever the plate is drawn. */
+.ws-worker-control { display: inline-flex; align-items: center; gap: .45em; }
 .ws-reader .ws-navbar .ws-head-worker .ws-worker-control {
   display: inline-flex; align-items: baseline; gap: 6px; height: var(--ws-control-height); margin: 0 calc(-1 * var(--ws-small-gap));
   padding: 0 var(--ws-small-gap); border: 0; border-radius: var(--ws-control-radius); background: transparent; box-shadow: none;
