@@ -8,6 +8,7 @@ import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
+import { ConstitutionPicker } from './ConstitutionPicker.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -21,6 +22,7 @@ export interface ReaderOptions {
   cards(): KanbanCard[]
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
+  files?(card: KanbanCard): string[]
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -72,10 +74,9 @@ export class Reader {
   private active = false
   private menu: HTMLElement | null = null
   private menuAnchor: HTMLElement | null = null
-  private switcher = false
   private sidebar = element('aside', 'ws-sidebar')
-  private readonly sidebarFind = element('input', 'ws-channel-find')
-  private sidebarList: HTMLElement = element('div', 'ws-channel-list')
+  private readonly sidebarPicker: ConstitutionPicker
+  private readonly picker: ConstitutionPicker
   /** The persisted choice; absent, the sidebar is closed. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
@@ -114,11 +115,16 @@ export class Reader {
     this.announcement.setAttribute('aria-atomic', 'true')
     this.stage.append(this.track)
     this.sidebar.setAttribute('aria-label', 'Constitutions')
-    this.sidebarFind.type = 'search'
-    this.sidebarFind.placeholder = 'Find a constitution'
-    this.sidebarFind.setAttribute('aria-label', 'Find a constitution')
-    this.sidebarFind.addEventListener('input', () => this.fillSidebar())
-    this.sidebar.append(this.sidebarFind, this.sidebarList)
+    const pickerOptions = {
+      cards: () => this.opts.switcherCards?.() ?? this.opts.cards(),
+      files: opts.files,
+      current: (card: KanbanCard) => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
+      onOpen: (card: KanbanCard) => { this.closeMenu(); this.opts.onChannel(card) },
+    }
+    this.sidebarPicker = new ConstitutionPicker(pickerOptions)
+    this.picker = new ConstitutionPicker(pickerOptions)
+    this.sidebarPicker.el.style.display = 'contents'
+    this.sidebar.append(this.sidebarPicker.el)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
     this.el.append(this.veil, this.navbar, main, thumb, this.announcement)
@@ -449,11 +455,11 @@ export class Reader {
     if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
   }
   private closeMenu(): boolean {
+    if (this.picker.isOpen) { this.picker.close(); return true }
     if (!this.menu) return false
     this.menu.remove()
     this.menu = null
     this.menuAnchor = null
-    this.switcher = false
     return true
   }
   private readonly pointerInput = (): void => { this.keyboardInput = false; this.el.classList.remove('ws-keyboard') }
@@ -461,42 +467,16 @@ export class Reader {
   private readonly outside = (e: PointerEvent): void => {
     if (this.menu && !this.menu.contains(e.target as Node) && !this.menuAnchor?.contains(e.target as Node)) this.closeMenu()
   }
-  private channelList(filter = ''): HTMLElement {
-    const list = element('div', 'ws-channel-list')
-    for (const card of (this.opts.switcherCards?.() ?? this.opts.cards())) {
-      if (!`${card.name} ${card.path}`.toLowerCase().includes(filter.toLowerCase())) continue
-      const row = button('ws-channel-row', '', () => { this.closeMenu(); this.opts.onChannel(card) }, card.name)
-      row.append(element('span', 'ws-channel-name', card.name))
-      row.title = card.outcome ?? card.path
-      row.setAttribute('aria-current', String((card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner))
-      row.append(element('small', '', card.originId))
-      list.append(row)
-    }
-    return list
-  }
   private openSwitcher(): void {
-    if (this.sidebarShown) { this.sidebarFind.focus(); return }
-    if (this.switcher) { this.closeMenu(); return }
+    if (this.sidebarShown) { this.sidebarPicker.focus(); return }
+    if (this.picker.isOpen) { this.picker.close(); return }
     this.closeMenu()
-    const menu = element('div', 'ws-menu ws-switcher')
-    const find = element('input', 'ws-channel-find')
-    find.placeholder = 'Find a constitution'
-    find.setAttribute('aria-label', 'Find a constitution')
-    let list = this.channelList()
-    find.addEventListener('input', () => { const next = this.channelList(find.value); list.replaceWith(next); list = next })
-    menu.append(find, list)
-    this.el.append(menu)
-    this.menu = menu
-    this.menuAnchor = this.title
-    this.switcher = true
-    const rect = this.title.getBoundingClientRect()
-    menu.style.left = `${Math.min(rect.left, Math.max(12, window.innerWidth - menu.offsetWidth - 12))}px`
-    menu.style.top = `${rect.bottom + 6}px`
-    find.focus()
+    this.picker.show(this.el, this.title)
   }
   /** Re-list the channel rows after the overview's order changes. */
   refreshChannels(): void {
     if (this.active && this.sidebarShown) this.fillSidebar()
+    if (this.active && this.picker.isOpen) this.picker.refresh()
   }
   private get sidebarShown(): boolean {
     return !this.phone.matches && (this.sidebarChoice ?? false)
@@ -517,19 +497,12 @@ export class Reader {
   }
   /** Rows refresh in place; the list keeps its scroll and the find its text. */
   private fillSidebar(): void {
-    const top = this.sidebarList.scrollTop
-    const next = this.channelList(this.sidebarFind.value)
-    this.sidebarList.replaceWith(next)
-    this.sidebarList = next
-    next.scrollTop = top
-    const current = next.querySelector<HTMLElement>('[aria-current="true"]')
-    if (current && (current.offsetTop < next.scrollTop || current.offsetTop + current.offsetHeight > next.scrollTop + next.clientHeight)) {
-      next.scrollTop = Math.max(0, current.offsetTop - next.clientHeight / 3)
-    }
+    this.sidebarPicker.refresh()
   }
   private readonly keydown = (e: KeyboardEvent): void => {
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
+    if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
     // Native controls own activation and composite navigation; the managed tablist uses our shared intents.
     if (!this.tabs.el.contains(e.target as Node) && !shouldForwardDocumentKey(e) && !e.altKey && !e.metaKey && !e.ctrlKey) return
     const intent = keyIntent(e, 'reader')
@@ -541,6 +514,7 @@ export class Reader {
     if (intent === 'help') return false
     if (intent === 'back') {
       if (this.cancelResize) this.cancelResize()
+      else if (this.picker.isOpen) this.picker.close(true)
       else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
       else if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
       else if (this.expanded) this.toggleExpand()
@@ -549,6 +523,11 @@ export class Reader {
     }
     if (this.tabs.handleIntent(intent)) return true
     if (intent === 'sidebar') this.toggleSidebar()
+    else if (intent === 'find') {
+      if (this.sidebarShown) this.sidebarPicker.focus()
+      else if (this.picker.isOpen) this.picker.focus()
+      else this.openSwitcher()
+    }
     else if (intent === 'prev' || intent === 'next') this.step(intent === 'prev' ? -1 : 1)
     else if (intent === 'first' || intent === 'last') this.selectIndex(intent === 'first' ? 0 : (this.channel?.documents.length ?? 1) - 1)
     else if (intent === 'open') this.toggleExpand()
@@ -596,6 +575,8 @@ export class Reader {
     if (this.departure !== null) clearTimeout(this.departure)
     this.wide.removeEventListener('change', this.relayout)
     this.tabs.dispose()
+    this.picker.dispose()
+    this.sidebarPicker.dispose()
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)

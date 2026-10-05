@@ -127,6 +127,7 @@ describe('minified production document keyboard bridge', () => {
     const frame = await report()
     const keys: Array<[string, KeyboardEventInit, string]> = [
       ['h', {}, 'prev'], ['l', {}, 'next'],
+      ['c', {}, 'sidebar'], ['/', {}, 'find'],
       ['j', {}, 'nextChannel'], ['k', {}, 'prevChannel'],
       ['ArrowDown', { repeat: true }, 'scrollDown'], ['?', { shiftKey: true }, 'help'],
       ['\\', { metaKey: true }, 'sidebar'], ['\\', { ctrlKey: true }, 'sidebar'],

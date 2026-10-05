@@ -94,6 +94,33 @@ beforeEach(() => {
 afterEach(() => { workspace?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('opens the shared picker over Desk without entering Reader until selection, searching known file receipts', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000)
+    workspace.overview.opened(cards[0])
+    workspace.overview.refresh()
+    await flush()
+    const previous = document.createElement('button')
+    document.body.append(previous); previous.focus()
+    const route = window.location.hash
+    workspace.findConstitution()
+    expect(workspace.isActive).toBe(false)
+    expect(window.location.hash).toBe(route)
+    const find = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    expect(document.activeElement).toBe(find)
+    find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(previous)
+    expect(document.querySelector('.ws-switcher')).toBeNull()
+    workspace.findConstitution()
+    const input = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    const reads = vi.mocked(fetch).mock.calls.length
+    input.value = 'table.html'; input.dispatchEvent(new Event('input'))
+    expect(vi.mocked(fetch).mock.calls.length).toBe(reads)
+    expect(document.querySelectorAll('.ws-switcher .ws-channel-row')).toHaveLength(1)
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(workspace.isActive).toBe(true)
+    expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+  })
   it('selects the declared report on first entry and retains the same iframe through pages, expand and return', async () => {
     workspace.open(cards[0])
     await flush()

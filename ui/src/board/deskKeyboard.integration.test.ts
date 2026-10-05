@@ -12,6 +12,7 @@ interface BoardInternals {
   startPolling(): void
   fetchAndRender(): Promise<void>
   workspace: Workspace
+  deskEl: HTMLElement
 }
 let board: KanbanModal
 let inside: BoardInternals
@@ -62,6 +63,33 @@ beforeEach(() => {
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Desk keyboard selection', () => {
+  it('opens Find over Desk without entering Reader until a match is selected', () => {
+    const previous = document.createElement('button')
+    inside.deskEl.append(previous); previous.focus()
+    const route = window.location.hash
+    expect(press('/').defaultPrevented).toBe(true)
+    expect(inside.workspace.isActive).toBe(false)
+    expect(window.location.hash).toBe(route)
+    const find = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    expect(document.activeElement).toBe(find)
+    press('Escape', {}, find)
+    expect(document.activeElement).toBe(previous)
+    press('/')
+    const input = document.querySelector<HTMLInputElement>('.ws-switcher input')!
+    input.value = 'd1'; input.dispatchEvent(new Event('input'))
+    press('Enter', {}, input)
+    expect(inside.workspace.isActive).toBe(true)
+    expect(window.location.hash).toContain('draft-uid')
+  })
+  it('uses a visible existing card filter and leaves slash literal in fields', () => {
+    const input = document.createElement('input'); input.type = 'search'
+    inside.deskEl.append(input)
+    vi.spyOn(input, 'getClientRects').mockReturnValue([{ width: 100 }] as unknown as DOMRectList)
+    press('/')
+    expect(document.activeElement).toBe(input)
+    expect(document.querySelector('.ws-switcher')).toBeNull()
+    expect(press('/', {}, input).defaultPrevented).toBe(false)
+  })
   it('moves through both flight bands, the three columns, Pinned and Resting without wrapping', () => {
     press('j'); expect(selected()).toBe('review')
     press('h'); expect(selected()).toBe('head-uid')

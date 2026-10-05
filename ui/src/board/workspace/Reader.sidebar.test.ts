@@ -36,6 +36,7 @@ function makeReader(current: KanbanCard = alpha): Reader {
     onChannel,
     cards: () => channels,
     switcherCards: () => listedCards,
+    files: card => card === beta ? ['unique-result.pdf'] : [],
   })
   document.body.append(reader.el)
   reader.show(channel(current), fiberKey(current), 'Board', current)
@@ -123,6 +124,36 @@ describe('Reader channel sidebar', () => {
     viewport.wide = false
     const storedTrue = makeReader()
     expect(storedTrue.el.classList.contains('ws-with-sidebar')).toBe(true)
+  })
+
+  it('toggles with c as well as the command alias', () => {
+    const reader = makeReader()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true }))
+    expect(reader.el.classList.contains('ws-with-sidebar')).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
+    expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
+  })
+
+  it.each([false, true])('Find focuses the %s sidebar mode, opens the first file match and restores focus on Escape', sidebar => {
+    storage.set('shuttle:workspace:sidebar', String(sidebar))
+    const reader = makeReader()
+    const previous = reader.el.querySelector<HTMLButtonElement>('.ws-return')!
+    previous.focus()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true }))
+    const find = reader.el.querySelector<HTMLInputElement>(sidebar ? '.ws-sidebar input' : '.ws-switcher input')!
+    expect(document.activeElement).toBe(find)
+    find.value = 'unique-result.pdf'
+    find.dispatchEvent(new Event('input'))
+    expect(rowNames(reader)).toEqual(['Beta'])
+    find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(document.activeElement).toBe(previous)
+    expect(reader.el.querySelector('.ws-switcher')).toBeNull()
+    expect(reader.el.classList.contains('ws-with-sidebar')).toBe(sidebar)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true }))
+    const again = reader.el.querySelector<HTMLInputElement>(sidebar ? '.ws-sidebar input' : '.ws-switcher input')!
+    again.value = 'unique-result.pdf'; again.dispatchEvent(new Event('input'))
+    again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    expect(onChannel).toHaveBeenLastCalledWith(beta)
   })
 
   it('never shows the sidebar on a phone, even when it is stored open', () => {

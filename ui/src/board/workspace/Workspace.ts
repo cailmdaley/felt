@@ -9,6 +9,7 @@ import { renderMarkdown, showToast } from '../utils.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
+import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { Overview } from './Overview.js'
 import { WorkspaceHistory, type WorkspaceRoute } from './route.js'
 
@@ -41,6 +42,8 @@ export class Workspace {
   readonly reader: Reader
   readonly overview: Overview
   readonly dock: Dock
+  private readonly picker: ConstitutionPicker
+  private readonly root: HTMLElement
   private readonly opts: WorkspaceOptions
   private readonly history: WorkspaceHistory
   private readonly channels = new Map<string, ChannelState>()
@@ -58,6 +61,7 @@ export class Workspace {
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
+    this.root = root
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
@@ -67,10 +71,19 @@ export class Workspace {
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
       onOrder: () => this.reader?.refreshChannels(),
     })
+    this.picker = new ConstitutionPicker({
+      cards: () => {
+        const ordered = this.overview.orderedCards()
+        return [...ordered, ...opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
+      },
+      files: card => this.overview.fileNames(card),
+      onOpen: card => this.open(card, 'Desk', undefined, this.overview.hasMetadata(card)),
+    })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
       switcherCards: () => this.overview.orderedCards(),
+      files: card => this.overview.fileNames(card),
       onSelect: key => this.select(key),
       onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
       workerPill: card => this.dock.workerPillFor(card),
@@ -90,6 +103,10 @@ export class Workspace {
   }
 
   get isActive(): boolean { return this.reader.isActive }
+  /** Opens over the Desk without navigating or waking the reader. */
+  findConstitution(): void {
+    this.picker.show(this.root)
+  }
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
     this.startPrompt = { card, failure }
@@ -192,6 +209,7 @@ export class Workspace {
   }
   private async applyRoute(route: WorkspaceRoute): Promise<void> {
     const epoch = ++this.routeEpoch
+    this.picker.close()
     if (route.kind === 'overview') {
       const hash = route.hash ?? window.location.hash
       const view = VIEW_HASHES[hash]
@@ -397,6 +415,7 @@ export class Workspace {
     document.removeEventListener('visibilitychange', this.visibility)
     this.history.dispose()
     this.dock.reset()
+    this.picker.dispose()
     this.reader.dispose()
     this.overview.dispose()
   }

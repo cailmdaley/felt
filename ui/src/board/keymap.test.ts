@@ -24,6 +24,8 @@ describe('shared keyboard table', () => {
   it.each(['input', 'textarea', 'select'])('ignores typing in %s but allows reader Alt-arrows', tag => {
     const field = document.createElement(tag)
     expect(keyIntent(event('j', {}, field), 'desk')).toBeNull()
+    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event('/', {}, field), surface)).toBeNull()
+    expect(shouldForwardDocumentKey(event('/', {}, field))).toBe(false)
     expect(keyIntent(event('ArrowRight', { altKey: true }, field), 'reader')).toBe('next')
     expect(shouldForwardDocumentKey(event('ArrowRight', { altKey: true }, field))).toBe(false)
   })
@@ -81,6 +83,12 @@ describe('shared keyboard table', () => {
     expect(keyIntent(e, 'desk')).toBeNull()
     expect(shouldForwardDocumentKey(e)).toBe(false)
     expect(shouldForwardDocumentKey(event('j'))).toBe(true)
+    for (const key of ['c', '/']) {
+      const handled = event(key)
+      handled.preventDefault()
+      expect(keyIntent(handled, 'reader')).toBeNull()
+      expect(shouldForwardDocumentKey(handled)).toBe(false)
+    }
   })
   it('allows held movement, not repeated activation or dismissal', () => {
     expect(keyIntent(event('j', { repeat: true }), 'desk')).toBe('down')

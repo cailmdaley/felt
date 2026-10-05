@@ -342,6 +342,10 @@ export class Overview {
   }
   /** Find never truncates keyboard channel order. */
   orderedCards(): KanbanCard[] { this.resolveFolios(); return [...this.order] }
+  /** Receipt metadata already held by the sheet; searching never reads fiber bodies. */
+  fileNames(card: KanbanCard): string[] {
+    return this.folios.get(uidOf(card))?.receipts.flatMap(r => [r.basename, r.fullPath]) ?? []
+  }
   unfiledReceipts(uid: string): ShelfFile[] { return this.folios.get(uid)?.receipts ?? [] }
   hasMetadata(card: KanbanCard): boolean {
     const uid = uidOf(card)
@@ -600,7 +604,8 @@ export class Overview {
     const intent = keyIntent(event, 'overview')
     if (!intent || intent === 'help') return
     event.preventDefault()
-    this.moveSelection(intent)
+    if (intent === 'find') this.find.focus({ preventScroll: true })
+    else this.moveSelection(intent)
   }
   private renderRibbon(): void {
     const documents = new Map<DocKey, Receipt>()

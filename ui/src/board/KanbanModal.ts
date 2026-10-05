@@ -2575,6 +2575,14 @@ export class KanbanModal {
     if (this.handleViewHotkey(e)) return
     if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
+      if (intent === 'find') {
+        const filter = [...this.deskEl!.querySelectorAll<HTMLInputElement>('input[type="search"], input[data-card-filter]')]
+          .find(input => !input.closest('[hidden],[inert]') && input.getClientRects().length > 0)
+        if (filter) filter.focus({ preventScroll: true })
+        else this.workspace?.findConstitution()
+        e.preventDefault(); e.stopPropagation()
+        return
+      }
       const nativeActivation = e.key === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
       if (intent && !nativeActivation && this.deskKeyboard?.handle(intent)) {
         e.preventDefault()
