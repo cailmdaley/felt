@@ -556,6 +556,7 @@ export class Reader {
       else this.opts.onReturn()
       return true
     }
+    if (this.tabs.handleIntent(intent)) return true
     if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'prev' || intent === 'next') this.step(intent === 'prev' ? -1 : 1)
     else if (intent === 'first' || intent === 'last') this.selectIndex(intent === 'first' ? 0 : (this.channel?.documents.length ?? 1) - 1)

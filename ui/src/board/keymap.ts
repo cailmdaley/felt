@@ -39,7 +39,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['ArrowLeft'], 'prev', 'Previous page', true), bind(['ArrowRight'], 'next', 'Next page', true),
     bind(['ArrowDown'], 'nextChannel', 'Next channel', true), bind(['ArrowUp'], 'prevChannel', 'Previous channel', true),
     bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Return to origin view'),
-    bind(['g'], 'first', 'First page'), bind(['G'], 'last', 'Last page'), bind(['?'], 'help', 'Keyboard help'),
+    bind(['g', 'Home'], 'first', 'First page'), bind(['G', 'End'], 'last', 'Last page'), bind(['?'], 'help', 'Keyboard help'),
   ],
 }
 

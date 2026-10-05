@@ -809,16 +809,18 @@ export class Dock {
     box.className = 'kbn-ctl-composer'
     const message = document.createElement('textarea')
     message.className = 'kbn-detail-directive'
-    message.rows = 2
+    message.rows = 1
     message.placeholder = 'What should the worker do next?'
     message.setAttribute('aria-label', 'Message for the next worker')
     swallow(message)
-    // The box grows with what is written rather than wearing a resize grip.
+    // The resting composer is one line; focus or a draft gives it room to grow.
     const fit = (): void => {
       message.style.height = 'auto'
-      message.style.height = `${message.scrollHeight}px`
+      if (message.value || message === document.activeElement) message.style.height = `${message.scrollHeight}px`
     }
     message.addEventListener('input', fit)
+    message.addEventListener('focus', fit)
+    message.addEventListener('blur', fit)
 
     // Two lines under the box: a send's outcome (and the project-directory
     // prompt a refused start raises), and the images turned away. Neither

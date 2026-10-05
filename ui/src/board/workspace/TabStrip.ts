@@ -1,3 +1,5 @@
+import type { KeyIntent } from '../keymap.js'
+
 export const TAB_CROSSING_MS = 280
 
 /** Clamp the scroll offset that centres a tab inside a horizontally scrolling strip. */
@@ -51,7 +53,6 @@ export class TabStrip {
       ? window.matchMedia('(prefers-reduced-motion: reduce)')
       : null
     this.el.addEventListener('scroll', this.onScroll, { passive: true })
-    this.el.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('resize', this.onResize)
     this.motion?.addEventListener('change', this.onMotionChange)
   }
@@ -145,7 +146,6 @@ export class TabStrip {
     this.disposed = true
     this.cancelAnimation()
     this.el.removeEventListener('scroll', this.onScroll)
-    this.el.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('resize', this.onResize)
     this.motion?.removeEventListener('change', this.onMotionChange)
     this.el.replaceChildren()
@@ -216,19 +216,16 @@ export class TabStrip {
     this.el.scrollLeft = this.animationTarget
     this.updateFades()
   }
-  private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !this.records.length) return
+  /** The reader's shared keymap also owns roving focus within the tablist. */
+  handleIntent(intent: KeyIntent): boolean {
     const current = this.records.findIndex(({ button }) => button === document.activeElement)
-    if (current < 0) return
-    let next: number | null = null
-    if (event.key === 'ArrowRight') next = Math.min(this.records.length - 1, current + 1)
-    if (event.key === 'ArrowLeft') next = Math.max(0, current - 1)
-    if (event.key === 'Home') next = 0
-    if (event.key === 'End') next = this.records.length - 1
-    if (next === null || next === current) return
-    event.preventDefault()
-    this.mark(next, true)
-    this.onSelect(next)
+    if (current < 0) return false
+    const next = intent === 'next' ? Math.min(this.records.length - 1, current + 1)
+      : intent === 'prev' ? Math.max(0, current - 1)
+      : intent === 'first' ? 0 : intent === 'last' ? this.records.length - 1 : null
+    if (next === null) return false
+    if (next !== current) { this.mark(next, true); this.onSelect(next) }
     this.records[next]?.button.focus({ preventScroll: true })
+    return true
   }
 }
