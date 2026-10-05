@@ -158,9 +158,9 @@ export function escapeHtml(text: string): string {
 // Local/relative image paths in rendered markdown resolve through the Shuttle
 // daemon's owner-routed file route (GET /api/v1/file?path=&origin=). Relative,
 // so both the daemon-served bundle and the dev proxy reach :4000 without CORS.
-// Fiber bodies render with a basePath (FiberDetailModal passes the fiber's
-// dir), so relative paths resolve through this route; card outcomes render
-// without one and leave relative paths untouched.
+// Fiber bodies render with a basePath (the workspace reader supplies the
+// fiber's directory), so relative paths resolve through this route; card
+// outcomes render without one and leave relative paths untouched.
 const FILE_ROUTE = `/api/v1/file`
 
 interface RenderMarkdownOptions {
@@ -204,10 +204,9 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
       // here. A relative href is a path in the fiber's own directory and
       // belongs on the same owner-routed `/file` route.
       //
-      // `data-file-path` carries the resolved absolute path so a host that can
-      // do better than a new tab — the detail panel, which has a file viewer —
-      // intercepts the click and opens it in place. Without such a host the
-      // href alone is already a working URL.
+      // `data-file-path` carries the resolved absolute path so the workspace
+      // reader can intercept the click and open the target as a document.
+      // Without such a host the href alone is already a working URL.
       localRenderer.link = ({ href, text }: { href: string; text: string }) => {
         const external = /^(https?:|mailto:|data:)/i.test(href) || href.startsWith('#')
         const resolved = external ? null : fileUrl(href, opts)
@@ -291,7 +290,7 @@ export function fileUrl(rawPath: string, opts?: RenderMarkdownOptions): string |
  * HTML artifacts render inside same-origin `/api/v1/file` iframes. Treat
  * absolute web links as departures from the artifact, not in-frame navigation:
  * a report that omits `target="_blank"` should not strand the reader on arXiv
- * inside the fiber panel. Relative links and hash links stay under the
+ * inside the workspace reader. Relative links and hash links stay under the
  * artifact's control.
  */
 export function prepareIframeExternalLinks(iframe: HTMLIFrameElement): void {

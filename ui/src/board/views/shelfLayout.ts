@@ -24,7 +24,7 @@
  * together" is the shape of the tile itself.
  *
  * Pure: no DOM, no storage side effects beyond the two localStorage helpers at
- * the bottom, which swallow their own failures the way FiberDetailModal's do.
+ * the bottom, which swallow their own storage failures.
  */
 
 import type { ShelfFile } from './shelfData.js'

@@ -16,26 +16,16 @@
  *     would close whatever sheet is on top by then. So every back this module
  *     issues is counted and the matching pop is swallowed.
  *
- *   · A SWAP IS NOT A CLOSE. The detail panel is one reused instance whose
- *     `open()` begins by calling `close()`, so opening card B while card A is
- *     up reads as close-then-open. Released and re-pushed, that is a back()
- *     racing a pushState — the queued pop then takes the new panel down with
- *     it. `swap()` marks the layer as staying open across the churn, so the
- *     entry is simply kept and no history call is made at all.
+ *   · A SWAP IS NOT A CLOSE. A layer can replace its content while remaining
+ *     open. `swap()` defers any release until the replacement finishes, so its
+ *     history entry stays in place and no back/push pair races a queued pop.
  *
- * LIFO is assumed, and it is what the board does: the card's close takes its
- * followed-reference panel and its file viewer down first, and both Escape and
- * back act on the newest sheet. A layer released out of order gives up its
- * claim without issuing a back — one stale entry beats popping someone else's.
+ * The stack is LIFO: nested sheets close newest first, and both Escape and
+ * back act on the top layer. A layer released out of order gives up its claim
+ * without issuing a back, rather than popping another layer's entry.
  */
 
-/** The board's sheet layers. The first three stack, innermost last; the
- *  Shelf's reader belongs to another view and stands alone. Ids rather than an
- *  enum so the stack stays a plain string machine that tests can drive
- *  directly. */
-export const SHEET_CARD = 'card'
-export const SHEET_VIEWER = 'viewer'
-export const SHEET_LINKED = 'linked'
+/** The Shelf file reader's history layer. */
 export const SHEET_SHELF_READER = 'shelf-reader'
 
 export interface SheetHistoryDriver {
@@ -126,10 +116,8 @@ export class SheetHistory {
 }
 
 /**
- * The board's one stack. A module singleton because the three sheet layers —
- * the card, its file viewer, the panel of followed references — live in three
- * files and must share one ordering; a stack per file would let each pop the
- * other's entries.
+ * The board's shared sheet-history stack. The Shelf file reader registers its
+ * full-screen form here so browser back and Escape share one layer order.
  */
 let shared: SheetHistory | null = null
 const closers = new Map<string, () => void>()
@@ -152,16 +140,11 @@ function sharedHistory(): SheetHistory {
 
 /**
  * Declare a sheet layer open (with the closer the back gesture should run) or
- * closed. The single entry point for every sheet on the board.
+ * closed. This is the entry point for sheet back navigation.
  */
 export function holdSheet(id: string, held: boolean, onBack?: () => void): void {
   if (held && onBack) closers.set(id, onBack)
   else if (!held) closers.delete(id)
   sharedHistory().set(id, held)
-}
-
-/** Run a content swap on one layer without releasing its entry. */
-export function swapSheet<T>(id: string, fn: () => T): T {
-  return sharedHistory().swap(id, fn)
 }
 

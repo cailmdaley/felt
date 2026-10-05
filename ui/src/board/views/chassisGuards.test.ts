@@ -112,7 +112,7 @@ describe('isBlockingDialog', () => {
 })
 
 describe('BLOCKING_DIALOG_SELECTOR', () => {
-  it('covers Radix, hand-rolled aria dialogs, and the fiber panel', () => {
+  it('covers Radix, hand-rolled aria dialogs, and the floating file reader', () => {
     // A hand-rolled dialog is the case M1 missed: role="dialog"
     // aria-modal="true", no data-state anywhere.
     expect(BLOCKING_DIALOG_SELECTOR).toContain('[role="dialog"][data-state="open"]')

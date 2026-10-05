@@ -14,22 +14,21 @@
  * subline is in the queue pane, where a row is a card name and joining the end
  * of its chain is not visible from that name.
  *
- * It is raised by a LONG PRESS on the card itself, on the board, rather than by
- * a control inside the open sheet — the gesture sits where the object is, and a
- * button in the sheet's head row is a place nobody looked. The menu mounts on
- * `document.body`: the panel is a size container and would clip a descendant
- * popover, and the card's column scrolls.
+ * It is raised by a LONG PRESS on the card itself, rather than by a control in
+ * the conversation dock — the gesture sits where the object is. The menu mounts
+ * on `document.body`, outside the card's scrolling column, so it is not clipped.
  */
 import type { KanbanCard } from './KanbanTypes.js'
 import type { MoveBroker } from './MoveDestinations.js'
 import { isMobileViewport, onMobileChange } from './mobile.js'
 import { clearSelection, dismissOnScrim, onPressRelease } from './dismissGesture.js'
+import './MoveMenu.css'
 
 /**
  * Put the desktop move popover next to its anchor — below by preference,
  * flipped above when the viewport's lower edge would clip it, and slid back
- * inside the right margin either way. `position: fixed`, because the panel is
- * a size container and would clip a descendant popover.
+ * inside the right margin either way. `position: fixed` keeps it aligned to the
+ * viewport while its anchor sits inside a scrolling card column.
  */
 function placeMoveMenu(menu: HTMLElement, anchor: HTMLElement): void {
   const a = anchor.getBoundingClientRect()

@@ -10,7 +10,7 @@
 //   • Resting drop — the due-preservation policy, whose whole protocol is the
 //     PRESENCE OF A KEY in the JSON body: absent leaves the date, `null`
 //     clears it.
-//   • The detail panel's due editor — one `/felt-edit` carrying a bare civil
+//   • The conversation dock's due editor — one `/felt-edit` carrying a bare civil
 //     day, never an instant.
 //
 // So the assertion here is always the REQUEST: url, method, and the parsed
@@ -712,7 +712,7 @@ describe('verdicts stop app workers before changing the card lifecycle', () => {
   })
 })
 
-// ── The detail panel's due editor ────────────────────────────────────────────
+// ── The conversation dock's due editor ────────────────────────────────────────────
 
 describe('Dock.livePatch — the due branch', () => {
   const makePanel = (): Dock => new Dock(BASE, () => {})
@@ -771,17 +771,16 @@ describe('Dock.livePatch — the due branch', () => {
   })
 })
 
-// ── The detail panel's kind editor ───────────────────────────────────────────
+// ── The conversation dock's kind control ───────────────────────────────────────────
 //
-// The panel's Kind control is three-way — One-shot | Standing | Pinned — and
+// The dock's Kind control is three-way — One-shot | Standing | Pinned — and
 // every one of its writes is SHAPE-ONLY. That is the deliberate divergence from
 // `commitPin` above: the drag targets a surface (the Pinned strip = at rest) and
 // therefore also kills and pauses; this control edits a field and must not.
 //
 // These pin the wire, which is where the divergence is visible. The selected-
 // segment rendering is not covered here — the suite has no DOM (see
-// bodyLinks.test.ts on why the shims were removed); the panel's own harness
-// (`npm run harness`) is where that is looked at.
+// bodyLinks.test.ts on why the shims were removed); this suite pins the wire writes rather than control rendering.
 
 describe('Dock.livePatch — the kind branch', () => {
   const makePanel = (): Dock => new Dock(BASE, () => {})

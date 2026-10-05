@@ -29,16 +29,16 @@ export interface KanbanCard {
   /**
    * The owning host's felt store path (the feed row's `felt_store`, e.g.
    * `/home/user/store` for a remote-host card). Threaded into owner-routed
-   * fiber reads so the detail view reads the OWNER's copy, not the
+   * fiber reads so the workspace reader reads the OWNER's copy, not the
    * git-synced local one.
    */
   feltStore?: string
   /**
    * Absolute path to the fiber's own directory on the owning host
-   * (`dirname(felt.path)`). The base the detail panel resolves a relative
+   * (`dirname(felt.path)`). The base the workspace reader resolves a relative
    * `:::{embed}` / markdown image against before handing it to the `/file`
    * route. Absent for remote-origin fibers served by an older daemon and for
-   * fibers felt carries no path for; the panel then falls back to a placeholder.
+   * fibers felt carries no path for; the reader then falls back to a placeholder.
    */
   fiberDir?: string
   status: string
@@ -114,7 +114,7 @@ export interface KanbanCard {
    * `shuttle.runtime.dispatched_at` — the INSTANT the owning daemon launched
    * the most recent worker. Rides the composite feed inside felt's `shuttle`
    * map (felt serializes the whole block), so no daemon change was needed to
-   * surface it. Opens the detail panel's session-window line.
+   * surface it. Opens the conversation dock's session-window line.
    */
   dispatchedAt?: string
   /**
@@ -149,13 +149,13 @@ export interface KanbanCard {
   /**
    * `shuttle.effort` — reasoning-effort axis (a harness-native token, e.g.
    * `high`, `xhigh`, `max`). Absent resolves to the agent registry's concrete
-   * default. Drives the effort select in the fiber-detail agent picker.
+   * default. Drives the effort select in the conversation dock's agent picker.
    */
   shuttleEffort?: string
   /**
    * `shuttle.chrome` — browser-automation axis (claude harness only). Present
    * (true) when the block enables `--chrome`; drives the chrome toggle in the
-   * fiber-detail agent picker.
+   * conversation dock's agent picker.
    */
   shuttleChrome?: boolean
 
@@ -174,7 +174,7 @@ export interface KanbanCard {
   /**
    * `shuttle.kind` — `oneshot` (default), `standing`, or `pinned`. Present
    * iff the fiber has a shuttle block. Drives the kind segmented control in
-   * the fiber-detail modal and reveals the schedule/tz row when standing. A
+   * the conversation dock and reveals the schedule/tz row when standing. A
    * resting (`status:active`, not running) pinned fiber classifies onto the
    * Pinned strip; a running one shows live in Now via the worker override.
    */

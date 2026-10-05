@@ -1712,8 +1712,8 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * Render one grid card. Title click opens the reading surface in vellum;
-   * body click opens the action detail modal.
+   * Render one grid card. Clicking it opens the document workspace reader;
+   * conversation actions live in the dock.
    */
   private renderCard(
     card: KanbanCard,
@@ -1766,10 +1766,8 @@ export class KanbanSurfaceRenderer {
     glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
     glyph.textContent = isAgentCard(card) ? '◐' : '✓'
 
-    // The title is plain text — clicking anywhere on the card (title
-    // included) opens the fiber-detail panel, which IS the fiber as a
-    // vellum page; drill-out to the full workspace lives in the panel (id
-    // slug, dropdown, wikilinks).
+    // The title is plain text — clicking the card opens its document in the
+    // workspace reader. Conversation actions for the fiber live in the dock.
     const name = document.createElement('span')
     name.className = 'kbn-card-name'
     name.textContent = card.name

@@ -8,9 +8,6 @@ import { resolve } from 'node:path'
  * harness-board-dist/, loadable over `file://` (ES modules are CORS-blocked
  * under file://; an IIFE script tag is not). Not part of the shipped app — a
  * dev/verification artifact only.
- *
- * Mirrors vite.harness.config.ts; differs only in entry/outDir/global name so
- * the two harnesses (board chrome vs fiber-detail panel) build side by side.
  */
 
 const OUT_DIR = 'harness-board-dist'

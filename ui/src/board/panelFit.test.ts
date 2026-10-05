@@ -1,13 +1,7 @@
-// A restored panel geometry must fit the window it is restored into.
-//
-// The defect: the fiber-detail panel remembers its size per card, and the
-// restore path checked only that the panel's TOP-LEFT still landed on screen.
-// A card whose geometry was saved on a taller display therefore reopened
-// taller than the window — and since the page pane is the panel's scroll
-// container, its bottom edge sat below the screen. The reader could scroll the
-// body to its end and still never see the end: on the "FORTH Crete tutorial"
-// card, a 1400px panel in a 577px window left everything past `## Status`
-// unreachable, because the last ~820px of the scrollport was off-screen.
+// A restored file-reader window must fit the viewport it is restored into.
+// The reader persists its geometry, so a window saved on a taller display can
+// exceed the current viewport. Its document must remain scrollable all the way
+// to the bottom while the window itself stays on screen.
 
 import { describe, expect, it } from 'vitest'
 import { fitPanelGeometry } from './FloatingPanelChrome.js'

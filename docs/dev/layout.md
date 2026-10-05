@@ -46,10 +46,9 @@ Run root Make targets for the daily loop; run direct Mix commands inside `daemon
 `make build SKIP_UI=1` leaves the bundle to whatever put it there.
 The documentation builds from the root with `mkdocs build -f docs/mkdocs.yml`.
 
-The UI harnesses mount real components against a mocked daemon.
-Run `npm run harness` or `npm run harness:board` inside `ui/` to build
-self-contained bundles in `ui/harness-dist/` and `ui/harness-board-dist/`.
-They open over `file://` without a running daemon.
+The board harness mounts the real board against a mocked daemon.
+Run `npm run harness:board` inside `ui/` to build a self-contained bundle in
+`ui/harness-board-dist/`. It opens over `file://` without a running daemon.
 
 ## Tests
 

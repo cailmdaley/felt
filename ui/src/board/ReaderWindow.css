@@ -1,0 +1,404 @@
+/* ── The floating reader window ─────────────────────────────────────────
+   The Board's file reader (ShelfReader) opens files in a floating,
+   draggable, edge-and-corner-resizable window built by ReaderChrome and
+   moved by FloatingPanelChrome: a vellum frame, a tab strip that is also the
+   drag bar, and full-bleed view cells. On a phone, or under any finger, the
+   window becomes a sheet that fills the viewport. */
+
+.kbn-detail-overlay {
+  position: fixed;
+  /* The floor of FloatingPanelChrome's z-order stack, which counts up from
+     10000 as windows are raised. */
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  min-width: 380px;
+  min-height: 320px;
+  /* The geometry machinery measures offsetWidth/offsetHeight and writes
+     style.width/height; border-box keeps the measured and written sizes equal. */
+  box-sizing: border-box;
+  background: #EDE2CE;
+  border: 1px solid rgba(27, 22, 17, 0.16);
+  border-radius: 2px;
+  box-shadow:
+    0 1px 0 rgba(255, 251, 237, 0.6) inset,
+    0 14px 38px rgba(27, 22, 17, 0.22),
+    0 3px 10px rgba(27, 22, 17, 0.10);
+  /* A named size container lets prose.css adapt its reading column to the
+     file-reader window. Drag and resize always set explicit dimensions, so
+     `size` containment does not collapse the layout. */
+  container-name: kbn-detail;
+  container-type: size;
+  font-family: var(--font-main, 'EB Garamond', serif);
+  color: #1B1611;
+  overflow: hidden;
+  /* Soft tonal mottling — aged-paper warmth without a moiré. */
+  background-image:
+    radial-gradient(ellipse 800px 500px at 18% 12%, rgba(255, 251, 237, 0.55), transparent 65%),
+    radial-gradient(ellipse 700px 500px at 88% 88%, rgba(27, 22, 17, 0.035), transparent 60%);
+}
+.kbn-detail-overlay.kbn-detail-dragging,
+.kbn-detail-overlay.kbn-detail-resizing {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.kbn-detail-overlay.kbn-detail-dragging iframe,
+.kbn-detail-overlay.kbn-detail-resizing iframe {
+  /* Pointer events over an iframe would swallow the drag mid-gesture. */
+  pointer-events: none;
+}
+
+/* ── Resize handles ──────────────────────────────────────────────────── */
+.kbn-detail-rh {
+  position: absolute;
+  z-index: 30;
+  touch-action: none;
+}
+/* A sheet has no edges to resize; its handles stay wired for when it is a
+   window again. */
+.kbn-detail-sheet .kbn-detail-rh { display: none; }
+.kbn-detail-rh-n  { top: -3px; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.kbn-detail-rh-s  { bottom: -3px; left: 12px; right: 12px; height: 7px; cursor: ns-resize; }
+.kbn-detail-rh-e  { right: -3px; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.kbn-detail-rh-w  { left: -3px; top: 12px; bottom: 12px; width: 7px; cursor: ew-resize; }
+.kbn-detail-rh-ne { top: -3px; right: -3px; width: 15px; height: 15px; cursor: nesw-resize; }
+.kbn-detail-rh-nw { top: -3px; left: -3px; width: 15px; height: 15px; cursor: nwse-resize; }
+.kbn-detail-rh-se { bottom: -3px; right: -3px; width: 15px; height: 15px; cursor: nwse-resize; }
+.kbn-detail-rh-sw { bottom: -3px; left: -3px; width: 15px; height: 15px; cursor: nesw-resize; }
+
+/* ── The floating file-reader window ─────────────────────────────────────
+   ShelfReader mounts this overlay above the Board canvas. It is independently
+   draggable and resizable on desktop, with a manuscript drag bar, tab strip,
+   and full-bleed views. The frame and this modifier give it one consistent
+   vellum surface. */
+.kbn-detail-overlay.kbn-fileview-window {
+  display: flex;
+  flex-direction: column;
+  background: #E8E0D2;
+  background-image:
+    radial-gradient(ellipse 620px 420px at 82% 6%, rgba(255, 251, 237, 0.6), transparent 62%),
+    radial-gradient(ellipse 540px 460px at 8% 96%, rgba(27, 22, 17, 0.04), transparent 64%);
+}
+
+/* ── The chrome bar = the tab strip itself ─────────────────────────────────
+   The viewer window has NO separate title bar: the tabs ARE the titles, and
+   this bar is the window's drag handle (empty areas drag; the tab/✕ buttons
+   opt out). It holds the horizontally-scrolling tabs (flex:1) and, pinned to
+   the right, a ✕ that closes the whole viewer. One bar, not two. */
+.kbn-fileview-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0 4px 0 0;
+  cursor: grab;
+  touch-action: none;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.13);
+}
+.kbn-detail-overlay.kbn-detail-dragging .kbn-fileview-bar {
+  cursor: grabbing;
+}
+.kbn-fileview-win-close {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  margin-bottom: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #7A7368;
+  font-size: calc(17px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.kbn-fileview-win-close:hover {
+  color: #8C3B2E;
+  background: rgba(140, 59, 46, 0.1);
+}
+
+/* ── Tab strip ────────────────────────────────────────────────────────────
+   The row of manuscript index-tabs inside the chrome bar — one per open file,
+   stable order. The active tab is lit + raised and seams into the full view
+   below; inactive tabs sit back. Scrolls horizontally (thin rule scrollbar)
+   when many files are open; the ✕ stays pinned outside this scroll. */
+.kbn-detail-tabstrip {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 7px 0 0 9px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(154, 123, 53, 0.3) transparent;
+}
+.kbn-detail-tabstrip::-webkit-scrollbar { height: 6px; }
+.kbn-detail-tabstrip::-webkit-scrollbar-thumb {
+  background: rgba(154, 123, 53, 0.3);
+  border-radius: 6px;
+}
+/* Flat manuscript tabs — no rounded tops, no gradients, no raised browser-tab
+   shadow. Just ink on parchment: a muted label, and the active one marked by
+   darker ink + a gilt underline sitting on the bar's hairline. Matches the
+   Board's charcoal-rule + gilt-accent vocabulary. */
+.kbn-detail-tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 240px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 7px;
+  cursor: pointer;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #8A8073;
+  user-select: none;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+.kbn-detail-tab:hover {
+  color: #4A443C;
+  background: rgba(27, 22, 17, 0.03);
+}
+.kbn-detail-tab:focus-visible {
+  outline: 2px solid rgba(154, 123, 53, 0.45);
+  outline-offset: -2px;
+}
+.kbn-detail-tab-active {
+  color: #2E2418;
+  border-bottom-color: #C2963B;
+}
+.kbn-detail-tab-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(12px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.01em;
+}
+.kbn-detail-tab-active .kbn-detail-tab-name { font-weight: 600; }
+.kbn-detail-tab-close {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: #9A8F80;
+  font-size: calc(11px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: color 0.14s ease, background 0.14s ease, opacity 0.14s ease;
+}
+.kbn-detail-tab:hover .kbn-detail-tab-close,
+.kbn-detail-tab-active .kbn-detail-tab-close { opacity: 0.7; }
+.kbn-detail-tab-close:hover {
+  color: #8C3B2E;
+  background: rgba(140, 59, 46, 0.1);
+  opacity: 1;
+}
+
+/* ── The full-view area ───────────────────────────────────────────────────
+   One file fills the column. Only the active tab's cell is seen; the rest
+   stay built and rendered beneath it so switching tabs keeps each file's
+   scroll + zoom. The cell is the pan surface: Cmd-scroll sets `zoom` on the
+   viewer, which grows its layout box, and the cell (overflow:auto) scrolls to
+   pan. */
+.kbn-detail-views {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: #FFFDF6;
+}
+.kbn-detail-view-cell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  background: #FFFDF6;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(154, 123, 53, 0.35) transparent;
+}
+/* An inactive tab is COVERED, not hidden: it keeps its full size and stays
+   rendered, stacked beneath the active cell, whose opaque background hides it.
+   A browser's PDF viewer lives inside its frame and scrolls itself, out of the
+   page's reach. In WebKit, `display: none` collapses the frame and the viewer
+   re-fits the document to the empty box; `visibility: hidden` keeps the size
+   but drops the viewer's scroll and paint, so the tab came back blank and then
+   at page 1. Covered, the viewer is never told it was hidden. `showCell` makes
+   the covered cell `inert`, which keeps focus and assistive tech out. */
+.kbn-detail-view-cell:not([hidden]) { z-index: 1; }
+.kbn-detail-view-cell[hidden] {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.kbn-detail-view-cell::-webkit-scrollbar { width: 9px; height: 9px; }
+.kbn-detail-view-cell::-webkit-scrollbar-thumb {
+  background: rgba(154, 123, 53, 0.3);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+/* The viewer fills the cell at zoom 1; `zoom` > 1 grows it and the cell pans.
+   `zoom` (not transform) so the scaled box affects layout → real scrollbars. */
+.kbn-detail-view-cell > .kbn-fileview-frame-wrap { width: 100%; height: 100%; }
+/* The self-rendered text pane fills its cell the same way the frame does, and
+   scrolls in itself — which is what lets it keep a reading position. */
+.kbn-detail-view-cell > .kbn-fileview-text-wrap { width: 100%; height: 100%; }
+/* Image fills the cell as a full-view plate on a vellum mat (centered); the
+   whole figure is visible at zoom 1, Cmd-scroll magnifies from there. */
+/* Image as a full-width plate, top-aligned (block, not flex-centered): the
+   whole figure fills the column width at zoom 1, and Cmd-scroll `zoom` grows it
+   PAST that — explicit `width:100%` (not object-fit/max-width) gives the image a
+   concrete layout size that `zoom` actually multiplies, so the cell overflows
+   and pans in both axes. (max-width/contain absorbed the zoom → the fit-width
+   cap that motivated this.) */
+.kbn-detail-view-cell > .kbn-fileview-image-wrap {
+  display: block;
+  width: 100%;
+  min-height: 100%;
+  box-sizing: border-box;
+  padding: 0;
+}
+.kbn-detail-view-cell > .kbn-fileview-image-wrap > .kbn-fileview-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  object-fit: initial;
+  border-radius: 0;
+}
+.kbn-detail-view-cell > .kbn-fileview-audio { padding: 28px; }
+
+/* ── The sheet frame ───────────────────────────────────────────────────────
+   Not a smaller window — a different object. It fills the viewport and drops
+   its shadow and its rounded edge (there is nothing behind it to float over).
+
+   The frame answers to READER_MEDIA: the file reader becomes a sheet under
+   any finger, including on a tablet. ShelfReader applies `.kbn-detail-sheet`
+   when that query matches, and this block draws the full-screen frame.
+
+   The sheet's geometry is `inset`; the reader does not write inline geometry
+   in this mode, because an inline `left` would outrank every rule below. */
+@media (max-width: 700px), (pointer: coarse) {
+  .kbn-detail-overlay.kbn-detail-sheet {
+    inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+           env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+    /* A window's floor is not a sheet's: the screen is the size. */
+    min-width: 0;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    /* The window's `container-type: size` needs explicit dimensions, which a
+       sheet has none of; inline-size keeps the cluster's container queries
+       working while the height comes from `inset`. */
+    container-type: inline-size;
+  }
+
+  /* The reader's own chrome: the tab strip scrolls sideways rather than
+     wrapping into a second row that eats the page, the bar stops being a
+     drag handle, and its ✕ becomes a real target. A pan inside a view cell
+     stays in the cell rather than dragging the board behind the sheet. */
+  .kbn-fileview-window.kbn-detail-sheet .kbn-detail-tabstrip {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-bar {
+    cursor: default;
+    touch-action: auto;
+    padding-left: 6px;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-win-close {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-detail-views {
+    overscroll-behavior: contain;
+  }
+}
+
+/* ── The reader's zoom cluster ─────────────────────────────────────────────
+   − FIT + and a percentage in the floating file reader's chrome bar. Mounted
+   only under a coarse pointer (`installTouchZoom` is a no-op otherwise), so these
+   rules simply never find a box on the wide board. Iron gall throughout: it
+   is machinery, and machinery does not get a pigment. */
+.kbn-reader-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  margin-left: 4px;
+}
+.kbn-reader-zoom-btn {
+  appearance: none;
+  min-width: 34px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  background: rgba(255, 251, 237, 0.5);
+  border: 1px solid rgba(27, 22, 17, 0.16);
+  border-radius: 3px;
+  color: #5B5347;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.kbn-reader-zoom-btn:active { background: rgba(196, 147, 51, 0.18); }
+.kbn-reader-zoom-fit {
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.1em;
+}
+/* The readout is a fact you glance at, not a control — no box, no target. */
+.kbn-reader-zoom-pct {
+  flex: 0 0 auto;
+  min-width: 40px;
+  padding-left: 2px;
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  color: #8C8271;
+  text-align: right;
+}
+
+/* ── The sheet on its side ────────────────────────────────────────────────
+   A phone in landscape opens the same sheet with 400px of height to spend,
+   and the head that reads as a title bar in portrait reads as a lid there.
+   So the head gives up its second line of title and its vertical padding, the
+   drawer tightens its lines, and the file viewer's frame keeps everything that is left — which on this shape
+   is the entire point of having opened it. */
+@media (max-height: 500px) and (pointer: coarse) {
+  /* The tab strip is one line of file names; it does not need the padding of
+     a title bar on a page this short. */
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-bar {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+  .kbn-fileview-window.kbn-detail-sheet .kbn-fileview-win-close {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .kbn-reader-zoom-btn { min-width: 32px; min-height: 32px; }
+}
+

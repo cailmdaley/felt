@@ -1,13 +1,7 @@
 /**
- * FloatingPanelChrome — the drag / resize machinery shared by Portolan's
- * floating non-modal panels (the kanban's fiber-detail panel, the sent-file
- * viewer). A panel is a `position: fixed` overlay whose geometry is always
- * set inline (left/top/width/height); these helpers own the pointer
- * lifecycle and hand geometry persistence back to the caller via
- * `onSettle`.
- *
- * Extracted from FiberDetailModal so a second panel didn't mean a second
- * copy of the eight-zone resize handles.
+ * FloatingPanelChrome — geometry, drag, resize, and focus behavior for the
+ * Board's floating file-reader window. The caller persists its inline window
+ * geometry through `onSettle`.
  */
 
 export interface PanelGeometry {
@@ -17,63 +11,26 @@ export interface PanelGeometry {
   height: number
 }
 
-/** The smallest a floating panel may be: below this the header stops being
- *  usable. Shared, because every window in the set is the same frame. */
+/** The smallest size for the floating file-reader window and its resize handles. */
 export const PANEL_MIN = { width: 380, height: 320 }
 
-export function applyPanelGeometry(el: HTMLElement, g: PanelGeometry): void {
-  el.style.left = `${Math.max(0, g.left)}px`
-  el.style.top = `${Math.max(0, g.top)}px`
-  el.style.width = `${g.width}px`
-  el.style.height = `${g.height}px`
-}
-
-/** A geometry refitted to the window it is about to be applied in. */
-export function fittedGeometry(g: PanelGeometry): PanelGeometry {
-  return fitPanelGeometry(g, { width: window.innerWidth, height: window.innerHeight }, PANEL_MIN)
-}
-
 /**
- * The half-and-half arrangement: the card takes the left half of the viewport,
- * the panel beside it the right half, with a shared gutter. Used when a second
- * window opens — the file viewer, and the panel that holds followed wikilinks.
- */
-export function halfAndHalf(): { card: PanelGeometry; other: PanelGeometry } {
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const gutter = 12
-  const half = Math.floor((vw - 3 * gutter) / 2)
-  const top = gutter
-  const height = vh - 2 * gutter
-  return {
-    card: { left: gutter, top, width: half, height },
-    other: { left: 2 * gutter + half, top, width: half, height },
-  }
-}
-
-/**
- * The shared z-order stack for every floating window on the board — the card
- * panel, the file viewer, the wikilink panel. Clicking one raises it above the
- * others: a `pointerdown` bumps the counter and stamps the window's `z-index`,
- * so the last-touched window wins. Seeded at the panel's base CSS `z-index`
- * (10000), so the first raise lands above every window at rest.
+ * The floating file-reader window's z-order. A `pointerdown` raises it above
+ * overlapping board surfaces by stamping a value above its base `z-index`.
  */
 let panelZ = 10000
-export function bringPanelToFront(el: HTMLElement): void {
+function bringPanelToFront(el: HTMLElement): void {
   el.style.zIndex = String(++panelZ)
 }
 
 /**
- * Raise `el` when a click lands inside one of its frames.
+ * Raise `el` when focus moves into one of its iframes.
  *
- * The `pointerdown` that raises a window never fires for a click INSIDE an
- * iframe — the event belongs to the frame's own document, a PDF viewer's or a
- * report's, and never reaches this one. So a file viewer tucked behind its
- * card stayed tucked while its PDF was clicked, and only its tab strip could
- * bring it up. What the page does see is focus leaving it: the window blurs
- * and the clicked frame becomes `document.activeElement` — read one task
- * later, once the focus move has settled. One listener serves every window
- * that asks; the returned function withdraws the request.
+ * A `pointerdown` inside a PDF or report iframe belongs to that frame's
+ * document and never reaches the parent page. The parent can observe the
+ * resulting focus change instead: after the window blurs, the iframe becomes
+ * `document.activeElement`. One listener serves each registered window; the
+ * returned function withdraws its request.
  */
 const frameRaised = new Set<HTMLElement>()
 let frameFocusWatched = false
@@ -100,41 +57,11 @@ export function raiseOnFrameFocus(el: HTMLElement): () => void {
 }
 
 /**
- * Every floating window currently on screen, in open order.
+ * Clamp a remembered file-reader geometry to the viewport it is applied in.
  *
- * Two behaviours need the whole set rather than one window's own element.
- * Click-away close: a click on the panel next door is not a click "outside the
- * card", or following a wikilink would close the card you followed it from.
- * Escape: it acts on the LAST-OPENED window, so a reading unwinds in the order
- * it was built up rather than vanishing at once.
- */
-const openPanels: HTMLElement[] = []
-
-export function registerPanel(el: HTMLElement): void {
-  openPanels.push(el)
-}
-export function unregisterPanel(el: HTMLElement): void {
-  const i = openPanels.indexOf(el)
-  if (i >= 0) openPanels.splice(i, 1)
-}
-export function inSomeOpenPanel(node: Node | null): boolean {
-  return node !== null && openPanels.some((p) => p.contains(node))
-}
-/** Is this the newest window on screen — the one Escape should act on? */
-export function isTopPanel(el: HTMLElement): boolean {
-  return openPanels[openPanels.length - 1] === el
-}
-
-/**
- * Clamp a remembered geometry to the viewport it is about to be applied in.
- *
- * A `position: fixed` panel taller than the window has its lower edge below
- * the screen, and the page pane's scroll container goes with it: the reader
- * can scroll the body to its end and still never SEE the end, because the
- * bottom of the scrollport is off-screen. (That was the bug — a card whose
- * geometry was saved on a taller window could only ever be read down to
- * `viewportHeight` worth of it.) So no restored geometry is ever trusted
- * unclamped: size fits the window first, then position slides back inside it.
+ * A fixed reader window taller than the viewport leaves its lower edge and
+ * scrollport off screen. Clamp its size to the viewport first, then move it
+ * inside the available area.
  *
  * Pure, and takes its viewport rather than reading `window`, so the rule is
  * testable headless.
@@ -154,20 +81,6 @@ export function fitPanelGeometry(
   }
 }
 
-/** Class carrying the geometry transition — applied only for the duration
- *  of a programmatic move so pointer-driven drag/resize stays 1:1. */
-const GEOM_ANIM_CLASS = 'panel-geom-anim'
-const GEOM_ANIM_MS = 320
-
-/** Glide the panel to a new geometry (split-view enter/exit). The
- *  transition class is shed after the animation so subsequent drags
- *  aren't smoothed-and-laggy. */
-export function animatePanelGeometry(overlay: HTMLElement, g: PanelGeometry): void {
-  overlay.classList.add(GEOM_ANIM_CLASS)
-  applyPanelGeometry(overlay, g)
-  window.setTimeout(() => overlay.classList.remove(GEOM_ANIM_CLASS), GEOM_ANIM_MS)
-}
-
 export function readPanelGeometry(overlay: HTMLElement): PanelGeometry {
   return {
     left: overlay.offsetLeft,
@@ -177,14 +90,10 @@ export function readPanelGeometry(overlay: HTMLElement): PanelGeometry {
   }
 }
 
-/** Header-strip drag. Plain pointer drag — the header is dedicated chrome,
- *  so no modifier gate is needed (the Cmd-gate lesson from the pin-card
- *  prototype applies to chrome-less surfaces where drag fights text
- *  selection; a title bar doesn't). Buttons and form fields opt out.
- *  `onMoved` fires once a gesture actually travels (>4px) — callers whose
- *  drag handle doubles as a click target consult it so drag-release ≠
- *  click. `onSettle` fires on pointer-up, after the click event has had a
- *  chance to consult the moved state. */
+/** Header-strip drag. The dedicated chrome is the drag handle, so pointer
+ *  drag needs no modifier. Buttons and form fields opt out. `onMoved` fires
+ *  once a gesture travels (>4px); `onSettle` fires on pointer-up, after a
+ *  click handler can distinguish a drag from a click. */
 /** Is this panel currently framed as a full-screen sheet? A reader can become
  *  one while open, and keeps its drag and resize wiring across the change;
  *  both stand down while it is. */
@@ -196,8 +105,7 @@ export function attachPanelDrag(
   overlay: HTMLElement,
   handle: HTMLElement,
   opts: {
-    /** Defaults to `kbn-detail-dragging` — every window in the set is the
-     *  same frame, styled by the one stylesheet. */
+    /** Defaults to `kbn-detail-dragging`, styled by the file-reader frame. */
     draggingClass?: string
     onMoved?: () => void
     onSettle?: () => void
@@ -235,15 +143,13 @@ export function attachPanelDrag(
   })
 }
 
-/** Eight invisible resize zones on the edges and corners. Pointer-based,
- *  same lifecycle as drag; min size keeps the header usable. Handle
- *  elements are classed `<handleClassPrefix>` + `<handleClassPrefix>-<dir>`
- *  so each panel's CSS positions its own zones. */
+/** Eight invisible resize zones on the file-reader window's edges and
+ *  corners. Pointer-based, same lifecycle as drag; the minimum size keeps its
+ *  header usable. Handle elements use `<handleClassPrefix>-<dir>` classes. */
 export function attachPanelResize(
   overlay: HTMLElement,
   opts: {
-    /** All four default to the shared frame's values — the same stylesheet
-     *  styles every window in the set, and {@link PANEL_MIN} is its floor. */
+    /** Defaults use the file-reader frame's shared stylesheet and {@link PANEL_MIN}. */
     handleClassPrefix?: string
     resizingClass?: string
     minWidth?: number

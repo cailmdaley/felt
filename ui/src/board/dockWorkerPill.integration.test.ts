@@ -9,7 +9,7 @@ interface BoardState {
   body: HTMLElement | null
   deskEl: HTMLElement | null
   lastResponse: KanbanResponse | null
-  dock: { el: HTMLElement; open(card: KanbanCard): void; close(): void; refreshConversationOpening(): void }
+  dock: { el: HTMLElement; open(card: KanbanCard): void; reset(): void; refreshConversationOpening(): void }
   render(data: KanbanResponse): void
   teardownState(): void
 }
@@ -49,7 +49,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  state.dock.close()
+  state.dock.reset()
   state.teardownState()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()

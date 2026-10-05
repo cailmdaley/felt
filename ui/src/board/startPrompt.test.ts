@@ -244,7 +244,7 @@ describe('buildProjectDirPrompt', () => {
   })
 })
 
-describe('the detail panel answers a refused start with the prompt', () => {
+describe('the conversation dock answers a refused start with the prompt', () => {
   it('renders the prompt in place of the error, then retries with the confirmed directory', async () => {
     vi.stubGlobal('window', { matchMedia: () => ({ matches: false }) })
     const bodies: Record<string, unknown>[] = []

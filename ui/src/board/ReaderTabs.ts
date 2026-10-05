@@ -1,12 +1,8 @@
 /**
  * ReaderTabs — the tab set, as arithmetic.
  *
- * Two surfaces on the board now open files into a tabbed window: the fiber
- * detail panel's file viewer (FiberDetailModal) and the Shelf's Reader
- * (views/ShelfReader). The DOM they build is different — one is a column
- * beside a card, the other an overlay over a canvas — but the RULES of a tab
- * set are the same everywhere, and they are the part that is easy to get
- * subtly wrong:
+ * The Shelf's floating file reader uses these rules for its tabs, the part of
+ * a reader that is easy to get subtly wrong:
  *
  *   OPENING an already-open file activates its tab. It never adds a second.
  *     A file opened twice is one file you looked at twice.
@@ -22,9 +18,8 @@
  * a genuine miss, which is exactly the dedupe rule expressed as control flow.
  *
  * No DOM, no storage — `coerceTabRefs` is the one concession to persistence,
- * and it only reads a parsed record. That holds even though the two callers
- * turned out to build the same tab tree after all: it lives next door in
- * `ReaderChrome`, where a module that touches elements belongs.
+ * and it only reads a parsed record. `ReaderChrome` owns the corresponding
+ * elements.
  */
 
 /** The one thing a tab must have: the file it stands for. */

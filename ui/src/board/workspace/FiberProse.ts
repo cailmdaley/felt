@@ -2,6 +2,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { extractEmbeds } from '../attachments.js'
 import { basename, renderMarkdown } from '../utils.js'
 import { installWikilinks } from '../wikilinks.js'
+import '../prose.css'
 import type { Channel, DocKey } from './documents.js'
 
 /** The outcome as the reading surface's lede, including math and references. */

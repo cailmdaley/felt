@@ -1,10 +1,7 @@
-/* ── Sent-file viewer bodies — by-extension rendering cells ──────────────
-   The floating sibling panel is retired (the two-column file viewer absorbed
-   it into FiberDetailModal's right-column accordion). What remains is the
-   by-extension viewer the accordion mounts per open file: an <img>, an
-   <audio controls>, or an iframe-with-loading-veil. These classes style those
-   bodies so they fill their accordion cell. Loaded from FileViewerPanel.ts
-   (buildFileViewer). */
+/* ── File viewer bodies — by-extension rendering cells ───────────────────
+   `buildFileViewer` creates an <img>, an <audio controls>, or an
+   iframe-with-loading-veil for the Shelf reader and workspace documents.
+   These classes make each body fill its view cell. */
 
 .kbn-fileview-frame-wrap {
   position: relative;
@@ -100,29 +97,11 @@
   max-width: 480px;
 }
 
-/* ── Programmatic geometry glide — used by the detail panel's two-column
-   reveal/hide (animatePanelGeometry, FloatingPanelChrome). Applied
-   transiently to the panel being resized; shed after the move so live drag
-   stays 1:1 with the pointer. */
-.panel-geom-anim {
-  /* Duration kept at 0.3s to match GEOM_ANIM_MS (FloatingPanelChrome), which
-     sheds this class at 320ms; a softer ease-out curve makes the two-column
-     reveal/glide-back settle gracefully rather than braking hard. */
-  transition:
-    left 0.3s cubic-bezier(0.33, 0.9, 0.32, 1),
-    top 0.3s cubic-bezier(0.33, 0.9, 0.32, 1),
-    width 0.3s cubic-bezier(0.33, 0.9, 0.32, 1),
-    height 0.3s cubic-bezier(0.33, 0.9, 0.32, 1);
-}
-@media (prefers-reduced-motion: reduce) {
-  .panel-geom-anim { transition: none; }
-}
-
 /* ── Text bodies the Reader renders itself ──────────────────────────────
    Markdown and source/log/config files don't go through an iframe: the daemon
    serves most of them as octet-stream, so a frame would download them or show
    unwrapped source. `buildFileViewer` fetches the bytes and fills this pane
-   instead — markdown also wears `.kbn-detail-prose` (FiberDetailModal.css), so
+   instead — markdown also wears `.kbn-detail-prose` (prose.css), so
    a sent report reads exactly like the fiber body it came from. The WRAP is
    the scroller, mirroring the frame-wrap cell it replaces. */
 .kbn-fileview-text-wrap {

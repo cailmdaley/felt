@@ -1,17 +1,12 @@
+import './ReaderWindow.css'
+
 /**
- * ReaderChrome — the tab strip's DOM, for the readers that share it.
+ * ReaderChrome — the floating reader window's DOM.
  *
- * `ReaderTabs` is the tab set as arithmetic and leaves the DOM entirely to its
- * callers, which is right: a tab set is rules, not markup. But the two callers
- * turned out to build the SAME markup — the same button, the same name span,
- * the same close glyph, the same hidden view cell — because they share
- * `FiberDetailModal.css`, which is where `.kbn-detail-tab` and
- * `.kbn-detail-view-cell` are styled. Two copies of an element tree whose
- * classes are declared once elsewhere is a copy that will drift.
- *
- * So the tree lives here and the wiring stays with the caller: this module
- * hands back bare elements with no listeners, and each reader binds its own
- * click and close behaviour, which is the part that genuinely differs.
+ * `ReaderTabs` is the tab set as arithmetic and leaves the DOM to its caller.
+ * This module builds the window, its tab buttons and its view cells as bare
+ * elements with no listeners, styled by `ReaderWindow.css`; the reader binds
+ * its own click and close behaviour.
  */
 
 /** The tab button, with its name span and close button already inside. The
@@ -67,14 +62,12 @@ export function showCell(cell: HTMLElement, on: boolean): void {
 }
 
 /**
- * The floating reader window itself — the frame all three readers share.
+ * The floating file-reader window used by ShelfReader.
  *
- * The same element tree, class for class: the card's vellum frame
- * (`.kbn-detail-overlay`) with the file-viewer modifier that lays it out as a
- * flex column, a chrome bar that IS the tab strip (no separate title bar — the
- * tabs are the titles, and the bar's empty areas are the drag handle), and the
- * full-bleed view area under it. A trailing ✕, pinned right of the
- * horizontally-scrolling tabs, closes the whole reader at once.
+ * Its element tree uses `.kbn-detail-overlay` as the frame and the
+ * file-viewer modifier for a flex column: a chrome bar that is also the tab
+ * strip, then the full-bleed view area. A trailing ✕, pinned right of the
+ * horizontally-scrolling tabs, closes the reader.
  *
  * Handed back with NO listeners and nothing else appended: the close handler,
  * any extra bar buttons (insert them before `closeBtn`), the wheel-zoom and

@@ -29,7 +29,7 @@
  *   • Drag back up to the now-board → clear horizon/cold.
  *   • Drop on a now-board column header routes through the daemon's
  *     /api/v1/transition lifecycle path.
- *   • Click a card body to open its detail modal.
+ *   • Click a card body to open its channel in the document workspace.
  *
  * Classification happens once, frontend-side: `classifyFiber` in
  * `KanbanRules.ts` buckets the composite feed into surfaces. The drag handler's
@@ -500,7 +500,7 @@ export class KanbanModal {
     if (this.container === null) return
     this.workspace?.dispose()
     this.workspace = null
-    this.dock.close()
+    this.dock.reset()
     this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
@@ -913,7 +913,7 @@ export class KanbanModal {
    * `1`–`3` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a Radix
-   * dialog / fiber-detail panel layered over the board. Returns true when the
+   * dialog layered over the board. Returns true when the
    * key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
@@ -965,7 +965,7 @@ export class KanbanModal {
    * force-dispatch path (the same one the dock's "New session ▸"
    * uses): a single fresh POST /api/v1/dispatch with `force: true, ad_hoc:
    * true` and no message — drag carries no directive (resume-previous and
-   * "talk first" intent live behind the detail modal). force bypasses status /
+   * "talk first" intent live in the conversation dock). force bypasses status /
    * enabled / review_state / schedule / validity gates, so closed (tempered or
    * composted), paused, awaiting-review, and dormant-standing cards all
    * fire a worker immediately — no waiting on the 15s poller; the dispatch
@@ -1007,7 +1007,7 @@ export class KanbanModal {
     // asked first. Confirm the destructive one too. Gated on `hasWorkerToStop`, so
     // the overwhelmingly common case (a verdict on a finished run) stays a
     // single click. This is the choke point for every path — the card's inline
-    // buttons, the detail panel's terminal moves, and a drag onto the column —
+    // buttons, the dock's Temper / Discard, and a drag onto the column —
     // so one guard covers all three.
     if ((target === 'tempered' || target === 'composted') && hasWorkerToStop(card)) {
       const verb = target === 'tempered' ? 'temper' : 'discard'
@@ -1167,7 +1167,7 @@ export class KanbanModal {
    * a second write would race it into a 409 already_running.
    *
    * A drag carries no message and always starts fresh; resuming and saying
-   * something first live behind the detail panel, where they are chosen on
+   * something first live in the conversation dock, where they are chosen on
    * purpose. `fresh` is stamped explicitly rather than left to the daemon's
    * auto-decide, which would resume a transcript that died dirty.
    *
@@ -2743,7 +2743,7 @@ export class KanbanModal {
 
   /**
    * Off the strip: reshape a pinned role back to a one-shot so it can be
-   * planned again. The exact write the detail panel's kind segmented control
+   * planned again. The exact write the dock's kind segmented control
    * makes — `reshape` rewrites the shape keys alone, leaving agent, host and
    * project_dir where they are. The strip's only exit that is not a verdict,
    * and the inverse of {@link commitPin}'s first call.

@@ -23,8 +23,7 @@
  *
  * WHAT IS REUSED, and it is nearly everything that matters:
  *   ../ReaderTabs           the tab-set arithmetic (open/activate/close, and
- *                           the never-a-second-tab rule), shared verbatim with
- *                           FiberDetailModal's viewer.
+ *                           the never-a-second-tab rule) for this reader.
  *   ../ReaderChrome         the tab button and the view cell — the element tree
  *                           the shared stylesheet is written against.
  *   ../ReaderZoom           Cmd/Ctrl-wheel magnification, cursor-anchored.
@@ -32,9 +31,8 @@
  *                           dispatch, so a file looks the same wherever the
  *                           board opens it.
  *   ../FloatingPanelChrome  drag + eight-zone resize.
- *   ../FiberDetailModal.css the window's vellum, bar, tabs and view cells —
- *                           the same stylesheet and the same class names, so
- *                           the two readers on the board are visibly one idea.
+ *   ../ReaderWindow.css     the vellum, bar, tabs and view cells for this
+ *                           floating file-reader window.
  * What is written here is the window's own lifecycle and its persistence.
  *
  * UNDER A FINGER the window is none of that. On a phone or a tablet
@@ -49,7 +47,7 @@
  * intact, because a reader you closed is not a reader you emptied.
  */
 
-import '../FiberDetailModal.css'
+import '../ReaderWindow.css'
 
 import {
   attachPanelDrag,
@@ -183,7 +181,6 @@ export function saveReaderPersist(state: ReaderPersist, storage?: Storage): void
 /**
  * A remembered geometry is usable only if it still lands on-screen — the
  * viewport may have shrunk, or moved to a smaller display, since it was saved.
- * (The same test the detail panel applies to its own windows.)
  */
 export function onScreen(g: PanelGeometry, vw: number, vh: number): boolean {
   return g.left < vw - 80 && g.top < vh - 80 && g.left > 80 - g.width && g.top > -20
@@ -345,7 +342,7 @@ export class ShelfReader {
       this.close()
     })
     views.addEventListener('wheel', (e) => this.onZoomWheel(e), { passive: false })
-    // The finger's half of the same gesture — see the detail panel's viewer.
+    // The finger's half of the same gesture — see `ReaderZoom`.
     installTouchZoom({
       bar,
       views,
@@ -629,7 +626,7 @@ export class ShelfReader {
   // ── Zoom ───────────────────────────────────────────────────────────────────
 
   /** Cmd/Ctrl + wheel magnifies the file under the cursor, anchored on it. The
-   *  gesture is `ReaderZoom`'s, shared with the detail panel's viewer; this side
+   *  gesture is `ReaderZoom`'s, shared with the workspace's documents; this side
    *  only says which tab is under the pointer, and saves if it moved. */
   private onZoomWheel(e: WheelEvent): void {
     const entry = this.state.tabs.find((t) => t.path === this.state.active)

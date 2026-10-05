@@ -74,7 +74,7 @@ export interface ViewContext extends TemporalFetchers {
    */
   shuttleBase: string
   /**
-   * Open a card's detail panel. Resolves against `cards` AND `response.cycles`,
+   * Open a fiber in the workspace reader. Resolves against `cards` AND `response.cycles`,
    * so a cycle band or chip can hand over its id directly — the split above is
    * about what a view iterates, not about what it can open.
    *

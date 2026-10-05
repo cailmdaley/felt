@@ -1,14 +1,14 @@
 /* One typographic scale for the whole board.
  *
- * Every px font-size in the board CSS — chassis, cards, detail panel, and the
- * three temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
+ * Every px font-size in the board CSS — chassis, cards, the floating file
+ * reader, and the three temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
  * so the design sizes stay readable in the source and the whole hierarchy moves
  * together from one number. Nothing else scales: spacing, rules and column
  * widths are deliberately left alone, so raising type tightens the page rather
  * than zooming it.
  *
- * Declared on :root (not `.kbn-modal`) because the detail overlay and the file
- * viewer mount outside the board's own subtree. Every call site carries a
+ * Declared on :root (not `.kbn-modal`) because the floating file-reader window
+ * mounts outside the board's own subtree. Every call site carries a
  * fallback of 1, so a host that never loads this file renders at design size.
  */
 :root {
@@ -1080,7 +1080,7 @@
 
 .kbn-col {
   /* Desk cards/chrome render at design size — the 1.18 scale is for the
-     temporal views, detail modal and file viewer, not the kanban lanes.
+     temporal views and floating file reader, not the kanban lanes.
      KanbanModal's expandOutcomesToFillSpace reads this off each card's
      computed style rather than the root, so it follows this override. */
   --kbn-type-scale: 1;
@@ -1597,7 +1597,7 @@
 .kbn-card-glyph-human {
   color: var(--kbn-you);
 }
-/* Plain text: the whole card opens the fiber-detail panel, so the card's own
+/* Plain text: clicking the card opens the workspace reader, so the card's own
    cursor applies. */
 .kbn-card-name {
   flex: 1;
@@ -2099,7 +2099,7 @@
 }
 /* Stale-origin card: the originating agent is disconnected. The
    snapshot is preserved (last-known-good) so the card still reads
-   and opens its detail panel, but drag is disabled because
+   and opens in the workspace reader, but drag is disabled because
    mutation has nowhere to land until reconnect. Visual signal
    is a desaturated dim plus a not-allowed cursor on the drag
    handle. */
@@ -2437,8 +2437,8 @@
 
   /* ── Cards, compact ────────────────────────────────────────────────────
      Title, path on one line, the opening line of the outcome, then agent and
-     badges in a single row. A phone card is an index entry you tap, not a
-     card you read — the detail panel is one touch away and holds the rest. */
+     badges in a single row. A phone card is an index entry you tap; its
+     document opens in the workspace reader, and its actions live in the dock. */
   .kbn-card {
     padding: 9px 11px;
     gap: 5px;
