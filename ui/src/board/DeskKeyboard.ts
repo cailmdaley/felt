@@ -85,6 +85,7 @@ export class DeskKeyboard {
     if (intent === 'last') row = regions[column].length - 1
     const target = regions[column][Math.max(0, Math.min(regions[column].length - 1, row))]
     this.select(identity(target))
+    this.focusSelection()
     return true
   }
 

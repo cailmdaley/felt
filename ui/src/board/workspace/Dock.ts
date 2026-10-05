@@ -458,7 +458,11 @@ export class Dock {
   get openCardId(): string | null { return this.card?.id ?? null }
 
   open(card: KanbanCard): void {
-    if (this.card?.id === card.id && this.card.originId === card.originId) {
+    if (this.card && (this.card.uid ?? this.card.id) === (card.uid ?? card.id) && this.card.originId === card.originId) {
+      // Controls hold this copy, so renamed fibers keep drafts but write to their current address.
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir'] as const) {
+        Object.assign(this.card, { [key]: card[key] })
+      }
       this.syncRuntime(card)
       return
     }
