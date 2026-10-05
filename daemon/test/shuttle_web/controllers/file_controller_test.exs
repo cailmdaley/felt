@@ -641,6 +641,57 @@ defmodule ShuttleWeb.FileControllerTest do
              ]
     end
 
+    test "bounds single range requests before forwarding to an older owner" do
+      stub_forward("candide", "http://localhost:4001", {:ok, 206, [], "video/mp4", "abc"})
+      url = "/api/v1/file?path=%2Fremote.mp4&origin=candide"
+
+      for {requested, forwarded} <- [
+            {"bytes=7-", "bytes=7-4194310"},
+            {"bytes=7-99999999", "bytes=7-4194310"},
+            {"bytes=-99999999", "bytes=-4194304"},
+            {"bytes=-3", "bytes=-3"},
+            {"bytes=4-2", "bytes=4-2"}
+          ] do
+        conn = api_conn() |> put_req_header("range", requested) |> get(url)
+        assert conn.status == 206
+        assert StubGetFileClient.last().headers == [{"range", forwarded}]
+        assert StubGetFileClient.last().timeout == 30_000
+      end
+    end
+
+    test "relays four-MiB remote partial media with its exact byte metadata" do
+      body = :binary.copy("x", 4 * 1024 * 1024)
+      headers = [{"content-range", "bytes 7-4194310/99999999"}, {"content-length", "4194304"}]
+      stub_forward("candide", "http://localhost:4001", {:ok, 206, headers, "video/mp4", body})
+
+      conn =
+        api_conn()
+        |> put_req_header("range", "bytes=7-")
+        |> get("/api/v1/file?path=%2Fremote.mp4&origin=candide")
+
+      assert conn.status == 206
+      assert conn.resp_body == body
+      assert get_resp_header(conn, "content-range") == ["bytes 7-4194310/99999999"]
+      assert get_resp_header(conn, "content-length") == ["4194304"]
+      assert StubGetFileClient.last().headers == [{"range", "bytes=7-4194310"}]
+    end
+
+    test "limits a remote error body to 64KiB and corrects Content-Length" do
+      body = :binary.copy("error", 100_000)
+      headers = [{"content-length", Integer.to_string(byte_size(body))}]
+
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 404, headers, "application/json", body}
+      )
+
+      conn = get(api_conn(), "/api/v1/file?path=%2Fmissing&origin=candide")
+      assert conn.status == 404
+      assert conn.resp_body == binary_part(body, 0, 64 * 1024)
+      assert get_resp_header(conn, "content-length") == ["65536"]
+    end
+
     test "forwards file-info to the owning daemon without downloading the file" do
       stub_forward(
         "candide",
@@ -659,6 +710,20 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert StubGetFileClient.last().url ==
                "http://localhost:4001/api/v1/file-info?path=%2Fabs%2Fon%2Fcandide.png"
+    end
+
+    test "file-info retains the generic relay's response and does not apply file caps" do
+      body = :binary.copy("x", 64 * 1024 + 1)
+      stub_forward("candide", "http://localhost:4001", {:ok, 404, "text/plain", body})
+
+      conn =
+        api_conn()
+        |> put_req_header("range", "bytes=7-")
+        |> get("/api/v1/file-info?path=%2Fremote&origin=candide")
+
+      assert conn.status == 404
+      assert conn.resp_body == body
+      assert StubGetFileClient.last().headers == []
     end
 
     test "relays the remote content-type VERBATIM — no doubled charset" do

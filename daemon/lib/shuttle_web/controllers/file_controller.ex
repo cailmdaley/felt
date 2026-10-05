@@ -13,7 +13,7 @@ defmodule ShuttleWeb.FileController do
   reader carries that origin back. A local-owned path is read here; a
   remote-owned path forwards to the owning daemon's identical `/file` (origin
   stripped) and relays its bytes, content type, range
-  metadata, and cache validators (`OriginRouter.forward_file_get/4`).
+  metadata, and cache validators (`OriginRouter.forward_file_get/5`).
 
   **Path contract.** `path` must be ABSOLUTE — the reader resolves a fiber's
   `:::{embed} <rel>` against the fiber's own directory client-side before
@@ -74,7 +74,8 @@ defmodule ShuttleWeb.FileController do
             remote,
             "/api/v1/file",
             %{"path" => path},
-            conditional_headers(conn)
+            conditional_headers(conn),
+            method: if(head_request?(conn), do: :head, else: :get)
           )
         )
 

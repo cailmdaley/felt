@@ -43,6 +43,8 @@ defmodule Shuttle.OriginRouter do
   require Logger
 
   @default_forward_timeout_ms 30_000
+  @file_range_limit 4 * 1024 * 1024
+  @file_error_limit 64 * 1024
 
   @typedoc """
   Where a write should execute: `:local` runs the endpoint's own handler here;
@@ -212,11 +214,17 @@ defmodule Shuttle.OriginRouter do
   Forward a file GET with conditional and range request headers, retaining the
   owner's representation, range, and validator headers for the caller. A 206
   or 416 crosses the same tunnel with its byte metadata, and a 304 remains a
-  bodyless response.
+  bodyless response. Single ranges are shortened to at most four MiB before
+  the request, including when the owner has no open-ended range cap. Invalid
+  ranges retain the owner's ignore/416 semantics. Error bodies are truncated
+  to 64 KiB after receipt; the transport still buffers them. Full GETs and
+  If-Range fallbacks to 200 retain whole-response buffering.
 
   Clients without `get_file/3` use their binary-safe `get_file/2` callback and
   return no response headers. Both transport callback shapes are supported;
-  callers still receive a body and can compare its content locally.
+  callers still receive a body and can compare its content locally. With
+  `method: :head`, use `head_file/3` and omit range headers; an unsupported
+  client fails instead of substituting a body-reading GET.
   """
   @spec forward_file_get(Remote.t(), String.t(), map(), [{String.t(), String.t()}], keyword()) ::
           {:forwarded, non_neg_integer(), [{String.t(), String.t()}], String.t(), binary()}
@@ -228,24 +236,84 @@ defmodule Shuttle.OriginRouter do
     stripped = query |> Map.delete("origin") |> Map.delete(:origin)
     url = Remote.url_for(remote, path) <> "?" <> URI.encode_query(stripped)
 
+    Code.ensure_loaded?(client)
+
     response =
-      if Code.ensure_loaded?(client) and function_exported?(client, :get_file, 3) do
-        client.get_file(url, req_headers, timeout)
-      else
-        client.get_file(url, timeout)
+      case Keyword.get(opts, :method, :get) do
+        :head ->
+          headers =
+            Enum.reject(req_headers, fn {name, _} ->
+              String.downcase(name) in ["range", "if-range"]
+            end)
+
+          if function_exported?(client, :head_file, 3),
+            do: client.head_file(url, headers, timeout),
+            else: {:error, :head_not_supported}
+
+        :get ->
+          if function_exported?(client, :get_file, 3),
+            do: client.get_file(url, bounded_file_headers(req_headers), timeout),
+            else: client.get_file(url, timeout)
       end
 
     case response do
       {:ok, status, headers, content_type, body} when is_list(headers) ->
+        {headers, body} = limit_file_error(status, headers, body)
         {:forwarded, status, headers, content_type, body}
 
       {:ok, status, content_type, body} ->
-        {:forwarded, status, [], content_type, body}
+        {headers, body} = limit_file_error(status, [], body)
+        {:forwarded, status, headers, content_type, body}
 
       {:error, reason} ->
         {:error, {:forward_failed, remote.name, reason}}
     end
   end
+
+  defp bounded_file_headers(headers) do
+    # Multiple Range fields are invalid; leave them intact for the owner to
+    # ignore rather than turning them into a valid range request.
+    if Enum.count(headers, fn {name, _} -> String.downcase(name) == "range" end) == 1 do
+      Enum.map(headers, fn {name, value} ->
+        if String.downcase(name) == "range",
+          do: {name, bounded_file_range(value)},
+          else: {name, value}
+      end)
+    else
+      headers
+    end
+  end
+
+  defp bounded_file_range(value) do
+    case Regex.run(~r/\Abytes=(\d*)-(\d*)\z/i, String.trim(value)) do
+      [_, "", suffix] when suffix != "" ->
+        "bytes=-#{min(String.to_integer(suffix), @file_range_limit)}"
+
+      [_, first, ""] when first != "" ->
+        first = String.to_integer(first)
+        "bytes=#{first}-#{first + @file_range_limit - 1}"
+
+      [_, first, last] when first != "" and last != "" ->
+        first = String.to_integer(first)
+        last = String.to_integer(last)
+
+        if last >= first,
+          do: "bytes=#{first}-#{min(last, first + @file_range_limit - 1)}",
+          else: value
+
+      _ ->
+        value
+    end
+  end
+
+  defp limit_file_error(status, headers, body)
+       when status >= 400 and byte_size(body) > @file_error_limit do
+    headers = Enum.reject(headers, fn {name, _} -> String.downcase(name) == "content-length" end)
+    headers = [{"content-length", Integer.to_string(@file_error_limit)} | headers]
+    {headers, body |> binary_part(0, @file_error_limit) |> :binary.copy()}
+  end
+
+  defp limit_file_error(_status, headers, body), do: {headers, body}
 
   @doc """
   The cross-host transport module — the ONE place `:write_forward_client` is
