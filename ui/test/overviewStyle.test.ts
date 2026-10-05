@@ -28,7 +28,10 @@ describe('Overview style contracts', () => {
   })
   it('makes thumbnails pointer-inert and marks freshness in gold', () => {
     expect(css).toMatch(/\.ws-overview-thumb\s*\{[^}]*pointer-events: none/)
-    expect(css).toMatch(/\.ws-overview-fresh\s*\{[^}]*background: var\(--ws-fresh\)/)
+    expect(css).toMatch(/\.ws-overview-folio\.ws-overview-unseen\s*\{[^}]*border-top-color: var\(--kbn-owed\)/)
+    expect(css).toMatch(/\.ws-overview-folio\.ws-overview-seen \.ws-overview-stack\s*\{[^}]*filter: saturate\(\.55\) contrast\(\.9\); opacity: \.8/)
+    expect(css).toMatch(/\.ws-overview-folio\[data-density='full'\]\s*\{[^}]*height: 310px/)
+    expect(css).toMatch(/\.ws-overview-folio\[data-density='line'\]\s*\{[^}]*height: 36px/)
     expect(tokens).toMatch(/--ws-fresh:\s*var\(--kbn-owed/)
     expect(css).toContain('-webkit-line-clamp: 2')
   })
