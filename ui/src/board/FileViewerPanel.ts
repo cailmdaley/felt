@@ -108,7 +108,7 @@ export function buildFileViewer(
     })
     img.addEventListener('error', () => {
       void head(src, RESOURCE_PRIORITY.selected, { fresh: true }).then(info => {
-        if (!disposed) options.onState?.({ status: 'error', error: headError(info), hasContent: false })
+        if (!disposed) options.onState?.({ status: 'error', error: info?.exists ? new Error('image format is not supported by this browser') : headError(info), hasContent: false })
       })
     })
     viewerDisposers.set(wrap, () => { disposed = true })

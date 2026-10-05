@@ -171,6 +171,17 @@ describe('workspace file viewer hooks', () => {
     await vi.waitFor(() => expect(onState).toHaveBeenCalledWith({ status: 'ready' }))
   })
 
+  it('tells an image that exists but cannot be decoded from a missing one', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (src: string) => new Response(JSON.stringify(src.includes('gone') ? { exists: false } : { exists: true, size: 9, modified_at: 1 }))))
+    const errors: string[] = []
+    for (const path of ['/broken.png', '/gone.png']) {
+      const viewer = buildFileViewer('', path, 'host-a', undefined, undefined, { onState: state => { if (state.status === 'error') errors.push((state.error as Error).message) } })
+      viewer.querySelector('img')!.dispatchEvent(new Event('error'))
+    }
+    await vi.waitFor(() => expect(errors).toHaveLength(2))
+    expect(errors.sort()).toEqual(['file request failed: 404', 'image format is not supported by this browser'])
+  })
+
   it('reports missing native documents even when an HTTP error page loads', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: false }))))
     const onState = vi.fn()

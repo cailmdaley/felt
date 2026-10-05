@@ -391,6 +391,16 @@ describe('refresh and failure states', () => {
     expect(frame.el.classList.contains('ws-stale')).toBe(false)
   })
 
+  it('offers a download for an image this browser cannot decode', async () => {
+    const image = { ...docs[0], kind: 'image' as const, path: '/figure.heic', name: 'figure.heic' }
+    host.setChannel([image], image.key)
+    render.calls.at(-1)!.options.onState!({ status: 'error', error: new Error('image format is not supported by this browser'), hasContent: false })
+    await Promise.resolve()
+    const content = host.get(image.key)!.content
+    expect(content.textContent).toContain('This browser cannot show this image')
+    expect(content.querySelector('a')!.download).toBe('figure.heic')
+  })
+
   it('keeps native media visible until replacement readiness and retains it if the replacement fails', async () => {
     const pdf = { ...docs[0], kind: 'pdf' as const, path: '/report.pdf' }
     host.setChannel([pdf], pdf.key)

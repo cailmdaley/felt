@@ -492,10 +492,10 @@ export class DocumentHost {
     notice.setAttribute('role', 'status')
     const cause = document.createElement('p')
     const owner = state.frame.doc.owner
-    const unsupportedMedia = message === 'media format is not supported by this browser'
+    const unsupportedMedia = message === 'media format is not supported by this browser' || message === 'image format is not supported by this browser'
     cause.textContent = missing
       ? `Not found on ${owner}${stale ? ' — showing last loaded copy' : ''}`
-      : unsupportedMedia ? 'This browser cannot play this format'
+      : unsupportedMedia ? (message.startsWith('image') ? 'This browser cannot show this image' : 'This browser cannot play this format')
       : `${owner} is unreachable${stale ? ' — showing last loaded copy' : ''}`
     notice.append(cause)
     if (unsupportedMedia) {
