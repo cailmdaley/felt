@@ -151,9 +151,15 @@ export class Overview {
   private readonly visits = new Map<string, number>()
   private readonly openedCards = new Map<string, KanbanCard>()
   private readonly fetchedCards = new Map<string, KanbanCard>()
-  private readonly cardLoads = new Map<string, Promise<KanbanCard>>()
-  private readonly attemptedCards = new Set<string>()
+  private readonly cardLoads = new Map<string, Promise<KanbanCard | undefined>>()
+  private readonly cardQueue: Array<() => Promise<void>> = []
+  private activeCardReads = 0
+  private readonly cardRetries = new Map<string, { attempts: number; at: number }>()
   private readonly missingCards = new Set<string>()
+  private readonly provisionalOpened = new Set<string>()
+  private readonly externalLoads = new Set<string>()
+  private retryTimer?: ReturnType<typeof setTimeout>
+  private navigation = 0
   private selection: HTMLButtonElement | null = null
   private readonly cardControllers = new Set<AbortController>()
   private readonly observer?: IntersectionObserver
@@ -250,6 +256,7 @@ export class Overview {
   /** Metadata paints immediately; one coalesced feed read finishes asynchronously. */
   refresh(): void {
     if (this.disposed) return
+    if (!this.request) for (const retry of this.cardRetries.values()) retry.at = 0
     this.reconcile()
     if (this.request) return
     const controller = new AbortController()
@@ -280,18 +287,38 @@ export class Overview {
   /** Board metadata arrived or changed; folios keep their places. */
   cardsChanged(): void { if (!this.disposed) this.reconcile() }
 
-  opened(card: KanbanCard): void {
+  opened(card: KanbanCard, authoritative = true): void {
     if (this.disposed) return
     const uid = uidOf(card)
     this.openedCards.set(uid, card)
+    if (authoritative) this.provisionalOpened.delete(uid)
+    else this.provisionalOpened.add(uid)
     this.visits.set(uid, Date.now())
     persist(VISIT_STORAGE, Object.fromEntries(this.visits))
     this.reconcile()
   }
 
+  /** A body read supplies metadata without another visit or navigation. */
+  resolved(card: KanbanCard): void {
+    if (this.disposed) return
+    const uid = uidOf(card)
+    this.fetchedCards.set(uid, card)
+    if (this.openedCards.has(uid)) this.openedCards.set(uid, card)
+    this.provisionalOpened.delete(uid)
+    this.missingCards.delete(uid)
+    this.cardRetries.delete(uid)
+    this.reconcile()
+  }
+
+  /** Workspace body reads already resolve this metadata; don't duplicate them. */
+  resolving(uid: string, pending: boolean): void {
+    if (pending) this.externalLoads.add(uid)
+    else { this.externalLoads.delete(uid); if (!this.disposed) this.reconcile() }
+  }
+
   setVisible(visible: boolean): void {
     if (this.disposed || visible === this.visible) return
-    if (!visible) { this.scroll = this.el.scrollTop; persist(SEEN_STORAGE, Date.now()) }
+    if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; persist(SEEN_STORAGE, Date.now()) }
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
@@ -316,10 +343,16 @@ export class Overview {
   /** Find never truncates keyboard channel order. */
   orderedCards(): KanbanCard[] { this.resolveFolios(); return [...this.order] }
   unfiledReceipts(uid: string): ShelfFile[] { return this.folios.get(uid)?.receipts ?? [] }
+  hasMetadata(card: KanbanCard): boolean {
+    const uid = uidOf(card)
+    return uid.startsWith('other:') || this.knownCards().get(uid)?.originId === card.originId
+  }
 
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.navigation++
+    clearTimeout(this.retryTimer)
     this.request?.abort()
     for (const controller of this.cardControllers) controller.abort()
     this.observer?.disconnect()
@@ -336,7 +369,7 @@ export class Overview {
 
   private knownCards(): Map<string, KanbanCard> {
     const known = new Map(this.fetchedCards)
-    for (const [uid, card] of this.openedCards) known.set(uid, card)
+    for (const [uid, card] of this.openedCards) if (!this.provisionalOpened.has(uid)) known.set(uid, card)
     // The live board's chosen mirrored row owns fiber metadata, not the file's byte host.
     for (const card of this.opts.cards()) known.set(uidOf(card), card)
     return known
@@ -347,6 +380,7 @@ export class Overview {
   }
   private reconcile(): void {
     const known = this.knownCards()
+    for (const uid of known.keys()) { this.missingCards.delete(uid); this.cardRetries.delete(uid) }
     const byUid = new Map<string, Map<DocKey, Receipt>>()
     for (const file of this.files) {
       const card = file.uid ? known.get(file.uid) : undefined
@@ -362,7 +396,7 @@ export class Overview {
     for (const uid of this.openedCards.keys()) if (!byUid.has(uid)) byUid.set(uid, new Map())
     for (const [uid, documents] of byUid) {
       const receipts = [...documents.values()].sort((a, b) => b.timestamp - a.timestamp || compare(a.key, b.key))
-      const card = known.get(uid) ?? this.fallback(uid, receipts[0]?.owner ?? 'local')
+      const card = known.get(uid) ?? this.openedCards.get(uid) ?? this.fallback(uid, receipts[0]?.owner ?? 'local')
       const latest = receipts[0]?.timestamp ?? 0
       let folio = this.folios.get(uid)
       if (!folio) {
@@ -394,13 +428,42 @@ export class Overview {
 
   private resolveFolios(): void {
     if (this.disposed) return
-    const candidates = [...this.folios.values()].filter(f => f.provisional && !f.uid.startsWith('other:') && !this.attemptedCards.has(f.uid))
-      .sort((a, b) => (a.thumb ? this.distance(a.thumb) : 0) - (b.thumb ? this.distance(b.thumb) : 0))
-    for (const folio of candidates.slice(0, Math.max(0, 4 - this.cardLoads.size))) {
-      this.attemptedCards.add(folio.uid)
-      const pending = this.loadCard(folio.card)
-      this.cardLoads.set(folio.uid, pending)
-      void pending.finally(() => { this.cardLoads.delete(folio.uid); if (!this.disposed) this.reconcile() })
+    const candidates = [...this.folios.values()].filter(f => f.provisional && !f.uid.startsWith('other:'))
+      .sort((a, b) => (a.thumb ? this.distance(a.thumb) : 0) - (b.thumb ? this.distance(b.thumb) : 0)).map(f => f.card)
+    // Confirmed misses have moved to Unfiled, but their intrinsic ids remain retryable.
+    for (const file of this.files) if (file.uid && this.missingCards.has(file.uid)) candidates.push(this.fallback(file.uid, file.host ?? 'local'))
+    for (const card of candidates) {
+      const uid = uidOf(card)
+      if (!this.externalLoads.has(uid) && (this.cardRetries.get(uid)?.at ?? 0) <= Date.now()) void this.queueCard(card)
+    }
+    clearTimeout(this.retryTimer)
+    const eligible = new Set(candidates.map(uidOf))
+    const times = [...this.cardRetries].filter(([uid]) => eligible.has(uid) && !this.cardLoads.has(uid) && !this.externalLoads.has(uid)).map(([, retry]) => retry.at)
+    if (times.length) this.retryTimer = setTimeout(() => this.reconcile(), Math.max(1, Math.min(...times) - Date.now()))
+  }
+
+  /** Clicks and preloads share deduplication and the same four-read budget. */
+  private queueCard(card: KanbanCard): Promise<KanbanCard | undefined> {
+    const uid = uidOf(card)
+    const prior = this.cardLoads.get(uid)
+    if (prior) return prior
+    let complete!: (card: KanbanCard | undefined) => void
+    const pending = new Promise<KanbanCard | undefined>(resolve => { complete = resolve })
+    this.cardLoads.set(uid, pending)
+    this.cardQueue.push(async () => {
+      const resolved = this.disposed ? undefined : this.knownCards().get(uid) ?? await this.loadCard(card)
+      this.cardLoads.delete(uid)
+      complete(resolved)
+      if (!this.disposed) this.reconcile()
+    })
+    this.pumpCards()
+    return pending
+  }
+  private pumpCards(): void {
+    while (this.activeCardReads < 4 && this.cardQueue.length) {
+      const job = this.cardQueue.shift()!
+      this.activeCardReads++
+      void job().finally(() => { this.activeCardReads--; this.pumpCards() })
     }
   }
 
@@ -569,32 +632,34 @@ export class Overview {
     place(this.ribbon, recent.map(r => this.ribbonItems.get(r.key)!.el))
   }
   private async open(card: KanbanCard, key?: DocKey): Promise<void> {
+    const navigation = ++this.navigation
     const uid = uidOf(card)
     let resolved = this.knownCards().get(uid)
-    if (!resolved && !uid.startsWith('other:')) {
-      let pending = this.cardLoads.get(uid)
-      if (!pending) {
-        pending = this.loadCard(card); this.cardLoads.set(uid, pending)
-        void pending.finally(() => this.cardLoads.delete(uid))
-      }
-      resolved = await pending
-    }
-    if (this.disposed) return
-    resolved ??= card
-    this.opened(resolved)
-    this.opts.onOpen(resolved, key)
+    if (!resolved && !uid.startsWith('other:')) resolved = await this.queueCard(card)
+    if (this.disposed || navigation !== this.navigation) return
+    const target = resolved ?? (this.missingCards.has(uid) ? this.fallback(`other:${card.originId}`, card.originId) : card)
+    this.opened(target, !!resolved || target.uid?.startsWith('other:'))
+    this.opts.onOpen(target, key)
   }
-  private async loadCard(fallback: KanbanCard): Promise<KanbanCard> {
+  private async loadCard(fallback: KanbanCard): Promise<KanbanCard | undefined> {
     const controller = new AbortController(); this.cardControllers.add(controller)
     const timeout = setTimeout(() => controller.abort(), 25000)
     try {
-      const entry = await readFiber(this.opts.shuttleBase, uidOf(fallback), fallback.originId, controller.signal)
+      const entry = await readFiber(this.opts.shuttleBase, uidOf(fallback), fallback.originId, controller.signal, 'discover')
       const card = cardFromCompositeEntry(entry)
-      if (!this.disposed) this.fetchedCards.set(uidOf(fallback), card)
-      return card
+      const current = this.knownCards().get(uidOf(fallback))
+      if (!this.disposed) this.resolved(current ?? card)
+      return current ?? card
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('Fiber not found on ')) this.missingCards.add(uidOf(fallback))
-      return fallback
+      const uid = uidOf(fallback)
+      const current = this.knownCards().get(uid)
+      if (current) return current
+      if (!this.disposed) {
+        if (error instanceof Error && error.message.startsWith('Fiber not found on ')) this.missingCards.add(uid)
+        const attempts = (this.cardRetries.get(uid)?.attempts ?? 0) + 1
+        this.cardRetries.set(uid, { attempts, at: Date.now() + Math.min(30000, 1000 * 2 ** Math.min(attempts - 1, 5)) })
+      }
+      return undefined
     }
     finally { clearTimeout(timeout); this.cardControllers.delete(controller) }
   }
