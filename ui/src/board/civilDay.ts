@@ -286,6 +286,24 @@ export function civilDaySpan(first: string, last: string, z: Zone = hostZone()):
   return [fromMs, after === undefined ? 0 : after - 1000]
 }
 
+/**
+ * {@link railCivilDay} for a run of instants — the shape of the views'
+ * per-minute folding passes. It remembers the last rail's `[start, end)` and
+ * answers any instant inside it by comparison alone, so a day's worth of
+ * minutes costs one wall-clock reading, not fourteen hundred.
+ */
+export function railDayReader(z: Zone = hostZone()): (ms: number) => string {
+  let day = ''
+  let startMs = 0
+  let endMs = 0
+  return (ms) => {
+    if (ms >= startMs && ms < endMs) return day
+    day = railCivilDay(ms, RAIL_START_HOUR, z)
+    ;({ startMs, endMs } = railBounds(day, z))
+    return day
+  }
+}
+
 // ── Civil-day arithmetic — no zone ───────────────────────────────────────────
 
 /**

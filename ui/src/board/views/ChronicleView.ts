@@ -77,6 +77,7 @@ import {
   RAIL_START_HOUR,
   railBounds,
   railCivilDay,
+  railDayReader,
   shiftCivilDay,
   wallClock,
   type Zone,
@@ -211,9 +212,10 @@ export function aggregateByCivilDay(
   z: Zone = hostZone(),
 ): Map<string, DayCell> {
   const out = new Map<string, DayCell>()
+  const railDay = railDayReader(z)
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
-    const day = railCivilDay(b.m, RAIL_START_HOUR, z)
+    const day = railDay(b.m)
     let cell = out.get(day)
     if (!cell) {
       cell = { agent: 0, attention: 0 }
@@ -265,10 +267,11 @@ export function spellsByCivilDay(
   z: Zone = hostZone(),
 ): Map<string, DaySpell[]> {
   const byDay = new Map<string, ActivityBucket[]>()
+  const railDay = railDayReader(z)
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
     if (b.k !== 'agent' && b.k !== 'attention') continue
-    const day = railCivilDay(b.m, RAIL_START_HOUR, z)
+    const day = railDay(b.m)
     const list = byDay.get(day)
     if (list) list.push(b)
     else byDay.set(day, [b])

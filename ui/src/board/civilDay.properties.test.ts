@@ -20,6 +20,7 @@ import {
   RAIL_START_HOUR,
   railBounds,
   railCivilDay,
+  railDayReader,
   sameCivilDue,
   shiftCivilDay,
   wallClock,
@@ -169,8 +170,9 @@ function spellings(day: string): fc.Arbitrary<string> {
 
 // ── The oracle ───────────────────────────────────────────────────────────────
 
-/** An instant's wall clock in a zone, read straight off a fresh `en-CA`
- *  formatter — no cache, no offset arithmetic, nothing shared with civilDay.ts. */
+/** An instant's wall clock in a zone, read straight off an `en-CA` formatter
+ *  (one per zone, reused) — no offset arithmetic, nothing shared with
+ *  civilDay.ts. */
 const oracleFormats = new Map<string, Intl.DateTimeFormat>()
 function oracle(ms: number, z: Zone): { day: string; hour: number; minute: number } {
   let f = oracleFormats.get(z.id)
@@ -258,6 +260,19 @@ describe('civil days and instants, in every zone', () => {
       expect(railBounds(shiftCivilDay(day, -1), z).endMs).toBe(rail.startMs)
       expect(Math.abs(rail.endMs - rail.startMs - DAY)).toBeLessThanOrEqual(HOUR)
     }), { seed: 0x711e, numRuns: RUNS })
+  })
+
+  it('reads a run of instants onto the same rails one at a time would', () => {
+    const runs = zonedInstants.chain(({ z, ms }) =>
+      fc.array(fc.integer({ min: -3 * DAY, max: 3 * DAY }), { minLength: 1, maxLength: 40 })
+        .map((steps) => ({ z, times: steps.map((step) => ms + step) })),
+    )
+    fc.assert(fc.property(runs, fc.boolean(), ({ z, times }, sorted) => {
+      const read = railDayReader(z)
+      for (const t of sorted ? [...times].sort((a, b) => a - b) : times) {
+        expect(read(t)).toBe(railCivilDay(t, RAIL_START_HOUR, z))
+      }
+    }), { seed: 0x2ead, numRuns: RUNS })
   })
 
   it('sorts one instant equal to itself however its offset is written', () => {
