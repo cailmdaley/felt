@@ -19,6 +19,7 @@ import './tokens.css'
 import './dock.css'
 
 type Directive = string | (() => Promise<string>)
+interface AgentAxes { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }
 interface ComposerSend {
   compose(): Promise<string>
   busy(): boolean
@@ -406,6 +407,8 @@ export class Dock {
   private composerSend: ComposerSend | null = null
   private composerError: HTMLElement | null = null
   private freshButton: HTMLButtonElement | null = null
+  private settingsSync: ((view: KanbanCard) => void) | null = null
+  private savesPending = 0
   private epoch = 0
   private readonly timers = new Set<number>()
   private readonly shuttleBase: string
@@ -516,6 +519,7 @@ export class Dock {
     this.composerSend = null
     this.composerError = null
     this.freshButton = null
+    this.settingsSync = null
     this.root?.replaceChildren()
   }
 
@@ -685,12 +689,14 @@ export class Dock {
     for (const band of this.bands.values()) band.syncRuntime(card)
     if (!card || !this.card || !this.workerContainer ||
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
+    const incoming = card
     if (this.card) {
       for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
     }
+    this.settingsSync?.(incoming)
     this.workerPillCard = card
     this.paintGuidance(card)
     const key = this.workerPillState(card)
@@ -759,9 +765,19 @@ export class Dock {
       strip = next
       for (const watch of watchers) watch(card)
     }
+    const reseeders: Array<() => void> = []
+    const reseed = (fn: () => void): void => { reseeders.push(fn) }
+    this.settingsSync = (view) => {
+      if (ledger.contains(document.activeElement) || this.savesPending) return
+      for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleSurface', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'inheritedProjectDir'] as const) {
+        Object.assign(card, { [key]: view[key] })
+      }
+      for (const sync of reseeders) sync()
+      reflect({})
+    }
     ledger.append(
-      this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, swallow, reflect),
-      this.buildCardFields(card, statusEl, errorEl, swallow, reflect, fn => watchers.push(fn)),
+      this.buildWorkerFields(card, shuttleManaged, statusEl, errorEl, swallow, reflect, reseed),
+      this.buildCardFields(card, statusEl, errorEl, swallow, reflect, fn => watchers.push(fn), reseed),
     )
     toggle.addEventListener('click', () => {
       ledger.hidden = !ledger.hidden
@@ -1084,6 +1100,7 @@ export class Dock {
     errorEl: HTMLElement,
     swallow: (el: HTMLElement) => void,
     reflect: (patch: Partial<KanbanCard>) => void,
+    reseed: (fn: () => void) => void,
   ): HTMLElement {
     const col = document.createElement('div')
     col.className = 'kbn-ctl-fields'
@@ -1164,18 +1181,21 @@ export class Dock {
       async (axes) => {
         const ok = await this.commitAxes(card, axes, statusEl, errorEl)
         if (ok) {
-          reflect({
-            shuttleAgent: axes.agent,
-            shuttleEffort: axes.effort || undefined,
-            shuttleChrome: axes.chrome,
-            shuttleSurface: axes.surface,
-          })
+          const patch: Partial<KanbanCard> = {}
+          if ('agent' in axes) patch.shuttleAgent = axes.agent
+          if ('effort' in axes) patch.shuttleEffort = axes.effort || undefined
+          if ('chrome' in axes) patch.shuttleChrome = axes.chrome
+          if ('surface' in axes) patch.shuttleSurface = axes.surface
+          reflect(patch)
         }
         return ok
       },
-    ).then(() => {
-      // An omitted effort resolves to the registry default; once the picker
-      // knows it, the strip names it too.
+    ).then(sync => {
+      if (!sync) return
+      const reset = (): void => sync({ agent: card.shuttleAgent ?? '', effort: card.shuttleEffort ?? '',
+        chrome: card.shuttleChrome ?? false, surface: persistedSurface(card.shuttleSurface) })
+      reseed(reset)
+      reset()
       if (!card.shuttleEffort && effortSelect.value) reflect({ shuttleEffort: effortSelect.value })
     })
 
@@ -1224,6 +1244,16 @@ export class Dock {
     const cronRow = field('Cron', cronInput, tzInput, spoken)
     cronRow.hidden = baseline.kind !== 'standing'
     col.append(field('Kind', kind.el), cronRow)
+    reseed(() => {
+      baseline.kind = card.shuttleKind ?? 'oneshot'
+      baseline.schedule = card.shuttleSchedule ?? ''
+      baseline.tz = card.shuttleTz ?? 'Europe/Paris'
+      kind.set(baseline.kind)
+      cronInput.value = baseline.schedule
+      tzInput.value = baseline.tz
+      cronRow.hidden = baseline.kind !== 'standing'
+      paintSpoken()
+    })
 
     const livePatch = (
       changes: { shuttleKind?: ShuttleKind; shuttleSchedule?: string; shuttleTz?: string },
@@ -1364,6 +1394,7 @@ export class Dock {
     swallow: (el: HTMLElement) => void,
     reflect: (patch: Partial<KanbanCard>) => void,
     watch: (fn: (view: KanbanCard) => void) => void,
+    reseed: (fn: () => void) => void,
   ): HTMLElement {
     const col = document.createElement('div')
     col.className = 'kbn-ctl-fields'
@@ -1418,8 +1449,13 @@ export class Dock {
       dueRow.hidden = !placedByDue(view)
     })
     col.append(dueRow)
+    reseed(() => {
+      current = dueCivilDay(card.due) ?? null
+      input.value = current ?? ''
+      paint()
+    })
 
-    col.append(field('Parent', this.buildParentPicker(card, livePatch, swallow)))
+    col.append(field('Parent', this.buildParentPicker(card, livePatch, swallow, reseed)))
     return col
   }
 
@@ -1432,6 +1468,7 @@ export class Dock {
     card: KanbanCard,
     livePatch: (changes: { parentId: string | null }, onCommitted: () => void) => void,
     swallow: (el: HTMLElement) => void,
+    reseed: (fn: () => void) => void,
   ): HTMLElement {
     const segments = card.id.split('/')
     let parentId: string | null = segments.length > 1 ? segments.slice(0, -1).join('/') : null
@@ -1446,6 +1483,7 @@ export class Dock {
       shown.textContent = parentId ?? '—'
       shown.title = parentId ? `Parent: ${parentId}` : 'Top level'
     }
+    reseed(() => { parentId = card.id.includes('/') ? card.id.slice(0, card.id.lastIndexOf('/')) : null; paint() })
     paint()
 
     const search = document.createElement('input')
@@ -1767,10 +1805,10 @@ export class Dock {
    * selected agent's `effort_levels`, a chrome toggle gated on
    * `chrome_capable`, and the session choice, which only a Codex agent has.
    * An axis the selected agent lacks is hidden rather than shown disabled.
-   * Any change repopulates the dependent controls (a new agent resets effort
-   * to its default and may drop chrome) and fires `onCommit` with the current
-   * composition — which `commitAxes` writes through `set-agent`. A refused
-   * write puts every control back on the last composition that landed.
+   * An agent change repopulates dependent controls and writes the changed
+   * axes together; an effort, chrome or session edit writes only that axis.
+   * A refused write restores the last composition that landed. Polls re-seed
+   * the controls while settings are unfocused and no save is pending.
    *
    * When the registry can't be read, the controls keep showing the card's own
    * values, frozen: the fact stays legible even where it can't be edited.
@@ -1784,9 +1822,9 @@ export class Dock {
       /** The session row; null where there is no block to carry the choice. */
       surfaceRow: HTMLElement | null
     },
-    current: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface },
-    onCommit: (axes: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }) => Promise<boolean>,
-  ): Promise<void> {
+    current: AgentAxes,
+    onCommit: (axes: Partial<AgentAxes>) => Promise<boolean>,
+  ): Promise<((axes: AgentAxes) => void) | undefined> {
     const { agentSelect, effortSelect, chromeToggle, surface, surfaceRow } = controls
     const chromeChip = chromeToggle.parentElement
     const freeze = (why: string): void => {
@@ -1880,22 +1918,26 @@ export class Dock {
       chrome: chromeToggle.checked,
       surface: surface.value,
     }
-    const commit = (): void => {
-      const axes = {
-        agent: selectedAgent(),
-        effort: effortSelect.value,
-        chrome: chromeToggle.checked,
-        surface: surface.value,
+    const sync = (axes: AgentAxes): void => {
+      current = axes
+      if (axes.agent && ![...agentSelect.options].some(option => option.value === axes.agent)) {
+        agentSelect.prepend(new Option(`${axes.agent} (custom)`, axes.agent))
       }
-      void onCommit(axes).then((ok) => {
-        if (ok) {
-          landed = axes
-          return
-        }
-        agentSelect.value = landed.agent
-        syncDependents(landed.agent, landed.effort)
-        chromeToggle.checked = landed.chrome && !chromeToggle.disabled
-        surface.set(landed.surface)
+      agentSelect.value = axes.agent || defaultAgent || ''
+      syncDependents(selectedAgent(), axes.effort)
+      chromeToggle.checked = axes.chrome && !chromeToggle.disabled
+      surface.set(isCodexAgent(recordFor(selectedAgent())) ? axes.surface : 'cli')
+      landed = { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked, surface: surface.value }
+    }
+    const commit = (axis: keyof AgentAxes): void => {
+      const axes: AgentAxes = { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked, surface: surface.value }
+      const patch: Partial<AgentAxes> = axis === 'agent'
+        ? Object.fromEntries(Object.entries(axes).filter(([key, value]) => value !== landed[key as keyof AgentAxes]))
+        : { [axis]: axes[axis] }
+      if (!Object.keys(patch).length) return
+      void onCommit(patch).then((ok) => {
+        if (ok) landed = { ...landed, ...patch }
+        else sync(landed)
       })
     }
 
@@ -1908,36 +1950,32 @@ export class Dock {
       const rec = recordFor(selectedAgent())
       if (!isCodexAgent(rec)) surface.set('cli')
       else if (!isCodexAgent(recordFor(current.agent))) surface.set(defaultSurface(rec))
-      commit()
+      commit('agent')
     })
-    effortSelect.addEventListener('change', () => commit())
-    chromeToggle.addEventListener('change', () => commit())
-    surface.onPick(() => commit())
+    effortSelect.addEventListener('change', () => commit('effort'))
+    chromeToggle.addEventListener('change', () => commit('chrome'))
+    surface.onPick(() => commit('surface'))
+    return sync
   }
 
   /**
-   * Write the composed agent axes through the daemon's `set-agent` lifecycle
-   * action — one validated write that sees base agent × effort × chrome
-   * together. Effort is always a concrete registry token when the agent
-   * supports that axis; chrome is always sent explicitly so a toggle-off is
-   * unambiguous.
+   * Write only the changed agent axes through `set-agent`. Coupled changes
+   * from picking a new agent travel in one validated write; independent axes
+   * leave the daemon's other settings untouched.
    */
   private async commitAxes(
     card: KanbanCard,
-    axes: { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface },
+    axes: Partial<AgentAxes>,
     statusEl: HTMLElement,
     errorEl: HTMLElement,
   ): Promise<boolean> {
-    if (!axes.agent) return false
+    if ('agent' in axes && !axes.agent) return false
     return this.withSaveStatus(statusEl, errorEl, () =>
       this.postJson('/api/v1/lifecycle', {
         action: 'set-agent',
         origin: card.originId,
         fiber: card.id,
-        agent: axes.agent,
-        effort: axes.effort,
-        chrome: axes.chrome,
-        surface: axes.surface,
+        ...axes,
       }),
     )
   }
@@ -1954,6 +1992,7 @@ export class Dock {
     errorEl: HTMLElement,
     write: () => Promise<void>,
   ): Promise<boolean> {
+    this.savesPending++
     errorEl.style.display = 'none'
     statusEl.textContent = 'Saving…'
     statusEl.classList.remove('kbn-detail-save-status-saved')
@@ -1982,6 +2021,8 @@ export class Dock {
       statusEl.textContent = ''
       statusEl.classList.remove('kbn-detail-save-status-saving')
       return false
+    } finally {
+      this.savesPending--
     }
   }
 
