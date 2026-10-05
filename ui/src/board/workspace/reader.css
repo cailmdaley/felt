@@ -78,8 +78,6 @@
 .ws-turn-active .ws-worker-dot { animation: ws-worker-breathe 2.4s ease-in-out infinite; }
 @keyframes ws-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
-/* The phone top bar's conversation dot; the desktop navbar carries no worker state. */
-.ws-topbar-worker { display: none; }
 .ws-nav-verdicts { flex: none; }
 .ws-nav-verdicts[hidden] { display: none; }
 .ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: center; gap: 4px; }
@@ -275,17 +273,6 @@
   .ws-return::before { content: '‹'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: var(--ws-heading-size); text-indent: 0; }
   .ws-channel-title { text-align: center; flex: 1; height: 44px; font-size: var(--ws-label-size); }
   .ws-channel-title::after { display: none; }
-  .ws-topbar-worker:not([hidden]) { display: flex; align-items: center; justify-content: center; }
-  .ws-reader .ws-topbar-worker .ws-worker-control {
-    display: grid; place-items: center; width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0;
-    border: 0; border-radius: 50%; background: transparent; animation: none;
-  }
-  .ws-topbar-worker :is(.ws-worker-state, .ws-worker-elapsed) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  /* A dot is a mark, not text: it wears the undiluted pigment. */
-  .ws-topbar-worker .ws-worker-dot { width: 10px; height: 10px; background: var(--kbn-agent); box-shadow: 0 0 0 4px var(--ws-machine-halo); }
-  .ws-topbar-worker [data-worker-state='waiting'] .ws-worker-dot,
-  .ws-topbar-worker [data-worker-state='attention'] .ws-worker-dot,
-  .ws-topbar-worker [data-worker-state='blocked'] .ws-worker-dot { background: var(--ws-fresh); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ws-fresh) 22%, transparent); }
   .ws-tabs { grid-row: 2; grid-column: 1 / -1; padding: 0 var(--ws-small-gap); border-top: var(--ws-line-width) solid var(--ws-hairline); }
   .ws-tab { height: var(--ws-phone-target); }
   .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) minmax(0, 1fr) var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); height: calc(var(--ws-thumb-height) + env(safe-area-inset-bottom)); flex: none; border-top: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); touch-action: pan-y; user-select: none; }
