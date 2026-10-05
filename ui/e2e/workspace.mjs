@@ -1320,6 +1320,22 @@ test('Phone overview single column, reader sheet, footer stepping and Back', asy
   assert.ok(await p.getByRole('searchbox', { name: 'Find work or files', exact: true }).isVisible())
 }, { width: 390, height: 844 })
 
+test('Phone audio page taller than the screen scrolls from its top to its bottom', async p => {
+  await open(p); await choose(p, 'tone.mp3')
+  const scroller = selected(p).locator('.kbn-fileview-audio')
+  await selected(p).locator('.ws-audio-page').waitFor()
+  const reach = () => scroller.evaluate(el => {
+    const page = el.querySelector('.ws-audio-page').getBoundingClientRect(), box = el.getBoundingClientRect()
+    return { overflow: el.scrollHeight - el.clientHeight, top: page.top - box.top, bottom: box.bottom - page.bottom }
+  })
+  const start = await reach()
+  assert.ok(start.overflow > 0, `the fixture outgrows the short screen (${start.overflow}px)`)
+  assert.ok(Math.abs(start.top) <= 0.5, `the waveform starts in reach at the top (${start.top}px)`)
+  await scroller.evaluate(el => { el.scrollTop = el.scrollHeight })
+  assert.ok((await reach()).bottom >= -0.5, 'the page\'s end scrolls into view')
+  assert.equal(await selected(p).locator('.ws-audio-waveform').evaluate(el => getComputedStyle(el).touchAction), 'pan-y', 'a vertical pan on the waveform scrolls the page')
+}, { width: 390, height: 420 }, 'false', 'reduce', true)
+
 test('Phone HTML reader retains its opaque frame and reading position', async p => {
   await open(p); const frame = await reportReady(p)
   const inner = await reportDocument(p)

@@ -1,4 +1,7 @@
-.ws-content .kbn-fileview-audio { background: var(--ws-paper); overflow: auto; padding: 0; }
+/* The scroller is a block: centred flex content taller than the page would
+   overflow above its top, out of reach. The inner page centres itself with
+   auto margins, which yield to the top edge once it outgrows the page. */
+.ws-content .kbn-fileview-audio { display: block; background: var(--ws-paper); overflow: auto; padding: 0; }
 .ws-content .kbn-fileview-audio audio[hidden] { display: none !important; }
 .ws-content .kbn-fileview-audio .kbn-media-page {
   width: 100%; max-width: none; min-height: 100%; padding: 0;
@@ -13,7 +16,8 @@
   padding: var(--ws-prose-padding); margin-block: auto;
 }
 .ws-audio-plot { position: relative; margin: 0 0 16px; }
-.ws-audio-waveform { display: block; width: 100%; height: 160px; cursor: crosshair; touch-action: none; color: var(--ws-ink); }
+/* A vertical pan begun on the waveform scrolls the page; a sideways drag scrubs. */
+.ws-audio-waveform { display: block; width: 100%; height: 160px; cursor: crosshair; touch-action: pan-y; color: var(--ws-ink); }
 .ws-audio-waveform:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 4px; }
 .ws-audio-hover { position: absolute; bottom: 0; transform: translateX(-50%); pointer-events: none; padding: 2px 5px; background: var(--ws-paper); font: var(--ws-small-size)/1.2 var(--ws-mono); }
 .ws-audio-transport { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding-bottom: 20px; border-bottom: 1px solid var(--ws-hairline); }
