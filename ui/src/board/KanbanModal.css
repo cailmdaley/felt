@@ -1,15 +1,15 @@
 /* One typographic scale for the whole board.
  *
- * Every px font-size in the board CSS — chassis, cards, the floating file
- * reader, and the three temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
+ * Every px font-size in the board CSS — chassis, cards, the document workspace,
+ * and the temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
  * so the design sizes stay readable in the source and the whole hierarchy moves
  * together from one number. Nothing else scales: spacing, rules and column
  * widths are deliberately left alone, so raising type tightens the page rather
  * than zooming it.
  *
- * Declared on :root (not `.kbn-modal`) because the floating file-reader window
- * mounts outside the board's own subtree. Every call site carries a
- * fallback of 1, so a host that never loads this file renders at design size.
+ * Declared on :root because the document reader mounts outside the board's
+ * `.kbn-modal` subtree. Every call site carries a fallback of 1, so a host that
+ * never loads this file renders at design size.
  */
 :root {
   --kbn-type-scale: 1.18;
@@ -1103,7 +1103,7 @@
 
 .kbn-col {
   /* Desk cards/chrome render at design size — the 1.18 scale is for the
-     temporal views and floating file reader, not the kanban lanes.
+     temporal views and document workspace reader, not the Desk lanes.
      KanbanModal's expandOutcomesToFillSpace reads this off each card's
      computed style rather than the root, so it follows this override. */
   --kbn-type-scale: 1;
@@ -1506,10 +1506,8 @@
   font-style: normal;
 }
 /* Card — a slip of rag laid on the sheet. Kind differentiation rides
-   the background tint and border-style on the existing .kbn-card-*
-   modifiers; no painted left-edge ribbon. The column container
-   already signals lifecycle, the kbn-pill stamp carries the status
-   mark, and the worker / dispatch chips do the rest. */
+   the background tint and border style on .kbn-card-* modifiers; the
+   column signals lifecycle, and worker and dispatch chips carry live state. */
 .kbn-card {
   background: var(--kbn-paper);
   border: 1px solid rgba(27, 22, 17, 0.12);
@@ -1629,31 +1627,6 @@
   line-height: 1.25;
   text-align: left;
   color: inherit;
-}
-.kbn-pill {
-  display: inline-block;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-.kbn-pill-open {
-  background: rgba(196, 147, 51, 0.12);
-  color: #C49333;
-  border: 1px solid rgba(196, 147, 51, 0.3);
-}
-.kbn-pill-active {
-  background: rgba(196, 147, 51, 0.25);
-  color: #8C6A24;
-  border: 1px solid rgba(196, 147, 51, 0.45);
-}
-.kbn-pill-closed {
-  background: rgba(122, 111, 92, 0.15);
-  color: var(--kbn-ink-muted);
-  border: 1px solid rgba(122, 111, 92, 0.35);
 }
 .kbn-card-id {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
@@ -2461,7 +2434,7 @@
   /* ── Cards, compact ────────────────────────────────────────────────────
      Title, path on one line, the opening line of the outcome, then agent and
      badges in a single row. A phone card is an index entry you tap; its
-     document opens in the workspace reader, and its actions live in the dock. */
+     document opens in the workspace reader, and its actions live on the fiber page. */
   .kbn-card {
     padding: 9px 11px;
     gap: 5px;

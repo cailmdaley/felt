@@ -3,8 +3,8 @@
  * `node scripts/check-worker-tap.mjs [shot-dir]`.
  *
  * On a phone and an iPad it checks the Desk card, reader navbar, and fiber-page
- * control-band pills, including their 44px touch targets. At a desktop the
- * terminal pill stays a button.
+ * control-band pills. The fiber-page pill has a 44px touch target; at a desktop
+ * the terminal pill stays a button.
  */
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
@@ -108,7 +108,9 @@ try {
     await page.waitForTimeout(400)
     await shot('fiber-page-controls')
     if (device.touch) {
-      assert.equal(await detailPill.getAttribute('href'), LINK, `${device.name}: detail pill links to the session`)
+      assert.equal(await detailPill.getAttribute('href'), LINK, `${device.name}: fiber-page pill links to the session`)
+      const targetHeight = await detailPill.evaluate(el => el.getBoundingClientRect().height)
+      assert.ok(targetHeight >= 44, `${device.name}: fiber-page pill target is ${targetHeight}px`)
       if (!await tap(detailPill, 'fiber-page')) failures.push(`${device.name}: fiber-page pill tap did not land`)
       // A 44px target: a tap 20px below the pill's centre still lands on it.
       await page.goto(home)

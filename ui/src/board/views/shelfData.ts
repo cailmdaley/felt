@@ -6,8 +6,7 @@
  * needs and a card's trail never did: WHICH FIBER sent it (`uid`, the key the
  * fiber lens clusters under) and WHICH DAEMON holds the bytes (`host`, which
  * `/api/v1/file` needs to route a remote read). Both are optional, because a
- * record can arrive without them and a shelf of unattributed cards is still a
- * shelf.
+ * receipt can arrive without attribution and still appear in the Board overview.
  */
 
 import { normalizeSentFiles, type SentFile } from '../sentFiles.js'
@@ -31,14 +30,13 @@ export interface ShelfResult {
 const EMPTY_SHELF: ShelfResult = { files: [], origins: {} }
 
 /**
- * Coerce a composite body (`{files: [...]}`) into shelf records.
+ * Coerce a composite body (`{files: [...]}`) into Board overview records.
  *
- * Built ON `normalizeSentFiles` rather than beside it: the path/basename/
- * timestamp coercion (including an older writer's ISO string where a number
- * belongs) is the same job, and a second dialect of "a sent file" is exactly
- * what that module exists to prevent. This pass only adds the two shelf
- * fields back on, index-aligned — which holds because the normalizer drops
- * only pathless records, so we filter the same way first.
+ * Built on `normalizeSentFiles` rather than beside it: path, basename, and
+ * timestamp coercion belong to one shared reader, not a second dialect of
+ * "a sent file". This pass only adds the two overview fields, index-aligned —
+ * which holds because the normalizer drops only pathless records, so we filter
+ * the same way first.
  */
 export function normalizeShelfFiles(raw: unknown): ShelfFile[] {
   const files = isRecord(raw) ? raw.files : undefined
@@ -79,10 +77,9 @@ function str(value: unknown): string | undefined {
 /**
  * One card per PATH, newest send winning, newest first.
  *
- * A file sent five times is one thing that was revised five times, not five
- * things — and the shelf is a surface of things. The surviving record keeps
- * the latest send's metadata (its fiber, its host), because that
- * is the state the card will actually render.
+ * A file sent five times is one document with a revision trail, not five
+ * documents. The surviving record keeps the latest send's metadata (its fiber,
+ * its host), because that is the state the card renders.
  */
 export function dedupeByPath(files: readonly ShelfFile[]): ShelfFile[] {
   const best = new Map<string, ShelfFile>()
@@ -99,7 +96,7 @@ export function dedupeByPath(files: readonly ShelfFile[]): ShelfFile[] {
  * Read the fleet's sent files since `sinceMs` from the cross-host composite.
  *
  * EMPTY for every failure — a 404, a 5xx, a network error, a body that is not
- * a list. The Shelf's empty state is a quiet line of marginalia, so an
+ * a list. The overview's empty state is a quiet line of marginalia, so an
  * unreachable daemon and a fleet that has sent nothing land in the same honest
  * place instead of an error splash.
  */

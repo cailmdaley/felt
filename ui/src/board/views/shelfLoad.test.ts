@@ -1,6 +1,6 @@
 /**
- * shelfLoad — the policies that keep a board of a hundred cards from becoming
- * a hundred live documents.
+ * Board overview load policy — keeping a board of a hundred cards from
+ * becoming a hundred live documents.
  *
  * The claim that matters most: a body the reader can see is NEVER taken down.
  * Everything else here is bookkeeping around that one promise.
