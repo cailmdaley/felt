@@ -864,6 +864,45 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   await p.locator('.ws-page-sheet-actions .kbn-ctl-temper').waitFor()
 }, { width: 844, height: 390 }, 'false', 'reduce', true)
 
+for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is one transform slide (${reducedMotion})`, async p => {
+  await open(p); await reportReady(p)
+  await p.waitForTimeout(500) // the reader's own arrival settles first
+  for (const opening of [true, false]) {
+    await p.evaluate(() => {
+      window.__before = new Set(document.getAnimations())
+      window.__slide = []
+      const t0 = performance.now()
+      const tick = () => {
+        const page = document.querySelector('.ws-page.ws-selected').getBoundingClientRect()
+        window.__slide.push({ t: performance.now() - t0, page: page.left, width: page.width })
+        if (performance.now() - t0 < 500) requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })
+    await p.locator('.ws-sidebar-toggle').click()
+    const all = await p.evaluate(() => document.getAnimations().filter(a => !window.__before.has(a) && a.effect?.target?.closest?.('.ws-reader')).map(a => ({
+      target: String(a.effect.target.className), kind: a.constructor.name, duration: a.effect.getTiming().duration, properties: [...new Set(a.effect.getKeyframes().flatMap(k => Object.keys(k).filter(key => !['offset', 'easing', 'composite', 'computedOffset'].includes(key))))],
+    })))
+    const animations = all.filter(a => a.kind === 'Animation')
+    assert.deepEqual(all.filter(a => a.kind !== 'Animation' && a.properties.some(name => ['left', 'width', 'transform'].includes(name))), [], 'no layout property transitions run')
+    if (reducedMotion === 'reduce') assert.deepEqual(animations, [], 'reduced motion lands instantly')
+    else {
+      assert.ok(animations.length >= 2, 'the sidebar and the stage move together')
+      for (const a of animations) {
+        assert.ok(a.duration >= 200 && a.duration <= 240, `slide lasts ${a.duration} ms: ${JSON.stringify(a)}`)
+        assert.ok(a.properties.every(name => ['translate', 'opacity', 'clipPath'].includes(name)), `only compositor properties animate: ${a.properties}`)
+      }
+    }
+    await p.waitForTimeout(600)
+    const samples = await p.evaluate(() => window.__slide)
+    assert.ok(samples.every(s => Math.abs(s.width - samples[0].width) < 1), `the page never changes width: ${samples.map(s => Math.round(s.width)).join(',')}`)
+    const lefts = samples.map(s => s.page)
+    const steps = lefts.slice(1).map((x, i) => Math.sign(Math.round(x - lefts[i])))
+    assert.ok(!(steps.includes(1) && steps.includes(-1)), `the page moves one way, without a double jump: ${lefts.map(Math.round).join(',')}`)
+    assert.equal(await p.locator('.ws-sidebar-toggle').getAttribute('aria-expanded'), String(opening))
+  }
+}, undefined, 'false', reducedMotion)
+
 test('Key discard then plate Temper replaces the pending verdict with one delayed write', async p => {
   await open(p); await reportReady(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))

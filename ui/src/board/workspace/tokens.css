@@ -108,6 +108,9 @@
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
   --ws-sidebar-width: 280px;
+  /* The sidebar's open and close: one slide, on the standard curve. */
+  --ws-sidebar-time: 220ms;
+  --ws-sidebar-ease: cubic-bezier(0.2, 0, 0, 1);
   --ws-sidebar-overflow: 32px;
   --ws-sidebar-pull: 18px;
   --ws-sidebar-lift: -2px;

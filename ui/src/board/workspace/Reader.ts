@@ -123,6 +123,7 @@ export class Reader {
   private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
   private liveWidth: number | null = null
   private cancelResize: (() => void) | null = null
+  private cancelSidebarSlide: (() => void) | null = null
   private instantRaf = 0
   private sizes: Record<string, number> = {}
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -669,13 +670,62 @@ export class Reader {
   private get sidebarShown(): boolean {
     return !this.phone.matches && (this.sidebarChoice ?? this.wide.matches)
   }
+  /**
+   * Opening or closing the sidebar is one coordinated motion: the column
+   * slides in or out while the stage and the tab strip glide to their new
+   * places. The layout lands at once and only `translate` and `opacity`
+   * animate back from where things were, so nothing reflows per frame.
+   * Under reduced motion it lands instantly.
+   */
   private toggleSidebar(): void {
     this.sidebarChoice = !this.sidebarShown
     try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
     this.closeMenu()
-    if (!this.sidebarShown) this.setSidebarVisible(false)
+    this.cancelSidebarSlide?.()
+    const shown = this.sidebarShown
+    const slide = !this.motion.matches && typeof this.sidebar.animate === 'function' && this.active
+    const before = slide ? this.stagePlaces() : null
+    this.setSidebarVisible(shown, false)
     this.renderSidebar(); this.layout(false)
-    if (this.sidebarShown) this.setSidebarVisible(true)
+    if (before) this.slideSidebar(shown, before)
+  }
+  private stagePlaces(): { page: number; tabs: number; sidebar: number } {
+    const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
+    const tabs = this.navbar.querySelector<HTMLElement>('.ws-nav-tabs')?.getBoundingClientRect().left ?? 0
+    return { page, tabs, sidebar: this.sidebar.offsetWidth }
+  }
+  private slideSidebar(shown: boolean, before: { page: number; tabs: number; sidebar: number }): void {
+    const after = this.stagePlaces()
+    const options: KeyframeAnimationOptions = {
+      duration: this.measure('sidebar-time', 220),
+      easing: getComputedStyle(this.el).getPropertyValue('--ws-sidebar-ease').trim() || 'ease',
+    }
+    const animations: Animation[] = []
+    const glide = (el: Element | null, from: number): void => {
+      if (el && Math.abs(from) >= 1) animations.push(el.animate([{ translate: `${from}px 0` }, { translate: '0 0' }], options))
+    }
+    glide(this.parallax, before.page - after.page)
+    glide(this.navbar.querySelector('.ws-nav-tabs'), before.tabs - after.tabs)
+    const width = Math.max(before.sidebar, after.sidebar)
+    const hidden = { translate: `${-width}px 0`, opacity: 0 }, rest = { translate: '0 0', opacity: 1 }
+    this.el.classList.add('ws-sidebar-sliding')
+    if (!shown) this.el.classList.add('ws-sidebar-leaving')
+    animations.push(this.sidebar.animate(shown ? [hidden, rest] : [rest, hidden], options))
+    // The left neighbour the sidebar covers fades with it instead of blinking.
+    for (const page of this.track.querySelectorAll<HTMLElement>('.ws-page.ws-receded.ws-before')) {
+      const opacity = getComputedStyle(page).opacity
+      animations.push(page.animate(shown
+        ? [{ clipPath: 'none', opacity }, { clipPath: 'none', opacity: 0 }]
+        : [{ opacity: 0 }, { opacity }], options))
+    }
+    const finish = (): void => {
+      if (this.cancelSidebarSlide !== cancel) return
+      this.cancelSidebarSlide = null
+      this.el.classList.remove('ws-sidebar-leaving', 'ws-sidebar-sliding')
+    }
+    const cancel = (): void => { for (const animation of animations) animation.cancel(); finish() }
+    this.cancelSidebarSlide = cancel
+    void Promise.allSettled(animations.map(animation => animation.finished)).then(finish)
   }
   private renderSidebar(): void {
     const shown = this.sidebarShown
@@ -777,6 +827,7 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)
     this.cancelResize?.()
     this.closeMenu()

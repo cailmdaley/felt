@@ -170,9 +170,10 @@ describe('Reader channel sidebar', () => {
       source.getBoundingClientRect = rect
       reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="beta"]')!.getBoundingClientRect = rect
       reader.captureSidebar([{ card: beta, source }])
-      const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-      toggle.click()
-      toggle.click()
+      // The arrival flight (a toggle slides the column instead of flying cards).
+      const flight = reader as unknown as { setSidebarVisible(visible: boolean, animate?: boolean): void }
+      flight.setSidebarVisible(false, false)
+      flight.setSidebarVisible(true)
       const ghost = reader.el.querySelector<HTMLElement>('.ws-sidebar-flight [data-channel-uid="beta"]')!
       const scope = ghost.dataset.wsTheme
       expect(scope).toBeTruthy()
