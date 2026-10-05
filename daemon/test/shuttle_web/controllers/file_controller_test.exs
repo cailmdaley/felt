@@ -157,7 +157,7 @@ defmodule ShuttleWeb.FileControllerTest do
       on_exit(fn -> File.rm(path) end)
       url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
 
-      for range <- ["bytes=10-", "bytes=4-2", "bytes=-0"] do
+      for range <- ["bytes=10-", "bytes=10-12", "bytes=-0"] do
         conn = api_conn() |> put_req_header("range", range) |> get(url)
 
         assert conn.status == 416
@@ -174,7 +174,7 @@ defmodule ShuttleWeb.FileControllerTest do
       on_exit(fn -> File.rm(path) end)
       url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
 
-      for range <- ["bytes=bad", "items=0-1", "bytes=", "bytes=0-1,4-5"] do
+      for range <- ["bytes=bad", "items=0-1", "bytes=", "bytes=0-1,4-5", "bytes=4-2"] do
         conn = api_conn() |> put_req_header("range", range) |> get(url)
 
         assert conn.status == 200

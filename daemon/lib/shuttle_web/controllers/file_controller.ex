@@ -309,7 +309,7 @@ defmodule ShuttleWeb.FileController do
 
       [_, first, ""] ->
         first = String.to_integer(first)
-        bounded_range(first, min(size - 1, first + @range_limit - 1), size)
+        bounded_range(first, first + @range_limit - 1, size)
 
       [_, first, last] ->
         bounded_range(String.to_integer(first), String.to_integer(last), size)
@@ -325,8 +325,10 @@ defmodule ShuttleWeb.FileController do
   defp suffix_range(length, size),
     do: {:partial, max(size - length, 0), size - 1}
 
+  defp bounded_range(first, last, _size) when last < first, do: :ignore
+
   defp bounded_range(first, last, size) do
-    if size == 0 or first >= size or last < first do
+    if size == 0 or first >= size do
       :unsatisfiable
     else
       {:partial, first, min(last, size - 1)}
