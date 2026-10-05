@@ -152,7 +152,7 @@ export class Overview {
   private readonly openedCards = new Map<string, KanbanCard>()
   private readonly fetchedCards = new Map<string, KanbanCard>()
   private readonly cardLoads = new Map<string, Promise<KanbanCard | undefined>>()
-  private readonly cardQueue: Array<() => Promise<void>> = []
+  private readonly cardQueue: Array<{ uid: string; run(): Promise<void> }> = []
   private activeCardReads = 0
   private readonly cardRetries = new Map<string, { attempts: number; at: number }>()
   private readonly missingCards = new Set<string>()
@@ -442,20 +442,26 @@ export class Overview {
     if (times.length) this.retryTimer = setTimeout(() => this.reconcile(), Math.max(1, Math.min(...times) - Date.now()))
   }
 
-  /** Clicks and preloads share deduplication and the same four-read budget. */
-  private queueCard(card: KanbanCard): Promise<KanbanCard | undefined> {
+  /** Clicks move ahead of queued preloads without duplicating or preempting active reads. */
+  private queueCard(card: KanbanCard, priority = false): Promise<KanbanCard | undefined> {
     const uid = uidOf(card)
     const prior = this.cardLoads.get(uid)
-    if (prior) return prior
+    if (prior) {
+      const index = priority ? this.cardQueue.findIndex(job => job.uid === uid) : -1
+      if (index > 0) this.cardQueue.unshift(this.cardQueue.splice(index, 1)[0])
+      return prior
+    }
     let complete!: (card: KanbanCard | undefined) => void
     const pending = new Promise<KanbanCard | undefined>(resolve => { complete = resolve })
     this.cardLoads.set(uid, pending)
-    this.cardQueue.push(async () => {
+    const job = { uid, run: async (): Promise<void> => {
       const resolved = this.disposed ? undefined : this.knownCards().get(uid) ?? await this.loadCard(card)
       this.cardLoads.delete(uid)
       complete(resolved)
       if (!this.disposed) this.reconcile()
-    })
+    } }
+    if (priority) this.cardQueue.unshift(job)
+    else this.cardQueue.push(job)
     this.pumpCards()
     return pending
   }
@@ -463,7 +469,7 @@ export class Overview {
     while (this.activeCardReads < 4 && this.cardQueue.length) {
       const job = this.cardQueue.shift()!
       this.activeCardReads++
-      void job().finally(() => { this.activeCardReads--; this.pumpCards() })
+      void job.run().finally(() => { this.activeCardReads--; this.pumpCards() })
     }
   }
 
@@ -635,7 +641,7 @@ export class Overview {
     const navigation = ++this.navigation
     const uid = uidOf(card)
     let resolved = this.knownCards().get(uid)
-    if (!resolved && !uid.startsWith('other:')) resolved = await this.queueCard(card)
+    if (!resolved && !uid.startsWith('other:')) resolved = await this.queueCard(card, true)
     if (this.disposed || navigation !== this.navigation) return
     const target = resolved ?? (this.missingCards.has(uid) ? this.fallback(`other:${card.originId}`, card.originId) : card)
     this.opened(target, !!resolved || target.uid?.startsWith('other:'))
