@@ -4,6 +4,7 @@ import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageColumn } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
+import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
@@ -34,6 +35,8 @@ interface ChannelState {
   channel: Channel
   links: Array<{ path: string; owner?: string; title?: string }>
   fileModifiedAt: Map<DocKey, string>
+  /** The owner file-time reads in flight, at most one per channel. */
+  metadataRead?: Promise<boolean>
   selected?: DocKey
   selectionVersion: number
   routedFile?: DocKey
@@ -497,31 +500,41 @@ export class Workspace {
       await receiptRead
       if (this.disposed) return
       this.rebuild(state)
-      await this.readFileMetadata(state)
-      if (this.disposed) return
-      this.rebuild(state)
       this.refreshProse(state)
+      void this.readFileMetadata(state).then(changed => {
+        if (!changed || this.disposed) return
+        this.rebuild(state)
+        this.refreshProse(state)
+        if (this.current === state && this.isActive) this.show(state, false)
+      })
     })().finally(() => { this.loads.delete(key); this.overview.resolving(state.channel.uid, false) })
     this.loads.set(key, promise)
     return promise
   }
-  /** Metadata reads are bounded and never download document bodies. */
-  private async readFileMetadata(state: ChannelState): Promise<void> {
+  /**
+   * Owner file times mark rewritten documents fresh. They follow the channel
+   * rather than gate it: the reads wait in the quiet request lane, never
+   * download a body, and resolve true when any time moved.
+   */
+  private readFileMetadata(state: ChannelState): Promise<boolean> {
+    if (state.metadataRead) return state.metadataRead
     const files = state.channel.documents.filter(d => d.kind !== 'fiber')
-    let cursor = 0
-    await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
-      while (cursor < files.length && !this.disposed) {
-        const doc = files[cursor++]
-        try {
-          const response = await fetch(fileInfoUrl(this.opts.shuttleBase, doc.path, doc.owner), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
-          if (!response.ok) continue
-          const info = await response.json()
-          const time = typeof info.modified_at === 'number' ? info.modified_at * 1000 : typeof info.modified_at === 'string' ? Date.parse(info.modified_at) : NaN
-          if (info.exists && Number.isFinite(time)) state.fileModifiedAt.set(doc.key, new Date(time).toISOString())
-          else state.fileModifiedAt.delete(doc.key)
-        } catch { /* An unreachable owner keeps its last known metadata. */ }
-      }
-    }))
+    let changed = false
+    const read = Promise.all(files.map(doc => inLane('quiet', async () => {
+      if (this.disposed) return
+      try {
+        const response = await fetch(fileInfoUrl(this.opts.shuttleBase, doc.path, doc.owner), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+        if (!response.ok) return
+        const info = await response.json()
+        const time = typeof info.modified_at === 'number' ? info.modified_at * 1000 : typeof info.modified_at === 'string' ? Date.parse(info.modified_at) : NaN
+        const before = state.fileModifiedAt.get(doc.key)
+        if (info.exists && Number.isFinite(time)) state.fileModifiedAt.set(doc.key, new Date(time).toISOString())
+        else state.fileModifiedAt.delete(doc.key)
+        if (state.fileModifiedAt.get(doc.key) !== before) changed = true
+      } catch { /* An unreachable owner keeps its last known metadata. */ }
+    }, { rank: 1 }))).then(() => changed).finally(() => { state.metadataRead = undefined })
+    state.metadataRead = read
+    return read
   }
   private rebuild(state: ChannelState): void {
     const before = state.channel
