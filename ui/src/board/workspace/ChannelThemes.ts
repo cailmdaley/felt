@@ -38,7 +38,7 @@ export class ChannelThemes {
     const reset: string[] = []
     for (let i = 0; i < defaults.length; i++) {
       const name = defaults.item(i)
-      if (name.startsWith('--ws-') && name !== '--ws-paper' && name !== '--ws-ink') reset.push(`${name}: ${defaults.getPropertyValue(name)};`)
+      if (name.startsWith('--') && name !== '--ws-paper' && name !== '--ws-ink') reset.push(`${name}: ${defaults.getPropertyValue(name)};`)
     }
     this.actDefaults.textContent = `[data-ws-theme] [data-part="act"] {
       ${reset.join('\n')}

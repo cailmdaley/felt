@@ -236,7 +236,7 @@ export function workspaceExample(now: number): WorkspaceExample {
       [data-part="prose"] { --ws-nested-ready: 1; & p { text-underline-offset: .2em; } --ws-after-nested: 1; }
       .kbn-card { opacity: .13; }
       @media (width: 1379px) { button { color: red !important; font-family: fantasy !important; } }
-      @media (width: 1379px) { :scope { --ws-mono: fantasy; --ws-control-height: 99px; --ws-agent: red; text-transform: uppercase; font-style: italic; } }
+      @media (width: 1379px) { :scope { --ws-mono: fantasy; --ws-control-height: 99px; --ws-agent: red; --kbn-agent: red; --font-mono: fantasy; text-transform: uppercase; font-style: italic; } }
     `),
     file(WORKSPACE_HOST, `${project}/.felt/research/workspace/mask-validation/theme.css`, 'text/css', '{ ] broken css'),
     file(WORKSPACE_HOST, report, 'text/html', reportHTML),
