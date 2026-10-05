@@ -206,6 +206,9 @@
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .ws-placeholder { background: var(--ws-paper); }
+.ws-media-poster { display: none; position: absolute; inset: 0 0 var(--ws-label-height); place-items: center; background: var(--ws-paper); color: var(--ws-ink-muted); font: 64px/1 var(--ws-serif); pointer-events: none; z-index: 5; }
+.ws-media-page:is(.ws-receded,.ws-parked) .ws-media-poster { display: grid; }
+.ws-media-page:is(.ws-receded,.ws-parked) .ws-content { opacity: 0; pointer-events: none; }
 .ws-body-status { color: var(--ws-ink-muted); font: italic var(--ws-chrome-size)/1.45 var(--ws-serif); }
 
 /* Workspace wrappers keep the shared renderer's file instruments on paper. */
@@ -242,11 +245,16 @@
 .ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); z-index: 2; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-reader { --ws-stage-inset: var(--ws-inset); }
+  .ws-reader { --ws-stage-inset: 0px; --ws-prose-padding: 24px 16px 48px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
-  .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; min-height: var(--ws-phone-nav-height); padding: 0 var(--ws-small-gap); }
+  .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
+  .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
+  .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
+  .ws-sheet::after { display: none; }
+  .ws-labelbar { display: none; }
+  .ws-media-poster { bottom: 0; }
   .ws-nav-lead, .ws-nav-tabs, .ws-worker-pill:not(:empty) { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
-  .ws-nav-tabs { grid-row: 2; grid-column: 1 / -1; }
+  .ws-nav-tabs { display: none; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); }
   .ws-worker-pill .ws-worker-control { width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0; justify-content: center; }
   .ws-worker-pill :is(.ws-worker-state, .ws-worker-elapsed) { display: none; }
@@ -256,15 +264,26 @@
   .ws-reader .ws-review-plate .kbn-ctl-btn { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); }
   .ws-return { width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; font-size: 0 !important; flex: none; padding: 0; }
   .ws-return::before { content: '‹'; font-size: var(--ws-section-size); }
-  .ws-channel-title { text-align: center; flex: 1; }
+  .ws-channel-title { text-align: center; flex: 1; height: 44px; font-size: 19px !important; }
+  .ws-channel-title::after { display: none; }
+  .ws-worker-pill .kbn-card-worker { display: grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; font-size: 0; border: 0; background: none; }
+  .ws-worker-pill .kbn-card-worker:not(:has(.ws-worker-dot))::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--ws-machine); }
+  .ws-worker-pill :is(.kbn-card-worker-waiting,.kbn-card-worker-attention)::before { background: var(--ws-owed); }
+  .ws-worker-pill :is(.ws-worker-state,.ws-worker-elapsed) { display: none; }
   .ws-tabs { grid-row: 2; grid-column: 1 / -1; padding: 0 var(--ws-small-gap); border-top: var(--ws-line-width) solid var(--ws-hairline); }
   .ws-tab { height: var(--ws-phone-target); }
-  .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) 1fr var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); min-height: var(--ws-thumb-height); border-top: var(--ws-line-width) solid var(--ws-hairline); }
+  .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) minmax(0, 1fr) var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); height: calc(var(--ws-thumb-height) + env(safe-area-inset-bottom)); flex: none; border-top: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); touch-action: pan-y; user-select: none; }
+  .ws-page-choice { min-width: 0; height: 55px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 1px; padding: 0 4px; }
+  .ws-thumb-title, .ws-thumb-arrival { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-thumb-title { font: 17px/1.1 var(--ws-serif); }
+  .ws-thumb-arrival, .ws-position { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: 0; color: var(--ws-ink-muted); }
   .ws-thumb-button { width: var(--ws-phone-target); height: var(--ws-phone-target); font-size: var(--ws-section-size) !important; }
   .ws-position { text-align: center; color: var(--ws-ink-muted); }
   .ws-icon-button, .ws-sidebar, .ws-sidebar-toggle, .ws-page .ws-edge { display: none !important; }
   .ws-label-title { max-width: 50%; }
-  .ws-prose, .ws-content .kbn-detail-prose { padding: var(--ws-gap) var(--ws-inset); }
+  .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
+  .ws-content .kbn-fileview-text:not(:has(> .kbn-detail-prose)) { padding-inline: 16px; }
+  .ws-content .kbn-fileview-text > .md-code-block { padding-inline: 0; }
   .ws-menu-item { min-height: var(--ws-phone-target); }
 }
 @media (pointer: coarse) {

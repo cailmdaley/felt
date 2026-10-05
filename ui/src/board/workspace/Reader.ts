@@ -19,6 +19,8 @@ import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
 import { ReceiptArrivals } from './receiptMotion.js'
+import { installBarSwipe, PhoneTopbar } from './PhoneGestures.js'
+import { PageSheet } from './PageSheet.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -86,6 +88,11 @@ export class Reader {
   private readonly returnButton: HTMLButtonElement
   private readonly conversation = element('div', 'ws-worker-pill')
   private readonly position = element('span', 'ws-position')
+  private readonly pageTitle = element('span', 'ws-thumb-title')
+  private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
+  private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
+  private readonly stopSwipe: () => void
+  private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
   private readonly next: HTMLButtonElement
@@ -149,7 +156,13 @@ export class Reader {
       if (doc) this.openMenu(doc, thumbMenu)
     }, 'Document menu')
     const thumb = element('div', 'ws-thumbbar')
-    thumb.append(this.prev, this.position, this.next, thumbMenu)
+    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
+    const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
+    pageChoice.setAttribute('aria-haspopup', 'dialog')
+    pageChoice.setAttribute('aria-expanded', 'false')
+    pageChoice.append(this.pageTitle, this.arrivalSummary, this.position)
+    thumb.append(this.prev, pageChoice, this.next, thumbMenu)
+    this.stopSwipe = installBarSwipe(thumb, () => this.active && this.phone.matches, delta => this.step(delta))
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -176,13 +189,14 @@ export class Reader {
     this.sidebar.append(this.sidebarPicker.el)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
-    this.el.append(this.veil, this.navbar, main, thumb, this.announcement)
+    this.el.append(this.veil, this.navbar, main, thumb, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
       onRefreshProse: opts.onRefreshProse,
       onSelect: key => opts.onSelect(key),
       onFrame: frame => this.prepareFrame(frame),
+      onScroll: (key, y) => this.topbar.scroll(key, y),
     })
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
@@ -208,7 +222,7 @@ export class Reader {
 
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
-    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
+    if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu(); this.pageSheet.hide() }
     const arrivals = this.receipts.observe(channel, ready)
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
@@ -254,6 +268,7 @@ export class Reader {
     this.cancelResize?.()
     this.sidebarFlight.setVisible(false, animate)
     this.active = false
+    this.pageSheet.hide()
     this.tabs.setVisible(false)
     this.closeMenu()
     this.el.inert = true
@@ -323,9 +338,18 @@ export class Reader {
       this.fillLabel(frame, ch.labels[i])
     })
     this.tabs.setCompact(this.expanded)
-    this.tabs.fresh(this.seen.observe(ch, this.selected ?? '', this.channelReady))
+    const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
+    this.tabs.fresh(fresh)
+    this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
     this.position.textContent = `${index + 1} / ${ch.documents.length}`
+    const doc = ch.documents[index]
+    if (doc) {
+      const metadata = documentLabelMetadata(doc, ch.labels[index], ch.owner)
+      this.pageTitle.textContent = doc.kind === 'fiber' ? ch.labels[index] : metadata.title
+      this.arrivalSummary.textContent = metadata.summary
+      this.topbar.select(doc.key)
+    }
     this.prev.disabled = index <= 0
     this.next.disabled = index >= ch.documents.length - 1
     const announcement = `${ch.labels[index]}, ${index + 1} of ${ch.documents.length}`
@@ -335,6 +359,12 @@ export class Reader {
   private prepareFrame(frame: DocumentFrame): void {
     frame.el.classList.toggle('ws-text-page', ['fiber', 'text', 'markdown', 'code'].includes(frame.doc.kind))
     frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
+    if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') {
+      frame.el.classList.add('ws-media-page')
+      const poster = element('div', 'ws-media-poster', frame.doc.kind === 'audio' ? '♪' : '▷')
+      poster.setAttribute('aria-hidden', 'true')
+      frame.sheet.append(poster)
+    }
     frame.el.setAttribute('role', 'tabpanel')
     frame.el.setAttribute('aria-label', frame.doc.name)
     const glyph = element('span', 'ws-kind-glyph')
@@ -389,7 +419,11 @@ export class Reader {
     return Math.min(max, width)
   }
   private layoutNavbar(): void {
-    if (this.phone.matches) { this.navbar.style.removeProperty('grid-template-columns'); return }
+    if (this.phone.matches) {
+      this.navbar.style.removeProperty('grid-template-columns')
+      this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
+      return
+    }
     const style = getComputedStyle(this.navbar)
     const gap = parseFloat(style.columnGap) || 12
     const padLeft = parseFloat(style.paddingLeft) || 12
@@ -459,6 +493,7 @@ export class Reader {
     }
   }
   private readonly relayout = (): void => {
+    if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.renderSidebar()
     this.layout(false)
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
@@ -613,6 +648,7 @@ export class Reader {
     this.sidebarPicker.refresh(this.sidebarShown)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
+    if (this.pageSheet.isOpen) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
@@ -684,6 +720,8 @@ export class Reader {
   dispose(): void {
     this.cancelResize?.()
     this.closeMenu()
+    this.stopSwipe()
+    this.pageSheet.dispose()
     this.observer?.disconnect()
     window.clearInterval(this.workerClock)
     window.removeEventListener('resize', this.relayout)

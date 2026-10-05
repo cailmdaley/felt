@@ -15,17 +15,29 @@ const tests = []
 const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce') => tests.push({ name, run, viewport, sidebarChoice, reducedMotion })
 const selected = p => p.locator('.ws-page.ws-selected')
 const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label
-const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true })
+const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true, includeHidden: true })
 async function open(p, expected = 'calibration-report') {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click()
-  await tab(p, 'calibration-report').waitFor()
+  await tab(p, 'calibration-report').waitFor({ state: 'attached' })
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(expected))
 }
 async function choose(p, label) {
-  await tab(p, label).click()
+  if (await p.locator('.ws-page-choice').isVisible()) {
+    await p.locator('.ws-page-choice').click()
+    const row = p.locator('.ws-page-sheet-row').filter({ has: p.locator('.ws-page-sheet-title', { hasText: displayLabel(label) }) })
+    if (await p.evaluate(() => navigator.maxTouchPoints > 0)) await row.tap()
+    else await row.click()
+    await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
+  } else await tab(p, label).click()
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
+async function chooseDeskColumn(p, index) {
+  const segment = p.locator(`.kbn-folio-seg[data-folio="${index}"]`)
+  if (!await segment.isVisible()) return
+  await segment.click()
+  await poll(p, index => document.querySelector(`.kbn-folio-seg[data-folio="${index}"]`)?.getAttribute('aria-selected') === 'true', index)
+}
 async function revealLatestFiles(p) {
   const latest = p.locator('.ws-overview-latest')
   await latest.waitFor()
@@ -339,8 +351,10 @@ test('Filmstrip previews share a safe budget, condense instantly, and retain sel
   await poll(p, () => !document.querySelector('.ws-tabs').classList.contains('ws-strip-film'))
   assert.equal(await film.locator('.ws-tab-thumb:visible').count(), 0)
   if (process.env.WORKSPACE_SHOTS) {
-    await p.locator('.ws-tab-fresh').scrollIntoViewIfNeeded()
+    await p.locator('.ws-page-choice').click()
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-phone.png` })
+    await p.keyboard.press('Escape')
+    await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
   }
   await choose(p, 'brief.md')
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
@@ -439,7 +453,7 @@ test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p =
   assert.ok(entering.frames.every(frame => 'transform' in frame && 'opacity' in frame && !('filter' in frame)))
   await p.waitForTimeout(70)
   await p.locator('.ws-sidebar-toggle').click()
-  await p.waitForTimeout(330)
+  await poll(p, () => !document.querySelector('.ws-sidebar-flight'))
   assert.equal(await p.locator('.ws-sidebar-flight').count(), 0)
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
   await p.locator('.ws-sidebar-toggle').click()
@@ -692,6 +706,7 @@ for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pa
   await poll(p, () => [...document.querySelectorAll('audio')].some(e => !e.paused && e.currentTime > 0))
   const other = `tone.${format === 'mp3' ? 'wav' : 'mp3'}`
   await choose(p, other); assert.ok(await audio.evaluate(a => a.paused))
+  assert.ok(await audio.evaluate(a => getComputedStyle(a.closest('.ws-content')).opacity === '0' && getComputedStyle(a.closest('.ws-sheet').querySelector('.ws-media-poster')).display === 'grid'), 'receded audio shows a poster, never live controls')
   await audio.evaluate(a => { window.__audioPausedTime = a.currentTime })
   await selected(p).locator('audio').evaluate(async a => { await a.play() })
   assert.equal(await p.locator('audio').evaluateAll(as => as.filter(a => !a.paused).length), 1)
@@ -743,11 +758,16 @@ test('Audio waveform, transport, comparison, keep-position and keyboard guards',
 
 for (const format of ['mp4', 'webm']) test(`Video ${format} plays and seeks native fixture`, async p => {
   await open(p); await choose(p, `test.${format}`)
-  const video = selected(p).locator('video')
+  const video = p.getByRole('tabpanel', { name: `test.${format}`, exact: true, includeHidden: true }).locator('video')
   await video.evaluate(async v => { await v.play() })
   await poll(p, () => [...document.querySelectorAll('video')].some(v => v.currentTime > 0 && v.videoWidth > 0))
   await video.evaluate(v => { v.pause(); v.currentTime = 0.5 })
   await poll(p, () => [...document.querySelectorAll('video')].some(v => !v.seeking && Math.abs(v.currentTime - 0.5) < 0.1))
+  await video.evaluate(v => { window.__video = v })
+  await choose(p, 'Constitution')
+  assert.ok(await video.evaluate(v => v.paused && getComputedStyle(v.closest('.ws-content')).opacity === '0' && getComputedStyle(v.closest('.ws-sheet').querySelector('.ws-media-poster')).display === 'grid'))
+  await choose(p, `test.${format}`)
+  assert.ok(await video.evaluate(v => v === window.__video && Math.abs(v.currentTime - 0.5) < 0.1 && getComputedStyle(v.closest('.ws-content')).opacity === '1'))
 })
 
 test('Native PDF renderer loads fixture; owner route and first-page preview', async p => {
@@ -788,7 +808,17 @@ test('Remote worker pill records attach handler without launching a terminal', a
   assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
 })
 
-test('Phone overview single column, reader tabs, footer stepping and Back', async p => {
+test('Phone overview single column, reader sheet, footer stepping and Back', async p => {
+  const switcher = await p.locator('.kbn-viewtabs').boundingBox()
+  assert.equal(Math.round(switcher.y + switcher.height), 844, 'view switcher sits at the bottom')
+  for (const view of ['desk', 'chronicle', 'shelf']) assert.ok((await p.locator(`[data-view="${view}"]`).boundingBox()).height >= 44)
+  const seasons = p.locator('.kbn-viewtabs-lens')
+  if (await seasons.locator('.kbn-lens-chip').count()) {
+    const gear = await p.locator('.kbn-viewtabs-settings').boundingBox(), lane = await seasons.boundingBox()
+    assert.ok(lane.x + lane.width <= gear.x, 'season scrollport ends before Settings')
+    await seasons.evaluate(el => { el.scrollLeft = el.scrollWidth })
+    assert.ok(await seasons.evaluate(el => el.scrollLeft > 0))
+  }
   await p.locator('[data-view="shelf"]').click()
   await poll(p, () => document.querySelector('.ws-overview-change[data-uid]')?.getClientRects().length > 0)
   const firstChange = p.locator('.ws-overview-change[data-uid]').first()
@@ -799,11 +829,12 @@ test('Phone overview single column, reader tabs, footer stepping and Back', asyn
   })
   assert.equal(firstBounds.scrollTop, 0, 'the phone overview has not scrolled')
   assert.ok(firstBounds.top >= firstBounds.viewTop && firstBounds.bottom <= firstBounds.viewBottom, 'the first changed row is visible on entry')
+  assert.equal((await p.locator('.ws-overview').boundingBox()).y, 0, 'overview starts above the bottom switcher')
   await poll(p, () => document.querySelectorAll('.ws-overview-folio:not([hidden])').length >= 2)
   const folios = await p.locator('.ws-overview-folio:visible').evaluateAll(es => es.map(e => e.getBoundingClientRect().x))
   assert.ok(folios.length > 1 && folios.every(x => Math.abs(x - folios[0]) < 2))
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
-  await tab(p, 'calibration-report').waitFor()
+  await tab(p, 'calibration-report').waitFor({ state: 'attached' })
   assert.ok(await p.locator('.ws-thumbbar').isVisible())
   await p.getByRole('button', { name: 'Next document', exact: true }).click()
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'false')
@@ -823,10 +854,92 @@ test('Phone HTML reader retains its opaque frame and reading position', async p 
   await p.getByRole('button', { name: 'Previous document', exact: true }).click()
   assert.equal(await reportY(p), 160)
   const box = await selected(p).boundingBox()
-  assert.ok(box.x >= 11 && box.width <= 367, 'HTML page stays in phone gutters')
+  assert.equal(box.x, 0, 'HTML page starts at the phone edge')
+  assert.equal(box.width, p.viewportSize().width, 'HTML page fills the phone width')
   await mkdir(shots, { recursive: true })
   await p.screenshot({ path: resolve(shots, 'sandbox-report-phone.png') })
 }, { width: 390, height: 844 })
+
+for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
+  test(`Phone ${viewport.width}: edge-to-edge page, modal sheet choice, focus and browser Back`, async p => {
+    await open(p); await reportReady(p)
+    const geometry = await selected(p).evaluate(el => {
+      const rect = el.getBoundingClientRect(), sheet = getComputedStyle(el.querySelector('.ws-sheet'))
+      return { x: rect.x, width: rect.width, border: sheet.borderTopWidth, radius: sheet.borderRadius, shadow: sheet.boxShadow }
+    })
+    assert.equal(geometry.x, 0); assert.equal(geometry.width, viewport.width)
+    assert.equal(geometry.border, '0px'); assert.equal(geometry.radius, '0px'); assert.equal(geometry.shadow, 'none')
+    assert.equal(await p.locator('.ws-nav-tabs').isVisible(), false)
+    assert.equal(await selected(p).locator('.ws-labelbar').isVisible(), false)
+    assert.equal((await p.locator('.ws-thumbbar').boundingBox()).height, 56)
+    const url = p.url()
+    const opener = p.getByRole('button', { name: 'Choose a page', exact: true })
+    await opener.click()
+    const sheet = p.getByRole('dialog', { name: 'Pages in this constitution' })
+    await sheet.waitFor()
+    assert.equal(p.url(), url, 'sheet is a same-address history layer')
+    assert.equal(await sheet.locator('.ws-page-sheet-row').count(), await tab(p, 'Constitution').evaluate(t => t.parentElement.children.length))
+    assert.equal(await sheet.locator('[aria-current="page"] .ws-page-sheet-title').innerText(), 'Calibration report')
+    assert.match(await sheet.locator('[aria-current="page"] .ws-page-sheet-summary').innerText(), /sent 1m ago · 3 receipts/)
+    for (let i = 0; i < 22; i++) {
+      await p.keyboard.press('Tab')
+      assert.ok(await sheet.evaluate(el => el.contains(document.activeElement)), 'native modal keeps focus inside the sheet')
+    }
+    await p.keyboard.press('l')
+    assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true', 'sheet keys cannot step reader')
+    await p.goBack()
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    assert.equal(p.url(), url); assert.ok(await opener.evaluate(el => el === document.activeElement))
+    await opener.click()
+    await sheet.getByRole('button', { name: 'Field note', exact: true }).click()
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    assert.equal(await tab(p, 'brief.md').getAttribute('aria-selected'), 'true')
+    await opener.click(); await p.mouse.click(10, 10)
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    await opener.click()
+    const grabber = await sheet.getByRole('button', { name: 'Close pages' }).boundingBox()
+    await swipe(p, grabber.x + grabber.width / 2, grabber.y + 20, grabber.x + grabber.width / 2, grabber.y + 90)
+    await poll(p, () => !document.querySelector('.ws-page-sheet').open)
+    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await poll(p, () => document.querySelector('.ws-reader')?.inert)
+  }, viewport)
+}
+
+test('Phone bar-only touch swipe steps, reverses and cancels; document vertical scroll only hides chrome', async p => {
+  await open(p); await reportReady(p)
+  const original = await selected(p).getAttribute('data-key')
+  const bar = await p.locator('.ws-thumbbar').boundingBox()
+  const y = bar.y + 22
+  await swipe(p, 220, y, 120, y + 4)
+  assert.notEqual(await selected(p).getAttribute('data-key'), original)
+  await swipe(p, 120, y, 220, y + 4)
+  assert.equal(await selected(p).getAttribute('data-key'), original)
+  await swipe(p, 220, y, 120, y, true)
+  assert.equal(await selected(p).getAttribute('data-key'), original)
+  await swipe(p, 5, y, 150, y)
+  assert.equal(await selected(p).getAttribute('data-key'), original, 'Safari edge-back starts are not claimed')
+  await swipe(p, 180, y, 184, y - 70)
+  assert.equal(await selected(p).getAttribute('data-key'), original, 'vertical bar pans are not pages')
+  await swipe(p, 190, 650, 194, 200)
+  assert.equal(await selected(p).getAttribute('data-key'), original, 'vertical report scroll is not a page gesture')
+  await poll(p, () => document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
+  await p.waitForTimeout(650) // Let the native touch fling settle before returning to the top.
+  await (await reportDocument(p)).evaluate(() => window.scrollTo(0, 0))
+  await poll(p, () => !document.querySelector('.ws-reader').classList.contains('ws-topbar-hidden'))
+}, { width: 390, height: 844 })
+
+async function swipe(p, x, y, endX, endY, cancel = false) {
+  const cdp = await p.context().newCDPSession(p)
+  const point = (x, y) => [{ x, y, radiusX: 1, radiusY: 1 }]
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: point(x, y) })
+  for (let i = 1; i <= 6; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: point(x + (endX - x) * i / 6, y + (endY - y) * i / 6) })
+    await p.waitForTimeout(20)
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] })
+  await p.waitForTimeout(80)
+  await cdp.detach()
+}
 
 test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
   await open(p)
@@ -976,8 +1089,12 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await open(p)
     await p.locator('.ws-review-plate').waitFor()
     if (device === 'phone') {
-      const sizes = await p.locator('.ws-review-plate button').evaluateAll(es => es.map(e => e.getBoundingClientRect().height))
-      assert.ok(sizes.every(height => height >= 44))
+      const buttons = await p.locator('.ws-review-plate button').evaluateAll(es => es.map(e => {
+        const rect = e.getBoundingClientRect()
+        return { x: rect.x, right: rect.right, y: rect.y, bottom: rect.bottom, height: rect.height }
+      }))
+      const bar = await p.locator('.ws-navbar').boundingBox()
+      assert.ok(buttons.every(rect => rect.height >= 44 && rect.x >= 0 && rect.right <= viewport.width && rect.y >= bar.y && rect.bottom <= bar.y + bar.height), 'phone review buttons remain reachable inside the top bar')
     }
     await shot('awaiting-review')
     await p.keyboard.press('t')
@@ -987,9 +1104,11 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await shot('toast')
     await p.keyboard.press('z')
     await p.locator('.ws-return').click()
+    await chooseDeskColumn(p, 1)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await poll(p, () => document.querySelector('.ws-worker-control')?.textContent.includes('12 m'))
     const dot = p.locator('.ws-worker-pill .ws-worker-dot')
+    assert.ok(await dot.isVisible(), 'phone compaction preserves the verdict lane worker dot')
     assert.equal(await p.evaluate(() => getComputedStyle(document.querySelector('.ws-worker-pill .ws-worker-dot')).animationName), 'none', 'reduced motion suppresses breathing')
     assert.ok(await p.locator('.ws-worker-pill .ws-turn-active').count())
     await shot('aloft')
@@ -1003,6 +1122,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.equal(await p.locator('.ws-worker-pill .ws-turn-active').count(), 0)
     await shot('waiting')
     await p.locator('.ws-return').click()
+    await chooseDeskColumn(p, 0)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
     await poll(p, () => document.querySelector('.ws-worker-control')?.dataset.workerState === 'no worker')
     await shot('no-worker')
@@ -1103,6 +1223,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /basalt-login-02/, 'foreign document owner remains in label')
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    if (device === 'phone') {
+      await p.locator('.kbn-folio-seg[data-folio="1"]').click()
+      await poll(p, () => document.querySelector('.kbn-folio-seg[data-folio="1"]')?.getAttribute('aria-selected') === 'true')
+    }
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     assert.match((await navbar.textContent()).trim(), /^aloft\s*12 m$/i, 'navbar names state and elapsed time, not agent; phone presents the dot')
     await choose(p, 'Constitution')
@@ -1150,6 +1274,7 @@ let passed = 0
 try {
   for (const { name, run, viewport, sidebarChoice, reducedMotion } of tests) {
     const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
+      hasTouch: !!viewport && viewport.width <= 700, isMobile: !!viewport && viewport.width <= 700,
       reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
     const page = await context.newPage()
     page.setDefaultTimeout(2000)
