@@ -208,6 +208,8 @@ test('Hostile report keys cannot queue verdicts or open controls; trusted and po
 test('Report reference batches are size-capped and limited to four responses a second', async p => {
   await open(p); await reportReady(p)
   const inner = await reportDocument(p)
+  // Keep ordinary scanner decoration out of the malicious sender's rate budget.
+  await inner.evaluate(() => document.querySelectorAll('code,a[href]').forEach(element => element.remove()))
   await p.waitForTimeout(1100)
   await inner.evaluate(() => {
     window.__referenceResponses = 0
