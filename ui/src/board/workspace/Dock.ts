@@ -259,6 +259,9 @@ function buildStrip(card: KanbanCard): HTMLElement {
   return strip
 }
 
+/** The meeting kind last picked, offered first by every composer this session. */
+let lastMeetingMode: MeetingMode = MEETING_MODES[0].value
+
 function ctlButton(label: string, cls: string): HTMLButtonElement {
   const btn = document.createElement('button')
   btn.type = 'button'
@@ -407,7 +410,8 @@ export class Dock {
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
   private guidance: HTMLElement | null = null
-  private dismissMeeting: (() => boolean) | null = null
+  private meetingArmed: () => boolean = () => false
+  private meetingStart: (() => void) | null = null
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
   private composerSend: ComposerSend | null = null
@@ -525,14 +529,15 @@ export class Dock {
 
   private dismissPopovers(): void {
     this.dismissConversation?.()
-    this.dismissMeeting?.()
     this.dismissParent?.()
   }
 
   private clear(): void {
     this.epoch++
     this.dismissPopovers()
-    this.dismissConversation = this.dismissMeeting = this.dismissParent = null
+    this.dismissConversation = this.dismissParent = null
+    this.meetingArmed = () => false
+    this.meetingStart = null
     for (const dispose of this.composerDisposers.splice(0)) dispose()
     if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
     this.searchDebounce = null
@@ -559,7 +564,7 @@ export class Dock {
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
-    return Boolean(this.dismissConversation?.() || this.dismissMeeting?.() || this.dismissParent?.())
+    return Boolean(this.dismissConversation?.() || this.dismissParent?.())
   }
 
 
@@ -910,9 +915,10 @@ export class Dock {
       fresh.classList.toggle('kbn-ctl-secondary', resumable)
       fresh.title = resumable ? 'Start a new session (⌥↵)' : ''
       resume.hidden = !resumable
-      message.placeholder = fiberPageColumn(card) === 'awaitingReview'
-        ? resumable ? 'Reply and resume…' : 'Reply and start…'
-        : 'What should the worker do next?'
+      message.placeholder = this.meetingArmed() ? 'A note for the meeting (optional)'
+        : fiberPageColumn(card) === 'awaitingReview'
+          ? resumable ? 'Reply and resume…' : 'Reply and start…'
+          : 'What should the worker do next?'
     }
     this.composerPaint()
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
@@ -985,7 +991,11 @@ export class Dock {
     foot.className = 'kbn-ctl-composer-foot'
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
-    const meeting = this.meeting ? this.buildMeeting(card, err, send) : null
+    // With Meeting on, its own verb stands in for New session and Resume.
+    const meeting = this.meeting ? this.buildMeeting(card, err, send, armed => {
+      sends.hidden = armed
+      this.composerPaint?.()
+    }) : null
     sends.append(fresh, resume)
     foot.append(...(meeting ? [meeting] : []), sends)
 
@@ -1011,6 +1021,7 @@ export class Dock {
       if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
+      if (this.meetingArmed()) { this.meetingStart?.(); return }
       const previous = Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
       const resumeSession = event.altKey ? !previous : previous
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
@@ -1031,82 +1042,97 @@ export class Dock {
   }
 
   /**
-   * Meeting, for this constitution: a verb that asks one question first.
-   * Meeting opens a menu, Call, Room or Phone, and picking one starts the
-   * recording on the daemon — nothing records before that pick; Phone opens
-   * this tab's mic in the pick's gesture and keeps its controls on the board. The
-   * composer's message, with its images' lines, becomes the meeting's note,
-   * and the worker — live or
-   * not — receives the meeting as a joined constitution.
+   * Meeting, for this constitution: a switch in the composer's control row.
+   * Off by default. On, it shows the meeting's kind (Call, Room, Phone) and
+   * the composer's verbs become one, Start meeting, which records on the
+   * daemon — nothing records before that press; Phone opens this tab's mic in
+   * the press's gesture and keeps its controls on the board. The composer's
+   * message, with its images' lines, becomes the meeting's note, and the
+   * worker — live or not — receives the meeting as a joined constitution.
    *
-   * One meeting records at a time. While any does, the verb stays in its
-   * place, inert, naming the recording on hover; it is absent only where
-   * hark is not available. It follows the board's meeting poll.
+   * One meeting records at a time. While any does, the switch stays in its
+   * place, off and inert, naming the recording on hover; it is absent only
+   * where hark is not available. It follows the board's meeting poll.
+   * `onArm` hears the switch so the composer can trade its verbs.
    */
-  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend): HTMLElement {
+  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: (armed: boolean) => void = () => {}): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
-    const opener = ctlButton('Meeting', 'kbn-ctl-meet-btn')
-    opener.setAttribute('aria-haspopup', 'menu')
-    opener.setAttribute('aria-expanded', 'false')
-    const menu = document.createElement('div')
-    menu.className = 'kbn-ctl-menu'
-    menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', 'Meeting kind')
-    menu.hidden = true
-
-    let release: Release | null = null
-    const setOpen = (open: boolean): void => {
-      if (open === !menu.hidden) return
-      menu.hidden = !open
-      release?.(); release = null
-      if (open) release = anchorPopover(menu, opener, { placement: 'below-start' })
-      opener.setAttribute('aria-expanded', String(open))
-      wrap.classList.toggle('kbn-ctl-meet-open', open)
+    const toggle = document.createElement('label')
+    toggle.className = 'kbn-ctl-meet-switch'
+    const input = document.createElement('input')
+    input.type = 'checkbox'
+    input.setAttribute('role', 'switch')
+    const track = document.createElement('span')
+    track.className = 'kbn-ctl-meet-track'
+    track.setAttribute('aria-hidden', 'true')
+    const word = document.createElement('span')
+    word.textContent = 'Meeting'
+    toggle.append(input, track, word)
+    const modes = segmented<MeetingMode>('Meeting kind', MEETING_MODES.map(({ value, label }) => [value, label] as const), lastMeetingMode)
+    modes.el.classList.add('kbn-ctl-meet-modes')
+    modes.onPick(mode => { lastMeetingMode = mode })
+    const verb = ctlButton('', 'kbn-ctl-send kbn-ctl-meet-start')
+    verb.setAttribute('aria-label', 'Start meeting')
+    // The phone's narrow row drops the noun the switch beside it already says.
+    const verbFace = (busy: boolean): void => {
+      if (busy) { verb.textContent = 'Starting…'; return }
+      const noun = document.createElement('span')
+      noun.className = 'kbn-ctl-meet-noun'
+      noun.textContent = ' meeting'
+      verb.replaceChildren('Start', noun, ' ↵')
     }
-    this.composerDisposers.push(() => { release?.(); release = null })
+    verbFace(false)
 
-    this.dismissMeeting = () => {
-      if (menu.hidden) return false
-      setOpen(false)
-      if (opener.isConnected) opener.focus()
-      return true
-    }
     let starting = false
+    const arm = (on: boolean): void => {
+      input.checked = on
+      wrap.classList.toggle('kbn-ctl-meet-on', on)
+      modes.el.hidden = verb.hidden = !on
+      onArm(on)
+    }
+    arm(false)
+    input.addEventListener('change', () => arm(input.checked))
+    this.meetingArmed = () => input.checked && !input.disabled
+
     const paint = (): void => {
       const control = this.meeting
       if (!control) return
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
       wrap.hidden = !control.canJoin() && !recording
-      opener.disabled = starting || send.busy() || !control.canJoin()
-      opener.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
-      if (opener.disabled) setOpen(false)
+      const held = starting || send.busy() || !control.canJoin()
+      input.disabled = held
+      modes.setDisabled(held)
+      verb.disabled = held
+      toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
+      if (!control.canJoin() && input.checked && !starting) arm(false)
     }
     this.meetingPaint = paint
 
-    const start = (mode: MeetingMode): void => {
-      if (starting || send.busy() || !this.meeting?.canJoin()) return
-      setOpen(false)
+    const start = (): void => {
+      if (!input.checked || starting || send.busy() || !this.meeting?.canJoin()) return
       starting = true
       send.setBusy(true)
-      opener.textContent = 'Starting…'
+      verbFace(true)
       err.style.display = 'none'
-      // The join is called inside the pick's gesture, so Phone can open the
+      // The join is called inside the press's gesture, so Phone can open the
       // mic; it resolves the note (uploading any images) after that.
       const epoch = this.epoch
       let joined: Promise<MeetingJoinResult>
-      try { joined = this.meeting!.join(card, mode, send.compose) }
+      try { joined = this.meeting!.join(card, modes.value, send.compose) }
       catch (error) { joined = Promise.reject(error) }
+      let began = false
       void joined.then(({ error, delivered }) => {
         if (epoch !== this.epoch) return
         if (error) {
           err.textContent = error
           err.style.display = ''
-        } else if (delivered) {
+        } else {
+          began = true
           // A recording whose worker never received the note keeps it, and
           // its images, for another try.
-          send.sent()
+          if (delivered) send.sent()
         }
       }).catch((error: unknown) => {
         if (epoch !== this.epoch) return
@@ -1114,54 +1140,18 @@ export class Dock {
         err.style.display = ''
       }).finally(() => {
         starting = false
-        opener.textContent = 'Meeting'
+        verbFace(false)
+        if (began && epoch === this.epoch) arm(false)
         send.setBusy(false)
       })
     }
-    const items = MEETING_MODES.map(({ value, label }) => {
-      const item = document.createElement('button')
-      item.type = 'button'
-      item.className = 'kbn-ctl-menu-item'
-      item.setAttribute('role', 'menuitem')
-      item.textContent = label
-      item.addEventListener('click', (e) => {
-        e.stopPropagation()
-        start(value)
-      })
-      return item
-    })
-    menu.append(...items)
-
-    opener.addEventListener('click', (e) => {
+    this.meetingStart = start
+    verb.addEventListener('click', (e) => {
       e.stopPropagation()
-      const opening = menu.hidden
-      setOpen(opening)
-      if (opening) items[0].focus()
-    })
-    menu.addEventListener('keydown', (e) => {
-      const at = items.indexOf(document.activeElement as HTMLButtonElement)
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault()
-        const step = e.key === 'ArrowDown' ? 1 : -1
-        items[(at + step + items.length) % items.length].focus()
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        setOpen(false)
-        opener.focus()
-      }
-    })
-    // Focus moving to another control (Tab away) closes the menu; focus
-    // dropping to nothing does not. WebKit gives a clicked button no focus, so
-    // pressing Room blurs Call to the body before Room's click lands — closing
-    // then would hide Room under the pointer and swallow the pick. Presses
-    // outside close the menu when focus moves to another control.
-    menu.addEventListener('focusout', (e) => {
-      const to = e.relatedTarget as Node | null
-      if (to && !wrap.contains(to)) setOpen(false)
+      start()
     })
 
-    wrap.append(opener, menu)
+    wrap.append(toggle, modes.el, verb)
     paint()
     return wrap
   }

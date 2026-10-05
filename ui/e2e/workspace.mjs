@@ -863,12 +863,6 @@ async function anchoredInView(p, panel, trigger, label) {
 }
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Fiber page popovers open anchored and inside the viewport: ${device}`, async p => {
   await open(p); await choose(p, 'Constitution')
-  const mic = selected(p).locator('.kbn-ctl-meet-btn')
-  if (await mic.count()) {
-    await mic.click()
-    await anchoredInView(p, selected(p).locator('.kbn-ctl-meet .kbn-ctl-menu'), mic, 'Meeting menu')
-    await p.keyboard.press('Escape')
-  }
   await selected(p).locator('.kbn-detail-controls-toggle').click()
   for (const name of ['Effort', 'Agent']) {
     const control = selected(p).locator(`select[aria-label="${name}"]`)

@@ -278,7 +278,7 @@ describe('the composer takes pasted images', () => {
     paste(textarea(), [png('one.png')])
     resume().click()
 
-    const opener = composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!
+    const opener = composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
     expect(fresh().disabled).toBe(true)
     expect(opener.disabled).toBe(true)
     expect(composer.querySelector<HTMLButtonElement>('.kbn-ctl-image-remove')!.disabled).toBe(true)
@@ -309,8 +309,8 @@ describe('the composer takes pasted images', () => {
     fetch.mockReturnValueOnce(upload.promise)
     textarea().value = 'first thought'
     paste(textarea(), [png('one.png')])
-    composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
-    composer.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click()
+    composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.click()
+    composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
 
     textarea().value = 'first thought, and a second'
     upload.resolve(uploaded('/srv/a.png'))
@@ -330,15 +330,16 @@ describe('the composer takes pasted images', () => {
     }
     mount({ meeting })
     const start = (): void => {
-      composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
-      composer.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click()
+      const meetingSwitch = composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
+      if (!meetingSwitch.checked) meetingSwitch.click()
+      composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
     }
     fetch.mockResolvedValue(uploaded('/srv/a.png'))
     textarea().value = 'note'
     paste(textarea(), [png('one.png')])
 
     start()
-    await vi.waitFor(() => expect(composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.disabled).toBe(false))
+    await vi.waitFor(() => expect(composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.disabled).toBe(false))
     expect(chips()).toHaveLength(1)
     expect(textarea().value).toBe('note')
 
