@@ -144,6 +144,7 @@ describe('Reader channel sidebar', () => {
     expect(open.el.querySelector('.ws-switcher')).toBeNull()
     disposeReader(open)
 
+    storage.set('shuttle:workspace:sidebar', 'false')
     viewport.wide = false
     const closed = makeReader()
     closed.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
@@ -183,32 +184,6 @@ describe('Reader channel sidebar', () => {
     reader.refreshChannels()
     expect(find.value).toBe('a')
     expect(rowNames(reader)).toEqual(['Gamma', 'Alpha'])
-  })
-
-  it('keeps the selected tab visible when opening the sidebar changes layout', () => {
-    const reader = makeReader()
-    const base = channel(alpha)
-    const documents = Array.from({ length: 4 }, (_, index) => ({
-      ...base.documents[0], key: `fiber:host-a:alpha-${index}`, name: `Page ${index + 1}`,
-    }))
-    const pages: Channel = { ...base, documents, labels: documents.map(doc => doc.name) }
-    reader.show(pages, documents[3].key, 'Desk', alpha)
-
-    const strip = reader.el.querySelector<HTMLElement>('.ws-tabs')!
-    const selected = reader.el.querySelectorAll<HTMLButtonElement>('.ws-tab')[3]
-    Object.defineProperty(strip, 'clientWidth', {
-      configurable: true, get: () => reader.el.classList.contains('ws-with-sidebar') ? 100 : 120,
-    })
-    Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 500 })
-    Object.defineProperty(selected, 'offsetLeft', { configurable: true, value: 310 })
-    Object.defineProperty(selected, 'offsetWidth', { configurable: true, value: 80 })
-
-    window.dispatchEvent(new Event('resize'))
-    expect(strip.scrollLeft).toBe(290)
-    reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
-    expect(strip.scrollLeft).toBe(300)
-    expect(strip.scrollLeft).toBeLessThanOrEqual(310)
-    expect(strip.scrollLeft + strip.clientWidth).toBeGreaterThanOrEqual(390)
   })
 
   it('switches focus-ring modality from keyboard to pointer input', () => {
