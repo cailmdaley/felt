@@ -1,4 +1,6 @@
 import { keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
+import { referenceRuntime, type ReferenceTarget } from './ChannelReferences.js'
+import referenceStyles from './references.css?inline'
 
 export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
 const PROTOCOL = 'shuttle-document'
@@ -17,7 +19,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
 }
 
 /** This function is serialized, so every dependency arrives as an argument. */
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, protocol: string, version: number): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, references: typeof referenceRuntime, css: string, protocol: string, version: number): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -45,6 +47,10 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   let pendingRestore: ScrollPosition | null = null
   let restoreTimer: ReturnType<typeof setTimeout> | undefined
   const send = (type: string, payload: Record<string, unknown> = {}): void => parent.postMessage({ protocol, version, type, payload }, '*')
+  const style = document.createElement('style'); style.textContent = css
+  ;(document.head ?? document.documentElement).append(style)
+  const links = references(document, candidates => send('references', { candidates }),
+    (type, candidate) => { if (active) send(type, { candidate }) })
   const resolveScroller = (): HTMLElement | null => {
     if (scroller?.isConnected && scroller.scrollHeight > scroller.clientHeight + 1) return scroller
     const root = document.scrollingElement as HTMLElement | null
@@ -82,6 +88,9 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     if (data.type === 'active' && typeof payload.active === 'boolean') {
       active = payload.active
       if (!active) { pause(); position() }
+    } else if (data.type === 'references:scan') links.scan()
+    else if (data.type === 'references:resolved' && Array.isArray(payload.targets)) {
+      links.resolve(payload.targets.filter((target: ReferenceTarget) => target && typeof target.candidate === 'string' && typeof target.title === 'string' && typeof target.audio === 'boolean'))
     } else if (data.type === 'pause') pause()
     else if (data.type === 'restore' && Number.isFinite(payload.x) && Number.isFinite(payload.y)) {
       cancelRestore()
@@ -112,7 +121,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   // Delegation prepares dynamically inserted links too. In-page anchors stay local.
   document.addEventListener('click', event => {
     const link = (event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement | null
-    if (!link || link.hasAttribute('download') || link.getAttribute('href')?.startsWith('#')) return
+    if (!link || link.dataset.wsReference || link.hasAttribute('download') || link.getAttribute('href')?.startsWith('#')) return
     link.target = '_blank'
     link.rel = 'noopener noreferrer'
   }, true)
@@ -120,6 +129,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     window.setTimeout(() => {
       if (!active) pause()
       send('ready', { media: !!document.querySelector('audio,video') })
+      links.scan()
       // Report handlers installed at load get first refusal.
       window.addEventListener('keydown', event => {
         if (!forward(event) || !intent(event, 'reader', bindings, target => !forward({ target, defaultPrevented: false } as KeyboardEvent))) return
@@ -133,7 +143,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length

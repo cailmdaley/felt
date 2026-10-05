@@ -13,6 +13,7 @@
 import './FileViewerPanel.css'
 import './prose.css'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
+import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import {
@@ -54,6 +55,8 @@ export interface FileViewerOptions {
   decorateAudio?: (audio: HTMLAudioElement) => () => void
   /** Channel references are installed after every text-body replacement. */
   decorateText?: (pane: HTMLElement) => void
+  resolveReferences?: (candidates: string[]) => ReferenceTarget[]
+  onReferenceIntent?: (type: 'select' | 'play' | 'pause', candidate: string) => void
 }
 
 /**
@@ -452,6 +455,7 @@ function buildHtmlViewer(
     frame.setAttribute('sandbox', DOCUMENT_SANDBOX)
     let announced = false
     let charged = 0
+    let resolved = new Set<string>()
     const charge = (media = false): void => {
       const weight = Math.max(charged, byteWeights.get(frame) ?? 1, media ? 2 : 1)
       if (weight <= charged) return
@@ -465,6 +469,16 @@ function buildHtmlViewer(
         announced = true
         charge(message.payload.media === true)
         ready(frame, bridge)
+      } else if (message.type === 'references' && embedded.bridge === bridge) {
+        const candidates = message.payload.candidates
+        if (!Array.isArray(candidates) || candidates.length > 4096 || candidates.some(candidate => typeof candidate !== 'string' || candidate.length > 4096)) return
+        const targets = options.resolveReferences?.(candidates) ?? []
+        resolved = new Set(targets.map(target => target.candidate))
+        bridge.command('references:resolved', { targets })
+      } else if (['select', 'play', 'pause'].includes(message.type) && embedded.bridge === bridge && embedded.active) {
+        const candidate = message.payload.candidate
+        if (typeof candidate !== 'string' || !resolved.has(candidate)) return
+        options.onReferenceIntent?.(message.type as 'select' | 'play' | 'pause', candidate)
       } else if (message.type === 'key' && embedded.bridge === bridge && embedded.active && typeof message.payload.key === 'string') {
         options.onDocumentKey?.(message.payload as unknown as DocumentKey)
       } else if (message.type === 'media') {

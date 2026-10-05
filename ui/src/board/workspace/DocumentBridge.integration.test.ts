@@ -18,6 +18,7 @@ let errors: unknown[]
 let browser: { window: Window & typeof globalThis; close: () => void }
 const messages = vi.fn()
 const app = vi.fn()
+const select = vi.fn()
 const documents: WorkspaceDocument[] = [0, 1].map(n => ({
   key: `host-a:/report-${n}.html`, owner: 'host-a', path: `/report-${n}.html`,
   name: `report-${n}.html`, kind: 'html', provenance: [],
@@ -66,7 +67,7 @@ beforeEach(() => {
   track = document.createElement('div')
   document.body.append(track)
   host = new production.DocumentHost(track, {
-    shuttleBase: '', buildProse: () => document.createElement('div'), onSelect: vi.fn(),
+    shuttleBase: '', buildProse: () => document.createElement('div'), onSelect: select,
   })
   document.addEventListener('keydown', onAppKey)
 })
@@ -344,6 +345,34 @@ describe('minified production document keyboard bridge', () => {
     anchor.click()
     expect(anchor.target).toBe('')
     expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin')
+  })
+
+  it('resolves report candidates as one batch and rejects unresolved, foreign, and inactive selection intents', async () => {
+    reportHtml = '<html><body><code>report-1.html</code><code>missing.html</code><a href="./report-1.html">Next report</a><a href="https://example.com/report-1.html">report-1.html</a><div contenteditable><code>report-1.html</code></div></body></html>'
+    const frame = await report()
+    const content = frame.contentDocument!
+    expect(content.querySelectorAll('.ws-channel-reference')).toHaveLength(2)
+    expect(content.querySelector('code')?.parentElement?.title).toBe('report-1.html')
+    ;(content.querySelector('code') as HTMLElement).click()
+    expect(select).toHaveBeenLastCalledWith(documents[1].key)
+    select.mockClear()
+    const send = (candidate: string, source: MessageEventSource | null = frame.contentWindow) => window.dispatchEvent(new MessageEvent('message', {
+      source, data: { protocol: 'shuttle-document', version: 1, type: 'select', payload: { candidate } },
+    }))
+    send('missing.html'); send(documents[1].key); send('report-1.html', window); send('report-1.html', null)
+    expect(select).not.toHaveBeenCalled()
+    host.select(documents[1].key)
+    send('report-1.html')
+    expect(select).not.toHaveBeenCalled()
+    host.select(documents[0].key)
+    send('report-1.html')
+    expect(select).toHaveBeenCalledExactlyOnceWith(documents[1].key)
+    const dynamic = content.createElement('code'); dynamic.textContent = './report-1.html'
+    content.body.append(dynamic)
+    await vi.waitFor(() => expect(dynamic.parentElement?.className).toBe('ws-channel-reference'))
+    expect(messages.mock.calls.some(([message]) => message.type === 'references' && message.payload.candidates.includes('./report-1.html'))).toBe(true)
+    host.parkAll(); select.mockClear(); send('report-1.html')
+    expect(select).not.toHaveBeenCalled()
   })
 
   it('never applies the HTML transform to native PDF, image, or audio viewers', async () => {

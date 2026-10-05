@@ -82,7 +82,11 @@ export class DocumentHost {
       state.frame.doc = doc
     }
     this.select(selected)
-    for (const state of this.frames.values()) state.references?.scan()
+    for (const state of this.frames.values()) {
+      state.references?.scan()
+      const frame = state.frame.viewer?.querySelector('iframe')
+      if (frame) frameBridge(frame)?.command('references:scan')
+    }
     for (const page of this.audioPages.values()) page.updateDocuments(documents)
     this.pruneFrames()
   }
@@ -307,6 +311,8 @@ export class DocumentHost {
           return () => { page.dispose(); this.audioPages.delete(audio) }
         },
         decorateText: pane => this.bindReferences(state, pane),
+        resolveReferences: candidates => referenceTargets(candidates, state.frame.doc, this.documents),
+        onReferenceIntent: (type, candidate) => this.referenceIntent(state, type, candidate),
         onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
         onDocumentKey: key => this.forwardKey(state, key),
         onWeight: weight => queueMicrotask(() => {
@@ -517,13 +523,15 @@ export class DocumentHost {
     state.references?.dispose()
     const surface = referenceRuntime(root,
       candidates => surface.resolve(referenceTargets(candidates, state.frame.doc, this.documents)),
-      (type, candidate) => {
-        if (!state.active || state.frame.doc.key !== this.selected || type !== 'select') return
-        const target = resolveChannelReference(candidate, state.frame.doc, this.documents)
-        if (target) this.options.onSelect(target.key)
-      })
+      (type, candidate) => this.referenceIntent(state, type, candidate))
     state.references = surface
     surface.scan()
+  }
+
+  private referenceIntent(state: FrameState, type: 'select' | 'play' | 'pause', candidate: string): void {
+    if (!state.active || state.frame.doc.key !== this.selected || type !== 'select') return
+    const target = resolveChannelReference(candidate, state.frame.doc, this.documents)
+    if (target) this.options.onSelect(target.key)
   }
 
   private saveScroll(state: FrameState): void {
