@@ -205,7 +205,7 @@
 .ws-with-sidebar .ws-sidebar { display: flex; }
 /* The left context page stays under the column; only the right edge peeks into the stage. */
 .ws-with-sidebar .ws-page.ws-receded.ws-before { clip-path: inset(0 100% 0 0); pointer-events: none; }
-.ws-sidebar-toggle { flex: none; height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important; font-size: var(--ws-label-size) !important; text-transform: uppercase; white-space: nowrap; }
+.ws-sidebar-toggle { flex: none; height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important; font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: all-small-caps; letter-spacing: .025em; white-space: nowrap; }
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
 .ws-thumbbar { display: none; }
