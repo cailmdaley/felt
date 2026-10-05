@@ -17,24 +17,27 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
-	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
-var (
-	sessionsDiscoveryLocal   bool
-	sessionsDiscoveryHost    string
-	sessionsDiscoveryHarness string
+// sessionsDiscoveryOptions are the live-discovery flags of shuttle sessions.
+type sessionsDiscoveryOptions struct {
+	local   bool
+	host    string
+	harness string
+}
 
-	messageLocal       bool
-	messageFile        string
-	messageWake        bool
-	messageContextOnly bool
-	messageFrom        string
-	messageID          string
-	messageRequestJSON bool
-	messageAttachments []string
-)
+// messageOptions are the flags of shuttle message.
+type messageOptions struct {
+	local       bool
+	file        string
+	wake        bool
+	contextOnly bool
+	from        string
+	id          string
+	requestJSON bool
+	attachments []string
+}
 
 const maxMessageReceiptBytes = 512 << 10
 
@@ -44,35 +47,35 @@ type messageRequestReceipt struct {
 	FeltReceiptProduced bool   `json:"_felt_receipt_produced"`
 }
 
-func runShuttleSessionDiscovery(ctx context.Context) error {
+func (a *app) runShuttleSessionDiscovery(ctx context.Context, o *sessionsDiscoveryOptions) error {
 	var (
 		directory messaging.Directory
 		err       error
 	)
-	if sessionsDiscoveryLocal {
-		host, hostErr := resolveOwnHost("")
+	if o.local {
+		host, hostErr := a.resolveOwnHost("")
 		if hostErr != nil {
 			return hostErr
 		}
-		directory = messaging.Discover(ctx, sysenv.OS(), host)
+		directory = messaging.Discover(ctx, a.env, host)
 	} else {
-		directory, err = fetchPeerDirectory(sessionsDiscoveryHost, sessionsDiscoveryHarness)
+		directory, err = a.fetchPeerDirectory(o.host, o.harness)
 	}
 	if err != nil {
 		return fmt.Errorf("discovering sessions: %w", err)
 	}
-	directory = filterPeerDirectory(directory, sessionsDiscoveryHost, sessionsDiscoveryHarness)
-	if jsonOutput {
-		return outputJSON(directory)
+	directory = filterPeerDirectory(directory, o.host, o.harness)
+	if a.json {
+		return a.outputJSON(directory)
 	}
-	printPeerDirectory(directory)
+	a.printPeerDirectory(directory)
 	return nil
 }
 
 // fetchPeerDirectory reads the daemon's fleet-wide peer directory, narrowed
 // to one host or harness when either is given.
-func fetchPeerDirectory(host, harness string) (messaging.Directory, error) {
-	endpoint, err := daemonEndpoint("/api/v1/peers")
+func (a *app) fetchPeerDirectory(host, harness string) (messaging.Directory, error) {
+	endpoint, err := a.daemonEndpoint("/api/v1/peers")
 	if err != nil {
 		return messaging.Directory{}, err
 	}
@@ -88,7 +91,7 @@ func fetchPeerDirectory(host, harness string) (messaging.Directory, error) {
 		q.Set("harness", messaging.NormalizeHarness(strings.TrimSpace(harness)))
 	}
 	u.RawQuery = q.Encode()
-	return getDaemonJSON[messaging.Directory](u.String(), "parsing peer directory")
+	return getDaemonJSON[messaging.Directory](a, u.String(), "parsing peer directory")
 }
 
 func filterPeerDirectory(directory messaging.Directory, host, harness string) messaging.Directory {
@@ -124,7 +127,7 @@ func filterPeerDirectory(directory messaging.Directory, host, harness string) me
 	return directory
 }
 
-func printPeerDirectory(directory messaging.Directory) {
+func (a *app) printPeerDirectory(directory messaging.Directory) {
 	for _, session := range directory.Sessions {
 		detail := session.Title
 		if detail == "" {
@@ -133,17 +136,21 @@ func printPeerDirectory(directory messaging.Directory) {
 		if detail == "" {
 			detail = session.CWD
 		}
-		fmt.Printf("%s\t%s\t%s\n", session.Address, session.State, detail)
+		fmt.Fprintf(a.env.Stdout, "%s\t%s\t%s\n", session.Address, session.State, detail)
 	}
 	for _, gap := range directory.Gaps {
-		fmt.Fprintf(os.Stderr, "warning: %s/%s discovery failed: %s\n", gap.Host, gap.Harness, gap.Error)
+		fmt.Fprintf(a.env.Stderr, "warning: %s/%s discovery failed: %s\n", gap.Host, gap.Harness, gap.Error)
 	}
 }
 
-var shuttleMessageCmd = &cobra.Command{
-	Use:   "message <address|session-id|fiber> [text|-]",
-	Short: "Send a message and files to an existing session",
-	Long: `Resolves a shuttle:// address, a unique native session ID, or a fiber's
+func (a *app) shuttleMessageCmd() *cobra.Command { return a.messageCmd(&messageOptions{}) }
+
+// messageCmd is shuttle message with its flags bound into messageOpts.
+func (a *app) messageCmd(messageOpts *messageOptions) *cobra.Command {
+	shuttleMessageCmd := &cobra.Command{
+		Use:   "message <address|session-id|fiber> [text|-]",
+		Short: "Send a message and files to an existing session",
+		Long: `Resolves a shuttle:// address, a unique native session ID, or a fiber's
 current worker session, then routes text (and --attach files) through the local
 daemon to the owning host. The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
@@ -154,87 +161,99 @@ adds the message as context without starting or steering a model turn. Prints
 receipt status and message id. If interrupted, retry with the printed id using
 --message-id <id>. Exit 0 means accepted, submitted, queued, or context_added;
 exit 1 means rejected, unknown, or another command error.`,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if messageRequestJSON {
-			if !messageLocal {
-				return fmt.Errorf("--request-json requires --local")
+		Args: func(cmd *cobra.Command, args []string) error {
+			if messageOpts.requestJSON {
+				if !messageOpts.local {
+					return fmt.Errorf("--request-json requires --local")
+				}
+				if len(args) != 0 || messageOpts.file != "" || cmd.Flags().Changed("wake") || cmd.Flags().Changed("context-only") || messageOpts.from != "" || messageOpts.id != "" || len(messageOpts.attachments) != 0 {
+					return fmt.Errorf("--request-json cannot be combined with positional text, --file, --attach, --wake, --context-only, --from, or --message-id")
+				}
+				return nil
 			}
-			if len(args) != 0 || messageFile != "" || cmd.Flags().Changed("wake") || cmd.Flags().Changed("context-only") || messageFrom != "" || messageID != "" || len(messageAttachments) != 0 {
-				return fmt.Errorf("--request-json cannot be combined with positional text, --file, --attach, --wake, --context-only, --from, or --message-id")
+			if len(args) < 1 || len(args) > 2 {
+				return fmt.Errorf("expected an address and text, '-' for stdin, or --file <path>")
+			}
+			if messageOpts.file == "" && len(args) != 2 && len(messageOpts.attachments) == 0 {
+				return fmt.Errorf("expected text, '-' for stdin, --file <path>, or --attach <path>")
+			}
+			if messageOpts.file != "" && len(args) == 2 {
+				return fmt.Errorf("text and --file are mutually exclusive")
 			}
 			return nil
-		}
-		if len(args) < 1 || len(args) > 2 {
-			return fmt.Errorf("expected an address and text, '-' for stdin, or --file <path>")
-		}
-		if messageFile == "" && len(args) != 2 && len(messageAttachments) == 0 {
-			return fmt.Errorf("expected text, '-' for stdin, --file <path>, or --attach <path>")
-		}
-		if messageFile != "" && len(args) == 2 {
-			return fmt.Errorf("text and --file are mutually exclusive")
-		}
-		return nil
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		request, err := buildMessageRequest(cmd.InOrStdin(), args)
-		if err != nil {
-			return err
-		}
-		if !messageRequestJSON {
-			request.Address, err = resolveMessageTarget(request.Address)
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			request, err := a.buildMessageRequest(cmd.InOrStdin(), args, messageOpts)
 			if err != nil {
 				return err
 			}
-		}
-		id := request.MessageID
-		if !messageRequestJSON {
-			fmt.Fprintf(cmd.ErrOrStderr(), "sending %s to %s\n", id, request.Address)
-		}
-		var receipt messaging.Receipt
-		var receiptProduced bool
-		feltErrorCode := ""
-		if messageLocal {
-			host, hostErr := resolveOwnHost("")
-			if hostErr != nil {
-				return hostErr
+			if !messageOpts.requestJSON {
+				request.Address, err = a.resolveMessageTarget(request.Address)
+				if err != nil {
+					return err
+				}
 			}
-			receipt, err = messaging.Send(cmd.Context(), sysenv.OS(), host, request)
-			if messageRequestJSON && err != nil {
-				feltErrorCode = messaging.ErrorCode(err)
+			id := request.MessageID
+			if !messageOpts.requestJSON {
+				fmt.Fprintf(cmd.ErrOrStderr(), "sending %s to %s\n", id, request.Address)
 			}
-		} else {
-			receipt, err = postMessage(request)
-		}
-		receiptProduced = receipt.MessageID != "" && receipt.Address == request.Address && receipt.Status != "" && receipt.Transport != ""
-		if receipt.MessageID == "" {
-			receipt.MessageID = id
-		}
-		if receipt.Address == "" {
-			receipt.Address = request.Address
-		}
-		if receipt.Status == "" && err != nil {
-			receipt.Status = messaging.StatusUnknown
-			if receipt.Transport == "" {
-				receipt.Transport = "daemon"
+			var receipt messaging.Receipt
+			var receiptProduced bool
+			feltErrorCode := ""
+			if messageOpts.local {
+				host, hostErr := a.resolveOwnHost("")
+				if hostErr != nil {
+					return hostErr
+				}
+				receipt, err = messaging.Send(cmd.Context(), a.env, host, request)
+				if messageOpts.requestJSON && err != nil {
+					feltErrorCode = messaging.ErrorCode(err)
+				}
+			} else {
+				receipt, err = a.postMessage(request)
 			}
-			if receipt.Detail == "" {
-				receipt.Detail = err.Error()
+			receiptProduced = receipt.MessageID != "" && receipt.Address == request.Address && receipt.Status != "" && receipt.Transport != ""
+			if receipt.MessageID == "" {
+				receipt.MessageID = id
 			}
-		}
-		if messageRequestJSON {
-			response := messageRequestReceipt{Receipt: receipt, FeltErrorCode: feltErrorCode, FeltReceiptProduced: receiptProduced}
-			if outputErr := json.NewEncoder(cmd.OutOrStdout()).Encode(response); outputErr != nil {
-				return outputErr
+			if receipt.Address == "" {
+				receipt.Address = request.Address
 			}
-		} else if jsonOutput {
-			if outputErr := outputJSON(receipt); outputErr != nil {
-				return outputErr
+			if receipt.Status == "" && err != nil {
+				receipt.Status = messaging.StatusUnknown
+				if receipt.Transport == "" {
+					receipt.Transport = "daemon"
+				}
+				if receipt.Detail == "" {
+					receipt.Detail = err.Error()
+				}
 			}
-		} else {
-			fmt.Printf("%s %s (%s)\n", receipt.Status, receipt.Address, receipt.MessageID)
-		}
-		return messageReceiptError(id, receipt, err)
-	},
+			if messageOpts.requestJSON {
+				response := messageRequestReceipt{Receipt: receipt, FeltErrorCode: feltErrorCode, FeltReceiptProduced: receiptProduced}
+				if outputErr := json.NewEncoder(cmd.OutOrStdout()).Encode(response); outputErr != nil {
+					return outputErr
+				}
+			} else if a.json {
+				if outputErr := a.outputJSON(receipt); outputErr != nil {
+					return outputErr
+				}
+			} else {
+				fmt.Fprintf(a.env.Stdout, "%s %s (%s)\n", receipt.Status, receipt.Address, receipt.MessageID)
+			}
+			return messageReceiptError(id, receipt, err)
+		},
+	}
+	shuttleMessageCmd.Flags().StringVar(&messageOpts.file, "file", "", "read message text from a file ('-' for stdin)")
+	shuttleMessageCmd.Flags().StringArrayVar(&messageOpts.attachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.wake, "wake", true, "request that the native harness wake the addressed session (use --wake=false for context only)")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.contextOnly, "context-only", false, "deliver context without starting or steering a model turn")
+	shuttleMessageCmd.Flags().StringVar(&messageOpts.from, "from", "", "label the sender (default: detected harness thread or external)")
+	shuttleMessageCmd.Flags().StringVar(&messageOpts.id, "message-id", "", "supply an idempotency key for a safe retry")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.local, "local", false, "send through this host's native adapter without daemon routing")
+	_ = shuttleMessageCmd.Flags().MarkHidden("local")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.requestJSON, "request-json", false, "read one message request JSON frame from stdin")
+	_ = shuttleMessageCmd.Flags().MarkHidden("request-json")
+	return shuttleMessageCmd
 }
 
 func messageReceiptError(id string, receipt messaging.Receipt, err error) error {
@@ -254,26 +273,26 @@ func messageReceiptError(id string, receipt messaging.Receipt, err error) error 
 	}
 }
 
-func buildMessageRequest(stdin io.Reader, args []string) (messaging.Request, error) {
-	if messageRequestJSON {
+func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOptions) (messaging.Request, error) {
+	if o.requestJSON {
 		return readMessageRequestFrame(stdin)
 	}
-	text, err := readMessageText(stdin, args)
+	text, err := readMessageText(stdin, args, o.file)
 	if err != nil {
 		return messaging.Request{}, err
 	}
-	attachments, err := messaging.ReadAttachments(messageAttachments)
+	attachments, err := messaging.ReadAttachments(o.attachments)
 	if err != nil {
 		return messaging.Request{}, err
 	}
-	id := strings.TrimSpace(messageID)
+	id := strings.TrimSpace(o.id)
 	if id == "" {
 		id, err = newMessageID()
 		if err != nil {
 			return messaging.Request{}, err
 		}
 	}
-	return messaging.Request{Address: args[0], Text: text, From: resolveMessageSender(messageFrom), Wake: messageWake && !messageContextOnly, MessageID: id, Attachments: attachments}, nil
+	return messaging.Request{Address: args[0], Text: text, From: a.resolveMessageSender(o.from), Wake: o.wake && !o.contextOnly, MessageID: id, Attachments: attachments}, nil
 }
 
 func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
@@ -313,7 +332,7 @@ func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
 	return request, nil
 }
 
-func readMessageText(stdin io.Reader, args []string) (string, error) {
+func readMessageText(stdin io.Reader, args []string, messageFile string) (string, error) {
 	if messageFile != "" {
 		if messageFile == "-" {
 			return readMessageInput(stdin)
@@ -353,12 +372,12 @@ func newMessageID() (string, error) {
 	return "msg-" + hex.EncodeToString(raw[:]), nil
 }
 
-func resolveMessageSender(explicit string) string {
+func (a *app) resolveMessageSender(explicit string) string {
 	if explicit = strings.TrimSpace(explicit); explicit != "" {
 		return explicit
 	}
-	if harness, value := harnessSessionFromEnv(); value != "" {
-		if host, err := resolveOwnHost(""); err == nil {
+	if harness, value := a.harnessSessionFromEnv(); value != "" {
+		if host, err := a.resolveOwnHost(""); err == nil {
 			if address, err := messaging.FormatAddress(host, harness, value); err == nil {
 				return address
 			}
@@ -395,27 +414,27 @@ var harnessSessionEnv = []struct{ key, harness string }{
 // started from Codex, and is attributed to its Pi parent. Pi under a Codex
 // session (a confer worker) is the common nesting, so Pi wins; --from
 // overrides either.
-func harnessSessionFromEnv() (harness, id string) {
-	if strings.TrimSpace(os.Getenv("AI_AGENT")) == "pi" {
-		if value := strings.TrimSpace(os.Getenv("PI_SESSION_ID")); value != "" {
+func (a *app) harnessSessionFromEnv() (harness, id string) {
+	if strings.TrimSpace(a.env.Getenv("AI_AGENT")) == "pi" {
+		if value := strings.TrimSpace(a.env.Getenv("PI_SESSION_ID")); value != "" {
 			return "pi", value
 		}
 	}
 	for _, candidate := range harnessSessionEnv {
-		if value := strings.TrimSpace(os.Getenv(candidate.key)); value != "" {
+		if value := strings.TrimSpace(a.env.Getenv(candidate.key)); value != "" {
 			return candidate.harness, value
 		}
 	}
 	return "", ""
 }
 
-func postMessage(request messaging.Request) (messaging.Receipt, error) {
+func (a *app) postMessage(request messaging.Request) (messaging.Receipt, error) {
 	var receipt messaging.Receipt
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return receipt, fmt.Errorf("encoding message: %w", err)
 	}
-	endpoint, err := daemonEndpoint("/api/v1/messages")
+	endpoint, err := a.daemonEndpoint("/api/v1/messages")
 	if err != nil {
 		return receipt, err
 	}
@@ -427,7 +446,7 @@ func postMessage(request messaging.Request) (messaging.Receipt, error) {
 		endpoint += "/files"
 		timeout = 120 * time.Second
 	}
-	client := daemonHTTPClient(timeout)
+	client := a.daemonHTTPClient(timeout)
 	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return receipt, fmt.Errorf("reaching daemon at %s: %w", endpoint, err)
@@ -489,23 +508,4 @@ func validMessageFilesReceipt(request messaging.Request, receipt messaging.Recei
 		}
 	}
 	return true
-}
-
-func init() {
-	shuttleSessionsCmd.Flags().BoolVar(&sessionsDiscoveryLocal, "local", false, "query this host's native harness adapters directly")
-	_ = shuttleSessionsCmd.Flags().MarkHidden("local")
-	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscoveryHost, "host", "", "limit live session discovery to one host")
-	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscoveryHarness, "harness", "", "limit live session discovery to one harness")
-
-	shuttleMessageCmd.Flags().StringVar(&messageFile, "file", "", "read message text from a file ('-' for stdin)")
-	shuttleMessageCmd.Flags().StringArrayVar(&messageAttachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
-	shuttleMessageCmd.Flags().BoolVar(&messageWake, "wake", true, "request that the native harness wake the addressed session (use --wake=false for context only)")
-	shuttleMessageCmd.Flags().BoolVar(&messageContextOnly, "context-only", false, "deliver context without starting or steering a model turn")
-	shuttleMessageCmd.Flags().StringVar(&messageFrom, "from", "", "label the sender (default: detected harness thread or external)")
-	shuttleMessageCmd.Flags().StringVar(&messageID, "message-id", "", "supply an idempotency key for a safe retry")
-	shuttleMessageCmd.Flags().BoolVar(&messageLocal, "local", false, "send through this host's native adapter without daemon routing")
-	_ = shuttleMessageCmd.Flags().MarkHidden("local")
-	shuttleMessageCmd.Flags().BoolVar(&messageRequestJSON, "request-json", false, "read one message request JSON frame from stdin")
-	_ = shuttleMessageCmd.Flags().MarkHidden("request-json")
-	addShuttleCommand(shuttleMessageCmd)
 }

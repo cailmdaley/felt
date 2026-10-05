@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
-	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // This file is the Go half of the host-local state contract: where the hook
@@ -37,11 +36,11 @@ const (
 // explicit reports whether the env var named the path — an explicit path is
 // explicit intent, so it also overrides the write gate below. The path is ""
 // when the data directory cannot be resolved (no home to expand against).
-func shuttleStatePath(envVar, leaf string) (path string, explicit bool) {
-	if v := strings.TrimSpace(os.Getenv(envVar)); v != "" {
+func (a *app) shuttleStatePath(envVar, leaf string) (path string, explicit bool) {
+	if v := strings.TrimSpace(a.env.Getenv(envVar)); v != "" {
 		return v, true
 	}
-	dir, err := shuttle.DataDir(sysenv.OS())
+	dir, err := shuttle.DataDir(a.env)
 	if err != nil {
 		return "", false
 	}
@@ -49,14 +48,14 @@ func shuttleStatePath(envVar, leaf string) (path string, explicit bool) {
 }
 
 // eventsFilePath mirrors Shuttle.EventStream.default_events_file/0 exactly.
-func eventsFilePath() (path string, explicit bool) {
-	return shuttleStatePath("SHUTTLE_EVENTS_FILE", "events.jsonl")
+func (a *app) eventsFilePath() (path string, explicit bool) {
+	return a.shuttleStatePath("SHUTTLE_EVENTS_FILE", "events.jsonl")
 }
 
 // commitsFilePath mirrors Shuttle.CommitLedger.default_path/0 exactly — the
 // same resolver as the event stream, one leaf over.
-func commitsFilePath() (path string, explicit bool) {
-	return shuttleStatePath("SHUTTLE_COMMITS_FILE", "commits.jsonl")
+func (a *app) commitsFilePath() (path string, explicit bool) {
+	return a.shuttleStatePath("SHUTTLE_COMMITS_FILE", "commits.jsonl")
 }
 
 // shuttleSink applies the write gate to a resolved state path.
@@ -90,25 +89,25 @@ func shuttleSink(path string, explicit bool) (string, bool) {
 // eventsSink resolves the stream path and decides whether this host wants one.
 // SHUTTLE_EVENTS=off is the kill switch for a host that has ~/.shuttle but
 // wants no stream; it names the event stream and scopes to it.
-func eventsSink() (string, bool) {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("SHUTTLE_EVENTS")), "off") {
+func (a *app) eventsSink() (string, bool) {
+	if strings.EqualFold(strings.TrimSpace(a.env.Getenv("SHUTTLE_EVENTS")), "off") {
 		return "", false
 	}
-	return shuttleSink(eventsFilePath())
+	return shuttleSink(a.eventsFilePath())
 }
 
 // commitsSink resolves the commit ledger path under the same gate. The state
 // directory is the only switch here: the ledger has no stream to silence, and
 // a host without ~/.shuttle acquires no file.
-func commitsSink() (string, bool) {
-	return shuttleSink(commitsFilePath())
+func (a *app) commitsSink() (string, bool) {
+	return shuttleSink(a.commitsFilePath())
 }
 
 // eventsMaxBytes is the rollover threshold, overridable by
 // SHUTTLE_EVENTS_MAX_BYTES (bytes). A non-numeric or non-positive value falls
 // back to the default rather than disabling the bound.
-func eventsMaxBytes() int64 {
-	if v := strings.TrimSpace(os.Getenv("SHUTTLE_EVENTS_MAX_BYTES")); v != "" {
+func (a *app) eventsMaxBytes() int64 {
+	if v := strings.TrimSpace(a.env.Getenv("SHUTTLE_EVENTS_MAX_BYTES")); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
 			return n
 		}
@@ -117,9 +116,9 @@ func eventsMaxBytes() int64 {
 }
 
 // appendEventLine rotates if needed, then appends one line.
-func appendEventLine(path, line string) error {
-	if info, err := os.Stat(path); err == nil && info.Size() >= eventsMaxBytes() {
-		rotateEvents(path)
+func (a *app) appendEventLine(path, line string) error {
+	if info, err := os.Stat(path); err == nil && info.Size() >= a.eventsMaxBytes() {
+		a.rotateEvents(path)
 	}
 	return appendLine(path, line)
 }
@@ -136,14 +135,14 @@ func appendEventLine(path, line string) error {
 // inside a hook the agent harness blocks on: if the lock cannot be taken in
 // time the rotation is skipped and the next append tries again; the stream
 // runs a line over, never loses one.
-func rotateEvents(path string) {
+func (a *app) rotateEvents(path string) {
 	unlock, ok := lockEventsRotation(path + eventsLockSuffix)
 	if !ok {
 		return
 	}
 	defer unlock()
 
-	if info, err := os.Stat(path); err == nil && info.Size() >= eventsMaxBytes() {
+	if info, err := os.Stat(path); err == nil && info.Size() >= a.eventsMaxBytes() {
 		_ = os.Rename(path, path+eventsRotatedSuffix)
 	}
 }

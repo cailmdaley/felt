@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"text/template"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 // The tunnels install two supervisors' jobs from one fleet file: launchd
@@ -18,56 +21,53 @@ import (
 // the developer's own launchd/systemd session: HOME is redirected per test and
 // launchctl/systemctl are stubs on PATH that only record their arguments.
 
-// useHostGOOS runs a test as if this machine were `goos`.
-func useHostGOOS(t *testing.T, goos string) {
-	t.Helper()
-	prev := hostGOOS
-	t.Cleanup(func() { hostGOOS = prev })
-	hostGOOS = goos
+// tunnelHost is one isolated machine for a tunnels test: its own HOME and
+// fleet file, an app that runs as goos, and the install flags it passes.
+type tunnelHost struct {
+	env  *sysenv.Env
+	app  *app
+	opts tunnelsInstallOptions
 }
 
-// installIntoTemp redirects HOME and the install flags at scratch dirs, and
-// restores the package vars afterwards. An empty jobDir leaves the supervisor
-// to pick its own default location under the redirected HOME — which is the
-// placement worth asserting.
-func installIntoTemp(t *testing.T, jobDir string) string {
+// newTunnelHost is a host whose fleet file holds remotes. An empty goos keeps
+// this machine's own platform.
+func newTunnelHost(t *testing.T, goos, remotes string) *tunnelHost {
+	t.Helper()
+	env := testEnv(t)
+	writeRemotesIn(t, env, remotes)
+	a := newApp(env)
+	if goos != "" {
+		a.hostGOOS = goos
+	}
+	return &tunnelHost{env: env, app: a}
+}
+
+// installIntoTemp redirects HOME and the install flags at scratch dirs. An
+// empty jobDir leaves the supervisor to pick its own default location under the
+// redirected HOME — which is the placement worth asserting.
+func (h *tunnelHost) installIntoTemp(t *testing.T, jobDir string) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	prevJob, prevLog, prevSSH, prevWriteOnly :=
-		tunnelsJobDir, tunnelsLogDir, tunnelsAutoSSH, tunnelsWriteOnly
-	t.Cleanup(func() {
-		tunnelsJobDir, tunnelsLogDir, tunnelsAutoSSH, tunnelsWriteOnly =
-			prevJob, prevLog, prevSSH, prevWriteOnly
-	})
-	tunnelsJobDir = jobDir
-	tunnelsLogDir = filepath.Join(home, "logs")
-	tunnelsAutoSSH = "/usr/bin/autossh"
-	tunnelsWriteOnly = false
+	h.env.Set("HOME", home)
+	h.opts = tunnelsInstallOptions{jobDir: jobDir, logDir: filepath.Join(home, "logs"), autoSSH: "/usr/bin/autossh"}
 	return home
 }
 
-// stubSupervisorsOnPath puts recording stubs for launchctl and systemctl at the
-// front of PATH, so an install test can never reach the real login session.
+// stubSupervisors puts recording stubs for launchctl and systemctl first on
+// the host's PATH, so an install test can never reach the real login session.
 // Every call lands in one log, in order. probeExit is what the stub answers
 // `systemctl --user show-environment` with: 0 for a host with a systemd user
 // session, non-zero for one without.
-func stubSupervisorsOnPath(t *testing.T, probeExit int) func() string {
+func (h *tunnelHost) stubSupervisors(t *testing.T, probeExit int) func() string {
 	t.Helper()
-	dir := t.TempDir()
-	log := filepath.Join(dir, "calls.log")
+	log := filepath.Join(t.TempDir(), "calls.log")
 	for _, bin := range []string{"launchctl", "systemctl"} {
-		script := "#!/bin/sh\n" +
-			"echo \"" + bin + " $*\" >> " + log + "\n" +
-			"for arg in \"$@\"; do\n" +
-			"  if [ \"$arg\" = show-environment ]; then exit " + strconv.Itoa(probeExit) + "; fi\n" +
-			"done\n" +
-			"exit 0\n"
-		if err := os.WriteFile(filepath.Join(dir, bin), []byte(script), 0o755); err != nil {
-			t.Fatal(err)
-		}
+		sysenvtest.FakeCommand(t, h.env, bin, "echo \""+bin+" $*\" >> "+log+"\n"+
+			"for arg in \"$@\"; do\n"+
+			"  if [ \"$arg\" = show-environment ]; then exit "+strconv.Itoa(probeExit)+"; fi\n"+
+			"done\n"+
+			"exit 0\n")
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return func() string {
 		b, err := os.ReadFile(log)
 		if err != nil {
@@ -75,6 +75,21 @@ func stubSupervisorsOnPath(t *testing.T, probeExit int) func() string {
 		}
 		return string(b)
 	}
+}
+
+func (h *tunnelHost) install(requested []string) error {
+	return h.app.installTunnels(requested, h.opts)
+}
+
+// managedSpecs is the convergent install's selection: every tunnel the fleet
+// file asks this host to supervise.
+func (h *tunnelHost) managedSpecs(t *testing.T) []tunnelSpec {
+	t.Helper()
+	doc, err := h.app.loadRemotesFile()
+	if err != nil {
+		t.Fatalf("loadRemotesFile: %v", err)
+	}
+	return resolveManagedTunnelSpecs(doc)
 }
 
 func readFile(t *testing.T, path string) string {
@@ -90,12 +105,12 @@ func readFile(t *testing.T, path string) string {
 // label, in ~/Library/LaunchAgents, then bootout → bootstrap → kickstart. The
 // bootout is what makes a reinstall pick up the plist just written.
 func TestInstallTunnels_Launchd(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
-	useHostGOOS(t, "darwin")
-	calls := stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "darwin", `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	calls := h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := h.install([]string{"alpha"}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -119,12 +134,12 @@ func TestInstallTunnels_Launchd(t *testing.T) {
 // daemon-reload, enable, restart. `restart` rather than `enable --now` is what
 // makes a reinstall over a live tunnel serve the unit just written.
 func TestInstallTunnels_Systemd(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"ssh":"alpha-login","tunnel":{"manager":"systemd"}}]`)
-	useHostGOOS(t, "linux")
-	calls := stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","port":4001,"ssh":"alpha-login","tunnel":{"manager":"systemd"}}]`)
+	calls := h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := h.install([]string{"alpha"}); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -169,12 +184,12 @@ func TestInstallTunnels_Systemd(t *testing.T) {
 // refusal that names the alternative, and no half-written fleet: the probe runs
 // before the job directory is created.
 func TestInstallTunnels_SystemdWithoutUserSession(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
-	useHostGOOS(t, "linux")
-	calls := stubSupervisorsOnPath(t, 1)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	calls := h.stubSupervisors(t, 1)
+	home := h.installIntoTemp(t, "")
 
-	err := installTunnels([]string{"alpha"})
+	err := h.install([]string{"alpha"})
 	if err == nil {
 		t.Fatal("install must refuse without a systemd user session")
 	}
@@ -195,6 +210,7 @@ func TestInstallTunnels_SystemdWithoutUserSession(t *testing.T) {
 // the escape hatch the systemd refusal points at, so it must work on a host
 // with no user session at all (probe exit 1) without shelling anything.
 func TestInstallTunnels_WriteOnly(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		goos, manager, jobPath string
 	}{
@@ -203,13 +219,13 @@ func TestInstallTunnels_WriteOnly(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.goos, func(t *testing.T) {
-			writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"`+tc.manager+`"}}]`)
-			useHostGOOS(t, tc.goos)
-			calls := stubSupervisorsOnPath(t, 1)
-			home := installIntoTemp(t, "")
-			tunnelsWriteOnly = true
+			t.Parallel()
+			h := newTunnelHost(t, tc.goos, `[{"name":"alpha","port":4001,"tunnel":{"manager":"`+tc.manager+`"}}]`)
+			calls := h.stubSupervisors(t, 1)
+			home := h.installIntoTemp(t, "")
+			h.opts.writeOnly = true
 
-			if err := installTunnels([]string{"alpha"}); err != nil {
+			if err := h.install([]string{"alpha"}); err != nil {
 				t.Fatalf("install --write-only: %v", err)
 			}
 			if _, err := os.Stat(filepath.Join(home, tc.jobPath)); err != nil {
@@ -225,12 +241,12 @@ func TestInstallTunnels_WriteOnly(t *testing.T) {
 // TestInstallTunnels_UnsupportedPlatform — neither supervisor exists, so say
 // which two do rather than writing files nothing can run.
 func TestInstallTunnels_UnsupportedPlatform(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
-	useHostGOOS(t, "windows")
-	stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "windows", `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 
-	err := installTunnels([]string{"alpha"})
+	err := h.install([]string{"alpha"})
 	if err == nil {
 		t.Fatal("install must refuse on a platform with no supervisor")
 	}
@@ -271,27 +287,17 @@ func renderForTest(t *testing.T, tmplText string, spec tunnelSpec) string {
 	return string(out)
 }
 
-// managedSpecs is the convergent install's selection: every tunnel the fleet
-// file asks this host to supervise.
-func managedSpecs(t *testing.T) []tunnelSpec {
-	t.Helper()
-	doc, err := loadRemotesFile()
-	if err != nil {
-		t.Fatalf("loadRemotesFile: %v", err)
-	}
-	return resolveManagedTunnelSpecs(doc)
-}
-
 // TestResolveTunnelSpecs_FromFleetFile — the fleet file is the only source, and
 // every field a job needs comes from it.
 func TestResolveTunnelSpecs_FromFleetFile(t *testing.T) {
-	writeRemotes(t, `{"version":1,"launchd_label_prefix":"com.example","remotes":[
+	t.Parallel()
+	h := newTunnelHost(t, "", `{"version":1,"launchd_label_prefix":"com.example","remotes":[
 	  {"name":"beta","port":4004,"ssh":"beta-login","remote_port":4200,
 	   "tunnel":{"manager":"launchd","multiplex":true}},
 	  {"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}
 	]}`)
 
-	specs := managedSpecs(t)
+	specs := h.managedSpecs(t)
 	if len(specs) != 2 {
 		t.Fatalf("got %d specs, want 2", len(specs))
 	}
@@ -321,10 +327,11 @@ func TestResolveTunnelSpecs_FromFleetFile(t *testing.T) {
 // between hubs, so both supervisor names select. Which one renders is the
 // host's business.
 func TestResolveTunnelSpecs_ManagedByEitherSupervisor(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}},
+	t.Parallel()
+	h := newTunnelHost(t, "", `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}},
 	  {"name":"beta","port":4002,"tunnel":{"manager":"systemd"}},
 	  {"name":"direct","port":4003,"tunnel":{"manager":"none"}}]`)
-	specs := managedSpecs(t)
+	specs := h.managedSpecs(t)
 	if len(specs) != 2 || specs[0].Name != "alpha" || specs[1].Name != "beta" {
 		t.Fatalf("want the two managed remotes, got %+v", specs)
 	}
@@ -334,11 +341,12 @@ func TestResolveTunnelSpecs_ManagedByEitherSupervisor(t *testing.T) {
 // block is managed by whatever supervisor the hub has, and by nothing where
 // there is neither.
 func TestResolveTunnelSpecs_DefaultManagerFollowsTheHost(t *testing.T) {
+	t.Parallel()
 	for _, goos := range []string{"darwin", "linux"} {
 		t.Run(goos+" manages it", func(t *testing.T) {
-			writeRemotes(t, `[{"name":"alpha","port":4001}]`)
-			useHostGOOS(t, goos)
-			specs := managedSpecs(t)
+			t.Parallel()
+			h := newTunnelHost(t, goos, `[{"name":"alpha","port":4001}]`)
+			specs := h.managedSpecs(t)
 			if len(specs) != 1 {
 				t.Fatalf("got %d specs, want 1", len(specs))
 			}
@@ -346,9 +354,9 @@ func TestResolveTunnelSpecs_DefaultManagerFollowsTheHost(t *testing.T) {
 	}
 
 	t.Run("elsewhere the remote is assumed reachable", func(t *testing.T) {
-		writeRemotes(t, `[{"name":"alpha","port":4001}]`)
-		useHostGOOS(t, "windows")
-		if specs := managedSpecs(t); len(specs) != 0 {
+		t.Parallel()
+		h := newTunnelHost(t, "windows", `[{"name":"alpha","port":4001}]`)
+		if specs := h.managedSpecs(t); len(specs) != 0 {
 			t.Fatalf("want no supervisor-managed tunnels, got %+v", specs)
 		}
 	})
@@ -358,8 +366,9 @@ func TestResolveTunnelSpecs_DefaultManagerFollowsTheHost(t *testing.T) {
 // io.shuttle, matching the daemon's own launchd identifier. The systemd unit
 // carries no prefix at all, matching shuttle-daemon.service.
 func TestResolveTunnelSpecs_DefaultLabelPrefix(t *testing.T) {
-	writeRemotes(t, `[{"name":"x","port":4001,"tunnel":{"manager":"launchd"}}]`)
-	specs, err := resolveTunnelSpecs([]string{"x"})
+	t.Parallel()
+	h := newTunnelHost(t, "", `[{"name":"x","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	specs, err := h.app.resolveTunnelSpecs([]string{"x"})
 	if err != nil {
 		t.Fatalf("resolveTunnelSpecs: %v", err)
 	}
@@ -374,9 +383,10 @@ func TestResolveTunnelSpecs_DefaultLabelPrefix(t *testing.T) {
 // TestResolveTunnelSpecs_LabelOverride — an explicit tunnel.label names the job
 // on both supervisors; systemd needs the suffix it may not have been given.
 func TestResolveTunnelSpecs_LabelOverride(t *testing.T) {
-	writeRemotes(t, `[{"name":"x","port":4001,"tunnel":{"manager":"launchd","label":"custom.tunnel"}},
+	t.Parallel()
+	h := newTunnelHost(t, "", `[{"name":"x","port":4001,"tunnel":{"manager":"launchd","label":"custom.tunnel"}},
 	  {"name":"y","port":4002,"tunnel":{"manager":"systemd","label":"custom-y.service"}}]`)
-	specs := managedSpecs(t)
+	specs := h.managedSpecs(t)
 	if specs[0].Label != "custom.tunnel" || specs[0].UnitName != "custom.tunnel.service" {
 		t.Errorf("x = %+v", specs[0])
 	}
@@ -388,9 +398,11 @@ func TestResolveTunnelSpecs_LabelOverride(t *testing.T) {
 // TestResolveTunnelSpecs_Errors — both failure messages must be actionable: the
 // fleet is in one file, so the error can always say what IS configured.
 func TestResolveTunnelSpecs_Errors(t *testing.T) {
+	t.Parallel()
 	t.Run("unknown name lists the configured ones", func(t *testing.T) {
-		writeRemotes(t, `[{"name":"alpha","port":4001},{"name":"beta","port":4002}]`)
-		_, err := resolveTunnelSpecs([]string{"gamma"})
+		t.Parallel()
+		h := newTunnelHost(t, "", `[{"name":"alpha","port":4001},{"name":"beta","port":4002}]`)
+		_, err := h.app.resolveTunnelSpecs([]string{"gamma"})
 		if err == nil {
 			t.Fatal("want an error for an unknown tunnel")
 		}
@@ -400,8 +412,9 @@ func TestResolveTunnelSpecs_Errors(t *testing.T) {
 	})
 
 	t.Run("manager none is not a supervised tunnel", func(t *testing.T) {
-		writeRemotes(t, `[{"name":"direct","port":4001,"tunnel":{"manager":"none"}}]`)
-		if specs := managedSpecs(t); len(specs) != 0 {
+		t.Parallel()
+		h := newTunnelHost(t, "", `[{"name":"direct","port":4001,"tunnel":{"manager":"none"}}]`)
+		if specs := h.managedSpecs(t); len(specs) != 0 {
 			t.Fatalf("manager none selected a tunnel: %+v", specs)
 		}
 	})
@@ -412,6 +425,7 @@ func TestResolveTunnelSpecs_Errors(t *testing.T) {
 // these files too.
 
 func TestRenderTunnelPlist_Autossh(t *testing.T) {
+	t.Parallel()
 	got := renderForTest(t, tunnelPlistTemplate, tunnelSpec{
 		Name:       "alpha",
 		SSHHost:    "alpha-login",
@@ -423,6 +437,7 @@ func TestRenderTunnelPlist_Autossh(t *testing.T) {
 }
 
 func TestRenderTunnelPlist_Multiplex(t *testing.T) {
+	t.Parallel()
 	got := renderForTest(t, tunnelPlistTemplate, tunnelSpec{
 		Name:       "beta",
 		SSHHost:    "beta-login",
@@ -435,6 +450,7 @@ func TestRenderTunnelPlist_Multiplex(t *testing.T) {
 }
 
 func TestRenderTunnelUnit_Autossh(t *testing.T) {
+	t.Parallel()
 	got := renderForTest(t, tunnelServiceTemplate, tunnelSpec{
 		Name:       "alpha",
 		SSHHost:    "alpha-login",
@@ -446,6 +462,7 @@ func TestRenderTunnelUnit_Autossh(t *testing.T) {
 }
 
 func TestRenderTunnelUnit_Multiplex(t *testing.T) {
+	t.Parallel()
 	got := renderForTest(t, tunnelServiceTemplate, tunnelSpec{
 		Name:       "beta",
 		SSHHost:    "beta-login",
@@ -462,6 +479,7 @@ func TestRenderTunnelUnit_Multiplex(t *testing.T) {
 // ControlPath hash has to reach the unit doubled. A bare `%C` would silently
 // point the multiplex tunnel at the unit's cache directory.
 func TestRenderTunnelUnit_EscapesTheControlPathSpecifier(t *testing.T) {
+	t.Parallel()
 	got := renderForTest(t, tunnelServiceTemplate, tunnelSpec{
 		Name: "beta", SSHHost: "beta-login", LocalPort: 4004, RemotePort: 4200, Multiplex: true,
 	})
@@ -487,6 +505,7 @@ func TestRenderTunnelUnit_EscapesTheControlPathSpecifier(t *testing.T) {
 // to be hardcoded in the template. Prove it now follows the file, on every arm
 // of both templates.
 func TestRenderTunnelJob_RemotePortReachesForward(t *testing.T) {
+	t.Parallel()
 	for _, tmpl := range []struct {
 		name, text string
 	}{{"plist", tunnelPlistTemplate}, {"unit", tunnelServiceTemplate}} {
@@ -515,10 +534,10 @@ func TestRenderTunnelJob_RemotePortReachesForward(t *testing.T) {
 // leaves behind a job matching our generated naming convention; convergent
 // install (no remote named) boots it out and deletes the file.
 func TestInstallTunnels_PruneRemovesOrphan(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
-	useHostGOOS(t, "linux")
-	calls := stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	calls := h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 
 	// Seed an orphan: gamma was once installed, but the fleet file above
@@ -531,7 +550,7 @@ func TestInstallTunnels_PruneRemovesOrphan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := h.install(nil); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 
@@ -556,12 +575,12 @@ func TestInstallTunnels_PruneRemovesOrphan(t *testing.T) {
 // in the fleet file, still managed, is never a prune target, whatever order
 // the directory listing comes back in.
 func TestInstallTunnels_PruneLeavesStillNamedRemoteAlone(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
-	useHostGOOS(t, "darwin")
-	stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "darwin", `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 
-	if err := installTunnels(nil); err != nil {
+	if err := h.install(nil); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	plist := filepath.Join(home, "Library", "LaunchAgents", "io.shuttle.shuttle-tunnel-alpha.plist")
@@ -574,10 +593,10 @@ func TestInstallTunnels_PruneLeavesStillNamedRemoteAlone(t *testing.T) {
 // remote; whatever else sits in the job directory, orphaned or not, is left
 // exactly as it was found.
 func TestInstallTunnels_NamedRemoteDoesNotPrune(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
-	useHostGOOS(t, "linux")
-	stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -587,7 +606,7 @@ func TestInstallTunnels_NamedRemoteDoesNotPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := h.install([]string{"alpha"}); err != nil {
 		t.Fatalf("install alpha: %v", err)
 	}
 	if _, err := os.Stat(orphan); err != nil {
@@ -600,10 +619,10 @@ func TestInstallTunnels_NamedRemoteDoesNotPrune(t *testing.T) {
 // exactly as much a prune target as one removed outright: this host is no
 // longer asked to supervise a tunnel for it.
 func TestInstallTunnels_PruneCatchesManagerNone(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","url":"https://alpha.example.ts.net","tunnel":{"manager":"none"}}]`)
-	useHostGOOS(t, "linux")
-	stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","url":"https://alpha.example.ts.net","tunnel":{"manager":"none"}}]`)
+	h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -613,7 +632,7 @@ func TestInstallTunnels_PruneCatchesManagerNone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := h.install(nil); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -626,10 +645,10 @@ func TestInstallTunnels_PruneCatchesManagerNone(t *testing.T) {
 // candidate, no matter how stale it looks: a hand-written plist or unit is not
 // ours to remove.
 func TestInstallTunnels_PruneIgnoresNonMatchingFiles(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
-	useHostGOOS(t, "linux")
-	stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -643,7 +662,7 @@ func TestInstallTunnels_PruneIgnoresNonMatchingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := h.install(nil); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	for _, path := range []string{handWritten, customLabel} {
@@ -656,12 +675,11 @@ func TestInstallTunnels_PruneIgnoresNonMatchingFiles(t *testing.T) {
 // TestInstallTunnels_DryRunRemovesNothing — --dry-run reports what prune
 // would do without touching the file or the supervisor.
 func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
-	useHostGOOS(t, "linux")
-	calls := stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
-	tunnelsDryRun = true
-	t.Cleanup(func() { tunnelsDryRun = false })
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	calls := h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
+	h.opts.dryRun = true
 
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
@@ -672,7 +690,7 @@ func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := h.install(nil); err != nil {
 		t.Fatalf("install --dry-run: %v", err)
 	}
 	if _, err := os.Stat(orphan); err != nil {
@@ -695,14 +713,13 @@ func TestInstallTunnels_DryRunRemovesNothing(t *testing.T) {
 // free all the way down, including the directories install would have made. A
 // host that has never installed a tunnel must look untouched afterwards.
 func TestInstallTunnels_DryRunCreatesNoDirectories(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
-	useHostGOOS(t, "darwin")
-	calls := stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
-	tunnelsDryRun = true
-	t.Cleanup(func() { tunnelsDryRun = false })
+	t.Parallel()
+	h := newTunnelHost(t, "darwin", `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	calls := h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
+	h.opts.dryRun = true
 
-	if err := installTunnels(nil); err != nil {
+	if err := h.install(nil); err != nil {
 		t.Fatalf("install --dry-run: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "Library")); !os.IsNotExist(err) {
@@ -719,12 +736,11 @@ func TestInstallTunnels_DryRunCreatesNoDirectories(t *testing.T) {
 // TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing — --dry-run does not
 // widen what install targets. Naming a remote prunes nothing, previewed or not.
 func TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing(t *testing.T) {
-	writeRemotes(t, `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
-	useHostGOOS(t, "linux")
-	stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
-	tunnelsDryRun = true
-	t.Cleanup(func() { tunnelsDryRun = false })
+	t.Parallel()
+	h := newTunnelHost(t, "linux", `[{"name":"alpha","port":4001,"tunnel":{"manager":"systemd"}}]`)
+	h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
+	h.opts.dryRun = true
 
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
@@ -735,7 +751,7 @@ func TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels([]string{"alpha"}); err != nil {
+	if err := h.install([]string{"alpha"}); err != nil {
 		t.Fatalf("install alpha --dry-run: %v", err)
 	}
 	if _, err := os.Stat(orphan); err != nil {
@@ -750,11 +766,11 @@ func TestInstallTunnels_DryRunOnANamedRemoteStillPrunesNothing(t *testing.T) {
 // name. The generated `.shuttle-tunnel-` infix is what makes it ours, not the
 // prefix, so prune recognizes it whatever prefix it was born under.
 func TestInstallTunnels_PruneCatchesAnOldLabelPrefix(t *testing.T) {
-	writeRemotes(t, `{"version":1,"launchd_label_prefix":"com.example","remotes":[
+	t.Parallel()
+	h := newTunnelHost(t, "darwin", `{"version":1,"launchd_label_prefix":"com.example","remotes":[
 	  {"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]}`)
-	useHostGOOS(t, "darwin")
-	calls := stubSupervisorsOnPath(t, 0)
-	home := installIntoTemp(t, "")
+	calls := h.stubSupervisors(t, 0)
+	home := h.installIntoTemp(t, "")
 	agentDir := filepath.Join(home, "Library", "LaunchAgents")
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -770,7 +786,7 @@ func TestInstallTunnels_PruneCatchesAnOldLabelPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := installTunnels(nil); err != nil {
+	if err := h.install(nil); err != nil {
 		t.Fatalf("install: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
@@ -813,6 +829,7 @@ func assertGolden(t *testing.T, name, got string) {
 // unix socket is forwarded with OpenSSH's port:socket form, bound to loopback,
 // in every template and both transports; no TCP remote port leaks in.
 func TestRenderTunnelJob_RemoteSocketForward(t *testing.T) {
+	t.Parallel()
 	const sock = "/srv/shuttle/sock/daemon.sock"
 	for _, tmpl := range []struct{ name, text string }{
 		{"plist", tunnelPlistTemplate},
@@ -834,10 +851,11 @@ func TestRenderTunnelJob_RemoteSocketForward(t *testing.T) {
 }
 
 func TestResolveTunnelSpecs_RemoteSocket(t *testing.T) {
-	writeRemotes(t, `{"version":1,"remotes":[
+	t.Parallel()
+	h := newTunnelHost(t, "", `{"version":1,"remotes":[
 	  {"name":"alpha","port":4001,"remote_socket":"/srv/shuttle/sock/daemon.sock","tunnel":{"manager":"launchd"}}
 	]}`)
-	specs := managedSpecs(t)
+	specs := h.managedSpecs(t)
 	if len(specs) != 1 || specs[0].RemoteSocket != "/srv/shuttle/sock/daemon.sock" || specs[0].RemotePort != 0 {
 		t.Fatalf("spec = %+v, want the socket and no remote port", specs)
 	}
@@ -851,6 +869,7 @@ func TestResolveTunnelSpecs_RemoteSocket(t *testing.T) {
 // the multiplex `sh -c` loop: the renderer refuses any forward outside the
 // allowlisted alphabet, in every template.
 func TestRenderTunnelJob_RefusesHostileForward(t *testing.T) {
+	t.Parallel()
 	hostile := []string{
 		"/srv/$(touch pwned).sock",
 		"/srv/a'; rm -rf ~; '.sock",
@@ -884,6 +903,7 @@ func TestRenderTunnelJob_RefusesHostileForward(t *testing.T) {
 // shell that reads it: single quotes inside the plist's sh script, double
 // quotes inside the unit (systemd strips them for exec, sh for the loop).
 func TestRenderTunnelJob_SocketForwardIsQuoted(t *testing.T) {
+	t.Parallel()
 	const sock = "/srv/shuttle/sock/daemon.sock"
 	spec := tunnelSpec{Name: "alpha", SSHHost: "alpha-login", Label: "l", LocalPort: 4001, RemoteSocket: sock, Multiplex: true}
 	if got := renderForTest(t, tunnelPlistTemplate, spec); !strings.Contains(got, "-L '127.0.0.1:4001:"+sock+"' alpha-login") {

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
-	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -35,19 +34,12 @@ import (
 // ($SHUTTLE_AGENTS_FILE, else ~/.config/shuttle/agents.json). Reads touch no felt
 // store, so no -C / --store context is required.
 
-var (
-	agentsResolveEffort string
-	agentsResolveChrome bool
-	agentsSourceFilter  string
-	agentsInitPath      string
-	agentsInitForce     bool
-	agentsEffortReset   bool
-)
-
-var shuttleAgentsCmd = &cobra.Command{
-	Use:   "agents",
-	Short: "List the agent registry Shuttle owns (the single source of truth)",
-	Long: `Print the effective agent registry — every base agent and alias with its
+func (a *app) shuttleAgentsCmd() *cobra.Command {
+	var agentsSourceFilter string
+	shuttleAgentsCmd := &cobra.Command{
+		Use:   "agents",
+		Short: "List the agent registry Shuttle owns (the single source of truth)",
+		Long: `Print the effective agent registry — every base agent and alias with its
 axis-constraint metadata (effort_levels, default_effort, chrome_capable).
 
 The registry is the built-in set with the user registry layered on top
@@ -63,59 +55,69 @@ the table marks an overridden default as default=<level>(override).
 --json emits the bare array the daemon's GET /api/v1/agents serves to the
 browser's agent picker, and nothing else: no footer, no warnings, either
 stream.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		switch agentsSourceFilter {
-		case "", shuttle.SourceBuiltin, shuttle.SourceUser:
-		default:
-			return fmt.Errorf("--source must be %q or %q, got %q",
-				shuttle.SourceBuiltin, shuttle.SourceUser, agentsSourceFilter)
-		}
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch agentsSourceFilter {
+			case "", shuttle.SourceBuiltin, shuttle.SourceUser:
+			default:
+				return fmt.Errorf("--source must be %q or %q, got %q",
+					shuttle.SourceBuiltin, shuttle.SourceUser, agentsSourceFilter)
+			}
 
-		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
-		if err != nil {
-			return fmt.Errorf("loading agent registry: %w", err)
-		}
+			reg, err := shuttle.LoadAgentRegistry(a.env)
+			if err != nil {
+				return fmt.Errorf("loading agent registry: %w", err)
+			}
 
-		records := reg.Records()
-		if agentsSourceFilter != "" {
-			filtered := make([]shuttle.AgentRecord, 0, len(records))
-			for _, a := range records {
-				if a.Source == agentsSourceFilter {
-					filtered = append(filtered, a)
+			records := reg.Records()
+			if agentsSourceFilter != "" {
+				filtered := make([]shuttle.AgentRecord, 0, len(records))
+				for _, rec := range records {
+					if rec.Source == agentsSourceFilter {
+						filtered = append(filtered, rec)
+					}
 				}
+				records = filtered
 			}
-			records = filtered
-		}
 
-		// --json is a machine surface and stays silent apart from the array. Not
-		// merely "stdout stays clean": the daemon shells this verb through
-		// Shuttle.CLI.run, which always sets stderr_to_stdout (daemon/lib/shuttle/cli.ex),
-		// so a footer on stderr would land inside the bytes it hands to
-		// Jason.decode and empty the browser's agent picker. Provenance and
-		// warnings are for a person reading a terminal — they ride the table.
-		if jsonOutput {
-			return outputJSON(records)
-		}
-		for _, w := range reg.Warnings() {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
-		}
-		for _, a := range records {
-			if a.IsAlias() {
-				fmt.Printf("%s %-22s → %s%s\n", sourceMarker(a), a.ID, a.AliasOf, formatAlias(a))
-				continue
+			// --json is a machine surface and stays silent apart from the array. Not
+			// merely "stdout stays clean": the daemon shells this verb through
+			// Shuttle.CLI.run, which always sets stderr_to_stdout (daemon/lib/shuttle/cli.ex),
+			// so a footer on stderr would land inside the bytes it hands to
+			// Jason.decode and empty the browser's agent picker. Provenance and
+			// warnings are for a person reading a terminal — they ride the table.
+			if a.json {
+				return a.outputJSON(records)
 			}
-			fmt.Printf("%s %-22s %-7s %-16s%s\n", sourceMarker(a), a.ID, a.CLI, a.Model, formatConstraints(a))
-		}
-		fmt.Fprintln(cmd.ErrOrStderr(), registryFooter(reg))
-		return nil
-	},
+			for _, w := range reg.Warnings() {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+			}
+			for _, rec := range records {
+				if rec.IsAlias() {
+					fmt.Fprintf(a.env.Stdout, "%s %-22s → %s%s\n", sourceMarker(rec), rec.ID, rec.AliasOf, formatAlias(rec))
+					continue
+				}
+				fmt.Fprintf(a.env.Stdout, "%s %-22s %-7s %-16s%s\n", sourceMarker(rec), rec.ID, rec.CLI, rec.Model, formatConstraints(rec))
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), a.registryFooter(reg))
+			return nil
+		},
+	}
+	shuttleAgentsCmd.Flags().StringVar(&agentsSourceFilter, "source", "",
+		"Show only records from one layer: builtin | user")
+	shuttleAgentsCmd.AddCommand(a.shuttleAgentsResolveCmd())
+	shuttleAgentsCmd.AddCommand(a.shuttleAgentsInitCmd())
+	shuttleAgentsCmd.AddCommand(a.shuttleAgentsEffortCmd())
+	return shuttleAgentsCmd
 }
 
-var shuttleAgentsResolveCmd = &cobra.Command{
-	Use:   "resolve <agent>",
-	Short: "Resolve an agent name + axes to its effective record",
-	Long: `Resolve an agent name and the requested axes (effort, chrome) to the
+func (a *app) shuttleAgentsResolveCmd() *cobra.Command {
+	var agentsResolveEffort string
+	var agentsResolveChrome bool
+	shuttleAgentsResolveCmd := &cobra.Command{
+		Use:   "resolve <agent>",
+		Short: "Resolve an agent name + axes to its effective record",
+		Long: `Resolve an agent name and the requested axes (effort, chrome) to the
 effective record the daemon launches: base cli/wrapper/model/extra_flags plus
 the post-overlay effort/chrome/headless. The output shape is identical to
 ` + "`shuttle show -j`" + `'s shuttle.resolved.agent.
@@ -123,97 +125,114 @@ the post-overlay effort/chrome/headless. The output shape is identical to
 Errors (non-zero exit) on an unknown agent, a dangling alias, or an axis the
 agent does not support — so a caller can distinguish a constraint violation
 from a successful resolve.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		reg, err := shuttle.LoadAgentRegistry(sysenv.OS())
-		if err != nil {
-			return fmt.Errorf("loading agent registry: %w", err)
-		}
-		rec, axes, err := reg.Resolve(args[0], agentsResolveEffort, agentsResolveChrome)
-		if err != nil {
-			return err
-		}
-		resolved := reg.NewResolvedAgent(rec, axes)
-		if jsonOutput {
-			return outputJSON(resolved)
-		}
-		fmt.Printf("id:          %s\n", resolved.ID)
-		fmt.Printf("cli:         %s\n", resolved.CLI)
-		fmt.Printf("wrapper:     %s\n", resolved.Wrapper)
-		if resolved.Provider != "" {
-			fmt.Printf("provider:    %s\n", resolved.Provider)
-		}
-		if resolved.Model != "" {
-			fmt.Printf("model:       %s\n", resolved.Model)
-		}
-		if resolved.Effort != "" {
-			fmt.Printf("effort:      %s\n", resolved.Effort)
-		}
-		fmt.Printf("chrome:      %t\n", resolved.Chrome)
-		fmt.Printf("headless:    %t\n", resolved.Headless)
-		if resolved.ExtraFlags != "" {
-			fmt.Printf("extra_flags: %s\n", resolved.ExtraFlags)
-		}
-		return nil
-	},
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reg, err := shuttle.LoadAgentRegistry(a.env)
+			if err != nil {
+				return fmt.Errorf("loading agent registry: %w", err)
+			}
+			rec, axes, err := reg.Resolve(args[0], agentsResolveEffort, agentsResolveChrome)
+			if err != nil {
+				return err
+			}
+			resolved := reg.NewResolvedAgent(rec, axes)
+			if a.json {
+				return a.outputJSON(resolved)
+			}
+			fmt.Fprintf(a.env.Stdout, "id:          %s\n", resolved.ID)
+			fmt.Fprintf(a.env.Stdout, "cli:         %s\n", resolved.CLI)
+			fmt.Fprintf(a.env.Stdout, "wrapper:     %s\n", resolved.Wrapper)
+			if resolved.Provider != "" {
+				fmt.Fprintf(a.env.Stdout, "provider:    %s\n", resolved.Provider)
+			}
+			if resolved.Model != "" {
+				fmt.Fprintf(a.env.Stdout, "model:       %s\n", resolved.Model)
+			}
+			if resolved.Effort != "" {
+				fmt.Fprintf(a.env.Stdout, "effort:      %s\n", resolved.Effort)
+			}
+			fmt.Fprintf(a.env.Stdout, "chrome:      %t\n", resolved.Chrome)
+			fmt.Fprintf(a.env.Stdout, "headless:    %t\n", resolved.Headless)
+			if resolved.ExtraFlags != "" {
+				fmt.Fprintf(a.env.Stdout, "extra_flags: %s\n", resolved.ExtraFlags)
+			}
+			return nil
+		},
+	}
+	shuttleAgentsResolveCmd.Flags().StringVar(&agentsResolveEffort, "effort", "",
+		"Effort axis token (validated against the agent's effort_levels)")
+	shuttleAgentsResolveCmd.Flags().BoolVar(&agentsResolveChrome, "chrome", false,
+		"Enable the chrome axis (claude harness only)")
+	return shuttleAgentsResolveCmd
 }
 
-var shuttleAgentsInitCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Write a user agent registry seeded from the built-ins",
-	Long: `Seed the user agent registry with the built-in records, then edit it.
+func (a *app) shuttleAgentsInitCmd() *cobra.Command {
+	var agentsInitPath string
+	var agentsInitForce bool
+	shuttleAgentsInitCmd := &cobra.Command{
+		Use:   "init",
+		Short: "Write a user agent registry seeded from the built-ins",
+		Long: `Seed the user agent registry with the built-in records, then edit it.
 
 Writes $SHUTTLE_AGENTS_FILE (else ~/.config/shuttle/agents.json), or --path. Refuses
 to overwrite an existing file without --force. The seeded file works every
 field across several harnesses — edit it in place.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path := agentsInitPath
-		if path == "" {
-			p, err := shuttle.UserAgentsPath(sysenv.OS())
-			if err != nil {
-				return err
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := agentsInitPath
+			if path == "" {
+				p, err := shuttle.UserAgentsPath(a.env)
+				if err != nil {
+					return err
+				}
+				path = p
 			}
-			path = p
-		}
-		if _, err := os.Stat(path); err == nil && !agentsInitForce {
-			return fmt.Errorf("%s already exists (use --force to overwrite)", path)
-		}
+			if _, err := os.Stat(path); err == nil && !agentsInitForce {
+				return fmt.Errorf("%s already exists (use --force to overwrite)", path)
+			}
 
-		builtins, err := shuttle.LoadBuiltinAgentRegistry()
-		if err != nil {
-			return fmt.Errorf("loading built-in agent registry: %w", err)
-		}
-		// Provenance is the loader's, not the file's — a seeded record must not
-		// claim to be a built-in once it lives in the user layer.
-		records := append([]shuttle.AgentRecord{}, builtins.Records()...)
-		for i := range records {
-			records[i].Source = ""
-		}
-		payload, err := json.MarshalIndent(map[string]any{
-			"version":  1,
-			"builtins": shuttle.BuiltinsMerge,
-			"agents":   records,
-		}, "", "  ")
-		if err != nil {
-			return fmt.Errorf("encoding agent registry: %w", err)
-		}
+			builtins, err := shuttle.LoadBuiltinAgentRegistry()
+			if err != nil {
+				return fmt.Errorf("loading built-in agent registry: %w", err)
+			}
+			// Provenance is the loader's, not the file's — a seeded record must not
+			// claim to be a built-in once it lives in the user layer.
+			records := append([]shuttle.AgentRecord{}, builtins.Records()...)
+			for i := range records {
+				records[i].Source = ""
+			}
+			payload, err := json.MarshalIndent(map[string]any{
+				"version":  1,
+				"builtins": shuttle.BuiltinsMerge,
+				"agents":   records,
+			}, "", "  ")
+			if err != nil {
+				return fmt.Errorf("encoding agent registry: %w", err)
+			}
 
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
-		}
-		if err := os.WriteFile(path, append(payload, '\n'), 0644); err != nil {
-			return fmt.Errorf("writing %s: %w", path, err)
-		}
-		fmt.Println(path)
-		return nil
-	},
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				return fmt.Errorf("creating %s: %w", filepath.Dir(path), err)
+			}
+			if err := os.WriteFile(path, append(payload, '\n'), 0644); err != nil {
+				return fmt.Errorf("writing %s: %w", path, err)
+			}
+			fmt.Fprintln(a.env.Stdout, path)
+			return nil
+		},
+	}
+	shuttleAgentsInitCmd.Flags().StringVar(&agentsInitPath, "path", "",
+		"Write to this path instead of the default user registry location")
+	shuttleAgentsInitCmd.Flags().BoolVar(&agentsInitForce, "force", false,
+		"Overwrite an existing file")
+	return shuttleAgentsInitCmd
 }
 
-var shuttleAgentsEffortCmd = &cobra.Command{
-	Use:   "effort <agent> [<level> | --reset]",
-	Short: "Set or clear an agent's default effort in the user registry",
-	Long: `Set the default effort of any agent — built-in or user — without copying
+func (a *app) shuttleAgentsEffortCmd() *cobra.Command {
+	var agentsEffortReset bool
+	shuttleAgentsEffortCmd := &cobra.Command{
+		Use:   "effort <agent> [<level> | --reset]",
+		Short: "Set or clear an agent's default effort in the user registry",
+		Long: `Set the default effort of any agent — built-in or user — without copying
 its record into the user file. Writes an entry in the file's "overrides" block:
 
   "overrides": { "claude-opus": { "default_effort": "high" } }
@@ -222,29 +241,33 @@ An alias resolves to its base agent, and the override is keyed by that id. The
 level must be one of the agent's effort_levels. --reset removes the override.
 Every other key and record in the file is kept, in order. A missing file is
 created; a bare-array file is rewritten in the object form.`,
-	Args: cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		level := ""
-		if len(args) == 2 {
-			level = args[1]
-		}
-		if (level == "") == !agentsEffortReset {
-			return fmt.Errorf("give exactly one of <level> or --reset")
-		}
-		path, id, changed, err := shuttle.SetEffortOverride(sysenv.OS(), args[0], level)
-		if err != nil {
-			return err
-		}
-		switch {
-		case !changed:
-			fmt.Printf("%s: no override in %s\n", id, path)
-		case level == "":
-			fmt.Printf("%s: override removed from %s\n", id, path)
-		default:
-			fmt.Printf("%s: default_effort %s in %s\n", id, level, path)
-		}
-		return nil
-	},
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			level := ""
+			if len(args) == 2 {
+				level = args[1]
+			}
+			if (level == "") == !agentsEffortReset {
+				return fmt.Errorf("give exactly one of <level> or --reset")
+			}
+			path, id, changed, err := shuttle.SetEffortOverride(a.env, args[0], level)
+			if err != nil {
+				return err
+			}
+			switch {
+			case !changed:
+				fmt.Fprintf(a.env.Stdout, "%s: no override in %s\n", id, path)
+			case level == "":
+				fmt.Fprintf(a.env.Stdout, "%s: override removed from %s\n", id, path)
+			default:
+				fmt.Fprintf(a.env.Stdout, "%s: default_effort %s in %s\n", id, level, path)
+			}
+			return nil
+		},
+	}
+	shuttleAgentsEffortCmd.Flags().BoolVar(&agentsEffortReset, "reset", false,
+		"Remove the agent's default_effort override")
+	return shuttleAgentsEffortCmd
 }
 
 // sourceMarker is the table's leading column: `*` the default agent, `u` a
@@ -262,10 +285,10 @@ func sourceMarker(a shuttle.AgentRecord) string {
 
 // registryFooter states what loaded from where — the answer to "did my file
 // load?" without a second command. Stderr, so --json stdout stays parseable.
-func registryFooter(reg *shuttle.AgentRegistry) string {
+func (a *app) registryFooter(reg *shuttle.AgentRegistry) string {
 	total := len(reg.Records())
 	if reg.UserPath() == "" {
-		path, err := shuttle.UserAgentsPath(sysenv.OS())
+		path, err := shuttle.UserAgentsPath(a.env)
 		if err != nil {
 			path = "~/.config/shuttle/agents.json"
 		}
@@ -273,8 +296,8 @@ func registryFooter(reg *shuttle.AgentRegistry) string {
 			reg.BuiltinCount(), path, total)
 	}
 	user := 0
-	for _, a := range reg.Records() {
-		if a.Source == shuttle.SourceUser {
+	for _, rec := range reg.Records() {
+		if rec.Source == shuttle.SourceUser {
 			user++
 		}
 	}
@@ -317,23 +340,4 @@ func formatAlias(a shuttle.AgentRecord) string {
 		return ""
 	}
 	return "  +[" + strings.Join(parts, " ") + "]"
-}
-
-func init() {
-	shuttleAgentsCmd.Flags().StringVar(&agentsSourceFilter, "source", "",
-		"Show only records from one layer: builtin | user")
-	shuttleAgentsResolveCmd.Flags().StringVar(&agentsResolveEffort, "effort", "",
-		"Effort axis token (validated against the agent's effort_levels)")
-	shuttleAgentsResolveCmd.Flags().BoolVar(&agentsResolveChrome, "chrome", false,
-		"Enable the chrome axis (claude harness only)")
-	shuttleAgentsInitCmd.Flags().StringVar(&agentsInitPath, "path", "",
-		"Write to this path instead of the default user registry location")
-	shuttleAgentsInitCmd.Flags().BoolVar(&agentsInitForce, "force", false,
-		"Overwrite an existing file")
-	shuttleAgentsCmd.AddCommand(shuttleAgentsResolveCmd)
-	shuttleAgentsEffortCmd.Flags().BoolVar(&agentsEffortReset, "reset", false,
-		"Remove the agent's default_effort override")
-	shuttleAgentsCmd.AddCommand(shuttleAgentsInitCmd)
-	shuttleAgentsCmd.AddCommand(shuttleAgentsEffortCmd)
-	addShuttleCommand(shuttleAgentsCmd)
 }

@@ -36,10 +36,11 @@ import (
 // daemon/lib/shuttle/contract.ex's @expected_level.
 const ShuttleContractLevel = 6
 
-var shuttleContractCmd = &cobra.Command{
-	Use:   "contract",
-	Short: "Print the daemon-shelled CLI contract level (daemon-facing)",
-	Long: `Prints ShuttleContractLevel — a bare integer, nothing else, exit 0 — the
+func (a *app) shuttleContractCmd() *cobra.Command {
+	shuttleContractCmd := &cobra.Command{
+		Use:   "contract",
+		Short: "Print the daemon-shelled CLI contract level (daemon-facing)",
+		Long: `Prints ShuttleContractLevel — a bare integer, nothing else, exit 0 — the
 version of the flag/output surface the shuttle daemon depends on when it shells
 mark-runtime, reopen, and the other lifecycle verbs. The daemon shells this at
 Poller.init and compares it to its own baked expectation, so a stale CLI
@@ -49,13 +50,11 @@ instead of failing one shelled write at a time with "unknown flag".
 Stable output contract: stdout is exactly "<level>\n" with no other text. Any
 other output on stdout, or a non-zero exit, means the daemon cannot determine
 the contract level and should treat the CLI as incompatible.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(ShuttleContractLevel)
-		return nil
-	},
-}
-
-func init() {
-	addShuttleCommand(shuttleContractCmd)
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintln(a.env.Stdout, ShuttleContractLevel)
+			return nil
+		},
+	}
+	return shuttleContractCmd
 }

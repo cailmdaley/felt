@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,8 @@ import (
 )
 
 func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
+	// serial: its fake --version probes run under shuttleExecutableBuild's fixed 3 s timeout, which the package's parallel subprocess load starves
+	env := testEnv(t)
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	currentPath := filepath.Join(home, ".local", "bin", "shuttle")
@@ -29,11 +30,11 @@ func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
 	goBinShuttle := filepath.Join(home, "go", "bin", "shuttle")
 	writeShuttleVersion(t, goBinShuttle, "build-old")
 
-	receipt := collectShuttleBinaryReceiptAt(currentPath, "build-current", home, pathDir, "")
-	if receipt.ResolvedPath != resolveBinaryPath(currentTarget) || receipt.Build != "build-current" {
+	receipt := newApp(env).collectShuttleBinaryReceiptAt(currentPath, "build-current", home, pathDir, "")
+	if receipt.ResolvedPath != newApp(env).resolveBinaryPath(currentTarget) || receipt.Build != "build-current" {
 		t.Fatalf("running binary receipt = %+v", receipt)
 	}
-	if receipt.HookResolution != resolveBinaryPath(pathShuttle) || receipt.HooksWouldPickIt {
+	if receipt.HookResolution != newApp(env).resolveBinaryPath(pathShuttle) || receipt.HooksWouldPickIt {
 		t.Fatalf("PATH should shadow the running binary in hook resolution: %+v", receipt)
 	}
 	if len(receipt.Executables) != 2 {
@@ -45,8 +46,8 @@ func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
 		}
 	}
 
-	fallback := collectShuttleBinaryReceiptAt(currentPath, "build-current", home, "", "")
-	if fallback.HookResolution != resolveBinaryPath(currentPath) || !fallback.HooksWouldPickIt {
+	fallback := newApp(env).collectShuttleBinaryReceiptAt(currentPath, "build-current", home, "", "")
+	if fallback.HookResolution != newApp(env).resolveBinaryPath(currentPath) || !fallback.HooksWouldPickIt {
 		t.Fatalf("hook fallback should select the running binary: %+v", fallback)
 	}
 }
@@ -63,6 +64,7 @@ func writeShuttleVersion(t *testing.T, path, build string) {
 }
 
 func TestCombineDoctorReceiptStatusPriorities(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		statuses []receiptStatus
@@ -75,6 +77,7 @@ func TestCombineDoctorReceiptStatusPriorities(t *testing.T) {
 		{"booting", []receiptStatus{receiptMismatch, receiptBooting}, receiptBooting},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, _ := combineDoctorReceiptStatus(tc.statuses...)
 			if got != tc.want {
 				t.Fatalf("status = %q, want %q", got, tc.want)
@@ -84,18 +87,21 @@ func TestCombineDoctorReceiptStatusPriorities(t *testing.T) {
 }
 
 func TestCollectDaemonReceiptUsesListenerResolutionError(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	hostFile := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, hostFile, nil, nil)
+	setHostEnvIn(t, env, hostFile, nil, nil)
 	if err := os.WriteFile(hostFile, []byte("{malformed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got := collectDaemonReceipt()
+	got := newApp(env).collectDaemonReceipt()
 	if got.Status != receiptMismatch || !strings.Contains(got.Repair, hostFile) || strings.Contains(got.Repair, "<nil>") {
 		t.Fatalf("daemon listener repair = %+v, want the host-file resolution error", got)
 	}
 }
 
 func TestDaemonReceiptOwnerCheckRepairIsActionable(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		err  *daemonTCPOwnerCheckError
@@ -105,6 +111,7 @@ func TestDaemonReceiptOwnerCheckRepairIsActionable(t *testing.T) {
 		{"accept timeout", &daemonTCPOwnerCheckError{address: "[::1]:4000", pending: true}, "the listener did not accept within 2 s; retry, and if it persists inspect what holds [::1]:4000"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := fmt.Errorf("reaching daemon at http://127.0.0.1:4000: %w", tc.err)
 			got := daemonReceiptOnTransportError(ReceiptDaemon{Status: receiptMissing, Repair: "start the daemon"}, err)
 			if got.Status != receiptMismatch || got.Repair != tc.want {
@@ -115,6 +122,8 @@ func TestDaemonReceiptOwnerCheckRepairIsActionable(t *testing.T) {
 }
 
 func TestBootingDaemonSuppressesHostMismatchAndRestartAdvice(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	ready := false
 	daemon := ReceiptDaemon{
 		Ready:  &ready,
@@ -122,7 +131,7 @@ func TestBootingDaemonSuppressesHostMismatchAndRestartAdvice(t *testing.T) {
 		Repair: "Shuttle daemon is still booting; retry when /api/v1/version reports ready:true",
 		Listen: "tcp://127.0.0.1:4000", HostClass: "shared-multi-user",
 	}
-	host := collectHostReceiptWhenReady(daemon)
+	host := newApp(env).collectHostReceiptWhenReady(daemon)
 	if host.Status != receiptBooting || host.Repair != daemon.Repair || host.Listen != "" || len(host.Problems) != 0 {
 		t.Fatalf("host receipt should defer listener checks until readiness: %+v", host)
 	}
@@ -133,6 +142,7 @@ func TestBootingDaemonSuppressesHostMismatchAndRestartAdvice(t *testing.T) {
 }
 
 func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body map[string]any
@@ -155,13 +165,13 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Parallel()
+			env := testEnv(t)
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(tc.body)
 			}))
-			defer server.Close()
-			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			got := collectDaemonReceipt()
+			got := newApp(env).collectDaemonReceipt()
 			if got.Status != tc.want {
 				t.Fatalf("daemon receipt = %#v, want status %q", got, tc.want)
 			}

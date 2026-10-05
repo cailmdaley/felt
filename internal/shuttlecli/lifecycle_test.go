@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,79 +16,40 @@ import (
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // ---- shared lifecycle test helpers -----------------------------------------
 
-func newStore(t *testing.T) (string, *felt.Storage) {
+// withStubbedTmux is an app whose tmux probes answer from live (the set of
+// session names reported as existing) and record each kill in the returned
+// slice instead of reaching a tmux server.
+func withStubbedTmux(t *testing.T, env *sysenv.Env, live map[string]bool) (*app, *[]string) {
 	t.Helper()
-	dir := t.TempDir()
-	storage := felt.NewStorage(dir)
-	if err := storage.Init(); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	return dir, storage
-}
-
-// seedFiber writes a fiber straight through storage, bypassing the cmd-layer
-// validation — so a deliberately invalid block can be planted on disk.
-func seedFiber(t *testing.T, storage *felt.Storage, id, uid, status string, block map[string]any, tempered *bool) {
-	t.Helper()
-	f := &felt.Felt{ID: id, UID: uid, Name: id, Status: status, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
-	if block != nil {
-		if err := f.SetExtraField("shuttle", block); err != nil {
-			t.Fatalf("SetExtraField shuttle: %v", err)
-		}
-	}
-	if tempered != nil {
-		if err := f.SetExtraField("tempered", *tempered); err != nil {
-			t.Fatalf("SetExtraField tempered: %v", err)
-		}
-	}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("Write %s: %v", id, err)
-	}
-}
-
-// seedShuttleRole seeds a fiber carrying a shuttle: block plus the requested
-// felt-native status and optional tempered verdict.
-func seedShuttleRole(t *testing.T, storage *felt.Storage, id, status string, block map[string]any, tempered *bool) {
-	t.Helper()
-	seedFiber(t, storage, id, "", status, block, tempered)
-}
-
-func mustRead(t *testing.T, storage *felt.Storage, id string) *felt.Felt {
-	t.Helper()
-	f, err := storage.Read(id)
-	if err != nil {
-		t.Fatalf("Read %s: %v", id, err)
-	}
-	return f
-}
-
-// withStubbedTmux replaces the tmux func vars; returns a pointer to the slice of
-// killed session names. `live` is the set of session names reported as existing.
-func withStubbedTmux(t *testing.T, live map[string]bool) *[]string {
-	t.Helper()
-	prevExists, prevKill := tmuxSessionExists, killTmuxSession
+	a := newApp(env)
 	killed := &[]string{}
-	tmuxSessionExists = func(name string) bool { return live[name] }
-	killTmuxSession = func(name string) error { *killed = append(*killed, name); return nil }
-	t.Cleanup(func() { tmuxSessionExists = prevExists; killTmuxSession = prevKill })
-	return killed
+	a.tmuxSessionExists = func(name string) bool { return live[name] }
+	a.killTmuxSession = func(name string) error { *killed = append(*killed, name); return nil }
+	return a, killed
 }
 
-func oneshot() map[string]any {
-	return map[string]any{"kind": "oneshot", "agent": "claude-opus", "project_dir": "/srv/work"}
+// runIn runs one shuttle invocation in env with dir as the -C default and
+// returns its stdout.
+func runIn(t *testing.T, env *sysenv.Env, dir string, args ...string) (string, error) {
+	t.Helper()
+	stdout, _, err := executeIn(t, env, dir, args...)
+	return stdout, err
 }
 
 // ---- close -----------------------------------------------------------------
 
 func TestShuttleClose_Tempered(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
-	if out, err := runCommand(t, dir, "close", "f", "--tempered=true"); err != nil {
+	if out, err := runIn(t, env, dir, "close", "f", "--tempered=true"); err != nil {
 		t.Fatalf("close: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -105,11 +65,13 @@ func TestShuttleClose_Tempered(t *testing.T) {
 }
 
 func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), &yes)
 
-	if out, err := runCommand(t, dir, "close", "f"); err != nil {
+	if out, err := runIn(t, env, dir, "close", "f"); err != nil {
 		t.Fatalf("close: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -124,13 +86,15 @@ func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
 // ---- pause -----------------------------------------------------------------
 
 func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "proj/task", felt.StatusActive, oneshot(), nil)
 	f0 := mustRead(t, storage, "proj/task")
 	live := shuttleTmuxSessionName(f0.ID, f0.UID)
-	killed := withStubbedTmux(t, map[string]bool{live: true})
+	a, killed := withStubbedTmux(t, env, map[string]bool{live: true})
 
-	if out, err := runCommand(t, dir, "pause", "proj/task"); err != nil {
+	if out, _, err := executeApp(t, a, dir, "pause", "proj/task"); err != nil {
 		t.Fatalf("pause: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "proj/task")
@@ -143,12 +107,14 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 }
 
 func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
 	f := mustRead(t, storage, "task")
-	killed := withStubbedTmux(t, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
+	a, killed := withStubbedTmux(t, env, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
 
-	if out, err := runCommand(t, dir, "pause", "task", "--no-kill"); err != nil {
+	if out, _, err := executeApp(t, a, dir, "pause", "task", "--no-kill"); err != nil {
 		t.Fatalf("pause --no-kill: %v\n%s", err, out)
 	}
 	if len(*killed) != 0 {
@@ -162,11 +128,13 @@ func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
 // ---- reopen ----------------------------------------------------------------
 
 func TestShuttleReopen_ToActive(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), &yes)
 
-	if out, err := runCommand(t, dir, "reopen", "f"); err != nil {
+	if out, err := runIn(t, env, dir, "reopen", "f"); err != nil {
 		t.Fatalf("reopen: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -179,10 +147,12 @@ func TestShuttleReopen_ToActive(t *testing.T) {
 }
 
 func TestShuttleReopen_AsDraft(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
-	if out, err := runCommand(t, dir, "reopen", "f", "--as-draft"); err != nil {
+	if out, err := runIn(t, env, dir, "reopen", "f", "--as-draft"); err != nil {
 		t.Fatalf("reopen --as-draft: %v\n%s", err, out)
 	}
 	if mustRead(t, storage, "f").Status != felt.StatusOpen {
@@ -190,23 +160,15 @@ func TestShuttleReopen_AsDraft(t *testing.T) {
 	}
 }
 
-// C1: `reopen --host <override>` is gone — post-S1, `resolveOwnHost` is pure
-// local state (env var → host file → hostname; no daemon round-trip to guard
-// against), so ambient resolution alone drives the ownership guard for
-// reopen the same way it does for every other write verb. This regression
-// test's whole premise (a --host override bypassing a MISMATCHED ambient
-// identity) no longer applies; the alias-guard-fires-without-an-override
-// half survives as `TestShuttleMarkRuntime_AliasGuardWithoutOverride`
-// (internal/shuttlecli/mark_runtime_test.go), which exercises the same guard on a
-// different verb.
-
 // ---- resume ----------------------------------------------------------------
 
 func TestShuttleResume_DraftToActive(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusOpen, oneshot(), nil)
 
-	if out, err := runCommand(t, dir, "resume", "f"); err != nil {
+	if out, err := runIn(t, env, dir, "resume", "f"); err != nil {
 		t.Fatalf("resume: %v\n%s", err, out)
 	}
 	if mustRead(t, storage, "f").Status != felt.StatusActive {
@@ -215,10 +177,12 @@ func TestShuttleResume_DraftToActive(t *testing.T) {
 }
 
 func TestShuttleResume_RefusesClosed(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
-	if _, err := runCommand(t, dir, "resume", "f"); err == nil {
+	if _, err := runIn(t, env, dir, "resume", "f"); err == nil {
 		t.Fatal("resume on a closed oneshot must refuse (use reopen)")
 	}
 }
@@ -226,15 +190,17 @@ func TestShuttleResume_RefusesClosed(t *testing.T) {
 // TestShuttleResume_RequiresProjectDir checks that resuming a draft requires
 // the worker directory and that resume --project-dir sets it while arming.
 func TestShuttleResume_RequiresProjectDir(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "draft", Name: "Draft"}); err != nil {
 		t.Fatalf("write draft: %v", err)
 	}
-	if out, err := runCommand(t, dir, "install", "draft", "--disabled"); err != nil {
+	if out, err := runIn(t, env, dir, "install", "draft", "--disabled"); err != nil {
 		t.Fatalf("install --disabled: %v\n%s", err, out)
 	}
 
-	_, err := runCommand(t, dir, "resume", "draft")
+	_, err := runIn(t, env, dir, "resume", "draft")
 	if err == nil || !strings.Contains(err.Error(), "shuttle resume draft --project-dir") {
 		t.Fatalf("resume without project_dir: err=%v, want a refusal naming --project-dir", err)
 	}
@@ -243,7 +209,7 @@ func TestShuttleResume_RequiresProjectDir(t *testing.T) {
 	}
 
 	work := t.TempDir()
-	if out, err := runCommand(t, dir, "resume", "draft", "--project-dir", work); err != nil {
+	if out, err := runIn(t, env, dir, "resume", "draft", "--project-dir", work); err != nil {
 		t.Fatalf("resume --project-dir: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "draft")
@@ -256,10 +222,12 @@ func TestShuttleResume_RequiresProjectDir(t *testing.T) {
 // TestShuttleReopen_RequiresProjectDir checks that reopen requires a worker
 // directory when it makes a closed fiber dispatchable.
 func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "old", felt.StatusClosed, map[string]any{"kind": "oneshot", "agent": "claude-opus"}, nil)
 
-	_, err := runCommand(t, dir, "reopen", "old")
+	_, err := runIn(t, env, dir, "reopen", "old")
 	if err == nil || !strings.Contains(err.Error(), "shuttle reopen old --project-dir <dir>") {
 		t.Fatalf("reopen without project_dir: err=%v, want a refusal naming --project-dir", err)
 	}
@@ -268,7 +236,7 @@ func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
 	}
 
 	work := t.TempDir()
-	if out, err := runCommand(t, dir, "reopen", "old", "--project-dir", work); err != nil {
+	if out, err := runIn(t, env, dir, "reopen", "old", "--project-dir", work); err != nil {
 		t.Fatalf("reopen --project-dir: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "old")
@@ -283,6 +251,8 @@ func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
 // write, and leaves shuttle.runtime alone — the reopened role re-fires the
 // occurrence it stood on.
 func TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	tempered := false
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
@@ -291,7 +261,7 @@ func TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen(t *testing.T) {
 	}, &tempered)
 	work := t.TempDir()
 
-	if out, err := runCommand(t, dir, "reopen", "f", "--project-dir", work, "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "reopen", "f", "--project-dir", work, "--local"); err != nil {
 		t.Fatalf("reopen --project-dir --local: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -312,6 +282,8 @@ func TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen(t *testing.T) {
 // reopens with --conclude-run, which arms the role, saves the directory and
 // stamps handed_off_at in one write.
 func TestShuttleReopen_ConcludeRunStampsAStandingRole(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	tempered := false
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
@@ -321,7 +293,7 @@ func TestShuttleReopen_ConcludeRunStampsAStandingRole(t *testing.T) {
 	work := t.TempDir()
 
 	before := time.Now().UTC()
-	if out, err := runCommand(t, dir, "reopen", "f", "--project-dir", work, "--conclude-run", "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "reopen", "f", "--project-dir", work, "--conclude-run", "--local"); err != nil {
 		t.Fatalf("reopen --conclude-run: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -340,6 +312,8 @@ func TestShuttleReopen_ConcludeRunStampsAStandingRole(t *testing.T) {
 // reopen --project-dir expand the same raw input to the same path, even when
 // a variable's value itself holds a "$".
 func TestShuttleResolveDir_MatchesWhatReopenSaves(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "old", felt.StatusClosed, map[string]any{
 		"kind": "oneshot", "agent": "claude-sonnet",
@@ -348,14 +322,14 @@ func TestShuttleResolveDir_MatchesWhatReopenSaves(t *testing.T) {
 	if err := os.MkdirAll(literal, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SUFFIX", "other")
-	t.Setenv("SHUTTLE_ROOT", literal)
+	env.Set("SUFFIX", "other")
+	env.Set("SHUTTLE_ROOT", literal)
 
-	out, err := runCommand(t, dir, "resolve-dir", "$SHUTTLE_ROOT")
+	out, err := runIn(t, env, dir, "resolve-dir", "$SHUTTLE_ROOT")
 	if err != nil || strings.TrimSpace(out) != literal {
 		t.Fatalf("resolve-dir: out=%q err=%v, want %q", out, err, literal)
 	}
-	if out, err := runCommand(t, dir, "reopen", "old", "--project-dir", "$SHUTTLE_ROOT", "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "reopen", "old", "--project-dir", "$SHUTTLE_ROOT", "--local"); err != nil {
 		t.Fatalf("reopen --project-dir: %v\n%s", err, out)
 	}
 	b, _, err := shuttle.BlockOf(mustRead(t, storage, "old"))
@@ -366,14 +340,16 @@ func TestShuttleResolveDir_MatchesWhatReopenSaves(t *testing.T) {
 
 // TestShuttleResolveDir expands like --project-dir and writes nothing.
 func TestShuttleResolveDir(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, _ := newStore(t)
 	work := t.TempDir()
-	t.Setenv("SHUTTLE_RESOLVE_TEST", work)
-	out, err := runCommand(t, dir, "resolve-dir", "$SHUTTLE_RESOLVE_TEST")
+	env.Set("SHUTTLE_RESOLVE_TEST", work)
+	out, err := runIn(t, env, dir, "resolve-dir", "$SHUTTLE_RESOLVE_TEST")
 	if err != nil || strings.TrimSpace(out) != work {
 		t.Fatalf("resolve-dir: out=%q err=%v, want %q", out, err, work)
 	}
-	if _, err := runCommand(t, dir, "resolve-dir", work+"/missing"); err == nil {
+	if _, err := runIn(t, env, dir, "resolve-dir", work+"/missing"); err == nil {
 		t.Fatal("resolve-dir must refuse a path that is not a directory")
 	}
 }
@@ -383,6 +359,8 @@ func TestShuttleResolveDir(t *testing.T) {
 // write — the handed_off_at stamp that keeps the poller from re-firing the
 // occurrence that just ran.
 func TestShuttleResume_StandingAwaitingRearmsAndConcludes(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
@@ -390,7 +368,7 @@ func TestShuttleResume_StandingAwaitingRearmsAndConcludes(t *testing.T) {
 	}, nil)
 
 	before := time.Now().UTC()
-	if out, err := runCommand(t, dir, "resume", "f", "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "resume", "f", "--local"); err != nil {
 		t.Fatalf("resume --local: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -405,6 +383,8 @@ func TestShuttleResume_StandingAwaitingRearmsAndConcludes(t *testing.T) {
 }
 
 func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	if runtime.GOOS != "linux" {
 		t.Skip("the TCP owner check reads Linux /proc")
 	}
@@ -414,7 +394,7 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 	if !kernelShowsUnacceptedRowAsUIDZero(t) {
 		t.Skip("this kernel stamps an unaccepted connection with our own uid, so a non-root test cannot stage a refused owner")
 	}
-	withOwnHost(t, "test-host")
+	ownHost(t, env, "test-host")
 
 	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -422,11 +402,11 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 	}
 	defer listener.Close()
 	settingsPath := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, settingsPath, nil, nil)
+	setHostEnvIn(t, env, settingsPath, nil, nil)
 	if err := os.WriteFile(settingsPath, []byte(fmt.Sprintf(`{"class":"shared-multi-user","listen":"tcp://%s"}`, listener.Addr())), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://"+listener.Addr().String())
+	env.Set("SHUTTLE_DAEMON_URL", "http://"+listener.Addr().String())
 
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
@@ -435,7 +415,7 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 		"schedule":    map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
-	out, err := runCommand(t, dir, "resume", "f")
+	out, err := runIn(t, env, dir, "resume", "f")
 	var ownerErr *daemonTCPOwnerCheckError
 	if !errors.As(err, &ownerErr) {
 		t.Fatalf("resume error = %v; want a TCP owner refusal\n%s", err, out)
@@ -448,10 +428,12 @@ func TestShuttleResume_OwnerRefusalDoesNotWriteLocally(t *testing.T) {
 // ---- set-outcome -----------------------------------------------------------
 
 func TestShuttleSetOutcome(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
-	if out, err := runCommand(t, dir, "set-outcome", "f", "--outcome", "Blocked: waiting on token"); err != nil {
+	if out, err := runIn(t, env, dir, "set-outcome", "f", "--outcome", "Blocked: waiting on token"); err != nil {
 		t.Fatalf("set-outcome: %v\n%s", err, out)
 	}
 	if got := mustRead(t, storage, "f").Outcome; got != "Blocked: waiting on token" {
@@ -462,6 +444,8 @@ func TestShuttleSetOutcome(t *testing.T) {
 // ---- accept ----------------------------------------------------------------
 
 func TestShuttleAccept_RearmsAndKeepsOutcome(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	// Awaiting review: standing, closed, untempered, with a prior outcome.
 	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, Outcome: "prior digest", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -475,7 +459,7 @@ func TestShuttleAccept_RearmsAndKeepsOutcome(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	if out, err := runCommand(t, dir, "accept", "f", "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err != nil {
 		t.Fatalf("accept --local: %v\n%s", err, out)
 	}
 	got := mustRead(t, storage, "f")
@@ -499,6 +483,8 @@ func TestShuttleAccept_RearmsAndKeepsOutcome(t *testing.T) {
 // on the very next poll — while this command just printed "next due: tomorrow
 // morning" to the user.
 func TestShuttleAccept_StampsHandedOffAt(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 
 	// A prior dispatch from days ago is the run being accepted now. If accept
@@ -518,7 +504,7 @@ func TestShuttleAccept_StampsHandedOffAt(t *testing.T) {
 	}
 
 	before := time.Now().UTC()
-	if out, err := runCommand(t, dir, "accept", "f", "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err != nil {
 		t.Fatalf("accept --local: %v\n%s", err, out)
 	}
 	after := time.Now().UTC()
@@ -559,6 +545,7 @@ func TestShuttleAccept_StampsHandedOffAt(t *testing.T) {
 // role only. A draft (status: open) and a closed role that already carries a
 // verdict (tempered true or false) are refused and left as they were.
 func TestShuttleAccept_RefusesDraftsAndVerdicts(t *testing.T) {
+	t.Parallel()
 	standing := map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
@@ -574,9 +561,11 @@ func TestShuttleAccept_RefusesDraftsAndVerdicts(t *testing.T) {
 		{"composted", felt.StatusClosed, &no},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
 			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "f", tc.status, standing, tc.tempered)
-			if _, err := runCommand(t, dir, "accept", "f", "--local"); err == nil {
+			if _, err := runIn(t, env, dir, "accept", "f", "--local"); err == nil {
 				t.Fatal("accept must refuse")
 			}
 			if got := mustRead(t, storage, "f").Status; got != tc.status {
@@ -592,13 +581,15 @@ func TestShuttleAccept_RefusesDraftsAndVerdicts(t *testing.T) {
 // the schedule's next tick is the next dispatch; an already-armed role is not
 // re-held to the arming gate.
 func TestShuttleAccept_ActiveStandingRoleConcludesRun(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
-	if out, err := runCommand(t, dir, "accept", "f", "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err != nil {
 		t.Fatalf("accept on an active standing role: %v\n%s", err, out)
 	}
 	got := mustRead(t, storage, "f")
@@ -616,19 +607,27 @@ func TestShuttleAccept_ActiveStandingRoleConcludesRun(t *testing.T) {
 // run with --local, which takes the fiber lock, so the CLI must not hold that
 // lock while it waits: the stand-in daemon takes it inside the request.
 func TestShuttleAccept_RoutesThroughDaemonWithoutHoldingTheLock(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
-	var got map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	requests := make(chan map[string]any, 1)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/lifecycle" {
 			http.NotFound(w, r)
 			return
 		}
+		var got map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&got)
+		select {
+		case requests <- got:
+		default:
+			t.Errorf("a second lifecycle request: %v", got)
+		}
 		unlock, err := storage.LockFiber("f")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -637,15 +636,19 @@ func TestShuttleAccept_RoutesThroughDaemonWithoutHoldingTheLock(t *testing.T) {
 		_ = unlock()
 		fmt.Fprint(w, "accepted by the daemon\n")
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	out, err := runCommand(t, dir, "accept", "f")
+	out, err := runIn(t, env, dir, "accept", "f")
 	if err != nil {
 		t.Fatalf("routed accept: %v\n%s", err, out)
 	}
 	if !strings.Contains(out, "accepted by the daemon") {
 		t.Fatalf("daemon answer not relayed: %q", out)
+	}
+	var got map[string]any
+	select {
+	case got = <-requests:
+	default:
+		t.Fatal("the daemon saw no lifecycle request")
 	}
 	if want := map[string]any{"action": "accept", "fiber": "f"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("lifecycle request = %v, want %v", got, want)
@@ -658,6 +661,8 @@ func TestShuttleAccept_RoutesThroughDaemonWithoutHoldingTheLock(t *testing.T) {
 // TestShuttleAccept_UnreachableDaemonWritesLocally: a daemon that cannot be
 // reached leaves the write to this process.
 func TestShuttleAccept_UnreachableDaemonWritesLocally(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
@@ -670,9 +675,9 @@ func TestShuttleAccept_UnreachableDaemonWritesLocally(t *testing.T) {
 	}
 	addr := listener.Addr().String()
 	listener.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://"+addr)
+	env.Set("SHUTTLE_DAEMON_URL", "http://"+addr)
 
-	if out, err := runCommand(t, dir, "accept", "f"); err != nil {
+	if out, err := runIn(t, env, dir, "accept", "f"); err != nil {
 		t.Fatalf("accept with the daemon down: %v\n%s", err, out)
 	}
 	if status := mustRead(t, storage, "f").Status; status != felt.StatusActive {
@@ -686,6 +691,8 @@ func TestShuttleAccept_UnreachableDaemonWritesLocally(t *testing.T) {
 // the daemon's accept lands) nor claims a refusal: it says the transition may
 // still apply.
 func TestShuttleAccept_DaemonThatDoesNotAnswerInTimeIsNotUnreachable(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet", "project_dir": "/srv/work",
@@ -693,19 +700,16 @@ func TestShuttleAccept_DaemonThatDoesNotAnswerInTimeIsNotUnreachable(t *testing.
 	}, nil)
 
 	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-release
 		fmt.Fprint(w, "accepted by the daemon\n")
 	}))
-	defer server.Close()
 	defer close(release)
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	prev := daemonLifecycleTimeout
-	daemonLifecycleTimeout = 200 * time.Millisecond
-	t.Cleanup(func() { daemonLifecycleTimeout = prev })
+	a := newApp(env)
+	a.daemonLifecycleTimeout = 200 * time.Millisecond
 
-	out, err := runCommand(t, dir, "accept", "f")
+	out, _, err := executeApp(t, a, dir, "accept", "f")
 	if err == nil {
 		t.Fatalf("an unanswered accept reported success:\n%s", out)
 	}
@@ -720,15 +724,19 @@ func TestShuttleAccept_DaemonThatDoesNotAnswerInTimeIsNotUnreachable(t *testing.
 }
 
 func TestShuttleAccept_RejectsOneshot(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
-	if _, err := runCommand(t, dir, "accept", "f", "--local"); err == nil {
+	if _, err := runIn(t, env, dir, "accept", "f", "--local"); err == nil {
 		t.Fatal("accept on a oneshot must refuse (standing/pinned only)")
 	}
 }
 
 func TestShuttleAccept_PinnedReParks(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	// Awaiting review: pinned, closed, untempered — the arc finished and is
 	// pending the human verdict. Accept RE-PARKS it to the strip (status: open),
@@ -744,7 +752,7 @@ func TestShuttleAccept_PinnedReParks(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	if out, err := runCommand(t, dir, "accept", "f", "--local"); err != nil {
+	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err != nil {
 		t.Fatalf("accept pinned --local: %v\n%s", err, out)
 	}
 	got := mustRead(t, storage, "f")
@@ -762,14 +770,16 @@ func TestShuttleAccept_PinnedReParks(t *testing.T) {
 // ---- set-model / set-agent -------------------------------------------------
 
 func TestShuttleSetModel_PreservesRuntimeKeys(t *testing.T) {
-	withOwnHost(t, "h") // block is host-pinned; own-host must match for the guard to pass
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "h") // block is host-pinned; own-host must match for the guard to pass
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "h",
 		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
 	}, nil)
 
-	if out, err := runCommand(t, dir, "set-model", "f", "claude-sonnet"); err != nil {
+	if out, err := runIn(t, env, dir, "set-model", "f", "claude-sonnet"); err != nil {
 		t.Fatalf("set-model: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -791,9 +801,12 @@ func TestShuttleSetModel_PreservesRuntimeKeys(t *testing.T) {
 }
 
 func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{felt.StatusOpen, felt.StatusActive, felt.StatusClosed} {
 		for _, verb := range []string{"set-agent", "set-model"} {
 			t.Run(status+"/"+verb, func(t *testing.T) {
+				t.Parallel()
+				env := testEnv(t)
 				dir, storage := newStore(t)
 				seedShuttleRole(t, storage, "f", status, map[string]any{
 					"kind": "oneshot", "agent": "claude-opus",
@@ -804,7 +817,7 @@ func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
 				if verb == "set-agent" {
 					args = append(args, "--effort", "high", "--chrome", "--surface", "cli")
 				}
-				if out, err := runCommand(t, dir, args...); err != nil {
+				if out, err := runIn(t, env, dir, args...); err != nil {
 					t.Fatalf("settings: %v\n%s", err, out)
 				}
 				after := mustRead(t, storage, "f")
@@ -823,22 +836,26 @@ func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
 }
 
 func TestShuttleSetModel_RejectsUnknownAgent(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
-	if _, err := runCommand(t, dir, "set-model", "f", "no-such-agent"); err == nil {
+	if _, err := runIn(t, env, dir, "set-model", "f", "no-such-agent"); err == nil {
 		t.Fatal("set-model with an unknown agent must fail validation")
 	}
 }
 
 func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus",
 		"session_uuid": "keep-me",
 	}, nil)
 
-	if out, err := runCommand(t, dir, "set-agent", "f", "claude-sonnet", "--effort", "high"); err != nil {
+	if out, err := runIn(t, env, dir, "set-agent", "f", "claude-sonnet", "--effort", "high"); err != nil {
 		t.Fatalf("set-agent: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -856,6 +873,8 @@ func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 }
 
 func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "codex-sol", "surface": "cli",
@@ -863,7 +882,7 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 	}, nil)
 
 	// An agent switch within Codex leaves an explicit CLI selection intact.
-	if out, err := runCommand(t, dir, "set-agent", "f", "codex-luna"); err != nil {
+	if out, err := runIn(t, env, dir, "set-agent", "f", "codex-luna"); err != nil {
 		t.Fatalf("set-agent preserving surface: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
@@ -872,7 +891,7 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 		t.Fatalf("surface after Codex switch = %#v, %v; want cli", b, err)
 	}
 
-	if out, err := runCommand(t, dir, "set-agent", "f", "codex-luna", "--surface", "app"); err != nil {
+	if out, err := runIn(t, env, dir, "set-agent", "f", "codex-luna", "--surface", "app"); err != nil {
 		t.Fatalf("set-agent app: %v\n%s", err, out)
 	}
 	f = mustRead(t, storage, "f")
@@ -880,22 +899,24 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 	if err != nil || b.Surface != "app" {
 		t.Fatalf("surface after explicit edit = %#v, %v; want app", b, err)
 	}
-	if _, err := runCommand(t, dir, "set-agent", "f", "claude-opus"); err == nil {
+	if _, err := runIn(t, env, dir, "set-agent", "f", "claude-opus"); err == nil {
 		t.Fatal("switching an app block away from Codex without choosing cli must fail")
 	}
 }
 
 // TestShuttleSetModel_KeepsSurfaceConsistentWithAgent: set-model and set-agent
 // share one composition rule, so set-model cannot move a surface: app block to
-// a non-Codex agent either — which used to leave a block set-agent then
-// refused. The refusal names the call that does move it.
+// a non-Codex agent either, which would leave a block set-agent refuses. The
+// refusal names the call that does move it.
 func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "codex-sol", "surface": "app",
 	}, nil)
 
-	_, err := runCommand(t, dir, "set-model", "f", "claude-opus")
+	_, err := runIn(t, env, dir, "set-model", "f", "claude-opus")
 	if err == nil || !strings.Contains(err.Error(), "--surface cli") {
 		t.Fatalf("set-model to Claude on an app block: err=%v, want a refusal naming --surface cli", err)
 	}
@@ -905,7 +926,7 @@ func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
 	}
 
 	// Within Codex, set-model keeps the surface.
-	if out, err := runCommand(t, dir, "set-model", "f", "codex-luna"); err != nil {
+	if out, err := runIn(t, env, dir, "set-model", "f", "codex-luna"); err != nil {
 		t.Fatalf("set-model within Codex: %v\n%s", err, out)
 	}
 	if b, _, err := shuttle.BlockOf(mustRead(t, storage, "f")); err != nil || b.Agent != "codex-luna" || b.Surface != "app" {
@@ -913,10 +934,10 @@ func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
 	}
 
 	// The named repair works, and leaves a block set-agent accepts.
-	if out, err := runCommand(t, dir, "set-agent", "f", "claude-opus", "--surface", "cli"); err != nil {
+	if out, err := runIn(t, env, dir, "set-agent", "f", "claude-opus", "--surface", "cli"); err != nil {
 		t.Fatalf("set-agent --surface cli: %v\n%s", err, out)
 	}
-	if out, err := runCommand(t, dir, "set-agent", "f", "--effort", "high"); err != nil {
+	if out, err := runIn(t, env, dir, "set-agent", "f", "--effort", "high"); err != nil {
 		t.Fatalf("set-agent after the move: %v\n%s", err, out)
 	}
 }
@@ -924,17 +945,19 @@ func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
 // ---- uninstall -------------------------------------------------------------
 
 func TestShuttleUninstall_RemovesBlock(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 
-	if out, err := runCommand(t, dir, "uninstall", "f"); err != nil {
+	if out, err := runIn(t, env, dir, "uninstall", "f"); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
 	if shuttle.HasFacet(mustRead(t, storage, "f")) {
 		t.Fatal("uninstall must remove the shuttle: block")
 	}
 	// Idempotent: a second uninstall is a no-op (nothing to do), not an error.
-	if out, err := runCommand(t, dir, "uninstall", "f"); err != nil {
+	if out, err := runIn(t, env, dir, "uninstall", "f"); err != nil {
 		t.Fatalf("second uninstall should be a no-op: %v\n%s", err, out)
 	}
 }
@@ -942,16 +965,18 @@ func TestShuttleUninstall_RemovesBlock(t *testing.T) {
 // ---- ownership guard -------------------------------------------------------
 
 func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
-	withOwnHost(t, "macbook")
-	writeRemotes(t, `{"version":1,"remotes":[]}`)
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "macbook")
+	writeRemotesIn(t, env, `{"version":1,"remotes":[]}`)
+	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "cineca",
 	}, nil)
 	before, _ := os.ReadFile(storage.Path("remote"))
 
-	_, err := runCommand(t, dir, "close", "remote", "--tempered=true")
+	_, err := runIn(t, env, dir, "close", "remote", "--tempered=true")
 	if err == nil {
 		t.Fatal("close on a cineca-owned fiber from macbook must be refused")
 	}
@@ -965,13 +990,15 @@ func TestShuttleOwnershipGuard_RefusesRemoteOwned(t *testing.T) {
 }
 
 func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
-	withOwnHost(t, "cineca")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "cineca")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "owned", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "cineca",
 	}, nil)
 
-	if out, err := runCommand(t, dir, "close", "owned", "--tempered=true"); err != nil {
+	if out, err := runIn(t, env, dir, "close", "owned", "--tempered=true"); err != nil {
 		t.Fatalf("close on a fiber owned here must succeed: %v\n%s", err, out)
 	}
 	if tv := readTempered(mustRead(t, storage, "owned")); tv == nil || !*tv {
@@ -983,13 +1010,15 @@ func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
 // standing role awaiting review with a retired agent must refuse rather than
 // silently re-arm.
 func TestShuttleRetiredAgent_AcceptRefuses(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{
 		"kind": "standing", "agent": "retired-agent", "project_dir": "/srv/work",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
 	}, nil)
 
-	if out, err := runCommand(t, dir, "accept", "f", "--local"); err == nil {
+	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err == nil {
 		t.Fatalf("accept must refuse a retired agent\n%s", out)
 	} else if !strings.Contains(err.Error()+out, "retired-agent") {
 		t.Fatalf("refusal should name the agent, got: %v\n%s", err, out)

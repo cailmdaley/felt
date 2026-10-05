@@ -18,6 +18,7 @@ import (
 )
 
 func TestParseSSListeners(t *testing.T) {
+	t.Parallel()
 	out := `LISTEN 0      4096       127.0.0.1:4000       0.0.0.0:*    users:(("beam.smp",pid=1234,fd=20))
 LISTEN 0      128            [::1]:4001          [::]:*    users:(("ssh",pid=55,fd=5),("autossh",pid=54,fd=3))
 LISTEN 0      128          0.0.0.0:22         0.0.0.0:*
@@ -37,6 +38,7 @@ garbage line
 }
 
 func TestParseLsofListeners(t *testing.T) {
+	t.Parallel()
 	out := "p1234\ncbeam.smp\nf20\nn127.0.0.1:4000\nf21\nn[::1]:4000\np88\nctailscaled\nf9\nn*:1055\np90\ncsome app\nf3\nn*:7000\n"
 	got := parseLsofListeners(out)
 	want := []rawListener{
@@ -94,6 +96,7 @@ func writeProcTCPFixture(t *testing.T, root, tcp, tcp6 string) {
 }
 
 func TestParseProcNetTCP(t *testing.T) {
+	t.Parallel()
 	loopback4 := procAddressHex(net.IPv4(127, 0, 0, 1))
 	loopback6 := procAddressHex(net.ParseIP("::1"))
 	v4 := fmt.Sprintf("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"+
@@ -114,10 +117,12 @@ func TestParseProcNetTCP(t *testing.T) {
 
 // Negative control: changing row.UID != callerUID to == makes the foreign-owner case fail.
 func TestCheckProcTCPConnectionOwner(t *testing.T) {
+	t.Parallel()
 	serverIP, clientIP := net.IPv4(127, 0, 0, 1), net.IPv4(127, 0, 0, 1)
 	const serverPort, clientPort = 4000, 51432
 
 	t.Run("established row owned by caller", func(t *testing.T) {
+		t.Parallel()
 		root := t.TempDir()
 		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "01", 1000, "4242", false), "")
 		if err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000); err != nil {
@@ -126,6 +131,7 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 	})
 
 	t.Run("foreign established row refused", func(t *testing.T) {
+		t.Parallel()
 		root := t.TempDir()
 		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "01", 2000, "4242", false), "")
 		err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000)
@@ -135,6 +141,7 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 	})
 
 	t.Run("missing established row is one-shot pending", func(t *testing.T) {
+		t.Parallel()
 		root := t.TempDir()
 		writeProcTCPFixture(t, root, procTCPRowFixture(serverIP, serverPort, clientIP, clientPort, "03", 1000, "4242", false), "")
 		err := checkProcTCPConnectionOwner(root, "127.0.0.1:4000", "127.0.0.1:51432", 1000)
@@ -145,6 +152,7 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 	})
 
 	t.Run("v4-mapped tcp6 row matches", func(t *testing.T) {
+		t.Parallel()
 		root := t.TempDir()
 		mapped := net.ParseIP("::ffff:127.0.0.1")
 		writeProcTCPFixture(t, root, "", procTCPRowFixture(mapped, serverPort, mapped, clientPort, "01", 1000, "4242", true))
@@ -154,6 +162,7 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 	})
 
 	t.Run("uid-0 row is one-shot pending for every caller", func(t *testing.T) {
+		t.Parallel()
 		// The kernel reports uid 0 on the server-side row until accept(); the
 		// one-shot check cannot distinguish an unaccepted connection from a
 		// root-owned listener.
@@ -174,6 +183,7 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 	})
 
 	t.Run("unreadable proc fails closed", func(t *testing.T) {
+		t.Parallel()
 		err := checkProcTCPConnectionOwner(filepath.Join(t.TempDir(), "absent"), "127.0.0.1:4000", "127.0.0.1:51432", 1000)
 		if err == nil || !strings.Contains(err.Error(), "cannot read /proc/net/tcp") {
 			t.Fatalf("unreadable proc error = %v", err)
@@ -181,19 +191,19 @@ func TestCheckProcTCPConnectionOwner(t *testing.T) {
 	})
 }
 
+// TestDialAndCheckDaemonTCPWaitsForAccept holds the post-connect owner check
+// to its wait: a connection whose server-side row stays uid 0 (not yet
+// accept()ed) is refused only once the wait has elapsed, a root caller is
+// admitted only after it, and a cancelled context ends the polling early. The
+// waits are the behaviour under test, so they run on the real clock. On a
+// Linux kernel that shows an unaccepted connection as uid 0 the rows come
+// from the real /proc; everywhere else a fixture /proc holds that row for each
+// dialed connection, so the wait logic runs on every platform.
 func TestDialAndCheckDaemonTCPWaitsForAccept(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("the connection owner check reads Linux /proc")
-	}
+	t.Parallel()
 	const callerUID = 1 // Exercise the non-root refusal even when the test process is root.
 	wait := 100 * time.Millisecond
-	if !kernelShowsUnacceptedRowAsUIDZero(t) {
-		t.Skip("this kernel stamps an unaccepted connection with the listener's uid; there is no pending window to wait out")
-	}
-	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
-		var d net.Dialer
-		return d.DialContext(ctx, network, address)
-	}
+	realProc := runtime.GOOS == "linux" && kernelShowsUnacceptedRowAsUIDZero(t)
 	listen := func(t *testing.T) *net.TCPListener {
 		t.Helper()
 		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
@@ -203,11 +213,34 @@ func TestDialAndCheckDaemonTCPWaitsForAccept(t *testing.T) {
 		t.Cleanup(func() { _ = listener.Close() })
 		return listener
 	}
+	// dialer returns the dial func and the proc root the check reads for it.
+	dialer := func(t *testing.T) (func(context.Context, string, string) (net.Conn, error), string) {
+		t.Helper()
+		dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, address)
+		}
+		if realProc {
+			return dial, "/proc"
+		}
+		root := t.TempDir()
+		return func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := dial(ctx, network, address)
+			if err != nil {
+				return nil, err
+			}
+			server, client := conn.RemoteAddr().(*net.TCPAddr), conn.LocalAddr().(*net.TCPAddr)
+			writeProcTCPFixture(t, root, procTCPRowFixture(server.IP, server.Port, client.IP, client.Port, "01", 0, "4242", false), "")
+			return conn, nil
+		}, root
+	}
 
 	t.Run("refuses an unaccepted socket after the wait", func(t *testing.T) {
+		t.Parallel()
 		listener := listen(t)
+		dial, procRoot := dialer(t)
 		started := time.Now()
-		conn, err := dialAndCheckDaemonTCP(context.Background(), dial, "tcp4", listener.Addr().String(), "/proc", callerUID, wait)
+		conn, err := dialAndCheckDaemonTCP(context.Background(), dial, "tcp4", listener.Addr().String(), procRoot, callerUID, wait)
 		elapsed := time.Since(started)
 		if conn != nil {
 			_ = conn.Close()
@@ -223,9 +256,11 @@ func TestDialAndCheckDaemonTCPWaitsForAccept(t *testing.T) {
 	})
 
 	t.Run("root waits before admitting uid zero", func(t *testing.T) {
+		t.Parallel()
 		listener := listen(t)
+		dial, procRoot := dialer(t)
 		started := time.Now()
-		conn, err := dialAndCheckDaemonTCP(context.Background(), dial, "tcp4", listener.Addr().String(), "/proc", 0, wait)
+		conn, err := dialAndCheckDaemonTCP(context.Background(), dial, "tcp4", listener.Addr().String(), procRoot, 0, wait)
 		elapsed := time.Since(started)
 		if err != nil || conn == nil {
 			t.Fatalf("root owner result = %v, %v; want admission after the wait", conn, err)
@@ -237,11 +272,13 @@ func TestDialAndCheckDaemonTCPWaitsForAccept(t *testing.T) {
 	})
 
 	t.Run("context cancellation stops polling", func(t *testing.T) {
+		t.Parallel()
 		listener := listen(t)
+		dial, procRoot := dialer(t)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 		defer cancel()
 		started := time.Now()
-		conn, err := dialAndCheckDaemonTCP(ctx, dial, "tcp4", listener.Addr().String(), "/proc", callerUID, time.Second)
+		conn, err := dialAndCheckDaemonTCP(ctx, dial, "tcp4", listener.Addr().String(), procRoot, callerUID, time.Second)
 		elapsed := time.Since(started)
 		if conn != nil {
 			_ = conn.Close()
@@ -257,6 +294,7 @@ func TestDialAndCheckDaemonTCPWaitsForAccept(t *testing.T) {
 }
 
 func TestObservedDaemonPortOwnerIncludesLoopbackAndWildcardListeners(t *testing.T) {
+	t.Parallel()
 	settings := hostSettings{Class: "shared-multi-user", Listen: "tcp://127.0.0.1:4000"}
 	ev := hostEvidence{settings: settings, daemonClass: "shared-multi-user", daemonListen: settings.Listen}
 	cases := []struct {
@@ -274,6 +312,7 @@ func TestObservedDaemonPortOwnerIncludesLoopbackAndWildcardListeners(t *testing.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			row := procTCPRowFixture(tc.address, 4000, net.IPv4zero, 0, "0A", 2000, "4242", tc.tcp6)
 			if tc.tcp6 {
@@ -290,6 +329,7 @@ func TestObservedDaemonPortOwnerIncludesLoopbackAndWildcardListeners(t *testing.
 }
 
 func TestProcListeners(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	must := func(err error) {
 		t.Helper()
@@ -321,6 +361,7 @@ func TestProcListeners(t *testing.T) {
 }
 
 func TestCountLoggedInUsers(t *testing.T) {
+	t.Parallel()
 	out := "alice    pts/0  2026-09-01 10:00 (10.0.0.2)\nalice    pts/1  2026-09-01 10:05\nbob      pts/2  2026-09-01 11:00\n\n"
 	if got := countLoggedInUsers(out); got != 2 {
 		t.Errorf("got %d, want 2", got)
@@ -331,6 +372,7 @@ func TestCountLoggedInUsers(t *testing.T) {
 }
 
 func TestClassifyFleetListeners(t *testing.T) {
+	t.Parallel()
 	raw := []rawListener{
 		{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000},
 		{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000}, // v4/v6 duplicate
@@ -354,6 +396,8 @@ func TestClassifyFleetListeners(t *testing.T) {
 }
 
 func TestEvaluateHost(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	one, three := 1, 3
 	tcpSettings := func(class string) hostSettings {
 		return hostSettings{Class: class, ClassSource: "file", Listen: "tcp://127.0.0.1:4000", listen: listenAddr{"tcp", "127.0.0.1:4000"}}
@@ -441,7 +485,8 @@ func TestEvaluateHost(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := evaluateHost(tc.ev)
+			t.Parallel()
+			got := newApp(env).evaluateHost(tc.ev)
 			if got.Status != tc.status {
 				t.Fatalf("status = %s, want %s (%+v)", got.Status, tc.status, got)
 			}
@@ -462,6 +507,8 @@ func TestEvaluateHost(t *testing.T) {
 }
 
 func TestEvaluateHostReportsPrivateTailnetSocket(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	one := 1
 	listen := "unix:///srv/s/sock/daemon.sock"
 	dir := shortPrivateTempDir(t)
@@ -472,7 +519,7 @@ func TestEvaluateHostReportsPrivateTailnetSocket(t *testing.T) {
 	}
 	defer listener.Close()
 
-	got := evaluateHost(hostEvidence{
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -490,6 +537,8 @@ func TestEvaluateHostReportsPrivateTailnetSocket(t *testing.T) {
 }
 
 func TestGatherHostEvidenceReportsConfiguredTailnetSocket(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir := shortPrivateTempDir(t)
 	path := filepath.Join(dir, "tailscaled.sock")
 	listener, err := net.Listen("unix", path)
@@ -502,9 +551,9 @@ func TestGatherHostEvidenceReportsConfiguredTailnetSocket(t *testing.T) {
 	if err := os.WriteFile(fleet, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SHUTTLE_REMOTES_FILE", fleet)
+	env.Set("SHUTTLE_REMOTES_FILE", fleet)
 
-	got := gatherHostEvidence()
+	got := newApp(env).gatherHostEvidence()
 	if got.tailscaleSocket != path || got.tailscaleConfigError != "" ||
 		got.tailnetSocketEvidence == nil || !got.tailnetSocketEvidence.Private ||
 		!slices.Equal(got.tailnetRemoteNames, []string{"hub-a"}) {
@@ -513,20 +562,22 @@ func TestGatherHostEvidenceReportsConfiguredTailnetSocket(t *testing.T) {
 }
 
 func TestGatherHostEvidencePreservesMalformedRemotesFileError(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir := t.TempDir()
 	fleet := filepath.Join(dir, "remotes.json")
 	if err := os.WriteFile(fleet, []byte(`{"defaults":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SHUTTLE_REMOTES_FILE", fleet)
+	env.Set("SHUTTLE_REMOTES_FILE", fleet)
 
-	ev := gatherHostEvidence()
+	ev := newApp(env).gatherHostEvidence()
 	if ev.remotesConfigError == "" || ev.tailscaleSocket != "" {
 		t.Fatalf("malformed remotes file evidence = %+v", ev)
 	}
 
 	listen := "unix:///tmp/shuttle.sock"
-	got := evaluateHost(hostEvidence{
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "single-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/tmp/shuttle.sock"},
@@ -539,8 +590,10 @@ func TestGatherHostEvidencePreservesMalformedRemotesFileError(t *testing.T) {
 }
 
 func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	listen := "unix:///srv/s/sock/daemon.sock"
-	got := evaluateHost(hostEvidence{
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -555,7 +608,7 @@ func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 		t.Fatalf("daemon/fleet socket mismatch receipt = %+v", got)
 	}
 
-	got = evaluateHost(hostEvidence{
+	got = newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -569,8 +622,10 @@ func TestEvaluateHostReportsDaemonFleetTailnetSocketMismatch(t *testing.T) {
 }
 
 func TestEvaluateHostReportsUnreadyTailnetBridge(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	listen := "unix:///srv/s/sock/daemon.sock"
-	got := evaluateHost(hostEvidence{
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", ClassSource: "file", Listen: listen,
 			listen: listenAddr{"unix", "/srv/s/sock/daemon.sock"},
@@ -590,6 +645,8 @@ func TestEvaluateHostReportsUnreadyTailnetBridge(t *testing.T) {
 }
 
 func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	listen := "unix:///srv/s/sock/daemon.sock"
 	base := hostEvidence{
 		settings: hostSettings{
@@ -601,6 +658,7 @@ func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *tes
 	}
 
 	t.Run("unconfined socket", func(t *testing.T) {
+		t.Parallel()
 		path := "/run/tailscaled.sock"
 		ev := base
 		ev.tailscaleSocket = path
@@ -608,18 +666,19 @@ func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *tes
 			Path: path, Exists: true, Socket: true, OwnerOK: true,
 			BadAncestor: "no ancestor directory owned by the daemon uid blocks traversal by other users",
 		}
-		got := evaluateHost(ev)
+		got := newApp(env).evaluateHost(ev)
 		if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "not confined to a private directory") {
 			t.Fatalf("unconfined LocalAPI socket receipt = %+v", got)
 		}
 	})
 
 	t.Run("conflicting defaults", func(t *testing.T) {
+		t.Parallel()
 		ev := base
 		ev.httpsProxy = "localhost:1055"
 		ev.tailscaleSocket = "/run/tailscaled.sock"
 		ev.tailscaleConfigError = "defaults.https_proxy and defaults.tailscale_socket are mutually exclusive"
-		got := evaluateHost(ev)
+		got := newApp(env).evaluateHost(ev)
 		if got.Status != receiptMismatch || !strings.Contains(strings.Join(got.Problems, "\n"), "mutually exclusive") {
 			t.Fatalf("conflicting dial defaults receipt = %+v", got)
 		}
@@ -628,6 +687,8 @@ func TestEvaluateHostRejectsUnconfinedTailnetSocketAndConflictingDefaults(t *tes
 
 // Negative control: a traversable temp directory makes this probe red; mode 0700 restores it.
 func TestInspectTailnetSocketPrivateDirectoryBoundary(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, err := os.MkdirTemp("/tmp", "felt-tailnet-socket-")
 	if err != nil {
 		t.Fatal(err)
@@ -643,19 +704,21 @@ func TestInspectTailnetSocketPrivateDirectoryBoundary(t *testing.T) {
 	}
 	defer listener.Close()
 
-	if got := inspectTailnetSocket(path, os.Geteuid()); got.Private {
+	if got := newApp(env).inspectTailnetSocket(path, os.Geteuid()); got.Private {
 		t.Fatalf("traversable parent reported private: %+v", got)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if got := inspectTailnetSocket(path, os.Geteuid()); !got.Private {
+	if got := newApp(env).inspectTailnetSocket(path, os.Geteuid()); !got.Private {
 		t.Fatalf("private parent not recognized: %+v", got)
 	}
 }
 
 // Negative control: remove the ACL grant below; the receipt must then report the directory private.
 func TestInspectTailnetSocketRejectsACLGrantedTraversal(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS ACLs can grant traversal without changing mode bits")
 	}
@@ -680,15 +743,17 @@ func TestInspectTailnetSocketRejectsACLGrantedTraversal(t *testing.T) {
 		t.Fatalf("ACL changed the directory mode to %04o", mode)
 	}
 
-	got := inspectTailnetSocket(path, os.Geteuid())
+	got := newApp(env).inspectTailnetSocket(path, os.Geteuid())
 	if got.Private || !strings.Contains(got.BadAncestor, "ACL") {
 		t.Fatalf("ACL-accessible socket directory was reported private: %+v", got)
 	}
 }
 
 func TestInspectTailnetSocketDistinguishesMissingFileSymlinkAndRegularFile(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir := shortPrivateTempDir(t)
-	missing := inspectTailnetSocket(filepath.Join(dir, "missing.sock"), os.Geteuid())
+	missing := newApp(env).inspectTailnetSocket(filepath.Join(dir, "missing.sock"), os.Geteuid())
 	if missing.Exists || missing.Error == "" {
 		t.Fatalf("missing socket evidence = %+v", missing)
 	}
@@ -697,7 +762,7 @@ func TestInspectTailnetSocketDistinguishesMissingFileSymlinkAndRegularFile(t *te
 	if err := os.WriteFile(regular, []byte("not a socket"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := inspectTailnetSocket(regular, os.Geteuid()); !got.Exists || got.Socket || got.Symlink {
+	if got := newApp(env).inspectTailnetSocket(regular, os.Geteuid()); !got.Exists || got.Socket || got.Symlink {
 		t.Fatalf("regular file evidence = %+v", got)
 	}
 
@@ -711,28 +776,17 @@ func TestInspectTailnetSocketDistinguishesMissingFileSymlinkAndRegularFile(t *te
 	if err := os.Symlink(socketPath, link); err != nil {
 		t.Fatal(err)
 	}
-	if got := inspectTailnetSocket(link, os.Geteuid()); !got.Symlink || got.Socket {
+	if got := newApp(env).inspectTailnetSocket(link, os.Geteuid()); !got.Symlink || got.Socket {
 		t.Fatalf("symlink evidence = %+v", got)
 	}
-	if got := inspectTailnetSocket(socketPath, os.Geteuid()); !got.Socket || !got.Private {
+	if got := newApp(env).inspectTailnetSocket(socketPath, os.Geteuid()); !got.Socket || !got.Private {
 		t.Fatalf("unix socket evidence = %+v", got)
 	}
 }
 
-func shortPrivateTempDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "td-private-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	return dir
-}
-
 func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	callerUID := os.Geteuid()
 	foreignUID := callerUID + 1
 	listen := "tcp://127.0.0.1:4000"
@@ -749,7 +803,8 @@ func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := evaluateHost(hostEvidence{
+			t.Parallel()
+			got := newApp(env).evaluateHost(hostEvidence{
 				settings: settings, daemonClass: "shared-multi-user", daemonListen: listen, daemonPeerGate: "uid",
 				daemonPeerGateUID: &tc.uid, daemonPeerGateUIDSource: tc.source,
 			})
@@ -762,8 +817,10 @@ func TestEvaluateHost_PeerGateUidSourceAndOwner(t *testing.T) {
 
 // Negative control: remove the missing-source/value switch case and this daemon can look healthy.
 func TestEvaluateHost_UidGateWithoutUidMismatches(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	listen := "tcp://127.0.0.1:4000"
-	got := evaluateHost(hostEvidence{
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
 		},
@@ -777,9 +834,11 @@ func TestEvaluateHost_UidGateWithoutUidMismatches(t *testing.T) {
 }
 
 func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	listen := "tcp://127.0.0.1:4000"
 	callerUID := os.Geteuid()
-	got := evaluateHost(hostEvidence{
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "shared-multi-user", Listen: listen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
 		},
@@ -807,6 +866,8 @@ func TestEvaluateHost_ForeignDaemonPortOwnerOverridesVersionGate(t *testing.T) {
 // TestEvaluateHost_UidGatedDaemonListener checks the daemon exemption and
 // confirms that unrelated fleet listeners remain findings.
 func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	one, callerUID := 1, os.Geteuid()
 	settings := hostSettings{
 		Class:       "shared-multi-user",
@@ -816,7 +877,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	}
 	daemonTCP := []rawListener{{Process: "beam.smp", PID: 1, Address: "127.0.0.1", Port: 4000}}
 
-	got := evaluateHost(hostEvidence{
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings:                settings,
 		users:                   &one,
 		listenFrom:              "ss",
@@ -841,7 +902,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 	}
 
 	exposedListen := "tcp://127.0.0.1:4000"
-	exposed := evaluateHost(hostEvidence{
+	exposed := newApp(env).evaluateHost(hostEvidence{
 		settings: hostSettings{
 			Class: "exposed", Listen: exposedListen, listen: listenAddr{"tcp", "127.0.0.1:4000"},
 		},
@@ -853,7 +914,7 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 		t.Fatalf("exposed TCP must not receive the shared-host gate exemption: %+v", exposed)
 	}
 
-	got = evaluateHost(hostEvidence{
+	got = newApp(env).evaluateHost(hostEvidence{
 		settings:                settings,
 		users:                   &one,
 		listenFrom:              "ss",
@@ -878,7 +939,9 @@ func TestEvaluateHost_UidGatedDaemonListener(t *testing.T) {
 // TestEvaluateHost_OneRepairPerRemedy — each listener is its own problem, but
 // two daemon listeners share one repair, and each role words its own.
 func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
-	got := evaluateHost(hostEvidence{
+	t.Parallel()
+	env := testEnv(t)
+	got := newApp(env).evaluateHost(hostEvidence{
 		settings:    hostSettings{Class: "exposed", Listen: "unix:///srv/s.sock", listen: listenAddr{"unix", "/srv/s.sock"}},
 		listenFrom:  "ss",
 		daemonPorts: []int{4000},
@@ -899,6 +962,7 @@ func TestEvaluateHost_OneRepairPerRemedy(t *testing.T) {
 }
 
 func TestInspectSocketDir(t *testing.T) {
+	t.Parallel()
 	euid := os.Geteuid()
 	base := t.TempDir()
 	// Explicit mode: under a 002 umask TempDir is 0775, which the ancestry check names.
@@ -952,6 +1016,7 @@ func TestInspectSocketDir(t *testing.T) {
 }
 
 func TestIsShuttleDaemonCommand(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
 		t.Fatal(err)
@@ -975,6 +1040,7 @@ func TestIsShuttleDaemonCommand(t *testing.T) {
 }
 
 func TestParsePSCommands(t *testing.T) {
+	t.Parallel()
 	out := "  38927 /opt/rel/erts/bin/beam.smp -- -root /opt/rel -progname erl\n  101 /usr/bin/ssh -N -L 4001:localhost:4000 hub-a\n\nbogus\n"
 	got := parsePSCommands(out)
 	if got[38927] != "/opt/rel/erts/bin/beam.smp -- -root /opt/rel -progname erl" || got[101] != "/usr/bin/ssh -N -L 4001:localhost:4000 hub-a" || len(got) != 2 {
@@ -983,6 +1049,7 @@ func TestParsePSCommands(t *testing.T) {
 }
 
 func TestFoldDoctorRepair(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, before, component, want string
 		status                        receiptStatus
@@ -994,6 +1061,7 @@ func TestFoldDoctorRepair(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			receipt := DoctorReceipt{Status: receiptMismatch, Repair: tc.before}
 			foldDoctorRepair(&receipt, tc.status, tc.component)
 			if receipt.Repair != tc.want {

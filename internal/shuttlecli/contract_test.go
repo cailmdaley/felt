@@ -14,6 +14,7 @@ import (
 // byte on stderr trips contract skew and parks every fresh launch. So we
 // capture both streams and assert stderr is empty as part of the contract.
 func TestShuttleContract_PrintsBareInteger(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 
 	out, errOut := runShuttleContract(t, dir)
@@ -39,6 +40,6 @@ func TestShuttleContract_PrintsBareInteger(t *testing.T) {
 // stderr separately, so the test can assert stderr is empty.
 func runShuttleContract(t *testing.T, dir string) (stdout, stderr string) {
 	t.Helper()
-	stdout, stderr, _ = executeCLI(t, dir, "contract")
+	stdout, stderr, _ = executeIn(t, testEnv(t), dir, "contract")
 	return stdout, stderr
 }

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 const hostFixtureDir = "../../daemon/test/fixtures/host"
@@ -30,25 +32,10 @@ type hostFixtureCase struct {
 	} `json:"expect"`
 }
 
-// setHostEnv isolates one resolution: the fixture's base env, then the case's
-// overrides, with every other input unset.
-func setHostEnv(t *testing.T, file string, base, env map[string]string) {
-	t.Helper()
-	for _, k := range []string{"SHUTTLE_LISTEN", "SHUTTLE_PORT", "SHUTTLE_DATA_DIR", "SHUTTLE_DAEMON_URL"} {
-		t.Setenv(k, "")
-	}
-	for k, v := range base {
-		t.Setenv(k, v)
-	}
-	for k, v := range env {
-		t.Setenv(k, v)
-	}
-	t.Setenv("SHUTTLE_HOST_CONFIG_FILE", file)
-}
-
 // TestHostFixtureParity — the Go reader reproduces every case the daemon's
 // reader must also reproduce.
 func TestHostFixtureParity(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(hostFixtureDir, "expected.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -65,12 +52,14 @@ func TestHostFixtureParity(t *testing.T) {
 	}
 	for _, tc := range doc.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
 			file := filepath.Join(t.TempDir(), "absent.json")
 			if tc.File != nil {
 				file, _ = filepath.Abs(filepath.Join(hostFixtureDir, *tc.File))
 			}
-			setHostEnv(t, file, doc.BaseEnv, tc.Env)
-			got, err := resolveHostSettings()
+			setHostEnvIn(t, env, file, doc.BaseEnv, tc.Env)
+			got, err := newApp(env).resolveHostSettings()
 			if tc.Expect.Error != "" {
 				if err == nil {
 					t.Fatalf("want %s error, resolved %+v", tc.Expect.Error, got)
@@ -94,6 +83,7 @@ func TestHostFixtureParity(t *testing.T) {
 // TestHostFixtureParity_CoversEveryInput — an input file no case reads is a
 // case someone meant to write.
 func TestHostFixtureParity_CoversEveryInput(t *testing.T) {
+	t.Parallel()
 	data, _ := os.ReadFile(filepath.Join(hostFixtureDir, "expected.json"))
 	var doc struct {
 		Cases []hostFixtureCase `json:"cases"`
@@ -114,16 +104,18 @@ func TestHostFixtureParity_CoversEveryInput(t *testing.T) {
 }
 
 func TestWriteHostClass_PreservesKeysAndMode(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "cfg", "host.json")
-	setHostEnv(t, path, map[string]string{"SHUTTLE_DATA_DIR": "/srv/shuttle-fixture"}, nil)
+	setHostEnvIn(t, env, path, map[string]string{"SHUTTLE_DATA_DIR": "/srv/shuttle-fixture"}, nil)
 
-	if _, err := writeHostClass(hostClassShared); err != nil {
+	if _, err := newApp(env).writeHostClass(hostClassShared); err != nil {
 		t.Fatalf("write to absent file: %v", err)
 	}
 	if err := os.WriteFile(path, []byte(`{"class":"single-user","listen":"unix:///srv/x.sock","note":{"kept":true}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeHostClass(hostClassExposed); err != nil {
+	if _, err := newApp(env).writeHostClass(hostClassExposed); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	info, err := os.Stat(path)
@@ -151,15 +143,17 @@ func TestWriteHostClass_PreservesKeysAndMode(t *testing.T) {
 }
 
 func TestWriteHostClass_Refusals(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, path, nil, nil)
-	if _, err := writeHostClass("shared"); !isHostConfigError(err, hostErrBadClass) {
+	setHostEnvIn(t, env, path, nil, nil)
+	if _, err := newApp(env).writeHostClass("shared"); !isHostConfigError(err, hostErrBadClass) {
 		t.Errorf("bad class: err = %v", err)
 	}
 	if err := os.WriteFile(path, []byte("{nope"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeHostClass(hostClassShared); !isHostConfigError(err, hostErrMalformed) {
+	if _, err := newApp(env).writeHostClass(hostClassShared); !isHostConfigError(err, hostErrMalformed) {
 		t.Errorf("malformed file must be refused, not overwritten: err = %v", err)
 	}
 	if raw, _ := os.ReadFile(path); string(raw) != "{nope" {
@@ -168,31 +162,36 @@ func TestWriteHostClass_Refusals(t *testing.T) {
 }
 
 func TestResolveHostSettings_NonStringKeyIsMalformed(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, path, nil, nil)
+	setHostEnvIn(t, env, path, nil, nil)
 	_ = os.WriteFile(path, []byte(`{"class": 3}`), 0o600)
-	if _, err := resolveHostSettings(); !isHostConfigError(err, hostErrMalformed) {
+	if _, err := newApp(env).resolveHostSettings(); !isHostConfigError(err, hostErrMalformed) {
 		t.Errorf("err = %v", err)
 	}
 }
 
 func TestDaemonURL_FollowsListen(t *testing.T) {
-	setHostEnv(t, filepath.Join(t.TempDir(), "absent.json"), nil, map[string]string{"SHUTTLE_PORT": "4100"})
+	t.Parallel()
+	env := testEnv(t)
+	setHostEnvIn(t, env, filepath.Join(t.TempDir(), "absent.json"), nil, map[string]string{"SHUTTLE_PORT": "4100"})
 	check := func(label, want string) {
 		t.Helper()
-		got, err := daemonURL()
+		got, err := newApp(env).daemonURL()
 		if err != nil || got != want {
 			t.Errorf("%s: daemonURL = %q, %v; want %q", label, got, err, want)
 		}
 	}
 	check("tcp", "http://127.0.0.1:4100")
-	t.Setenv("SHUTTLE_LISTEN", "unix:///srv/shuttle-fixture/sock/daemon.sock")
+	env.Set("SHUTTLE_LISTEN", "unix:///srv/shuttle-fixture/sock/daemon.sock")
 	check("unix", "http://shuttle.invalid")
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:9")
+	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:9")
 	check("override", "http://127.0.0.1:9")
 }
 
 func TestShuttleDeployChecksOwnerBeforeDaemonCall(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -211,15 +210,8 @@ func TestShuttleDeployChecksOwnerBeforeDaemonCall(t *testing.T) {
 		t.Fatalf("generate daemon call: %v", err)
 	}
 
-	binDir := t.TempDir()
-	calls := filepath.Join(t.TempDir(), "calls")
 	shuttle := "#!/bin/sh\n[ \"$*\" = 'host check-owner' ] || exit 2\necho check-owner >> \"$CALLS\"\n[ \"${FAIL_OWNER:-0}\" = 0 ]\n"
 	curl := "#!/bin/sh\necho curl >> \"$CALLS\"\n"
-	for name, body := range map[string]string{"shuttle": shuttle, "curl": curl} {
-		if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
 	for _, tc := range []struct {
 		name      string
 		failOwner bool
@@ -229,14 +221,18 @@ func TestShuttleDeployChecksOwnerBeforeDaemonCall(t *testing.T) {
 		{"owner refused", true, "check-owner"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-			t.Setenv("CALLS", calls)
+			t.Parallel()
+			env := testEnv(t)
+			sysenvtest.FakeCommand(t, env, "shuttle", shuttle)
+			sysenvtest.FakeCommand(t, env, "curl", curl)
+			calls := filepath.Join(t.TempDir(), "calls")
+			env.Set("CALLS", calls)
 			if tc.failOwner {
-				t.Setenv("FAIL_OWNER", "1")
+				env.Set("FAIL_OWNER", "1")
 			} else {
-				t.Setenv("FAIL_OWNER", "0")
+				env.Set("FAIL_OWNER", "0")
 			}
-			_, err := exec.Command("bash", "-c", string(generated)).CombinedOutput()
+			_, err := env.Command("bash", "-c", string(generated)).CombinedOutput()
 			if (err != nil) != tc.failOwner {
 				t.Fatalf("daemon call error = %v; want failure %v", err, tc.failOwner)
 			}
@@ -247,14 +243,12 @@ func TestShuttleDeployChecksOwnerBeforeDaemonCall(t *testing.T) {
 			if strings.TrimSpace(string(got)) != tc.wantCalls {
 				t.Fatalf("calls = %q, want %q", got, tc.wantCalls)
 			}
-			if err := os.WriteFile(calls, nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
 		})
 	}
 }
 
 func TestCheckResolvedDaemonPortOwnerSkipsOtherListeners(t *testing.T) {
+	t.Parallel()
 	for _, settings := range []hostSettings{
 		{Class: "single-user", listen: listenAddr{Network: "tcp", Address: "127.0.0.1:4000"}},
 		{Class: "shared-multi-user", listen: listenAddr{Network: "unix", Address: "/tmp/daemon.sock"}},
@@ -266,11 +260,13 @@ func TestCheckResolvedDaemonPortOwnerSkipsOtherListeners(t *testing.T) {
 }
 
 func TestIsSocketClassDaemonTCPMatchesLoopbackAddresses(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	if runtime.GOOS != "linux" {
 		t.Skip("the owner check applies to Linux socket-class TCP listeners")
 	}
 	hostFile := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, hostFile, nil, nil)
+	setHostEnvIn(t, env, hostFile, nil, nil)
 	if err := os.WriteFile(hostFile, []byte(`{"class":"shared-multi-user","listen":"tcp://127.0.0.1:4102"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +282,8 @@ func TestIsSocketClassDaemonTCPMatchesLoopbackAddresses(t *testing.T) {
 		{"127.0.0.1:4103", false},
 	} {
 		t.Run(tc.address, func(t *testing.T) {
-			got, err := isSocketClassDaemonTCP("tcp", tc.address)
+			t.Parallel()
+			got, err := newApp(env).isSocketClassDaemonTCP("tcp", tc.address)
 			if err != nil || got != tc.want {
 				t.Fatalf("isSocketClassDaemonTCP(%q) = %v, %v; want %v", tc.address, got, err, tc.want)
 			}
@@ -295,6 +292,8 @@ func TestIsSocketClassDaemonTCPMatchesLoopbackAddresses(t *testing.T) {
 }
 
 func TestDaemonHTTPClientFailsClosedWhenSettingsCannotResolve(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	if runtime.GOOS != "linux" {
 		t.Skip("the owner check applies to Linux socket-class TCP listeners")
 	}
@@ -311,15 +310,15 @@ func TestDaemonHTTPClientFailsClosedWhenSettingsCannotResolve(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 
 	hostFile := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, hostFile, nil, nil)
+	setHostEnvIn(t, env, hostFile, nil, nil)
 	if err := os.WriteFile(hostFile, []byte("{malformed"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://"+listener.Addr().String())
+	env.Set("SHUTTLE_DAEMON_URL", "http://"+listener.Addr().String())
 	for _, key := range []string{"HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"} {
-		t.Setenv(key, "")
+		env.Set(key, "")
 	}
-	if _, err := getDaemon("http://"+listener.Addr().String(), time.Second); err == nil || !strings.Contains(err.Error(), hostFile) {
+	if _, err := newApp(env).getDaemon("http://"+listener.Addr().String(), time.Second); err == nil || !strings.Contains(err.Error(), hostFile) {
 		t.Fatalf("getDaemon error = %v; want host settings error naming %s", err, hostFile)
 	}
 	select {
@@ -330,6 +329,8 @@ func TestDaemonHTTPClientFailsClosedWhenSettingsCannotResolve(t *testing.T) {
 }
 
 func TestDaemonHTTPClientChecksLiveSocketClassTCP(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	if runtime.GOOS != "linux" {
 		t.Skip("the accepted-socket owner check reads Linux /proc")
 	}
@@ -345,12 +346,12 @@ func TestDaemonHTTPClientChecksLiveSocketClassTCP(t *testing.T) {
 
 	addr := listener.Addr().String()
 	hostFile := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, hostFile, nil, nil)
+	setHostEnvIn(t, env, hostFile, nil, nil)
 	if err := os.WriteFile(hostFile, []byte(fmt.Sprintf(`{"class":"shared-multi-user","listen":"tcp://%s"}`, addr)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	body, err := getDaemon("http://"+addr, daemonReadTimeout)
+	body, err := newApp(env).getDaemon("http://"+addr, daemonReadTimeout)
 	if err != nil {
 		t.Fatalf("the daemon HTTP client rejected its own listener: %v", err)
 	}
@@ -359,9 +360,9 @@ func TestDaemonHTTPClientChecksLiveSocketClassTCP(t *testing.T) {
 	}
 }
 
-func mustDaemonEndpoint(t *testing.T, path string) string {
+func mustDaemonEndpoint(t *testing.T, a *app, path string) string {
 	t.Helper()
-	endpoint, err := daemonEndpoint(path)
+	endpoint, err := a.daemonEndpoint(path)
 	if err != nil {
 		t.Fatalf("daemonEndpoint: %v", err)
 	}
@@ -372,6 +373,8 @@ func mustDaemonEndpoint(t *testing.T, path string) string {
 // through the socket: the synthetic base URL plus a path reaches the server,
 // and an $HTTP_PROXY does not capture it.
 func TestGetDaemon_DialsUnixSocket(t *testing.T) {
+	// serial: the daemon client's proxy is net/http's ProxyFromEnvironment, which reads $HTTP_PROXY from the process
+	env := testEnv(t)
 	// /tmp, not t.TempDir(): macOS temp paths alone approach the 104-byte
 	// sun_path limit.
 	dir, err := os.MkdirTemp("/tmp", "felt-sock-")
@@ -396,22 +399,23 @@ func TestGetDaemon_DialsUnixSocket(t *testing.T) {
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
 
-	setHostEnv(t, filepath.Join(dir, "absent.json"), nil, map[string]string{"SHUTTLE_LISTEN": "unix://" + sock})
+	setHostEnvIn(t, env, filepath.Join(dir, "absent.json"), nil, map[string]string{"SHUTTLE_LISTEN": "unix://" + sock})
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:9")
 
-	body, err := getDaemon(mustDaemonEndpoint(t, "/api/v1/state?x=1"), daemonReadTimeout)
+	a := newApp(env)
+	body, err := a.getDaemon(mustDaemonEndpoint(t, a, "/api/v1/state?x=1"), daemonReadTimeout)
 	if err != nil {
 		t.Fatalf("getDaemon: %v", err)
 	}
 	if got := string(body); got != "host=localhost path=/api/v1/state q=x=1" {
 		t.Errorf("body = %q", got)
 	}
-	if _, err := postDaemon(mustDaemonEndpoint(t, "/api/v1/dispatch"), []byte("{}"), daemonPostTimeout); err != nil {
+	if _, err := a.postDaemon(mustDaemonEndpoint(t, a, "/api/v1/dispatch"), []byte("{}"), daemonPostTimeout); err != nil {
 		t.Errorf("postDaemon: %v", err)
 	}
 	// A redirect — relative or absolute — is refused rather than followed off
 	// the socket.
-	if _, err := getDaemon(mustDaemonEndpoint(t, "/redirect"), daemonReadTimeout); err == nil || !strings.Contains(err.Error(), "never redirects") || !strings.Contains(err.Error(), "localhost:4077") {
+	if _, err := a.getDaemon(mustDaemonEndpoint(t, a, "/redirect"), daemonReadTimeout); err == nil || !strings.Contains(err.Error(), "never redirects") || !strings.Contains(err.Error(), "localhost:4077") {
 		t.Errorf("redirect: err = %v; want a refusal", err)
 	}
 }
@@ -421,6 +425,7 @@ func TestGetDaemon_DialsUnixSocket(t *testing.T) {
 // lifecycle verbs answer "daemon unreachable" with a local write, and a
 // malformed operator file must not take that path.
 func TestLifecycleOwnerCheckRefusalIsNotTransportError(t *testing.T) {
+	t.Parallel()
 	refusal := fmt.Errorf("reaching daemon at http://127.0.0.1:4000: %w", &daemonTCPOwnerCheckError{
 		address: "127.0.0.1:4000", uid: 2000, foreign: true,
 	})
@@ -434,11 +439,13 @@ func TestLifecycleOwnerCheckRefusalIsNotTransportError(t *testing.T) {
 }
 
 func TestDaemonURL_BrokenHostFileFailsLoud(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, path, nil, nil)
+	setHostEnvIn(t, env, path, nil, nil)
 	for _, body := range []string{`{"class":"shared"}`, `{nope`, `{"listen":"tcp://0.0.0.0:4000"}`} {
 		_ = os.WriteFile(path, []byte(body), 0o600)
-		url, err := daemonURL()
+		url, err := newApp(env).daemonURL()
 		if err == nil || url != "" {
 			t.Fatalf("%s: daemonURL = %q, %v; want an error", body, url, err)
 		}
@@ -449,8 +456,8 @@ func TestDaemonURL_BrokenHostFileFailsLoud(t *testing.T) {
 			t.Errorf("%s: error %q reads as a transport error", body, err)
 		}
 	}
-	t.Setenv("SHUTTLE_LISTEN", "tcp://10.0.0.5:4000")
-	if _, err := daemonURL(); err == nil || !strings.Contains(err.Error(), "SHUTTLE_LISTEN") || isLifecycleTransportError(err) {
+	env.Set("SHUTTLE_LISTEN", "tcp://10.0.0.5:4000")
+	if _, err := newApp(env).daemonURL(); err == nil || !strings.Contains(err.Error(), "SHUTTLE_LISTEN") || isLifecycleTransportError(err) {
 		t.Errorf("env listener: err = %v", err)
 	}
 }
@@ -458,10 +465,12 @@ func TestDaemonURL_BrokenHostFileFailsLoud(t *testing.T) {
 // TestPostLifecycle_BrokenHostFileDoesNotFallBack — the lifecycle hop, whose
 // transport errors trigger a local write, surfaces the host file error.
 func TestPostLifecycle_BrokenHostFileDoesNotFallBack(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "host.json")
-	setHostEnv(t, path, nil, nil)
+	setHostEnvIn(t, env, path, nil, nil)
 	_ = os.WriteFile(path, []byte(`{"class":"shared"}`), 0o600)
-	_, err := postLifecycle("resume", "x")
+	_, err := newApp(env).postLifecycle("resume", "x")
 	if err == nil || isLifecycleTransportError(err) || !strings.Contains(err.Error(), path) {
 		t.Fatalf("err = %v", err)
 	}

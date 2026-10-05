@@ -17,10 +17,11 @@ import (
 // speech-recognition renderings of "Claude".
 var defaultFollowNames = []string{"claude", "cloud", "clawed", "klaud"}
 
-var shuttleFollowCmd = &cobra.Command{
-	Use:   "follow <transcript>",
-	Short: "Stream a live meeting transcript to an agent in batches",
-	Long: `Watch a live transcript file and print its new lines in batches, each
+func (a *app) shuttleFollowCmd() *cobra.Command {
+	shuttleFollowCmd := &cobra.Command{
+		Use:   "follow <transcript>",
+		Short: "Stream a live meeting transcript to an agent in batches",
+		Long: `Watch a live transcript file and print its new lines in batches, each
 followed by one blank line, so an agent reading stdout sees coherent chunks
 rather than a trickle of single lines.
 
@@ -38,42 +39,40 @@ complete lines are held pending until one of these flushes them:
 Lines starting "#" ride along with the batch without counting words or
 triggering a flush. A partial trailing line waits for its newline. A file that
 shrinks is read again from the start. The file is polled once per second.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		words, _ := cmd.Flags().GetInt("words")
-		seconds, _ := cmd.Flags().GetFloat64("seconds")
-		namesFlag, _ := cmd.Flags().GetString("names")
-		var names []string
-		for _, name := range strings.Split(namesFlag, ",") {
-			if name = strings.TrimSpace(name); name != "" {
-				names = append(names, name)
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			words, _ := cmd.Flags().GetInt("words")
+			seconds, _ := cmd.Flags().GetFloat64("seconds")
+			namesFlag, _ := cmd.Flags().GetString("names")
+			var names []string
+			for _, name := range strings.Split(namesFlag, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					names = append(names, name)
+				}
 			}
-		}
-		if len(names) == 0 {
-			return fmt.Errorf("--names must list at least one word")
-		}
-		path, err := expandUserPath(args[0])
-		if err != nil {
-			return err
-		}
-		if resolved, err := filepath.EvalSymlinks(path); err == nil {
-			path = resolved
-		}
-		out := cmd.OutOrStdout()
-		return followTranscript(path, newFollowBatcher(words, time.Duration(seconds*float64(time.Second)), names), followIO{
-			poll:  time.Second,
-			sleep: time.Sleep,
-			clock: time.Now,
-			emit:  func(line string) { fmt.Fprintln(out, line) },
-		})
-	},
-}
-
-func init() {
+			if len(names) == 0 {
+				return fmt.Errorf("--names must list at least one word")
+			}
+			path, err := a.expandUserPath(args[0])
+			if err != nil {
+				return err
+			}
+			if resolved, err := filepath.EvalSymlinks(path); err == nil {
+				path = resolved
+			}
+			out := cmd.OutOrStdout()
+			return followTranscript(path, newFollowBatcher(words, time.Duration(seconds*float64(time.Second)), names), followIO{
+				poll:  time.Second,
+				sleep: time.Sleep,
+				clock: time.Now,
+				emit:  func(line string) { fmt.Fprintln(out, line) },
+			})
+		},
+	}
 	shuttleFollowCmd.Flags().Int("words", 150, "Flush pending lines once their utterance text reaches this many words")
 	shuttleFollowCmd.Flags().Float64("seconds", 15, "Flush pending lines this long after the first one arrived")
 	shuttleFollowCmd.Flags().String("names", strings.Join(defaultFollowNames, ","), "Comma-separated words that address the agent (case-insensitive)")
-	addShuttleCommand(shuttleFollowCmd)
+	return shuttleFollowCmd
 }
 
 // followTimestamp matches a leading HH:MM:SS stamp, or an HH:MM:SS-HH:MM:SS

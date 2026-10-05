@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 const provenanceSession = "01a02f80-b023-7ed2-8f3d-8f5b7b94ce21"
@@ -20,20 +21,17 @@ const provenanceSession = "01a02f80-b023-7ed2-8f3d-8f5b7b94ce21"
 // The one-record composite body that names the session's owning host.
 const provenanceOwnerRecords = `{"records":[{"session":"` + provenanceSession + `","host":"candide"}]}`
 
-// daemonStub serves the given routes and points SHUTTLE_DAEMON_URL at itself.
-// Every other path 404s, so an unexpected request still fails loudly.
-func daemonStub(t *testing.T, routes map[string]http.HandlerFunc) *httptest.Server {
+// daemonStub serves the given routes as env's daemon. Every other path 404s,
+// so an unexpected request still fails loudly.
+func daemonStub(t testing.TB, env *sysenv.Env, routes map[string]http.HandlerFunc) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h, ok := routes[r.URL.Path]; ok {
 			h(w, r)
 			return
 		}
 		http.NotFound(w, r)
 	}))
-	t.Cleanup(server.Close)
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	return server
 }
 
 func jsonBody(body string) http.HandlerFunc {
@@ -41,7 +39,9 @@ func jsonBody(body string) http.HandlerFunc {
 }
 
 func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
-	daemonStub(t, map[string]http.HandlerFunc{
+	t.Parallel()
+	env := testEnv(t)
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath: func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"records":[
@@ -52,7 +52,7 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
         ]}`))
 		},
 	})
-	out, err := runCommand(t, t.TempDir(), "sessions", "new/name", "--json")
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", "new/name", "--json")
 	if err != nil {
 		t.Fatalf("sessions: %v\n%s", err, out)
 	}
@@ -84,9 +84,11 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 }
 
 func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	body := []byte("{\"type\":\"response_item\"}\n")
 	digest := sha256.Sum256(body)
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(provenanceOwnerRecords),
 		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","harness":"codex","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(body)) + `,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`),
 		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) {
@@ -96,8 +98,8 @@ func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
 		},
 	})
 	cache := t.TempDir()
-	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", cache)
-	out, err := runCommand(t, t.TempDir(), "transcript", provenanceSession)
+	env.Set("SHUTTLE_TRANSCRIPT_CACHE_DIR", cache)
+	out, _, err := executeIn(t, env, t.TempDir(), "transcript", provenanceSession)
 	if err != nil {
 		t.Fatalf("transcript: %v\n%s", err, out)
 	}
@@ -115,8 +117,10 @@ func TestShuttleTranscript_RemoteVerifiesAndCachesExactBytes(t *testing.T) {
 }
 
 func TestShuttleTranscript_RemoteAcceptsEmptyFileWithoutSourcePath(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	digest := sha256.Sum256(nil)
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(provenanceOwnerRecords),
 		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","byte_count":0,"sha256":"` + hex.EncodeToString(digest[:]) + `"}`),
 		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) {
@@ -124,8 +128,8 @@ func TestShuttleTranscript_RemoteAcceptsEmptyFileWithoutSourcePath(t *testing.T)
 			w.Header().Set("X-Transcript-SHA256", hex.EncodeToString(digest[:]))
 		},
 	})
-	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
-	out, err := runCommand(t, t.TempDir(), "transcript", provenanceSession)
+	env.Set("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
+	out, _, err := executeIn(t, env, t.TempDir(), "transcript", provenanceSession)
 	if err != nil {
 		t.Fatalf("empty transcript: %v\n%s", err, out)
 	}
@@ -139,11 +143,13 @@ func TestShuttleTranscript_RemoteAcceptsEmptyFileWithoutSourcePath(t *testing.T)
 }
 
 func TestShuttleTranscript_RawSnapshotReceiptWinsWhenLiveFileGrew(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	old := []byte("old\n")
 	current := []byte("old\nnew\n")
 	oldDigest := sha256.Sum256(old)
 	currentDigest := sha256.Sum256(current)
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(provenanceOwnerRecords),
 		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","source_path":"/remote/live.jsonl","byte_count":` + strconv.Itoa(len(old)) + `,"sha256":"` + hex.EncodeToString(oldDigest[:]) + `"}`),
 		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) {
@@ -152,8 +158,8 @@ func TestShuttleTranscript_RawSnapshotReceiptWinsWhenLiveFileGrew(t *testing.T) 
 			_, _ = w.Write(current)
 		},
 	})
-	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
-	out, err := runCommand(t, t.TempDir(), "transcript", provenanceSession)
+	env.Set("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
+	out, _, err := executeIn(t, env, t.TempDir(), "transcript", provenanceSession)
 	if err != nil {
 		t.Fatalf("growing transcript: %v\n%s", err, out)
 	}
@@ -167,24 +173,28 @@ func TestShuttleTranscript_RawSnapshotReceiptWinsWhenLiveFileGrew(t *testing.T) 
 }
 
 func TestShuttleTranscript_RejectsNonUUIDBeforeHTTP(t *testing.T) {
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
-	if _, err := runCommand(t, t.TempDir(), "transcript", "not-a-session"); err == nil || !strings.Contains(err.Error(), "invalid session ID") {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	if _, _, err := executeIn(t, env, t.TempDir(), "transcript", "not-a-session"); err == nil || !strings.Contains(err.Error(), "invalid session ID") {
 		t.Fatalf("expected UUID validation error, got %v", err)
 	}
 }
 
 func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	good := []byte("previous verified transcript\n")
 	bad := []byte("truncated transfer\n")
 	goodDigest := sha256.Sum256(good)
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath:    jsonBody(provenanceOwnerRecords),
 		transcriptPath:           jsonBody(`{"session":"` + provenanceSession + `","availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":` + strconv.Itoa(len(good)) + `,"sha256":"` + hex.EncodeToString(goodDigest[:]) + `"}`),
 		"/api/v1/transcript/raw": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(bad) },
 	})
 	cache := t.TempDir()
-	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", cache)
-	_, destination, err := transcriptCachePath(provenanceSession)
+	env.Set("SHUTTLE_TRANSCRIPT_CACHE_DIR", cache)
+	_, destination, err := newApp(env).transcriptCachePath(provenanceSession)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +202,7 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runCommand(t, t.TempDir(), "transcript", provenanceSession); err == nil || !strings.Contains(err.Error(), "byte count") {
+	if _, _, err := executeIn(t, env, t.TempDir(), "transcript", provenanceSession); err == nil || !strings.Contains(err.Error(), "byte count") {
 		t.Fatalf("expected verified transfer failure, got %v", err)
 	}
 	got, err := os.ReadFile(destination)
@@ -212,12 +222,14 @@ func TestShuttleTranscript_HashMismatchPreservesExistingCache(t *testing.T) {
 }
 
 func TestShuttleTranscript_LocalJSONCarriesBothPaths(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	native := "/Users/cail/.codex/sessions/rollout.jsonl"
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(`{"records":[{"session":"` + provenanceSession + `","host":"local"}]}`),
 		transcriptPath:        jsonBody(`{"session":"` + provenanceSession + `","availability":"available_local","host":"local","harness":"codex","source_path":"` + native + `","byte_count":12,"sha256":"abc"}`),
 	})
-	out, err := runCommand(t, t.TempDir(), "transcript", provenanceSession, "--json")
+	out, _, err := executeIn(t, env, t.TempDir(), "transcript", provenanceSession, "--json")
 	if err != nil {
 		t.Fatalf("transcript --json: %v\n%s", err, out)
 	}
@@ -231,6 +243,7 @@ func TestShuttleTranscript_LocalJSONCarriesBothPaths(t *testing.T) {
 }
 
 func TestIdentityPendingAppendsAlongsideHistoricalSessions(t *testing.T) {
+	t.Parallel()
 	f := shuttleFeltWithBlock(t, map[string]any{
 		"kind":    "oneshot",
 		"runtime": map[string]any{"dispatched_at": "2026-08-23T18:00:00Z"},
@@ -252,15 +265,18 @@ func TestIdentityPendingAppendsAlongsideHistoricalSessions(t *testing.T) {
 }
 
 func TestCompositeFiberRuntimePendingRequiresMissingSession(t *testing.T) {
-	daemonStub(t, map[string]http.HandlerFunc{
+	t.Parallel()
+	env := testEnv(t)
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		"/api/v1/fibers/composite": jsonBody(`{"fibers":[{"fiber":{"id":"01UID","slug":"remote/name","shuttle":{"runtime":{"dispatched_at":"2026-08-23T18:00:00Z"}}}}]}`),
 	})
-	if !compositeFiberRuntimePending("remote/name") {
+	if !newApp(env).compositeFiberRuntimePending("remote/name") {
 		t.Fatal("remote dispatched_at without session_uuid should be pending")
 	}
 }
 
 func TestApplyOriginFreshnessDoesNotChangeAvailability(t *testing.T) {
+	t.Parallel()
 	rows := []SessionProvenance{{
 		Host: "cineca",
 		Transcript: TranscriptReceipt{
@@ -275,10 +291,10 @@ func TestApplyOriginFreshnessDoesNotChangeAvailability(t *testing.T) {
 
 // One daemon fake serving all four composite/transcript surfaces, so reverse
 // lookup and materialization can be exercised end to end.
-func provenanceDaemon(t *testing.T, transcriptBody []byte) *httptest.Server {
+func provenanceDaemon(t *testing.T, env *sysenv.Env, transcriptBody []byte) *httptest.Server {
 	t.Helper()
 	digest := sha256.Sum256(transcriptBody)
-	return daemonStub(t, map[string]http.HandlerFunc{
+	return daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(`{"records":[
               {"fiber":"old/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","at":1},
               {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","at":2}
@@ -295,9 +311,10 @@ func provenanceDaemon(t *testing.T, transcriptBody []byte) *httptest.Server {
 }
 
 func TestShuttleSessions_ProvenanceTableIncludesAddress(t *testing.T) {
-	server := provenanceDaemon(t, []byte("x\n"))
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	out, err := runCommand(t, t.TempDir(), "sessions", "new/name")
+	t.Parallel()
+	env := testEnv(t)
+	provenanceDaemon(t, env, []byte("x\n"))
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", "new/name")
 	if err != nil {
 		t.Fatalf("sessions: %v\n%s", err, out)
 	}
@@ -307,12 +324,14 @@ func TestShuttleSessions_ProvenanceTableIncludesAddress(t *testing.T) {
 }
 
 func TestShuttleSessions_ProvenanceTablePrintsCanonicalHarness(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	const session = "d8c9c483-4c45-4e67-85fd-9d21f92417ee"
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath:      jsonBody(`{"records":[{"fiber":"work/worker","uid":"01UID","session":"` + session + `","host":"node","harness":"claude-code","kind":"dispatch","at":1,"transcript":{"availability":"transcript_missing"}}]}`),
 		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
 	})
-	out, err := runCommand(t, t.TempDir(), "sessions", "work/worker")
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", "work/worker")
 	if err != nil {
 		t.Fatalf("sessions: %v\n%s", err, out)
 	}
@@ -323,13 +342,15 @@ func TestShuttleSessions_ProvenanceTablePrintsCanonicalHarness(t *testing.T) {
 }
 
 func TestShuttleSessions_AppTranscriptAddressUsesThreadID(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	const transcriptID = "22222222-2222-4222-8222-222222222222"
 	const threadID = "11111111-1111-4111-8111-111111111111"
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath:      jsonBody(`{"records":[{"fiber":"work/worker","uid":"01UID","session":"` + transcriptID + `","thread_id":"` + threadID + `","host":"node","harness":"codex","kind":"claim","at":1,"transcript":{"availability":"transcript_missing"}}]}`),
 		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
 	})
-	out, err := runCommand(t, t.TempDir(), "sessions", "work/worker", "--json")
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", "work/worker", "--json")
 	if err != nil {
 		t.Fatalf("sessions: %v\n%s", err, out)
 	}
@@ -343,9 +364,10 @@ func TestShuttleSessions_AppTranscriptAddressUsesThreadID(t *testing.T) {
 }
 
 func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
-	server := provenanceDaemon(t, []byte("x\n"))
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	out, err := runCommand(t, t.TempDir(), "sessions", provenanceSession, "--json")
+	t.Parallel()
+	env := testEnv(t)
+	provenanceDaemon(t, env, []byte("x\n"))
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", provenanceSession, "--json")
 	if err != nil {
 		t.Fatalf("reverse lookup: %v\n%s", err, out)
 	}
@@ -368,13 +390,15 @@ func TestShuttleSessions_ReverseLookupBySessionUUID(t *testing.T) {
 }
 
 func TestShuttleSessions_ReverseLookupByCodexThreadID(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	const transcriptID = "22222222-2222-4222-8222-222222222222"
 	const threadID = "11111111-1111-4111-8111-111111111111"
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath:      jsonBody(`{"records":[{"fiber":"work/worker","uid":"01UID","session":"` + transcriptID + `","thread_id":"` + threadID + `","host":"node","harness":"codex","kind":"claim","at":1,"transcript":{"availability":"transcript_missing"}}]}`),
 		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
 	})
-	out, err := runCommand(t, t.TempDir(), "sessions", threadID, "--json")
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", threadID, "--json")
 	if err != nil {
 		t.Fatalf("sessions: %v\n%s", err, out)
 	}
@@ -392,9 +416,10 @@ func TestShuttleSessions_ReverseLookupByCodexThreadID(t *testing.T) {
 }
 
 func TestShuttleSessions_ReverseLookupByCommit(t *testing.T) {
-	server := provenanceDaemon(t, []byte("x\n"))
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	out, err := runCommand(t, t.TempDir(), "sessions", "--commit", "79def80", "--json")
+	t.Parallel()
+	env := testEnv(t)
+	provenanceDaemon(t, env, []byte("x\n"))
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", "--commit", "79def80", "--json")
 	if err != nil {
 		t.Fatalf("commit lookup: %v\n%s", err, out)
 	}
@@ -410,21 +435,23 @@ func TestShuttleSessions_ReverseLookupByCommit(t *testing.T) {
 }
 
 func TestShuttleSessions_UnrecordedCommitIsHonest(t *testing.T) {
-	server := provenanceDaemon(t, []byte("x\n"))
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	_, err := runCommand(t, t.TempDir(), "sessions", "--commit", "deadbeef")
+	t.Parallel()
+	env := testEnv(t)
+	provenanceDaemon(t, env, []byte("x\n"))
+	_, _, err := executeIn(t, env, t.TempDir(), "sessions", "--commit", "deadbeef")
 	if err == nil || !strings.Contains(err.Error(), "not recorded") {
 		t.Fatalf("want honest not-recorded error, got %v", err)
 	}
 }
 
 func TestShuttleSessions_MaterializeWritesManifestAndTranscripts(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	body := []byte("{\"type\":\"response_item\"}\n")
-	server := provenanceDaemon(t, body)
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	t.Setenv("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
+	provenanceDaemon(t, env, body)
+	env.Set("SHUTTLE_TRANSCRIPT_CACHE_DIR", t.TempDir())
 	dir := t.TempDir()
-	out, err := runCommand(t, t.TempDir(), "sessions", "new/name", "--materialize", "--dir", dir, "--json")
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", "new/name", "--materialize", "--dir", dir, "--json")
 	if err != nil {
 		t.Fatalf("materialize: %v\n%s", err, out)
 	}
@@ -462,16 +489,18 @@ func TestShuttleSessions_MaterializeWritesManifestAndTranscripts(t *testing.T) {
 }
 
 func TestShuttleSessions_ReverseLookupKeysOnLedgerUIDNotPath(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	// Fiber-less ledger rows: path round-tripping would match the first
 	// fiber-less row (01OTHER); keying on the ledger's own UID must not.
-	daemonStub(t, map[string]http.HandlerFunc{
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		sessionsCompositePath: jsonBody(`{"records":[
               {"uid":"01OTHER","session":"aaaaaaaa-0000-4000-8000-000000000000","host":"h","harness":"codex","kind":"dispatch","at":1,"transcript":{"availability":"transcript_missing"}},
               {"uid":"01UID","session":"` + provenanceSession + `","host":"h","harness":"codex","kind":"dispatch","at":2,"transcript":{"availability":"transcript_missing"}}
             ]}`),
 		"/api/v1/fibers/composite": jsonBody(`{"fibers":[]}`),
 	})
-	out, err := runCommand(t, t.TempDir(), "sessions", provenanceSession, "--json")
+	out, _, err := executeIn(t, env, t.TempDir(), "sessions", provenanceSession, "--json")
 	if err != nil {
 		t.Fatalf("reverse lookup: %v\n%s", err, out)
 	}
@@ -491,26 +520,30 @@ func TestShuttleSessions_ReverseLookupKeysOnLedgerUIDNotPath(t *testing.T) {
 }
 
 func TestShuttleSessions_AmbiguousCommitPrefixErrors(t *testing.T) {
-	daemonStub(t, map[string]http.HandlerFunc{
+	t.Parallel()
+	env := testEnv(t)
+	daemonStub(t, env, map[string]http.HandlerFunc{
 		"/api/v1/commits/composite": jsonBody(`{"records":[
               {"sha":"79def80aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","session":"s1"},
               {"sha":"79def80bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","session":"s2"}
             ]}`),
 		sessionsCompositePath: jsonBody(`{"records":[]}`),
 	})
-	_, err := runCommand(t, t.TempDir(), "sessions", "--commit", "79def80")
+	_, _, err := executeIn(t, env, t.TempDir(), "sessions", "--commit", "79def80")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("want ambiguous-prefix error, got %v", err)
 	}
 }
 
 func TestMaterialize_LocalWithoutPathIsAnErrorNotAbsence(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	rows := []SessionProvenance{{
 		Session:    provenanceSession,
 		Transcript: TranscriptReceipt{Availability: "available_local"},
 	}}
 	dir := t.TempDir()
-	path, err := materializeFiberTranscripts("f", "01UID", rows, dir)
+	path, err := newApp(env).materializeFiberTranscripts("f", "01UID", rows, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
