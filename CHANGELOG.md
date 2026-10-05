@@ -6,13 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
-### Added
-
-- Every felt-enabled Pi, Claude Code, and supported Codex session receives a durable handoff nudge at the smaller of 75% context or 500,000 tokens, then a firmer nudge at the smaller of 88% or 750,000 tokens.
-  Each level fires once per session, including resumes; `SHUTTLE_HANDOFF_*` environment variables configure the thresholds.
-  Claude Code and Codex require Node on the hook's PATH; unknown Claude windows use the absolute limits.
-
-## [2.0.0] — 2026-10-04
+## [2.0.0-rc.1] — 2026-10-05
 
 ### Breaking changes
 
@@ -30,6 +24,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Continuation keys belong under `shuttle.runtime`.
 
 ### Added
+
+- Every felt-enabled Pi, Claude Code, and supported Codex session receives a durable handoff nudge at the smaller of 75% context or 500,000 tokens, then a firmer nudge at the smaller of 88% or 750,000 tokens.
+  Each level fires once per session, including resumes; `SHUTTLE_HANDOFF_*` environment variables configure the thresholds.
+  Claude Code and Codex require Node on the hook's PATH; unknown Claude windows use the absolute limits.
 
 - A [guided setup path](docs/shuttle/setup.md) covers the first worker, multiple hosts, terminal and browser opening, and the Codex desktop backend.
   The Shuttle skill includes an agent-guided setup reference.

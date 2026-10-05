@@ -9,10 +9,10 @@ You can follow it yourself or ask your agent to work through it with you.
 
 ## Install
 
-On macOS or Linux:
+On macOS or Linux, install **2.0.0-rc.1** for prerelease testing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.1 sh
 ```
 
 The installer downloads the `felt` and `shuttle` commands and prints where it puts them.
@@ -22,14 +22,15 @@ There is no Windows build.
 
 It also installs felt's integration for supported agent CLIs it finds, including Claude Code and Codex.
 That writes to those agents' configuration folders; `felt uninstall` reverses the integration.
-If you prefer installing the tools separately from the integration, use Homebrew:
+Homebrew supplies the stable 1.x release rather than this candidate:
 
 ```sh
 brew install cailmdaley/tap/felt
 ```
 
 For source builds and other installation choices, see the [installation reference](shuttle/installation.md).
-Check your installation with `felt --version`; use `felt update` later to update both commands and refresh agent integration.
+Check your installation with `felt --version`; rerun the pinned installer to reinstall the candidate.
+`felt update` selects the stable channel, so do not use it to update an RC installation.
 
 ## Create a store
 

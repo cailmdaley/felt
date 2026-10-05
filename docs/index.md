@@ -29,7 +29,7 @@ To use felt for notes on its own, follow the commands below.
 Install felt on macOS or Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh | FELT_VERSION=2.0.0-rc.1 sh
 ```
 
 The installer includes both the `felt` and `shuttle` commands.
