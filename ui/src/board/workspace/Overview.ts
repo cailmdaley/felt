@@ -770,7 +770,7 @@ export class Overview {
       for (const receipt of documents) {
         let item = row.thumbs.get(receipt.key)
         if (!item) {
-          const el = button('ws-overview-change-doc')
+          const el = button('ws-overview-change-doc'); el.dataset.key = receipt.key
           const thumb = this.createThumbnail(`change:${change.uid}:${receipt.key}`, receipt, receipt.basename)
           el.append(thumb.el)
           const record = row
