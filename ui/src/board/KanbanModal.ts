@@ -1073,11 +1073,19 @@ export class KanbanModal {
      */
     opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean; verdictCommitted?: boolean } = {},
   ): void {
+    const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
+    // Server placement, or the gesture's pre-paint basis, determines a no-op.
+    // A same-column verdict must not authorize a delayed write after reopening.
+    const fromKind = findCardColumn(basis, card.id)
+    if (fromKind === target) {
+      this.showBanner(`“${card.name}” is already in ${COLUMN_TITLES[target]}.`, 'info')
+      this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
+      return
+    }
     if ((target === 'tempered' || target === 'composted') && this.workspace && !opts.verdictCommitted) {
       this.workspace.queueVerdict(card, target)
       return
     }
-    const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
     // A verdict on a card with a LIVE worker kills that worker (commitTransition
     // → killWorkerIfRunning), and it did so silently — one click on Compost and
     // a running session was gone, while "New session", which destroys less,
@@ -1095,21 +1103,6 @@ export class KanbanModal {
         this.announce(`Left ${card.name} running.`)
         return
       }
-    }
-
-    // Use the server's placement from the last response — that's the source
-    // of truth for which column the card is in. Re-deriving from card fields
-    // here is a footgun: column classification depends on `shuttle.enabled`,
-    // `idea` tag, `tempered`, standing-role review state, etc. — anything
-    // the local rule misses (or drifts from the server) silently no-ops the
-    // drag with a snap-back.
-    const fromKind = findCardColumn(basis, card.id)
-    if (fromKind === target) {
-      // Dropped back onto the column it already lives in — a no-op, but say so
-      // rather than letting the drag feel ignored.
-      this.showBanner(`“${card.name}” is already in ${COLUMN_TITLES[target]}.`, 'info')
-      this.announce(`${card.name} is already in ${COLUMN_TITLES[target]}.`)
-      return
     }
 
     // Surface-shift case: card lives on a non-Now surface (timeline.futureDated
