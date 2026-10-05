@@ -39,6 +39,7 @@
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
+import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
@@ -1086,23 +1087,13 @@ export class KanbanModal {
       this.workspace.queueVerdict(card, target)
       return
     }
-    // A verdict on a card with a LIVE worker kills that worker (commitTransition
-    // → killWorkerIfRunning), and it did so silently — one click on Compost and
-    // a running session was gone, while "New session", which destroys less,
-    // asked first. Confirm the destructive one too. Gated on `hasWorkerToStop`, so
-    // the overwhelmingly common case (a verdict on a finished run) stays a
-    // single click. This is the choke point for every path — the card's inline
-    // buttons, the dock's Temper / Discard, and a drag onto the column —
-    // so one guard covers all three.
-    if ((target === 'tempered' || target === 'composted') && hasWorkerToStop(card)) {
-      const verb = target === 'tempered' ? 'temper' : 'discard'
-      const ok = window.confirm(
-        `“${card.name}” has a live worker. This stops it — ${verb} anyway?`,
-      )
-      if (!ok) {
-        this.announce(`Left ${card.name} running.`)
-        return
-      }
+    // A verdict stops the card's worker (commitTransition → killWorkerIfRunning).
+    // In the workspace, Workspace.queueVerdict asks at gesture time and refuses
+    // an expired verdict whose card gained an unconfirmed worker, so a committed
+    // verdict arrives here already authorized. Without a workspace, ask now.
+    if ((target === 'tempered' || target === 'composted') && !opts.verdictCommitted && !confirmWorkerStop(card, target)) {
+      this.announce(`Left ${card.name} running.`)
+      return
     }
 
     // Surface-shift case: card lives on a non-Now surface (timeline.futureDated

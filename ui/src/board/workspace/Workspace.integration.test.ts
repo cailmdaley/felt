@@ -145,6 +145,38 @@ describe('workspace reader integration', () => {
     expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
     expect(commit).not.toHaveBeenCalled()
   })
+  it('asks to stop a worker at gesture time and carries the answer to the delayed write', async () => {
+    workspace.dispose()
+    const app = card({ id: 'work/app', uid: 'app-uid', originId: 'host-a', status: 'active', shuttleKind: 'oneshot',
+      shuttleSurface: 'app', sessionUuid: 'thread-1' })
+    let live = [app]
+    bodyCards = live
+    const commit = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
+      onVisibility: visibility, dock: new Dock('', changed, commit) })
+    workspace.open(app); await flush()
+    vi.useFakeTimers()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    workspace.queueVerdict(app, 'composted')
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
+    confirm.mockReturnValue(true)
+    workspace.queueVerdict(app, 'composted')
+    expect(confirm).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(6000); await flush()
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(commit).toHaveBeenCalledExactlyOnceWith(app, 'composted')
+    // A worker that starts during the undo window was never confirmed.
+    const finished = card({ id: 'work/done', uid: 'done-uid', originId: 'host-a', status: 'open', shuttleKind: 'oneshot' })
+    live = [finished]; commit.mockClear(); confirm.mockClear()
+    workspace.queueVerdict(finished, 'tempered')
+    expect(confirm).not.toHaveBeenCalled()
+    live = [{ ...finished, status: 'active', workerState: 'running' }]
+    vi.advanceTimersByTime(6000); await flush()
+    expect(commit).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('has a worker now; verdict not written')
+  })
   it.each(['same identity', 'replacement', 'missing'])('rechecks an off-index linked fiber against its owner: %s', async result => {
     workspace.dispose()
     const linked = card({ id: 'work/linked', uid: 'linked-uid', originId: 'host-a',
@@ -442,9 +474,12 @@ describe('workspace reader integration', () => {
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
+    confirm.mockReturnValue(true)
     button('Temper').click()
+    expect(confirm).toHaveBeenCalledTimes(2)
     expect(transition).not.toHaveBeenCalled()
     vi.advanceTimersByTime(6000)
+    expect(confirm).toHaveBeenCalledTimes(2)
     vi.useRealTimers()
     expect(transition).toHaveBeenCalledWith(expect.objectContaining({
       id: 'b/task', uid: 'stable-task', path: 'b/task/task.md', fiberDir: '/notes/b/task',

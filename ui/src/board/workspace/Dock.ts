@@ -1,4 +1,5 @@
 import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
+import { confirmWorkerStop } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
@@ -646,7 +647,7 @@ export class Dock {
 
   verdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
     if (this.queueVerdict) this.queueVerdict(card, target)
-    else this.commitVerdict(card, target)
+    else if (confirmWorkerStop(card, target)) this.commitVerdict(card, target)
   }
 
   /** Only the expired undo queue calls this in the workspace. */

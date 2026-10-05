@@ -1,6 +1,6 @@
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
-import { Verdicts, type Verdict } from './Verdicts.js'
+import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageColumn } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
@@ -217,6 +217,9 @@ export class Workspace {
     if (!indexed && !state?.metadataKnown) return
     const card = indexed ?? requested
     const review = fiberPageColumn(card) === 'awaitingReview'
+    // Ask while the gesture is fresh; the undo window carries the answer to the write.
+    if (!confirmWorkerStop(card, verdict)) return
+    const workerStopConfirmed = hasWorkerToStop(card)
     const material = this.current?.channel.uid === uid && this.current.channel.owner === owner ? this.themes.material(this.reader.el) : undefined
     this.verdicts.queue(card, verdict, async () => {
       let live = resolve()
@@ -233,6 +236,10 @@ export class Workspace {
       // A worker may start during the undo window; never stop it from a stale review.
       if (review && fiberPageColumn(live) !== 'awaitingReview') {
         showToast(`${live.name} no longer awaits review; verdict not written`, 'error')
+        return
+      }
+      if (hasWorkerToStop(live) && !workerStopConfirmed) {
+        showToast(`${live.name} has a worker now; verdict not written`, 'error')
         return
       }
       this.dock.commitVerdict(live, verdict)

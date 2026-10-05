@@ -1,10 +1,17 @@
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import { keyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import './verdicts.css'
 
 export type Verdict = 'tempered' | 'composted'
 export const VERDICT_DELAY_MS = 6000
+
+/** A verdict stops any worker the card owns, so it asks first, as "New session"
+ * does; a verdict on a finished run stays a single gesture. */
+export function confirmWorkerStop(card: KanbanCard, verdict: Verdict): boolean {
+  return !hasWorkerToStop(card) ||
+    window.confirm(`“${card.name}” has a live worker. This stops it — ${verdict === 'tempered' ? 'temper' : 'discard'} anyway?`)
+}
 interface Pending { timer: number; toast: HTMLElement }
 
 /** Session-local safety: only an expired toast authorizes a lifecycle write.

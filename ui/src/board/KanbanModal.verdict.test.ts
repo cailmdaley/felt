@@ -58,14 +58,23 @@ describe('verdict transition authorization', () => {
     expect(board.workspace.queueVerdict).toHaveBeenCalledExactlyOnceWith(fiber, 'tempered')
     expect(board.commitTransition).not.toHaveBeenCalled()
   })
-  it('keeps the live-worker confirmation at delayed commit and honors refusal', () => {
+  it('leaves the live-worker confirmation to queue time and does not ask again at delayed commit', () => {
     const fiber = card({ id: 'work/running', status: 'active', shuttleKind: 'oneshot', workerState: 'running' })
     const board = setup(fiber)
     board.lastResponse = response({ now: { drafts: [], inFlight: [fiber], awaitingReview: [] } })
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     board.transition(fiber, 'composted')
-    expect(confirm).not.toHaveBeenCalled()
     vi.advanceTimersByTime(6000)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(board.commitTransition).toHaveBeenCalledOnce()
+  })
+  it('asks at the gesture and honors refusal without a workspace', () => {
+    const fiber = card({ id: 'work/running', status: 'active', shuttleKind: 'oneshot', workerState: 'running' })
+    const board = setup(fiber)
+    ;(board as unknown as { workspace: null }).workspace = null
+    board.lastResponse = response({ now: { drafts: [], inFlight: [fiber], awaitingReview: [] } })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    board.transition(fiber, 'composted')
     expect(confirm).toHaveBeenCalledOnce()
     expect(board.commitTransition).not.toHaveBeenCalled()
   })
