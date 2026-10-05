@@ -6,7 +6,9 @@ import {
   dueCivilDay,
   formatSpanMinutes,
   instantMs,
+  isoDayLocal,
   sameCivilDue,
+  shiftCivilDay,
   wallClock,
   zone,
 } from './civilDay.js';
@@ -269,6 +271,15 @@ describe('the offset cache at a transition inside a quarter hour', () => {
       const said = [hour, minute, second].map((n) => String(n).padStart(2, '0')).join(':');
       expect(said, iso).toBe(intl.format(ms));
     }
+  });
+});
+
+describe('years Date.UTC would remap', () => {
+  it('keeps years 0–99 as themselves', () => {
+    const utc = zone('UTC');
+    expect(isoDayLocal(Date.parse('0001-01-01T00:00:00Z'), utc)).toBe('0001-01-01');
+    expect(civilDayAt('0050-06-01', 0, utc)).toBe(Date.parse('0050-06-01T00:00:00Z'));
+    expect(shiftCivilDay('0099-12-31', 1)).toBe('0100-01-01');
   });
 });
 

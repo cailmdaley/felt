@@ -58,7 +58,9 @@ const DAY_MS = 86_400_000
  * throughout, and one whose ends differ holds a transition and is read
  * directly, to the second, every time. The views ask in loops, and a
  * `formatToParts` costs fifty times a `Date` getter.
-
+ *
+ * The domain is Date's own range less a day at either edge, where a wall
+ * clock can fall outside what a Date can hold.
  */
 class Zone {
   readonly id: string
@@ -102,10 +104,18 @@ class Zone {
     for (const part of this.#fields.formatToParts(at)) {
       if (part.type !== 'literal') f[part.type] = Number(part.value)
     }
-    return Date.UTC(f.year, f.month - 1, f.day, f.hour, f.minute, f.second) - at
+    return utcFields(f.year, f.month - 1, f.day, f.hour, f.minute, f.second) - at
   }
 }
 export type { Zone }
+
+/** `Date.UTC`, without its remapping of years 0–99 onto 1900–1999. */
+function utcFields(year: number, month: number, day: number, hour = 0, minute = 0, second = 0): number {
+  const d = new Date(0)
+  d.setUTCFullYear(year, month, day)
+  d.setUTCHours(hour, minute, second, 0)
+  return d.getTime()
+}
 
 const zones = new Map<string, Zone>()
 
@@ -143,7 +153,7 @@ function wall(ms: number, z: Zone): Date {
 function isoOfWall(w: Date): string {
   const m = String(w.getUTCMonth() + 1).padStart(2, '0')
   const d = String(w.getUTCDate()).padStart(2, '0')
-  return `${w.getUTCFullYear()}-${m}-${d}`
+  return `${String(w.getUTCFullYear()).padStart(4, '0')}-${m}-${d}`
 }
 
 /**
@@ -232,7 +242,7 @@ function validCalendarDay(day: string): boolean {
 function civilUtc(day: string | undefined): number | undefined {
   if (!day || !DATE_ONLY_RE.test(day) || !validCalendarDay(day)) return undefined
   const [y, m, d] = day.split('-').map(Number)
-  return Date.UTC(y, m - 1, d)
+  return utcFields(y, m - 1, d)
 }
 
 /**
