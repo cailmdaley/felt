@@ -170,7 +170,7 @@ describe('LiveFileRefresh', () => {
     expect(h.cancel).toHaveBeenCalledTimes(1)
   })
 
-  it('uses ETag and does not render a 304 again', async () => {
+  it('revalidates the browser copy on the first read, then uses ETag and does not render a 304 again', async () => {
     const unchanged = response(304, '', { etag: 'W/"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' })
     const fetchFile = vi.fn()
       .mockResolvedValueOnce(response(200, 'report', { etag: 'W/"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' }))
@@ -182,6 +182,7 @@ describe('LiveFileRefresh', () => {
     h.setNow(LIVE_FILE_POLL_INTERVAL_MS)
     await h.poller.pollNow()
 
+    expect(fetchFile).toHaveBeenNthCalledWith(1, '/file?path=%2Freport.html', expect.objectContaining({ cache: 'no-cache', headers: {} }))
     expect(fetchFile).toHaveBeenNthCalledWith(2, '/file?path=%2Freport.html', expect.objectContaining({
       cache: 'no-store',
       headers: { 'If-None-Match': 'W/"sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' },
