@@ -120,7 +120,10 @@ export function cacheDocumentTitle(key: string, path: string, source: string | U
   versions.set(version, next)
   if (versions.size > 512) versions.delete(versions.keys().next().value!)
   const held = titles.get(key)
+  current.delete(key)
   current.add(key)
+  // Bounded for a long session: a forgotten key only means its next render peeks it again.
+  if (current.size > 2000) current.delete(current.values().next().value!)
   touch(key, next)
   save()
   if (held !== next && (held?.title !== next.title || held?.preview !== next.preview)) for (const listener of listeners) listener(key)

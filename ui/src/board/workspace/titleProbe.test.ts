@@ -2,10 +2,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
 const reads: string[] = []
+const bodies = new Map<string, string>()
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async (src: string, _signal: AbortSignal, onSource: (source: Uint8Array) => void) => {
     reads.push(decodeURIComponent(src))
     if (src.includes('report.html')) onSource(new TextEncoder().encode('<title>The report</title>'))
+    const body = [...bodies].find(([name]) => decodeURIComponent(src).includes(name))?.[1]
+    if (body) onSource(new TextEncoder().encode(body))
   }),
 }))
 const { probeDocumentTitles, PROBE_RETRY_MS } = await import('./titleProbe.js')
@@ -31,5 +34,31 @@ describe('title probe', () => {
     await vi.waitFor(() => expect(reads).toHaveLength(5))
     vi.useRealTimers()
     expect(reads.slice(3).map(src => src.match(/\/(\w+\.\w+)/)?.[1])).toEqual(['paper.pdf', 'song.mp3'])
+  })
+
+  it('peeks a document again when its modification time or latest receipt moves', async () => {
+    const reads0 = reads.length
+    bodies.set('/replaced.html', '<title>First draft</title>')
+    const build = (modifiedAt: string, sentAt: number) => buildChannel({ uid: 'replaced', owner: 'replaced-host', name: 'Replaced', path: '/f.md', fiberDir: '/', body: '',
+      embeds: [{ path: '/replaced.html' }],
+      sent: [{ path: '/replaced.html', owner: 'replaced-host', time: sentAt }],
+      fileModifiedAt: new Map([['replaced-host:/replaced.html', modifiedAt]]),
+    })
+    const first = build('2026-10-05T10:00:00Z', 1000)
+    const key = first.documents.find(d => d.name === 'replaced.html')!.key
+    probeDocumentTitles('', first.documents)
+    await vi.waitFor(() => expect(declaredTitle(key)?.title).toBe('First draft'))
+    probeDocumentTitles('', build('2026-10-05T10:00:00Z', 1000).documents)
+    await Promise.resolve()
+    expect(reads.length - reads0).toBe(1)
+    bodies.set('/replaced.html', '<title>Second draft</title>')
+    probeDocumentTitles('', build('2026-10-05T11:00:00Z', 1000).documents)
+    await vi.waitFor(() => expect(declaredTitle(key)?.title).toBe('Second draft'))
+    expect(reads.length - reads0).toBe(2)
+    // A fresh receipt alone (a re-send) is a new version too.
+    bodies.set('/replaced.html', '<title>Third draft</title>')
+    probeDocumentTitles('', build('2026-10-05T11:00:00Z', 2000).documents)
+    await vi.waitFor(() => expect(declaredTitle(key)?.title).toBe('Third draft'))
+    expect(reads.length - reads0).toBe(3)
   })
 })
