@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileViewerOptions } from '../FileViewerPanel.js'
-import type { WorkspaceDocument } from './documents.js'
+import type { Channel, WorkspaceDocument } from './documents.js'
 import { DocumentHost, withWorkspaceKeyBridge } from './DocumentHost.js'
 import { Reader } from './Reader.js'
 import { buildChannel } from './documents.js'
@@ -386,6 +386,55 @@ describe('refresh and failure states', () => {
   })
 })
 
+describe('report scrolling', () => {
+  it('caches the HTML report scroller and re-resolves detached replacements', () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const report: WorkspaceDocument = { ...docs[0], kind: 'html' }
+    const channel: Channel = { uid: 'task', owner: 'host-a', name: 'Task', documents: [report], labels: ['report'], body: '' }
+    const reader = new Reader({
+      shuttleBase: '', buildProse, onRefreshProse: vi.fn(), onSelect, onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [],
+    })
+    document.body.append(reader.el)
+    try {
+      reader.show(channel, report.key, 'Board')
+      const iframe = document.createElement('iframe')
+      reader.host.get(report.key)!.viewer!.append(iframe)
+      const content = iframe.contentDocument!
+      const makeScroller = () => {
+        const element = content.createElement('main')
+        element.style.overflowY = 'auto'
+        Object.defineProperties(element, {
+          clientHeight: { configurable: true, value: 200 },
+          clientWidth: { configurable: true, value: 600 },
+          scrollHeight: { configurable: true, value: 1200 },
+        })
+        const scrollBy = vi.fn()
+        Object.defineProperty(element, 'scrollBy', { configurable: true, value: scrollBy })
+        return { element, scrollBy }
+      }
+      const pressDown = () => reader.el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+      const first = makeScroller()
+      content.body.append(first.element)
+      const querySelectorAll = vi.spyOn(content, 'querySelectorAll')
+      pressDown()
+      pressDown()
+      expect(querySelectorAll.mock.calls.filter(([selector]) => selector === 'body *')).toHaveLength(1)
+      expect(first.scrollBy).toHaveBeenCalledTimes(2)
+
+      first.element.remove()
+      const replacement = makeScroller()
+      content.body.append(replacement.element)
+      pressDown()
+      expect(querySelectorAll.mock.calls.filter(([selector]) => selector === 'body *')).toHaveLength(2)
+      expect(first.scrollBy).toHaveBeenCalledTimes(2)
+      expect(replacement.scrollBy).toHaveBeenCalledOnce()
+    } finally { reader.dispose() }
+  })
+})
+
 describe('document keyboard bridge', () => {
   it('lets document and report load-time window handlers consume Escape before forwarding', async () => {
     const iframe = document.createElement('iframe')
@@ -425,6 +474,14 @@ describe('document keyboard bridge', () => {
     expect(html).toContain("type:'shuttle-workspace-key'")
     expect(html).toContain('function keyIntent(event, surface')
     expect(html).toContain('<body>Data</body>')
+  })
+
+  it('keeps doctype and base ahead of the bridge when a report has no head', () => {
+    const html = withWorkspaceKeyBridge('<!doctype html><base href="/reports/"><body>Report</body>')
+    const bridge = html.indexOf('<script data-shuttle-workspace-bridge>')
+    expect(html.toLowerCase().startsWith('<!doctype html>')).toBe(true)
+    expect(html.indexOf('<base href=')).toBeLessThan(bridge)
+    expect(new DOMParser().parseFromString(html, 'text/html').compatMode).toBe('CSS1Compat')
   })
 
   it('forwards only valid chords from the selected viewer source, never parked or foreign frames', () => {

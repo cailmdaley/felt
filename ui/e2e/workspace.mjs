@@ -53,6 +53,15 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   }
   await choose(p, 'brief.md')
   await choose(p, 'calibration-report')
+  await iframe.evaluate(f => {
+    const report = f.contentDocument
+    const querySelectorAll = report.querySelectorAll.bind(report)
+    report.__workspaceBodyWalks = 0
+    report.querySelectorAll = selector => {
+      if (selector === 'body *') report.__workspaceBodyWalks++
+      return querySelectorAll(selector)
+    }
+  })
   for (const [down, up] of [['ArrowDown', 'ArrowUp']]) {
     await iframe.evaluate(f => f.contentWindow.scrollTo(0, 0))
     await p.keyboard.press(down)
@@ -61,6 +70,7 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
     await p.keyboard.press(up)
     await poll(p, before => window.__reportWindow.scrollY < before, before)
   }
+  assert.ok(await iframe.evaluate(f => f.contentDocument.__workspaceBodyWalks) <= 1, 'report scroller is resolved at most once for the frame')
   await tab(p, 'calibration-report').dblclick()
   assert.ok(await p.locator('.ws-page.ws-expanded').count())
   await p.locator('.ws-page.ws-expanded .ws-labelbar').dblclick()

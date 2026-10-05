@@ -39,8 +39,16 @@ const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
 export function withWorkspaceKeyBridge(html: string): string {
   // Install after report load handlers so its document/window dialogs get first refusal.
   const bridge = `<script data-shuttle-workspace-bridge>(function(intent,forward,bindings){window.addEventListener('load',function(){window.setTimeout(function(){window.addEventListener('keydown',function(e){if(!forward(e)||!intent(e,'reader',bindings,function(target){return !forward({target:target,defaultPrevented:false})}))return;e.preventDefault();e.stopPropagation();parent.postMessage({type:'shuttle-workspace-key',key:e.key,altKey:e.altKey,ctrlKey:e.ctrlKey,metaKey:e.metaKey,shiftKey:e.shiftKey,repeat:e.repeat},'*')})},0)},{once:true})})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)});</script>`
-  const head = /<head\b[^>]*>/i
-  return head.test(html) ? html.replace(head, (tag) => tag + bridge) : bridge + html
+  let insertion = 0
+  const doctype = /<!doctype\b[^>]*>/i.exec(html)
+  if (doctype) insertion = doctype.index + doctype[0].length
+  const head = /<head\b[^>]*>/i.exec(html)
+  if (head) insertion = Math.max(insertion, head.index + head[0].length)
+  const bases = /<base\b[^>]*>/ig
+  for (let base; (base = bases.exec(html));) {
+    if (base.index >= insertion) insertion = base.index + base[0].length
+  }
+  return html.slice(0, insertion) + bridge + html.slice(insertion)
 }
 
 /** Stable frames, a fleet-wide live-document budget, and selected-only polling. */

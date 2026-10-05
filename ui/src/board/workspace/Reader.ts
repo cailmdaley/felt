@@ -68,6 +68,7 @@ export class Reader {
   private readonly next: HTMLButtonElement
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
+  private readonly reportScrollers = new WeakMap<Document, HTMLElement>()
   private channel: Channel | null = null
   private currentCard: KanbanCard | null = null
   private selected: DocKey | null = null
@@ -561,11 +562,21 @@ export class Reader {
         const frame = viewer.querySelector('iframe')
         const content = frame?.contentDocument
         if (!content) return
-        const root = content.scrollingElement as HTMLElement | null
-        const nested = [...content.querySelectorAll<HTMLElement>('body *')].filter(el =>
-          el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(content.defaultView!.getComputedStyle(el).overflowY))
-        scroller = root && root.scrollHeight > root.clientHeight + 1 ? root
-          : nested.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0]
+        scroller = this.reportScrollers.get(content) ?? null
+        if (scroller && (!scroller.isConnected || scroller.ownerDocument !== content)) {
+          this.reportScrollers.delete(content)
+          scroller = null
+        }
+        if (!scroller) {
+          const root = content.scrollingElement as HTMLElement | null
+          if (root && root.scrollHeight > root.clientHeight + 1) scroller = root
+          else {
+            const nested = [...content.querySelectorAll<HTMLElement>('body *')].filter(el =>
+              el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 1 && /auto|scroll/.test(content.defaultView!.getComputedStyle(el).overflowY))
+            scroller = nested.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0] ?? null
+          }
+          if (scroller && content.readyState === 'complete') this.reportScrollers.set(content, scroller)
+        }
       } catch { return }
     }
     if (!scroller || scroller.scrollHeight <= scroller.clientHeight) return
