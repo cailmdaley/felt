@@ -686,6 +686,8 @@ export class KanbanSurfaceRenderer {
     el.type = 'button'
     el.className = `kbn-pin-chip${isAgent ? ' kbn-pin-chip-agent' : ' kbn-pin-chip-human'}${isStale ? ' kbn-card--stale' : ''}`
     el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
     el.setAttribute('role', 'listitem')
     el.draggable = !isStale && !coarsePointer()
     el.title = card.outcome ? `${card.name} — ${card.outcome}` : card.name
@@ -1260,6 +1262,8 @@ export class KanbanSurfaceRenderer {
     if (sleeping) el.classList.add('kbn-cluster-item-standing')
     el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
     el.title = card.name
     el.setAttribute('role', 'listitem')
     el.setAttribute('aria-label', card.name)
@@ -1738,6 +1742,8 @@ export class KanbanSurfaceRenderer {
     // touch path to the same transitions (`onCardLongPress`).
     el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
     // A fiber in a git-synced store is served by every daemon holding it. The
     // board shows one card (see `dedupeMirroredRows`); say on hover where else
     // it lives, so "one card" doesn't read as "the other host lost it".
@@ -2140,6 +2146,10 @@ export class KanbanSurfaceRenderer {
       // place some of these fibers appear on the board at all (the fold draws
       // them here and nowhere else), so it has to be a way in.
       const member = members[i]
+      if (member) {
+        li.dataset.cardUid = member.uid ?? member.id
+        li.dataset.cardOrigin = member.originId
+      }
       li.addEventListener('click', (e) => {
         e.stopPropagation()
         if (member) this.o.openDetail(member)

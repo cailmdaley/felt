@@ -44,6 +44,10 @@
 
      A hue outside these is a claim the data never made. */
 
+  /* Shared neutral materials: iron gall carries text and chrome, never an actor. */
+  --kbn-ink: #1B1611;
+  --kbn-ink-muted: #7A6F5C;
+
   /* YOU. A message you sent, a role you drive, a human actor. The attention
      tick on the Chronicle, the glyph on a pin. */
   --kbn-you: #BC4538;
