@@ -24,7 +24,7 @@ describe('bounded document messages', () => {
   it('accepts no more than four reference batches in any second per frame and disposes its budget', () => {
     const frame = document.createElement('iframe'); document.body.append(frame)
     const receive = vi.fn()
-    const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000)
     const bridge = connectDocumentFrame(frame, receive)
     const send = () => window.dispatchEvent(new MessageEvent('message', {
       source: frame.contentWindow, data: envelope('references', { candidates: ['report.html'] }),
@@ -43,5 +43,28 @@ describe('bounded document messages', () => {
     bridge.dispose(); send()
     expect(receive).toHaveBeenCalledTimes(5)
     second.dispose()
+  })
+
+  it('delivers the newest deferred batch when the window reopens and survives a backward clock', () => {
+    vi.useFakeTimers()
+    try {
+      const frame = document.createElement('iframe'); document.body.append(frame)
+      const receive = vi.fn()
+      const now = vi.spyOn(performance, 'now').mockReturnValue(100_000)
+      const bridge = connectDocumentFrame(frame, receive)
+      const send = (candidate: string) => window.dispatchEvent(new MessageEvent('message', {
+        source: frame.contentWindow, data: envelope('references', { candidates: [candidate] }),
+      }))
+      for (let i = 0; i < 6; i++) send(`r${i}`)
+      expect(receive).toHaveBeenCalledTimes(4)
+      now.mockReturnValue(101_000); vi.advanceTimersByTime(1000)
+      expect(receive).toHaveBeenCalledTimes(5)
+      expect(receive.mock.lastCall![0].payload.candidates).toEqual(['r5'])
+      // A clock stepped into the past must not pin the budget's entries in the future.
+      for (let i = 0; i < 3; i++) send(`s${i}`)
+      now.mockReturnValue(0); send('late')
+      expect(receive.mock.lastCall![0].payload.candidates).toEqual(['late'])
+      bridge.dispose()
+    } finally { vi.useRealTimers() }
   })
 })

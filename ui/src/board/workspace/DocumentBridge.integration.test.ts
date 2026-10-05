@@ -405,6 +405,21 @@ describe('minified production document keyboard bridge', () => {
     expect(select).not.toHaveBeenCalled()
   })
 
+  it('keeps rescanning references when the report steps its wall clock backward', async () => {
+    reportHtml = '<html><body><code>report-1.html</code></body></html>'
+    const frame = await report()
+    const content = frame.contentDocument!
+    const win = frame.contentWindow as Window & typeof globalThis
+    const added = (text: string) => messages.mock.calls.some(([message]) => message.type === 'references' && message.payload.candidates.includes(text))
+    const first = content.createElement('code'); first.textContent = './report-1.html'; content.body.append(first)
+    await vi.waitFor(() => expect(added('./report-1.html')).toBe(true))
+    // NTP, a report stubbing Date, or a test clock: ~19 hours into the past.
+    const wall = win.Date.now.bind(win.Date)
+    win.Date.now = () => wall() - 7e7
+    const second = content.createElement('code'); second.textContent = '../report-1.html'; content.body.append(second)
+    await vi.waitFor(() => expect(added('../report-1.html')).toBe(true))
+  })
+
   it('gives document and load-time window click handlers first refusal on channel links', async () => {
     reportHtml = `<html><head><script>
       document.addEventListener('click', event => { if (event.target.id === 'owned') event.preventDefault() });

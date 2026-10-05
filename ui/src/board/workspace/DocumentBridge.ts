@@ -85,7 +85,8 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   const send = (type: string, payload: Record<string, unknown> = {}): void => {
     if (type === 'references') {
       // Coalesce ordinary rescans so the latest layout reaches the parent budget.
-      const wait = Math.ceil(limits.interval - (Date.now() - referencesAt))
+      // A monotonic clock, clamped, so a stubbed or stepped clock cannot defer a rescan.
+      const wait = Math.min(limits.interval, Math.max(0, Math.ceil(limits.interval - (performance.now() - referencesAt))))
       if (wait > 0) {
         pendingReferences = payload
         if (referencesTimer === undefined) referencesTimer = setTimeout(() => {
@@ -96,7 +97,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
         return
       }
       clearTimeout(referencesTimer); referencesTimer = undefined; pendingReferences = undefined
-      referencesAt = Date.now()
+      referencesAt = performance.now()
     }
     parent.postMessage({ protocol, version, type, payload }, '*')
   }
@@ -226,7 +227,9 @@ export function frameBridge(frame: HTMLIFrameElement): FrameBridge | undefined {
 /** Opaque origins cannot authenticate by origin; only this top-frame Window can speak. */
 export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message: DocumentMessage) => void): FrameBridge {
   const listeners = new Set<(position: ScrollPosition) => void>()
-  const referenceTimes: number[] = []
+  let referenceTimes: number[] = []
+  let deferredReferences: MessageEvent | undefined
+  let deferredTimer: ReturnType<typeof setTimeout> | undefined
   const bridge: FrameBridge = {
     position: { x: 0, y: 0 },
     command: (type, payload = {}) => {
@@ -240,16 +243,30 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
       frame.contentWindow?.postMessage(message, '*')
     },
     subscribeScroll: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
-    dispose: () => { window.removeEventListener('message', onMessage); listeners.clear(); bridges.delete(frame) },
+    dispose: () => {
+      window.removeEventListener('message', onMessage); listeners.clear(); bridges.delete(frame)
+      clearTimeout(deferredTimer); deferredTimer = undefined; deferredReferences = undefined
+    },
   }
   const onMessage = (event: MessageEvent): void => {
     if (!event.source || event.source !== frame.contentWindow) return
-    // Drop excess batches before walking their candidates. Each frame owns its budget.
+    // Defer excess batches before walking their candidates. Each frame owns its
+    // budget; the newest deferred batch is delivered when the window reopens, so
+    // the latest layout always arrives even though the frame never resends.
     if (event.data?.type === 'references') {
-      const now = Date.now()
-      while (referenceTimes.length && now - referenceTimes[0] >= 1000) referenceTimes.shift()
-      if (referenceTimes.length >= REFERENCE_RATE) return
+      const now = performance.now()
+      referenceTimes = referenceTimes.filter(t => t <= now && now - t < 1000)
+      if (referenceTimes.length >= REFERENCE_RATE) {
+        deferredReferences = event
+        if (deferredTimer === undefined) deferredTimer = setTimeout(() => {
+          deferredTimer = undefined
+          const latest = deferredReferences; deferredReferences = undefined
+          if (latest) onMessage(latest)
+        }, Math.min(1000, Math.max(0, Math.ceil(1000 - (now - referenceTimes[0])))))
+        return
+      }
       referenceTimes.push(now)
+      clearTimeout(deferredTimer); deferredTimer = undefined; deferredReferences = undefined
     }
     if (!documentMessage(event.data)) return
     const message = event.data
