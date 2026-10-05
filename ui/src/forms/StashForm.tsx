@@ -30,7 +30,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { agentGroups, resolveEffort, useAgentRegistry } from './agents'
+import { agentGroups, resolveEffort } from './agents'
+import { useAgentRegistry } from './useAgentRegistry'
 import { AppDialog } from './AppDialog'
 import { injectStyles } from './injectStyles'
 import { AddProjectPath, useProjectSelection } from './ProjectPicker'
