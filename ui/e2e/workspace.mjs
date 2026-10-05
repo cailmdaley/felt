@@ -720,13 +720,51 @@ test('The map in the running head indexes pages as legible tiles, captions a hov
   assert.equal(await p.locator('.ws-tab-fresh').count(), 0)
 })
 
+test('The sidebar edge resizes the column by drag and keys, persists per viewer, and resets on double-click', async p => {
+  await open(p); await reportReady(p)
+  const edge = p.getByRole('separator', { name: 'Resize constitutions' })
+  const width = () => p.evaluate(() => {
+    const sidebar = document.querySelector('.ws-sidebar').getBoundingClientRect(), page = document.querySelector('.ws-page.ws-selected').getBoundingClientRect()
+    return { sidebar: Math.round(sidebar.width), gutter: Math.round(page.left - sidebar.right), now: Number(document.querySelector('.ws-sidebar-handle').getAttribute('aria-valuenow')) }
+  })
+  const start = await width()
+  assert.equal(start.sidebar, 384, 'the column opens at its default width')
+  assert.equal(start.now, 384)
+  assert.equal(await edge.getAttribute('aria-valuemin'), '320')
+  assert.equal(await edge.getAttribute('aria-valuemax'), String(Math.floor(1440 * 0.4)))
+  // A drag reflows the stage live and keeps the page one gutter from the column.
+  const box = await edge.boundingBox()
+  await p.mouse.move(box.x + box.width / 2, 400); await p.mouse.down()
+  await p.mouse.move(box.x + 80, 400, { steps: 4 })
+  const live = await width()
+  assert.ok(live.sidebar > start.sidebar + 60 && Math.abs(live.gutter - 24) <= 4, `the stage follows the drag: ${JSON.stringify(live)}`)
+  await p.mouse.move(box.x + 2000, 400, { steps: 4 })
+  await p.mouse.up()
+  assert.equal((await width()).sidebar, Math.floor(1440 * 0.4), 'the drag stops at its share of the viewport')
+  assert.equal(await p.evaluate(() => localStorage.getItem('shuttle:workspace:sidebar-width')), String(Math.floor(1440 * 0.4)))
+  // Keys step it, held to its floor.
+  await edge.focus()
+  await p.keyboard.press('Home')
+  assert.equal((await width()).sidebar, 320)
+  await p.keyboard.press('ArrowRight')
+  assert.equal((await width()).sidebar, 336, 'an arrow steps 16 px and does not step pages')
+  assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
+  await p.reload()
+  await reportReady(p)
+  assert.equal((await width()).sidebar, 336, 'the width survives a reload')
+  await edge.dblclick()
+  assert.equal((await width()).sidebar, 384, 'double-click resets the default')
+  assert.equal(await p.evaluate(() => localStorage.getItem('shuttle:workspace:sidebar-width')), null)
+}, undefined, 'true')
+
 for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps one gutter, and the map follows it (${width})`, async p => {
   await open(p); await reportReady(p)
   const geometry = async () => p.evaluate(() => {
     const rect = el => el.getBoundingClientRect()
     const page = rect(document.querySelector('.ws-page.ws-selected')), sidebar = rect(document.querySelector('.ws-sidebar'))
-    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage'))
+    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage')), strip = rect(document.querySelector('.ws-navbar .ws-tabs'))
     return { gutter: page.left - sidebar.right, right: stage.right - page.right, page: page.left + page.width / 2, tile: tile.left + tile.width / 2,
+      clamped: tile.right <= strip.right && strip.right - tile.right <= 48,
       ground: getComputedStyle(document.querySelector('.ws-sidebar')).backgroundColor }
   })
   for (const label of ['calibration-report', 'Constitution', 'remote-summary.pdf']) {
@@ -736,7 +774,8 @@ for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps 
     // The pointer's parallax may drift the page a few pixels.
     assert.ok(Math.abs(at.gutter - 24) <= 4, `${label}: the page sits one gutter from the sidebar: ${JSON.stringify(at)}`)
     assert.ok(at.right >= 24, `${label}: the page shrinks before it crowds the stage's far edge: ${JSON.stringify(at)}`)
-    assert.ok(Math.abs(at.tile - at.page) < 3, `${label}: the selected tile sits under the page: ${JSON.stringify(at)}`)
+    // Over the page's centre, unless the head's slot ends first; then as near it as the slot keeps the tile whole.
+    assert.ok(Math.abs(at.tile - at.page) < 3 || (at.clamped && at.tile < at.page), `${label}: the selected tile sits over the page: ${JSON.stringify(at)}`)
     assert.notEqual(at.ground, 'rgba(0, 0, 0, 0)', 'the sidebar column has its own ground')
   }
 }, { width, height: 900 }, 'true')
@@ -1025,7 +1064,9 @@ for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is
     }
     await p.waitForTimeout(600)
     const samples = await p.evaluate(() => window.__slide)
-    assert.ok(samples.every(s => Math.abs(s.width - samples[0].width) < 1), `the page never changes width: ${samples.map(s => Math.round(s.width)).join(',')}`)
+    // Where the column takes the page's preferred width, the page lands at its new width in one step and never reflows per frame.
+    const widths = samples.map(s => Math.round(s.width)), changes = widths.slice(1).filter((w, i) => Math.abs(w - widths[i]) >= 1).length
+    assert.ok(changes <= 1, `the page changes width at most once, in one step: ${widths.join(',')}`)
     const lefts = samples.map(s => s.page)
     const steps = lefts.slice(1).map((x, i) => Math.sign(Math.round(x - lefts[i])))
     assert.ok(!(steps.includes(1) && steps.includes(-1)), `the page moves one way, without a double jump: ${lefts.map(Math.round).join(',')}`)

@@ -159,6 +159,20 @@
 /* The column travels as cards; the current slip reaches toward the reading stage. */
 .ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-stage-top) var(--ws-inset) 0; position: relative; z-index: 2; }
 .ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
+/* The sidebar's edge resizes it: a hairline that darkens under the pointer, the keyboard or a drag. */
+.ws-sidebar-handle {
+  position: absolute; top: 0; bottom: 0; right: calc(var(--ws-sidebar-handle) / -2); z-index: 3; width: var(--ws-sidebar-handle);
+  cursor: col-resize; touch-action: none;
+}
+.ws-sidebar-handle::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: var(--ws-line-width); transform: translateX(-50%);
+  background: transparent; transition: background-color 120ms var(--ws-ease), width 120ms var(--ws-ease);
+}
+.ws-sidebar-handle:hover::after, .ws-sidebar-resizing .ws-sidebar-handle::after { width: 2px; background: var(--ws-hairline); }
+.ws-sidebar-handle:focus { outline: none; }
+.ws-reader.ws-keyboard .ws-sidebar-handle:focus-visible::after { width: 2px; background: var(--ws-focus); }
+.ws-sidebar-resizing, .ws-sidebar-resizing * { cursor: col-resize !important; user-select: none; }
+.ws-sidebar-resizing iframe { pointer-events: none; }
 .ws-sidebar .ws-channel-list {
   flex: 1; min-height: 0; width: calc(100% + var(--ws-sidebar-overflow)); margin-right: calc(-1 * var(--ws-sidebar-overflow));
   padding: var(--ws-small-gap) var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;

@@ -63,6 +63,9 @@ function button(cls: string, text: string, action: () => void, label = text): HT
 /** The viewport at which the desktop sidebar defaults open. */
 export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
+const SIDEBAR_WIDTH_STORAGE = 'shuttle:workspace:sidebar-width'
+/** One arrow press resizes the sidebar by this much; with Shift, four times as much. */
+const SIDEBAR_STEP = 16
 /** A latched swipe that neither moves nor releases for this long has lost its release. */
 const SWIPE_QUIET = 500
 
@@ -130,6 +133,10 @@ export class Reader {
   /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
+  /** The sidebar's edge: a separator that resizes it by pointer or keys. */
+  private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
+  /** The viewer's chosen width; absent, the measure's default. */
+  private sidebarWidthChoice: number | null = null
   private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
   private liveWidth: number | null = null
   private cancelResize: (() => void) | null = null
@@ -219,7 +226,15 @@ export class Reader {
     this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
     this.sidebarPicker.el.style.display = 'contents'
-    this.sidebar.append(this.sidebarPicker.el)
+    this.sidebarHandle.setAttribute('role', 'separator')
+    this.sidebarHandle.setAttribute('aria-orientation', 'vertical')
+    this.sidebarHandle.setAttribute('aria-label', 'Resize constitutions')
+    this.sidebarHandle.title = 'Drag to resize · double-click to reset'
+    this.sidebarHandle.tabIndex = 0
+    this.sidebarHandle.addEventListener('pointerdown', e => this.sidebarResizeStart(e))
+    this.sidebarHandle.addEventListener('keydown', e => this.sidebarResizeKey(e))
+    this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
+    this.sidebar.append(this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     column.append(this.stage)
     const main = element('div', 'ws-stage-row')
@@ -254,7 +269,10 @@ export class Reader {
       this.sizes = JSON.parse(sessionStorage.getItem('shuttle:workspace:sizes') ?? '{}')
       const choice = localStorage.getItem(SIDEBAR_STORAGE)
       if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
+      const width = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE))
+      if (Number.isFinite(width) && width > 0) this.sidebarWidthChoice = width
     } catch { /* Storage is optional. */ }
+    this.applySidebarWidth()
   }
 
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
@@ -582,6 +600,7 @@ export class Reader {
   }
   private readonly relayout = (): void => {
     if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
+    this.applySidebarWidth()
     this.renderSidebar()
     this.layout(false)
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
@@ -794,6 +813,81 @@ export class Reader {
     this.cancelSidebarSlide = cancel
     void Promise.allSettled(animations.map(animation => animation.finished)).then(finish)
   }
+  /** The sidebar's bounds: the measure's floor, up to a share of the viewport. */
+  private sidebarBounds(): { min: number; max: number; preferred: number } {
+    const min = this.measure('sidebar-min', 320)
+    const max = Math.max(min, Math.floor(window.innerWidth * this.measure('sidebar-max-share', 0.4)))
+    return { min, max, preferred: Math.min(max, Math.max(min, this.measure('sidebar-default', 384))) }
+  }
+  /** The width the sidebar wears now: the viewer's choice clamped to the viewport, else the default. */
+  private applySidebarWidth(width = this.sidebarWidthChoice): number {
+    const { min, max, preferred } = this.sidebarBounds()
+    const px = Math.round(width === null ? preferred : Math.min(max, Math.max(min, width)))
+    this.el.style.setProperty('--ws-sidebar-width', `${px}px`)
+    this.sidebarHandle.setAttribute('aria-valuemin', String(min))
+    this.sidebarHandle.setAttribute('aria-valuemax', String(max))
+    this.sidebarHandle.setAttribute('aria-valuenow', String(px))
+    return px
+  }
+  /** Set (or with null, reset) the viewer's width; the stage reflows at once, without a crossing. */
+  private setSidebarWidth(width: number | null, persist: boolean): void {
+    this.sidebarWidthChoice = width
+    this.applySidebarWidth()
+    this.layout(false)
+    if (!persist) return
+    try {
+      if (width === null) localStorage.removeItem(SIDEBAR_WIDTH_STORAGE)
+      else localStorage.setItem(SIDEBAR_WIDTH_STORAGE, String(Math.round(width)))
+    } catch { /* Storage is optional. */ }
+  }
+  private sidebarResizeStart(e: PointerEvent): void {
+    if (e.button !== 0 || !this.sidebarShown) return
+    e.preventDefault()
+    const handle = this.sidebarHandle
+    handle.setPointerCapture(e.pointerId)
+    const startX = e.clientX, startWidth = this.sidebar.offsetWidth, before = this.sidebarWidthChoice
+    let latched = false
+    this.el.classList.add('ws-sidebar-resizing')
+    this.stage.classList.add('ws-resizing')
+    const move = (ev: PointerEvent): void => {
+      const delta = ev.clientX - startX
+      if (!latched && Math.abs(delta) < this.measure('drag-latch', 4)) return
+      latched = true
+      const { min, max } = this.sidebarBounds()
+      this.setSidebarWidth(Math.min(max, Math.max(min, startWidth + delta)), false)
+    }
+    const finish = (commit: boolean): void => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('keydown', key, true)
+      this.el.classList.remove('ws-sidebar-resizing')
+      this.stage.classList.remove('ws-resizing')
+      if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId)
+      if (!latched) return
+      if (commit) this.setSidebarWidth(this.sidebarWidthChoice, true)
+      else this.setSidebarWidth(before, false)
+    }
+    const up = (): void => finish(true)
+    const cancel = (): void => finish(false)
+    const key = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); finish(false) }
+    }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', cancel)
+    window.addEventListener('keydown', key, true)
+  }
+  private sidebarResizeKey(e: KeyboardEvent): void {
+    const { min, max } = this.sidebarBounds()
+    const now = this.sidebar.offsetWidth, step = SIDEBAR_STEP * (e.shiftKey ? 4 : 1)
+    const next = e.key === 'ArrowLeft' ? now - step : e.key === 'ArrowRight' ? now + step
+      : e.key === 'Home' ? min : e.key === 'End' ? max : e.key === 'Enter' ? null : undefined
+    if (next === undefined) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.setSidebarWidth(next === null ? null : Math.min(max, Math.max(min, next)), true)
+  }
   private renderSidebar(): void {
     const shown = this.sidebarShown
     this.el.classList.toggle('ws-with-sidebar', shown)
@@ -828,6 +922,8 @@ export class Reader {
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
+    // The sidebar's edge takes its own arrows, Home, End and Enter.
+    if (e.target === this.sidebarHandle && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
     const forward = shouldForwardDocumentKey(e)
     if (e.altKey && !forward) return

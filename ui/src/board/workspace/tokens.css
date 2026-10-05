@@ -134,7 +134,12 @@
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  --ws-sidebar-width: 320px;
+  /* The sidebar: a default the viewer can drag between its floor and a share of the viewport. */
+  --ws-sidebar-default: 384px;
+  --ws-sidebar-min: 320px;
+  --ws-sidebar-max-share: 0.4;
+  --ws-sidebar-width: var(--ws-sidebar-default);
+  --ws-sidebar-handle: 9px;
   /* The sidebar's open and close: one slide, on the standard curve. */
   --ws-sidebar-time: 220ms;
   --ws-sidebar-ease: cubic-bezier(0.2, 0, 0, 1);
