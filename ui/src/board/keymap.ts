@@ -39,7 +39,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['ArrowLeft'], 'prev', 'Previous page', true), bind(['ArrowRight'], 'next', 'Next page', true),
     bind(['ArrowDown'], 'nextChannel', 'Next channel', true), bind(['ArrowUp'], 'prevChannel', 'Previous channel', true),
     bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Return to origin view'),
-    bind(['g'], 'first', 'First page'), bind(['G'], 'last', 'Last page'), bind(['?'], 'help', 'Keyboard help'),
+    bind(['g', 'Home'], 'first', 'First page'), bind(['G', 'End'], 'last', 'Last page'), bind(['?'], 'help', 'Keyboard help'),
   ],
 }
 
@@ -49,10 +49,17 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 /** A document gets first refusal; native viewers don't install this bridge. */
-export function shouldForwardDocumentKey(event: Pick<KeyboardEvent, 'defaultPrevented' | 'target'>): boolean {
+export function shouldForwardDocumentKey(event: Pick<KeyboardEvent, 'defaultPrevented' | 'target'> & Partial<Pick<KeyboardEvent, 'key' | 'altKey' | 'ctrlKey' | 'metaKey'>>): boolean {
+  if (event.defaultPrevented) return false
   const el = event.target as HTMLElement | null
-  const field = el?.closest?.('input,textarea,select,[role="textbox"],[contenteditable]')
-  return !event.defaultPrevented && (!field || field.getAttribute('contenteditable') === 'false')
+  if (el?.closest?.('input,textarea,select,[role="textbox"],audio,video,iframe,embed,object')) return false
+  const editable = el?.closest?.('[contenteditable]')
+  if (editable && editable.getAttribute('contenteditable') !== 'false') return false
+  if (!event.altKey && !event.ctrlKey && !event.metaKey) {
+    if (['Enter', ' '].includes(event.key ?? '') && el?.closest?.('button,a[href],summary,[role="button"],[role="checkbox"],[role="radio"],[role="switch"],[role="tab"]')) return false
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key ?? '') && el?.closest?.('[role="menu"],[role="radiogroup"],[role="tablist"],[role="slider"],[role="listbox"]')) return false
+  }
+  return true
 }
 
 export function keyIntent(event: KeyboardEvent, surface: KeySurface,

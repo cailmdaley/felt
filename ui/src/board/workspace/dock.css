@@ -33,8 +33,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--ws-small-gap) 10px;
-  padding: var(--ws-inset) 0;
-  border-bottom: var(--ws-line-width) solid var(--ws-hairline);
+  padding: var(--ws-small-gap) 0;
 }
 .ws-dock-status { min-width: 0; font: var(--ws-small-size) var(--ws-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
 /* Worker pills inherit the Desk's states and pigments without recolouring. */
@@ -45,11 +44,12 @@
   color: var(--ws-ink-muted);
   font-size: var(--ws-label-size);
 }
-.ws-dock-body { display: flex; flex-direction: column; gap: var(--ws-inset); padding-top: var(--ws-inset); }
+.ws-dock-body { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: var(--ws-small-gap); padding-top: var(--ws-small-gap); }
+.ws-dock-body > :is(.kbn-ctl-compose, .kbn-detail-transcript, .kbn-detail-controls-open, .kbn-ctl-history-open) { grid-column: 1 / -1; }
 .ws-dock .kbn-detail-controls {
   display: flex;
   flex-direction: column;
-  border-block: var(--ws-line-width) solid var(--ws-hairline);
+  min-width: 0;
 }
 .ws-dock .kbn-detail-controls-toggle {
   display: flex;
@@ -57,7 +57,7 @@
   gap: 9px;
   width: 100%;
   min-height: var(--ctl-h);
-  padding: 8px 0;
+  padding: 4px 0;
   border: none;
   background: transparent;
   text-align: left;
@@ -75,6 +75,9 @@
 .ws-dock .kbn-detail-controls-open .kbn-detail-controls-chevron { transform: rotate(90deg); }
 .ws-dock .kbn-ctl-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ws-dock .kbn-ctl-strip { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-strip { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-facts { display: inline-flex; flex-wrap: nowrap; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-run { display: none; }
 .ws-dock .kbn-ctl-facts { display: flex; flex-wrap: wrap; min-width: 0; align-items: baseline; }
 .ws-dock .kbn-ctl-who { display: inline-flex; gap: var(--ws-small-gap); }
 .ws-dock .kbn-ctl-agent { color: var(--ws-agent); }
@@ -139,15 +142,16 @@
   display: block;
   box-sizing: border-box;
   width: 100%;
-  min-height: 72px;
+  min-height: 38px;
   max-height: 35vh;
-  padding: 10px 12px;
+  padding: 6px 10px;
   border: none;
   outline: none;
   background: transparent;
   resize: none;
   font: var(--ws-prose-size)/1.4 var(--ws-serif);
 }
+.ws-dock .kbn-detail-directive:focus { min-height: 72px; }
 .ws-dock .kbn-detail-directive::placeholder { color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-composer-drop { border-style: dashed; border-color: var(--ws-ink); }
 .ws-dock .kbn-ctl-images { display: flex; flex-wrap: wrap; gap: var(--ws-small-gap); padding: 6px 10px; }
@@ -201,7 +205,9 @@
 .ws-dock .kbn-detail-parent-option { display: flex; flex-direction: column; width: 100%; padding: 8px; border: none; background: transparent; text-align: left; }
 .ws-dock .kbn-detail-parent-option:hover { background: var(--ws-hover); }
 .ws-dock .kbn-detail-parent-option-id { font: var(--ws-small-size) var(--ws-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
-.ws-dock .kbn-ctl-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); padding-top: var(--ws-inset); border-top: var(--ws-line-width) solid var(--ws-hairline); }
+.ws-dock .kbn-ctl-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); }
+.ws-dock .kbn-ctl-foot .kbn-ctl-btn { padding: 4px 8px; font-size: var(--ws-small-size); }
+.ws-dock .kbn-ctl-foot:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty)) { grid-column: 1 / -1; }
 .ws-dock .kbn-ctl-foot .kbn-detail-error { flex-basis: 100%; }
 .ws-dock .kbn-detail-save-status { flex: 1; color: var(--ws-ink-muted); font: var(--ws-small-size) var(--ws-mono); }
 .ws-dock .kbn-detail-save-status-saving { font-style: italic; }
@@ -227,6 +233,9 @@
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-dock { --ctl-h: var(--ws-phone-target); }
+  .ws-dock-body { grid-template-columns: minmax(0, 1fr) auto; }
+  .ws-dock .kbn-ctl-foot { grid-column: 1 / -1; }
+  .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--ws-label-size); }
   .ws-dock :is(.kbn-ctl-menu-item, .kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
   .ws-dock .kbn-ctl-image { width: 80px; height: 80px; }
   /* iOS zooms the page into any field set under 16px. */

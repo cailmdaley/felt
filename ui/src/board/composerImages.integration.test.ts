@@ -36,7 +36,6 @@ const dispatched = { ok: true, status: 200, json: async () => ({ tmux_session: '
 let composer: HTMLElement
 let fetch: ReturnType<typeof vi.fn>
 let panel: Dock
-let closeSpy: ReturnType<typeof vi.spyOn>
 
 interface PanelInternals {
   buildComposer(c: ReturnType<typeof card>, swallow: (el: HTMLElement) => void): HTMLElement
@@ -49,7 +48,6 @@ function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = 
   document.body.innerHTML = ''
   panel = new Dock('https://daemon.example', vi.fn(), undefined, undefined,
     opts.meeting ? { meeting: opts.meeting } : undefined)
-  closeSpy = vi.spyOn(panel, 'close').mockImplementation(() => {})
   const internals = panel as unknown as PanelInternals
   if (opts.pendingStart) {
     internals.pendingStartPrompt = {
@@ -72,6 +70,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  panel.reset()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
@@ -273,14 +272,22 @@ describe('the composer takes pasted images', () => {
     expect(textarea().value).toBe('')
   })
 
-  it('keeps the draft and its images when the dock is put away', () => {
-    paste(textarea(), [png('one.png')])
-    textarea().value = 'half a thought'
-    closeSpy.mockRestore()
-    panel.close()
+  it('retains a draft and image chips in its owner+uid band across channel switches', () => {
+    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster' })
+    const firstBand = panel.bandFor(task)
+    document.body.append(firstBand.el)
+    const input = firstBand.el.querySelector<HTMLTextAreaElement>('textarea')!
+    input.value = 'half a thought'
+    paste(input, [png('one.png')])
+
+    const otherBand = panel.bandFor(card({ id: 'work/other', uid: 'other-uid', originId: 'cluster' }))
+    document.body.append(otherBand.el)
+    expect(panel.bandFor(task)).toBe(firstBand)
+    expect(firstBand.el.querySelector('textarea')).toBe(input)
+    expect(input.value).toBe('half a thought')
+    expect(firstBand.el.querySelectorAll('.kbn-ctl-image')).toHaveLength(1)
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()
-    expect(textarea().value).toBe('half a thought')
-    expect(chips()).toHaveLength(1)
+    expect(panel.bandFor(card({ id: 'work/task', uid: 'task-uid', originId: 'other-host' }))).not.toBe(firstBand)
   })
 
   it('revokes every thumbnail URL when the dock forgets its card', () => {

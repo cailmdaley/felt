@@ -1,7 +1,7 @@
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { keyIntent, type KeyIntent } from '../keymap.js'
+import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
@@ -136,7 +136,6 @@ export class Reader {
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
     document.addEventListener('pointerdown', this.pointerInput, true)
-    document.addEventListener('keydown', this.keyboardModality, true)
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
     this.wide.addEventListener('change', this.relayout)
@@ -542,14 +541,16 @@ export class Reader {
     }
   }
   private readonly keydown = (e: KeyboardEvent): void => {
-    this.keyboardInput = true
+    this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
+    // Native controls own activation and composite navigation; the managed tablist uses our shared intents.
+    if (!this.tabs.el.contains(e.target as Node) && !shouldForwardDocumentKey(e) && !e.altKey && !e.metaKey && !e.ctrlKey) return
     const intent = keyIntent(e, 'reader')
-    if (intent && this.handleIntent(intent)) {
+    if (intent && this.handleIntent(intent, e.repeat)) {
       e.preventDefault(); e.stopImmediatePropagation()
     }
   }
-  private handleIntent(intent: KeyIntent): boolean {
+  private handleIntent(intent: KeyIntent, repeat = false): boolean {
     if (intent === 'help') return false
     if (intent === 'back') {
       if (this.cancelResize) this.cancelResize()
@@ -559,6 +560,7 @@ export class Reader {
       else this.opts.onReturn()
       return true
     }
+    if (this.tabs.handleIntent(intent)) return true
     if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'prev' || intent === 'next') this.step(intent === 'prev' ? -1 : 1)
     else if (intent === 'first' || intent === 'last') this.selectIndex(intent === 'first' ? 0 : (this.channel?.documents.length ?? 1) - 1)
@@ -568,12 +570,12 @@ export class Reader {
       const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
       const card = cards[index + (intent === 'prevChannel' ? -1 : 1)]
       if (index >= 0 && card) this.opts.onChannel(card)
-    } else if (['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp'].includes(intent)) this.scrollDocument(intent)
+    } else if (['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp'].includes(intent)) this.scrollDocument(intent, repeat)
     else return false
     return true
   }
 
-  private scrollDocument(intent: KeyIntent): void {
+  private scrollDocument(intent: KeyIntent, repeat: boolean): void {
     const doc = this.document
     const viewer = doc && this.host.get(doc.key)?.viewer
     if (!doc || !viewer || !['fiber', 'html', 'markdown', 'text', 'code'].includes(doc.kind)) return
@@ -595,7 +597,7 @@ export class Reader {
     const up = ['scrollUp', 'halfUp', 'pageUp'].includes(intent)
     const line = parseFloat(scroller.ownerDocument.defaultView?.getComputedStyle(scroller).lineHeight ?? '') || 24
     const amount = intent.startsWith('half') ? scroller.clientHeight / 2 : intent.startsWith('page') ? scroller.clientHeight : 3 * line
-    scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches ? 'instant' : 'smooth' })
+    scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
     this.cancelResize?.()
@@ -611,7 +613,6 @@ export class Reader {
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
     document.removeEventListener('pointerdown', this.pointerInput, true)
-    document.removeEventListener('keydown', this.keyboardModality, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
     this.el.remove()
