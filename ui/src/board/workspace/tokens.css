@@ -47,6 +47,8 @@
 
   --ws-crossing: 280ms;
   --ws-veil-time: var(--ws-crossing);
+  /* A released page swipe settles within a crossing; the reader shortens it for fast flicks. */
+  --ws-swipe-settle: var(--ws-crossing);
   --ws-desk-scale: 0.94;
   --ws-desk-opacity: 0.72;
   --ws-desk-pointer-drift: 8px;

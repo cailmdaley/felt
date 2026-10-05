@@ -131,6 +131,9 @@
 .ws-page.ws-parked { left: var(--ws-parking-x) !important; transition: none; pointer-events: none; }
 .ws-page.ws-parked::after { content: ''; position: absolute; inset: 0; background: var(--ws-paper); z-index: 4; }
 .ws-stage.ws-instant .ws-track, .ws-stage.ws-instant .ws-page, .ws-stage.ws-resizing .ws-track, .ws-stage.ws-resizing .ws-page { transition: none; }
+.ws-stage.ws-swiping .ws-track, .ws-stage.ws-swiping .ws-page { transition: none; }
+/* A released swipe decelerates from the finger's speed instead of starting a fresh crossing. */
+.ws-stage.ws-swipe-release .ws-track { transition: transform var(--ws-swipe-settle) cubic-bezier(0.2, 0.9, 0.3, 1); }
 .ws-stage.ws-resizing iframe { pointer-events: none; }
 .ws-labelbar {
   display: flex; align-items: center; flex: none; height: var(--ws-label-height); gap: var(--ws-small-gap);
@@ -255,6 +258,9 @@
   .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
+  /* Phone neighbours are flat sheets beside the page, seen only while a swipe or crossing carries them in. */
+  .ws-page.ws-receded, .ws-page.ws-receded:is(.ws-text-page, .ws-before, .ws-after) { transform: none; opacity: 1; mask-image: none; }
+  .ws-page.ws-receded .ws-sheet { box-shadow: none; }
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
@@ -289,7 +295,11 @@
   .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
   .ws-content .kbn-fileview-text:not(:has(> .kbn-detail-prose)) { padding-inline: 16px; }
   .ws-content .kbn-fileview-text > .md-code-block { padding-inline: 0; }
+  /* A wide table scrolls inside itself, so the page keeps its width and its swipe. */
+  .ws-content .kbn-detail-prose table { display: block; width: max-content; max-width: 100%; overflow-x: auto; }
   .ws-menu-item { min-height: var(--ws-phone-target); }
+  /* While the keyboard is up the field owns the screen; the page bar would sit under Safari's input accessory. */
+  .ws-reader:has(.ws-content :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"]), [contenteditable="true"]):focus) .ws-thumbbar { display: none; }
 }
 @media (pointer: coarse) {
   .ws-worker-pill .kbn-card-worker { min-height: var(--ws-phone-target); display: inline-flex; align-items: center; }

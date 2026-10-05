@@ -1,6 +1,7 @@
 import { DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
 import { referenceRuntime, type ReferenceTarget, type ReferencePlayback } from './ChannelReferences.js'
 import referenceStyles from './references.css?inline'
+import { installPageSwipe, SWIPE } from './PhoneGestures.js'
 
 export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
 const PROTOCOL = 'shuttle-document'
@@ -23,6 +24,7 @@ function fields(value: unknown, allowed: readonly string[]): value is Record<str
 }
 const shortString = (value: unknown, max = REFERENCE_LENGTH): value is string => typeof value === 'string' && value.length <= max
 const coordinate = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 0x7fffffff
+const travel = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 8192
 const boundedArray = (value: unknown, valid: (item: unknown) => boolean): boolean => Array.isArray(value) && value.length <= REFERENCE_LIMIT && Array.from(value).every(valid)
 
 /** Fixed schemas bound work in both directions; unknown types and extra data are refused. */
@@ -40,6 +42,11 @@ export function documentMessage(data: unknown): data is DocumentMessage {
       if (fields(p, ['intent', 'instant']) && typeof p.intent === 'string') return SCROLL_INTENTS.includes(p.intent) && (p.instant === undefined || typeof p.instant === 'boolean')
       return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
     case 'restore': return fields(p, ['x', 'y']) && coordinate(p.x) && coordinate(p.y)
+    case 'swipe':
+      if (fields(p, ['phase']) && p.phase === 'cancel') return true
+      if (fields(p, ['phase', 'dx']) && p.phase === 'move') return travel(p.dx)
+      return fields(p, ['phase', 'dx', 'velocity']) && p.phase === 'end' && travel(p.dx)
+        && typeof p.velocity === 'number' && Number.isFinite(p.velocity) && Math.abs(p.velocity) <= 20
     case 'references': return fields(p, ['candidates']) && boundedArray(p.candidates, item => shortString(item))
     case 'select': case 'play': return fields(p, ['candidate']) && shortString(p.candidate)
     case 'references:resolved': return fields(p, ['targets']) && boundedArray(p.targets, item =>
@@ -52,7 +59,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
 }
 
 /** This function is serialized, so every dependency arrives as an argument. */
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -168,6 +175,24 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     }
   })
   document.addEventListener('scroll', position, { capture: true, passive: true })
+  // Touches inside an opaque frame never reach the board, so the frame
+  // recognises a page swipe itself and reports its travel; follow updates are
+  // coalesced to one per animation frame.
+  let swipeMove: number | undefined
+  let swipeFrame = 0
+  swipe(document, signal => {
+    if (signal.phase === 'move') {
+      swipeMove = signal.dx
+      if (!swipeFrame) swipeFrame = requestAnimationFrame(() => {
+        swipeFrame = 0
+        if (swipeMove !== undefined) send('swipe', { phase: 'move', dx: swipeMove })
+        swipeMove = undefined
+      })
+      return
+    }
+    cancelAnimationFrame(swipeFrame); swipeFrame = 0; swipeMove = undefined
+    send('swipe', signal)
+  }, () => active, swipeLimits, true)
   document.addEventListener('play', event => {
     const media = event.target as HTMLMediaElement
     if (!['AUDIO', 'VIDEO'].includes(media.tagName)) return
@@ -204,7 +229,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length
