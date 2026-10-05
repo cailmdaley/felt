@@ -6,7 +6,8 @@
  * as PDF stay in their own iframe. HTML, markdown, and text subscribe to the
  * shared conditional file poller; their DOM changes only when the body does.
  *
- * Every file URL uses the daemon's owner-routed `GET /api/v1/file` endpoint.
+ * File bytes and validators use owner-routed `GET /api/v1/file`; HTML bases
+ * and thumbnails use `/api/v1/file-assets/:origin/*path` for relative resources.
  */
 
 import './FileViewerPanel.css'
@@ -24,7 +25,6 @@ import {
   fileBytesUrl,
   fileExt,
   fileInfoUrl,
-  prepareIframeExternalLinks,
   renderMarkdown,
 } from './utils.js'
 
@@ -159,7 +159,6 @@ export function buildFileViewer(
     // gets revealed.
     if (veil.classList.contains('kbn-fileview-loading-error')) return
     veil.remove()
-    prepareIframeExternalLinks(iframe)
     onFrameLoad?.(iframe, false)
     ready()
   })
@@ -303,7 +302,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
       void fetch(src, { method: 'HEAD', signal: controller.signal }).then(res => finish(res.ok)).catch(() => finish(false))
     }, { once: true })
     frame.addEventListener('error', () => finish(false), { once: true })
-    frame.src = kind === 'pdf' ? `${src}#page=1&view=FitH&toolbar=0` : src
+    frame.src = kind === 'pdf' ? `${src}#page=1&view=FitH&toolbar=0` : htmlAssetUrl(src)
     wrap.append(frame)
   } else if (kind === 'audio' || kind === 'video') {
     const media = document.createElement(kind)
@@ -509,10 +508,29 @@ function buildHtmlViewer(
   return wrap
 }
 
-/** Give a srcdoc document the same base URL its direct `/file` navigation had. */
+/** A path-shaped owner route lets the browser resolve CSS, scripts and sibling images. */
+export function htmlAssetUrl(src: string): string {
+  const url = new URL(src, document.baseURI)
+  const path = url.searchParams.get('path')
+  if (!url.pathname.endsWith('/api/v1/file') || !path?.startsWith('/')) return url.href
+  const owner = url.searchParams.get('origin') || 'local'
+  url.pathname = url.pathname.slice(0, -'/file'.length) + `/file-assets/${encodeURIComponent(owner)}` + path.split('/').map(encodeURIComponent).join('/')
+  url.search = ''
+  return url.href
+}
+
+/** Srcdoc inherits its parent's URL, so install the byte-owning report's asset base. */
 export function htmlWithBase(html: string, src: string): string {
-  if (/<base\b/i.test(html)) return html
-  const base = `<base href="${escapeHtml(new URL(src, document.baseURI).href)}">`
+  const asset = htmlAssetUrl(src)
+  const declared = /<base\b[^>]*>/i.exec(html)
+  if (declared) {
+    const template = document.createElement('template')
+    template.innerHTML = declared[0]
+    const base = template.content.querySelector('base')!
+    base.href = new URL(base.getAttribute('href') ?? '', asset).href
+    return html.slice(0, declared.index) + base.outerHTML + html.slice(declared.index + declared[0].length)
+  }
+  const base = `<base href="${escapeHtml(asset)}">`
   const head = /<head\b[^>]*>/i
   if (head.test(html)) return html.replace(head, (match) => `${match}${base}`)
   const htmlTag = /<html\b[^>]*>/i

@@ -187,6 +187,7 @@ harness processes sharing one transcript.
 | `GET /config/:id` | host-addressed | One operator file's text and digest — `stores`, `projects`, `agents`, `remotes` or `host` — plus `entries` for the two path lists |
 | `GET /fleet` | host-addressed | A host's fleet as rows: the normalized fleet file and its discovered tailnet peers (each row's `source` says which), joined to live reachability and each remote's build |
 | `GET /file` | owner-routed | Raw bytes by absolute path, with `ETag` / `Last-Modified` conditional GET for live HTML, markdown, and text readers |
+| `GET /file-assets/:origin/*path` | owner-routed | The same raw bytes under a path-shaped URL, so HTML reports resolve sibling images, CSS, and scripts; no CORS access for opaque origins |
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |

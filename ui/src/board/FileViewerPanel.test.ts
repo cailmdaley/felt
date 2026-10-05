@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildFileViewer, disposeFileViewer } from './FileViewerPanel.js'
+import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl } from './FileViewerPanel.js'
 import { envelope } from './workspace/DocumentBridge.js'
 const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
 afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals() })
@@ -19,6 +19,16 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('resolves sibling and nested report assets under the byte-owning host', () => {
+    const asset = htmlAssetUrl('https://board.test/api/v1/file?path=%2Fproject%2Freport%20dir%2Findex.html&origin=host-b')
+    expect(asset).toBe('https://board.test/api/v1/file-assets/host-b/project/report%20dir/index.html')
+    expect(new URL('images/figure.svg', asset).href).toBe('https://board.test/api/v1/file-assets/host-b/project/report%20dir/images/figure.svg')
+    const source = htmlWithBase('<!doctype html><body><img src="figure.png"></body>', asset)
+    expect(new DOMParser().parseFromString(source, 'text/html').querySelector('base')!.href).toBe(asset)
+    const relativeBase = htmlWithBase('<head><base href="assets/"></head>', asset)
+    expect(new DOMParser().parseFromString(relativeBase, 'text/html').querySelector('base')!.href).toBe('https://board.test/api/v1/file-assets/host-b/project/report%20dir/assets/')
+    expect(htmlWithBase('<base href="https://cdn.test/">', asset)).toContain('https://cdn.test/')
+  })
   it('transforms srcdoc before assignment and leaves old HTML visible until replacement load', () => {
     const onState = vi.fn(), onFrame = vi.fn()
     const viewer = buildFileViewer('', '/report.html', 'host-a', onFrame, undefined, {

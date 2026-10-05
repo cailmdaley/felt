@@ -18,6 +18,28 @@ export function documentMessage(data: unknown): data is DocumentMessage {
 
 /** This function is serialized, so every dependency arrives as an argument. */
 function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, protocol: string, version: number): void {
+  // Storage belongs to this document's lifetime, never the board's origin.
+  // Decks and plotting libraries can keep preferences without escaping isolation.
+  for (const name of ['localStorage', 'sessionStorage'] as const) {
+    try { void window[name].length } catch {
+      const values = new Map<string, string>()
+      const storage = {
+        get length() { return values.size },
+        key: (index: number) => [...values.keys()][index] ?? null,
+        getItem: (key: string) => values.get(String(key)) ?? null,
+        setItem: (key: string, value: string) => { values.set(String(key), String(value)) },
+        removeItem: (key: string) => { values.delete(String(key)) },
+        clear: () => values.clear(),
+      }
+      Object.defineProperty(window, name, { configurable: true, value: storage })
+    }
+  }
+  // Srcdoc has an opaque URL even when its assets have a network base. Keep
+  // state changes local; a report's URL must never become a board address.
+  for (const name of ['pushState', 'replaceState'] as const) {
+    const native = window.history[name].bind(window.history)
+    window.history[name] = (state: unknown, unused: string) => native(state, unused)
+  }
   let active = false
   let scroller: HTMLElement | null = null
   const send = (type: string, payload: Record<string, unknown> = {}): void => parent.postMessage({ protocol, version, type, payload }, '*')
@@ -115,7 +137,10 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
   const listeners = new Set<(position: ScrollPosition) => void>()
   const bridge: FrameBridge = {
     position: { x: 0, y: 0 },
-    command: (type, payload = {}) => frame.contentWindow?.postMessage(envelope(type, payload), '*'),
+    command: (type, payload = {}) => {
+      if (type === 'restore' && typeof payload.x === 'number' && typeof payload.y === 'number') bridge.position = { x: payload.x, y: payload.y }
+      frame.contentWindow?.postMessage(envelope(type, payload), '*')
+    },
     subscribeScroll: listener => { listeners.add(listener); return () => { listeners.delete(listener) } },
     dispose: () => { window.removeEventListener('message', onMessage); listeners.clear(); bridges.delete(frame) },
   }
