@@ -14,6 +14,8 @@ defmodule ShuttleWeb.FileControllerTest do
   import Phoenix.ConnTest
 
   @endpoint ShuttleWeb.Endpoint
+  @sandbox_policy "sandbox allow-scripts allow-popups " <>
+                    "allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms"
 
   describe "local serve" do
     test "200 with bytes + content-type for an existing absolute path" do
@@ -37,6 +39,101 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert conn.status == 200
       assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
+    end
+
+    # Negative control: omitting the document sandbox policy makes these checks go red.
+    @tag :tmp_dir
+    test "sandboxes local HTML document responses without CORS access", %{tmp_dir: dir} do
+      for {extension, accept} <- [
+            {"html", "text/html"},
+            {"htm", "text/html"},
+            {"HTML", "text/html"},
+            {"xhtml", "application/xhtml+xml"}
+          ] do
+        path = Path.join(dir, "report.#{extension}")
+        body = "<script>window.open('popup.html')</script>"
+        File.write!(path, body)
+
+        conn =
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", accept)
+          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+        assert conn.status == 200
+        assert conn.resp_body == body
+        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
+    end
+
+    @tag :tmp_dir
+    test "sandboxes a sibling HTML asset opened from an opaque report", %{tmp_dir: dir} do
+      report_path = Path.join(dir, "report.html")
+      popup_path = Path.join(dir, "popup.html")
+      File.write!(report_path, ~s(<a href="popup.html" target="_blank">open</a>))
+      body = "<script>window.opener.location = 'https://example.invalid'</script>"
+      File.write!(popup_path, body)
+
+      report_url = URI.parse("http://127.0.0.1" <> file_asset_url("local", report_path))
+      sibling_url = report_url |> URI.merge("popup.html") |> Map.fetch!(:path)
+      assert sibling_url == file_asset_url("local", popup_path)
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/html")
+        |> get(sibling_url)
+
+      assert conn.status == 200
+      assert conn.resp_body == body
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+    end
+
+    @tag :tmp_dir
+    test "sandboxes SVG and compressed SVG responses without CORS access", %{tmp_dir: dir} do
+      body = "<svg><script>window.open('popup.html')</script></svg>"
+
+      for extension <- ["svg", "svgz"] do
+        path = Path.join(dir, "report.#{extension}")
+        File.write!(path, body)
+
+        conn =
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", "image/svg+xml")
+          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+        assert conn.status == 200
+        assert conn.resp_body == body
+        assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
+        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
+    end
+
+    @tag :tmp_dir
+    test "leaves PDFs, media and images unsandboxed", %{tmp_dir: dir} do
+      for {extension, accept, content_type} <- [
+            {"pdf", "application/pdf", "application/pdf"},
+            {"mp4", "video/mp4", "video/mp4"},
+            {"png", "image/png", "image/png"}
+          ] do
+        path = Path.join(dir, "asset.#{extension}")
+        File.write!(path, "representation")
+
+        conn =
+          local_conn()
+          |> put_req_header("origin", "null")
+          |> put_req_header("accept", accept)
+          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+
+        assert conn.status == 200
+        assert get_resp_header(conn, "content-type") |> List.first() =~ content_type
+        assert get_resp_header(conn, "content-security-policy") == []
+        assert get_resp_header(conn, "access-control-allow-origin") == []
+      end
     end
 
     @tag :tmp_dir
@@ -613,6 +710,50 @@ defmodule ShuttleWeb.FileControllerTest do
                "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport%2Ffoo.css"
     end
 
+    test "sandboxes remote HTML even when the owner omits CSP" do
+      body = "<script>window.open('popup.html')</script>"
+      stub_forward("candide", "http://localhost:4001", {:ok, 200, "text/html", body})
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/html")
+        |> get("/api/v1/file?path=%2Fproject%2Freport.html&origin=candide")
+
+      assert conn.status == 200
+      assert conn.resp_body == body
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+      assert StubGetFileClient.last().url ==
+               "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport.html"
+    end
+
+    test "does not relay an unsafe remote CSP or ACAO" do
+      body = "<script>window.open('popup.html')</script>"
+
+      headers = [
+        {"content-security-policy", "sandbox allow-scripts allow-same-origin"},
+        {"access-control-allow-origin", "null"}
+      ]
+
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 200, headers, "text/html", body}
+      )
+
+      conn =
+        local_conn()
+        |> put_req_header("origin", "null")
+        |> put_req_header("accept", "text/html")
+        |> get("/api/v1/file?path=%2Fproject%2Freport.html&origin=candide")
+
+      assert conn.status == 200
+      assert conn.resp_body == body
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
+      assert get_resp_header(conn, "access-control-allow-origin") == []
+    end
+
     test "forwards conditional headers and relays a remote 304 with its validators" do
       etag = ~s(W/"remote-file")
 
@@ -638,6 +779,7 @@ defmodule ShuttleWeb.FileControllerTest do
 
       assert conn.status == 304
       assert conn.resp_body == ""
+      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
       assert get_resp_header(conn, "etag") == [etag]
       assert get_resp_header(conn, "last-modified") == [last_modified]
       assert get_resp_header(conn, "cache-control") == ["public, max-age=300"]

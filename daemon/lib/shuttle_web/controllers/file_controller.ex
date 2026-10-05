@@ -14,7 +14,9 @@ defmodule ShuttleWeb.FileController do
   reader carries that origin back. A local-owned path is read here; a
   remote-owned path forwards to the owning daemon's identical `/file` (origin
   stripped) and relays its bytes, content type, range
-  metadata, and cache validators (`OriginRouter.forward_file_get/5`).
+  metadata, and cache validators (`OriginRouter.forward_file_get/5`). HTML,
+  XHTML, and SVG responses receive a CSP sandbox before either local serving or
+  remote relay; PDF and media responses retain their native handling.
 
   **Path contract.** `path` must be ABSOLUTE — the reader resolves a fiber's
   `:::{embed} <rel>` against the fiber's own directory client-side before
@@ -46,6 +48,9 @@ defmodule ShuttleWeb.FileController do
 
   @digest_limit 1024 * 1024
   @range_limit 4 * 1024 * 1024
+  @sandboxed_extensions [".html", ".htm", ".xhtml", ".svg", ".svgz"]
+  @document_sandbox_policy "sandbox allow-scripts allow-popups " <>
+                             "allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms"
 
   @media_types %{
     ".mp3" => "audio/mpeg",
@@ -68,6 +73,8 @@ defmodule ShuttleWeb.FileController do
   @gregorian_epoch_offset :calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}})
 
   def show(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
+    conn = sandbox_document(conn, path)
+
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
         relay_file_bytes(
@@ -88,6 +95,16 @@ defmodule ShuttleWeb.FileController do
 
   def show(conn, _params) do
     conn |> put_status(400) |> json(%{error: "path is required"})
+  end
+
+  # Apply the policy before the owner decision so a remote running an older
+  # release cannot return script-capable documents without this sandbox.
+  defp sandbox_document(conn, path) do
+    if String.downcase(Path.extname(path)) in @sandboxed_extensions do
+      put_resp_header(conn, "content-security-policy", @document_sandbox_policy)
+    else
+      conn
+    end
   end
 
   @doc """
