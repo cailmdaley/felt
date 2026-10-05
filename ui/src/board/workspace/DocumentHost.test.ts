@@ -73,6 +73,20 @@ describe('stable document frames', () => {
     expect(host.get(docs[3].key)!.sheet.inert).toBe(true)
   })
 
+  it('does not reselect a page that recedes in its own document-link handler', () => {
+    const fiber = { ...docs[0], kind: 'fiber' as const }
+    host.setChannel([fiber, docs[1]], fiber.key)
+    const frame = host.get(fiber.key)!
+    const link = document.createElement('button')
+    frame.viewer!.append(link)
+    link.addEventListener('click', () => host.select(docs[1].key))
+    link.click()
+    expect(host.get(docs[1].key)!.el.classList.contains('ws-selected')).toBe(true)
+    expect(onSelect).not.toHaveBeenCalled()
+    frame.el.click()
+    expect(onSelect).toHaveBeenCalledWith(fiber.key)
+  })
+
   it('restores prose scroll after its reading geometry is assigned', async () => {
     const prose = document.createElement('div')
     let laidOut = false, top = 0

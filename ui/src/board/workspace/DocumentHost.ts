@@ -211,8 +211,10 @@ export class DocumentHost {
       notice: null, controller: null, revision: 0,
     }
     this.placeholder(state)
-    el.addEventListener('click', () => {
-      if (el.classList.contains('ws-receded')) this.options.onSelect(frame.doc.key)
+    el.addEventListener('click', event => {
+      // A selected page can recede in a descendant's handler before this bubbles.
+      // Inert neighbour sheets target their surrounding frame, not their content.
+      if (el.classList.contains('ws-receded') && !sheet.contains(event.target as Node)) this.options.onSelect(frame.doc.key)
     })
     this.frames.set(doc.key, state)
     // This is the only append of a frame. Reordering is geometry, not DOM motion.
