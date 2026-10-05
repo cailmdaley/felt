@@ -7,6 +7,7 @@ import {
   formatSpanMinutes,
   instantMs,
   sameCivilDue,
+  wallClock,
   zone,
 } from './civilDay.js';
 import { effectiveHorizon } from './KanbanRules.js';
@@ -250,6 +251,24 @@ describe('civilDayAt', () => {
     expect(civilDayAt(undefined)).toBeUndefined();
     expect(civilDayAt('2026-07-30T00:00:00Z')).toBeUndefined();
     expect(civilDayAt('2026-02-30')).toBeUndefined();
+  });
+});
+
+describe('the offset cache at a transition inside a quarter hour', () => {
+  // Liberia moved from UTC−0:44:30 to UTC at 1972-01-07T00:44:30Z — mid-way
+  // through a quarter hour of UTC. Checked against Intl directly, to the second.
+  const monrovia = zone('Africa/Monrovia');
+  const intl = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Monrovia', hourCycle: 'h23',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  it('reads each side of the jump with its own offset', () => {
+    for (const iso of ['1972-01-07T00:44:29Z', '1972-01-07T00:44:30Z', '1972-01-07T00:30:00Z', '1972-01-07T00:59:59Z']) {
+      const ms = Date.parse(iso);
+      const { hour, minute, second } = wallClock(ms, monrovia);
+      const said = [hour, minute, second].map((n) => String(n).padStart(2, '0')).join(':');
+      expect(said, iso).toBe(intl.format(ms));
+    }
   });
 });
 

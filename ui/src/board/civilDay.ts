@@ -54,9 +54,11 @@ const DAY_MS = 86_400_000
  * {@link zone}; the board's own is {@link hostZone}.
  *
  * Offsets are read through `Intl.DateTimeFormat#formatToParts` and memoized
- * per quarter hour of UTC, which is exact for every zone whose transitions
- * fall on a quarter hour of UTC — every rule in force since the 1970s. The
- * views ask in loops, and a `formatToParts` costs fifty times a `Date` getter.
+ * per quarter hour of UTC: a quarter hour whose two ends agree has one offset
+ * throughout, and one whose ends differ holds a transition and is read
+ * directly, to the second, every time. The views ask in loops, and a
+ * `formatToParts` costs fifty times a `Date` getter.
+
  */
 class Zone {
   readonly id: string
@@ -83,16 +85,24 @@ class Zone {
     const quarter = Math.floor(ms / QUARTER_HOUR_MS)
     let offset = this.#offsets.get(quarter)
     if (offset === undefined) {
-      const at = quarter * QUARTER_HOUR_MS
-      const f: Record<string, number> = {}
-      for (const part of this.#fields.formatToParts(at)) {
-        if (part.type !== 'literal') f[part.type] = Number(part.value)
-      }
-      offset = Date.UTC(f.year, f.month - 1, f.day, f.hour, f.minute, f.second) - at
+      const first = this.#read(quarter * QUARTER_HOUR_MS)
+      const last = this.#read((quarter + 1) * QUARTER_HOUR_MS - 1000)
+      // NaN marks a quarter hour with a transition inside it.
+      offset = first === last ? first : Number.NaN
       if (this.#offsets.size >= 8192) this.#offsets.clear()
       this.#offsets.set(quarter, offset)
     }
-    return offset
+    return Number.isNaN(offset) ? this.#read(ms) : offset
+  }
+
+  /** The offset at an instant, straight from Intl, to the second. */
+  #read(ms: number): number {
+    const at = Math.floor(ms / 1000) * 1000
+    const f: Record<string, number> = {}
+    for (const part of this.#fields.formatToParts(at)) {
+      if (part.type !== 'literal') f[part.type] = Number(part.value)
+    }
+    return Date.UTC(f.year, f.month - 1, f.day, f.hour, f.minute, f.second) - at
   }
 }
 export type { Zone }
