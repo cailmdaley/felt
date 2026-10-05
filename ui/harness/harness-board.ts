@@ -57,7 +57,7 @@ const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
 const example = new URLSearchParams(window.location.search).get('example')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'workspace' ? workspaceExample(now) : null
+const workspaceFixture = example === 'workspace' || example === 'music' ? workspaceExample(now, { music: example === 'music' }) : null
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
@@ -1474,7 +1474,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // A text card's body. Images, pages and PDFs load by URL, not through
   // fetch, so offline they stay faces.
   if (url.includes('/api/v1/file')) {
-    if (workspaceFixture) return workspaceFixture.fileResponse(url, method, init?.headers)
+    if (workspaceFixture) {
+      const response = workspaceFixture.fileResponse(url, method, init?.headers)
+      ;(request as Record<string, unknown>).status = response.status
+      return response
+    }
     return new Response('# Daily digest\n\nThree cosmic-shear papers and one CMB-lensing cross-correlation.\n', {
       headers: { 'Content-Type': 'text/plain' },
     })

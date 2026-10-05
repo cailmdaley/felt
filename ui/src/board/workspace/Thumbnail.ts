@@ -1,5 +1,6 @@
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { LOAD_POLICY } from '../views/shelfLoad.js'
+import { RESOURCE_FRESH_MS } from '../documentResources.js'
 import { docKey, documentKind } from './documents.js'
 import { cacheDocumentTitle, declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import './thumbnail.css'
@@ -78,6 +79,7 @@ export class Thumbnail {
   lastVisible = 0
   body?: HTMLElement
   private timer?: ReturnType<typeof setTimeout>
+  private retryTimer?: ReturnType<typeof setTimeout>
   private generation = 0
   private readonly opts: ThumbnailOptions
   private readonly face: HTMLElement
@@ -127,7 +129,7 @@ export class Thumbnail {
   priority(): number { return this.opts.priority() }
   distance(): number { return this.opts.distance() }
   schedule(): void { budget.schedule() }
-  dispose(): void { this.stopTitles(); budget.remove(this); this.unmount(); this.el.remove() }
+  dispose(): void { clearTimeout(this.retryTimer); this.stopTitles(); budget.remove(this); this.unmount(); this.el.remove() }
   unmount(): void {
     this.generation++
     clearTimeout(this.timer); this.timer = undefined
@@ -154,7 +156,12 @@ export class Thumbnail {
       clearTimeout(this.timer); this.timer = undefined
       this.state = ok ? 'live' : 'failed'
       this.el.classList.toggle('ws-thumbnail-ready', ok)
-      if (!ok) { disposeFileViewer(this.body ?? null); this.body?.remove(); this.body = undefined }
+      if (!ok) {
+        disposeFileViewer(this.body ?? null); this.body?.remove(); this.body = undefined
+        // The cache holds a miss for its freshness window; after it, a document written since can appear.
+        clearTimeout(this.retryTimer)
+        this.retryTimer = setTimeout(() => { if (this.state === 'failed') { this.state = 'idle'; budget.schedule() } }, RESOURCE_FRESH_MS)
+      }
       this.scale(); budget.schedule()
     }
     this.timer = setTimeout(() => finish(false), LOAD_POLICY.softTimeoutRemoteMs)

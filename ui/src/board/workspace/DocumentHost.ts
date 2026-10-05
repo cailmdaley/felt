@@ -8,6 +8,7 @@ import {
   type FileViewerState,
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
+import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
@@ -491,10 +492,10 @@ export class DocumentHost {
     notice.setAttribute('role', 'status')
     const cause = document.createElement('p')
     const owner = state.frame.doc.owner
-    const unsupportedMedia = message === 'media format is not supported by this browser'
+    const unsupportedMedia = message === 'media format is not supported by this browser' || message === 'image format is not supported by this browser'
     cause.textContent = missing
       ? `Not found on ${owner}${stale ? ' — showing last loaded copy' : ''}`
-      : unsupportedMedia ? 'This browser cannot play this format'
+      : unsupportedMedia ? (message.startsWith('image') ? 'This browser cannot show this image' : 'This browser cannot play this format')
       : `${owner} is unreachable${stale ? ' — showing last loaded copy' : ''}`
     notice.append(cause)
     if (unsupportedMedia) {
@@ -542,9 +543,10 @@ export class DocumentHost {
     const doc = state.frame.doc
     const src = fileBytesUrl(this.options.shuttleBase, doc.path, doc.owner)
     try {
-      const response = await fetch(src, { method: 'HEAD', signal: controller.signal, cache: 'no-store' })
+      const info = await head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal })
       if (this.disposed || state.controller !== controller) return
-      if (!response.ok) throw new Error(`file request failed: ${response.status}`)
+      if (!info) throw new Error('the daemon could not be reached')
+      if (!info.exists) throw new Error('file request failed: 404')
       this.clearNotice(state)
       await refreshLiveFile(src)
     } catch (error) {
