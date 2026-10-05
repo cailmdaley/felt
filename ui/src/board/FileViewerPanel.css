@@ -107,18 +107,6 @@
   color-scheme: light;
 }
 .kbn-fileview-audio audio::-webkit-media-controls-panel { background-color: var(--ws-fill, #f0e6d0); }
-.kbn-media-progress {
-  display: block;
-  width: calc(100% - 32px);
-  height: 2px;
-  margin: 26px 16px 0;
-  border: 0;
-  appearance: none;
-  background: var(--ws-hairline, #c6b38d);
-}
-.kbn-media-progress::-webkit-progress-bar { background: var(--ws-hairline, #c6b38d); }
-.kbn-media-progress::-webkit-progress-value { background: var(--ws-ink, #342c20); }
-.kbn-media-progress::-moz-progress-bar { background: var(--ws-ink, #342c20); }
 .kbn-fileview-video { padding: 20px; }
 .kbn-fileview-video .kbn-media-page { max-width: none; height: 100%; display: flex; flex-direction: column; justify-content: center; }
 .kbn-fileview-video video {

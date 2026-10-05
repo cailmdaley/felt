@@ -225,20 +225,12 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   media.preload = 'metadata'
   media.setAttribute('aria-label', basename(path))
   if (media instanceof HTMLVideoElement) media.playsInline = true
-  const timeline = document.createElement('progress')
-  timeline.className = 'kbn-media-progress'
-  timeline.max = 1
-  timeline.value = 0
-  timeline.setAttribute('aria-hidden', 'true')
   const state: MediaState = { media, active: options.active !== false }
   mediaViewers.set(wrap, state)
   players.add(media)
   media.addEventListener('play', () => {
     if (!state.active) { media.pause(); return }
     for (const other of players) if (other !== media) other.pause()
-  })
-  media.addEventListener('timeupdate', () => {
-    timeline.value = Number.isFinite(media.duration) && media.duration > 0 ? media.currentTime / media.duration : 0
   })
   media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
   let disposed = false
@@ -250,7 +242,6 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
     }).catch(error => { if (!disposed) options.onState?.({ status: 'error', error, hasContent: false }) })
   })
   page.append(media)
-  if (kind === 'audio') page.append(timeline)
   wrap.append(page)
   media.src = src
   viewerDisposers.set(wrap, () => {

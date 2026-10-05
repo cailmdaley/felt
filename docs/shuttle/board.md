@@ -162,7 +162,10 @@ Opening a folio or receipt enters the reader: one selected page, inert receded n
 The fiber page anchors its body, embedded files, opened body links and sent documents.
 Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, metadata polls and the optional Constitutions sidebar preserve retained document instances and reading position.
-The navbar's worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel.
+The navbar's state-only worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel.
+The fiber header shows status alone. Agent, effort, cadence, host and project directory belong to the folded settings line; the band's worker line is only its conversation action.
+Document label bars show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
+Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
 The Constitutions sidebar starts closed and remembers an explicit choice.
 On phones, previous/next controls sit in a thumb bar, and browser Back returns to the originating view.
 

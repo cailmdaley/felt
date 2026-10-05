@@ -197,7 +197,7 @@ for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pa
   await p.keyboard.press('Space')
   await poll(p, () => !window.__audio.paused)
   assert.equal(await p.locator('audio').evaluateAll(as => as.filter(a => !a.paused).length), 1)
-  await poll(p, () => [...document.querySelectorAll('.kbn-media-progress')].some(e => e.value > 0))
+  await poll(p, () => [...document.querySelectorAll('audio')].some(e => !e.paused && e.currentTime > 0))
   const other = `tone.${format === 'mp3' ? 'wav' : 'mp3'}`
   await choose(p, other); assert.ok(await audio.evaluate(a => a.paused))
   await audio.evaluate(a => { window.__audioPausedTime = a.currentTime })
@@ -326,7 +326,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await settings.click()
     for (const [state, label] of [['media', 'tone.mp3'], ['pdf', 'response.pdf'], ['unsupported', 'archive.zip']]) {
       await choose(p, label)
-      if (state === 'media') await poll(p, () => document.querySelector('.ws-selected audio')?.readyState >= 1)
+      if (state === 'media') {
+        await poll(p, () => document.querySelector('.ws-selected audio')?.readyState >= 1)
+        assert.equal(await selected(p).locator('progress').count(), 0, 'native transport owns playback position')
+      }
       if (state === 'pdf') await selected(p).locator('iframe').waitFor()
       if (state === 'unsupported') await selected(p).getByRole('link', { name: 'Download', exact: true }).waitFor()
       await poll(p, () => {

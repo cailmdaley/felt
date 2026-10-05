@@ -215,7 +215,7 @@ defmodule Shuttle.OriginRouter do
   bodyless response.
 
   Clients without `get_file/3` use their binary-safe `get_file/2` callback and
-  return no response headers. This keeps older transport adapters functional;
+  return no response headers. Both transport callback shapes are supported;
   callers still receive a body and can compare its content locally.
   """
   @spec forward_file_get(Remote.t(), String.t(), map(), [{String.t(), String.t()}], keyword()) ::

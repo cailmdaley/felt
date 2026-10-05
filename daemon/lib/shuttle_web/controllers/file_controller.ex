@@ -3,20 +3,19 @@ defmodule ShuttleWeb.FileController do
   Serve file/asset bytes by absolute path: `GET /api/v1/file?path=…&origin=…`,
   and metadata-only change probes via `GET /api/v1/file-info?path=…&origin=…`.
 
-  The one genuine backend addition the standalone Shuttle UI needs. The fiber
-  detail panel renders the daemon's raw markdown lean (`marked`), but a
-  `:::{embed}` artifact and a relative image are file *bytes*, not markdown —
-  this route delivers them. It is also what lets a remote-owned fiber's body and
-  assets render: only the owning daemon can read its own host's filesystem.
+  Reader pages and overview thumbnails fetch HTML, text, and native media
+  bytes from their owning host. The fiber route supplies markdown; this file
+  route supplies embeds, opened links, and relative assets. Only the owning
+  daemon can read its host's filesystem.
 
   **Owner-routed via `Shuttle.OriginRouter`, exactly like `/kill` and
   `/felt-edit`.** The composite board stamps each fiber with its `origin`; the
-  panel carries that origin back. A local-owned path is read here; a
+  reader carries that origin back. A local-owned path is read here; a
   remote-owned path forwards to the owning daemon's identical `/file` (origin
-  stripped) over the SSH tunnel and relays its bytes, content type, range
+  stripped) and relays its bytes, content type, range
   metadata, and cache validators (`OriginRouter.forward_file_get/4`).
 
-  **Path contract.** `path` must be ABSOLUTE — the panel resolves a fiber's
+  **Path contract.** `path` must be ABSOLUTE — the reader resolves a fiber's
   `:::{embed} <rel>` against the fiber's own directory client-side before
   calling, and an absolute embed (a paper build outside `.felt/`) is passed
   through as-is. There is deliberately no felt-store sandbox: the constitution
@@ -24,7 +23,7 @@ defmodule ShuttleWeb.FileController do
   localhost/trusted-cluster daemon the rest of the API already assumes (it shells
   out to felt over arbitrary stores). A relative path is a 400; `/file` returns
   404 for a missing file, while `/file-info` reports `exists: false`; neither
-  500s the panel.
+  500s the reader.
 
   **Conditional and range reads on both owner legs.** A weak `ETag` hashes the
   served file bytes, so same-size rewrites with the same mtime still invalidate

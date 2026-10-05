@@ -168,7 +168,6 @@
 .ws-prose blockquote { border-left: var(--ws-focus-width) solid var(--ws-hairline); padding-left: var(--ws-inset); color: var(--ws-ink-muted); }
 .ws-prose-header { display: flex; flex-wrap: wrap; gap: var(--ws-small-gap) var(--ws-gap); color: var(--ws-ink-muted); font: var(--ws-small-size)/1.5 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); text-transform: uppercase; border-bottom: var(--ws-line-width) solid var(--ws-hairline); padding-bottom: var(--ws-inset); margin-bottom: var(--ws-gap); }
 .ws-prose .kbn-detail-lede, .ws-prose-outcome { font-size: var(--ws-lede-size); margin-bottom: var(--ws-gap); color: var(--ws-ink); }
-.ws-prose-header .ws-prose-agent { color: var(--ws-machine); text-transform: none; }
 .ws-prose-documents { list-style: none; padding: 0; font: var(--ws-label-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); }
 .ws-prose-documents button { display: block; width: 100%; padding: var(--ws-inset); text-align: left; border-top: var(--ws-line-width) solid var(--ws-hairline); }
 .ws-prose-documents button:hover { background: var(--ws-hover); }

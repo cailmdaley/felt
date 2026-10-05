@@ -35,7 +35,7 @@
   gap: var(--ws-small-gap) 10px;
   padding: var(--ws-small-gap) 0;
 }
-.ws-dock-status { min-width: 0; font: var(--ws-small-size) var(--ws-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
+.ws-dock-worker:empty { display: none; }
 /* Worker pills inherit the Desk's states and pigments without recolouring. */
 .ws-dock .kbn-card-worker { min-height: var(--ctl-h); display: inline-flex; align-items: center; }
 .ws-dock .kbn-detail-directive:focus-visible { outline: none; }
