@@ -274,7 +274,7 @@
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-dock { --ctl-h: var(--ws-phone-target); }
-  /* Settings, History and the fiber's ⋯ share the one folded row. */
+  /* Settings and History share the one folded row. */
   .ws-dock-body { grid-template-columns: minmax(0, 1fr) auto auto; }
   .ws-dock .kbn-ctl-foot { grid-column: 3; }
   /* The verbs wrap beneath the field, inside its border, on their own row. */
@@ -316,11 +316,7 @@
 .ws-dock .kbn-ctl-history-toggle { font: var(--ws-label-size)/1.4 var(--ws-serif) !important; }
 .ws-dock .kbn-ctl-verdict { grid-column: 1 / -1; display: flex; gap: 8px; margin-bottom: 8px; }
 .ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 36px; padding-inline: 16px; }
-.ws-dock .kbn-ctl-verdict-menu { position: relative; }
-.ws-dock .kbn-ctl-verdict-menu summary { cursor: pointer; display: grid; place-items: center; min-width: 36px; min-height: 36px; list-style: none; font: var(--ws-section-size)/1 var(--ws-serif); }
-.ws-dock .kbn-ctl-verdict-menu summary::-webkit-details-marker { display: none; }
-.ws-dock .kbn-ctl-verdict-menu .kbn-ctl-menu { gap: 4px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-dock .kbn-ctl-verdict .kbn-ctl-btn, .ws-dock .kbn-ctl-verdict-menu summary { min-height: 44px; min-width: 44px; }
+  .ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 44px; min-width: 44px; }
 }
 

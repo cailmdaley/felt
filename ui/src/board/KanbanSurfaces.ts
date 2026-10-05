@@ -1833,7 +1833,8 @@ export class KanbanSurfaceRenderer {
     // badge / held pill / worker pill are the RIGHT region, built further
     // down and collected into `rightChip` for the same reason.
     let reviewMetaActions: HTMLDivElement | undefined
-    if (kind === 'awaitingReview' && !isStale) {
+    // Work awaiting review or in flight can be cleared from its card.
+    if ((kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
       reviewMetaActions = document.createElement('div')
       reviewMetaActions.className = 'kbn-card-review-meta-actions'
       const verdictBtn = (label: string, modifier: string, target: ColumnKind): HTMLButtonElement => {
@@ -1950,12 +1951,14 @@ export class KanbanSurfaceRenderer {
     // room rather than flush against whichever side claims it first; the
     // right chip then lands flush against the row's own right edge, same as
     // it always has.
+    // In flight the pair follows the left chips instead of centring, so a
+    // worker pill that changes width never moves it under the pointer.
     if (reviewMetaActions) {
       const before = document.createElement('div')
       before.className = 'kbn-card-meta-spacer'
       const after = document.createElement('div')
       after.className = 'kbn-card-meta-spacer'
-      meta.append(before, reviewMetaActions, after)
+      meta.append(...(kind === 'inFlight' ? [] : [before]), reviewMetaActions, after)
     }
     if (rightChip) {
       if (!reviewMetaActions) {

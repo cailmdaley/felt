@@ -1,7 +1,7 @@
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
-import { fiberPageColumn } from './fiberPageState.js'
+import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
@@ -204,7 +204,7 @@ export class Workspace {
 
   private deferVerdict(verdict: Verdict): void {
     const state = this.current
-    if (!state?.metadataKnown || fiberPageColumn(state.card) !== 'awaitingReview') return
+    if (!state?.metadataKnown || !verdictReachable(state.card)) return
     this.queueVerdict(state.card, verdict)
   }
   /** Desk, plates, act-zone buttons and keys authorize the same delayed write. */

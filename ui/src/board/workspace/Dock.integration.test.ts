@@ -42,7 +42,7 @@ afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMo
 describe('shared verdict controls', () => {
   it('uses the same lifecycle callback from the fiber band and floating plate', async () => {
     const transition = vi.fn()
-    const review = task({ status: 'closed', tempered: false })
+    const review = task({ status: 'closed' })
     const controls = new Dock('', saved, transition)
     const band = controls.bandFor(review)
     const plate = controls.verdictPlateFor(review)
@@ -213,7 +213,7 @@ describe('state-shaped act zone', () => {
     expect(message.placeholder).toBe('What should the worker do next?')
   })
 
-  it('puts review verdicts first, retains a draft across runtime changes, and hides verdicts on drafts', () => {
+  it('puts review verdicts first, retains a draft across runtime changes, and leaves verdicts outside review to the head', () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
@@ -226,7 +226,7 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
     expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
-    expect(band.el.querySelector('.kbn-ctl-verdict-menu')).not.toBeNull()
+    expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard,.kbn-ctl-verdict-menu')).toBeNull()
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')

@@ -473,12 +473,12 @@ describe('workspace reader integration', () => {
     expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(0)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^aloft/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
     confirm.mockReturnValue(true)
-    button('Temper').click()
+    // In flight, the head carries the verdict pair.
+    document.querySelector<HTMLButtonElement>('.ws-nav-verdicts .kbn-ctl-temper')!.click()
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(transition).not.toHaveBeenCalled()
     vi.advanceTimersByTime(6000)

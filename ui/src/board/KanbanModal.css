@@ -2222,9 +2222,9 @@
   pointer-events: none;
   transition: opacity 120ms ease;
 }
-.kbn-card-awaitingReview:hover .kbn-card-review-meta-actions,
-.kbn-card-awaitingReview:focus-within .kbn-card-review-meta-actions,
-.kbn-card-awaitingReview.kbn-key-selected .kbn-card-review-meta-actions {
+:is(.kbn-card-awaitingReview, .kbn-card-inFlight):hover .kbn-card-review-meta-actions,
+:is(.kbn-card-awaitingReview, .kbn-card-inFlight):focus-within .kbn-card-review-meta-actions,
+:is(.kbn-card-awaitingReview, .kbn-card-inFlight).kbn-key-selected .kbn-card-review-meta-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -2237,10 +2237,13 @@
   opacity: 1;
 }
 @media (hover: none) {
+  /* Without hover only awaiting review shows its verdicts; work in flight
+     keeps its card to the worker, and the reader's head carries the pair. */
   .kbn-card-review-meta-actions {
     opacity: 1;
     pointer-events: auto;
   }
+  .kbn-card-inFlight .kbn-card-review-meta-actions { display: none; }
   /* The button is the whole 44px touch target, on a transparent ground; its
      compact 28px plate is drawn inside it. Negative margins keep the meta
      row's layout at the plate's height, so the card does not grow. */

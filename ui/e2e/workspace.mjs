@@ -126,7 +126,13 @@ test('Awaiting-review actions reveal without shifting and remain thumb-sized on 
   const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
   const actions = review.locator('.kbn-card-review-meta-actions')
   assert.equal(await drafts.locator('.kbn-card-review-meta-actions').count(), 0)
-  assert.equal(await flight.locator('.kbn-card-review-meta-actions').count(), 0)
+  // Work in flight reveals the same pair on hover, so a card can be cleared from the Desk.
+  const flightActions = flight.locator('.kbn-card-review-meta-actions').first()
+  assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await flight.locator('.kbn-card').first().hover()
+  assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '1')
+  assert.deepEqual(await flightActions.locator('button').allTextContents(), ['Temper', 'Discard'])
+  await p.mouse.move(0, 0)
   assert.equal(await actions.locator('button').count(), 2)
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
   const before = await actions.evaluate(el => {
@@ -176,6 +182,9 @@ test('Awaiting-review actions stay visible and thumb-sized without hover', async
     assert.equal(reach.plate, 28, 'the plate reads compact')
     assert.equal(reach.meta, 28, 'the touch reach does not grow the meta row')
   }
+  // Without hover, in-flight cards keep their meta row to the worker.
+  await chooseDeskColumn(p, 1)
+  assert.equal(await p.locator('[data-column="inFlight"] .kbn-card-review-meta-actions').first().evaluate(el => getComputedStyle(el).display), 'none')
 }, { width: 390, height: 844 }, undefined, 'reduce', true)
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
@@ -791,7 +800,7 @@ test('Review plate reaches verdicts from a delivery and leaves the fiber page it
   await open(p)
   const plate = p.locator('.ws-nav-verdicts .ws-review-plate')
   await plate.waitFor()
-  assert.equal(await plate.getAttribute('aria-label'), 'Awaiting review')
+  assert.equal(await plate.getAttribute('aria-label'), 'Verdict')
   await choose(p, 'Constitution')
   assert.ok(!await plate.isVisible(), 'the fiber page carries its own pair')
   assert.ok(await selected(p).locator('.kbn-ctl-verdict').isVisible())
@@ -1016,6 +1025,28 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   await p.clock.runFor(1)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
   assert.equal((await posts()).length, 1)
+})
+
+test('Temper reaches drafts and work in flight from the head and t, through the undo queue', async p => {
+  await chooseDeskColumn(p, 0)
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
+  await choose(p, 'Constitution')
+  assert.ok(await p.locator('.ws-nav-verdicts .kbn-ctl-temper').isVisible(), 'a draft carries the pair in the head')
+  await p.keyboard.press('t')
+  await p.locator('.ws-verdict-toast').waitFor()
+  await p.keyboard.press('z')
+  await poll(p, () => !document.querySelector('.ws-verdict-toast'))
+  await p.locator('.ws-return').click()
+  await chooseDeskColumn(p, 1)
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await choose(p, 'Constitution')
+  // A live worker asks once at the gesture; declining queues nothing.
+  const asked = []
+  p.once('dialog', dialog => { asked.push(dialog.message()); void dialog.dismiss() })
+  await p.locator('.ws-nav-verdicts .kbn-ctl-temper').click()
+  assert.equal(asked.length, 1, 'tempering a live worker asks first')
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
 })
 
 test('Pending verdicts on two fibers commit independently', async p => {
@@ -2310,7 +2341,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control'], settle: 100 })
-  await still(p, "opening the fiber's ⋯ menu", () => p.locator(`${dock} .kbn-ctl-verdict-menu summary`).click(), { allow: ['.kbn-ctl-verdict-menu .kbn-ctl-menu'] })
+  // In flight, the head carries the verdict and the act zone draws none.
+  assert.equal(await p.locator(`${dock} :is(.kbn-ctl-temper, .kbn-ctl-discard, .kbn-ctl-verdict-menu)`).count(), 0, 'the fiber page leaves an in-flight verdict to the head')
+  if (!phone) assert.ok(await p.locator('.ws-nav-verdicts .kbn-ctl-temper').isVisible(), 'the head carries Temper in flight')
 }, viewport)
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the head, label bar and sidebar (${device})`, async p => {
@@ -2332,6 +2365,16 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.waitForTimeout(400)
   await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover())
   await still(p, 'a sidebar poll repaint', () => repaint(p))
+  // A worker starting on a fiber that awaits review keeps the head's verdict
+  // pair in place, so neither the index nor the pair moves; the index only
+  // yields room at its far end to the worker control.
+  await choose(p, 'calibration-report')
+  await still(p, 'a worker starting under review', () => p.evaluate(async () => {
+    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
+    row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', last_activity_at: Date.now(), started_at: Date.now() - 60000 }
+    await window.__harness.modal.fetchAndRender()
+  }), { regions: ['.ws-navbar'], allow: ['.ws-head-worker', '.ws-nav-trail'], positionsOnly: true, settle: 100 })
+  assert.ok(await p.locator('.ws-nav-verdicts .kbn-ctl-temper').isVisible(), 'a live worker under review keeps the head pair')
   await choose(p, 'Constitution')
   await composerKeyStaysPut(p)
   await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })

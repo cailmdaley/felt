@@ -418,7 +418,6 @@ export class Dock {
   private composerError: HTMLElement | null = null
   private composerPaint: (() => void) | null = null
   private actPaint: (() => void) | null = null
-  private verdictMenu: HTMLDetailsElement | null = null
   private freshButton: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
@@ -551,7 +550,6 @@ export class Dock {
     this.composerSend = null
     this.composerError = null
     this.composerPaint = this.actPaint = null
-    this.verdictMenu = null
     this.freshButton = null
     this.settingsSync = null
     this.historySync = null
@@ -583,7 +581,6 @@ export class Dock {
 
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
-    if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
     return Boolean(this.dismissConversation?.() || this.dismissParent?.())
   }
 
@@ -698,13 +695,13 @@ export class Dock {
   }
 
   /** The compact verdict pair the navbar and the phone's page sheet carry
-   *  while the fiber awaits review, reachable from any page. */
+   *  for every fiber still without a verdict, reachable from any page. */
   verdictPlateFor(card: KanbanCard): HTMLElement {
     const plate = document.createElement('div')
     plate.className = 'ws-review-plate'
     plate.dataset.part = 'act'; plate.dataset.act = 'verdict'
     plate.setAttribute('role', 'group')
-    plate.setAttribute('aria-label', 'Awaiting review')
+    plate.setAttribute('aria-label', 'Verdict')
     plate.append(this.verdictControlsFor(card))
     return plate
   }
@@ -847,39 +844,15 @@ export class Dock {
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
     const verdict = this.verdictControlsFor(card)
-    const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
-    const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
-    const menu = document.createElement('details')
-    menu.className = 'kbn-ctl-verdict-menu'
-    const more = document.createElement('summary')
-    more.textContent = '⋯'; more.setAttribute('aria-label', 'Fiber actions')
-    const choices = document.createElement('div'); choices.className = 'kbn-ctl-menu'
-    menu.append(more, choices)
-    let release: Release | null = null
-    menu.addEventListener('toggle', () => {
-      release?.(); release = null
-      if (menu.open && menu.isConnected) release = anchorPopover(choices, more, { placement: 'below-end' })
-    })
-    this.composerDisposers.push(() => { release?.(); release = null })
-    this.verdictMenu = menu
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
+    // The verdict leads the act zone while the fiber awaits review; in every
+    // other column the reader's head carries it.
     this.actPaint = () => {
       const column = fiberPageColumn(card)
       this.el.dataset.column = column
-      const review = column === 'awaitingReview'
-      if (review) {
-        if (verdict.parentElement !== body) body.prepend(verdict)
-        if (temper.parentElement !== verdict) verdict.append(temper, discard)
-        menu.remove()
-      } else {
-        verdict.remove()
-        if (column === 'drafts') { temper.remove(); discard.remove(); menu.remove() }
-        else {
-          if (temper.parentElement !== choices) choices.append(temper, discard)
-          if (menu.parentElement !== foot) foot.append(menu)
-        }
-      }
+      if (column === 'awaitingReview') { if (verdict.parentElement !== body) body.prepend(verdict) }
+      else verdict.remove()
     }
     this.actPaint()
   }

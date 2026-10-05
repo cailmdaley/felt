@@ -97,6 +97,8 @@
 @media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
 .ws-nav-verdicts { flex: none; margin-left: var(--ws-small-gap); }
 .ws-nav-verdicts[hidden] { display: none; }
+/* The protected plate resets every property, visibility too, so it is held by name. */
+.ws-nav-verdicts-held, .ws-nav-verdicts-held * { visibility: hidden; }
 .ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: baseline; gap: 2px; }
 .ws-review-plate { font: var(--ws-label-size)/1.2 var(--ws-serif); }
 /* In the head the verdicts are verbs in their pigments, plated only under the pointer. */
