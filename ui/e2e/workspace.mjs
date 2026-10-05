@@ -80,6 +80,42 @@ test('Fresh Desk leaves focus alone; the first j selects awaiting review and Ent
   assert.ok(await p.evaluate(() => document.activeElement?.tagName !== 'IFRAME' && !document.activeElement?.closest('.ws-content')), 'keyboard entry must keep app-level focus')
 })
 
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Workspace type distinguishes names, verbs and data (${device})`, async p => {
+  const type = async (selector, size, family) => {
+    const actual = await p.locator(selector).first().evaluate(el => {
+      const style = getComputedStyle(el)
+      return { size: style.fontSize, family: style.fontFamily }
+    })
+    assert.equal(actual.size, `${size}px`, selector)
+    assert.ok(actual.family.includes(family), `${selector}: ${actual.family}`)
+  }
+  await open(p); await reportReady(p)
+  await type('.ws-channel-title', 15, 'EB Garamond')
+  await type('.ws-review-plate .kbn-ctl-btn', 15, 'EB Garamond')
+  if (device === 'desktop') {
+    for (const selector of ['.ws-return', '.ws-sidebar-toggle', '.ws-tab-label', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
+    await type('.ws-selected .ws-provenance', 11, 'IBM Plex Mono')
+  } else {
+    await type('.ws-thumb-title', 15, 'EB Garamond')
+    await type('.ws-thumb-arrival', 11, 'IBM Plex Mono')
+  }
+  await choose(p, 'Constitution')
+  await type('.ws-selected .ws-prose-status', 15, 'EB Garamond')
+  if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 34, 'EB Garamond')
+  await type('.ws-selected .kbn-detail-lede', 24, 'EB Garamond')
+  await type('.ws-selected .kbn-ctl-send', 15, 'EB Garamond')
+  await type('.ws-selected .kbn-ctl-strip', 11, 'IBM Plex Mono')
+  await choose(p, 'tone.mp3')
+  await p.waitForFunction(() => document.querySelector('.ws-selected audio')?.readyState >= 1)
+  await type('.ws-selected .ws-audio-play', 15, 'EB Garamond')
+  await type('.ws-selected .ws-audio-clock', 11, 'IBM Plex Mono')
+  await type('.ws-selected .ws-audio-compare button > span:first-child', 15, 'EB Garamond')
+  await p.keyboard.press('?')
+  assert.equal(await p.locator('.kbn-keymap-dialog header button').textContent(), '×')
+  await p.keyboard.press('Escape')
+  assert.equal(await p.locator('.kbn-keymap-overlay').count(), 0)
+}, viewport)
+
 test('Awaiting-review actions reveal without shifting and remain thumb-sized on touch', async p => {
   const drafts = p.locator('[data-column="drafts"]')
   const flight = p.locator('[data-column="inFlight"]')

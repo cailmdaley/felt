@@ -27,7 +27,8 @@ It caches by ETag and checks for edits on the workspace's ordinary refresh caden
 Missing, unreachable or unparseable CSS leaves the bundled base in place; it never prevents reading.
 CSS uses the browser's error recovery: malformed individual declarations are ignored, and a nonempty file with no valid rules is rejected.
 
-The constitution-name menu has a **Plain** toggle.
+The page's **⋯** menu includes **Plain (drop this constitution's theme)** when the constitution declares a theme or has a sibling `theme.css`.
+Its check state shows whether Plain is selected.
 It removes both the bundled theme and custom CSS for this viewer, including sidebar cards, changed-work rows and folios, without editing the fiber.
 The choice is stored locally by channel and host; blocked browser storage doesn't prevent the toggle from working for the current session.
 
@@ -90,6 +91,9 @@ These are the stable styling tokens:
 | `--ws-heading-size`, `--ws-section-size`, `--ws-lede-size`, `--ws-prose-size` | Fiber title, section, outcome and body sizes |
 | `--ws-label-size`, `--ws-small-size`, `--ws-chrome-size` | Labels, metadata and controls |
 | `--ws-radius`, `--ws-control-radius`, `--ws-line-width`, `--ws-float` | Frame shape, control shape, borders and elevation shadow |
+
+The default scale is 11 px mono metadata, 15 px serif names and verbs, 18–21 px serif prose, 24 px outcomes and 34 px fiber titles.
+Themes can restyle those fonts and sizes through the variables above; act zones keep Shuttle's default typography.
 
 Set related text and background tokens together and check contrast.
 Ordinary text needs at least 4.5:1 contrast; large text needs 3:1.
