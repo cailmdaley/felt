@@ -26,7 +26,8 @@ function pump(): void {
 
 /**
  * The index names pages by their declared titles, so it reads each titled
- * document's first 64 KiB once per session, independent of any thumbnail.
+ * document's first 64 KiB once per session, independent of any thumbnail,
+ * ahead of the stage's images and frames competing for the same connections.
  */
 export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDocument[]): void {
   for (const doc of documents) {
@@ -40,7 +41,7 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
         if (declaredTitle(doc.key)) return
         const text = doc.kind === 'html' || doc.kind === 'text'
         cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
-      })
+      }, 'high')
       // A peek that could not read (an unreachable owner, a refused request) is tried again on a later render.
       if (!read) setTimeout(() => probed.delete(doc.key), PROBE_RETRY_MS)
     } })
