@@ -7,10 +7,13 @@ import { ReceiptMotion } from './receiptMotion.js'
 
 export const TAB_CROSSING_MS = 280
 
-/** Clamp the scroll offset that centres a tab inside a horizontally scrolling strip. */
-export function centeredScrollLeft(tabLeft: number, tabWidth: number, viewportWidth: number, contentWidth: number): number {
+/**
+ * Clamp the scroll offset that puts a tab's centre at `focus` inside a
+ * horizontally scrolling strip (by default, the strip's own centre).
+ */
+export function centeredScrollLeft(tabLeft: number, tabWidth: number, viewportWidth: number, contentWidth: number, focus = viewportWidth / 2): number {
   const maximum = Math.max(0, contentWidth - viewportWidth)
-  const centred = tabLeft + tabWidth / 2 - viewportWidth / 2
+  const centred = tabLeft + tabWidth / 2 - focus
   return Math.max(0, Math.min(maximum, centred))
 }
 
@@ -72,6 +75,7 @@ export class TabStrip {
   private animationTarget = 0
   private disposed = false
   private visible = true
+  private focus: number | null = null
 
   constructor(onSelect: (index: number) => void, onExpand: () => void, options?: StripOptions) {
     this.onSelect = onSelect
@@ -103,6 +107,11 @@ export class TabStrip {
   arrive(keys: ReadonlySet<string>): void {
     if (!this.visible) return
     for (const record of this.records) if (keys.has(record.key)) this.receiptMotion.tab(record.button)
+  }
+
+  /** Where, inside the strip, the selected tab's centre belongs: over the selected page. */
+  setFocus(x: number | null): void {
+    this.focus = x
   }
 
   setVisible(visible: boolean): void {
@@ -169,7 +178,7 @@ export class TabStrip {
     this.selectedIndex = index
     this.updateSelection()
     const selected = this.records[index].button
-    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth)
+    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth, this.focus ?? this.el.clientWidth / 2)
     this.animationTarget = target
     this.cancelAnimation()
     if (!animate || this.motion?.matches || this.el.clientWidth === 0) {

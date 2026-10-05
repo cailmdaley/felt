@@ -512,7 +512,7 @@ export class Reader {
       return
     }
     const style = getComputedStyle(this.navbar)
-    const gap = parseFloat(style.columnGap) || 24
+    const gap = parseFloat(style.columnGap) || 32
     const padLeft = parseFloat(style.paddingLeft) || 12
     const width = this.navbar.clientWidth - padLeft - (parseFloat(style.paddingRight) || 12)
     if (!width) return
@@ -528,10 +528,19 @@ export class Reader {
     const sidebar = this.sidebarShown ? this.sidebar.offsetWidth : 0
     const centre = sidebar + (this.navbar.clientWidth - sidebar) / 2 - padLeft
     const half = Math.min(centre - lead - gap, width - position - gap - centre)
-    const band = Math.min(tabs, 2 * half)
-    this.navbar.style.gridTemplateColumns = band >= this.measure('index-floor', 240)
-      ? `${Math.floor(centre - band / 2 - gap)}px ${Math.floor(band)}px minmax(0, 1fr)`
-      : `${Math.ceil(Math.min(lead, width * 0.45))}px minmax(0, 1fr) auto`
+    // A run that fits is centred over the stage. A longer one takes all the
+    // room between the lead and the page count, and scrolls so the selected
+    // label sits over the page's centre.
+    if (tabs <= 2 * half) {
+      this.navbar.style.gridTemplateColumns = `${Math.floor(centre - tabs / 2 - gap)}px ${Math.ceil(tabs)}px minmax(0, 1fr)`
+      this.tabs.setFocus(null)
+      return
+    }
+    const start = Math.ceil(Math.min(lead, width * 0.45))
+    this.navbar.style.gridTemplateColumns = `${start}px minmax(0, 1fr) auto`
+    const bandLeft = start + gap
+    const band = width - position - gap - bandLeft
+    this.tabs.setFocus(centre - bandLeft >= this.measure('index-focus-margin', 80) && bandLeft + band - centre >= this.measure('index-focus-margin', 80) ? centre - bandLeft : null)
   }
   private layout(animate: boolean): void {
     this.layoutNavbar()

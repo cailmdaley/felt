@@ -60,6 +60,7 @@
 [data-part="tab"][aria-selected="true"] { color: var(--ws-ink); }
 [data-part="tab"] .ws-tab-label {
   font-family: var(--ws-mono);
+  font-size: 12px;
   letter-spacing: var(--ws-mono-tracking);
   text-transform: uppercase;
 }

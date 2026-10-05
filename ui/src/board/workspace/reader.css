@@ -40,7 +40,7 @@
    serif, the page count in mono, all on one baseline. */
 .ws-navbar {
   display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline; column-gap: var(--ws-gap); padding: var(--ws-head-top) var(--ws-head-end) 0 var(--ws-head-start);
+  align-items: baseline; column-gap: var(--ws-head-span); padding: var(--ws-head-top) var(--ws-head-end) 0 var(--ws-head-start);
   background: transparent; position: relative; z-index: 3; flex: none;
 }
 .ws-nav-lead { display: flex; align-items: baseline; min-width: 0; gap: var(--ws-head-gap); }

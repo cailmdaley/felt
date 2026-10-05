@@ -93,8 +93,10 @@
   --ws-head-start: var(--ws-inset);
   --ws-head-end: var(--ws-stage-inset);
   --ws-head-gap: 10px;
+  --ws-head-span: 32px;
   --ws-title-ceiling: 360px;
-  --ws-index-floor: 240px;
+  /* The selected label is held over the page only while this much index lies on either side of it. */
+  --ws-index-focus-margin: 80px;
   --ws-stage-inset: 28px;
   --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
