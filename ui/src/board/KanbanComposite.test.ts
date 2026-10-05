@@ -4,6 +4,15 @@ import { buildKanbanResponseFromComposite, cardFromCompositeEntry } from './Kanb
 import { parseCompositeFeed } from './KanbanComposite.js'
 
 describe('composite app runtime', () => {
+  it('carries the owner-served launch instant into the board without a second runtime read', () => {
+    const feed = parseCompositeFeed({ fibers: [{
+      origin: 'local', felt_store: '/felt', path: 'idea.md',
+      fiber: { id: 'idea', name: 'Idea', status: 'active' },
+      runtime: { state: 'running', started_at: 1791121680000 },
+    }] })
+    expect(feed.entries[0].runtime?.startedAt).toBe(1791121680000)
+    expect(cardFromCompositeEntry(feed.entries[0]).workerStartedAt).toBe(1791121680000)
+  })
   it('retains an app worker state without inventing a tmux session', () => {
     const feed = parseCompositeFeed({
       fibers: [{

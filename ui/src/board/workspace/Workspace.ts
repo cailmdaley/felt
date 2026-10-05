@@ -438,7 +438,7 @@ export class Workspace {
           // Body reads carry document metadata; the composite feed owns live workers.
           const live = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner) ?? state.card
           const metadata = cardFromCompositeEntry({ ...entry, origin: state.channel.owner })
-          for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
+          for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
             metadata[key] = live[key] as never
           }
           if (live.workerState) metadata.sessionUuid = live.sessionUuid

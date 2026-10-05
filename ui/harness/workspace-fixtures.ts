@@ -190,6 +190,7 @@ export function workspaceExample(now: number): WorkspaceExample {
         phase: 'working',
         tmux_session: `remote-review-${fiber.uid}-shuttle`,
         last_activity_at: now - 5_000,
+        started_at: now - 12 * minute,
       }
     }
     if (index === 0) entry.fiber = { ...(entry.fiber as Record<string, unknown>), updated_at: iso(-minute) }

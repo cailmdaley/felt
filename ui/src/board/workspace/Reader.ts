@@ -16,6 +16,7 @@ import { buildCardPaper } from '../KanbanSurfaces.js'
 import { overviewHostMarks } from './Overview.js'
 import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { workspaceMeasure } from './measures.js'
+import { workerPlate } from './workerPlate.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -109,9 +110,11 @@ export class Reader {
   private sizes: Record<string, number> = {}
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly phone = window.matchMedia(MOBILE_MEDIA)
+  private readonly workerClock: number
 
   constructor(opts: ReaderOptions) {
     this.opts = opts
+    this.workerClock = window.setInterval(() => { if (this.active) { this.paintWorker(); this.layoutNavbar() } }, 30000)
     this.stopTitles = watchDocumentTitles(key => {
       const ch = this.channel
       if (!ch?.documents.some(d => d.key === key)) return
@@ -294,7 +297,7 @@ export class Reader {
   private paintWorker(): void {
     const card = this.currentCard
     const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview' && this.document?.kind !== 'fiber'
-    const control = card ? review ? this.opts.verdictPlate?.(card) : this.opts.workerPill?.(card) : null
+    const control = card ? review ? this.opts.verdictPlate?.(card) : workerPlate(card, this.opts.workerPill?.(card) ?? null) : null
     this.conversation.classList.toggle('ws-worker-review', review)
     this.conversation.replaceChildren(...(control ? [control] : []))
   }
@@ -692,6 +695,7 @@ export class Reader {
     this.cancelResize?.()
     this.closeMenu()
     this.observer?.disconnect()
+    window.clearInterval(this.workerClock)
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
     cancelAnimationFrame(this.arrival)

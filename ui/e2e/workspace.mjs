@@ -640,6 +640,61 @@ test('Desk slash opens the same constitution picker without opening reader; Esca
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
 })
 
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+  test(`Worker plate and undo toast states: ${device}`, async p => {
+    const shot = async state => {
+      if (!process.env.WORKSPACE_SHOTS) return
+      await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+      await poll(p, () => !document.querySelector('.ws-selected .ws-body-status')?.textContent.includes('Loading'))
+      await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `verdict-${device}-${state}.png`) })
+    }
+    await open(p)
+    await p.locator('.ws-review-plate').waitFor()
+    if (device === 'phone') {
+      const sizes = await p.locator('.ws-review-plate button').evaluateAll(es => es.map(e => e.getBoundingClientRect().height))
+      assert.ok(sizes.every(height => height >= 44))
+    }
+    await shot('awaiting-review')
+    await p.keyboard.press('t')
+    await p.locator('.ws-verdict-toast').waitFor()
+    assert.equal(await p.locator('.ws-verdict-toasts').getAttribute('aria-live'), 'polite')
+    assert.equal(await p.locator('.ws-verdict-toast').evaluate(e => getComputedStyle(e).animationName), 'none')
+    await shot('toast')
+    await p.keyboard.press('z')
+    await p.locator('.ws-return').click()
+    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    await poll(p, () => document.querySelector('.ws-worker-control')?.textContent.includes('12 m'))
+    const dot = p.locator('.ws-worker-pill .ws-worker-dot')
+    assert.equal(await dot.evaluate(e => getComputedStyle(e).animationName), 'none', 'reduced motion suppresses breathing')
+    assert.ok(await p.locator('.ws-worker-pill .ws-turn-active').count())
+    await shot('aloft')
+    await p.evaluate(async () => {
+      const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
+      row.runtime.phase = 'waiting'
+      row.runtime.last_activity_at = Date.now() - 120000
+      await window.__harness.modal.fetchAndRender()
+    })
+    await poll(p, () => document.querySelector('.ws-worker-control')?.dataset.workerState === 'waiting')
+    assert.equal(await p.locator('.ws-worker-pill .ws-turn-active').count(), 0)
+    await shot('waiting')
+    await p.locator('.ws-return').click()
+    await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
+    await poll(p, () => document.querySelector('.ws-worker-control')?.dataset.workerState === 'no worker')
+    await shot('no-worker')
+  }, viewport)
+}
+
+test('Only the owner-reported working phase breathes, on a 2.4 s opacity cycle', async p => {
+  await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  const dot = p.locator('.ws-worker-pill .ws-worker-dot')
+  await dot.waitFor()
+  const timing = await dot.evaluate(e => {
+    const css = getComputedStyle(e)
+    return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction }
+  })
+  assert.deepEqual(timing, { name: 'ws-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
+}, undefined, 'false', 'no-preference')
+
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
 // constitution switcher repeat names as navigation actions. The desktop fiber
 // title is a reading anchor; the phone uses only the navbar name. Expanded
@@ -724,7 +779,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    assert.match((await navbar.innerText()).trim(), /^aloft$/i, 'navbar names state, not agent')
+    assert.match((await navbar.innerText()).trim(), /^aloft\s*12 m$/i, 'navbar names state and elapsed time, not agent')
     await choose(p, 'Constitution')
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
