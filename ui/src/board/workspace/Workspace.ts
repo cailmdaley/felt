@@ -80,6 +80,7 @@ export class Workspace {
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
+    this.dock.setVerdictQueue((card, verdict) => this.queueVerdict(card, verdict))
     this.themes = new ChannelThemes(opts.shuttleBase)
     this.overview = new Overview({
       shuttleBase: opts.shuttleBase,
@@ -204,15 +205,25 @@ export class Workspace {
   private deferVerdict(verdict: Verdict): void {
     const state = this.current
     if (!state?.metadataKnown || fiberPageColumn(state.card) !== 'awaitingReview') return
-    this.verdicts.queue(state.card, verdict, () => {
+    this.queueVerdict(state.card, verdict)
+  }
+  /** Desk, plates, act-zone buttons and keys authorize the same delayed write. */
+  queueVerdict(requested: KanbanCard, verdict: Verdict): void {
+    const uid = requested.uid ?? requested.id, owner = requested.originId
+    const state = this.channels.get(channelId(uid, owner))
+    const resolve = (): KanbanCard => this.opts.cards().find(card => (card.uid ?? card.id) === uid && card.originId === owner) ?? state?.card ?? requested
+    const card = resolve()
+    const review = fiberPageColumn(card) === 'awaitingReview'
+    const material = this.current?.channel.uid === uid && this.current.channel.owner === owner ? this.themes.material(this.reader.el) : undefined
+    this.verdicts.queue(card, verdict, () => {
+      const live = resolve()
       // A worker may start during the undo window; never stop it from a stale review.
-      const card = this.opts.cards().find(card => (card.uid ?? card.id) === state.channel.uid && card.originId === state.channel.owner) ?? state.card
-      if (fiberPageColumn(card) !== 'awaitingReview') {
-        showToast(`${card.name} no longer awaits review; verdict not written`, 'error')
+      if (review && fiberPageColumn(live) !== 'awaitingReview') {
+        showToast(`${live.name} no longer awaits review; verdict not written`, 'error')
         return
       }
-      this.dock.verdict(card, verdict)
-    }, this.themes.material(this.reader.el))
+      this.dock.commitVerdict(live, verdict)
+    }, material)
   }
   private focusComposer(): void {
     const state = this.current
@@ -535,6 +546,7 @@ export class Workspace {
     document.removeEventListener('visibilitychange', this.visibility)
     this.history.dispose()
     this.verdicts.dispose()
+    this.dock.setVerdictQueue(undefined)
     this.dock.reset()
     this.picker.dispose()
     this.reader.dispose()

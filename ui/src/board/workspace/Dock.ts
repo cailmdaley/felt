@@ -424,6 +424,7 @@ export class Dock {
   private readonly shuttleBase: string
   private readonly onSaved: () => void
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
+  private queueVerdict?: (card: KanbanCard, target: 'tempered' | 'composted') => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
   private readonly workerPhase: (card: KanbanCard) => boolean
@@ -505,6 +506,7 @@ export class Dock {
     if (!band) {
       band = new Dock(this.shuttleBase, this.onSaved, this.onTransition, this.onOpenWorker,
         { meeting: this.meeting ?? undefined, workerPhase: this.workerPhase })
+      band.setVerdictQueue(this.queueVerdict)
       this.bands.set(key, band)
     }
     band.open(card)
@@ -636,8 +638,19 @@ export class Dock {
     return true
   }
 
-  /** Both verdict surfaces delegate to the board's lifecycle choke point. */
+  /** All control bands share the workspace's identity-keyed undo queue. */
+  setVerdictQueue(queue?: (card: KanbanCard, target: 'tempered' | 'composted') => void): void {
+    this.queueVerdict = queue
+    for (const band of this.bands.values()) band.setVerdictQueue(queue)
+  }
+
   verdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
+    if (this.queueVerdict) this.queueVerdict(card, target)
+    else this.commitVerdict(card, target)
+  }
+
+  /** Only the expired undo queue calls this in the workspace. */
+  commitVerdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
     this.onTransition(card, target)
   }
 

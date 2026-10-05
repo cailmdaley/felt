@@ -637,8 +637,43 @@ test('Review plate reaches verdicts from a delivery and leaves the fiber page it
   assert.equal(await plate.count(), 0)
   assert.ok(await selected(p).locator('.kbn-ctl-verdict').isVisible())
   await choose(p, 'calibration-report')
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await plate.getByRole('button', { name: 'Temper', exact: true }).click()
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
+  await p.clock.runFor(6000)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+})
+
+test('Key discard then plate Temper replaces the pending verdict with one delayed write', async p => {
+  await open(p); await reportReady(p)
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  await p.locator('.ws-channel-title').focus(); await p.keyboard.press('x')
+  await p.clock.runFor(3000)
+  await p.locator('.ws-review-plate').getByRole('button', { name: 'Temper', exact: true }).click()
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
+  assert.match(await p.locator('.ws-verdict-toast').innerText(), /^Tempered/)
+  await p.clock.runFor(5999)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
+  await p.clock.runFor(1)
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+  const writes = (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
+  assert.equal(writes.length, 1)
+  assert.equal(JSON.parse(writes[0].body).target, 'tempered')
+})
+
+for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay and undo through the same queue`, async p => {
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  if (surface === 'fiber') { await open(p); await choose(p, 'Constitution') }
+  const controls = surface === 'Desk'
+    ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-review-meta-actions')
+    : selected(p).locator('.kbn-ctl-verdict')
+  await controls.getByRole('button', { name: /Discard/ }).click({ force: true })
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
+  await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
+  await p.clock.runFor(6000)
+  assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
 })
 
 test('Verdict keys delay writes, guard typing, undo, and commit after leaving the reader', async p => {

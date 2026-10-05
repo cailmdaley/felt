@@ -329,9 +329,8 @@ export class KanbanModal {
     this.dock = new Dock(
       this.shuttleBase,
       () => { void this.fetchAndRender() },
-      // Temper / Discard route through the same optimistic path as the inline
-      // card buttons and drags — instant relocation, background commit, reconcile.
-      (card, target) => this.transition(card, target),
+      // Expired verdicts enter the optimistic lifecycle path exactly once.
+      (card, target) => this.transition(card, target, { verdictCommitted: true }),
       this.openWorkerAfterGesture,
       {
         meeting: {
@@ -1072,8 +1071,12 @@ export class KanbanModal {
      *    a second `applyOptimisticTransition` would lift the card from its NEW
      *    surface and re-place it, and re-derive nothing useful.
      */
-    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean } = {},
+    opts: { basis?: KanbanResponse | null; skipOptimistic?: boolean; verdictCommitted?: boolean } = {},
   ): void {
+    if ((target === 'tempered' || target === 'composted') && this.workspace && !opts.verdictCommitted) {
+      this.workspace.queueVerdict(card, target)
+      return
+    }
     const basis = opts.basis !== undefined ? opts.basis : this.lastResponse
     // A verdict on a card with a LIVE worker kills that worker (commitTransition
     // → killWorkerIfRunning), and it did so silently — one click on Compost and
@@ -1457,7 +1460,8 @@ export class KanbanModal {
     this.gestureDepth += 1
     try {
       const unfolded = clearQueueEdge(before, fiberId)
-      const painted = drop.column
+      // Verdict placement waits for the shared undo window; unqueuing is independent.
+      const painted = drop.column && drop.column !== 'tempered' && drop.column !== 'composted'
         ? (applyOptimisticTransition(unfolded, fiberId, drop.column) ?? unfolded)
         : unfolded
       if (painted) this.applyResponse(painted)
@@ -1508,8 +1512,8 @@ export class KanbanModal {
         dependsOnShape: undefined,
       }
       if (drop.column) {
-        // Already painted, and `before` is where the card actually came from.
-        this.transition(released, drop.column, { basis: before, skipOptimistic: true })
+        // Non-verdict drops are painted; verdicts remain on their source surface.
+        this.transition(released, drop.column, { basis: before, skipOptimistic: drop.column !== 'tempered' && drop.column !== 'composted' })
         return
       }
       if (drop.horizon !== undefined) {
