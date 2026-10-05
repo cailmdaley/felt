@@ -4,7 +4,7 @@ import { basename, renderMarkdown } from '../utils.js'
 import { installWikilinks } from '../wikilinks.js'
 import '../prose.css'
 import './fiber-prose.css'
-import type { Channel, DocKey, WorkspaceDocument } from './documents.js'
+import type { Channel } from './documents.js'
 import { fiberPageKicker } from './fiberPageState.js'
 
 /** The outcome as the reading surface's lede, including math and references. */
@@ -69,7 +69,6 @@ export function buildFiberProse(
   opts: {
     shuttleBase: string
     controls?: HTMLElement
-    onSelect: (key: DocKey) => void
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
   },
@@ -93,29 +92,6 @@ export function buildFiberProse(
   title.dataset.part = 'fiber-title'
   const outcome = document.createElement('div')
   outcome.innerHTML = ledeHtml(channel.outcome ?? card.outcome ?? '')
-  const contents = document.createElement('nav')
-  contents.className = 'ws-prose-contents'
-  contents.setAttribute('aria-label', 'Document kinds')
-  const files = channel.documents.filter(doc => doc.kind !== 'fiber')
-  if (files.length) {
-    const total = document.createElement('span')
-    total.textContent = `${channel.documents.length} pages`
-    contents.append(total)
-    const groups: Array<[WorkspaceDocument['kind'], string, string]> = [['html', 'report', 'reports'], ['audio', 'audio', 'audio'], ['pdf', 'PDF', 'PDF'], ['image', 'image', 'images'], ['video', 'video', 'videos'], ['text', 'text', 'texts'], ['other', 'file', 'files']]
-    for (const [kind, singular, plural] of groups) {
-      const documents = files.filter(doc => doc.kind === kind)
-      if (!documents.length) continue
-      const newest = [...documents].sort((a, b) => {
-        const time = (doc: WorkspaceDocument) => Math.max(0, ...doc.provenance.flatMap(p => p.kind === 'sent' && Number.isFinite(p.time) ? [p.time] : []), Date.parse(doc.modifiedAt ?? '') || 0)
-        return time(b) - time(a) || channel.documents.indexOf(a) - channel.documents.indexOf(b)
-      })[0]
-      const select = document.createElement('button')
-      select.type = 'button'
-      select.textContent = `${documents.length} ${documents.length === 1 ? singular : plural}`
-      select.addEventListener('click', () => opts.onSelect(newest.key))
-      contents.append(select)
-    }
-  }
   const body = document.createElement('div')
   body.className = 'ws-prose-body'
   body.innerHTML = renderFiberMarkdown(channel.body, '', {
@@ -135,7 +111,7 @@ export function buildFiberProse(
   }
   installBodyFileLinks(body, opts.onFile)
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
-  article.append(header, title, outcome, ...(files.length ? [contents] : []), ...(opts.controls ? [opts.controls] : []), body)
+  article.append(header, title, outcome, ...(opts.controls ? [opts.controls] : []), body)
   scroller.append(article)
   return scroller
 }

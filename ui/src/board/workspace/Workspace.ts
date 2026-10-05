@@ -266,7 +266,6 @@ export class Workspace {
     const page = buildFiberProse(state.card, state.channel, {
       controls: this.controls(state)?.el,
       shuttleBase: this.opts.shuttleBase,
-      onSelect: key => this.select(key),
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title) => this.openFile(path, title),
     })

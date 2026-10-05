@@ -73,7 +73,7 @@ export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement
 }
 
 /**
- * A terminal worker's pill, shared by the Desk, reader navbar and fiber page.
+ * A terminal worker's pill, shared by the Desk and the reader.
  *
  * Desktop Claude opening follows this browser's preference: Kitty, the
  * Remote Control web link, or the installed Claude app's session route.
@@ -81,8 +81,7 @@ export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement
  * fallback. Other CLI harnesses open in Kitty. Phones use a recorded Claude
  * HTTPS link or a mark of the worker's state. The touch stylesheet keys on the
  * element, not on a class: a `.kbn-card-worker` that is not a link takes no
- * taps. On the fiber page, the pill uses the band's phone control height;
- * on the Desk card it keeps its compact card sizing.
+ * taps. On the Desk card it keeps its compact card sizing.
  *
  * `phase` lets the waiting and attention states take the pill over (label,
  * colour, title); a card outside In flight passes false and stays "Aloft".

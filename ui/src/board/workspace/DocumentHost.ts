@@ -377,6 +377,11 @@ export class DocumentHost {
       state.frame.content.replaceChildren(viewer)
       state.frame.viewer = viewer
     }
+    // A listening page scrolls inside its own viewer (audio.css), which joins the reader's scroll path.
+    if (doc.kind === 'audio' && viewer.classList.contains('kbn-fileview-audio')) {
+      if (replacement) bindReplacementScroll = () => this.bindScroller(state, viewer)
+      else this.bindScroller(state, viewer)
+    }
     this.watchVideoPoster(state, viewer)
   }
 

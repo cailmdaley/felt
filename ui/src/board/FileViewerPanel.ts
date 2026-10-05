@@ -370,9 +370,9 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
 }
 
 /** Native viewers own their byte streams; metadata peeks stop after the first 64 KiB even if Range is ignored. */
-async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>): Promise<void> {
+export async function readThumbnailMetadata(src: string, signal: AbortSignal, onSource: NonNullable<FileViewerOptions['onThumbnailSource']>, priority: RequestPriority = 'auto'): Promise<void> {
   try {
-    const response = await fetch(src, { signal, headers: { Range: 'bytes=0-65535' } })
+    const response = await fetch(src, { signal, priority, headers: { Range: 'bytes=0-65535' } })
     if (!response.ok || !response.body) return
     const reader = response.body.getReader()
     const bytes = new Uint8Array(65536)

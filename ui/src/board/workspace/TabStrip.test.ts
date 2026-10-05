@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { centeredScrollLeft, TAB_CROSSING_MS, TabStrip } from './TabStrip.js'
+import { centeredScrollLeft, indexCaptions, TAB_CROSSING_MS, TabStrip } from './TabStrip.js'
 import type { KeyIntent } from '../keymap.js'
 import { buildChannel } from './documents.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
@@ -127,7 +127,7 @@ describe('TabStrip', () => {
 
   it('follows document identity through a title change and styles declared titles even when the words match the filename', () => {
     const channel = buildChannel({ uid: 'u', owner: 'typography', name: 'Note', path: '/note.md', fiberDir: '/', body: '', embeds: [{ path: '/doc.html' }] })
-    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '', onHeight: vi.fn() })
+    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
     strips.push(strip)
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
     strip.mark(1, false)
@@ -141,15 +141,83 @@ describe('TabStrip', () => {
     expect(selected.getAttribute('aria-label')).toBe('Declared title')
   })
 
-  it('captions filmstrip faces once beneath the preview, including the fiber page', () => {
-    const channel = buildChannel({ uid: 'caption', owner: 'caption-host', name: 'A named fiber', path: '/fiber.md', fiberDir: '/', body: 'Preview prose', embeds: [{ path: '/song.mp3' }] })
-    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '', onHeight: vi.fn() })
+  it('indexes pages in words: the fiber page as §, file names without their extension unless that collides', () => {
+    const channel = buildChannel({ uid: 'words', owner: 'words-host', name: 'A named fiber', path: '/fiber.md', fiberDir: '/', body: 'Preview prose', embeds: [{ path: '/song.mp3' }, { path: '/a/take.wav' }, { path: '/b/take.flac' }] })
+    expect(indexCaptions(channel.labels, channel)).toEqual(['§', 'song', 'take.wav', 'take.flac'])
+    const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
     strips.push(strip)
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
-    for (const button of strip.buttons) {
-      expect(button.querySelector('.ws-thumbnail-title')?.textContent ?? '').toBe('')
-      expect(button.querySelector('.ws-tab-label')?.textContent).toBeTruthy()
+    expect(strip.buttons.map(button => button.textContent)).toEqual(['§', 'song', 'take.wav', 'take.flac'])
+    expect(strip.buttons.map(button => button.getAttribute('aria-label'))).toEqual(channel.labels)
+    expect(strip.buttons[0].classList.contains('ws-tab-anchor')).toBe(true)
+    expect(strip.buttons.some(button => button.hasAttribute('title'))).toBe(false)
+    expect(strip.el.querySelector('[data-part="thumbnail"]')).toBeNull()
+  })
+
+  describe('hover preview', () => {
+    const pointer = (type: string, target: Element, pointerType = 'mouse', relatedTarget: Element | null = null): void => {
+      const event = new MouseEvent(type, { bubbles: true, relatedTarget })
+      Object.defineProperty(event, 'pointerType', { value: pointerType })
+      target.dispatchEvent(event)
     }
+    const setup = (): { strip: TabStrip; preview: NonNullable<TabStrip['preview']> } => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+      const channel = buildChannel({ uid: 'peek', owner: 'peek-host', name: 'Peek', path: '/fiber.md', fiberDir: '/', body: 'Body prose', embeds: [{ path: '/one.html' }, { path: '/two.png' }] })
+      const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
+      strips.push(strip)
+      document.body.append(strip.el, strip.preview!.el)
+      strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+      return { strip, preview: strip.preview! }
+    }
+    afterEach(() => { vi.useRealTimers() })
+
+    it('waits before a first preview, then follows the pointer across labels at once', () => {
+      const { strip, preview } = setup()
+      pointer('pointerover', strip.buttons[1])
+      vi.advanceTimersByTime(399)
+      expect(preview.open).toBe(false)
+      vi.advanceTimersByTime(1)
+      expect(preview.open).toBe(true)
+      expect(preview.el.getAttribute('aria-hidden')).toBe('true')
+      expect(preview.el.querySelector('.ws-tab-preview-title')?.textContent).toBe('one.html')
+      expect(preview.el.querySelector('[data-part="thumbnail"]')).not.toBeNull()
+      expect(preview.el.querySelector('[data-part="thumbnail-face"]')).not.toBeNull()
+      pointer('pointerout', strip.buttons[1], 'mouse', strip.buttons[2])
+      pointer('pointerover', strip.buttons[2])
+      expect(preview.open).toBe(true)
+      expect(preview.el.querySelector('.ws-tab-preview-title')?.textContent).toBe('two.png')
+      expect(document.activeElement).not.toBe(preview.el)
+    })
+
+    it('leaves with the pointer, gives way to a press or a key, and ignores touch', () => {
+      const { strip, preview } = setup()
+      pointer('pointerover', strip.buttons[0], 'touch')
+      vi.advanceTimersByTime(1000)
+      expect(preview.open).toBe(false)
+      pointer('pointerover', strip.buttons[0])
+      vi.advanceTimersByTime(400)
+      expect(preview.el.querySelector('.ws-tab-preview-title')?.textContent).toBe('Peek')
+      pointer('pointerout', strip.buttons[0], 'mouse', document.body)
+      vi.advanceTimersByTime(200)
+      expect(preview.open).toBe(false)
+      pointer('pointerover', strip.buttons[1])
+      expect(preview.open).toBe(true)
+      pointer('pointerdown', strip.buttons[1])
+      expect(preview.open).toBe(false)
+      pointer('pointerover', strip.buttons[1])
+      vi.advanceTimersByTime(1000)
+      expect(preview.open).toBe(false)
+      pointer('pointerover', strip.buttons[2])
+      vi.advanceTimersByTime(400)
+      expect(preview.open).toBe(true)
+      expect(preview.dismiss()).toBe(true)
+      expect(preview.dismiss()).toBe(false)
+      strip.setVisible(false)
+      vi.advanceTimersByTime(1000)
+      pointer('pointerover', strip.buttons[0])
+      vi.advanceTimersByTime(1000)
+      expect(preview.open).toBe(false)
+    })
   })
 
   it('supports duplicate labels as distinct stable tabs and clears on dispose', () => {

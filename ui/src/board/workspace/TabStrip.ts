@@ -1,17 +1,20 @@
 import type { KeyIntent } from '../keymap.js'
-import type { Channel } from './documents.js'
-import { extractEmbeds } from '../attachments.js'
-import { Thumbnail } from './Thumbnail.js'
+import type { Channel, WorkspaceDocument } from './documents.js'
+import { TabPreview } from './TabPreview.js'
+import { probeDocumentTitles } from './titleProbe.js'
 import { declaredTitle } from './DocumentTitles.js'
 import './tabs.css'
 import { ReceiptMotion } from './receiptMotion.js'
 
 export const TAB_CROSSING_MS = 280
 
-/** Clamp the scroll offset that centres a tab inside a horizontally scrolling strip. */
-export function centeredScrollLeft(tabLeft: number, tabWidth: number, viewportWidth: number, contentWidth: number): number {
+/**
+ * Clamp the scroll offset that puts a tab's centre at `focus` inside a
+ * horizontally scrolling strip (by default, the strip's own centre).
+ */
+export function centeredScrollLeft(tabLeft: number, tabWidth: number, viewportWidth: number, contentWidth: number, focus = viewportWidth / 2): number {
   const maximum = Math.max(0, contentWidth - viewportWidth)
-  const centred = tabLeft + tabWidth / 2 - viewportWidth / 2
+  const centred = tabLeft + tabWidth / 2 - focus
   return Math.max(0, Math.min(maximum, centred))
 }
 
@@ -34,12 +37,35 @@ function easeCrossing(progress: number): number {
   return cubicBezier(Math.max(0, Math.min(1, progress)), 0.25, 0.1, 0.25, 1)
 }
 
-type TabRecord = { key: string; label: string; button: HTMLButtonElement; thumb?: Thumbnail }
-interface StripOptions { shuttleBase: string; onHeight(height: number): void }
+/**
+ * The words the index shows. The fiber's own page is its § mark; a label
+ * that is a file's name drops its extension (the preview and the label bar
+ * name the kind) unless that would make two captions alike.
+ */
+export function indexCaptions(labels: string[], channel?: Channel): string[] {
+  const captions = labels.map((label, index) => {
+    const doc = channel?.documents[index]
+    if (doc?.kind === 'fiber') return '§'
+    const extension = doc?.name.match(/\.[^./]+$/)?.[0]
+    return doc && extension && label.endsWith(doc.name) && label.length > extension.length ? label.slice(0, -extension.length) : label
+  })
+  const counts = new Map<string, number>()
+  for (const caption of captions) counts.set(caption, (counts.get(caption) ?? 0) + 1)
+  return captions.map((caption, index) => caption !== '§' && (counts.get(caption) ?? 0) > 1 ? labels[index] : caption)
+}
 
-/** One roving-focus tablist whose selected tab stays centred through one interruptible crossing. */
+type TabRecord = { key: string; label: string; button: HTMLButtonElement }
+interface StripOptions { shuttleBase: string }
+
+/**
+ * The running head's index: one roving-focus tablist of bare serif labels
+ * whose selected tab stays centred through one interruptible crossing.
+ * Thumbnails come on demand, in a hover preview beneath the hovered label.
+ */
 export class TabStrip {
   readonly el: HTMLDivElement
+  /** Pointer-only previews; mount `preview.el` where it can float over the stage. */
+  readonly preview: TabPreview | null
   private readonly onSelect: (index: number) => void
   private readonly onExpand: () => void
   private readonly motion: MediaQueryList | null
@@ -49,13 +75,11 @@ export class TabStrip {
   private animationFrame: number | null = null
   private animationTarget = 0
   private disposed = false
-  private compact = false
   private visible = true
-  private readonly phone = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 700px)') : null
-  private readonly options?: StripOptions
+  private focus: number | null = null
+  private readonly shuttleBase: string | null
 
   constructor(onSelect: (index: number) => void, onExpand: () => void, options?: StripOptions) {
-    this.options = options
     this.onSelect = onSelect
     this.onExpand = onExpand
     this.el = document.createElement('div')
@@ -63,13 +87,15 @@ export class TabStrip {
     this.el.dataset.part = 'tab-strip'
     this.el.setAttribute('role', 'tablist')
     this.el.setAttribute('aria-label', 'Documents')
+    this.shuttleBase = options?.shuttleBase ?? null
+    this.preview = options ? new TabPreview(options.shuttleBase) : null
+    this.preview?.attach(this.el)
     this.motion = typeof window.matchMedia === 'function'
       ? window.matchMedia('(prefers-reduced-motion: reduce)')
       : null
     this.el.addEventListener('scroll', this.onScroll, { passive: true })
     window.addEventListener('resize', this.onResize)
     this.motion?.addEventListener('change', this.onMotionChange)
-    this.phone?.addEventListener('change', this.onResize)
   }
 
   /** Current buttons, exposed for keyboard integrations and focused tests. */
@@ -86,31 +112,23 @@ export class TabStrip {
     for (const record of this.records) if (keys.has(record.key)) this.receiptMotion.tab(record.button)
   }
 
-  setCompact(expanded: boolean): void {
-    this.compact = expanded
-    this.updateMode()
+  /** Where, inside the strip, the selected tab's centre belongs: over the selected page. */
+  setFocus(x: number | null): void {
+    this.focus = x
   }
+
   setVisible(visible: boolean): void {
     this.visible = visible
-    for (const record of this.records) record.thumb?.schedule()
-  }
-  private updateMode(): void {
-    const compact = this.compact || !!this.phone?.matches
-    this.el.classList.toggle('ws-strip-film', !!this.options && !compact)
-    this.options?.onHeight(this.phone?.matches ? 44 : compact ? 36 : 104)
-    for (const record of this.records) record.thumb?.schedule()
+    this.preview?.setEnabled(visible)
   }
 
   render(labels: string[], keys?: string[], channel?: Channel): void {
     if (this.disposed) return
+    if (channel) this.preview?.update(channel, labels)
+    if (channel && this.shuttleBase !== null) probeDocumentTitles(this.shuttleBase, channel.documents)
+    const captions = indexCaptions(labels, channel)
     if (labels.length === this.records.length && labels.every((label, index) => label === this.records[index].label && (!keys || keys[index] === this.records[index].key))) {
-      if (channel) {
-        this.records.find(r => r.key === channel.documents[0]?.key)?.thumb?.setProse(extractEmbeds(channel.body).body || channel.outcome || '', channel.name)
-        this.records.forEach((record, index) => {
-          const doc = channel.documents[index]
-          record.button.querySelector('.ws-tab-label')?.classList.toggle('ws-tab-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title === record.label))
-        })
-      }
+      if (channel) this.records.forEach((record, index) => this.paintLabel(record.button, captions[index], record.label, channel.documents[index]))
       return
     }
 
@@ -134,33 +152,9 @@ export class TabStrip {
       const matches = available.get(keys ? key : label)
       const button = matches?.shift() ?? this.createButton(key)
       button.dataset.tabKey = key
-      let thumb = this.records.find(r => r.button === button)?.thumb
-      if (channel && this.options) {
-        const doc = channel.documents[index]
-        if (!thumb) {
-          const recordKey = key
-          thumb = new Thumbnail({ key: `tab:${key}`, shuttleBase: this.options.shuttleBase,
-            file: doc.kind === 'fiber' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
-            fallback: `\n${extractEmbeds(channel.body).body.slice(0, 400) || channel.outcome || channel.name}`,
-            className: `ws-tab-thumb ws-tab-kind-${doc.kind}`, captioned: true,
-            priority: () => this.visible && !this.disposed && !this.compact && !this.phone?.matches && this.el.isConnected ? (this.onScreen(button) ? 3 : 1) : 0,
-            distance: () => Math.abs(this.records.findIndex(r => r.key === recordKey) - this.selectedIndex),
-            onAspect: aspect => {
-              button.style.setProperty('--ws-tab-aspect', String(Math.max(0.8, Math.min(2.8, aspect))))
-              this.mark(this.selectedIndex, false)
-            },
-          })
-          if (doc.kind === 'fiber') thumb.setProse(extractEmbeds(channel.body).body || channel.outcome || '', channel.name)
-          button.replaceChildren(thumb.el)
-        }
-        let caption = button.querySelector<HTMLElement>('.ws-tab-label')
-        if (!caption) { caption = document.createElement('span'); caption.className = 'ws-tab-label'; button.append(caption) }
-        caption.textContent = label
-        caption.classList.toggle('ws-tab-title', !!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title === label))
-      } else button.textContent = label
-      button.title = channel ? channel.documents[index].path : label
+      this.paintLabel(button, captions[index], label, channel?.documents[index])
       button.setAttribute('aria-label', label)
-      return { key, label, button, thumb }
+      return { key, label, button }
     })
 
     const retained = new Set(next.map((record) => record.button))
@@ -176,9 +170,7 @@ export class TabStrip {
     for (const child of [...this.el.children]) {
       if (child instanceof HTMLButtonElement && !retained.has(child)) child.remove()
     }
-    for (const record of this.records) if (!retained.has(record.button)) record.thumb?.dispose()
     this.records = next
-    this.updateMode()
     this.updateSelection()
     this.updateFades()
     this.scheduleClipping()
@@ -189,9 +181,8 @@ export class TabStrip {
     if (this.disposed || index < 0 || index >= this.records.length) return
     this.selectedIndex = index
     this.updateSelection()
-    for (const record of this.records) record.thumb?.schedule()
     const selected = this.records[index].button
-    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth)
+    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth, this.focus ?? this.el.clientWidth / 2)
     this.animationTarget = target
     this.cancelAnimation()
     if (!animate || this.motion?.matches || this.el.clientWidth === 0) {
@@ -225,10 +216,21 @@ export class TabStrip {
     this.el.removeEventListener('scroll', this.onScroll)
     window.removeEventListener('resize', this.onResize)
     this.motion?.removeEventListener('change', this.onMotionChange)
-    this.phone?.removeEventListener('change', this.onResize)
-    for (const record of this.records) record.thumb?.dispose()
+    this.preview?.dispose()
     this.el.replaceChildren()
     this.records = []
+  }
+
+  /**
+   * One serif label per tab. The fiber's own page is anchored by its § mark
+   * alone; declared titles and embed titles are marked for themes.
+   */
+  private paintLabel(button: HTMLButtonElement, caption: string, label: string, doc?: WorkspaceDocument): void {
+    let text = button.querySelector<HTMLElement>('.ws-tab-label')
+    if (!text) { text = document.createElement('span'); text.className = 'ws-tab-label'; button.replaceChildren(text) }
+    text.textContent = caption
+    button.classList.toggle('ws-tab-anchor', doc?.kind === 'fiber')
+    text.classList.toggle('ws-tab-title', !!doc && (!!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title === label)))
   }
 
   private createButton(key: string): HTMLButtonElement {
@@ -258,10 +260,6 @@ export class TabStrip {
     })
   }
 
-  private onScreen(button: HTMLElement): boolean {
-    const band = this.el.getBoundingClientRect(), tab = button.getBoundingClientRect()
-    return tab.width > 0 && tab.right > band.left && tab.left < band.right
-  }
   private updateFades(): void {
     this.el.classList.toggle('ws-fade-l', this.el.scrollLeft > 2)
     this.el.classList.toggle('ws-fade-r', this.el.scrollLeft + this.el.clientWidth < this.el.scrollWidth - 2)
@@ -292,8 +290,8 @@ export class TabStrip {
     this.animationFrame = null
   }
 
-  private readonly onScroll = (): void => { this.updateFades(); for (const record of this.records) record.thumb?.schedule() }
-  private readonly onResize = (): void => { this.updateMode(); this.mark(this.selectedIndex, false); this.updateFades(); this.scheduleClipping() }
+  private readonly onScroll = (): void => { this.updateFades() }
+  private readonly onResize = (): void => { this.mark(this.selectedIndex, false); this.updateFades(); this.scheduleClipping() }
   private readonly onMotionChange = (): void => {
     if (!this.motion?.matches || this.animationFrame === null) return
     this.cancelAnimation()

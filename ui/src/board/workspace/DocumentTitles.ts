@@ -2,7 +2,53 @@ export interface DocumentTitle { title?: string; preview: string; etag?: string 
 const titles = new Map<string, DocumentTitle>()
 const versions = new Map<string, DocumentTitle>()
 const listeners = new Set<(key: string) => void>()
-export function declaredTitle(key: string): DocumentTitle | undefined { return titles.get(key) }
+/** Keys whose title was read from the document in this session, not recalled from storage. */
+const current = new Set<string>()
+
+/**
+ * Declared titles outlive the session so a return visit names its tabs at
+ * once: the most recently used titles, each with the validator it was read
+ * under, kept in localStorage. Storage is optional; every access may throw.
+ */
+export const TITLE_STORAGE = 'shuttle:workspace:titles'
+export const TITLE_STORAGE_LIMIT = 300
+type StoredTitle = [key: string, title: string, etag: string | null]
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+function recall(): void {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(TITLE_STORAGE) ?? '[]')
+    if (!Array.isArray(stored)) return
+    for (const entry of stored.slice(-TITLE_STORAGE_LIMIT)) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string' || typeof entry[1] !== 'string') continue
+      titles.set(entry[0], { title: entry[1], preview: '', etag: typeof entry[2] === 'string' ? entry[2] : undefined })
+    }
+  } catch { /* Storage is optional. */ }
+}
+function save(): void {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    const entries: StoredTitle[] = []
+    for (const [key, value] of titles) if (value.title) entries.push([key, value.title, value.etag ?? null])
+    try { localStorage.setItem(TITLE_STORAGE, JSON.stringify(entries.slice(-TITLE_STORAGE_LIMIT))) } catch { /* Storage is optional. */ }
+  }, 500)
+}
+/** Most recently used last: a read or a write moves a title to the end; storage keeps the newest. */
+let latest: string | undefined
+function touch(key: string, value: DocumentTitle): void {
+  titles.delete(key)
+  titles.set(key, value)
+  latest = key
+}
+recall()
+latest = [...titles.keys()].at(-1)
+
+export function declaredTitle(key: string): DocumentTitle | undefined {
+  const value = titles.get(key)
+  if (value && key !== latest) { touch(key, value); if (value.title) save() }
+  return value
+}
+/** A recalled title names a tab until the document itself is read again; only then is it current. */
+export function titleIsCurrent(key: string): boolean { return current.has(key) }
 export function watchDocumentTitles(listener: (key: string) => void): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
@@ -74,7 +120,12 @@ export function cacheDocumentTitle(key: string, path: string, source: string | U
   versions.set(version, next)
   if (versions.size > 512) versions.delete(versions.keys().next().value!)
   const held = titles.get(key)
-  titles.set(key, next)
-  if (held !== next) for (const listener of listeners) listener(key)
+  current.delete(key)
+  current.add(key)
+  // Bounded for a long session: a forgotten key only means its next render peeks it again.
+  if (current.size > 2000) current.delete(current.values().next().value!)
+  touch(key, next)
+  save()
+  if (held !== next && (held?.title !== next.title || held?.preview !== next.preview)) for (const listener of listeners) listener(key)
   return next
 }

@@ -36,12 +36,12 @@ beforeEach(() => {
 afterEach(() => { dock.reset(); reader.dispose(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
 function show(card: KanbanCard): HTMLElement | null {
   reader.show(channel(card), channel(card).documents[0].key, 'Desk', card)
-  expect(reader.el.querySelector('.ws-navbar .kbn-card-worker')).toBeNull()
-  const band = dock.bandFor(card).el
-  expect(band.querySelectorAll('.kbn-card-worker').length).toBeLessThanOrEqual(1)
-  return band.querySelector('.ws-worker-pill[data-part="act"] .kbn-card-worker')
+  expect(dock.bandFor(card).el.querySelector('.kbn-card-worker')).toBeNull()
+  // The head carries the one worker control.
+  expect(reader.el.querySelectorAll('.ws-navbar .kbn-card-worker').length).toBeLessThanOrEqual(1)
+  return reader.el.querySelector<HTMLElement>('.ws-navbar .ws-head-worker .kbn-card-worker')
 }
-describe('the fiber page act zone owns the only worker control', () => {
+describe('the worker control lives in the reader head; the fiber page draws none', () => {
   it('opens the owner terminal without repeating agent or worker state on the fiber', () => {
     const pill = show(worker())!
     expect(pill.tagName).toBe('BUTTON')

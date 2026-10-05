@@ -12,9 +12,12 @@ const render = vi.hoisted(() => ({
   suspend: vi.fn(), resume: vi.fn(), once: vi.fn(), dispose: vi.fn(), refresh: vi.fn(async () => {}),
 }))
 vi.mock('../FileViewerPanel.js', () => ({
+  readThumbnailMetadata: vi.fn(async () => {}),
   buildFileViewer: vi.fn((_base, path, owner, frame, text, options) => {
     const viewer = document.createElement('div')
     viewer.dataset.path = path
+    // A listening page is its own scroller, as the shared renderer builds it.
+    if (options?.kind === 'audio') viewer.className = 'kbn-fileview-media kbn-fileview-audio'
     render.calls.push({ viewer, path, owner, options, frame, text })
     return viewer
   }),
@@ -250,6 +253,25 @@ describe('stable document frames', () => {
     expect(restored.viewer.scrollTop).toBe(317)
     expect(host.get(docs[0].key)).not.toBe(frame)
     expect(host.get(docs[0].key)!.viewer).not.toBe(first.viewer)
+  })
+
+  it('wires the listening page scroller into the scroll hook and restores it after eviction', async () => {
+    const audio: WorkspaceDocument = { key: 'host-a:/doc/song.mp3', owner: 'host-a', path: '/doc/song.mp3', name: 'song.mp3', kind: 'audio', provenance: [] }
+    host.setChannel([audio], audio.key)
+    const first = render.calls.at(-1)!
+    await ready(first)
+    first.viewer.scrollTop = 240
+    first.viewer.dispatchEvent(new Event('scroll'))
+    expect(onScroll).toHaveBeenLastCalledWith(audio.key, 240)
+    for (let n = 1; n <= 10; n++) {
+      host.setChannel([docs[n]], docs[n].key)
+      await ready()
+    }
+    expect(host.get(audio.key)).toBeUndefined()
+    host.setChannel([audio], audio.key)
+    const restored = render.calls.at(-1)!
+    expect(restored.viewer).not.toBe(first.viewer)
+    expect(restored.viewer.scrollTop).toBe(240)
   })
 
   it('charges heavy HTML two slots and bounds off-channel frame metadata with the LRU', async () => {

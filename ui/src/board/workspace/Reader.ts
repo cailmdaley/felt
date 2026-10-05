@@ -87,7 +87,6 @@ export class Reader {
   private readonly tabs: TabStrip
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
-  private readonly trail: HTMLElement
   private keyboardInput = false
   private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
@@ -96,6 +95,11 @@ export class Reader {
   private readonly verdicts = element('span', 'ws-nav-verdicts')
   private verdictKey: string | null = null
   private readonly position = element('span', 'ws-position')
+  /** The running head's page count, at its right end. */
+  private readonly headPosition = element('span', 'ws-position ws-head-position')
+  /** The one worker control: the card's own pill, drawn bare in the head's right end. */
+  private readonly headWorker = element('span', 'ws-head-worker')
+  private workerClock = 0
   private readonly pageTitle = element('span', 'ws-thumb-title')
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
@@ -150,26 +154,26 @@ export class Reader {
     this.verdicts.dataset.part = 'act'; this.verdicts.dataset.act = 'verdict'
     this.verdicts.hidden = true
     this.el.inert = true
-    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), {
-      shuttleBase: opts.shuttleBase,
-      onHeight: height => this.el.style.setProperty('--ws-strip-h', `${height}px`),
-    })
+    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), { shuttleBase: opts.shuttleBase })
+    this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Constitutions')
+    this.sidebarToggle.title = 'Constitutions · s'
+    this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
-    this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
-    this.sidebarToggle.title = 'Constitutions (s or ⌘\\)'
     this.lead = element('div', 'ws-nav-lead')
-    this.lead.dataset.part = 'chrome-plate'
-    this.lead.append(this.returnButton, this.sidebarToggle, this.title, this.verdicts)
-    this.trail = element('div', 'ws-nav-trail')
+    this.lead.append(this.sidebarToggle, this.returnButton, this.title, this.verdicts)
+    this.headPosition.setAttribute('aria-hidden', 'true')
+    this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
+    this.headWorker.hidden = true
+    const trail = element('div', 'ws-nav-trail')
+    trail.append(this.headWorker, this.headPosition)
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
-    const tabPlate = element('div', 'ws-nav-tabs')
-    tabPlate.dataset.part = 'chrome-plate'
-    tabPlate.append(this.tabs.el)
-    this.navbar.append(this.lead, tabPlate, this.trail)
-    this.prev = button('ws-thumb-button', '‹', () => this.step(-1), 'Previous document')
-    this.next = button('ws-thumb-button', '›', () => this.step(1), 'Next document')
+    this.navbar.append(this.lead, this.tabs.el, trail)
+    this.prev = button('ws-thumb-button', '', () => this.step(-1), 'Previous document')
+    this.next = button('ws-thumb-button', '', () => this.step(1), 'Next document')
+    this.prev.innerHTML = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>'
+    this.next.innerHTML = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="m2 2 8 8-8 8"/></svg>'
     const thumbMenu = button('ws-thumb-button', '⋯', () => {
       const doc = this.document
       if (doc) this.openMenu(doc, thumbMenu)
@@ -181,7 +185,9 @@ export class Reader {
     const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
     pageChoice.setAttribute('aria-haspopup', 'dialog')
     pageChoice.setAttribute('aria-expanded', 'false')
-    pageChoice.append(this.pageTitle, this.arrivalSummary, this.position)
+    const pageMeta = element('span', 'ws-thumb-meta')
+    pageMeta.append(this.position, this.arrivalSummary)
+    pageChoice.append(this.pageTitle, pageMeta)
     thumb.append(this.prev, pageChoice, this.next, thumbMenu)
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
@@ -216,6 +222,7 @@ export class Reader {
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, this.stage)
     this.el.append(this.veil, this.navbar, main, thumb, this.announcement, this.pageSheet.el)
+    if (this.tabs.preview) this.el.append(this.tabs.preview.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -269,6 +276,7 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
+    if (!this.workerClock) this.workerClock = window.setInterval(() => this.paintWorker(), 30000)
     this.paintVerdicts()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
@@ -297,6 +305,7 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
+    window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
     this.cancelResize?.()
     this.setSidebarVisible(false, animate)
@@ -417,8 +426,18 @@ export class Reader {
     }
     this.verdicts.hidden = !key || !this.verdicts.firstChild || this.document?.kind === 'fiber'
   }
+  /** Repaint the head's worker control from the current card, keeping its focus. */
+  private paintWorker(): void {
+    const card = this.currentCard
+    const pill = card ? this.opts.workerPill?.(card) ?? null : null
+    const focused = this.headWorker.contains(document.activeElement)
+    this.headWorker.replaceChildren(...(card && pill ? [workerPlate(card, pill)] : []))
+    this.headWorker.hidden = !pill
+    if (focused) this.headWorker.querySelector<HTMLElement>('.kbn-card-worker')?.focus({ preventScroll: true })
+  }
   private paint(animate: boolean): void {
     this.paintVerdicts()
+    this.paintWorker()
     const ch = this.channel
     if (!ch) return
     const index = ch.documents.findIndex(d => d.key === this.selected)
@@ -430,17 +449,16 @@ export class Reader {
       frame.el.classList.toggle('ws-expanded', doc.key === this.selected && this.expanded)
       this.fillLabel(frame, ch.labels[i])
     })
-    this.tabs.setCompact(this.expanded)
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
     this.tabs.fresh(fresh)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
-    this.position.textContent = `${index + 1} / ${ch.documents.length}`
+    this.position.textContent = this.headPosition.textContent = `${index + 1} / ${ch.documents.length}`
     const doc = ch.documents[index]
     if (doc) {
       const metadata = documentLabelMetadata(doc, ch.labels[index], ch.owner)
       this.pageTitle.textContent = doc.kind === 'fiber' ? ch.labels[index] : metadata.title
-      this.arrivalSummary.textContent = metadata.summary
+      this.arrivalSummary.textContent = metadata.summary && ` · ${metadata.summary.charAt(0).toLowerCase()}${metadata.summary.slice(1)}`
       this.topbar.select(doc.key)
     }
     this.prev.disabled = index <= 0
@@ -513,21 +531,35 @@ export class Reader {
       return
     }
     const style = getComputedStyle(this.navbar)
-    const gap = parseFloat(style.columnGap) || 12
+    const gap = parseFloat(style.columnGap) || 32
     const padLeft = parseFloat(style.paddingLeft) || 12
     const width = this.navbar.clientWidth - padLeft - (parseFloat(style.paddingRight) || 12)
     if (!width) return
-    const lead = this.returnButton.offsetWidth + this.sidebarToggle.offsetWidth + this.verdicts.offsetWidth + 3 * gap + Math.min(280, Math.max(100, this.title.scrollWidth))
-    const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + Math.max(0, this.tabs.buttons.length - 1) * 2 + 4
-    // A fitting strip is centred over the stage, which starts after the sidebar;
-    // a longer strip takes the remaining band, bounded by both controls.
+    const leadGap = parseFloat(getComputedStyle(this.lead).columnGap) || 0
+    const leadParts = [this.sidebarToggle, this.returnButton, this.title, this.verdicts].filter(el => el.offsetWidth > 0)
+    const lead = leadParts.reduce((sum, el) => sum + (el === this.title ? Math.min(this.measure('title-ceiling', 360), el.scrollWidth) : el.offsetWidth), 0) + Math.max(0, leadParts.length - 1) * leadGap
+    const position = this.headPosition.parentElement?.offsetWidth ?? this.headPosition.offsetWidth
+    const stripStyle = getComputedStyle(this.tabs.el)
+    const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + (parseFloat(stripStyle.paddingLeft) || 0) + (parseFloat(stripStyle.paddingRight) || 0) + 1
+    // The index is centred over the stage, which starts after the sidebar,
+    // as wide as it can be without crossing the lead or the page count;
+    // where that leaves too little, it takes the room between them.
     const sidebar = this.sidebarShown ? this.sidebar.offsetWidth : 0
     const centre = sidebar + (this.navbar.clientWidth - sidebar) / 2 - padLeft
-    const leadBand = Math.floor(centre - tabs / 2 - gap)
-    const trailBand = width - leadBand - tabs - 2 * gap
-    this.navbar.style.gridTemplateColumns = leadBand >= lead && trailBand >= 0
-      ? `${leadBand}px ${tabs}px minmax(0, 1fr)`
-      : `${Math.min(lead, width * 0.4)}px minmax(0, 1fr) 0px`
+    const half = Math.min(centre - lead - gap, width - position - gap - centre)
+    // A run that fits is centred over the stage. A longer one takes all the
+    // room between the lead and the page count, and scrolls so the selected
+    // label sits over the page's centre.
+    if (tabs <= 2 * half) {
+      this.navbar.style.gridTemplateColumns = `${Math.floor(centre - tabs / 2 - gap)}px ${Math.ceil(tabs)}px minmax(0, 1fr)`
+      this.tabs.setFocus(null)
+      return
+    }
+    const start = Math.ceil(Math.min(lead, width * 0.45))
+    this.navbar.style.gridTemplateColumns = `${start}px minmax(0, 1fr) auto`
+    const bandLeft = start + gap
+    const band = width - position - gap - bandLeft
+    this.tabs.setFocus(centre - bandLeft >= this.measure('index-focus-margin', 80) && bandLeft + band - centre >= this.measure('index-focus-margin', 80) ? centre - bandLeft : null)
   }
   private layout(animate: boolean): void {
     this.layoutNavbar()
@@ -757,7 +789,7 @@ export class Reader {
   }
   private stagePlaces(): { page: number; tabs: number; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
-    const tabs = this.navbar.querySelector<HTMLElement>('.ws-nav-tabs')?.getBoundingClientRect().left ?? 0
+    const tabs = this.tabs.el.getBoundingClientRect().left
     return { page, tabs, sidebar: this.sidebar.offsetWidth }
   }
   private slideSidebar(shown: boolean, before: { page: number; tabs: number; sidebar: number }): void {
@@ -771,7 +803,7 @@ export class Reader {
       if (el && Math.abs(from) >= 1) animations.push(el.animate([{ translate: `${from}px 0` }, { translate: '0 0' }], options))
     }
     glide(this.parallax, before.page - after.page)
-    glide(this.navbar.querySelector('.ws-nav-tabs'), before.tabs - after.tabs)
+    glide(this.tabs.el, before.tabs - after.tabs)
     const width = Math.max(before.sidebar, after.sidebar)
     const hidden = { translate: `${-width}px 0`, opacity: 0 }, rest = { translate: '0 0', opacity: 1 }
     this.el.classList.add('ws-sidebar-sliding')
@@ -826,6 +858,8 @@ export class Reader {
     if (this.pageSheet.isOpen) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
+    // Any key puts the pointer's preview away; Escape stops there.
+    if (this.tabs.preview?.dismiss() && e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); return }
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
     const forward = shouldForwardDocumentKey(e)
@@ -893,6 +927,7 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)
     this.cancelResize?.()
