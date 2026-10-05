@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"os"
 	"sync"
 	"testing"
 
@@ -22,6 +21,7 @@ import (
 // SHUTTLE_FIBER_PATH names for a worker), so they must serialize through the
 // same lock file rather than each acquiring an independent one.
 func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
+	t.Parallel()
 	_, storage := newStore(t)
 	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
 	seeded := mustRead(t, storage, "f")
@@ -117,39 +117,26 @@ func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
 }
 
 // TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv pins the fix for the
-// chdir is t.Chdir for the go.mod toolchain (1.23): testing.T.Chdir arrived in
-// Go 1.24, and a test that compiles only on newer local toolchains is a CI
-// break waiting to happen (it did).
-func chdir(t *testing.T, dir string) {
-	t.Helper()
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir %s: %v", dir, err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(prev) })
-}
-
 // live-fire near-miss: a daemon-launched worker (SHUTTLE_FIBER_PATH in env)
 // running `shuttle handoff <other-fiber>` must stamp the fiber it NAMED,
 // not its own — and must not be treated as exiting (self=false gates the tmux
 // self-kill). Self-handoff and the resolution-failure fallback keep the old
 // env-authoritative behavior.
 func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "sibling", felt.StatusActive, oneshot(), nil)
-	chdir(t, dir)
-	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
+	env.Chdir(dir)
+	env.Set("SHUTTLE_FIBER_PATH", storage.Path("own"))
 
 	// Explicit different fiber: the argument wins, caller is not exiting.
-	path, self, err := testApp(t).resolveHandoffPath("sibling")
+	path, self, err := newApp(env).resolveHandoffPath("sibling")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(sibling): %v", err)
 	}
-	if !testApp(t).samePath(path, storage.Path("sibling")) {
+	if !newApp(env).samePath(path, storage.Path("sibling")) {
 		t.Fatalf("path = %q, want sibling's %q — ambient SHUTTLE_FIBER_PATH overrode the explicit argument", path, storage.Path("sibling"))
 	}
 	if self {
@@ -157,7 +144,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 	}
 
 	// Self-handoff: env path is authoritative, self=true.
-	path, self, err = testApp(t).resolveHandoffPath("own")
+	path, self, err = newApp(env).resolveHandoffPath("own")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(own): %v", err)
 	}
@@ -167,7 +154,7 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 
 	// Resolution failure: falls back to the env path (the pre-existing
 	// daemon-worker behavior), still self.
-	path, self, err = testApp(t).resolveHandoffPath("no-such-fiber")
+	path, self, err = newApp(env).resolveHandoffPath("no-such-fiber")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(no-such-fiber): %v", err)
 	}
@@ -183,15 +170,17 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 // the daemon-worker reality when project_dir isn't a felt repo — falls back to
 // the env path, self=true.
 func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
 	seedShuttleRole(t, storage, "parent/nested-card", felt.StatusActive, oneshot(), nil)
-	t.Setenv("SHUTTLE_FIBER_PATH", storage.Path("own"))
+	env.Set("SHUTTLE_FIBER_PATH", storage.Path("own"))
 
-	chdir(t, dir)
+	env.Chdir(dir)
 	// "nested-card" fuzzily resolves to parent/nested-card but is not its exact
 	// id — ambiguity, env wins.
-	path, self, err := testApp(t).resolveHandoffPath("nested-card")
+	path, self, err := newApp(env).resolveHandoffPath("nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(nested-card): %v", err)
 	}
@@ -199,17 +188,17 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 		t.Fatalf("fuzzy mismatch: path=%q self=%v, want env path %q self=true", path, self, storage.Path("own"))
 	}
 	// The exact nested id is honored as a sibling handoff.
-	path, self, err = testApp(t).resolveHandoffPath("parent/nested-card")
+	path, self, err = newApp(env).resolveHandoffPath("parent/nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(parent/nested-card): %v", err)
 	}
-	if !testApp(t).samePath(path, storage.Path("parent/nested-card")) || self {
+	if !newApp(env).samePath(path, storage.Path("parent/nested-card")) || self {
 		t.Fatalf("exact nested id: path=%q self=%v, want sibling path self=false", path, self)
 	}
 
 	// No felt store in cwd at all: resolution errors, env fallback, self=true.
-	chdir(t, t.TempDir())
-	path, self, err = testApp(t).resolveHandoffPath("parent/nested-card")
+	env.Chdir(t.TempDir())
+	path, self, err = newApp(env).resolveHandoffPath("parent/nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath outside store: %v", err)
 	}

@@ -94,7 +94,7 @@ func (a *app) resolveProjectDirFlag(raw string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return "", fmt.Errorf("--project-dir is required")
 	}
-	abs, err := a.expandUserPath(os.ExpandEnv(raw))
+	abs, err := a.expandUserPath(os.Expand(raw, a.env.Getenv))
 	if err != nil {
 		return "", fmt.Errorf("resolving project dir %q: %w", raw, err)
 	}
