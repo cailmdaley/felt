@@ -61,12 +61,21 @@
   color: var(--ws-ink);
   background: var(--ws-fill);
 }
+[data-part="tab"] .ws-tab-label {
+  font-family: var(--ws-mono);
+  letter-spacing: var(--ws-mono-tracking);
+  text-transform: uppercase;
+}
 
 [data-part="label-bar"] {
   color: var(--ws-ink-muted);
   background-color: var(--ws-paper);
   font-family: var(--ws-mono);
   text-transform: uppercase;
+}
+[data-part="label-bar"] .ws-label-title {
+  font-family: var(--ws-mono);
+  letter-spacing: var(--ws-mono-tracking);
 }
 
 [data-part="page-frame"] {

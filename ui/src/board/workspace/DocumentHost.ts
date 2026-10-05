@@ -11,6 +11,7 @@ import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
+import { createMediaPoster, type MediaPoster } from './MediaPoster.js'
 import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
 
 export interface DocumentFrame {
@@ -39,6 +40,8 @@ type FrameState = {
   weight: number
   references: ReferenceSurface | null
   referenceCandidates: string[]
+  poster: MediaPoster | null
+  stopVideoPoster: (() => void) | null
 }
 
 const RETAIN = 10
@@ -243,13 +246,17 @@ export class DocumentHost {
     const label = document.createElement('div')
     label.className = 'ws-labelbar'
     label.dataset.part = 'label-bar'
-    sheet.append(content, label)
+    const poster = doc.kind === 'audio' || doc.kind === 'video' ? createMediaPoster(doc.kind) : null
+    sheet.append(content)
+    if (poster) sheet.append(poster.el)
+    sheet.append(label)
     el.append(sheet)
     const frame: DocumentFrame = { el, sheet, content, label, doc, viewer: null }
     const state: FrameState = {
       frame, pending: null, loaded: false, active: false, initialSuspended: false,
       scroll: readScroll(doc.key), readScroll: null, stopScroll: null,
       notice: null, controller: null, revision: 0, transferTime: null, weight: 1, references: null, referenceCandidates: [],
+      poster, stopVideoPoster: null,
     }
     this.placeholder(state)
     el.addEventListener('click', event => {
@@ -285,6 +292,7 @@ export class DocumentHost {
   }
 
   private buildViewer(state: FrameState, replacement: boolean): void {
+    state.stopVideoPoster?.()
     state.revision++
     const revision = state.revision
     if (state.pending) {
@@ -311,7 +319,10 @@ export class DocumentHost {
         active: state.active,
         kind: doc.kind === 'fiber' ? undefined : doc.kind,
         decorateAudio: audio => {
-          const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect)
+          const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
+            (peaks, duration) => {
+              if (!this.disposed && state.revision === revision) state.poster?.setAudio(peaks, duration)
+            })
           this.audioPages.set(audio, page)
           page.updateDocuments(this.documents)
           const changed = (): void => this.updateReferencePlayback()
@@ -356,6 +367,25 @@ export class DocumentHost {
       state.frame.content.replaceChildren(viewer)
       state.frame.viewer = viewer
     }
+    this.watchVideoPoster(state, viewer)
+  }
+
+  private watchVideoPoster(state: FrameState, viewer: HTMLElement): void {
+    const video = viewer.querySelector('video')
+    const poster = state.poster
+    if (!video || !poster) return
+    const stop = (): void => {
+      video.removeEventListener('loadeddata', capture)
+      video.removeEventListener('canplay', capture)
+      if (state.stopVideoPoster === stop) state.stopVideoPoster = null
+    }
+    const capture = (): void => {
+      if (poster.captureVideo(video)) stop()
+    }
+    state.stopVideoPoster = stop
+    video.addEventListener('loadeddata', capture)
+    video.addEventListener('canplay', capture)
+    capture()
   }
 
   private viewerState(state: FrameState, viewer: HTMLElement, result: FileViewerState): void {
@@ -403,6 +433,7 @@ export class DocumentHost {
   }
 
   private evict(state: FrameState): void {
+    state.stopVideoPoster?.()
     this.saveScroll(state)
     state.revision++
     state.controller?.abort()
@@ -622,7 +653,7 @@ export class DocumentHost {
 
   /** Audio keys do not take Space away from the reader. */
   private readonly onMediaKey = (event: KeyboardEvent): void => {
-    if (!this.selected || !['p', ',', '>'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || (event.key === 'p' && event.repeat)) return
+    if (!this.selected || !['p', '[', ']'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.isComposing || event.keyCode === 229 || (event.key === 'p' && event.repeat)) return
     const state = this.frames.get(this.selected)
     if (!state?.active || state.frame.el.closest('[inert]') || blockingDialogOpen() || this.track.closest('.ws-reader')?.querySelector('.ws-menu')) return
     const intent = keyIntent(event, 'reader')

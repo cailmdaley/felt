@@ -14,6 +14,14 @@ const name = 'Calibrate the shear response'
 const tests = []
 const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce', touch = false) => tests.push({ name, run, viewport, sidebarChoice, reducedMotion, touch })
 const selected = p => p.locator('.ws-page.ws-selected')
+const plainThemeLabel = "Plain (drop this constitution's theme)"
+async function openPlainThemeMenu(p) {
+  const trigger = await p.locator('.ws-thumbbar').isVisible()
+    ? p.locator('.ws-thumbbar [aria-label="Document menu"]')
+    : selected(p).locator('.ws-menu-button')
+  await trigger.click()
+  return p.getByRole('button', { name: plainThemeLabel, exact: true })
+}
 const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label
 const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true, includeHidden: true })
 async function open(p, expected = 'calibration-report') {
@@ -71,6 +79,42 @@ test('Fresh Desk leaves focus alone; the first j selects awaiting review and Ent
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await p.evaluate(() => document.activeElement?.tagName !== 'IFRAME' && !document.activeElement?.closest('.ws-content')), 'keyboard entry must keep app-level focus')
 })
+
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Workspace type distinguishes names, verbs and data (${device})`, async p => {
+  const type = async (selector, size, family) => {
+    const actual = await p.locator(selector).first().evaluate(el => {
+      const style = getComputedStyle(el)
+      return { size: style.fontSize, family: style.fontFamily }
+    })
+    assert.equal(actual.size, `${size}px`, selector)
+    assert.ok(actual.family.includes(family), `${selector}: ${actual.family}`)
+  }
+  await open(p); await reportReady(p)
+  await type('.ws-channel-title', 15, 'EB Garamond')
+  await type('.ws-review-plate .kbn-ctl-btn', 15, 'EB Garamond')
+  if (device === 'desktop') {
+    for (const selector of ['.ws-return', '.ws-sidebar-toggle', '.ws-tab-label', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
+    await type('.ws-selected .ws-provenance', 11, 'IBM Plex Mono')
+  } else {
+    await type('.ws-thumb-title', 15, 'EB Garamond')
+    await type('.ws-thumb-arrival', 11, 'IBM Plex Mono')
+  }
+  await choose(p, 'Constitution')
+  await type('.ws-selected .ws-prose-status', 15, 'EB Garamond')
+  if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 34, 'EB Garamond')
+  await type('.ws-selected .kbn-detail-lede', 24, 'EB Garamond')
+  await type('.ws-selected .kbn-ctl-send', 15, 'EB Garamond')
+  await type('.ws-selected .kbn-ctl-strip', 11, 'IBM Plex Mono')
+  await choose(p, 'tone.mp3')
+  await p.waitForFunction(() => document.querySelector('.ws-selected audio')?.readyState >= 1)
+  await type('.ws-selected .ws-audio-play', 15, 'EB Garamond')
+  await type('.ws-selected .ws-audio-clock', 11, 'IBM Plex Mono')
+  await type('.ws-selected .ws-audio-compare button > span:first-child', 15, 'EB Garamond')
+  await p.keyboard.press('?')
+  assert.equal(await p.locator('.kbn-keymap-dialog header button').textContent(), '×')
+  await p.keyboard.press('Escape')
+  assert.equal(await p.locator('.kbn-keymap-overlay').count(), 0)
+}, viewport)
 
 test('Awaiting-review actions reveal without shifting and remain thumb-sized on touch', async p => {
   const drafts = p.locator('[data-column="drafts"]')
@@ -390,10 +434,12 @@ test('Opaque report denies parent DOM and same-origin API reads; links open outs
         event.preventDefault()
       })
       document.body.tabIndex = -1
-      document.body.focus()
     })
-    await p.keyboard.press('ArrowRight')
-    await inner.waitForFunction(() => sessionStorage.getItem('slide') === '2')
+    // A real click activates the opaque document; DOM focus alone need not
+    // make it Chrome's keyboard target.
+    await inner.locator('#report-sentinel').click()
+    await inner.locator('body').press('ArrowRight')
+    await inner.waitForFunction(() => sessionStorage.getItem('slide') === '2', undefined, { polling: 40 })
     assert.equal(await inner.evaluate(() => sessionStorage.getItem('slide')), '2')
     assert.equal(await selected(p).getAttribute('data-key'), key, 'deck-owned arrows never step workspace documents')
     assert.equal(await p.evaluate(() => localStorage.getItem('plot-theme')), null, 'report preferences cannot leak to board storage')
@@ -401,19 +447,26 @@ test('Opaque report denies parent DOM and same-origin API reads; links open outs
     await inner.evaluate(() => {
       const link = document.createElement('a'); link.href = 'opaque-popup.html'; link.textContent = 'Sibling hostile HTML'; document.body.prepend(link)
     })
-    const checkPopup = async click => {
+    const checkPopup = async (click, expectedURL) => {
       const opened = p.context().waitForEvent('page')
       await click()
       const popup = await opened
-      await popup.waitForFunction(() => window.__access)
-      const access = await popup.evaluate(() => window.__access)
-      await popup.close()
-      assert.deepEqual(access, { storageDenied: true, apiDenied: true, sentinel: null }, 'raw HTML popups cannot regain the board origin')
-      return access
+      try {
+        // The page event can precede navigation, and noopener popups need not
+        // paint. Wait for the intended document, then poll its network result
+        // without depending on animation frames.
+        await popup.waitForURL(expectedURL, { waitUntil: 'domcontentloaded' })
+        await popup.waitForFunction(() => window.__access, undefined, { polling: 40 })
+        const access = await popup.evaluate(() => window.__access)
+        assert.deepEqual(access, { storageDenied: true, apiDenied: true, sentinel: null }, 'raw HTML popups cannot regain the board origin')
+        return access
+      } finally { await popup.close() }
     }
-    const siblingPopup = await checkPopup(() => inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).click())
+    const siblingURL = await inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).evaluate(link => link.href)
+    const siblingPopup = await checkPopup(() => inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).click(), siblingURL)
     await selected(p).getByRole('button', { name: 'Document menu', exact: true }).click()
-    const rawFilePopup = await checkPopup(() => p.getByRole('link', { name: 'Open in new tab', exact: true }).click())
+    const rawFile = p.getByRole('link', { name: 'Open in new tab', exact: true })
+    const rawFilePopup = await checkPopup(() => rawFile.click(), await rawFile.evaluate(link => link.href))
     await mkdir(shots, { recursive: true })
     await writeFile(resolve(shots, 'security-probes.json'), JSON.stringify({ iframe: access, relativeAssets: assets, siblingPopup, rawFilePopup, requests }, null, 2))
   } finally { await new Promise(resolve => server.close(resolve)) }
@@ -442,35 +495,57 @@ test('Embedded HTML media pauses on recede and park without reloading or auto-re
 })
 
 test('Late nested report layout retains its restore and then accepts reader scrolling', async p => {
+  // The bridge clamps an unsatisfied restore after 3 s. Model layout arriving
+  // before that deadline explicitly, independently of CPU scheduling.
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await open(p); await reportReady(p)
-  await p.locator('.ws-selected iframe').evaluate(frame => {
+  await report(p).evaluate(frame => new Promise(resolve => {
     const bridge = new DOMParser().parseFromString(frame.srcdoc, 'text/html').querySelector('[data-shuttle-workspace-bridge]').outerHTML
-    frame.srcdoc = '<!doctype html><html><head>' + bridge + '</head><body><p id="early">Short initial layout</p><script>window.addEventListener("load",()=>setTimeout(()=>window.__shortReady=true,0))</script></body></html>'
-  })
+    frame.addEventListener('load', resolve, { once: true })
+    frame.srcdoc = `<!doctype html><html><head>${bridge}</head><body>
+      <p id="early">Short initial layout</p>
+      <script>
+        window.addEventListener('message', event => {
+          if (event.source === parent && event.data?.protocol === 'shuttle-document' && event.data.type === 'active') {
+            window.__active = event.data.payload.active
+          }
+        })
+        window.addEventListener('load', () => setTimeout(() => window.__shortReady = true, 0))
+      </script>
+    </body></html>`
+  }))
   const inner = await reportDocument(p)
-  await inner.waitForFunction(() => window.__shortReady)
-  const command = async (type, payload) => p.locator('.ws-selected iframe').evaluate((frame, data) => frame.contentWindow.postMessage(data, '*'), { protocol: 'shuttle-document', version: 1, type, payload })
+  await p.clock.runFor(1)
+  await inner.waitForFunction(() => window.__shortReady, undefined, { polling: 40 })
+  const command = async (type, payload) => report(p).evaluate((frame, data) => frame.contentWindow.postMessage(data, '*'), { protocol: 'shuttle-document', version: 1, type, payload })
   await command('restore', { x: 0, y: 160 })
   await command('active', { active: false })
+  await inner.waitForFunction(() => window.__active === false, undefined, { polling: 40 })
   const saved = () => p.evaluate(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y)
-  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 160)
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 160, undefined, { polling: 40 })
+  await p.clock.runFor(1000)
+  assert.equal(await inner.evaluate(() => document.scrollingElement.scrollTop), 0, 'short layout cannot yet hold the restore')
   assert.equal(await saved(), 160, 'pending restore is not overwritten by a clamped zero')
   await inner.evaluate(() => {
     document.querySelector('#early').remove()
-    const main = document.createElement('main'); main.id = 'late'; main.style.cssText = 'height:280px;overflow:auto;line-height:20px'
+    const main = document.createElement('main'); main.id = 'late'; main.tabIndex = 0; main.style.cssText = 'height:280px;overflow:auto;line-height:20px'
     main.innerHTML = '<div style="height:6000px">Late asynchronous report content</div>'
     document.body.append(main)
   })
-  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 160)
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 160, undefined, { polling: 40 })
   await command('active', { active: true })
-  // Focus the report's scrollable content, not the frame's top-left boundary.
-  // The iframe element alone can be focused while its document has no focus.
-  await inner.locator('#late').click()
-  await inner.waitForFunction(() => document.hasFocus())
-  await p.keyboard.press('ArrowDown')
-  await inner.waitForFunction(() => document.querySelector('#late').scrollTop > 160)
-  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y > 160)
-  assert.ok(await saved() > 160)
+  // postMessage returns before the bridge processes activation. The fixture's
+  // listener runs after the bridge's listener, acknowledging delivery.
+  await inner.waitForFunction(() => window.__active === true, undefined, { polling: 40 })
+  const scroller = inner.locator('#late')
+  await scroller.click()
+  await inner.waitForFunction(() => document.hasFocus(), undefined, { polling: 40 })
+  await scroller.press('ArrowDown')
+  // Reader ArrowDown advances three 20 px lines; native scrolling alone is
+  // not enough to satisfy this assertion.
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 220, undefined, { polling: 40 })
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 220, undefined, { polling: 40 })
+  assert.equal(await saved(), 220)
 })
 
 test('Desk-opened channel reload and Back restore its Desk return control', async p => {
@@ -909,6 +984,34 @@ test('Text, markdown, code, image, archive and missing-file cause', async p => {
   assert.match(await selected(p).locator('.ws-document-path').innerText(), /\/deliverables\/not-produced.csv$/)
 })
 
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Receded media posters show cached audio peaks and the first video frame (${device})`, async p => {
+  await open(p); await choose(p, 'tone.mp3')
+  await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')
+  const geometry = await selected(p).locator('.ws-audio-page').evaluate(el => {
+    const page = el.parentElement.getBoundingClientRect(), audio = el.getBoundingClientRect()
+    return { paddingTop: getComputedStyle(el).paddingTop, topGap: audio.top - page.top, bottomGap: page.bottom - audio.bottom }
+  })
+  assert.equal(geometry.paddingTop, device === 'phone' ? '24px' : '44px', 'audio shares prose top inset')
+  assert.ok(Math.abs(geometry.topGap - geometry.bottomGap) <= 2, `short audio comparison is vertically centered: ${JSON.stringify(geometry)}`)
+  await choose(p, 'tone.wav')
+  const audioPage = p.locator('.ws-page[data-key$="/tone.mp3"]')
+  const audioPoster = audioPage.locator('.ws-media-poster')
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.mp3"] .ws-media-poster-ready'))
+  assert.equal(await audioPoster.locator('canvas').evaluate(canvas => canvas.width), 1000)
+  assert.ok(await audioPoster.locator('canvas').evaluate(canvas => getComputedStyle(canvas).display === 'block'))
+  const waveformWidth = await audioPoster.evaluate(el => el.querySelector('canvas').getBoundingClientRect().width / el.getBoundingClientRect().width)
+  assert.ok(waveformWidth >= 0.88, `waveform covers most of the neighbour (${waveformWidth})`)
+  await choose(p, 'test.mp4')
+  await poll(p, () => [...document.querySelectorAll('.ws-selected video')].some(video => video.readyState >= 2 && video.videoWidth > 0))
+  const labels = await p.locator('.ws-tab').evaluateAll(tabs => tabs.map(tab => tab.getAttribute('aria-label')))
+  const videoIndex = labels.indexOf('test.mp4')
+  const adjacent = labels[videoIndex === 0 ? 1 : videoIndex - 1]
+  await choose(p, adjacent)
+  const videoPoster = p.locator('.ws-page[data-key$="/test.mp4"] .ws-media-poster')
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/test.mp4"] .ws-media-poster-ready'))
+  assert.ok(await videoPoster.locator('canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0))
+}, viewport)
+
 for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pauses away and parking without auto-resume`, async p => {
   await open(p); await choose(p, `tone.${format}`)
   const audio = p.getByRole('tabpanel', { name: `tone.${format}`, exact: true, includeHidden: true }).locator('audio')
@@ -968,9 +1071,9 @@ test('Audio waveform, transport, comparison, keep-position and keyboard guards',
   await poll(p, () => !document.querySelector('.ws-selected audio').paused)
   await selected(p).getByRole('button', { name: 'Pause', exact: true }).click()
   await selected(p).locator('audio').evaluate(a => { a.currentTime = 0 })
-  await p.keyboard.press('>')
+  await p.keyboard.press(']')
   assert.ok(await selected(p).locator('audio').evaluate(a => a.currentTime > 0))
-  await p.keyboard.press(',')
+  await p.keyboard.press('[')
   assert.equal(await selected(p).locator('audio').evaluate(a => a.currentTime), 0)
   await p.keyboard.press('?')
   await p.getByText('Audio: play / pause', { exact: true }).waitFor()
@@ -1169,6 +1272,10 @@ test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters fil
   await title.focus()
   await p.keyboard.press('c')
   assert.ok(await sidebar.isVisible())
+  for (const page of await p.locator('.ws-page.ws-receded.ws-before').all()) {
+    assert.equal(await page.evaluate(el => getComputedStyle(el).clipPath), 'inset(0px 100% 0px 0px)', 'left neighbours are masked behind the sidebar')
+  }
+  assert.notEqual(await p.locator('.ws-page.ws-receded.ws-after').first().evaluate(el => getComputedStyle(el).maskImage), 'none', 'right neighbour keeps its edge fade')
   assert.equal(await p.getByRole('button', { name: 'Hide constitutions', exact: true }).getAttribute('aria-expanded'), 'true')
   await title.focus()
   await p.keyboard.press('/')
@@ -1322,6 +1429,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.locator('.ws-verdict-toast').waitFor()
     assert.equal(await p.locator('.ws-verdict-toasts').getAttribute('aria-live'), 'polite')
     assert.equal(await p.locator('.ws-verdict-toast').evaluate(e => getComputedStyle(e).animationName), 'none')
+    const toastBox = await p.locator('.ws-verdict-toasts').boundingBox()
+    const labelBox = await p.locator(device === 'phone' ? '.ws-thumbbar' : '.ws-selected .ws-labelbar').boundingBox()
+    assert.ok(toastBox.y + toastBox.height <= labelBox.y - 12, 'undo toast clears the page label or phone bottom bar by 12 px')
     await shot('toast')
     await p.keyboard.press('z')
     await p.locator('.ws-return').click()
@@ -1605,21 +1715,21 @@ test('Plain removes custom and bundled styling, persists, and can restore custom
   await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').click()
   await choose(p, 'Constitution')
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
-  await p.locator('.ws-channel-title').click()
-  await p.getByRole('button', { name: 'Plain', exact: true }).click()
-  assert.equal(await p.getByRole('button', { name: 'Plain', exact: true }).getAttribute('aria-pressed'), 'true')
+  const plain = await openPlainThemeMenu(p)
+  await plain.click()
+  assert.equal(await plain.getAttribute('aria-pressed'), 'true')
+  assert.equal(await plain.evaluate(el => getComputedStyle(el, '::before').content), '"✓"')
   assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
   assert.equal(await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').getAttribute('data-ws-theme'), null)
   await p.reload()
   await p.locator('.ws-channel-title').waitFor()
   assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
-  await p.locator('.ws-channel-title').click()
-  await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  const plainAfterReload = await openPlainThemeMenu(p)
+  await plainAfterReload.click()
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   await p.setViewportSize({ width: 390, height: 844 })
-  await p.locator('.ws-channel-title').click() // close the open picker
-  await p.locator('.ws-channel-title').click()
-  assert.ok((await p.getByRole('button', { name: 'Plain', exact: true }).boundingBox()).height >= 44, 'Plain has a phone-sized touch target')
+  const phonePlain = await openPlainThemeMenu(p)
+  assert.ok((await phonePlain.boundingBox()).height >= 44, 'Plain has a phone-sized touch target')
 })
 
 test('Broken theme falls back to its bundled base', async p => {
@@ -1727,8 +1837,8 @@ test('Nested sidebar cards reset foreign variables, including cards in Plain', a
   }
   await assertNeutral()
   await foreign.click(); await choose(p, 'Constitution')
-  await p.locator('.ws-channel-title').click()
-  await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  const plain = await openPlainThemeMenu(p)
+  await plain.click()
   assert.equal(await foreign.getAttribute('data-ws-theme'), null)
   assert.ok(await foreign.getAttribute('data-ws-theme-boundary') !== null)
   await p.locator('.ws-sidebar').getByRole('button', { name: new RegExp(name) }).click()
@@ -1769,7 +1879,7 @@ test('Theme changes repaint paused audio without replacing the player or fetchin
   })
   const before = await pixel(); assert.deepEqual(before.drawn, before.ink)
   const reads = (await records(p)).filter(r => decodeURIComponent(r.url).includes('tone.mp3')).length
-  await p.locator('.ws-channel-title').click(); await p.getByRole('button', { name: 'Plain', exact: true }).click()
+  const plain = await openPlainThemeMenu(p); await plain.click()
   await p.clock.runFor(80)
   const after = await pixel(); assert.deepEqual(after.drawn, after.ink); assert.notDeepEqual(after.ink, before.ink)
   assert.ok(await p.evaluate(() => document.querySelector('.ws-selected audio') === window.__themedAudio && window.__themedAudio.paused && window.__themedAudio.currentTime === 0))

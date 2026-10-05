@@ -93,14 +93,14 @@
   --ws-parking-x: -20000px;
   --ws-small-gap: 6px;
 
-  --ws-chrome-size: 14px;
-  --ws-title-size: 19px;
-  --ws-label-size: 12px;
+  /* The shared type scale. Theme roots can override these documented tokens. */
   --ws-small-size: 11px;
-  --ws-heading-size: 30px;
-  --ws-section-size: 23px;
-  --ws-lede-size: 21px;
+  --ws-label-size: 15px;
+  --ws-chrome-size: 15px;
   --ws-prose-size: 18px;
+  --ws-section-size: 21px;
+  --ws-lede-size: 24px;
+  --ws-heading-size: 34px;
   --ws-prose-width: 760px;
   --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
 

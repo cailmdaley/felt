@@ -90,7 +90,11 @@ describe('shared keyboard table', () => {
     expect(keyIntent(event('u'), 'desk')).toBeNull()
     expect(keyIntent(event('u'), 'reader')).toBe('halfUp')
     expect(keyIntent(event('.'), 'reader')).toBe('conversation')
-    expect(keyIntent(event('>'), 'reader')).toBe('audioForward')
+    expect(keyIntent(event(']'), 'reader')).toBe('audioForward')
+    expect(keyIntent(event('['), 'reader')).toBe('audioBack')
+    expect(keyIntent(event('p'), 'reader')).toBe('audioPlay')
+    expect(keyIntent(event('>'), 'reader')).toBeNull()
+    expect(keyIntent(event(','), 'reader')).toBeNull()
   })
   it('gives document handlers first refusal', () => {
     const e = event('j')

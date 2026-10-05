@@ -42,6 +42,41 @@ describe('channel theme lifetime and owner reads', () => {
     themes.togglePlain(card); themes.togglePlain(card)
     expect(fetcher).toHaveBeenCalledOnce()
   })
+
+  it('offers Plain for declared themes, including the bundled default', () => {
+    expect(themes.hasTheme(card)).toBe(false)
+    expect(themes.hasTheme({ ...card, theme: 'portolan' })).toBe(true)
+    expect(themes.hasTheme({ ...card, theme: 'Night Chart' })).toBe(true)
+    expect(themes.hasTheme({ ...card, theme: '  ' })).toBe(false)
+  })
+
+  it('discovers a beside-fiber theme while the saved Plain choice is active', async () => {
+    const otherCard = { ...card, uid: 'unrelated-theme', fiberDir: undefined }
+    const other = root()
+    const unrelatedChange = vi.fn()
+    other.addEventListener('workspace-theme-change', unrelatedChange)
+    themes.bind(other, otherCard)
+    await Promise.resolve()
+    unrelatedChange.mockClear()
+    const el = root()
+    const becameAvailable = vi.fn()
+    el.addEventListener('workspace-theme-change', () => {
+      if (themes.hasTheme(card)) becameAvailable()
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(':root { --ws-paper: ivory; }')))
+    themes.togglePlain(card)
+    expect(themes.isPlain(card)).toBe(true)
+    expect(themes.hasTheme(card)).toBe(false)
+    themes.bind(el, card, 'reader')
+    await vi.waitFor(() => expect(themes.hasTheme(card)).toBe(true))
+    expect(themes.isPlain(card)).toBe(true)
+    expect(el.dataset.wsTheme).toBeUndefined()
+    expect(becameAvailable).toHaveBeenCalled()
+    expect(unrelatedChange).not.toHaveBeenCalled()
+    themes.togglePlain(card)
+    expect(el.dataset.wsTheme).toBeTruthy()
+  })
+
   it('keeps boundaries on Plain and unbound surfaces and supplies captured defaults to the compiler', () => {
     themes.dispose()
     document.documentElement.style.setProperty('--ws-paper', 'white')

@@ -31,7 +31,9 @@ export class KeymapHelp {
     title.textContent = 'Keyboard shortcuts'
     const close = document.createElement('button')
     close.type = 'button'
-    close.textContent = 'Close'
+    close.className = 'kbn-keymap-close'
+    close.setAttribute('aria-label', 'Close')
+    close.textContent = '×'
     close.addEventListener('click', () => this.close())
     header.append(title, close)
     const note = document.createElement('p')

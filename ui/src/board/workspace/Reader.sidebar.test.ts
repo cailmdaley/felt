@@ -29,9 +29,9 @@ let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
 const channels = [alpha, beta, gamma]
 
-function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes): Reader {
+function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerPill?: (card: KanbanCard) => HTMLElement | null): Reader {
   const reader = new Reader({
-    shuttleBase: '', themes,
+    shuttleBase: '', themes, workerPill,
     buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(),
     onSelect: vi.fn(),
@@ -93,6 +93,20 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
+  it('gives a sidebar worker separate state and elapsed text without replacing its conversation target', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 60000 }
+    listedCards = [working]
+    const target = document.createElement('button'), open = vi.fn()
+    target.addEventListener('click', open)
+    const reader = makeReader(working, undefined, () => target)
+    expect(reader.el.querySelector('.ws-sidebar .ws-worker-control')).toBe(target)
+    expect(target.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
+    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1 m')
+    expect(target.dataset.part).toBe('act')
+    target.click()
+    expect(open).toHaveBeenCalledOnce()
+  })
   it('binds retained sidebar roots only while active and visible, through revisions, filtering and hide/show', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const bound = new Map<HTMLElement, KanbanCard>()
@@ -256,6 +270,31 @@ describe('Reader channel sidebar', () => {
     const reader = makeReader()
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
     expect(reader.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('puts the theme toggle in the page menu, reachable with the sidebar open and hidden without a theme', () => {
+    let hasTheme = false
+    let plain = false
+    const themes = {
+      bind: vi.fn(), unbind: vi.fn(), hasTheme: () => hasTheme, isPlain: () => plain,
+      togglePlain: vi.fn(() => { plain = !plain }),
+    } as unknown as ChannelThemes
+    const reader = makeReader(alpha, themes)
+    reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+    expect(reader.el.querySelector('.ws-sidebar [data-part="plain-toggle"]')).toBeNull()
+    expect(reader.el.querySelector('.ws-switcher [data-part="plain-toggle"]')).toBeNull()
+
+    reader.el.querySelector<HTMLButtonElement>('.ws-menu-button')!.click()
+    const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-menu [data-part="plain-toggle"]')!
+    expect(toggle.textContent).toBe("Plain (drop this constitution's theme)")
+    expect(toggle.hidden).toBe(true)
+    hasTheme = true
+    reader.el.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
+    expect(toggle.hidden).toBe(false)
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    toggle.click()
+    expect(themes.togglePlain).toHaveBeenCalledWith(alpha)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
   })
 
   it('focuses the sidebar find from the title when open and opens a switcher when closed', () => {

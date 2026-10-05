@@ -898,7 +898,9 @@ export class Dock {
       if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : 'Start ↵'
       fresh.hidden = resumable
       resume.hidden = !resumable
-      message.placeholder = fiberPageColumn(card) === 'awaitingReview' ? 'Reply and resume…' : 'What should the worker do next?'
+      message.placeholder = fiberPageColumn(card) === 'awaitingReview'
+        ? resumable ? 'Reply and resume…' : 'Reply and start…'
+        : 'What should the worker do next?'
     }
     this.composerPaint()
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {

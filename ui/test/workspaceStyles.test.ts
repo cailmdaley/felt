@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const read = (name: string): string => readFileSync(new URL(`../src/board/workspace/${name}`, import.meta.url), 'utf8')
@@ -6,6 +6,19 @@ const css = read('reader.css').replace(/\/\*[\s\S]*?\*\//g, '')
 const tokens = read('tokens.css')
 
 describe('workspace style contracts', () => {
+  it('keeps the default type scale named and workspace font sizes on those tokens', () => {
+    for (const [token, size] of Object.entries({
+      'small-size': 11, 'label-size': 15, 'chrome-size': 15, 'prose-size': 18,
+      'section-size': 21, 'lede-size': 24, 'heading-size': 34,
+    })) expect(tokens).toMatch(new RegExp(`--ws-${token}:\\s*${size}px;`))
+    const styleFiles = [...readdirSync(new URL('../src/board/workspace/', import.meta.url)).filter(name => name.endsWith('.css') && name !== 'tokens.css'), '../keymap.css']
+    for (const name of styleFiles) {
+      const styles = read(name).replace(/\/\*[\s\S]*?\*\//g, '')
+      for (const declaration of styles.matchAll(/\bfont(?:-size)?\s*:\s*([^;{}]+)/g)) {
+        expect(declaration[1], `${name}: ${declaration[0]}`).not.toMatch(/\b\d+(?:\.\d+)?(?:px|rem)\b/)
+      }
+    }
+  })
   it('defines every workspace token that its reader uses', () => {
     const declarations = new Set([...`${tokens}\n${css}`.matchAll(/(--ws-[\w-]+)\s*:/g)].map(m => m[1]))
     for (const token of [...css.matchAll(/var\((--ws-[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)

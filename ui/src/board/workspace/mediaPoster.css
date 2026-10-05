@@ -1,0 +1,10 @@
+.ws-media-poster { overflow: hidden; }
+.ws-media-poster-canvas { display: none; color: var(--ws-ink-muted); opacity: .62; }
+.ws-media-poster-ready .ws-media-poster-canvas { display: block; }
+.ws-media-poster-ready .ws-media-poster-fallback { display: none; }
+.ws-media-poster-audio .ws-media-poster-canvas { width: 90%; height: 150px; }
+.ws-media-poster-video .ws-media-poster-canvas { width: 100%; height: 100%; object-fit: contain; }
+.ws-media-poster-fallback { display: flex; align-items: center; justify-content: center; gap: var(--ws-inset); }
+.ws-media-poster-glyph { font: var(--ws-heading-size)/1 var(--ws-serif); }
+.ws-media-poster-duration { font: var(--ws-small-size)/1.2 var(--ws-mono); color: var(--ws-ink-muted); }
+.ws-media-poster-duration[hidden] { display: none; }

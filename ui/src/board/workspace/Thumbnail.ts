@@ -60,6 +60,12 @@ class ThumbnailBudget {
 const budget = new ThumbnailBudget()
 export function pumpThumbnails(): void { budget.flush() }
 
+function thumbnailTitle(captioned: boolean | undefined, declared: string | undefined, fallback?: string): string {
+  if (captioned) return ''
+  if (declared) return declared
+  return fallback && !/^(?:report|index)\.html$/i.test(fallback) ? fallback : ''
+}
+
 /** Sandboxed, inert, one-read previews; moving metadata never reloads the body. */
 export class Thumbnail {
   readonly key: string
@@ -97,15 +103,19 @@ export class Thumbnail {
     budget.thumbnails.add(this)
   }
   private get documentKey(): string | undefined { return this.file ? docKey(this.file.owner, this.file.fullPath, this.file.owner) : undefined }
-  setProse(prose: string, title: string): void { this.title.textContent = title; this.preview.textContent = prose.slice(0, 800) }
+  setProse(prose: string, title: string): void {
+    this.title.textContent = thumbnailTitle(this.opts.captioned, title)
+    this.preview.textContent = prose.slice(0, 800)
+  }
   private paintFace(): void {
     const metadata = this.documentKey ? declaredTitle(this.documentKey) : undefined
-    this.title.textContent = this.opts.captioned ? '' : metadata?.title ?? this.file?.basename ?? ''
+    const title = thumbnailTitle(this.opts.captioned, metadata?.title, this.file?.basename)
+    this.title.textContent = title
     this.preview.textContent = metadata?.preview || (this.file ? '' : this.opts.fallback)
     const name = this.body?.querySelector<HTMLElement>('.kbn-thumbnail-name')
-    if (name && !this.opts.captioned) {
-      name.textContent = metadata?.title ?? this.file?.basename ?? ''
-      name.classList.toggle('ws-thumbnail-declared-title', !!metadata?.title)
+    if (name) {
+      name.textContent = title
+      name.classList.toggle('ws-thumbnail-declared-title', !this.opts.captioned && !!metadata?.title)
     }
   }
   priority(): number { return this.opts.priority() }

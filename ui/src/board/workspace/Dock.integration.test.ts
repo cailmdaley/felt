@@ -130,6 +130,16 @@ describe('Dock dispatch recovery', () => {
 })
 
 describe('state-shaped act zone', () => {
+  it('names the default review send and keeps other columns generic', () => {
+    band = dock.bandFor(task({ status: 'closed' }))
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    expect(message.placeholder).toBe('Reply and start…')
+    dock.syncRuntime(task({ status: 'active', workerState: 'running' }))
+    expect(message.placeholder).toBe('What should the worker do next?')
+    dock.syncRuntime(task({ status: 'open' }))
+    expect(message.placeholder).toBe('What should the worker do next?')
+  })
+
   it('puts review verdicts first, retains a draft across runtime changes, and hides verdicts on drafts', () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)

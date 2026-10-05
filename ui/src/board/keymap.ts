@@ -40,8 +40,8 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   ],
   reader: [
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
-    bind([','], 'audioBack', 'Audio: back 5 seconds'),
-    bind(['>'], 'audioForward', 'Audio: forward 5 seconds'),
+    bind(['['], 'audioBack', 'Audio: back 5 seconds'),
+    bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
     bind(['.'], 'conversation', 'Open conversation'),
     bind(['r'], 'compose', 'Focus composer on the fiber page'),
     bind(['t'], 'temper', 'Temper awaiting review (6 s undo)'),

@@ -1,16 +1,16 @@
 .ws-verdict-toasts {
-  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: max(24px, env(safe-area-inset-bottom));
+  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: calc(var(--ws-stage-inset) + var(--ws-label-height) + var(--ws-inset) + var(--ws-line-width));
   left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px;
   width: max-content; max-width: calc(100vw - 24px); pointer-events: none;
 }
 .ws-verdict-toast {
   pointer-events: auto; padding: 8px 16px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-radius);
-  background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-float); font: 18px/1.4 var(--ws-serif);
+  background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-float); font: var(--ws-prose-size)/1.4 var(--ws-serif);
   animation: ws-verdict-arrive 180ms ease;
 }
 .ws-verdict-toast button {
   border: 0; border-bottom: 1px solid var(--ws-verdict); color: var(--ws-verdict); background: transparent;
-  font: 15px/1.4 var(--ws-serif); min-height: 36px; cursor: pointer;
+  font: var(--ws-label-size)/1.4 var(--ws-serif); min-height: 36px; cursor: pointer;
 }
 .ws-verdict-toast button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
 @keyframes ws-verdict-arrive { from { opacity: 0; transform: translateY(6px); } }

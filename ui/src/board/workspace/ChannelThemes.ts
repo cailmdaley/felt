@@ -12,6 +12,7 @@ interface ThemeEntry {
   card: KanbanCard
   base: string
   custom: string
+  customAvailable: boolean
   compiled: string
   etag?: string
   readAt: number
@@ -74,6 +75,9 @@ export class ChannelThemes {
     } catch { /* Storage is optional. */ }
   }
   isPlain(card: KanbanCard): boolean { return this.plain.has(this.key(card)) }
+  hasTheme(card: KanbanCard): boolean {
+    return Boolean(card.theme?.trim()) || this.entries.get(this.key(card))?.customAvailable === true
+  }
   togglePlain(card: KanbanCard): void {
     const key = this.key(card)
     if (this.plain.has(key)) this.plain.delete(key)
@@ -94,7 +98,7 @@ export class ChannelThemes {
     if (old?.key !== key) this.unbind(root)
     let entry = this.entries.get(key)
     if (!entry) {
-      entry = { key, scope: themeScopeId(key), card, base: '', custom: '', compiled: '', readAt: -Infinity }
+      entry = { key, scope: themeScopeId(key), card, base: '', custom: '', customAvailable: false, compiled: '', readAt: -Infinity }
       this.entries.set(key, entry)
     }
     this.roots.set(root, entry)
@@ -105,11 +109,15 @@ export class ChannelThemes {
     const base = this.baseName(card)
     if (entry.base !== base || oldDir !== card.fiberDir) {
       entry.base = base
-      if (oldDir !== card.fiberDir) { entry.custom = ''; entry.etag = undefined; entry.readAt = -Infinity }
+      if (oldDir !== card.fiberDir) {
+        const hadCustom = entry.customAvailable
+        entry.custom = ''; entry.customAvailable = false; entry.etag = undefined; entry.readAt = -Infinity
+        if (hadCustom) this.changed(root)
+      }
       this.compile(entry)
     }
     this.paint(entry)
-    if (mode === 'reader' && !this.isPlain(card)) void this.refresh(entry)
+    if (mode === 'reader') void this.refresh(entry)
   }
   unbind(root: HTMLElement): void {
     const old = this.roots.get(root)
@@ -197,6 +205,7 @@ export class ChannelThemes {
     entry.readAt = Date.now()
     const path = `${entry.card.fiberDir}/theme.css`
     const owner = entry.card.originId
+    let customAvailable = false
     entry.pending = (async () => {
       try {
         const res = await fetch(fileBytesUrl(this.base, path, owner), {
@@ -208,14 +217,23 @@ export class ChannelThemes {
           if (res.status !== 404) console.warn(`Shuttle theme: ${path} on ${owner} could not be loaded; using the bundled base`)
           entry.custom = ''; entry.etag = undefined
         } else {
+          customAvailable = true
           entry.custom = await res.text()
           entry.etag = res.headers.get('ETag') ?? undefined
         }
       } catch (error) {
         console.warn(`Shuttle theme: ${path} on ${owner} could not be loaded; using the bundled base`, error)
+        customAvailable = false
         entry.custom = ''; entry.etag = undefined
       }
-      if (!this.disposed) { this.compile(entry); this.paint(entry) }
+      if (!this.disposed) {
+        const availabilityChanged = entry.customAvailable !== customAvailable
+        entry.customAvailable = customAvailable
+        this.compile(entry); this.paint(entry)
+        if (availabilityChanged) {
+          for (const [root, bound] of this.roots) if (bound === entry) this.changed(root)
+        }
+      }
     })().finally(() => { entry.pending = undefined })
     return entry.pending
   }

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AudioPage } from './AudioPage.js'
+import { loadWaveform } from './audioWaveform.js'
 import type { WorkspaceDocument } from './documents.js'
 
 vi.mock('./audioWaveform.js', () => ({ loadWaveform: vi.fn(async () => null) }))
@@ -8,6 +9,7 @@ const doc: WorkspaceDocument = { key: 'host-a:/song.wav', owner: 'host-a', path:
 let page: AudioPage
 let context: { fillStyle: string; scale: ReturnType<typeof vi.fn>; fillRect: ReturnType<typeof vi.fn>; save: ReturnType<typeof vi.fn>; beginPath: ReturnType<typeof vi.fn>; rect: ReturnType<typeof vi.fn>; clip: ReturnType<typeof vi.fn>; restore: ReturnType<typeof vi.fn> }
 beforeEach(() => {
+  vi.clearAllMocks()
   context = { fillStyle: '', scale: vi.fn(), fillRect: vi.fn(), save: vi.fn(), beginPath: vi.fn(), rect: vi.fn(), clip: vi.fn(), restore: vi.fn() }
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D)
   vi.stubGlobal('ResizeObserver', undefined)
@@ -15,6 +17,25 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
 })
 afterEach(() => { page?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('publishes the cached peaks and duration for its frame poster without a second load', async () => {
+  const peaks = [0.1, 0.8, 0.3]
+  vi.mocked(loadWaveform).mockResolvedValueOnce({ peaks, duration: 61 })
+  const root = document.createElement('section')
+  const audio = document.createElement('audio')
+  root.append(audio); document.body.append(root)
+  Object.defineProperty(audio, 'duration', { value: 61 })
+  const poster = vi.fn()
+  page = new AudioPage(audio, doc, '', vi.fn(), poster)
+  audio.dispatchEvent(new Event('loadedmetadata'))
+  await Promise.resolve()
+  expect(poster).toHaveBeenLastCalledWith(peaks, 61)
+  root.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
+  expect(poster).toHaveBeenLastCalledWith(peaks, 61)
+  expect(poster).toHaveBeenCalledTimes(3)
+  expect(loadWaveform).toHaveBeenCalledTimes(1)
+  page.dispose()
+})
 
 it('redraws retained paused canvas with computed played ink after its channel changes, not unrelated channels', async () => {
   const root = document.createElement('section'), other = document.createElement('section')
