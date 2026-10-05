@@ -251,12 +251,6 @@
   .ws-dock .kbn-ctl-image-remove { width: var(--ws-phone-target); height: var(--ws-phone-target); }
 }
 
-/* The fiber's worker pill: the sidebar card's own plate, on its own row. */
-.ws-dock-body > .ws-worker-pill { grid-column: 1 / -1; display: flex; justify-content: flex-start; }
-.ws-dock-body > .ws-worker-pill[hidden] { display: none; }
-.ws-dock .ws-worker-pill .ws-worker-control { padding: 0 10px; border: var(--ws-line-width) solid var(--ws-hairline) !important; border-radius: 999px; background: var(--ws-paper); }
-.ws-dock .ws-worker-pill .ws-worker-control:hover { background: var(--ws-hover); }
-
 /* The agent and effort lists, opened as anchored popovers under their select. */
 .ws-dock .ws-select-picker {
   display: flex; flex-direction: column; gap: 1px; box-sizing: border-box;
@@ -309,8 +303,6 @@
   .ws-dock .kbn-ctl-verdict .kbn-ctl-btn, .ws-dock .kbn-ctl-verdict-menu summary, .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn { min-height: 44px; min-width: 44px; }
   /* Two verbs take their own row, so the resting composer keeps its prompt legible. */
   .ws-dock .kbn-ctl-composer:has(.kbn-ctl-secondary) .kbn-ctl-composer-foot { grid-column: 1 / -1 !important; grid-row: auto !important; }
-  /* The top bar's conversation dot is the phone's worker control. */
-  .ws-dock-body > .ws-worker-pill { display: none; }
   /* The field is underlined beside the microphone; its verbs sit beneath, unruled. */
   .ws-dock .kbn-ctl-composer { border-bottom: 0; row-gap: 0; }
   .ws-dock .kbn-detail-directive { min-height: var(--ws-phone-target); padding-block: 10px; border-bottom: var(--ws-line-width) solid var(--ws-hairline); }

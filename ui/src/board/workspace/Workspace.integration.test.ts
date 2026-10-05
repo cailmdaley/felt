@@ -469,8 +469,7 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *)')).toHaveLength(1)
-    expect(band.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *)')).toHaveLength(0)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
@@ -555,7 +554,7 @@ describe('workspace reader integration', () => {
     expect(visibility).toHaveBeenLastCalledWith(false)
   })
 
-  it('opens the real worker conversation from the act zone pill without a panel', async () => {
+  it('opens the real worker conversation with c, without a panel or a pill on the fiber page', async () => {
     const live = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', tmuxSession: 'terminal-alpha', shuttleHost: 'daemon-a' }
     const openWorker = vi.fn()
     bodyCards = [live]
@@ -567,10 +566,9 @@ describe('workspace reader integration', () => {
     workspace.open(live)
     await flush()
     expect(document.querySelector('.ws-navbar .kbn-card-worker')).toBeNull()
-    const pill = document.querySelector<HTMLButtonElement>('.ws-dock .ws-worker-pill button.kbn-card-worker')!
-    expect(pill).not.toBeNull()
+    expect(document.querySelector('.ws-dock .kbn-card-worker')).toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
-    pill.click()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
     expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')
     expect(workspace.isActive).toBe(true)
     expect(document.querySelector('.ws-dock-slot')).toBeNull()

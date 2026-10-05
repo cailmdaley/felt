@@ -4,6 +4,7 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { card } from './testFixtures.js'
 import { Dock } from './workspace/Dock.js'
 import { Reader } from './workspace/Reader.js'
+import { workerPlate } from './workspace/workerPlate.js'
 import type { Channel } from './workspace/documents.js'
 import { saveClaudeOpening } from './conversationOpening.js'
 
@@ -37,11 +38,11 @@ afterEach(() => { dock.reset(); reader.dispose(); vi.restoreAllMocks(); vi.unstu
 function show(card: KanbanCard): HTMLElement | null {
   reader.show(channel(card), channel(card).documents[0].key, 'Desk', card)
   expect(reader.el.querySelector('.ws-navbar .kbn-card-worker')).toBeNull()
-  const band = dock.bandFor(card).el
-  expect(band.querySelectorAll('.kbn-card-worker').length).toBeLessThanOrEqual(1)
-  return band.querySelector('.ws-worker-pill[data-part="act"] .kbn-card-worker')
+  expect(dock.bandFor(card).el.querySelector('.kbn-card-worker')).toBeNull()
+  const pill = dock.workerPillFor(card)
+  return pill && workerPlate(card, pill)
 }
-describe('the fiber page act zone owns the only worker control', () => {
+describe('the worker control lives in the reader head; the fiber page draws none', () => {
   it('opens the owner terminal without repeating agent or worker state on the fiber', () => {
     const pill = show(worker())!
     expect(pill.tagName).toBe('BUTTON')

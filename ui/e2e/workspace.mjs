@@ -1275,9 +1275,10 @@ test('Native PDF renderer loads fixture; owner route and first-page preview', as
   await poll(p, () => [...document.querySelectorAll('.ws-overview iframe')].some(f => f.src.includes('#page=1')))
 })
 
-test('Remote worker pill records attach handler without launching a terminal', async p => {
+test('Remote worker conversation records attach handler without launching a terminal', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  await p.locator('.ws-selected .ws-dock .ws-worker-pill .kbn-card-worker').click()
+  await choose(p, 'Constitution')
+  await p.keyboard.press('c')
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')
@@ -1648,8 +1649,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `verdict-${device}-${state}.png`) })
     }
     await open(p)
-    assert.equal(await p.locator('.ws-nav-lead .kbn-card-worker, .ws-navbar .ws-worker-pill').count(), 0, 'the navbar carries no worker plate')
-    assert.equal(await p.locator('.ws-topbar-worker').isVisible(), false, 'a fiber without a worker shows no conversation dot')
+    assert.equal(await p.locator('.ws-navbar .kbn-card-worker, .ws-navbar .ws-worker-pill').count(), 0, 'the navbar carries no worker plate')
     if (device === 'phone') {
       assert.ok(!await p.locator('.ws-nav-verdicts').isVisible(), 'the phone top bar stays the name alone')
       await p.locator('.ws-page-choice').click()
@@ -1683,53 +1683,26 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.locator('.ws-return').click()
     await chooseDeskColumn(p, 1)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-    // Opening the reader is navigation, not a state change: wait for it before the short poll.
-    // The phone's worker control is the top bar's conversation dot; the
-    // desktop's is the act zone's pill.
-    const control = device === 'phone' ? '.ws-navbar .ws-topbar-worker' : '.ws-selected .ws-dock .ws-worker-pill'
-    await p.locator(`${control} .ws-worker-control`).waitFor()
-    await poll(p, selector => document.querySelector(`${selector} .ws-worker-control`)?.textContent.includes('12 m'), control)
-    const dot = p.locator(`${control} .ws-worker-dot`)
-    assert.ok(await dot.isVisible(), 'the worker control shows its dot')
-    assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none', 'reduced motion suppresses breathing')
-    assert.ok(await p.locator(`${control} .ws-turn-active`).count())
-    if (device === 'phone') {
-      assert.equal(await p.locator('.ws-selected .ws-dock .ws-worker-pill').isVisible(), false, 'the fiber page draws no second worker control')
-      const target = await p.locator(`${control} .ws-worker-control`).boundingBox()
-      const bar = await p.locator('.ws-navbar').boundingBox()
-      assert.ok(target.width >= 44 && target.height >= 44, 'the dot is a 44 px target')
-      assert.ok(target.x + target.width >= bar.x + bar.width - 12, 'the dot sits at the top bar\'s right')
-      assert.equal(await dot.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(61, 91, 160)', 'a working machine is cobalt')
-    }
+    await choose(p, 'Constitution')
+    assert.equal(await selected(p).locator('.kbn-card-worker, [data-act="worker"]').count(), 0, 'the fiber page draws no worker control; the reader head carries it')
     await shot('aloft')
-    await p.evaluate(async () => {
-      const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
-      row.runtime.phase = 'waiting'
-      row.runtime.last_activity_at = Date.now() - 120000
-      await window.__harness.modal.fetchAndRender()
-    })
-    await poll(p, selector => document.querySelector(`${selector} .ws-worker-control`)?.dataset.workerState === 'waiting', control)
-    assert.equal(await p.locator(`${control} .ws-turn-active`).count(), 0)
-    if (device === 'phone') assert.equal(await dot.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(196, 147, 51)', 'a waiting worker is gold')
-    await shot('waiting')
     await p.locator('.ws-return').click()
     await chooseDeskColumn(p, 0)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
-    await poll(p, selector => { const pill = document.querySelector(selector); return pill?.hidden === true && getComputedStyle(pill).display === 'none' }, control)
     await shot('no-worker')
   }, viewport)
 }
 
 test('Only the owner-reported working phase breathes, on a 2.4 s opacity cycle', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  const dot = p.locator('.ws-selected .ws-dock .ws-worker-pill .ws-worker-dot')
+  const dot = p.locator('.ws-sidebar [aria-current="true"] .ws-worker-dot')
   await dot.waitFor()
   const timing = await p.evaluate(() => {
-    const css = getComputedStyle(document.querySelector('.ws-selected .ws-dock .ws-worker-pill .ws-worker-dot'))
+    const css = getComputedStyle(document.querySelector('.ws-sidebar [aria-current="true"] .ws-worker-dot'))
     return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction }
   })
   assert.deepEqual(timing, { name: 'ws-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
-}, undefined, 'false', 'no-preference')
+}, undefined, 'true', 'no-preference')
 
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
 // constitution switcher repeat names as navigation actions. The desktop fiber
@@ -1821,9 +1794,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     }
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await choose(p, 'Constitution')
-    const pill = selected(p).locator('.ws-dock .ws-worker-pill')
-    assert.match((await pill.textContent()).trim(), /^aloft\s*12 m$/i, 'the act zone pill names state and elapsed time, not agent')
-    assert.equal(await selected(p).locator('.kbn-card-worker').count(), 1, 'one worker control on the fiber page')
+    assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0, 'the fiber page draws no worker control')
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1)
     assert.ok((await cadence.innerText()).trim(), 'standing cadence lives in the settings line')
@@ -1845,7 +1816,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
         const texts = selector => [...document.querySelectorAll(selector)].map(e => e.textContent.trim())
         return {
           header: texts('.ws-selected .ws-prose-header'),
-          band: texts('.ws-selected .ws-dock .ws-worker-pill'),
           settings: texts('.ws-selected .kbn-detail-controls-toggle'),
           navbar: texts('.ws-nav-verdicts'),
           title: texts('.ws-selected .ws-label-title'),
@@ -2024,7 +1994,6 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
   assert.notEqual(style.pigment, 'red', 'theme aliases cannot change a control pigment')
   assert.ok(!style.mono.includes('fantasy'), 'theme aliases cannot change a control font')
   assert.equal(await selected(p).locator('.ws-dock').getAttribute('data-part'), 'act')
-  assert.equal(await selected(p).locator('.ws-dock .ws-worker-pill').getAttribute('data-part'), 'act')
   assert.equal(await p.locator('.ws-nav-verdicts').getAttribute('data-part'), 'act')
 }, { width: 1379, height: 900 })
 
