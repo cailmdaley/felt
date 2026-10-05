@@ -326,6 +326,7 @@ for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pa
   await poll(p, () => [...document.querySelectorAll('audio')].some(e => !e.paused && e.currentTime > 0))
   const other = `tone.${format === 'mp3' ? 'wav' : 'mp3'}`
   await choose(p, other); assert.ok(await audio.evaluate(a => a.paused))
+  assert.ok(await audio.evaluate(a => getComputedStyle(a.closest('.ws-content')).opacity === '0' && getComputedStyle(a.closest('.ws-sheet').querySelector('.ws-media-poster')).display === 'grid'), 'receded audio shows a poster, never live controls')
   await audio.evaluate(a => { window.__audioPausedTime = a.currentTime })
   await selected(p).locator('audio').evaluate(async a => { await a.play() })
   assert.equal(await p.locator('audio').evaluateAll(as => as.filter(a => !a.paused).length), 1)
@@ -382,6 +383,11 @@ for (const format of ['mp4', 'webm']) test(`Video ${format} plays and seeks nati
   await poll(p, () => [...document.querySelectorAll('video')].some(v => v.currentTime > 0 && v.videoWidth > 0))
   await video.evaluate(v => { v.pause(); v.currentTime = 0.5 })
   await poll(p, () => [...document.querySelectorAll('video')].some(v => !v.seeking && Math.abs(v.currentTime - 0.5) < 0.1))
+  await video.evaluate(v => { window.__video = v })
+  await choose(p, 'Constitution')
+  assert.ok(await video.evaluate(v => v.paused && getComputedStyle(v.closest('.ws-content')).opacity === '0' && getComputedStyle(v.closest('.ws-sheet').querySelector('.ws-media-poster')).display === 'grid'))
+  await choose(p, `test.${format}`)
+  assert.ok(await video.evaluate(v => v === window.__video && Math.abs(v.currentTime - 0.5) < 0.1 && getComputedStyle(v.closest('.ws-content')).opacity === '1'))
 })
 
 test('Native PDF renderer loads fixture; owner route and first-page preview', async p => {

@@ -181,6 +181,9 @@
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .ws-placeholder { background: var(--ws-paper); }
+.ws-media-poster { display: none; position: absolute; inset: 0 0 var(--ws-label-height); place-items: center; background: var(--ws-paper); color: var(--ws-ink-muted); font: 64px/1 var(--ws-serif); pointer-events: none; z-index: 5; }
+.ws-media-page:is(.ws-receded,.ws-parked) .ws-media-poster { display: grid; }
+.ws-media-page:is(.ws-receded,.ws-parked) .ws-content { opacity: 0; pointer-events: none; }
 .ws-body-status { color: var(--ws-ink-muted); font: italic var(--ws-chrome-size)/1.45 var(--ws-serif); }
 
 /* Workspace wrappers keep the shared renderer's file instruments on paper. */
@@ -224,6 +227,7 @@
   .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
+  .ws-media-poster { bottom: 0; }
   .ws-nav-lead, .ws-nav-tabs, .ws-worker-pill:not(:empty) { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
   .ws-nav-tabs { display: none; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); }
