@@ -704,8 +704,11 @@ defmodule ShuttleWeb.FileControllerTest do
 
     @tag :file_security
     test "retains file security on booting responses before the controller" do
+      # This test's own boot snapshot, not the one every request reads.
+      Shuttle.Test.Env.own_scope!()
       Shuttle.Readiness.begin_boot()
-      on_exit(fn -> Shuttle.Readiness.mark_ready() end)
+      key = Shuttle.Env.scope_key({Shuttle.Readiness, :boot_state})
+      on_exit(fn -> :persistent_term.erase(key) end)
 
       for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
         conn = get(api_conn(), url)
