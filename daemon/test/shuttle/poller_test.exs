@@ -1396,7 +1396,7 @@ defmodule Shuttle.PollerTest do
 
     assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
 
-    first_task = :sys.get_state(poller).poll_task_pid
+    %{poll_task_pid: first_task, poll_token: abandoned_token} = :sys.get_state(poller)
 
     assert wait_until(fn ->
              state = :sys.get_state(poller)
@@ -1422,19 +1422,28 @@ defmodule Shuttle.PollerTest do
     assert health.stalls >= 2
     assert is_binary(health.last_stalled_at)
 
-    # Capture a live cycle token, let its watchdog supersede it, then inject
-    # the abandoned task's shape. The current cycle remains authoritative.
-    old_token = :sys.get_state(poller).poll_token
+    # Hold one cycle in flight for the rest of the test: its read outlasts the
+    # test and its watchdog does not fire, so the current token cannot move
+    # under the assertions. Every cycle that starts after the swap carries the
+    # long watchdog; a different token than the one in flight at the swap is
+    # such a cycle.
+    MockRunner.set_ls_delay(60_000)
+    :sys.replace_state(poller, &%{&1 | stall_timeout_ms: 600_000})
+    token_at_swap = :sys.get_state(poller).poll_token
 
     assert wait_until(fn ->
              state = :sys.get_state(poller)
-             is_pid(state.poll_task_pid) and state.poll_token != old_token
+             is_pid(state.poll_task_pid) and state.poll_token not in [nil, token_at_swap]
            end)
 
-    current_token = :sys.get_state(poller).poll_token
-    send(poller, {:poll_world, old_token, {:error, :late_abandoned_cycle}})
+    # Inject the first, abandoned cycle's reply. The current cycle remains
+    # authoritative: its token stands and no cycle is counted as applied.
+    %{poll_token: current_token, poll_cycles: cycles} = :sys.get_state(poller)
+    send(poller, {:poll_world, abandoned_token, {:error, :late_abandoned_cycle}})
     _ = Poller.snapshot(poller)
-    assert :sys.get_state(poller).poll_token == current_token
+    state = :sys.get_state(poller)
+    assert state.poll_token == current_token
+    assert state.poll_cycles == cycles
   end
 
   test "poller supervision shuts down an in-flight read with its owner" do
