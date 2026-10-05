@@ -12,16 +12,6 @@ Shuttle adds execution settings to selected fibers; your other fibers remain not
 [Set up Shuttle](setup.md) takes you from installation to a small task on one machine.
 You don't need a multi-machine setup to start.
 
-<video controls preload="metadata" playsinline
-  poster="../assets/shuttle-board-tour-poster.jpg"
-  aria-label="Narrated tour of the Shuttle board: creating a task, starting a new session or resuming one, opening a worker with Aloft, and reviewing a result">
-  <source src="../assets/shuttle-board-tour.mp4" type="video/mp4">
-  <track kind="captions" srclang="en" label="English" default src="../assets/shuttle-board-tour.vtt">
-  <a href="../assets/shuttle-board-tour.mp4">Download the narrated board tour (MP4)</a>.
-</video>
-
-The tour pairs screenshots of the board over a fictional workshop with control guides, diagrams of dialogs and menus the screenshots don't show.
-
 ## From a written task to a result
 
 Suppose you are planning a small workshop.
@@ -39,6 +29,16 @@ The agent chooses its implementation steps.
    You can revise the written task as your requirements change.
 4. **Read the result.** The worker records its conclusion in the fiber's `outcome` field.
    It closes the task for your review, or leaves continuation notes and hands off so another session can continue.
+
+<video controls preload="metadata" playsinline
+  poster="../assets/shuttle-board-tour-poster.jpg"
+  aria-label="Narrated tour of the Shuttle board: creating a task, starting a new session or resuming one, opening a worker with Aloft, and reviewing a result">
+  <source src="../assets/shuttle-board-tour.mp4" type="video/mp4">
+  <track kind="captions" srclang="en" label="English" default src="../assets/shuttle-board-tour.vtt">
+  <a href="../assets/shuttle-board-tour.mp4">Download the narrated board tour (MP4)</a>.
+</video>
+
+The tour pairs screenshots of the board over a fictional workshop with control guides, diagrams of dialogs and menus the screenshots don't show.
 
 A terminal worker runs in **tmux**, which keeps its terminal session alive when you close a window or disconnect from SSH.
 Codex can also run through its native desktop backend; see [Opening conversations](conversations.md) for the available choices.

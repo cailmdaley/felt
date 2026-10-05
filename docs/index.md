@@ -12,14 +12,6 @@ You can use felt on its own, with any editor and no background service.
 It uses the same fibers, starts agents in your project, and shows their progress and results in a browser board.
 Start with felt for notes, or go to [Set up Shuttle](shuttle/setup.md) if you want agents to run tasks.
 
-<video controls preload="metadata" playsinline
-  poster="assets/shuttle-board-tour-poster.jpg"
-  aria-label="Narrated tour of the Shuttle board: creating a task, starting a new session or resuming one, opening a worker with Aloft, and reviewing a result">
-  <source src="assets/shuttle-board-tour.mp4" type="video/mp4">
-  <track kind="captions" srclang="en" label="English" default src="assets/shuttle-board-tour.vtt">
-  <a href="assets/shuttle-board-tour.mp4">Download the narrated board tour (MP4)</a>.
-</video>
-
 ## Set up with your agent
 
 We recommend asking your existing agent to help you set up Shuttle.
@@ -103,7 +95,13 @@ Its browser **board** lets you read and edit tasks, follow running agents, and r
 Agents write results and continuation notes back into the fiber, so another session can continue unfinished work.
 You can run this on one machine or [connect several machines](shuttle/remotes.md).
 
-![Shuttle board showing tasks for a small workshop](assets/shuttle-board-example.png)
+<video controls preload="metadata" playsinline
+  poster="assets/shuttle-board-tour-poster.jpg"
+  aria-label="Narrated tour of the Shuttle board: creating a task, starting a new session or resuming one, opening a worker with Aloft, and reviewing a result">
+  <source src="assets/shuttle-board-tour.mp4" type="video/mp4">
+  <track kind="captions" srclang="en" label="English" default src="assets/shuttle-board-tour.vtt">
+  <a href="assets/shuttle-board-tour.mp4">Download the narrated board tour (MP4)</a>.
+</video>
 
 The example board follows the same workshop: venue research, a draft programme, and a participant guide.
 
