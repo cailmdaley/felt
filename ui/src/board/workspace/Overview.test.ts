@@ -467,6 +467,8 @@ describe('Overview thumbnail budget and safe content', () => {
     let signal: AbortSignal | undefined
     fetchMock.mockImplementation((_url: string, options: RequestInit) => { signal = options.signal as AbortSignal; return new Promise<Response>(() => {}) })
     overview.show(); draw()
+    // The thumbnail's read starts once any title peek of the same file has answered.
+    for (let turn = 0; turn < 5 && !signal; turn++) await Promise.resolve()
     expect(signal?.aborted).toBe(false)
     overview.dispose()
     expect(signal?.aborted).toBe(true)

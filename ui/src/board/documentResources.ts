@@ -311,18 +311,34 @@ function ifNoneMatch(headers: HeadersInit | undefined): string | undefined {
 
 /**
  * A document's whole text for a reader that wants it once, such as a
- * thumbnail. Fresh text answers at once; older text revalidates. Null when
- * the document cannot be read.
+ * thumbnail. Fresh text answers at once, as does a fresh peek that covered
+ * the whole document; older text revalidates. Null when the document cannot
+ * be read.
  */
-export function text(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.thumbnail, options: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<TextBody | null> {
+export async function text(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.thumbnail, options: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<TextBody | null> {
   const entry = entryFor(src)
-  if (!options.fresh && knownMissing(entry)) return Promise.resolve(null)
-  if (!options.fresh && isFresh(entry.text)) return Promise.resolve(entry.text!.value)
+  if (!options.fresh) {
+    // A title peek of a short document already read all of it.
+    await inFlight.get(`peek\0${resourceKey(src)}`)?.promise.catch(() => null)
+    if (options.signal?.aborted || knownMissing(entry)) return null
+    if (isFresh(entry.text)) return entry.text!.value
+    const whole = wholePeek(entry)
+    if (whole) return whole
+  }
   return shared(`text\0${resourceKey(src)}`, priority, async signal => {
     const etag = entry.text?.value.etag
     const response = await readWhole(entry, { cache: 'no-store', signal, headers: etag ? { 'If-None-Match': etag } : undefined }, priority)
     return response.ok || response.status === 304 ? entry.text?.value ?? null : null
   }, options.signal).catch(() => null)
+}
+
+/** A fresh peek that holds the entire document, kept as its text. */
+function wholePeek(entry: Entry): TextBody | null {
+  const held = entry.peek
+  if (!held || !isFresh(held) || held.value.size === undefined || held.value.size > held.value.bytes.length) return null
+  holdText(entry, { text: new TextDecoder().decode(held.value.bytes), etag: held.value.etag })
+  entry.text!.at = held.at
+  return entry.text!.value
 }
 
 /** The text held for a document, however old, without a request. */

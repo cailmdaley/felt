@@ -164,6 +164,17 @@ describe('shared reads', () => {
     expect(header(fetcher.mock.calls[1][1], 'If-None-Match')).toBe('W/"sha256-b"')
   })
 
+  it('takes the text of a short document from the title peek that read all of it', async () => {
+    const fetcher = vi.fn(async () => new Response(new TextEncoder().encode('# Short'), { status: 206, headers: { ETag: 'W/"sha256-d"', 'Content-Range': 'bytes 0-6/7' } }))
+    vi.stubGlobal('fetch', fetcher)
+    const src = '/api/v1/file?path=%2Fshort.md'
+    const title = peek(src)
+    expect(await text(src)).toEqual({ text: '# Short', etag: 'W/"sha256-d"' })
+    await title
+    expect(recallText(src)).toEqual({ text: '# Short', etag: 'W/"sha256-d"' })
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it('lets a thumbnail join a page read already in flight', async () => {
     let finish!: (response: Response) => void
     const fetcher = vi.fn(() => new Promise<Response>(r => { finish = r }))
