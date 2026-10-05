@@ -64,6 +64,8 @@ function button(cls: string, text: string, action: () => void, label = text): HT
 /** The viewport at which the desktop sidebar defaults open. */
 export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
+/** A latched swipe that neither moves nor releases for this long has lost its release. */
+const SWIPE_QUIET = 500
 
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
@@ -100,6 +102,7 @@ export class Reader {
   private readonly stopSwipe: () => void
   private swipeSettle: ReturnType<typeof setTimeout> | null = null
   private swiping = false
+  private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
@@ -247,6 +250,7 @@ export class Reader {
 
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
+    this.cancelSwipe()
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu(); this.pageSheet.hide() }
     const arrivals = this.receipts.observe(channel, ready)
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
@@ -278,6 +282,7 @@ export class Reader {
 
   select(key: DocKey): void {
     if (!this.channel?.documents.some(d => d.key === key) || key === this.selected) return
+    this.cancelSwipe()
     this.cancelResize?.()
     this.closeMenu()
     this.selected = key
@@ -291,6 +296,7 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
+    this.cancelSwipe()
     this.cancelResize?.()
     this.setSidebarVisible(false, animate)
     this.active = false
@@ -345,21 +351,29 @@ export class Reader {
     return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
       && (window.visualViewport?.scale ?? 1) <= 1.01 && (this.channel?.documents.length ?? 0) > 1
   }
-  /** The track follows a latched page swipe, then settles on the page the release chose. */
+  /**
+   * The track follows a latched page swipe, then settles on the page the
+   * release chose. A swipe whose release cannot be honoured, or that goes
+   * quiet for half a second, is cancelled so layout owns the track again.
+   */
   private swipe(signal: SwipeSignal): void {
     const ch = this.channel
     const index = ch?.documents.findIndex(d => d.key === this.selected) ?? -1
     const width = this.stage.clientWidth
-    if (!ch || index < 0 || !width || (!this.swiping && (signal.phase !== 'move' || !this.swipeable))) return
+    if (!ch || index < 0 || !width) { this.cancelSwipe(); return }
+    if (!this.swiping && (signal.phase !== 'move' || !this.swipeable)) return
     const hasPrevious = index > 0, hasNext = index < ch.documents.length - 1
     if (signal.phase === 'move') {
       if (this.swipeSettle !== null) { clearTimeout(this.swipeSettle); this.swipeSettle = null }
+      if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
+      this.swipeWatchdog = setTimeout(() => { this.swipeWatchdog = null; this.cancelSwipe() }, SWIPE_QUIET)
       this.swiping = true
       this.stage.classList.remove('ws-swipe-release')
       this.stage.classList.add('ws-swiping')
       this.track.style.transform = `translateX(${this.trackX + swipeFollow(signal.dx, width, hasPrevious, hasNext)}px)`
       return
     }
+    this.clearSwipeWatchdog()
     this.swiping = false
     const delta = signal.phase === 'end' && this.swipeable ? swipeOutcome(signal.dx, signal.velocity, width, hasPrevious, hasNext) : 0
     const travelled = signal.phase === 'end' ? Math.abs(swipeFollow(signal.dx, width, hasPrevious, hasNext)) : 0
@@ -372,6 +386,18 @@ export class Reader {
     }
     if (delta) this.step(delta)
     else this.layout(true)
+  }
+  /** Abandon a latched swipe in place: the track returns to the selected page without a release. */
+  private cancelSwipe(): void {
+    this.clearSwipeWatchdog()
+    if (!this.swiping) return
+    this.swiping = false
+    this.stage.classList.remove('ws-swiping')
+    this.layout(false)
+  }
+  private clearSwipeWatchdog(): void {
+    if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
+    this.swipeWatchdog = null
   }
   /** Temper and Discard ride the navbar while the fiber awaits review; the
    *  fiber page carries its own pair in the act zone, and the phone's page
@@ -871,6 +897,7 @@ export class Reader {
     this.cancelResize?.()
     this.closeMenu()
     this.stopSwipe()
+    this.clearSwipeWatchdog()
     this.pageSheet.dispose()
     this.observer?.disconnect()
     window.removeEventListener('resize', this.relayout)
