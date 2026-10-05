@@ -1,8 +1,10 @@
 # Constitution themes
 
 A constitution can give its Shuttle channel a visual identity without changing its documents or the Desk.
-Its theme reaches the reader's veil, tabs, page frames, label bars, fiber header and prose, and Markdown or text pages.
-On the Board overview, its folio wears the same paper and accents.
+Its theme reaches the reader's veil, floating chrome, filmstrip and thumbnail paper, page frames, label bars, fiber header and prose, Markdown or text pages, and audio waveform ink.
+On the Board overview, its changed-work rows and every folio density wear the same paper and accents.
+Its sidebar card has its own channel boundary, even inside another constitution's reader.
+Phone top and bottom bars and the page sheet use the channel's materials without adding a card frame around the edge-to-edge page.
 HTML reports, PDFs, images and other documents keep their own styling.
 
 ## Declaration
@@ -26,7 +28,7 @@ Missing, unreachable or unparseable CSS leaves the bundled base in place; it nev
 CSS uses the browser's error recovery: malformed individual declarations are ignored, and a nonempty file with no valid rules is rejected.
 
 The constitution-name menu has a **Plain** toggle.
-It removes both the bundled theme and custom CSS for this viewer, including the folio, without editing the fiber.
+It removes both the bundled theme and custom CSS for this viewer, including sidebar cards, changed-work rows and folios, without editing the fiber.
 The choice is stored locally by channel and host; blocked browser storage doesn't prevent the toggle from working for the current session.
 
 ## CSS boundary
@@ -42,13 +44,18 @@ Shuttle parses the file with a constructable `CSSStyleSheet` and scopes style ru
 Selector lists, functional selectors and CSS nesting retain their browser-defined meaning.
 Rules inside `@media`, `@supports` and `@layer` retain their conditions and are scoped recursively.
 Rules can't select the Desk or an adjacent channel; arbitrary selectors such as `body` don't escape the boundary.
+Each sidebar card, changed-work row and folio is an independent root for its own constitution.
+Nested roots reset inherited typography and custom properties, so a foreign card or a card in Plain mode doesn't inherit the open reader's theme.
 
 ### Act zone
 
-The composer and its verbs, Temper/Discard, and the worker pill or plate are an **act zone**, marked `data-part="act"`.
+The composer and its verbs, Temper/Discard, verdict plates, the navbar and sidebar worker controls, and the undo toast are **act zones**, marked `data-part="act"`.
+The `data-act` attribute identifies `composer`, `verdict`, `worker` or `toast`; it isn't permission for theme rules to enter.
 Each generated CSS scope stops before that zone, so even a broad `button { color: red }` rule can't select Temper or the worker control.
-The zone also resets inherited workspace tokens to the unthemed defaults, accepting only `--ws-paper` and `--ws-ink` from the channel.
+The zone also resets inherited UI variables and typography to the unthemed defaults, accepting only `--ws-paper` and `--ws-ink` from the channel.
 Its hairlines and control fills derive from that paper and ink; its fonts, sizing and pigment meanings remain Shuttle's.
+The body-level undo toast copies those two material tokens when the verdict is queued, retaining that constitution's paper and ink if the reader navigates elsewhere.
+It never receives the author's scoped CSS.
 This boundary is structural, not a styling convention.
 
 `@font-face` definitions are hoisted as written; give custom font families distinctive names because their definitions are document-wide.
@@ -58,7 +65,8 @@ Other global at-rules are omitted with a console note.
 Relative URLs resolve against the board page; use absolute URLs or data URIs for ornaments and fonts.
 Custom themes are CSS, not a sandbox for untrusted network resources.
 
-Stylesheets are removed when no reader or folio uses them.
+Stylesheets are removed when no reader, sidebar card, changed-work row or folio uses them.
+Changing a theme repaints a paused audio waveform without replacing its player or losing playback position.
 Channel selection and page styling change immediately; only the veil's tint crosses over 280 ms.
 Reduced motion disables theme animations and transitions, and reduced transparency makes the veil opaque.
 
@@ -94,19 +102,37 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | Selector | Part |
 |---|---|
 | `[data-part='veil']` | Still backdrop beneath the reader |
+| `[data-part='chrome-plate']` | Floating return/title or filmstrip plate; excludes the worker plate |
+| `[data-part='tab-strip']` | Filmstrip container |
 | `[data-part='tab']` | Document tab |
 | `[data-part='tab'][aria-selected='true']` | Selected tab |
 | `[data-part='label-bar']` | Bottom document label and its controls |
 | `[data-part='page-frame']` | Paper sheet enclosing content and label |
 | `[data-part='fiber-header']` | Fiber status header |
 | `[data-part='fiber-title']` | Constitution title |
-| `[data-part='act']` | Scope limit, **not** a styling hook; inline controls and navbar worker |
+| `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts, workers and undo toast |
 | `[data-part='prose']` | Fiber article or text/Markdown pane |
 | `[data-part='prose'] h1`, `h2`, `h3`, `p`, `blockquote`, `code`, `table`, `hr` | Prose elements; prefix each with the prose selector |
-| `:scope[data-part='folio']` | Channel's overview folio, also the theme root |
+| `[data-part='thumbnail']` | Shared preview's UI paper in filmstrip, folios, changed-work rows and page sheet |
+| `[data-part='thumbnail-face']` | Designed text face beneath a loaded preview |
+| `:scope[data-part='sidebar-card']` | Channel's Desk-card face in the reader sidebar |
+| `:scope[data-part='since-row']` | Channel's since-you-were-here row |
+| `:scope[data-part='folio']` | Channel's overview folio |
+| `:scope[data-part='folio'][data-density='full']` | Full-height folio |
+| `:scope[data-part='folio'][data-density='compact']` | Compact thumbnail-and-text card |
+| `:scope[data-part='folio'][data-density='line']` | Short row: 36 px desktop, 44 px phone |
+| `[data-part='phone-topbar']` | Reader navbar; top bar on phone |
+| `[data-part='phone-bottom-bar']` | Phone page title, arrival and stepping controls |
+| `[data-part='page-sheet']` | Modal page chooser |
+| `[data-part='page-sheet-panel']` | Page chooser's paper panel |
+| `[data-part='page-sheet-row']` | One page choice, with its thumbnail |
+| `[data-part='audio-page']` | Listening page and comparison list |
+| `[data-part='audio-waveform']` | Canvas; its CSS `color` sets the played waveform ink |
 
-The same CSS is used on reader and folio roots.
-Keep folio ornamentation light, and don't use pseudo-elements that intercept clicks or cover controls.
+The same CSS is used on reader and compact channel roots.
+Keep card and row ornamentation light, preserve their density and touch targets, and don't use pseudo-elements that intercept clicks or cover controls.
+Thumbnail paper and text faces can be styled; the HTML, PDF and image contents of loaded previews keep their own appearance.
+On the phone, bundled themes remove frame radius, clip paths, borders and shadows so pages stay edge to edge.
 
 ## Pigments
 

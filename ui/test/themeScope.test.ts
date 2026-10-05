@@ -91,6 +91,20 @@ native('isolates nested themed, Plain and same-channel boundaries with own layer
   expect(facts.inset).toBe('0px'); expect(facts.strip).toBe('104px')
 }, 15000)
 
+native('serializes escaped custom-property names without escaping the channel', async () => {
+  const facts = await page.evaluate(() => {
+    const compile = (globalThis as unknown as { compileTheme(css: string, scope: string, ns: string): string }).compileTheme
+    document.head.querySelectorAll('style').forEach(el => el.remove())
+    document.body.innerHTML = '<div data-ws-theme="escaped" data-ws-theme-boundary id="reader"><div data-part="act" id="act">Act</div></div>'
+    const name = '--break}body{opacity:0;--rest'
+    const style = document.createElement('style')
+    style.textContent = 'body { opacity: .75; }\n' + compile(`:scope { ${CSS.escape(name)}: 1; }`, '[data-ws-theme="escaped"]', 'escaped')
+    document.head.append(style)
+    return { opacity: getComputedStyle(document.body).opacity, own: getComputedStyle(document.getElementById('reader')!).getPropertyValue(name).trim(), act: getComputedStyle(document.getElementById('act')!).getPropertyValue(name).trim() }
+  })
+  expect(facts).toEqual({ opacity: '0.75', own: '1', act: '' })
+})
+
 native('keeps standalone toast material and ACT pigments independent of channel author CSS', async () => {
   const surface = readFileSync(resolve('src/board/workspace/themes/surface.css'), 'utf8')
   const toastCss = readFileSync(resolve('src/board/workspace/verdicts.css'), 'utf8')

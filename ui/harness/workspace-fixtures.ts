@@ -236,7 +236,8 @@ export function workspaceExample(now: number): WorkspaceExample {
       [data-part="fiber-title"]::after { content: '✧'; display: block; color: var(--ws-verdict); font-family: "Shuttle Fixture Flourish"; animation: var(--fixture-animation, ink-flourish 2s ease infinite alternate); }
       @media (min-width: 1px) { @supports (display: grid) { @layer fixture { [data-part="label-bar"] { border-top-style: double; } } } }
       [data-part="prose"] { --ws-nested-ready: 1; & p { text-underline-offset: .2em; } --ws-after-nested: 1; }
-      .kbn-card { opacity: .13; }
+      .kbn-desk .kbn-card { opacity: .13; }
+      [data-part="audio-waveform"] { color: rgb(11, 109, 127); }
       @media (width: 1379px) { button { color: red !important; font-family: fantasy !important; } }
       @media (width: 1379px) { :scope { --ws-mono: fantasy; --ws-control-height: 99px; --ws-agent: red; --kbn-agent: red; --font-mono: fantasy; text-transform: uppercase; font-style: italic; } }
     `),
@@ -280,6 +281,8 @@ export function workspaceExample(now: number): WorkspaceExample {
       ':::{embed} report.html',
       ':title: Calibration report',
       ':::',
+      '',
+      '## Validation notes',
       '',
       'Read the [mask table](tables/mask.csv) alongside the report.',
       '',
