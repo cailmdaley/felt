@@ -2240,7 +2240,8 @@ for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']
 // box that moved or resized beyond 0.5 px outside the touched control and its
 // intended dependants. A new surface joins these before it lands.
 async function still(p, label, act, { allow = [], known = [], ...options } = {}) {
-  const shifts = unexpected(await layoutShift(p, { regions: ['body'], act, allow, ...options }), known)
+  // Any press dismisses a tab's hover preview by design.
+  const shifts = unexpected(await layoutShift(p, { regions: ['body'], act, allow: ['.ws-tab-preview', ...allow], ...options }), known)
   assert.deepEqual(shifts, [], `${label} moved something: ${JSON.stringify(shifts, null, 1)}`)
 }
 const repaint = p => p.evaluate(() => window.__harness.modal.fetchAndRender())
@@ -2309,7 +2310,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.keyboard.press('Escape')
   // Selecting a page crosses the tabs and steps the count; the head's other parts hold.
   assert.deepEqual(unexpected(await layoutShift(p, { regions: ['.ws-navbar'], act: () => p.keyboard.press('Alt+ArrowRight'), allow: ['.ws-tabs', '.ws-head-position'], settle: 400 })), [], 'selecting a page')
-  await still(p, 'a poll repaint', () => repaint(p), { allow: ['.ws-tab-preview'] })
+  await still(p, 'a poll repaint', () => repaint(p))
   await p.keyboard.press('s')
   await p.locator('.ws-sidebar .kbn-card').nth(1).waitFor()
   await p.waitForTimeout(400)
