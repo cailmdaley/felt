@@ -8,6 +8,7 @@ import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { TabStrip } from './TabStrip.js'
+import { DocumentSeen } from './DocumentSeen.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 
 export interface ReaderOptions {
@@ -54,6 +55,8 @@ export class Reader {
   readonly stage = element('div', 'ws-stage')
   readonly host: DocumentHost
   private readonly opts: ReaderOptions
+  private readonly seen = new DocumentSeen()
+  private channelReady = false
   private readonly tabs: TabStrip
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
@@ -163,9 +166,11 @@ export class Reader {
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
-  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true): void {
+  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
+    const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
+    this.channelReady = ready
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
@@ -180,9 +185,9 @@ export class Reader {
     this.title.title = channel.name
     const pill = card ? this.opts.workerPill?.(card) : null
     this.conversation.replaceChildren(...(pill ? [pill] : []))
-    this.tabs.render(channel.labels)
+    this.tabs.render(channel.labels, channel.documents.map(d => d.key))
     this.host.setChannel(channel.documents, selected)
-    this.paint(!switching && animate)
+    this.paint(!switching && !reordered && animate)
     this.renderSidebar()
     if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
@@ -260,6 +265,7 @@ export class Reader {
       frame.el.classList.toggle('ws-expanded', doc.key === this.selected && this.expanded)
       this.fillLabel(frame, ch.labels[i])
     })
+    this.tabs.fresh(this.seen.observe(ch, this.selected ?? '', this.channelReady))
     this.tabs.mark(index, animate)
     this.position.textContent = `${index + 1} / ${ch.documents.length}`
     this.prev.disabled = index <= 0

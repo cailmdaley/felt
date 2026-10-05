@@ -5,7 +5,7 @@ import { readFiber } from './fiberSource.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
-import { renderMarkdown, showToast } from '../utils.js'
+import { fileInfoUrl, renderMarkdown, showToast } from '../utils.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
@@ -26,6 +26,7 @@ interface ChannelState {
   card: KanbanCard
   channel: Channel
   links: Array<{ path: string; owner?: string; title?: string }>
+  fileModifiedAt: Map<DocKey, string>
   selected?: DocKey
   selectionVersion: number
   routedFile?: DocKey
@@ -199,7 +200,7 @@ export class Workspace {
       state = {
         card,
         channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, modifiedAt: card.modifiedAt }),
-        links: [], selectionVersion: 0, loaded: false, metadataKnown,
+        links: [], fileModifiedAt: new Map(), selectionVersion: 0, loaded: false, metadataKnown,
       }
       this.channels.set(key, state)
     } else { state.card = card; state.metadataKnown ||= metadataKnown }
@@ -276,7 +277,7 @@ export class Workspace {
     const ch = state.channel
     if (!state.selected || !ch.documents.some(d => d.key === state.selected)) state.selected = defaultSelection(ch)
     this.refreshProse(state)
-    this.reader.show(ch, state.selected, this.origin, state.card, animate)
+    this.reader.show(ch, state.selected, this.origin, state.card, animate, state.loaded)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: state.selected }
     this.dock.syncRuntime(state.card)
   }
@@ -307,6 +308,9 @@ export class Workspace {
     state.selectionVersion++
     this.show(state)
     this.history.select(key)
+    void this.readFileMetadata(state).then(() => {
+      if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
+    })
   }
   private async openFiber(id: string, owner: string): Promise<void> {
     const epoch = this.routeEpoch
@@ -388,10 +392,30 @@ export class Workspace {
       await receiptRead
       if (this.disposed) return
       this.rebuild(state)
+      await this.readFileMetadata(state)
+      if (this.disposed) return
+      this.rebuild(state)
       this.refreshProse(state)
     })().finally(() => { this.loads.delete(key); this.overview.resolving(state.channel.uid, false) })
     this.loads.set(key, promise)
     return promise
+  }
+  /** Metadata reads are bounded and never download document bodies. */
+  private async readFileMetadata(state: ChannelState): Promise<void> {
+    const files = state.channel.documents.filter(d => d.kind !== 'fiber')
+    let cursor = 0
+    await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+      while (cursor < files.length && !this.disposed) {
+        const doc = files[cursor++]
+        try {
+          const response = await fetch(fileInfoUrl(this.opts.shuttleBase, doc.path, doc.owner), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+          if (!response.ok) continue
+          const info = await response.json()
+          if (info.exists && typeof info.modified_at === 'string' && Number.isFinite(Date.parse(info.modified_at))) state.fileModifiedAt.set(doc.key, info.modified_at)
+          else state.fileModifiedAt.delete(doc.key)
+        } catch { /* An unreachable owner keeps its last known metadata. */ }
+      }
+    }))
   }
   private rebuild(state: ChannelState): void {
     const before = state.channel
@@ -408,7 +432,7 @@ export class Workspace {
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
-      sent, links, previous: before, modifiedAt: card.modifiedAt,
+      sent, links, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {
       state.selected = fallbackSelection(before.documents.map(d => d.key), state.channel.documents.map(d => d.key), state.selected)

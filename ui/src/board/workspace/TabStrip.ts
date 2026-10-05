@@ -62,9 +62,13 @@ export class TabStrip {
     return this.records.map((record) => record.button)
   }
 
-  render(labels: string[]): void {
+  fresh(keys: ReadonlySet<string>): void {
+    for (const { key, button } of this.records) button.classList.toggle('ws-tab-fresh', keys.has(key))
+  }
+
+  render(labels: string[], keys?: string[]): void {
     if (this.disposed) return
-    if (labels.length === this.records.length && labels.every((label, index) => label === this.records[index].label)) return
+    if (labels.length === this.records.length && labels.every((label, index) => label === this.records[index].label && (!keys || keys[index] === this.records[index].key))) return
 
     const active = document.activeElement instanceof HTMLButtonElement && this.el.contains(document.activeElement)
       ? this.records.find((record) => record.button === document.activeElement)?.key
@@ -72,21 +76,23 @@ export class TabStrip {
     const oldSelectedKey = this.records[this.selectedIndex]?.key
     const available = new Map<string, HTMLButtonElement[]>()
     for (const record of this.records) {
-      const matches = available.get(record.label) ?? []
+      const identity = keys ? record.key : record.label
+      const matches = available.get(identity) ?? []
       matches.push(record.button)
-      available.set(record.label, matches)
+      available.set(identity, matches)
     }
 
     const seen = new Map<string, number>()
-    const next = labels.map((label) => {
+    const next = labels.map((label, index) => {
       const occurrence = seen.get(label) ?? 0
       seen.set(label, occurrence + 1)
-      const key = `${label}\u0000${occurrence}`
-      const matches = available.get(label)
+      const key = keys?.[index] ?? `${label}\u0000${occurrence}`
+      const matches = available.get(keys ? key : label)
       const button = matches?.shift() ?? this.createButton(key)
       button.dataset.tabKey = key
       button.textContent = label
       button.title = label
+      button.setAttribute('aria-label', label)
       return { key, label, button }
     })
 

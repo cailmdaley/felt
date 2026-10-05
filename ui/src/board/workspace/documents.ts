@@ -46,6 +46,8 @@ export interface ChannelInput {
   sent?: { path: string; owner?: string; session?: string; time: number; worker?: string }[]
   links?: { path: string; owner?: string; title?: string }[]
   previous?: Channel
+  /** Owner-routed file mtimes indexed by normalized document identity. */
+  fileModifiedAt?: ReadonlyMap<DocKey, string>
 }
 
 export interface ParsedDocKey {
@@ -119,7 +121,23 @@ function sentProvenance(document: WorkspaceDocument, previous?: WorkspaceDocumen
   return [...receipts.values()].sort(receiptOrder)
 }
 
-/** Build one owner-aware row, retaining arrival order and receipt history without mutating inputs. */
+/** Latest known receipt or owner-file activity; unknown dates sort last. */
+export function documentActivity(document: WorkspaceDocument): number | undefined {
+  const times = document.provenance.flatMap(p => p.kind === 'sent' && Number.isFinite(p.time) ? [p.time] : [])
+  const modified = document.modifiedAt ? Date.parse(document.modifiedAt) : NaN
+  if (Number.isFinite(modified)) times.push(modified)
+  return times.length ? Math.max(...times) : undefined
+}
+
+export function compareDocuments(a: WorkspaceDocument, b: WorkspaceDocument): number {
+  const latest = (documentActivity(b) ?? -Infinity) - (documentActivity(a) ?? -Infinity)
+  if (latest && !Number.isNaN(latest)) return latest
+  const first = (doc: WorkspaceDocument): number => Math.min(...doc.provenance.flatMap(p => p.kind === 'sent' && Number.isFinite(p.time) ? [p.time] : []))
+  const delivery = first(a) - first(b)
+  return (Number.isNaN(delivery) ? 0 : delivery) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+}
+
+/** Build one owner-aware row, retaining receipt history without mutating inputs. */
 export function buildChannel(input: ChannelInput): Channel {
   const extracted = extractEmbeds(input.body)
   const documents = new Map<DocKey, WorkspaceDocument>()
@@ -140,7 +158,7 @@ export function buildChannel(input: ChannelInput): Channel {
       const name = absolute.split('/').pop() || absolute
       document = {
         key, owner: resolvedOwner, path: absolute, name,
-        kind: documentKind(absolute), provenance: [],
+        kind: documentKind(absolute), provenance: [], modifiedAt: input.fileModifiedAt?.get(key),
       }
       documents.set(key, document)
     }
@@ -153,7 +171,7 @@ export function buildChannel(input: ChannelInput): Channel {
     add(embed.path, input.owner, { kind: 'embed', ...(embed.title ? { title: embed.title } : {}) })
   }
 
-  // The receipt feed may arrive newest-first; first delivery determines document order.
+  // Sort receipts chronologically within each document's provenance.
   const sent = [...(input.sent ?? [])].sort((a, b) => {
     const at = Number.isFinite(a.time) ? a.time : Infinity
     const bt = Number.isFinite(b.time) ? b.time : Infinity
@@ -186,16 +204,8 @@ export function buildChannel(input: ChannelInput): Channel {
     ]
   }
 
-  const ordered: WorkspaceDocument[] = [prose]
-  for (const old of previous?.documents ?? []) {
-    if (old.kind === 'fiber') continue
-    const arrival = documents.get(old.key)
-    if (!arrival) continue
-    ordered.push(arrival)
-    documents.delete(old.key)
-  }
   documents.delete(prose.key)
-  ordered.push(...documents.values())
+  const ordered = [prose, ...[...documents.values()].sort(compareDocuments)]
 
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
@@ -252,6 +262,8 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
       return labels
     }
 
+    const title = document.provenance.find(p => p.kind === 'embed' && p.title)
+    if (title?.kind === 'embed') add(title.title ?? '')
     const parts = document.path.split('/').filter(Boolean)
     const reportPage = /^(?:report|index)\.html$/i.test(document.name)
     if (reportPage) {

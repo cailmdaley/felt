@@ -211,9 +211,11 @@ describe('workspace reader integration', () => {
     const iframe = frame.content.querySelector('iframe')!
     expect(frame.el.classList.contains('ws-selected')).toBe(true)
     expect(window.location.hash).toContain(encodeURIComponent(reportKey))
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    const reportIndex = workspace.reader.host.get(reportKey) ? [...document.querySelectorAll('.ws-tab')].findIndex(tab => tab.getAttribute('aria-selected') === 'true') : -1
+    const away = reportIndex === document.querySelectorAll('.ws-tab').length - 1 ? 'ArrowLeft' : 'ArrowRight'
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: away, altKey: true, bubbles: true }))
     expect(frame.el.classList.contains('ws-receded')).toBe(true)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: away === 'ArrowLeft' ? 'ArrowRight' : 'ArrowLeft', altKey: true, bubbles: true }))
     document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!.click()
     expect(frame.el.classList.contains('ws-expanded')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -451,7 +453,7 @@ describe('workspace reader integration', () => {
 
     workspace.open(orderedCards[1])
     await flush()
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
+    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
     expect(document.querySelector('.ws-tab[aria-selected="true"]')?.textContent).toBe('shared')
     const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.textContent === 'Note')!
     note.click()
