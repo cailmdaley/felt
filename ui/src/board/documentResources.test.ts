@@ -131,12 +131,18 @@ describe('shared reads', () => {
     expect(fetcher).toHaveBeenCalledTimes(3)
   })
 
-  it('does not keep a failed read', async () => {
-    const fetcher = vi.fn(async () => new Response('', { status: 404 }))
+  it('keeps a missing document as an answer while fresh, but not a failed read', async () => {
+    const fetcher = vi.fn(async (src: string) => new Response('', { status: src.includes('missing') ? 404 : 503 }))
     vi.stubGlobal('fetch', fetcher)
     expect(await peek('/api/v1/file?path=/missing')).toBeNull()
     expect(await peek('/api/v1/file?path=/missing')).toBeNull()
+    expect(await text('/api/v1/file?path=/missing')).toBeNull()
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(await peek('/api/v1/file?path=/missing', RESOURCE_PRIORITY.title, { now: Date.now() + RESOURCE_FRESH_MS + 1 })).toBeNull()
     expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(await peek('/api/v1/file?path=/failing')).toBeNull()
+    expect(await peek('/api/v1/file?path=/failing')).toBeNull()
+    expect(fetcher).toHaveBeenCalledTimes(4)
   })
 
   it('answers a peek and a thumbnail from the text a page read, and revalidates it once stale', async () => {

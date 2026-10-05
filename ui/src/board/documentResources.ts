@@ -47,6 +47,8 @@ interface Entry {
   head?: Held<Head>
   peek?: Held<Peek>
   text?: Held<TextBody>
+  /** When the owner last said the document does not exist; a missing document is an answer too. */
+  missing?: number
   facts: Map<string, { validator: string; value: Promise<unknown> }>
 }
 
@@ -114,6 +116,7 @@ function holdText(entry: Entry, body: TextBody): void {
 }
 
 const isFresh = (held: Held<unknown> | undefined, now = Date.now()): boolean => !!held && now - held.at < RESOURCE_FRESH_MS
+const knownMissing = (entry: Entry, now = Date.now()): boolean => entry.missing !== undefined && now - entry.missing < RESOURCE_FRESH_MS
 
 /** The selected page reads now; every other read waits its turn in the quiet lane. */
 export function queued<T>(priority: ResourcePriority, work: () => Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -201,6 +204,7 @@ export function head(src: string, priority: ResourcePriority = RESOURCE_PRIORITY
       const value: Head = !info.exists ? { exists: false }
         : { exists: true, size, modifiedAt, validator: modifiedAt !== undefined && size !== undefined ? `${modifiedAt}|${size}` : undefined }
       entry.head = { value, at: Date.now() }
+      entry.missing = value.exists ? undefined : entry.head.at
       return value
     } finally { limit.answered() }
   }, options.signal).catch(() => null)
@@ -215,6 +219,7 @@ export function peek(src: string, priority: ResourcePriority = RESOURCE_PRIORITY
   const entry = entryFor(src)
   const now = options.now ?? Date.now()
   if (!options.fresh) {
+    if (knownMissing(entry, now)) return Promise.resolve(null)
     if (isFresh(entry.peek, now)) return Promise.resolve(entry.peek!.value)
     if (isFresh(entry.text, now)) return Promise.resolve(peekOfText(entry))
   }
@@ -242,7 +247,9 @@ async function readPeek(entry: Entry, signal: AbortSignal): Promise<Peek | null>
       if (entry.text && entry.text.value.etag === known) { entry.text.at = Date.now(); return peekOfText(entry) }
       return null
     }
+    if (response.status === 404) entry.missing = Date.now()
     if (!response.ok || !response.body) return null
+    entry.missing = undefined
     const reader = response.body.getReader()
     const out = new Uint8Array(PEEK_BYTES)
     let length = 0
@@ -289,7 +296,8 @@ async function readWhole(entry: Entry, init: RequestInit, priority: ResourcePrio
     if (entry.text && entry.text.value.etag === etag) entry.text.at = Date.now()
     return response
   }
-  if (response.ok) holdText(entry, { text: await response.clone().text(), etag: etagOf(response) })
+  if (response.status === 404) entry.missing = Date.now()
+  if (response.ok) { entry.missing = undefined; holdText(entry, { text: await response.clone().text(), etag: etagOf(response) }) }
   return response
 }
 
@@ -307,6 +315,7 @@ function ifNoneMatch(headers: HeadersInit | undefined): string | undefined {
  */
 export function text(src: string, priority: ResourcePriority = RESOURCE_PRIORITY.thumbnail, options: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<TextBody | null> {
   const entry = entryFor(src)
+  if (!options.fresh && knownMissing(entry)) return Promise.resolve(null)
   if (!options.fresh && isFresh(entry.text)) return Promise.resolve(entry.text!.value)
   return shared(`text\0${resourceKey(src)}`, priority, async signal => {
     const etag = entry.text?.value.etag
