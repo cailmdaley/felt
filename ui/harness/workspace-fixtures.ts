@@ -226,8 +226,11 @@ export function workspaceExample(now: number): WorkspaceExample {
       @import 'https://example.invalid/font.css';
       @font-face { font-family: "Shuttle Fixture Flourish"; src: local("Georgia"); }
       @keyframes ink-flourish { from { opacity: .45; } to { opacity: 1; } }
-      :scope { --ws-custom-ready: 1; --fixture-animation: ink-flourish 2s ease infinite alternate; }
+      @keyframes \\31 ink { to { opacity: 1; } }
+      @keyframes "foo bar" { to { opacity: 1; } }
+      :scope { --ws-custom-ready: 1; --fixture-animation: ink-flourish 2s ease infinite alternate; --fixture-space-animation: "foo bar" 1s; }
       [data-part="fiber-header"] { animation-name: ink-flourish; }
+      [data-part="prose"] h2 { animation: var(--fixture-space-animation, \\31 ink 1s); }
       [data-part="fiber-title"]::after { content: '✧'; display: block; color: var(--ws-verdict); font-family: "Shuttle Fixture Flourish"; animation: var(--fixture-animation, ink-flourish 2s ease infinite alternate); }
       @media (min-width: 1px) { @supports (display: grid) { @layer fixture { [data-part="label-bar"] { border-top-style: double; } } } }
       [data-part="prose"] { --ws-nested-ready: 1; & p { text-underline-offset: .2em; } --ws-after-nested: 1; }

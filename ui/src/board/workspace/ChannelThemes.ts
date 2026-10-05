@@ -51,6 +51,8 @@ export class ChannelThemes {
       --ws-you: color-mix(in srgb, var(--kbn-you) 55%, var(--ws-ink));
       --ws-owed: color-mix(in srgb, var(--kbn-owed) 40%, var(--ws-ink));
       --ws-verdict: color-mix(in srgb, var(--kbn-tempered-ink) 40%, var(--ws-ink));
+      --ws-red: var(--ws-owed); --ws-machine: var(--ws-agent);
+      --ws-machine-halo: color-mix(in srgb, var(--ws-agent) 20%, transparent);
       color: var(--ws-ink); font-style: normal; font-weight: normal; text-shadow: none;
     }`
     document.head.append(this.actDefaults)
@@ -174,6 +176,9 @@ export class ChannelThemes {
 /** Stable, selector-safe identity; two 32-bit hashes keep hosts with mirrored ids distinct. */
 export function themeScopeId(key: string): string {
   let a = 2166136261, b = 5381
-  for (const c of key) { a = Math.imul(a ^ c.charCodeAt(0), 16777619); b = Math.imul(b, 33) ^ c.charCodeAt(0) }
+  for (let i = 0; i < key.length; i++) {
+    const code = key.charCodeAt(i)
+    a = Math.imul(a ^ code, 16777619); b = Math.imul(b, 33) ^ code
+  }
   return `ws-${(a >>> 0).toString(36)}-${(b >>> 0).toString(36)}`
 }

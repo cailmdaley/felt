@@ -83,5 +83,6 @@ describe('channel theme lifetime and owner reads', () => {
   it('keeps identities deterministic and distinguishes mirrored owners', () => {
     expect(themeScopeId('first')).toBe(themeScopeId('first'))
     expect(themeScopeId('first')).not.toBe(themeScopeId('second'))
+    expect(themeScopeId('🌟')).not.toBe(themeScopeId('🌙'))
   })
 })

@@ -32,6 +32,7 @@
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
+import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
 import { installWorkspaceNativeURLs, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
@@ -1563,6 +1564,7 @@ try {
   // range the board's cards live in.
   ;(window as unknown as { __harness: unknown }).__harness = {
     modal,
+    scopeTheme,
     MOCK_FEED: workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED,
     temporal: docsExample?.temporal ?? workspaceFixture?.temporal ?? MOCK_TEMPORAL,
     requests: mockRequests,

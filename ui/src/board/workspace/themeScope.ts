@@ -96,19 +96,37 @@ function animationNames(value: string, names: Map<string, string>): string {
     if (c === ',' && functions.at(-1)?.name === 'var') functions.at(-1)!.fallback = true
     if (c === '"' || c === "'") {
       const end = quotedEnd(value, i)
-      const name = value.slice(i + 1, end - 1)
-      output += reference() && names.has(name) ? `${c}${names.get(name)}${c}` : value.slice(i, end)
-      i = end
-    } else if (identifier(c)) {
-      let end = i + 1
-      while (end < value.length && identifier(value[end])) end++
       const token = value.slice(i, end)
-      output += reference() && value[end] !== '(' && names.has(token) ? CSS.escape(names.get(token)!) : token
-      functionName = token
+      const name = keyframeName(token)
+      output += reference() && names.has(name) ? CSS.escape(names.get(name)!) : token
+      i = end
+    } else if (identifier(c) || c === '\\') {
+      let end = i
+      while (end < value.length && (identifier(value[end]) || value[end] === '\\')) end = value[end] === '\\' ? escapeEnd(value, end) : end + 1
+      const token = value.slice(i, end)
+      const name = token.includes('\\') ? keyframeName(token) : token
+      output += reference() && value[end] !== '(' && names.has(name) ? CSS.escape(names.get(name)!) : token
+      functionName = name
       i = end
     } else { output += c; i++ }
   }
   return output
+}
+/** CSSOM gives escaped identifiers and strings the same identity as their declarations. */
+function keyframeName(token: string): string {
+  const sheet = new CSSStyleSheet()
+  sheet.replaceSync(`@keyframes ${token} {}`)
+  return (sheet.cssRules[0] as CSSKeyframesRule | undefined)?.name ?? token
+}
+function escapeEnd(value: string, start: number): number {
+  let end = start + 1
+  while (end < value.length && end < start + 7 && '0123456789abcdef'.includes(value[end].toLowerCase())) end++
+  if (end === start + 1) return Math.min(value.length, end + 1)
+  if (' \t\n\r\f'.includes(value[end] ?? '_')) {
+    if (value[end] === '\r' && value[end + 1] === '\n') end++
+    end++
+  }
+  return end
 }
 function identifier(c: string): boolean {
   const code = c.charCodeAt(0)
@@ -137,10 +155,12 @@ function themeImports(css: string): { body: string; allowed: string[] } {
       body += css.slice(i, end); i = end; continue
     }
     if (depth === 0 && css.slice(i, i + 7).toLowerCase() === '@import' && !identifier(css[i + 7] ?? ' ')) {
-      let end = i + 7
+      let end = i + 7, parentheses = 0
       for (; end < css.length; end++) {
         if (css[end] === '"' || css[end] === "'") end = quotedEnd(css, end) - 1
-        else if (css[end] === ';') { end++; break }
+        else if (css[end] === '(') parentheses++
+        else if (css[end] === ')') parentheses--
+        else if (css[end] === ';' && parentheses === 0) { end++; break }
       }
       const statement = css.slice(i, end)
       let target = statement.slice(7).trim()

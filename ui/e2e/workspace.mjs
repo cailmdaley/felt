@@ -548,14 +548,21 @@ test('Custom theme is scoped with private keyframes, hoisted fonts and condition
   assert.ok(source.includes(`animation-name: ${theme}-ink-flourish`))
   assert.ok(source.includes(`--fixture-animation: ${theme}-ink-flourish`))
   assert.ok(source.includes(`var(--fixture-animation, ${theme}-ink-flourish`))
+  assert.ok(source.includes(`@keyframes ${theme}-1ink`))
+  assert.ok(source.includes(`var(--fixture-space-animation, ${theme}-1ink`))
   await p.emulateMedia({ reducedMotion: 'no-preference' })
   assert.equal(await selected(p).locator('[data-part="fiber-title"]').evaluate(el => getComputedStyle(el, '::after').animationName), `${theme}-ink-flourish`)
+  assert.equal(await selected(p).locator('.ws-prose h2').first().evaluate(el => getComputedStyle(el).animationName), `${theme}-foo\\ bar`, 'escaped and quoted names share CSSOM identity')
   await p.emulateMedia({ reducedMotion: 'reduce' })
   assert.equal(await selected(p).locator('[data-part="fiber-title"]').evaluate(el => getComputedStyle(el, '::after').animationName), 'none')
   assert.ok(source.includes('@font-face') && source.includes('Shuttle Fixture Flourish'))
   assert.ok(source.includes('@media') && source.includes('@supports') && source.includes('@layer'))
   assert.equal(await selected(p).locator('[data-part="prose"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-after-nested').trim()), '1', 'declarations following a nested selector survive CSSOM scoping')
   assert.ok(!source.includes('example.invalid'), 'non-Google imports are removed before insertion')
+  const fontImport = '@import url(https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600&display=swap);'
+  const allowed = await p.evaluate(css => window.__harness.scopeTheme(`${css} h1 { color: red }`, '[data-ws-theme="font-check"]', 'font-check'), fontImport)
+  assert.ok(allowed.startsWith(fontImport), 'Google Fonts import survives URL semicolons without loading an external stylesheet')
+  assert.ok(allowed.includes('@scope'), 'rules after an import remain scoped')
   assert.equal(await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity), desk, 'Desk is outside the theme scope')
   const other = p.locator('.ws-overview-folio[data-uid="01KVBR2G7CXDWMG85592QW78M9"]')
   assert.equal(await other.evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '', 'another channel does not inherit the custom theme')
@@ -607,6 +614,31 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
   assert.equal(await selected(p).locator('.ws-dock').getAttribute('data-part'), 'act')
   assert.equal(await p.locator('.ws-worker-pill').getAttribute('data-part'), 'act')
 }, { width: 1379, height: 900 })
+
+test('Night Chart text and protected control pigments meet AA on dark paper', async p => {
+  await p.locator('.kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+  await choose(p, 'Constitution')
+  await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'night-chart')
+  const contrasts = await selected(p).evaluate(page => {
+    const band = page.querySelector('.ws-dock')
+    const error = document.createElement('span')
+    error.className = 'kbn-detail-error'; error.textContent = 'Fixture error'
+    band.append(error)
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d')
+    const rgb = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3) }
+    const luminance = color => rgb(color).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0)
+    const paper = luminance(getComputedStyle(band).getPropertyValue('--ws-paper'))
+    const result = [...page.querySelectorAll('.ws-prose h1,.ws-prose-body p,.ws-prose-status,.ws-labelbar,.kbn-ctl-agent,.kbn-card-worker,.kbn-detail-error')].map(el => {
+      const ink = luminance(getComputedStyle(el).color)
+      return { part: el.className || el.tagName, ratio: (Math.max(ink, paper) + .05) / (Math.min(ink, paper) + .05) }
+    })
+    error.remove()
+    return result
+  })
+  for (const { part, ratio } of contrasts) assert.ok(ratio >= 4.5, `${part}: ${ratio.toFixed(2)}:1`)
+  console.log(`CONTRAST Night Chart ${Math.min(...contrasts.map(c => c.ratio)).toFixed(2)}:1 minimum across ${contrasts.length} text samples`)
+})
 
 test('Theme refresh uses ETag on the ordinary cadence, not on selection frames', async p => {
   await open(p); await choose(p, 'Constitution')
