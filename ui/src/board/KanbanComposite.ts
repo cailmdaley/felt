@@ -66,6 +66,8 @@ interface CompositeRuntime {
    * type. Present only for a tracked running worker; drives activity-age labels
    * and the 60s waiting-chip gate, never card ordering. */
   lastActivityAt?: number;
+  /** Owner-observed launch instant of the current worker, epoch milliseconds. */
+  startedAt?: number;
   /** Owner-served: where a phone opens this worker — the claude.ai bridge URL
    * the session wrote into its own transcript. Absent when never bridged. */
   sessionLink?: string;
@@ -200,7 +202,8 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const desktopLink = validDesktopThreadLink(value.desktop_link);
   const surface = value.surface === 'app' || value.surface === 'cli' ? value.surface : undefined;
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
-  return { state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, sessionLink, desktopLink, launchError };
+  const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
+  return { state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

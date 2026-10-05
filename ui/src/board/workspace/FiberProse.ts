@@ -3,7 +3,9 @@ import { extractEmbeds } from '../attachments.js'
 import { basename, renderMarkdown } from '../utils.js'
 import { installWikilinks } from '../wikilinks.js'
 import '../prose.css'
-import type { Channel, DocKey } from './documents.js'
+import './fiber-prose.css'
+import type { Channel, DocKey, WorkspaceDocument } from './documents.js'
+import { fiberPageKicker } from './fiberPageState.js'
 
 /** The outcome as the reading surface's lede, including math and references. */
 export function ledeHtml(outcome: string): string {
@@ -52,7 +54,7 @@ export function installBodyFileLinks(
     if (!path) continue
     link.title = `Open ${basename(path)} in the viewer`
     link.addEventListener('click', (event) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+      if (link.dataset.wsReference || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
       onFile(link.dataset.filePath ?? path, link.textContent?.trim() || undefined)
@@ -83,15 +85,40 @@ export function buildFiberProse(
   if (card.status) {
     const status = document.createElement('span')
     status.className = 'ws-prose-status'
-    status.textContent = card.status
+    status.textContent = fiberPageKicker(card)
     header.append(status)
   }
   const title = document.createElement('h1')
   title.textContent = channel.name
   title.dataset.part = 'fiber-title'
+  const outcome = document.createElement('div')
+  outcome.innerHTML = ledeHtml(channel.outcome ?? card.outcome ?? '')
+  const contents = document.createElement('nav')
+  contents.className = 'ws-prose-contents'
+  contents.setAttribute('aria-label', 'Document kinds')
+  const files = channel.documents.filter(doc => doc.kind !== 'fiber')
+  if (files.length) {
+    const total = document.createElement('span')
+    total.textContent = `${channel.documents.length} pages`
+    contents.append(total)
+    const groups: Array<[WorkspaceDocument['kind'], string, string]> = [['html', 'report', 'reports'], ['audio', 'audio', 'audio'], ['pdf', 'PDF', 'PDF'], ['image', 'image', 'images'], ['video', 'video', 'videos'], ['text', 'text', 'texts'], ['other', 'file', 'files']]
+    for (const [kind, singular, plural] of groups) {
+      const documents = files.filter(doc => doc.kind === kind)
+      if (!documents.length) continue
+      const newest = [...documents].sort((a, b) => {
+        const time = (doc: WorkspaceDocument) => Math.max(0, ...doc.provenance.flatMap(p => p.kind === 'sent' && Number.isFinite(p.time) ? [p.time] : []), Date.parse(doc.modifiedAt ?? '') || 0)
+        return time(b) - time(a) || channel.documents.indexOf(a) - channel.documents.indexOf(b)
+      })[0]
+      const select = document.createElement('button')
+      select.type = 'button'
+      select.textContent = `${documents.length} ${documents.length === 1 ? singular : plural}`
+      select.addEventListener('click', () => opts.onSelect(newest.key))
+      contents.append(select)
+    }
+  }
   const body = document.createElement('div')
   body.className = 'ws-prose-body'
-  body.innerHTML = renderFiberMarkdown(channel.body, channel.outcome ?? card.outcome ?? '', {
+  body.innerHTML = renderFiberMarkdown(channel.body, '', {
     ...card, originId: channel.owner,
   }).html
   // The shared markdown renderer emits same-origin byte routes. A workspace
@@ -108,26 +135,7 @@ export function buildFiberProse(
   }
   installBodyFileLinks(body, opts.onFile)
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
-  article.append(header, title, ...(opts.controls ? [opts.controls] : []), body)
-
-  const files = channel.documents.map((doc, index) => ({ doc, index })).filter(({ doc }) => doc.kind !== 'fiber')
-  if (files.length) {
-    const heading = document.createElement('h2')
-    heading.textContent = 'In this constitution'
-    const list = document.createElement('ul')
-    list.className = 'ws-prose-documents'
-    for (const { doc, index } of files) {
-      const item = document.createElement('li')
-      const button = document.createElement('button')
-      button.type = 'button'
-      button.textContent = channel.labels[index] ?? doc.name
-      button.title = `${doc.owner}:${doc.path}`
-      button.addEventListener('click', () => opts.onSelect(doc.key))
-      item.append(button)
-      list.append(item)
-    }
-    article.append(heading, list)
-  }
+  article.append(header, title, outcome, ...(files.length ? [contents] : []), ...(opts.controls ? [opts.controls] : []), body)
   scroller.append(article)
   return scroller
 }

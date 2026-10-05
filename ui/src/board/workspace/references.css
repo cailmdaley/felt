@@ -1,0 +1,26 @@
+a.ws-channel-reference {
+  color: var(--ws-ink, #30281e) !important;
+  text-decoration: underline !important;
+  text-decoration-color: var(--ws-ink, #30281e) !important;
+  text-decoration-thickness: 1px !important;
+  text-underline-offset: .18em;
+  cursor: pointer;
+}
+a.ws-channel-reference:has(code) { font: inherit; }
+.ws-reader button.ws-reference-play, button.ws-reference-play {
+  position: relative; display: inline-grid; place-items: center; vertical-align: middle;
+  width: 24px; height: 24px; margin: 0 4px 0 0; padding: 0;
+  border: 0; border-radius: 2px; background: transparent; color: var(--ws-ink, #30281e);
+  font: 13px/1 Georgia, serif; cursor: pointer;
+}
+button.ws-reference-play::after {
+  content: ''; position: absolute; bottom: 1px; left: 0;
+  width: var(--ws-reference-progress, 0%); height: 1px; background: currentColor;
+}
+button.ws-reference-play:hover { background: var(--ws-hover, #e8dcc1); }
+a.ws-channel-reference:focus-visible, button.ws-reference-play:focus-visible {
+  outline: 1px solid var(--ws-focus, #ac3b2a); outline-offset: 2px;
+}
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-reader button.ws-reference-play, button.ws-reference-play { width: 44px; height: 44px; }
+}

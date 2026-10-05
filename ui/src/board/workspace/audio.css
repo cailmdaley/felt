@@ -1,0 +1,39 @@
+.ws-content .kbn-fileview-audio { background: var(--ws-paper); overflow: auto; padding: 0; }
+.ws-content .kbn-fileview-audio audio[hidden] { display: none !important; }
+.ws-content .kbn-fileview-audio .kbn-media-page { width: 100%; max-width: none; padding: 0; }
+.ws-audio-page {
+  width: 100%; min-width: 0; padding: 48px 36px;
+  color: var(--ws-ink); background: var(--ws-paper);
+  font: 12px/1.4 var(--ws-mono);
+}
+.ws-audio-plot { position: relative; margin: 0 0 16px; }
+.ws-audio-waveform { display: block; width: 100%; height: 160px; cursor: crosshair; touch-action: none; }
+.ws-audio-waveform:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 4px; }
+.ws-audio-hover { position: absolute; bottom: 0; transform: translateX(-50%); pointer-events: none; padding: 2px 5px; background: var(--ws-paper); }
+.ws-audio-transport { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding-bottom: 20px; border-bottom: 1px solid var(--ws-hairline); }
+.ws-reader .ws-audio-page button, .ws-audio-page select {
+  min-height: 44px; min-width: 44px; padding: 0 10px; border-radius: 5px;
+  color: var(--ws-ink); background: transparent; font: 12px/1.4 var(--ws-mono) !important;
+}
+.ws-reader .ws-audio-page button:hover { background: var(--ws-hover); }
+.ws-reader .ws-audio-play { border: 1px solid var(--ws-hairline) !important; min-width: 68px; }
+.ws-audio-clock { margin-left: auto; padding-inline: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ws-audio-page select { border: 1px solid var(--ws-hairline); }
+.ws-audio-compare { margin-top: 20px; }
+.ws-audio-compare[hidden], .ws-audio-hover[hidden] { display: none; }
+.ws-audio-compare header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; }
+.ws-audio-compare h2 { margin: 0; font: 500 23px/1.2 var(--ws-serif); }
+.ws-audio-keep { display: inline-flex; gap: 8px; align-items: center; min-height: 44px; cursor: pointer; }
+.ws-audio-keep input { accent-color: var(--ws-ink); width: 18px; height: 18px; }
+.ws-audio-compare ul { list-style: none; padding: 0; margin: 8px 0 0; }
+.ws-audio-compare li { border-top: 1px solid var(--ws-hairline-soft); }
+.ws-reader .ws-audio-compare button { width: 100%; display: flex; gap: 12px; justify-content: space-between; text-align: left; }
+.ws-audio-compare button > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.ws-audio-duration { color: var(--ws-ink-muted); flex: none; font-variant-numeric: tabular-nums; }
+.ws-reader .ws-audio-page .ws-audio-play, .ws-audio-keep { font: 15px/1.4 var(--ws-serif) !important; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-audio-page { padding: 24px 12px; }
+  .ws-audio-waveform { height: 180px; }
+  .ws-audio-clock { order: 1; width: 100%; margin: 4px 0 0; text-align: center; }
+  .ws-audio-transport select { margin-left: auto; }
+}

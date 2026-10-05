@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildFileViewer, disposeFileViewer } from './FileViewerPanel.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl } from './FileViewerPanel.js'
+import { envelope } from './workspace/DocumentBridge.js'
+const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
+afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals() })
 
 const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), recover: null as null | (() => void), stop: vi.fn() }))
 vi.mock('./LiveFileRefresh.js', () => ({ watchLiveFile: vi.fn((_url, content, error, options) => {
@@ -16,6 +19,16 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('resolves sibling and nested report assets under the byte-owning host', () => {
+    const asset = htmlAssetUrl('https://board.test/api/v1/file?path=%2Fproject%2Freport%20dir%2Findex.html&origin=host-b')
+    expect(asset).toBe('https://board.test/api/v1/file-assets/host-b/project/report%20dir/index.html')
+    expect(new URL('images/figure.svg', asset).href).toBe('https://board.test/api/v1/file-assets/host-b/project/report%20dir/images/figure.svg')
+    const source = htmlWithBase('<!doctype html><body><img src="figure.png"></body>', asset)
+    expect(new DOMParser().parseFromString(source, 'text/html').querySelector('base')!.href).toBe(asset)
+    const relativeBase = htmlWithBase('<head><base href="assets/"></head>', asset)
+    expect(new DOMParser().parseFromString(relativeBase, 'text/html').querySelector('base')!.href).toBe('https://board.test/api/v1/file-assets/host-b/project/report%20dir/assets/')
+    expect(htmlWithBase('<base href="https://cdn.test/">', asset)).toContain('https://cdn.test/')
+  })
   it('transforms srcdoc before assignment and leaves old HTML visible until replacement load', () => {
     const onState = vi.fn(), onFrame = vi.fn()
     const viewer = buildFileViewer('', '/report.html', 'host-a', onFrame, undefined, {
@@ -29,6 +42,8 @@ describe('workspace file viewer hooks', () => {
     expect(initial.srcdoc).toContain('<script>bridge()</script>')
     expect(onState).not.toHaveBeenCalled()
     initial.dispatchEvent(new Event('load'))
+    expect(onState).not.toHaveBeenCalled()
+    ready(initial)
     expect(onFrame).toHaveBeenCalledWith(initial, false)
     expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
 
@@ -36,8 +51,7 @@ describe('workspace file viewer hooks', () => {
     const next = viewer.querySelectorAll('iframe')[1]
     expect(viewer.querySelector('iframe')).toBe(initial)
     expect(initial.srcdoc).toContain('First')
-    next.contentWindow!.scrollTo = vi.fn()
-    next.dispatchEvent(new Event('load'))
+    ready(next)
     expect(viewer.querySelector('iframe')).toBe(next)
     expect(onFrame).toHaveBeenLastCalledWith(next, true)
   })
@@ -45,8 +59,9 @@ describe('workspace file viewer hooks', () => {
   it('reports a stale HTML copy and ignores late staging events after disposal', () => {
     const onState = vi.fn()
     const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onState })
+    document.body.append(viewer)
     watch.content!('First')
-    viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
+    ready(viewer.querySelector('iframe')!)
     const error = new Error('offline')
     watch.error!(error)
     expect(onState).toHaveBeenLastCalledWith({ status: 'error', error, hasContent: true })
@@ -55,9 +70,50 @@ describe('workspace file viewer hooks', () => {
     const staging = viewer.querySelectorAll('iframe')[1]
     disposeFileViewer(viewer)
     onState.mockClear()
-    staging.dispatchEvent(new Event('load'))
+    ready(staging)
     expect(onState).not.toHaveBeenCalled()
     expect(watch.stop).toHaveBeenCalledOnce()
+  })
+
+  it('disposes an unready initial bridge when refreshed content becomes ready first', async () => {
+    const { frameBridge } = await import('./workspace/DocumentBridge')
+    const onWeight = vi.fn()
+    const removed = vi.spyOn(window, 'removeEventListener')
+    const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onWeight })
+    document.body.append(viewer)
+    watch.content!('First')
+    const first = viewer.querySelector('iframe')!
+    expect(frameBridge(first)).toBeDefined()
+    watch.content!('Changed before initial readiness')
+    const next = viewer.querySelectorAll('iframe')[1]
+    ready(next)
+    expect(frameBridge(first)).toBeUndefined()
+    expect(removed.mock.calls.filter(([event]) => event === 'message')).toHaveLength(1)
+    expect(viewer.querySelector('iframe')).toBe(next)
+    document.body.append(first)
+    ready(first)
+    expect(onWeight).toHaveBeenCalledTimes(1)
+    disposeFileViewer(viewer)
+    expect(removed.mock.calls.filter(([event]) => event === 'message')).toHaveLength(2)
+    removed.mockRestore()
+  })
+
+  it('keeps media weight monotonic despite forged readiness and resets it for new bytes', () => {
+    const onWeight = vi.fn()
+    const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onWeight })
+    document.body.append(viewer)
+    watch.content!('<audio src="song.mp3"></audio>')
+    const first = viewer.querySelector('iframe')!
+    const message = (frame: HTMLIFrameElement, type: string, payload: Record<string, unknown>): void => {
+      window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope(type, payload) }))
+    }
+    message(first, 'ready', { media: false })
+    message(first, 'media', {})
+    message(first, 'ready', { media: false })
+    expect(onWeight.mock.calls).toEqual([[2]])
+    watch.content!('A light replacement')
+    ready(viewer.querySelectorAll('iframe')[1])
+    expect(onWeight.mock.calls).toEqual([[2], [1]])
   })
 
   it('waits for changed recovered HTML to load before declaring it ready', () => {
@@ -65,14 +121,13 @@ describe('workspace file viewer hooks', () => {
     const viewer = buildFileViewer('', '/report.html', 'host-a', undefined, undefined, { onState })
     document.body.append(viewer)
     watch.content!('First')
-    viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
+    ready(viewer.querySelector('iframe')!)
     watch.error!(new Error('offline'))
     watch.content!('Changed')
     watch.recover!()
     expect(onState).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error' }))
     const staged = viewer.querySelectorAll('iframe')[1]
-    staged.contentWindow!.scrollTo = vi.fn()
-    staged.dispatchEvent(new Event('load'))
+    ready(staged)
     expect(onState).toHaveBeenLastCalledWith({ status: 'ready' })
   })
 

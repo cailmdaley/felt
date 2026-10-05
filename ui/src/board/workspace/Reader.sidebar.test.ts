@@ -61,7 +61,7 @@ beforeEach(() => {
   reduced = false
   scrollCurrent.mockClear()
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollCurrent })
-  storage = new Map()
+  storage = new Map([['shuttle:workspace:sidebar', 'false']])
   readers = []
   listedCards = [beta, alpha, gamma]
   onChannel.mockReset()
@@ -92,14 +92,15 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
-  it('defaults closed at wide and narrow widths, with a labelled Constitutions lead control', () => {
+  it('defaults open at wide widths and closed at narrow widths, with a labelled Constitutions lead control', () => {
+    storage.clear()
     viewport.wide = true
     const wide = makeReader()
     const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(wideToggle.textContent).toBe('▥ Constitutions')
     expect(wideToggle.title).toBe('Constitutions (⌘\\)')
-    expect(wideToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
     disposeReader(wide)
 
     viewport.wide = false

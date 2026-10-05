@@ -84,4 +84,6 @@ The [constitution theme contract](https://cailmdaley.github.io/felt/concepts/the
 
 Start from [report-template.html](../assets/report-template.html) — a battle-tested palette and set of classes, not a content model to fill in. Render the report with an explicit `:::{embed} report.html` line in the fiber body, placed where the reader should meet it (usually the top).
 
+Reference a sibling page with `href="./name.mp3"` or its unique basename in `<code>`; the reader makes it a page link with inline play for audio ([companion references](https://cailmdaley.github.io/felt/concepts/companions/#references-between-pages)).
+
 The test before handoff: **give the report to someone who has never seen this fiber and ask what they'd do next.** If they have to reconstruct the present by diffing paragraphs, rewrite it.

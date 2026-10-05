@@ -101,6 +101,24 @@ beforeEach(() => {
 afterEach(() => { workspace?.dispose(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('keeps the originating Desk column and bands through j/k and returns the current card', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const returned = vi.fn()
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility,
+      deskColumn: () => [{ card: cards[0], band: 'Needs you' }, { card: cards[1], band: 'Working' }],
+      onReturnCard: returned, dock: new Dock('', changed),
+    })
+    workspace.open(cards[0]); await flush()
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Needs you', 'Working'])
+    expect(document.querySelectorAll('.ws-sidebar .kbn-card')).toHaveLength(2)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
+    expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(returned).toHaveBeenCalledWith(expect.objectContaining({ uid: 'beta', originId: 'host-b' }))
+  })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()
     document.body.replaceChildren()
@@ -135,6 +153,27 @@ describe('workspace reader integration', () => {
     await flush()
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+  })
+  it('owner-routes file mtimes in Unix seconds for embeds and body links, keeping selection on reorder', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('table.html') ? 2000000000 : 1900000000 }))
+      return original(input, init)
+    })
+    workspace.open(cards[0]); await flush()
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    expect(document.querySelectorAll('.ws-tab')[1].getAttribute('aria-label')).toBe('table.html')
+    const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
+    expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
+    document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
+    document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!.click()
+    await flush()
+    const selectedKey = document.querySelector('.ws-selected')?.getAttribute('data-key')
+    expect(workspace.reader.host.get(selectedKey!)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
   })
   it('loads receipts from each channel owner with conditional revalidation and last-good retention', async () => {
     const shared = [
@@ -211,9 +250,11 @@ describe('workspace reader integration', () => {
     const iframe = frame.content.querySelector('iframe')!
     expect(frame.el.classList.contains('ws-selected')).toBe(true)
     expect(window.location.hash).toContain(encodeURIComponent(reportKey))
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    const reportIndex = workspace.reader.host.get(reportKey) ? [...document.querySelectorAll('.ws-tab')].findIndex(tab => tab.getAttribute('aria-selected') === 'true') : -1
+    const away = reportIndex === document.querySelectorAll('.ws-tab').length - 1 ? 'ArrowLeft' : 'ArrowRight'
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: away, altKey: true, bubbles: true }))
     expect(frame.el.classList.contains('ws-receded')).toBe(true)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: away === 'ArrowLeft' ? 'ArrowRight' : 'ArrowLeft', altKey: true, bubbles: true }))
     document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!.click()
     expect(frame.el.classList.contains('ws-expanded')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -226,18 +267,18 @@ describe('workspace reader integration', () => {
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
   })
 
-  it('keeps body links and embeds while placing the inline controls above the outcome', async () => {
+  it('keeps body links and embeds while placing the outcome above inline controls', async () => {
     workspace.open(cards[0])
     await flush()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
-    const title = article.querySelector('h1')!
+    const header = article.querySelector('header')!
     const band = article.querySelector<HTMLElement>('.ws-dock')!
     const outcome = article.querySelector<HTMLElement>('.kbn-detail-lede')!
-    expect(title.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(band.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(header.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(outcome.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.textContent === 'Note')!
+    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Note')!
     proseTab.click()
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
@@ -331,10 +372,11 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(band.querySelector('.kbn-card-worker')?.textContent).toBe('Aloft')
+    expect(band.querySelector('.kbn-card-worker')).toBeNull()
+    expect(document.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
-    button('New session').click()
+    band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     expect(confirm).toHaveBeenCalledOnce()
     button('Temper').click()
     expect(transition).toHaveBeenCalledWith(expect.objectContaining({
@@ -342,7 +384,7 @@ describe('workspace reader integration', () => {
       feltStore: '/new/.felt', shuttleHost: 'host-b', shuttleProjectDir: '/work/b', originId: 'host-a',
     }), 'tempered')
     vi.mocked(fetch).mockClear()
-    button('Resume').click()
+    band.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
     await flush()
     const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/dispatch'))!
     expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: 'Keep this draft' })
@@ -445,19 +487,20 @@ describe('workspace reader integration', () => {
     })
     workspace.open(orderedCards[0])
     await flush()
-    const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.textContent ?? '')
+    const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.getAttribute('aria-label') ?? '')
     const firstOrder = labels()
     expect(firstOrder).toEqual(['Note', 'shared', 'table.html'])
 
     workspace.open(orderedCards[1])
     await flush()
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
-    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.textContent).toBe('shared')
-    const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.textContent === 'Note')!
+    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
+    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('shared')
+    const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
-    const proseLabels = [...prose.querySelectorAll<HTMLButtonElement>('.ws-prose-documents button')].map(button => button.textContent ?? '')
-    expect(labels()).toEqual(['Note', ...proseLabels])
+    expect(prose.querySelector('.ws-prose-documents')).toBeNull()
+    expect(prose.querySelector('.ws-prose-contents')?.textContent).toBe('3 pages2 reports')
+    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
   })
 
   it('uses the shared Reader keymap for single-step tab roving focus', async () => {
@@ -650,6 +693,25 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[1].name)
     expect(window.location.hash).toContain(`${ordered[1].uid ?? ordered[1].id}@${ordered[1].originId}`)
     expect(visibility).toHaveBeenCalledWith(true)
+  })
+
+  it('restores a Desk-opened channel over Desk after reload', async () => {
+    workspace.open(cards[0])
+    await flush()
+    expect(document.querySelector('.ws-return')?.textContent).toBe('‹ Desk')
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'desk' } })
+
+    workspace.dispose()
+    document.body.replaceChildren()
+    const onView = vi.fn()
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => cards, origin: () => 'Board', onVisibility: visibility, onView,
+      dock: new Dock('', changed),
+    })
+    await flush()
+
+    expect(onView).toHaveBeenCalledWith('desk')
+    expect(document.querySelector('.ws-return')?.textContent).toBe('‹ Desk')
   })
 
   it('restores overview scroll after returning from a channel opened on the Board', async () => {

@@ -5,6 +5,8 @@ export interface ConstitutionPickerOptions {
   files?(card: KanbanCard): string[]
   current?(card: KanbanCard): boolean
   revealCurrent?: boolean
+  renderCard?(card: KanbanCard): HTMLElement
+  group?(card: KanbanCard): string | undefined
   onOpen(card: KanbanCard): void
 }
 
@@ -17,7 +19,8 @@ export class ConstitutionPicker {
   private popup = false
   private selected: string | null = null
   private revealed: string | null = null
-  private readonly rows = new Map<string, { el: HTMLButtonElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard }>()
+  private readonly rows = new Map<string, { el: HTMLElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard; revision: string }>()
+  private readonly captions = new Map<string, HTMLElement>()
   private readonly opts: ConstitutionPickerOptions
   constructor(opts: ConstitutionPickerOptions) {
     this.opts = opts
@@ -68,20 +71,49 @@ export class ConstitutionPicker {
     const keys = new Set(visible.map(identity))
     for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.rows.delete(key) }
     let cursor = this.list.firstChild
+    let previousGroup: string | undefined
+    const groups = new Set<string>()
     for (const card of visible) {
+      const group = this.opts.group?.(card)
+      if (group && group !== previousGroup) {
+        let caption = this.captions.get(group)
+        if (!caption) { caption = document.createElement('h3'); caption.className = 'kbn-flight-caption'; caption.textContent = group; this.captions.set(group, caption) }
+        groups.add(group)
+        if (caption !== cursor) this.list.insertBefore(caption, cursor)
+        cursor = caption.nextSibling
+      }
+      previousGroup = group
       const key = identity(card)
       let row = this.rows.get(key)
       if (!row) {
-        const el = document.createElement('button')
-        el.type = 'button'; el.className = 'ws-channel-row'
-        const name = document.createElement('span'); name.className = 'ws-channel-name'
-        const owner = document.createElement('small')
-        el.append(name, owner)
-        row = { el, name, owner, card }
+        const el = this.opts.renderCard?.(card) ?? document.createElement('button')
+        el.classList.add('ws-channel-row')
+        if (el instanceof HTMLButtonElement) el.type = 'button'
+        else { el.setAttribute('role', 'button'); el.tabIndex = 0 }
+        const name = el.querySelector<HTMLElement>('.ws-channel-name') ?? document.createElement('span'); name.classList.add('ws-channel-name')
+        const owner = el.querySelector<HTMLElement>('.ws-channel-owner') ?? document.createElement('small')
+        if (!this.opts.renderCard) el.append(name, owner)
+        row = { el, name, owner, card, revision: JSON.stringify(card) }
         const record = row
-        el.addEventListener('click', () => { this.close(); this.opts.onOpen(record.card) })
+        const open = (): void => { this.close(); this.opts.onOpen(record.card) }
+        el.addEventListener('click', event => {
+          const control = (event.target as Element).closest('button,a')
+          if (control && control !== el) return
+          open()
+        })
+        if (!(el instanceof HTMLButtonElement)) el.addEventListener('keydown', event => {
+          if (event.target !== el || !['Enter', ' '].includes(event.key) || event.isComposing || event.repeat) return
+          event.preventDefault(); open()
+        })
         this.rows.set(key, row)
       }
+      if (this.opts.renderCard && row.revision !== JSON.stringify(card)) {
+        const face = this.opts.renderCard(card)
+        row.el.replaceChildren(...face.childNodes)
+        row.name = row.el.querySelector<HTMLElement>('.ws-channel-name')!
+        row.owner = row.el.querySelector<HTMLElement>('.ws-channel-owner')!
+      }
+      row.revision = JSON.stringify(card)
       row.card = card
       row.el.dataset.channelUid = card.uid ?? card.id
       row.el.dataset.channelOwner = card.originId
@@ -89,10 +121,11 @@ export class ConstitutionPicker {
       row.el.setAttribute('aria-current', String(key === selected))
       row.el.title = card.outcome ?? card.path
       if (row.name.textContent !== card.name) row.name.textContent = card.name
-      if (row.owner.textContent !== card.originId) row.owner.textContent = card.originId
+      if (!this.opts.renderCard && row.owner.textContent !== card.originId) row.owner.textContent = card.originId
       if (row.el !== cursor) this.list.insertBefore(row.el, cursor)
       cursor = row.el.nextSibling
     }
+    for (const [group, caption] of this.captions) if (!groups.has(group)) { caption.remove(); this.captions.delete(group) }
     if (reveal && selected && selected !== this.revealed) {
       const row = this.rows.get(selected)
       if (row) {
@@ -106,7 +139,7 @@ export class ConstitutionPicker {
     if (event.key === 'Escape') this.close(true)
     else if (event.key === 'Enter' && event.target === this.find) {
       if (event.repeat) return
-      this.list.querySelector<HTMLButtonElement>('button')?.click()
+      this.list.querySelector<HTMLElement>('.ws-channel-row')?.click()
     } else return
     event.preventDefault(); event.stopImmediatePropagation()
   }

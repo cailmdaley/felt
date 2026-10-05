@@ -24,7 +24,7 @@ let band: Dock
 const saved = vi.fn()
 const writes = (): Array<Record<string, unknown>> => vi.mocked(fetch).mock.calls
   .filter(([, options]) => options?.method === 'POST').map(([, options]) => JSON.parse(String(options?.body)))
-const button = (text: string): HTMLButtonElement => [...band.el.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === text)!
+const button = (text: string): HTMLButtonElement => text === 'New session' ? band.el.querySelector('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')! : text === 'Resume' ? band.el.querySelector('.kbn-ctl-resume')! : [...band.el.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === text)!
 const select = (label: string): HTMLSelectElement => band.el.querySelector(`select[aria-label="${label}"]`)!
 const change = (label: string, value: string): void => { select(label).value = value; select(label).dispatchEvent(new Event('change')) }
 
@@ -38,6 +38,24 @@ beforeEach(async () => {
   await flush()
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
+
+describe('shared verdict controls', () => {
+  it('uses the same lifecycle callback from the fiber band and floating plate', async () => {
+    const transition = vi.fn()
+    const review = task({ status: 'closed', tempered: false })
+    const controls = new Dock('', saved, transition)
+    const band = controls.bandFor(review)
+    const plate = controls.verdictPlateFor(review)
+    document.body.append(band.el, plate)
+    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
+    plate.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
+    expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
+      ['task-uid', 'tempered'], ['task-uid', 'composted'],
+    ])
+    controls.reset()
+    await flush()
+  })
+})
 
 describe('Dock click boundary', () => {
   it('isolates all control clicks at the band rather than wiring each field', () => {
@@ -95,6 +113,7 @@ describe('Dock dispatch recovery', () => {
   it.each(['New session', 'Resume'])('re-enables %s after a sessionless conflict only when worker state changes', async name => {
     vi.mocked(fetch).mockResolvedValue(response({}, 409))
     const verb = button(name)
+    const label = verb.textContent
     verb.click()
     await flush()
     expect(verb.textContent).toBe('Already running')
@@ -103,8 +122,41 @@ describe('Dock dispatch recovery', () => {
     expect(verb.disabled).toBe(true)
     dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
     expect(verb.disabled).toBe(false)
-    expect(verb.textContent).toBe(name)
+    expect(verb.textContent).toBe(label)
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
+  })
+})
+
+describe('state-shaped act zone', () => {
+  it('puts review verdicts first, retains a draft across runtime changes, and hides verdicts on drafts', () => {
+    const review = task({ status: 'closed', sessionUuid: 'resume-me' })
+    band = dock.bandFor(review)
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'My correction'
+    expect(band.el.querySelector('.ws-dock-body')?.firstElementChild?.className).toBe('kbn-ctl-verdict')
+    expect(band.el.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
+    expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
+    expect(message.placeholder).toBe('Reply and resume…')
+    dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
+    expect(band.el.querySelector('textarea')).toBe(message)
+    expect(message.value).toBe('My correction')
+    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
+    expect(band.el.querySelector('.kbn-ctl-verdict-menu')).not.toBeNull()
+    dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
+    expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
+    expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
+  })
+  it('Enter resumes the named session and Alt-Enter explicitly starts fresh', async () => {
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'Continue'
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
+    message.value = 'Restart'
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Restart' })
   })
 })
 

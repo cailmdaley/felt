@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildFileViewer, disposeFileViewer, suspendFileViewer, resumeFileViewer } from '../FileViewerPanel.js'
 import { DocumentHost } from './DocumentHost.js'
+import { envelope } from './DocumentBridge.js'
 import type { WorkspaceDocument } from './documents.js'
 
 vi.mock('../LiveFileRefresh.js', () => ({
@@ -29,6 +30,9 @@ beforeEach(() => {
   })
   vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function (this: HTMLMediaElement) { return !playing.has(this) })
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 0))
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: true, size: 2048 }))))
 })
 afterEach(() => {
@@ -77,20 +81,24 @@ describe('native media documents', () => {
     const report = viewer('/listening-room.html')
     const iframe = report.querySelector('iframe')!
     await vi.waitFor(() => expect(iframe.srcdoc).toContain('Listening room'))
-    const embedded = document.createElement('audio')
-    iframe.contentDocument!.body.append(embedded)
-    iframe.dispatchEvent(new Event('load'))
+    const command = vi.spyOn(iframe.contentWindow!, 'postMessage')
+    const send = (type: string) => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: envelope(type) }))
+    send('ready')
+    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: true }), '*')
     const native = viewer('/song.mp3').querySelector('audio')!
-    await embedded.play(); expect(embedded.paused).toBe(false)
-    await native.play(); expect(embedded.paused).toBe(true)
-    await embedded.play(); expect(native.paused).toBe(true)
-    embedded.currentTime = .3
-    suspendFileViewer(report); expect(embedded.paused).toBe(true)
+    await native.play()
+    expect(command).toHaveBeenLastCalledWith(envelope('pause'), '*')
+    send('media')
+    expect(native.paused).toBe(true)
+    suspendFileViewer(report)
+    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: false }), '*')
+    send('media')
+    expect(command).toHaveBeenLastCalledWith(envelope('pause'), '*')
     resumeFileViewer(report)
-    expect(embedded.paused).toBe(true); expect(embedded.currentTime).toBe(.3)
+    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: true }), '*')
   })
 
-  it('keeps the element through receding and parking and takes Space without stealing typing', async () => {
+  it('keeps the element through receding and parking and takes p without stealing typing or Space', async () => {
     const track = document.createElement('div'); document.body.append(track)
     host = new DocumentHost(track, { shuttleBase: '', buildProse: () => document.createElement('div'), onSelect: () => {} })
     const audioDoc = doc('/song.mp3', 'audio'), videoDoc = doc('/film.mp4', 'video')
@@ -98,6 +106,8 @@ describe('native media documents', () => {
     const audio = host.get(audioDoc.key)!.viewer!.querySelector('audio')!
     audio.dispatchEvent(new Event('loadedmetadata'))
     document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    expect(audio.paused).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }))
     expect(audio.paused).toBe(false)
     audio.currentTime = .5
     host.select(videoDoc.key); expect(audio.paused).toBe(true)
@@ -105,7 +115,7 @@ describe('native media documents', () => {
     expect(host.get(audioDoc.key)!.viewer!.querySelector('audio')).toBe(audio)
     expect(audio.paused).toBe(true); expect(audio.currentTime).toBe(.5)
     const field = document.createElement('textarea'); document.body.append(field)
-    field.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }))
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true }))
     expect(audio.paused).toBe(true)
     host.parkAll(); host.setChannel([audioDoc, videoDoc], audioDoc.key)
     expect(host.get(audioDoc.key)!.viewer!.querySelector('audio')).toBe(audio)

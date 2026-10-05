@@ -1,17 +1,21 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
+import { Verdicts, type Verdict } from './Verdicts.js'
+import { fiberPageColumn } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
-import { renderMarkdown, showToast } from '../utils.js'
+import { fileInfoUrl, renderMarkdown, showToast } from '../utils.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
+import { WorkspaceDepth } from './Depth.js'
+import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { Overview } from './Overview.js'
-import { WorkspaceHistory, type WorkspaceRoute } from './route.js'
+import { WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
 
 export interface WorkspaceOptions {
@@ -19,7 +23,9 @@ export interface WorkspaceOptions {
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
-  /** A history entry addressed one of the board's views; switch to it without pushing. */
+  deskColumn?(card: KanbanCard): SidebarEntry[]
+  onReturnCard?(card: KanbanCard): void
+  /** A history entry addressed a board view or channel origin; switch to it without pushing. */
   onView?(view: WorkspaceView): void
   dock: Dock
 }
@@ -27,6 +33,7 @@ interface ChannelState {
   card: KanbanCard
   channel: Channel
   links: Array<{ path: string; owner?: string; title?: string }>
+  fileModifiedAt: Map<DocKey, string>
   selected?: DocKey
   selectionVersion: number
   routedFile?: DocKey
@@ -34,8 +41,10 @@ interface ChannelState {
   metadataKnown: boolean
   error?: string
 }
-export type WorkspaceView = 'desk' | 'chronicle' | 'board'
+export type WorkspaceView = WorkspaceOriginView
 const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chronicle': 'chronicle', '#/board': 'board' }
+const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
+const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
 
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
@@ -43,14 +52,17 @@ export class Workspace {
   readonly reader: Reader
   readonly overview: Overview
   readonly dock: Dock
+  private readonly verdicts = new Verdicts()
   private readonly picker: ConstitutionPicker
   private readonly themes: ChannelThemes
   private readonly root: HTMLElement
+  private readonly depth: WorkspaceDepth
   private readonly opts: WorkspaceOptions
   private readonly history: WorkspaceHistory
   private readonly channels = new Map<string, ChannelState>()
   private readonly proseRevisions = new Map<DocKey, string>()
   private current: ChannelState | null = null
+  private column: SidebarEntry[] | null = null
   private origin = 'Board'
   private readonly receipts = new Map<string, { files: ShelfFile[]; etag?: string }>()
   private readonly receiptsRead = new Map<string, Promise<void>>()
@@ -64,6 +76,7 @@ export class Workspace {
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.root = root
+    this.depth = new WorkspaceDepth(root)
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
@@ -81,17 +94,28 @@ export class Workspace {
         return [...ordered, ...opts.cards().filter(card => !ordered.some(row => (row.uid ?? row.id) === (card.uid ?? card.id) && row.originId === card.originId))]
       },
       files: card => this.overview.fileNames(card),
-      onOpen: card => this.open(card, 'Desk', undefined, this.overview.hasMetadata(card)),
+      onOpen: card => this.open(card, 'Desk', undefined, this.overview.hasMetadata(card), false),
     })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
-      switcherCards: () => this.overview.orderedCards(),
+      switcherCards: () => this.sidebarCards(),
+      pickerCards: () => this.overview.orderedCards(),
+      sidebarBand: card => this.column?.find(entry => cardIdentity(entry.card) === cardIdentity(card))?.band,
       files: card => this.overview.fileNames(card),
       onSelect: key => this.select(key),
-      onReturn: () => { if (this.origin === 'Board') this.lastBoardRoute = null; this.history.leave() },
+      onCrossing: travel => this.depth.cross(travel),
+      onReturn: () => {
+        if (this.origin === 'Board') this.lastBoardRoute = null
+        if (this.current) this.opts.onReturnCard?.(this.current.card)
+        this.history.leave()
+      },
       workerPill: card => this.dock.workerPillFor(card),
+      verdictPlate: card => this.dock.verdictPlateFor(card),
+      onVerdict: verdict => this.deferVerdict(verdict),
+      onCompose: () => this.focusComposer(),
+      onConversation: card => { this.dock.openConversation(card) },
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),
@@ -120,19 +144,37 @@ export class Workspace {
     this.open(card, this.opts.origin(), this.ensure(card).channel.documents[0].key)
   }
 
-  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true): void {
+  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
+    const outsideColumn = this.isActive && this.column && !this.column.some(entry => cardIdentity(entry.card) === cardIdentity(card))
+    if (!this.isActive || origin !== this.origin || outsideColumn || !fromDeskColumn) {
+      const column = fromDeskColumn && !outsideColumn && origin === 'Desk' ? this.opts.deskColumn?.(card) : undefined
+      this.column = column?.length ? column : null
+      this.reader.captureSidebar(this.column ?? [])
+    }
     this.origin = origin
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
-    this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected)
+    this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin))
+  }
+
+  private sidebarCards(): KanbanCard[] {
+    if (this.column) {
+      const live = new Map(this.opts.cards().map(card => [cardIdentity(card), card]))
+      return this.column.map(entry => live.get(cardIdentity(entry.card)) ?? entry.card)
+    }
+    return this.origin === 'Board' ? this.overview.orderedCards() : this.overview.recentCards()
   }
 
   mountOverview(host: HTMLElement): void {
     if (this.overview.el.parentElement !== host) host.append(this.overview.el)
+    this.depth.setActive(true)
     this.overview.setVisible(!this.isActive)
     this.overview.refresh()
   }
-  hideOverview(): void { this.overview.setVisible(false) }
+  hideOverview(): void {
+    this.overview.setVisible(false)
+    this.depth.setActive(this.isActive)
+  }
 
   /** View keys park the reader; Board restores its last unreturned channel. */
   suspend(view: 'desk' | 'chronicle'): void {
@@ -159,11 +201,32 @@ export class Workspace {
     this.show(this.current)
   }
 
+  private deferVerdict(verdict: Verdict): void {
+    const state = this.current
+    if (!state?.metadataKnown || fiberPageColumn(state.card) !== 'awaitingReview') return
+    this.verdicts.queue(state.card, verdict, () => {
+      // A worker may start during the undo window; never stop it from a stale review.
+      const card = this.opts.cards().find(card => (card.uid ?? card.id) === state.channel.uid && card.originId === state.channel.owner) ?? state.card
+      if (fiberPageColumn(card) !== 'awaitingReview') {
+        showToast(`${card.name} no longer awaits review; verdict not written`, 'error')
+        return
+      }
+      this.dock.verdict(card, verdict)
+    })
+  }
+  private focusComposer(): void {
+    const state = this.current
+    if (!state) return
+    const key = state.channel.documents[0]?.key
+    if (key) this.select(key)
+    this.controls(state)?.el.querySelector<HTMLTextAreaElement>('.kbn-detail-directive')?.focus()
+  }
+
   private controls(state: ChannelState | null): Dock | undefined {
     return state?.metadataKnown && !state.channel.uid.startsWith('other:') ? this.dock.bandFor(state.card) : undefined
   }
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.shuttleAgent, state.error, state.loaded, state.metadataKnown])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.error, state.loaded, state.metadataKnown])
   }
   private prose(key: DocKey): HTMLElement {
     const state = [...this.channels.values()].find(s => s.channel.documents[0]?.key === key)
@@ -204,7 +267,7 @@ export class Workspace {
       state = {
         card,
         channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, modifiedAt: card.modifiedAt }),
-        links: [], selectionVersion: 0, loaded: false, metadataKnown,
+        links: [], fileModifiedAt: new Map(), selectionVersion: 0, loaded: false, metadataKnown,
       }
       this.channels.set(key, state)
     } else { state.card = card; state.metadataKnown ||= metadataKnown }
@@ -219,15 +282,20 @@ export class Workspace {
     this.picker.close()
     if (route.kind === 'overview') {
       const hash = route.hash ?? window.location.hash
-      const view = VIEW_HASHES[hash]
+      const view = VIEW_HASHES[hash] ?? this.history.originView
       this.reader.hide(view !== 'board')
       if (view === 'board') this.lastBoardRoute = null
-      if (view) this.opts.onView?.(view)
+      this.origin = VIEW_LABELS[view]
+      this.opts.onView?.(view)
       this.overview.setVisible(view === 'board')
+      this.depth.setActive(view === 'board')
       this.opts.onVisibility(false)
       this.stopTimer()
       return
     }
+    const originView = this.history.originView
+    this.origin = VIEW_LABELS[originView]
+    this.opts.onView?.(originView)
     let state = this.channels.get(channelId(route.uid, route.owner))
     if (!state) {
       const card = this.opts.cards().find(c => (c.uid ?? c.id) === route.uid && c.originId === route.owner)
@@ -250,6 +318,7 @@ export class Workspace {
     const selectionVersion = state.selectionVersion
     if (route.doc) state.selected = route.doc
     this.opts.onVisibility(true)
+    this.depth.setActive(true)
     this.show(state)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
@@ -281,7 +350,7 @@ export class Workspace {
     const ch = state.channel
     if (!state.selected || !ch.documents.some(d => d.key === state.selected)) state.selected = defaultSelection(ch)
     this.refreshProse(state)
-    this.reader.show(ch, state.selected, this.origin, state.card, animate)
+    this.reader.show(ch, state.selected, this.origin, state.card, animate, state.loaded)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: state.selected }
     this.dock.syncRuntime(state.card)
   }
@@ -312,8 +381,13 @@ export class Workspace {
     state.selectionVersion++
     this.show(state)
     this.history.select(key)
+    void this.readFileMetadata(state).then(() => {
+      if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
+    })
   }
   private async openFiber(id: string, owner: string): Promise<void> {
+    this.column = null
+    this.reader.captureSidebar([])
     const epoch = this.routeEpoch
     const known = this.opts.cards().find(c => (c.id === id || c.uid === id) && c.originId === owner)
       ?? this.opts.cards().find(c => c.uid === id)
@@ -375,7 +449,7 @@ export class Workspace {
           // Body reads carry document metadata; the composite feed owns live workers.
           const live = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner) ?? state.card
           const metadata = cardFromCompositeEntry({ ...entry, origin: state.channel.owner })
-          for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
+          for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
             metadata[key] = live[key] as never
           }
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
@@ -393,10 +467,31 @@ export class Workspace {
       await receiptRead
       if (this.disposed) return
       this.rebuild(state)
+      await this.readFileMetadata(state)
+      if (this.disposed) return
+      this.rebuild(state)
       this.refreshProse(state)
     })().finally(() => { this.loads.delete(key); this.overview.resolving(state.channel.uid, false) })
     this.loads.set(key, promise)
     return promise
+  }
+  /** Metadata reads are bounded and never download document bodies. */
+  private async readFileMetadata(state: ChannelState): Promise<void> {
+    const files = state.channel.documents.filter(d => d.kind !== 'fiber')
+    let cursor = 0
+    await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+      while (cursor < files.length && !this.disposed) {
+        const doc = files[cursor++]
+        try {
+          const response = await fetch(fileInfoUrl(this.opts.shuttleBase, doc.path, doc.owner), { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+          if (!response.ok) continue
+          const info = await response.json()
+          const time = typeof info.modified_at === 'number' ? info.modified_at * 1000 : typeof info.modified_at === 'string' ? Date.parse(info.modified_at) : NaN
+          if (info.exists && Number.isFinite(time)) state.fileModifiedAt.set(doc.key, new Date(time).toISOString())
+          else state.fileModifiedAt.delete(doc.key)
+        } catch { /* An unreachable owner keeps its last known metadata. */ }
+      }
+    }))
   }
   private rebuild(state: ChannelState): void {
     const before = state.channel
@@ -413,7 +508,7 @@ export class Workspace {
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
-      sent, links, previous: before, modifiedAt: card.modifiedAt,
+      sent, links, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {
       state.selected = fallbackSelection(before.documents.map(d => d.key), state.channel.documents.map(d => d.key), state.selected)
@@ -439,10 +534,12 @@ export class Workspace {
     this.stopTimer()
     document.removeEventListener('visibilitychange', this.visibility)
     this.history.dispose()
+    this.verdicts.dispose()
     this.dock.reset()
     this.picker.dispose()
     this.reader.dispose()
     this.overview.dispose()
     this.themes.dispose()
+    this.depth.dispose()
   }
 }

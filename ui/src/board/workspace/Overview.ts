@@ -2,15 +2,17 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
-import { cardFromCompositeEntry } from '../KanbanReadModel.js'
+import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
+import { fiberPageColumn } from './fiberPageState.js'
 import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
-import { chooseEvictions, chooseLoads, LOAD_POLICY } from '../views/shelfLoad.js'
-import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
-import { documentKind } from './documents.js'
-import { docKey, parseDocKey, type DocKey } from './documents.js'
+import { LOAD_POLICY } from '../views/shelfLoad.js'
+import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
+import { docKey, parseDocKey, documentKind, documentLabels, type DocKey } from './documents.js'
+import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import type { ChannelThemes } from './ChannelThemes.js'
 import './tokens.css'
 import './overview.css'
+import { ReceiptMotion } from './receiptMotion.js'
 
 export interface OverviewOptions {
   shuttleBase: string
@@ -26,6 +28,7 @@ const RECEIPT_OVERLAP_MS = 60000
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
 const SEEN_STORAGE = 'shuttle.workspace.overview.seen'
+const CHANGES_STORAGE = 'shuttle.workspace.overview.changes'
 const DAY_GROUPS = ['Today', 'Yesterday', 'This week', 'Earlier'] as const
 const HOST_MARKS = ['○', '■', '▲', '◇', '◐', '□', '△', '◆']
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0
@@ -152,25 +155,55 @@ interface RibbonItem {
   thumb: Thumbnail
 }
 interface Group { el: HTMLElement; grid: HTMLElement; count: HTMLElement }
-interface Thumbnail {
-  key: string
+interface ChangeStamp { outcome: string; review: boolean; outcomeAt: number; reviewAt: number }
+interface Change {
+  uid: string
+  card: KanbanCard
+  receipts: Receipt[]
+  outcome: boolean
+  review: boolean
+  latest: number
+  priority: number
+}
+interface ChangeRow {
   el: HTMLElement
-  file?: Receipt
-  state: 'idle' | 'loading' | 'live' | 'failed'
-  near: boolean
-  lastVisible: number
-  body?: HTMLElement
-  timer?: ReturnType<typeof setTimeout>
-  generation: number
+  open: HTMLButtonElement
+  name: HTMLElement
+  summary: HTMLElement
+  outcome: HTMLElement
+  documents: HTMLElement
+  more: HTMLElement
+  thumbs: Map<DocKey, { el: HTMLButtonElement; thumb: Thumbnail }>
+  change: Change
+}
+const needsYou = (card: KanbanCard): number => fiberPageColumn(card) === 'awaitingReview' ? 0
+  : fiberPageColumn(card) === 'inFlight' && inFlightBand(card) === 'needsYou' ? 1 : 2
+function changeSummary(change: Change): string {
+  const parts = [change.review ? '→ awaiting review' : '', change.outcome ? 'outcome changed' : ''].filter(Boolean)
+  const kinds = new Map<string, number>()
+  for (const receipt of change.receipts) {
+    const kind = documentKind(receipt.fullPath)
+    const label = kind === 'html' ? 'report' : kind === 'text' ? 'text' : kind === 'other' ? 'file' : kind === 'pdf' ? 'PDF' : kind
+    kinds.set(label, (kinds.get(label) ?? 0) + 1)
+  }
+  parts.push([...kinds].map(([kind, n]) => `${n} ${kind}${n === 1 || ['audio', 'video', 'text'].includes(kind) ? '' : 's'}`).join(', '))
+  return parts.filter(Boolean).join(' · ')
 }
 
 /** Persistent contact sheet; receipts are raw, owner-aware, and never path-deduped. */
 export class Overview {
   readonly el = node('div', 'ws-overview')
   private readonly opts: OverviewOptions
+  private readonly stopTitles: () => void
+  private readonly receiptMotion = new ReceiptMotion()
   private readonly inner = node('div', 'ws-overview-inner')
-  private readonly summary = node('div', 'ws-overview-summary ws-overview-meta')
-  private readonly legend = node('div', 'ws-overview-legend ws-overview-meta')
+  private readonly summary = node('div', 'ws-overview-summary')
+  private readonly changesEl = node('div', 'ws-overview-changes')
+  private readonly changesEmpty = node('p', 'ws-overview-changes-empty', 'Nothing new since you were here.')
+  private readonly changeRows = new Map<string, ChangeRow>()
+  private readonly stamps = new Map<string, ChangeStamp>()
+  private readonly boundary = node('div', 'ws-overview-boundary')
+  private readonly latest = node('details', 'ws-overview-latest')
   private readonly ribbon = node('div', 'ws-overview-ribbon')
   private readonly groupsEl = node('div', 'ws-overview-groups')
   private readonly status = node('p', 'ws-overview-status')
@@ -209,17 +242,29 @@ export class Overview {
   private visible = true
   private disposed = false
   private scroll = 0
-  /** When this sheet was last left; receipts before it are not news, even in fibers never opened. */
+  /** The prior visit is fixed for this sheet, so reloads inside thirty seconds keep the news. */
   private readonly seen: number
+  private readonly previousVisit?: number
+  private visitStarted?: number
+  private visitTimer?: ReturnType<typeof setTimeout>
   private raf?: number
 
   constructor(opts: OverviewOptions) {
     this.opts = opts
+    this.stopTitles = watchDocumentTitles(() => { if (!this.disposed) this.render() })
     const lens = stored(LENS_STORAGE)
     if (lens === 'recent' || lens === 'projects' || lens === 'hosts') this.lens = lens
     const seen = stored(SEEN_STORAGE)
-    this.seen = typeof seen === 'number' && Number.isFinite(seen) ? seen : Date.now()
-    persist(SEEN_STORAGE, this.seen)
+    this.previousVisit = typeof seen === 'number' && Number.isFinite(seen) && seen > 0 && seen <= Date.now() ? seen : undefined
+    this.seen = this.previousVisit ?? Date.now() - WINDOW_MS
+    const stamps = stored(CHANGES_STORAGE)
+    if (stamps && typeof stamps === 'object' && !Array.isArray(stamps)) {
+      for (const [uid, raw] of Object.entries(stamps)) {
+        if (!raw || typeof raw !== 'object') continue
+        const stamp = raw as ChangeStamp
+        if (typeof stamp.outcome === 'string' && typeof stamp.review === 'boolean' && Number.isFinite(stamp.outcomeAt) && Number.isFinite(stamp.reviewAt)) this.stamps.set(uid, stamp)
+      }
+    }
     const visits = stored(VISIT_STORAGE)
     if (visits && typeof visits === 'object' && !Array.isArray(visits)) {
       for (const [uid, at] of Object.entries(visits)) if (typeof at === 'number' && Number.isFinite(at)) this.visits.set(uid, at)
@@ -232,20 +277,21 @@ export class Overview {
     title.append(cap, 'ocuments')
     title.setAttribute('aria-label', 'Documents')
     heading.append(title, this.summary)
-    this.legend.setAttribute('aria-label', 'Host legend')
-    header.append(heading, this.legend)
-    const receipts = node('section', 'ws-overview-receipts')
-    receipts.setAttribute('aria-label', 'Latest receipts')
-    const receiptHeading = node('h2', 'ws-overview-section-title', 'Latest receipts')
-    receiptHeading.append(node('span', 'ws-overview-section-count', '12 newest across the fleet'))
-    receipts.append(receiptHeading, this.ribbon)
+    header.append(heading)
+    const changes = node('section', 'ws-overview-news')
+    changes.setAttribute('aria-label', 'Since you were here')
+    changes.append(node('h2', 'ws-overview-section-title', this.previousVisit ? 'Since you were here' : 'The last 30 days'), this.changesEl, this.changesEmpty)
+    const latestHeading = node('summary', '', 'Latest files')
+    this.latest.append(latestHeading, this.ribbon)
+    this.latest.addEventListener('toggle', this.schedule)
     const controls = node('div', 'ws-overview-controls')
     this.lensGroup.setAttribute('role', 'radiogroup')
     this.lensGroup.setAttribute('aria-label', 'Group documents')
-    for (const [value, label] of [['recent', 'Recent work'], ['projects', 'Projects'], ['hosts', 'Hosts']] as const) {
+    for (const [value, label] of [['recent', 'Recent'], ['projects', 'Projects'], ['hosts', 'Hosts']] as const) {
       const option = button('')
       option.textContent = label
       option.setAttribute('role', 'radio')
+      option.setAttribute('aria-label', label)
       option.dataset.lens = value
       option.addEventListener('click', () => this.setLens(value))
       this.lensButtons.set(value, option); this.lensGroup.append(option)
@@ -259,12 +305,12 @@ export class Overview {
       const next = order[(order.indexOf(this.lens) + step + order.length) % order.length]
       this.setLens(next); this.lensButtons.get(next)?.focus()
     })
-    this.find.type = 'search'; this.find.placeholder = 'Find work or files…'
+    this.find.type = 'search'; this.find.placeholder = 'Find… /'
     this.find.setAttribute('aria-label', 'Find work or files')
     this.find.addEventListener('input', () => this.render())
     controls.append(this.lensGroup, this.find)
     this.status.setAttribute('role', 'status')
-    this.inner.append(header, receipts, controls, this.groupsEl, this.status)
+    this.inner.append(header, changes, this.latest, controls, this.groupsEl, this.status)
     this.el.append(this.inner)
     this.el.setAttribute('aria-label', 'Document overview')
     this.el.addEventListener('scroll', this.schedule, { passive: true })
@@ -373,8 +419,9 @@ export class Overview {
   }
 
   setVisible(visible: boolean): void {
-    if (this.disposed || visible === this.visible) return
-    if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; persist(SEEN_STORAGE, Date.now()) }
+    if (this.disposed) return
+    if (visible === this.visible) { if (visible) this.startVisit(); return }
+    if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; this.leaveVisit() }
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
@@ -382,8 +429,24 @@ export class Overview {
       if (visible) this.opts.themes?.bind(folio.el, folio.card)
       else this.opts.themes?.unbind(folio.el)
     }
-    if (visible) { this.el.scrollTop = this.scroll; this.schedule() }
-    else if (this.raf !== undefined) { cancelAnimationFrame(this.raf); this.raf = undefined }
+    if (visible) { this.el.scrollTop = this.scroll; this.startVisit(); this.schedule() }
+    else {
+      if (this.raf !== undefined) { cancelAnimationFrame(this.raf); this.raf = undefined }
+      for (const thumb of this.thumbnails.values()) thumb.schedule()
+    }
+  }
+  private startVisit(): void {
+    if (!this.visible || !this.el.isConnected || this.visitStarted !== undefined) return
+    this.visitStarted = Date.now()
+    this.visitTimer = setTimeout(() => {
+      if (!this.disposed && this.visible) persist(SEEN_STORAGE, Date.now())
+    }, 30001)
+  }
+  private readonly leaveVisit = (): void => {
+    if (this.visitStarted === undefined) return
+    persist(SEEN_STORAGE, Date.now())
+    clearTimeout(this.visitTimer)
+    this.visitStarted = undefined
   }
   show(): void { this.setVisible(true) }
   hide(): void { this.setVisible(false) }
@@ -402,6 +465,12 @@ export class Overview {
   }
   /** Find never truncates keyboard channel order. */
   orderedCards(): KanbanCard[] { this.resolveFolios(); return [...this.order] }
+  /** Notes and external entry points use Recent work, independent of the sheet's lens. */
+  recentCards(): KanbanCard[] {
+    return [...this.folios.values()].sort((a, b) =>
+      DAY_GROUPS.indexOf(a.recent as typeof DAY_GROUPS[number]) - DAY_GROUPS.indexOf(b.recent as typeof DAY_GROUPS[number])
+      || b.latest - a.latest || compare(a.uid, b.uid) || compare(a.card.originId, b.card.originId)).map(folio => folio.card)
+  }
   /** Receipt metadata already held by the sheet; searching never reads fiber bodies. */
   fileNames(card: KanbanCard): string[] {
     return this.folios.get(uidOf(card))?.receipts.flatMap(r => [r.basename, r.fullPath]) ?? []
@@ -414,8 +483,11 @@ export class Overview {
 
   dispose(): void {
     if (this.disposed) return
+    clearTimeout(this.visitTimer)
     this.disposed = true
     this.navigation++
+    this.stopTitles()
+    this.receiptMotion.dispose()
     clearTimeout(this.retryTimer)
     this.request?.abort()
     for (const controller of this.cardControllers) controller.abort()
@@ -423,7 +495,7 @@ export class Overview {
     this.resizeObserver?.disconnect()
     if (this.raf !== undefined) cancelAnimationFrame(this.raf)
     for (const folio of this.folios.values()) this.opts.themes?.unbind(folio.el)
-    for (const thumb of this.thumbnails.values()) this.unmount(thumb)
+    for (const thumb of this.thumbnails.values()) thumb.dispose()
     this.thumbnails.clear()
     window.removeEventListener('resize', this.schedule)
     document.removeEventListener('keydown', this.keydown)
@@ -444,7 +516,9 @@ export class Overview {
       effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
   }
   private reconcile(): void {
+    const arrived: Folio[] = []
     const known = this.knownCards()
+    this.observeChanges(known)
     for (const uid of known.keys()) { this.missingCards.delete(uid); this.cardRetries.delete(uid) }
     const byUid = new Map<string, Map<DocKey, Receipt>>()
     for (const file of this.files) {
@@ -464,6 +538,7 @@ export class Overview {
       const card = known.get(uid) ?? this.openedCards.get(uid) ?? this.fallback(uid, receipts[0]?.owner ?? 'local')
       const latest = receipts[0]?.timestamp ?? 0
       let folio = this.folios.get(uid)
+      const priorReceipts = folio?.receipts.map(r => [r.key, r.timestamp, r.sessionId])
       if (!folio) {
         folio = this.createFolio(uid, card)
         this.folios.set(uid, folio)
@@ -478,6 +553,7 @@ export class Overview {
         folio.project = projectOf(card)
         folio.host = card.originId
       }
+      if (priorReceipts && JSON.stringify(priorReceipts) !== JSON.stringify(receipts.map(r => [r.key, r.timestamp, r.sessionId]))) arrived.push(folio)
       folio.provisional = !known.has(uid)
       folio.card = card; folio.receipts = receipts
       this.updateFolio(folio)
@@ -489,6 +565,9 @@ export class Overview {
     }
     this.marks = overviewHostMarks([...this.fleetHosts, ...known.values()].flatMap(h => typeof h === 'string' ? [h] : [h.originId, ...(h.mirroredOrigins ?? [])]).concat([...this.folios.values()].flatMap(f => f.receipts.map(r => r.owner))))
     this.render()
+    if (this.visible && this.el.isConnected) {
+      for (const folio of arrived) if (!folio.el.hidden) this.receiptMotion.folio(folio.el)
+    }
     this.resolveFolios()
   }
 
@@ -567,6 +646,8 @@ export class Overview {
     folio.el.title = folio.card.path || folio.uid
     folio.el.dataset.depth = String(Math.max(1, Math.min(3, folio.receipts.length)))
     folio.fresh.hidden = folio.latest <= Math.max(this.seen, this.visits.get(folio.uid) ?? 0)
+    folio.el.classList.toggle('ws-overview-unseen', !folio.fresh.hidden)
+    folio.el.classList.toggle('ws-overview-seen', folio.fresh.hidden)
     const lead = folio.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html') ?? folio.receipts[0]
     const key = `folio:${folio.uid}:${lead?.key ?? 'prose'}`
     if (folio.thumb?.key !== key) {
@@ -574,6 +655,37 @@ export class Overview {
       folio.thumb = this.createThumbnail(key, lead, `Fiber note · ${folio.card.outcome || folio.card.name}`)
       folio.stack.append(folio.thumb.el)
     } else if (folio.thumb) folio.thumb.file = lead
+  }
+  /** Compare outcome text, not mtime: unrelated file writes cannot claim an outcome changed. */
+  private observeChanges(known: Map<string, KanbanCard>): void {
+    let changed = false
+    for (const [uid, card] of known) {
+      const outcome = card.outcome ?? ''
+      const review = fiberPageColumn(card) === 'awaitingReview' && !card.foldedUnder
+      const old = this.stamps.get(uid)
+      if (old && old.outcome === outcome && old.review === review) continue
+      this.stamps.set(uid, {
+        outcome, review,
+        outcomeAt: old && old.outcome !== outcome ? Date.now() : old?.outcomeAt ?? 0,
+        reviewAt: old && !old.review && review ? Date.now() : old?.reviewAt ?? (review ? Date.parse(card.closedAt ?? '') || 0 : 0),
+      })
+      changed = true
+    }
+    if (changed) persist(CHANGES_STORAGE, Object.fromEntries(this.stamps))
+  }
+  private changes(): Change[] {
+    const known = this.knownCards()
+    for (const folio of this.folios.values()) if (!known.has(folio.uid)) known.set(folio.uid, folio.card)
+    return [...known].flatMap(([uid, card]) => {
+      const since = Math.max(this.seen, this.visits.get(uid) ?? 0)
+      const receipts = this.folios.get(uid)?.receipts.filter(r => r.timestamp > since) ?? []
+      const stamp = this.stamps.get(uid)
+      const outcome = (stamp?.outcomeAt ?? 0) > since
+      const review = !!stamp?.review && stamp.reviewAt > since
+      if (!receipts.length && !outcome && !review) return []
+      return [{ uid, card, receipts, outcome, review,
+        latest: Math.max(receipts[0]?.timestamp ?? 0, outcome ? stamp!.outcomeAt : 0, review ? stamp!.reviewAt : 0), priority: needsYou(card) }]
+    }).sort((a, b) => a.priority - b.priority || b.latest - a.latest || compare(a.uid, b.uid))
   }
   private grouped(): Array<[string, Folio[]]> {
     const groups = new Map<string, Folio[]>()
@@ -592,8 +704,12 @@ export class Overview {
     this.order = grouped.flatMap(([, rows]) => rows.map(f => f.card))
     this.opts.onOrder?.([...this.order])
     const query = this.find.value.trim().toLowerCase()
-    const matches = (f: Folio): boolean => !query || [f.card.name, f.card.path, ...f.receipts.flatMap(r => [r.basename, r.fullPath])].some(v => v.toLowerCase().includes(query))
+    const matches = (f: { card: KanbanCard; receipts: Receipt[] }): boolean => !query || [f.card.name, f.card.path, ...f.receipts.flatMap(r => [r.basename, r.fullPath, declaredTitle(r.key)?.title ?? ''])].some(v => v.toLowerCase().includes(query))
+    const changes = this.changes()
+    this.renderChanges(changes, matches)
     const shown: HTMLElement[] = []
+    let boundaryPlaced = false
+    text(this.boundary, this.previousVisit ? `— you were here ${age(this.previousVisit).replace(/(\d)([mh])/, '$1 $2')} —` : '')
     for (const [name, rows] of grouped) {
       const filtered = rows.filter(matches)
       const key = `${this.lens}:${name}`
@@ -608,7 +724,17 @@ export class Overview {
       }
       text(group.count, `${filtered.length} ${filtered.length === 1 ? 'fiber' : 'fibers'}`)
       group.el.hidden = !filtered.length
-      place(group.grid, rows.map(f => f.el)); shown.push(group.el)
+      const density = this.lens !== 'recent' || name === 'This week' ? 'compact' : name === 'Earlier' ? 'line' : 'full'
+      group.el.dataset.density = density
+      for (const folio of rows) folio.el.dataset.density = density
+      const children: HTMLElement[] = []
+      for (const folio of rows) {
+        if (this.lens === 'recent' && this.previousVisit && !boundaryPlaced && folio.latest <= this.seen && matches(folio)) {
+          children.push(this.boundary); boundaryPlaced = true
+        }
+        children.push(folio.el)
+      }
+      place(group.grid, children); shown.push(group.el)
     }
     // Filtered folios stay mounted and inert, so Find never discards live thumbnails.
     for (const folio of this.folios.values()) {
@@ -618,18 +744,78 @@ export class Overview {
       text(folio.marks, hosts.map(h => this.marks.get(h) ?? '○').join(' ')); folio.marks.title = hosts.join(', ')
       folio.marks.setAttribute('aria-label', hosts.join(', '))
     }
+    if (this.lens === 'recent' && this.previousVisit && !boundaryPlaced) shown.push(this.boundary)
     place(this.groupsEl, shown)
     this.renderRibbon()
-    text(this.summary, `${this.folios.size} fibers · ${new Set([...this.folios.values()].flatMap(f => f.receipts.map(r => r.key))).size} documents · last 30 days`)
-    const legend = [...this.marks].map(([host, mark]) => node('span', 'ws-overview-hostmark', `${mark} ${host}`))
-    this.legend.replaceChildren(...legend)
+    const newDocuments = [...this.folios.values()].flatMap(f => f.receipts.filter(r => r.timestamp > this.seen))
+    const documentCount = new Set(newDocuments.map(r => r.key)).size
+    const constitutionCount = new Set([...newDocuments.map(r => r.uid), ...changes.map(c => c.uid)]).size
+    const reviewCount = this.opts.cards().filter(c => fiberPageColumn(c) === 'awaitingReview' && !c.foldedUnder).length
+    const prefix = this.previousVisit ? `Since you were here at ${new Date(this.previousVisit).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'The last 30 days'
+    text(this.summary, `${prefix}: ${documentCount} ${documentCount === 1 ? 'document' : 'documents'} in ${constitutionCount} ${constitutionCount === 1 ? 'constitution' : 'constitutions'}; ${reviewCount} await your review.`)
+    this.startVisit()
     if (!this.status.textContent || this.status.textContent.startsWith('No ')) text(this.status, this.folios.size ? grouped.some(([, rows]) => rows.some(matches)) ? '' : 'No work matches Find.' : 'No receipts in the last 30 days. Open a fiber to keep it here this session.')
     this.paintSelection()
     this.schedule()
   }
 
+  private renderChanges(changes: Change[], matches: (change: Change) => boolean): void {
+    const keep = new Set(changes.map(c => c.uid))
+    for (const [uid, row] of this.changeRows) if (!keep.has(uid)) {
+      for (const item of row.thumbs.values()) this.removeThumbnail(item.thumb)
+      row.el.remove(); this.changeRows.delete(uid)
+    }
+    for (const change of changes) {
+      let row = this.changeRows.get(change.uid)
+      if (!row) {
+        const el = node('article', 'ws-overview-change'); el.dataset.uid = change.uid
+        const open = button('ws-overview-change-open')
+        const name = node('span', 'ws-overview-change-name')
+        const summary = node('span', 'ws-overview-change-summary ws-overview-meta')
+        const outcome = node('span', 'ws-overview-change-outcome')
+        const documents = node('div', 'ws-overview-change-documents')
+        const more = node('span', 'ws-overview-change-more ws-overview-meta')
+        open.append(name, summary, outcome); el.append(open, documents)
+        row = { el, open, name, summary, outcome, documents, more, thumbs: new Map(), change }
+        const record = row
+        open.addEventListener('click', () => { void this.open(record.change.card, record.change.receipts[0]?.key) })
+        this.changeRows.set(change.uid, row)
+      }
+      row.change = change
+      text(row.name, change.card.name); text(row.summary, changeSummary(change)); text(row.outcome, change.card.outcome ?? '')
+      row.open.title = change.card.path
+      row.el.dataset.needsYou = String(change.priority < 2)
+      row.el.hidden = !matches(change); row.el.inert = row.el.hidden
+      const documents = change.receipts.slice(0, 4)
+      const keys = new Set(documents.map(r => r.key))
+      for (const [key, item] of row.thumbs) if (!keys.has(key)) {
+        this.removeThumbnail(item.thumb); item.el.remove(); row.thumbs.delete(key)
+      }
+      for (const receipt of documents) {
+        let item = row.thumbs.get(receipt.key)
+        if (!item) {
+          const el = button('ws-overview-change-doc'); el.dataset.key = receipt.key
+          const thumb = this.createThumbnail(`change:${change.uid}:${receipt.key}`, receipt, receipt.basename)
+          el.append(thumb.el)
+          const record = row
+          el.addEventListener('click', () => { void this.open(record.change.card, receipt.key) })
+          item = { el, thumb }; row.thumbs.set(receipt.key, item)
+        }
+        item.thumb.file = receipt
+        item.el.title = `${declaredTitle(receipt.key)?.title ?? receipt.basename} — ${receipt.owner}:${receipt.fullPath}`
+        item.el.setAttribute('aria-label', `Open ${declaredTitle(receipt.key)?.title ?? receipt.basename}`)
+      }
+      text(row.more, `+${change.receipts.length - documents.length}`)
+      place(row.documents, [...documents.map(r => row!.thumbs.get(r.key)!.el), ...(change.receipts.length > 4 ? [row.more] : [])])
+    }
+    place(this.changesEl, changes.map(c => this.changeRows.get(c.uid)!.el))
+    this.changesEmpty.hidden = changes.some(matches)
+    text(this.changesEmpty, changes.length ? 'No changes match Find.' : this.previousVisit ? 'Nothing new since you were here.' : 'No deliveries in the last 30 days.')
+  }
+
   private candidates(): HTMLButtonElement[] {
-    return [...this.ribbon.querySelectorAll<HTMLButtonElement>('.ws-overview-rib'),
+    return [...this.changesEl.querySelectorAll<HTMLButtonElement>('.ws-overview-change-open'),
+      ...(this.latest.open ? this.ribbon.querySelectorAll<HTMLButtonElement>('.ws-overview-rib') : []),
       ...this.groupsEl.querySelectorAll<HTMLButtonElement>('.ws-overview-folio')].filter(el => !el.closest('[hidden]'))
   }
   private paintSelection(): void {
@@ -640,11 +826,10 @@ export class Overview {
     const candidates = this.candidates()
     if (!candidates.length) return
     const current = this.selection && candidates.includes(this.selection) ? this.selection : null
-    let next = current ?? candidates.find(el => el.classList.contains('ws-overview-folio')) ?? candidates[0]
+    let next = current ?? candidates[0]
     if (intent === 'open') { current?.click(); return }
     if (intent === 'first' || intent === 'last') {
-      const folios = candidates.filter(el => el.classList.contains('ws-overview-folio'))
-      next = (intent === 'first' ? folios[0] : folios.at(-1)) ?? next
+      next = (intent === 'first' ? candidates[0] : candidates.at(-1)) ?? next
     } else if (current) {
       const rect = current.getBoundingClientRect()
       const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2
@@ -677,6 +862,7 @@ export class Overview {
       if (!prior || receipt.timestamp > prior.timestamp || (receipt.timestamp === prior.timestamp && compare(receipt.uid, prior.uid) < 0)) documents.set(receipt.key, receipt)
     }
     const recent = [...documents.values()].sort((a, b) => b.timestamp - a.timestamp || compare(a.key, b.key)).slice(0, 12)
+    const labels = documentLabels(recent.map(r => ({ key: r.key, owner: r.owner, path: r.fullPath, name: r.basename, kind: documentKind(r.fullPath), provenance: [] })))
     const keep = new Set(recent.map(r => r.key))
     for (const [key, item] of this.ribbonItems) if (!keep.has(key)) {
       this.removeThumbnail(item.thumb); item.el.remove(); this.ribbonItems.delete(key)
@@ -699,8 +885,11 @@ export class Overview {
         })
       }
       item.receipt = receipt; item.thumb.file = receipt
-      text(item.label, receipt.basename); text(item.name, this.folios.get(receipt.uid)?.card.name ?? 'Other')
-      text(item.when, age(receipt.timestamp)); text(item.host, `${this.marks.get(receipt.owner) ?? '○'} ${receipt.owner}`)
+      text(item.label, labels[recent.indexOf(receipt)])
+      item.label.classList.toggle('ws-overview-declared-title', !!declaredTitle(receipt.key)?.title)
+      text(item.name, this.folios.get(receipt.uid)?.card.name ?? 'Other')
+      text(item.when, age(receipt.timestamp)); text(item.host, this.marks.get(receipt.owner) ?? '○')
+      item.host.title = receipt.owner; item.host.setAttribute('aria-label', receipt.owner)
       item.el.title = `${receipt.fullPath} — ${this.folios.get(receipt.uid)?.card.name ?? 'Other'}`
     }
     place(this.ribbon, recent.map(r => this.ribbonItems.get(r.key)!.el))
@@ -739,24 +928,16 @@ export class Overview {
   }
 
   private createThumbnail(key: string, file: Receipt | undefined, fallback: string): Thumbnail {
-    const el = node('div', 'ws-overview-thumb')
-    el.setAttribute('aria-hidden', 'true'); el.inert = true
-    const kind = file ? documentKind(file.fullPath) : 'fiber'
-    const glyph = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
-    const face = node('div', 'ws-overview-thumb-face', `${glyph} ${file?.basename ?? fallback}`)
-    el.append(face)
-    const thumb: Thumbnail = { key, el, file, state: 'idle', near: false, lastVisible: 0, generation: 0 }
-    this.thumbnails.set(key, thumb); this.observer?.observe(el)
+    const thumb: Thumbnail = new Thumbnail({ key, file, fallback, shuttleBase: this.opts.shuttleBase, className: 'ws-overview-thumb',
+      captioned: key.startsWith('ribbon:'),
+      priority: () => this.visible && !this.disposed ? this.priority(thumb) : 0,
+      distance: () => this.distance(thumb),
+    })
+    this.thumbnails.set(key, thumb); this.observer?.observe(thumb.el)
     return thumb
   }
   private removeThumbnail(thumb: Thumbnail): void {
-    this.observer?.unobserve(thumb.el); this.unmount(thumb); thumb.el.remove(); this.thumbnails.delete(thumb.key)
-  }
-  private unmount(thumb: Thumbnail): void {
-    thumb.generation++
-    clearTimeout(thumb.timer); thumb.timer = undefined
-    disposeFileViewer(thumb.body ?? null)
-    thumb.body?.remove(); thumb.body = undefined; thumb.state = 'idle'
+    this.observer?.unobserve(thumb.el); thumb.dispose(); this.thumbnails.delete(thumb.key)
   }
   private readonly schedule = (): void => {
     if (this.disposed || !this.visible || this.raf !== undefined) return
@@ -772,70 +953,15 @@ export class Overview {
   }
   /** On screen outranks the loading ring, which outranks everything else. */
   private priority(thumb: Thumbnail): number {
-    if (!thumb.el.isConnected || thumb.el.closest('[hidden]')) return 0
+    if (!thumb.el.isConnected || thumb.el.closest('[hidden]') || (this.latest.contains(thumb.el) && !this.latest.open)) return 0
     if (this.onScreen(thumb)) return 2
     return (this.observer ? thumb.near : false) ? 1 : 0
   }
-  /**
-   * Mount the nearest drawable thumbnails within the budget. A candidate may
-   * displace only a live body of strictly lower priority, so a dense sheet
-   * whose ring holds more than the budget settles instead of trading bodies
-   * back and forth on every load.
-   */
   private pump(): void {
     if (this.disposed || !this.visible) return
-    this.scaleThumbnails()
-    const all = [...this.thumbnails.values()]
-    const drawable = (t: Thumbnail): boolean => !!t.file
-    const candidates = all.filter(t => t.state === 'idle' && drawable(t) && this.priority(t) > 0)
-    if (!candidates.length) return
-    const best = Math.max(...candidates.map(t => this.priority(t)))
-    const alive = all.filter(t => t.state === 'live' || t.state === 'loading')
-    if (alive.length >= LOAD_POLICY.maxLive) {
-      const victims = chooseEvictions(alive.map(t => ({ key: t.key, lastVisible: t.lastVisible, exempt: t.state === 'loading' || this.priority(t) >= best })),
-        { maxLive: LOAD_POLICY.maxLive - 1, evictTo: LOAD_POLICY.evictTo })
-      for (const key of victims) this.unmount(this.thumbnails.get(key)!)
-    }
-    const population = all.filter(t => t.state === 'live' || t.state === 'loading')
-    const slots = Math.min(LOAD_POLICY.maxConcurrent - population.filter(t => t.state === 'loading').length, LOAD_POLICY.maxLive - population.length)
-    const ranked = candidates.filter(t => this.priority(t) === best)
-    for (const key of chooseLoads(ranked.map(t => ({ key: t.key, distance: this.distance(t) })), slots)) this.mount(this.thumbnails.get(key)!)
+    pumpThumbnails()
   }
   private scaleThumbnails(): void {
-    for (const thumb of this.thumbnails.values()) {
-      if (!thumb.body) continue
-      const content = thumb.body.querySelector<HTMLElement>('iframe,pre')
-      if (!content) continue
-      const width = thumb.body.classList.contains('kbn-thumbnail-pdf') ? 900 : content.tagName === 'IFRAME' ? 1040 : 760
-      const scale = (thumb.el.clientWidth || 176) / width
-      content.style.width = `${width}px`
-      content.style.transform = `scale(${scale})`
-      if (content.tagName === 'IFRAME') content.style.height = `${Math.ceil((thumb.el.clientHeight || 116) / scale)}px`
-    }
-  }
-  private mount(thumb: Thumbnail): void {
-    const file = thumb.file
-    if (!file || thumb.state !== 'idle') return
-    const generation = ++thumb.generation
-    thumb.state = 'loading'
-    const current = (): boolean => !this.disposed && thumb.generation === generation
-    const finish = (ok: boolean): void => {
-      if (!current() || thumb.state !== 'loading') return
-      clearTimeout(thumb.timer); thumb.timer = undefined
-      thumb.state = ok ? 'live' : 'failed'
-      if (!ok) { disposeFileViewer(thumb.body ?? null); thumb.body?.remove(); thumb.body = undefined }
-      this.schedule()
-    }
-    thumb.timer = setTimeout(() => finish(false), file.owner === 'local' ? LOAD_POLICY.softTimeoutLocalMs : LOAD_POLICY.softTimeoutRemoteMs)
-    const kind = documentKind(file.fullPath)
-    thumb.body = buildFileViewer(this.opts.shuttleBase, file.fullPath, file.owner, undefined, undefined, {
-      kind: kind === 'fiber' ? undefined : kind,
-      thumbnail: true,
-      active: false,
-      onState: state => { this.scaleThumbnails(); finish(state.status === 'ready') },
-    })
-    thumb.body.classList.add('ws-overview-thumb-body')
-    thumb.el.append(thumb.body)
-    this.scaleThumbnails()
+    for (const thumb of this.thumbnails.values()) thumb.scale()
   }
 }

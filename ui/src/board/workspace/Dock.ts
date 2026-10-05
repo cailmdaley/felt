@@ -1,6 +1,5 @@
 import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
-import { conversationActions } from '../conversationMenu.js'
-import { claudeOpening, CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
+import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../../forms/meetingApi.js'
@@ -15,6 +14,7 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
+import { fiberPageColumn } from './fiberPageState.js'
 import './tokens.css'
 import './dock.css'
 
@@ -386,8 +386,8 @@ export interface DockOptions {
 }
 
 /**
- * The fiber page's control band: worker, composer, meeting, folded settings,
- * session history and verdicts, followed by the fiber's prose.
+ * The fiber page's act zone: state-shaped verdicts, composer, meeting,
+ * folded settings and session history. The navbar owns the worker control.
  */
 export class Dock {
   private readonly bands = new Map<string, Dock>()
@@ -402,16 +402,16 @@ export class Dock {
   private meetingPaint: (() => void) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
-  private workerPill: HTMLElement | null = null
   private workerPillCard: KanbanCard | null = null
-  private workerContainer: HTMLElement | null = null
-  private workerPillKey = ''
   private guidance: HTMLElement | null = null
   private dismissMeeting: (() => boolean) | null = null
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
   private composerSend: ComposerSend | null = null
   private composerError: HTMLElement | null = null
+  private composerPaint: (() => void) | null = null
+  private actPaint: (() => void) | null = null
+  private verdictMenu: HTMLDetailsElement | null = null
   private freshButton: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
@@ -490,10 +490,6 @@ export class Dock {
     // opening targets without replacing the textarea or settings fields.
     this.card = { ...card }
     const view = this.card
-    // The worker line is only the shared action pill into its conversation.
-    this.workerContainer = document.createElement('div')
-    this.workerContainer.className = 'ws-dock-worker'
-    this.el.append(this.workerContainer)
     this.guidance = document.createElement('p')
     this.guidance.className = 'kbn-detail-app-guide'
     this.el.append(this.guidance)
@@ -537,13 +533,14 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.workerPillCard = this.transcriptCard = null
-    this.workerPill = this.workerContainer = this.transcriptPane = this.guidance = null
-    this.workerPillKey = ''
+    this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
     this.composerSend = null
     this.composerError = null
+    this.composerPaint = this.actPaint = null
+    this.verdictMenu = null
     this.freshButton = null
     this.settingsSync = null
     this.historySync = null
@@ -554,6 +551,7 @@ export class Dock {
   }
 
   handleEscape(): boolean {
+    if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
     return Boolean(this.dismissConversation?.() || this.dismissMeeting?.() || this.dismissParent?.())
   }
 
@@ -566,61 +564,6 @@ export class Dock {
     this.guidance.textContent = target.guidance
   }
 
-  /** A dock-local menu: no portal, global Escape listener or sheet claim. */
-  private workerMenu(pill: HTMLElement, card: KanbanCard): HTMLElement {
-    const actions = conversationActions(card.sessionLink, atDesktop(navigator.userAgent, coarsePointer()),
-      card.tmuxSession && this.onOpenWorker ? () => this.onOpenWorker?.(card.tmuxSession!, card.shuttleHost) : undefined)
-    if (actions.length < 2) return pill
-    pill.setAttribute('aria-haspopup', 'menu')
-    pill.setAttribute('aria-expanded', 'false')
-    // terminalWorkerPill also supplies a portal context-menu listener. Capture
-    // here keeps the same alternatives within the reader's Escape stack.
-    pill.addEventListener('contextmenu', e => {
-      e.preventDefault()
-      e.stopImmediatePropagation()
-      this.dismissConversation?.()
-      const menu = document.createElement('div')
-      menu.className = 'kbn-conversation-menu kbn-ctl-menu'
-      menu.setAttribute('role', 'menu')
-      menu.setAttribute('aria-label', 'Open conversation in')
-      const dismiss = (): boolean => {
-        menu.remove()
-        pill.setAttribute('aria-expanded', 'false')
-        this.dismissConversation = null
-        if (pill.isConnected) pill.focus()
-        return true
-      }
-      this.dismissConversation = dismiss
-      const items = actions.map(action => {
-        const item = document.createElement(action.href ? 'a' : 'button')
-        item.className = 'kbn-ctl-menu-item'
-        item.setAttribute('role', 'menuitem')
-        item.tabIndex = -1
-        item.textContent = action.label
-        if (item instanceof HTMLAnchorElement) {
-          item.href = action.href!
-          if (action.href!.startsWith('https:')) { item.target = '_blank'; item.rel = 'noopener noreferrer' }
-        } else (item as HTMLButtonElement).type = 'button'
-        item.addEventListener('click', e => { e.stopPropagation(); action.run?.(); dismiss() })
-        return item
-      })
-      menu.append(...items)
-      menu.addEventListener('keydown', e => {
-        const at = items.indexOf(document.activeElement as HTMLAnchorElement | HTMLButtonElement)
-        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
-          e.preventDefault()
-          const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : (at + (e.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
-          items[next].focus()
-        } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); dismiss() }
-        else if (e.key === 'Tab') dismiss()
-      })
-      menu.addEventListener('focusout', e => { if (e.relatedTarget && !menu.contains(e.relatedTarget as Node)) dismiss() })
-      this.el.querySelector('.ws-dock-worker')!.append(menu)
-      pill.setAttribute('aria-expanded', 'true')
-      items[0].focus()
-    }, true)
-    return pill
-  }
   private buildTranscriptPane(card: KanbanCard): HTMLElement {
     const pane = document.createElement('section')
     pane.className = 'kbn-detail-transcript'
@@ -684,50 +627,59 @@ export class Dock {
     }) : null
   }
 
-  private buildWorkerPill(card: KanbanCard): HTMLElement | null {
-    this.workerPillCard = card
+  /** Keyboard opening activates the exact destination used by the worker pill. */
+  openConversation(card: KanbanCard): boolean {
     const pill = this.workerPillFor(card)
-    return pill && card.tmuxSession ? this.workerMenu(pill, card) : pill
+    if (!pill?.matches('a[href],button')) return false
+    pill.click()
+    return true
   }
 
-  private workerPillState(card: KanbanCard): string {
-    return JSON.stringify([
-      card.workerSurface ?? card.shuttleSurface ?? null,
-      card.sessionUuid ?? null,
-      card.tmuxSession ?? null,
-      card.sessionLink ?? null,
-      card.desktopLink ?? null,
-      card.workerAgent ?? card.shuttleAgent ?? null,
-      card.shuttleHost ?? null,
-      card.shuttleProjectDir ?? null,
-      card.runtimePhase ?? null,
-      card.lastActivityAt ?? null,
-      card.launchError ?? null,
-      this.workerPhase(card),
-      workerVariant(card),
-      claudeOpening(),
-    ])
+  /** Both verdict surfaces delegate to the board's lifecycle choke point. */
+  verdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
+    this.onTransition(card, target)
   }
 
-  /**
-   * Repaint the worker pill from a fresher copy of the open card —
-   * the board calls this after every poll, so the pill follows the worker
-   * between Waiting, Aloft and Blocked while the dock stays open. A card
-   * other than the open one is ignored.
-   */
+  verdictControlsFor(card: KanbanCard): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'kbn-ctl-verdict'
+    for (const [label, cls, target] of [
+      ['Temper', 'kbn-ctl-temper', 'tempered'],
+      ['Discard', 'kbn-ctl-discard', 'composted'],
+    ] as const) {
+      const control = ctlButton(label, cls)
+      control.addEventListener('click', () => this.verdict(card, target))
+      row.append(control)
+    }
+    return row
+  }
+
+  /** The floating verdict is reachable while reading any delivered page. */
+  verdictPlateFor(card: KanbanCard): HTMLElement {
+    const plate = document.createElement('div')
+    plate.className = 'ws-review-plate'
+    const state = document.createElement('span')
+    state.textContent = 'Awaiting review'
+    plate.append(state, this.verdictControlsFor(card))
+    return plate
+  }
+
+  /** Refresh controls without replacing drafts or folded fields. */
   syncRuntime(card: KanbanCard | null): void {
     for (const band of this.bands.values()) band.syncRuntime(card)
-    if (!card || !this.card || !this.workerContainer ||
+    if (!card || !this.card ||
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
     }
     this.settingsSync?.(incoming)
     this.historySync?.()
+    this.composerPaint?.()
+    this.actPaint?.()
     for (const [button, blocked] of this.blockedDispatches) {
       if (blocked.worker === workerIdentity(card)) continue
       button.disabled = false
@@ -740,15 +692,6 @@ export class Dock {
     }
     this.workerPillCard = card
     this.paintGuidance(card)
-    const key = this.workerPillState(card)
-    if (key === this.workerPillKey) return
-    this.workerPillKey = key
-    this.dismissConversation?.()
-    const next = this.buildWorkerPill(card)
-    if (this.workerPill && next) this.workerPill.replaceWith(next)
-    else if (next) this.workerContainer.append(next)
-    else this.workerPill?.remove()
-    this.workerPill = next
   }
 
   refreshConversationOpening(): void {
@@ -857,13 +800,36 @@ export class Dock {
     }
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
-    const discard = ctlButton('Discard', 'kbn-ctl-discard')
-    const temper = ctlButton('Temper', 'kbn-ctl-temper')
-    for (const [btn, target] of [[discard, 'composted'], [temper, 'tempered']] as const) {
-      btn.addEventListener('click', () => this.onTransition(card, target))
-    }
-    foot.append(errorEl, statusEl, discard, temper)
+    const verdict = this.verdictControlsFor(card)
+    const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
+    const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
+    const menu = document.createElement('details')
+    menu.className = 'kbn-ctl-verdict-menu'
+    const more = document.createElement('summary')
+    more.textContent = '⋯'; more.setAttribute('aria-label', 'Fiber actions')
+    const choices = document.createElement('div'); choices.className = 'kbn-ctl-menu'
+    menu.append(more, choices)
+    this.verdictMenu = menu
+    foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
+    this.actPaint = () => {
+      const column = fiberPageColumn(card)
+      this.el.dataset.column = column
+      const review = column === 'awaitingReview'
+      if (review) {
+        if (verdict.parentElement !== body) body.prepend(verdict)
+        if (temper.parentElement !== verdict) verdict.append(temper, discard)
+        menu.remove()
+      } else {
+        verdict.remove()
+        if (column === 'drafts') { temper.remove(); discard.remove(); menu.remove() }
+        else {
+          if (temper.parentElement !== choices) choices.append(temper, discard)
+          if (menu.parentElement !== foot) foot.append(menu)
+        }
+      }
+    }
+    this.actPaint()
   }
 
   private buildComposer(card: KanbanCard): HTMLElement {
@@ -880,6 +846,7 @@ export class Dock {
     message.setAttribute('aria-label', 'Message for the next worker')
     // The resting composer is one line; focus or a draft gives it room to grow.
     const fit = (): void => {
+      box.classList.toggle('kbn-ctl-composer-draft', Boolean(message.value))
       message.style.height = 'auto'
       if (message.value || message === document.activeElement) message.style.height = `${message.scrollHeight}px`
     }
@@ -908,8 +875,17 @@ export class Dock {
     // While a send is in flight every verb is held and the chips are frozen,
     // so what is sent is what was shown.
     let busy = false
-    const fresh = ctlButton('New session', 'kbn-ctl-send')
-    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
+    const fresh = ctlButton('Start ↵', 'kbn-ctl-send')
+    const resume = ctlButton('Resume ↵', 'kbn-ctl-send kbn-ctl-resume')
+    this.composerPaint = () => {
+      const draft = fiberPageColumn(card) === 'drafts'
+      const resumable = !draft && Boolean(card.sessionUuid)
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : 'Start ↵'
+      fresh.hidden = resumable
+      resume.hidden = !resumable
+      message.placeholder = fiberPageColumn(card) === 'awaitingReview' ? 'Reply and resume…' : 'What should the worker do next?'
+    }
+    this.composerPaint()
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
       busy = on
       for (const verb of [fresh, resume]) if (verb !== except) verb.disabled = on
@@ -980,7 +956,8 @@ export class Dock {
     foot.className = 'kbn-ctl-composer-foot'
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
-    if (this.meeting) sends.append(this.buildMeeting(card, err, send))
+    const meeting = this.meeting ? this.buildMeeting(card, err, send) : null
+    if (meeting) meeting.classList.add('kbn-ctl-microphone')
     sends.append(fresh, resume)
     foot.append(sends)
 
@@ -1002,7 +979,15 @@ export class Dock {
       void this.runRequeue(card, send.compose, 'previous', resume, err).then((ok) => ok && send.sent())
     })
 
-    box.append(message, strip.el, foot)
+    message.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
+      event.preventDefault(); event.stopPropagation()
+      if (event.repeat || busy) return
+      const previous = Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
+      const resumeSession = event.altKey ? !previous : previous
+      void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
+    })
+    box.append(...(meeting ? [meeting] : []), message, strip.el, foot)
     wrap.append(box, imageErr, err)
     return wrap
   }

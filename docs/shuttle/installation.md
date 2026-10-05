@@ -1306,11 +1306,12 @@ boundary; they do not authenticate clients or replace access controls on the pro
 Roughly in the order a new installer hits them.
 
 **Fiber files are trusted content.** `/file` serves arbitrary absolute paths so
-reports and companion artifacts can render. HTML artifacts run inside the board
-as same-origin iframes, and interactive reports may execute JavaScript. Do not
-point a publicly reachable daemon at stores containing untrusted HTML or
-reports; the daemon's trusted-user boundary applies to files as well as API
-writes.
+reports and companion artifacts can render.
+HTML reader pages execute JavaScript in an opaque-origin sandbox, without access to the board's DOM or origin storage.
+Their preferences live only in their retained document, and their history state cannot change the board's address.
+Sibling images, CSS and classic scripts use the owner-routed `/file-assets` route; it grants no CORS access for report fetch/XHR requests.
+Raw HTML, XHTML and SVG file responses carry a CSP sandbox too, so a report's popup or an “Open in new tab” action cannot regain the board's origin.
+Do not expose a daemon containing untrusted reports publicly; the daemon's trusted-user boundary applies to files as well as API writes.
 
 **Every restart arms a boot quarantine.** On every (re)start the daemon parks
 each dispatchable candidate it has never observed running into `pending_launch`.

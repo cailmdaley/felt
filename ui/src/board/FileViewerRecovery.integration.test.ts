@@ -36,8 +36,8 @@ describe('unchanged file recovery', () => {
       const viewer = frame.viewer!
       const iframe = viewer.querySelector('iframe')
       if (iframe) {
-        iframe.contentWindow!.scrollTo = vi.fn()
-        iframe.dispatchEvent(new Event('load'))
+        const { envelope } = await import('./workspace/DocumentBridge.js')
+        window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: envelope('ready') }))
         await vi.advanceTimersByTimeAsync(0)
       }
       const contentNode = iframe ?? viewer.querySelector('pre')!

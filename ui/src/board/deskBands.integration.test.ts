@@ -75,6 +75,8 @@ describe('In flight bands', () => {
     expect(column.querySelector('.kbn-col-count')?.textContent).toBe('5')
     expect(column.querySelectorAll('.kbn-col-list')).toHaveLength(1)
     expect(column.querySelectorAll('.kbn-empty')).toHaveLength(0)
+    expect(column.querySelector('[data-flight-band="needsYou"] .kbn-card[data-fiber-id="worker-3"]')).not.toBeNull()
+    expect(column.querySelector('[data-flight-band="working"] .kbn-card[data-fiber-id="worker-0"]')).not.toBeNull()
     const waiting = column.querySelector<HTMLElement>('[data-fiber-id="worker-3"]')!
     expect(waiting.getAttribute('draggable')).toBe('true')
     waiting.click()

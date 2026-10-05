@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card, expectPinnedZone, ownerFiberResponse } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { docKey } from './documents.js'
+import { cacheDocumentTitle } from './DocumentTitles.js'
 import { Overview, overviewDayGroup, overviewHostMarks } from './Overview.js'
 
 const rect = (top: number, left = 0, width = 176, height = 116): DOMRect => ({
@@ -72,7 +73,7 @@ beforeEach(() => {
   feed = { files: [], origins: receiptOrigins() }
   fetchMock = vi.fn(async (url: string) => url.includes('/sent-files/all/composite')
     ? new Response(JSON.stringify(feed), { status: 200 })
-    : new Response('', { status: 404 }))
+    : url.includes('/api/v1/file?') && /\.html/.test(decodeURIComponent(url)) ? new Response('<p>Preview text</p>') : new Response('', { status: 404 }))
   vi.stubGlobal('fetch', fetchMock)
   onOpen = vi.fn(); onOrder = vi.fn()
   overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onOrder })
@@ -98,6 +99,10 @@ describe('Overview receipt membership and identity', () => {
   })
 
   it('marks only receipts newer than the last time the sheet was left', async () => {
+    overview.dispose()
+    localStorage.setItem('shuttle.workspace.overview.seen', JSON.stringify(now() - 30000))
+    overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen })
+    document.body.append(overview.el)
     feed.files = [receipt('alpha', '/old.html', now() - 60000)]
     await refresh()
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
@@ -318,10 +323,10 @@ describe('Overview stable lenses, visits, and DOM', () => {
 
   it('preserves mounted report-lead thumbnails through polls, Find, and hide/show, including sheet/ribbon scroll', async () => {
     feed.files = [receipt('alpha', '/notes/alpha/report.html', now() - 1000), receipt('alpha', '/notes/alpha/newest.html')]
-    await refresh(); activate()
+    await refresh(); activate(); await settle()
     const thumbnail = folio('alpha').querySelector('.ws-overview-thumb')!
     const iframe = thumbnail.querySelector('iframe')!
-    expect(iframe.src).toContain(encodeURIComponent('/notes/alpha/report.html'))
+    expect(iframe.src).toContain('/api/v1/file-assets/host-a/notes/alpha/report.html')
     expect(iframe.getAttribute('sandbox')).toBe('')
     expect(iframe.inert).toBe(true); expect(iframe.tabIndex).toBe(-1)
     iframe.dispatchEvent(new Event('load')); draw()
@@ -358,6 +363,7 @@ describe('Overview thumbnail budget and safe content', () => {
     expect(overview.el.querySelectorAll('iframe')).toHaveLength(4)
     expect(thumbs[5].querySelector('iframe')).not.toBeNull()
     for (let round = 0; round < 6; round++) {
+      await settle()
       for (const iframe of overview.el.querySelectorAll('iframe')) iframe.dispatchEvent(new Event('load'))
       draw()
       expect(overview.el.querySelectorAll('iframe').length).toBeLessThanOrEqual(16)
@@ -379,11 +385,11 @@ describe('Overview thumbnail budget and safe content', () => {
     // Inside the ring, below the visible sheet: near, never on screen.
     thumbs.forEach((el, i) => Object.defineProperty(el, 'getBoundingClientRect', { configurable: true, value: () => rect(820 + i, 10) }))
     Observer.current.deliver(thumbs); draw()
-    const loadAll = (): void => { for (const iframe of overview.el.querySelectorAll('iframe')) iframe.dispatchEvent(new Event('load')); draw() }
-    for (let round = 0; round < 8; round++) loadAll()
+    const loadAll = async (): Promise<void> => { await settle(); for (const iframe of overview.el.querySelectorAll('iframe')) iframe.dispatchEvent(new Event('load')); draw() }
+    for (let round = 0; round < 8; round++) await loadAll()
     const settled = [...overview.el.querySelectorAll('iframe')]
     expect(settled).toHaveLength(16)
-    for (let round = 0; round < 8; round++) { Observer.current.deliver(thumbs); loadAll() }
+    for (let round = 0; round < 8; round++) { Observer.current.deliver(thumbs); await loadAll() }
     expect([...overview.el.querySelectorAll("iframe")].filter(f => !settled.includes(f)).length).toBe(0)
   })
 
@@ -415,6 +421,123 @@ describe('Overview thumbnail budget and safe content', () => {
     expect(Observer.current.targets.size).toBe(0)
     expect(overview.el.isConnected).toBe(false)
     expect(frames.size).toBe(0)
+  })
+})
+
+describe('Overview news, visits and graduated density', () => {
+  const visitKey = 'shuttle.workspace.overview.seen'
+  const reset = (at?: number): void => {
+    overview.dispose()
+    if (at !== undefined) localStorage.setItem(visitKey, JSON.stringify(at))
+    overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onOrder })
+    document.body.append(overview.el)
+  }
+  it('leads a first visit with thirty-day news without writing a visit on load', async () => {
+    cards[0] = { ...cards[0], status: 'closed', closedAt: new Date(now() - 60000).toISOString() }
+    feed.files = [receipt('alpha', '/one.html', now() - 5000), receipt('alpha', '/two.mp3', now() - 4000)]
+    await refresh()
+    expect(overview.el.querySelector('.ws-overview-summary')?.textContent).toBe('The last 30 days: 2 documents in 1 constitution; 1 await your review.')
+    expect(localStorage.getItem(visitKey)).toBeNull()
+    expect(overview.el.querySelectorAll('.ws-overview-change')).toHaveLength(1)
+    expect(overview.el.querySelector('.ws-overview-change-summary')?.textContent).toContain('→ awaiting review')
+    expect(folio('alpha').classList.contains('ws-overview-unseen')).toBe(true)
+    expect(overview.el.querySelector<HTMLDetailsElement>('.ws-overview-latest')?.open).toBe(false)
+  })
+  it('preserves a visit through an early reload, advances after thirty seconds or on internal departure', async () => {
+    const previous = now() - 3 * 3600000
+    reset(previous); await refresh()
+    expect(localStorage.getItem(visitKey)).toBe(JSON.stringify(previous))
+    vi.advanceTimersByTime(30000)
+    expect(localStorage.getItem(visitKey)).toBe(JSON.stringify(previous))
+    reset(); await refresh()
+    expect(localStorage.getItem(visitKey)).toBe(JSON.stringify(previous))
+    vi.advanceTimersByTime(30001)
+    expect(localStorage.getItem(visitKey)).toBe(JSON.stringify(now()))
+    vi.advanceTimersByTime(1000); overview.hide()
+    expect(localStorage.getItem(visitKey)).toBe(JSON.stringify(now()))
+  })
+  it('does not record an overview visit when it never mounted', () => {
+    reset(); overview.el.remove(); overview.hide()
+    expect(localStorage.getItem(visitKey)).toBeNull()
+  })
+  it('compares outcome text and review transitions, including fibers with no documents', async () => {
+    reset(now() - 3600000); await refresh()
+    cards[0] = { ...cards[0], modifiedAt: new Date().toISOString() }
+    overview.cardsChanged()
+    expect(overview.el.querySelectorAll('.ws-overview-change')).toHaveLength(0)
+    cards[0] = { ...cards[0], outcome: 'A different checked measurement.' }
+    cards[1] = { ...cards[1], status: 'closed' }
+    overview.cardsChanged()
+    const rows = [...overview.el.querySelectorAll<HTMLElement>('.ws-overview-change')]
+    expect(rows.map(r => r.dataset.uid)).toEqual(['beta', 'alpha'])
+    expect(rows[0].textContent).toContain('→ awaiting review')
+    expect(rows[1].textContent).toContain('outcome changed')
+    expect(overview.el.querySelectorAll('.ws-overview-folio')).toHaveLength(0)
+    overview.opened(cards[0])
+    expect(overview.el.querySelector('.ws-overview-change[data-uid="alpha"]')).toBeNull()
+    expect(JSON.parse(localStorage.getItem('shuttle.workspace.overview.visits')!).alpha).toBe(now())
+    reset(); await refresh()
+    expect(overview.el.querySelector('.ws-overview-change[data-uid="alpha"]')).toBeNull()
+    expect(overview.el.querySelector('.ws-overview-change[data-uid="beta"]')).not.toBeNull()
+  })
+  it('puts awaiting review ahead of Needs-you ahead of newest work, and bounds new-document previews', async () => {
+    reset(now() - 3600000)
+    cards.push(card({ id: 'gamma', uid: 'gamma', originId: 'host-a', status: 'active', shuttleKind: 'oneshot' }))
+    cards[0] = { ...cards[0], status: 'closed' }
+    cards[1] = { ...cards[1], status: 'active', shuttleKind: 'oneshot', runtimePhase: 'waiting' }
+    feed.files = [receipt('gamma', '/working.html', now()), receipt('beta', '/needs.html', now() - 1000),
+      ...Array.from({ length: 6 }, (_, i) => receipt('alpha', `/report-${i}.html`, now() - 2000 - i, 'host-a', { sessionId: 'one-batch' }))]
+    await refresh()
+    const rows = [...overview.el.querySelectorAll<HTMLElement>('.ws-overview-change')]
+    expect(rows.map(r => r.dataset.uid)).toEqual(['alpha', 'beta', 'gamma'])
+    expect(rows[0].querySelectorAll('.ws-overview-change-doc')).toHaveLength(4)
+    expect(rows[0].querySelector('.ws-overview-change-more')?.textContent).toBe('+2')
+    rows[0].querySelector<HTMLButtonElement>('.ws-overview-change-open')!.click(); await settle()
+    expect(onOpen).toHaveBeenLastCalledWith(cards[0], 'host-a:/report-0.html')
+    expect(overview.el.querySelector('.ws-overview-change[data-uid="alpha"]')).toBeNull()
+    expect(folio('alpha').classList.contains('ws-overview-seen')).toBe(true)
+  })
+  it('counts the Desk review surface, excluding resting, cycles and folded cards', async () => {
+    cards = [card({ id: 'a', status: 'closed' }), card({ id: 'b', status: 'closed', tempered: true }),
+      card({ id: 'c', status: 'closed', effectiveHorizon: 'stashed' }), card({ id: 'd', status: 'closed', foldedUnder: 'a' }),
+      card({ id: 'e', status: 'closed', tags: ['cycle'], isCycle: true })]
+    await refresh()
+    expect(overview.el.querySelector('.ws-overview-summary')?.textContent).toMatch(/; 1 await your review\.$/)
+  })
+  it('finds declared titles without body reads and starts keyboard order at the change band', async () => {
+    reset(now() - 3600000)
+    feed.files = [receipt('alpha', '/unique-title-report.html'), receipt('beta', '/old.html', now() - 2 * 3600000)]
+    await refresh()
+    cacheDocumentTitle('host-a:/unique-title-report.html', '/unique-title-report.html', '<title>The measured universe</title>')
+    find('measured universe')
+    expect(folio('alpha').hidden).toBe(false)
+    expect(folio('beta').hidden).toBe(true)
+    find('')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }))
+    expect(overview.el.querySelector('.ws-key-selected')?.classList.contains('ws-overview-change-open')).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle()
+    expect(onOpen).toHaveBeenLastCalledWith(cards[0], 'host-a:/unique-title-report.html')
+  })
+  it('assigns full, compact and line densities with a temporal boundary', async () => {
+    reset(now() - 3 * 3600000)
+    cards = ['today', 'yesterday', 'week', 'earlier'].map(uid => card({ id: uid, uid }))
+    feed.files = cards.map((c, i) => receipt(c.uid!, `/${c.uid}.html`, now() - [0, 86400000, 3 * 86400000, 10 * 86400000][i]))
+    await refresh()
+    expect(cards.map(c => folio(c.uid!).dataset.density)).toEqual(['full', 'full', 'compact', 'line'])
+    expect(overview.el.querySelector('.ws-overview-boundary')?.textContent).toBe('— you were here 3 h ago —')
+    lens('projects')
+    expect(cards.every(c => folio(c.uid!).dataset.density === 'compact')).toBe(true)
+    expect(overview.el.querySelector('.ws-overview-boundary')).toBeNull()
+  })
+  it('survives storage denial for reads and writes', async () => {
+    overview.dispose()
+    vi.stubGlobal('localStorage', { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } })
+    overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen })
+    document.body.append(overview.el)
+    feed.files = [receipt('alpha', '/report.html')]
+    await refresh()
+    overview.opened(cards[0]); overview.hide(); overview.show(); lens('hosts')
+    expect(folio('alpha').isConnected).toBe(true)
   })
 })
 
