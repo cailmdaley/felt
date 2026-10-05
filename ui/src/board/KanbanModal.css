@@ -2076,6 +2076,8 @@
 .kbn-card-worker.ws-turn-active .ws-worker-dot { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
 @keyframes kbn-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .kbn-card-worker .ws-worker-dot { animation: none !important; } }
+/* Behind the reader or the Board's veil the Desk is inert and unread; its dots rest. */
+[inert] .kbn-card-worker .ws-worker-dot { animation: none; }
 
 /* Worker-less runtime phase badge (retrying / due / dispatched, and the
    waiting or attention of an app worker with no session matched). It wears

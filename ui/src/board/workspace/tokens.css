@@ -142,6 +142,8 @@
   --ws-sidebar-lift: -2px;
   --ws-sidebar-bottom: 40px;
   --ws-sidebar-card-gap: 12px;
+  /* A sidebar card's meta row: host mark and worker pill on one 19 px line, the Desk's chip height. */
+  --ws-meta-row: 19px;
   --ws-sidebar-outcome-lines: 2;
   --ws-sidebar-outcome-size: 14px;
   --ws-row-size: 16px;
