@@ -1935,7 +1935,7 @@ test('Only the owner-reported working phase breathes, on a 2.4 s opacity cycle',
     const css = getComputedStyle(document.querySelector('.ws-sidebar [aria-current="true"] .ws-worker-dot'))
     return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction }
   })
-  assert.deepEqual(timing, { name: 'ws-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
+  assert.deepEqual(timing, { name: 'kbn-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
 }, undefined, 'true', 'no-preference')
 
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
