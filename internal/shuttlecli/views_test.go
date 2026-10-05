@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -71,4 +72,25 @@ func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 	if !ok || facet["resolved"] == nil {
 		t.Fatalf("resolved Shuttle facet missing from show JSON: %#v", shown["shuttle"])
 	}
+}
+
+// captureStdout returns what fn wrote to the process's stdout.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	fn()
+	os.Stdout = old
+	if err := w.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(r); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	return buf.String()
 }

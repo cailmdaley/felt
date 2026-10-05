@@ -57,7 +57,7 @@ func fenceOverrides(dir, home string) map[string]string {
 // fencedEnv lists the variables TestMain clears because the developer's shell
 // (often a live shuttle worker) carries them and they select real machine
 // state: the daemon listener, identity, ledgers, worker context and harness
-// homes. A test that needs one sets it with t.Setenv.
+// homes. A test that needs one sets it on its testEnv.
 var fencedEnv = []string{
 	"SHUTTLE_HOST", "SHUTTLE_HOST_FILE", "SHUTTLE_HOST_CONFIG_FILE", "SHUTTLE_LISTEN",
 	"SHUTTLE_PORT", "SHUTTLE_DATA_DIR", "SHUTTLE_RELEASE", "SHUTTLE_DAEMON_URL",

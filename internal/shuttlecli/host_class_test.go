@@ -32,22 +32,6 @@ type hostFixtureCase struct {
 	} `json:"expect"`
 }
 
-// setHostEnv isolates one resolution: the fixture's base env, then the case's
-// overrides, with every other input unset.
-func setHostEnv(t *testing.T, file string, base, env map[string]string) {
-	t.Helper()
-	for _, k := range []string{"SHUTTLE_LISTEN", "SHUTTLE_PORT", "SHUTTLE_DATA_DIR", "SHUTTLE_DAEMON_URL"} {
-		t.Setenv(k, "")
-	}
-	for k, v := range base {
-		t.Setenv(k, v)
-	}
-	for k, v := range env {
-		t.Setenv(k, v)
-	}
-	t.Setenv("SHUTTLE_HOST_CONFIG_FILE", file)
-}
-
 // TestHostFixtureParity — the Go reader reproduces every case the daemon's
 // reader must also reproduce.
 func TestHostFixtureParity(t *testing.T) {

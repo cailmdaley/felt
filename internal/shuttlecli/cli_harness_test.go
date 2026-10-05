@@ -1,36 +1,16 @@
 package shuttlecli
 
 import (
-	"os"
-	"sync"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
-// testApp is an app on a copy of the test process's environment, taken when
-// it is called, writing to the process's standard streams.
+// testApp is an app on its own fenced env (testEnv).
 func testApp(t testing.TB) *app {
 	t.Helper()
-	env, _ := sysenvtest.FromProcess(t, nil)
-	env.Stdin, env.Stdout, env.Stderr = os.Stdin, os.Stdout, os.Stderr
-	a := newApp(env)
-	if goos, ok := testGOOS.Load(t); ok {
-		a.hostGOOS = goos.(string)
-	}
-	return a
-}
-
-// testGOOS holds the platform useHostGOOS gave each test.
-var testGOOS sync.Map // testing.TB → string
-
-// useHostGOOS makes every testApp(t) of this test run as if this machine were
-// goos.
-func useHostGOOS(t testing.TB, goos string) {
-	t.Helper()
-	testGOOS.Store(t, goos)
-	t.Cleanup(func() { testGOOS.Delete(t) })
+	return newApp(testEnv(t))
 }
 
 // executeCLI runs one shuttle invocation in a fresh command tree with dir as

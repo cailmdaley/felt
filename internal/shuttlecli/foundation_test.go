@@ -11,21 +11,6 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-// withOwnHost seeds identity via a host file (SHUTTLE_HOST_FILE) so
-// resolveOwnHost (and thus ensureOwnedHere) resolves deterministically to
-// hostID, independent of any real daemon, env var, or OS hostname on the test
-// machine. Shared by the foundation and lifecycle/create verb tests.
-func withOwnHost(t *testing.T, hostID string) {
-	t.Helper()
-	t.Setenv("SHUTTLE_HOST", "") // guard against ambient env leaking into the test
-	dir := t.TempDir()
-	path := filepath.Join(dir, "host")
-	if err := os.WriteFile(path, []byte(hostID+"\n"), 0o644); err != nil {
-		t.Fatalf("writing host file: %v", err)
-	}
-	t.Setenv("SHUTTLE_HOST_FILE", path)
-}
-
 func TestResolveOwnHost_Precedence(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

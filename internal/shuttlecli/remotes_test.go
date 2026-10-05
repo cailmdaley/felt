@@ -411,17 +411,6 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	}
 }
 
-// writeRemotes points SHUTTLE_REMOTES_FILE at a temp file holding body.
-func writeRemotes(t *testing.T, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "remotes.json")
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SHUTTLE_REMOTES_FILE", path)
-	return path
-}
-
 // TestParseProxyEndpoint is the proxy grammar's full table, and it is mirrored
 // line for line by the Elixir suite's table over Shuttle.Remotes.parse_proxy/1.
 // The two readers share the fixture files for everything a fleet file can
