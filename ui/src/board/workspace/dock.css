@@ -319,4 +319,3 @@
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 44px; min-width: 44px; }
 }
-

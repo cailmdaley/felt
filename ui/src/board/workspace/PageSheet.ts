@@ -12,7 +12,6 @@ export class PageSheet {
   readonly el = document.createElement('dialog')
   private readonly panel = document.createElement('section')
   private readonly list = document.createElement('div')
-  private readonly actions = document.createElement('div')
   private readonly rows = new Map<DocKey, Row>()
   private readonly token = `pages:${Math.random().toString(36).slice(2)}`
   private model: SheetModel | null = null
@@ -35,8 +34,7 @@ export class PageSheet {
     grabber.addEventListener('click', () => this.close())
     const heading = document.createElement('h2'); heading.textContent = 'Pages'
     const head = document.createElement('div'); head.className = 'ws-page-sheet-head'
-    this.actions.className = 'ws-page-sheet-actions'; this.actions.hidden = true
-    head.append(heading, this.actions)
+    head.append(heading)
     this.list.className = 'ws-page-sheet-list'
     this.panel.append(grabber, head, this.list)
     this.el.append(this.panel)
@@ -71,13 +69,6 @@ export class PageSheet {
 
   get isOpen(): boolean { return this.el.open }
 
-  /** The constitution's own verbs beside the heading (its verdicts while it awaits review). */
-  setActions(actions: HTMLElement | null): void {
-    const focused = this.actions.contains(document.activeElement) ? document.activeElement?.className.split(' ').find(c => c.startsWith('kbn-ctl-') && c !== 'kbn-ctl-btn') : undefined
-    this.actions.replaceChildren(...(actions ? [actions] : []))
-    this.actions.hidden = !actions
-    if (focused) this.actions.querySelector<HTMLElement>(`.${focused}`)?.focus({ preventScroll: true })
-  }
 
   update(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>): void {
     this.model = { channel, selected, fresh }

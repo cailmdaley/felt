@@ -36,12 +36,15 @@
 .ws-mono, .ws-labelbar, .ws-receipts, .ws-position {
   font-family: var(--ws-mono); letter-spacing: var(--ws-mono-tracking);
 }
-/* The running head: one row on the veil, no plates. It says where you are:
-   the return, the fiber's name and its verdicts, and its worker; the map at
-   the foot says which page. Names and verbs in the serif, on one baseline. */
+/* The running head: one row on the veil, no plates. The lead says where you
+   are (the return and the fiber's name), the centre which page (the map's
+   tiles), and the trail who is working and how far along the run you are.
+   Names and verbs in the serif. The lead yields its name before the centre
+   shrinks below its floor; the centre scrolls rather than push either end. */
 .ws-navbar {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline; column-gap: var(--ws-head-span); padding: var(--ws-head-top) var(--ws-head-end) 0 var(--ws-head-start);
+  display: grid; grid-template-columns: minmax(0, auto) minmax(var(--ws-head-index-floor), 1fr) auto;
+  align-items: center; column-gap: var(--ws-head-span); height: var(--ws-head-height);
+  padding: var(--ws-head-top) var(--ws-head-end) 0 var(--ws-head-start);
   background: transparent; position: relative; z-index: 3; flex: none;
 }
 .ws-nav-lead { display: flex; align-items: baseline; min-width: 0; gap: var(--ws-head-gap); }
@@ -65,7 +68,7 @@
 .ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
-/* The right end: the worker control. */
+/* The right end: the worker control, then the position. */
 .ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0; }
 .ws-head-worker { flex: none; display: flex; align-items: baseline; }
 .ws-head-worker[hidden] { display: none; }
@@ -97,29 +100,17 @@
 .ws-turn-active .ws-worker-dot { animation: ws-worker-breathe 2.4s ease-in-out infinite; }
 @keyframes ws-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
-.ws-nav-verdicts { flex: none; margin-left: var(--ws-small-gap); }
-.ws-nav-verdicts[hidden] { display: none; }
-/* The protected plate resets every property, visibility too, so it is held by name. */
-.ws-nav-verdicts-held, .ws-nav-verdicts-held * { visibility: hidden; }
-.ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: baseline; gap: 2px; }
-.ws-review-plate { font: var(--ws-label-size)/1.2 var(--ws-serif); }
-/* In the head the verdicts are verbs in their pigments, plated only under the pointer. */
-.ws-reader .ws-nav-verdicts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
-  height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border: 0; border-radius: var(--ws-control-radius);
-  background: transparent; font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0; text-transform: none;
-}
-.ws-reader .ws-nav-verdicts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); }
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
 .ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .ws-stage {
-  /* Pages clip at the stage's sides; their shadows still fall below it, toward the map. */
+  /* Pages clip at the stage's sides; their shadows still fall below it. */
   position: relative; overflow-x: clip; overflow-y: visible; flex: 1; min-height: 0; min-width: 0;
   background: transparent; transform-origin: center 40%;
 }
 .ws-parallax { position: absolute; inset: 0; transform: translate3d(var(--ws-page-x, 0px), var(--ws-page-y, 0px), 0); }
 .ws-track { position: absolute; left: 0; top: 0; height: 100%; width: 0; transition: transform var(--ws-crossing) var(--ws-ease); }
 .ws-page {
-  position: absolute; top: var(--ws-stage-inset); transform-origin: center;
+  position: absolute; top: var(--ws-stage-top); transform-origin: center;
   transition: left var(--ws-crossing) var(--ws-ease), width var(--ws-crossing) var(--ws-ease), height var(--ws-crossing) var(--ws-ease), transform var(--ws-crossing) var(--ws-ease), opacity var(--ws-crossing) var(--ws-ease);
 }
 .ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-radius); overflow: hidden; background: var(--ws-paper); box-shadow: var(--ws-float); }
@@ -177,7 +168,7 @@
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-channel-row[aria-current='true'] { background: var(--ws-paper); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent), 0 6px 12px color-mix(in srgb, var(--ws-ink) 12%, transparent); }
 /* The column travels as cards; the current slip reaches toward the reading stage. */
-.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-stage-inset) var(--ws-inset) 0; position: relative; z-index: 2; }
+.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-stage-top) var(--ws-inset) 0; position: relative; z-index: 2; }
 .ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
 .ws-sidebar .ws-channel-list {
   flex: 1; min-height: 0; width: calc(100% + var(--ws-sidebar-overflow)); margin-right: calc(-1 * var(--ws-sidebar-overflow));
@@ -261,9 +252,9 @@
 .ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); z-index: 2; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-reader { --ws-stage-inset: 0px; --ws-prose-padding: 24px 16px 48px; --ws-lede-size: 20px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
+  .ws-reader { --ws-stage-inset: 0px; --ws-stage-top: 0px; --ws-prose-padding: 24px 16px 48px; --ws-lede-size: 20px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
-  .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; column-gap: 0; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
+  .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; column-gap: 0; height: auto; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
   /* Phone neighbours are flat sheets beside the page, seen only while a swipe or crossing carries them in. */
@@ -272,7 +263,8 @@
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
-  .ws-nav-verdicts, .ws-band { display: none !important; }
+  /* The phone keeps its place in the bottom bar's ticks and count and its page sheet. */
+  .ws-head-index, .ws-head-position, .ws-tab-tip { display: none !important; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
   .ws-reader .ws-navbar .ws-head-worker .ws-worker-control { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }

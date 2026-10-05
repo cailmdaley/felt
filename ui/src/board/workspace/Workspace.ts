@@ -115,7 +115,6 @@ export class Workspace {
         this.history.leave()
       },
       workerPill: card => this.dock.workerPillFor(card),
-      verdictPlate: card => this.dock.verdictPlateFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
       onConversation: card => { this.dock.openConversation(card) },

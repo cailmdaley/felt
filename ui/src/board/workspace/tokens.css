@@ -69,27 +69,26 @@
   --ws-neighbour-fade-end: var(--ws-neighbour-fade);
   --ws-gap: 24px;
   --ws-inset: 12px;
-  /* The map: tiles of one size beneath the stage, the selected one lifted. */
-  --ws-tile-width: 80px;
-  --ws-tile-height: 56px;
+  /* The map: tiles of one size in the running head's centre, the selected one
+     lifted. The tile's height sets the head's: one tile with its air above and below. */
+  --ws-tile-width: 64px;
+  --ws-tile-height: 44px;
   --ws-tile-gap: 8px;
-  --ws-tile-pad: 6px;
+  --ws-tile-pad: 5px;
   --ws-tile-radius: 3px;
   --ws-tile-lift: -3px;
   --ws-tile-receded-opacity: 0.62;
   --ws-tile-hover-opacity: 0.92;
   --ws-tile-title-size: 11px;
+  --ws-tile-title-lines: 2;
   --ws-tile-glyph-size: 9px;
   --ws-tile-anchor-size: 26px;
   --ws-tile-caption-size: 10px;
   --ws-tile-caption-height: 15px;
   /* Room above and below a tile inside the strip, for its lift, fresh mark and focus rule. */
-  --ws-tile-air: 6px;
-  --ws-band-foot: 10px;
-  --ws-band-height: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air) + var(--ws-band-foot));
-  --ws-band-side: 64px;
-  --ws-band-fade: 40px;
-  --ws-tip-height: 24px;
+  --ws-tile-air: 4px;
+  --ws-index-fade: 40px;
+  --ws-tip-height: 28px;
   --ws-drag-latch: 4px;
 
   --ws-reader-layer: 9000;
@@ -101,12 +100,18 @@
   --ws-control-height: 32px;
   /* The running head: its top margin, its ends, and the space between its lead controls.
      Its start is the sidebar's inset, so the head's first control sits on the sidebar's edge. */
-  --ws-head-top: 10px;
+  --ws-head-top: 6px;
+  --ws-head-row: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air));
+  --ws-head-height: calc(var(--ws-head-top) + var(--ws-head-row));
   --ws-head-start: var(--ws-inset);
   --ws-head-end: var(--ws-stage-inset);
   --ws-head-gap: 10px;
   --ws-head-span: 32px;
+  /* The least room the head's centre keeps for its tiles: three of them. */
+  --ws-head-index-floor: calc(3 * var(--ws-tile-width) + 2 * var(--ws-tile-gap));
   --ws-stage-inset: 28px;
+  /* Between the head and the page's top edge; the page's sides and foot keep the stage inset. */
+  --ws-stage-top: 10px;
   --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
   --ws-label-height: 40px;

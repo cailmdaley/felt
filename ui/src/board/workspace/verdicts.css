@@ -1,5 +1,5 @@
 .ws-verdict-toasts {
-  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: calc(var(--ws-band-height) + var(--ws-stage-inset) + var(--ws-label-height) + var(--ws-inset) + var(--ws-line-width));
+  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: calc(var(--ws-stage-inset) + var(--ws-label-height) + var(--ws-inset) + var(--ws-line-width));
   left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px;
   width: max-content; max-width: calc(100vw - 24px); pointer-events: none;
 }
@@ -35,3 +35,28 @@
 .ws-verdict-toast[data-verdict] { border-left: 3px solid var(--verdict-edge); }
 .ws-verdict-toast[data-verdict='tempered'] { --verdict-edge: color-mix(in srgb, var(--kbn-tempered) 55%, var(--ws-paper)); }
 .ws-verdict-toast[data-verdict='discarded'] { --verdict-edge: color-mix(in srgb, var(--kbn-discarded) 55%, var(--ws-paper)); }
+/* Outside review the pair rides the composer's row, beside the field: two verbs
+   in their pigments, plated only under the pointer, so the composer's send stays
+   the row's one plate. The field may grow downward; the pair keeps its line. */
+.ws-dock .kbn-ctl-compose:has(> .kbn-ctl-verdict) { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--ws-inset); }
+.ws-dock .kbn-ctl-compose:has(> .kbn-ctl-verdict) > * { grid-column: 1 / -1; }
+.ws-dock .kbn-ctl-compose:has(> .kbn-ctl-verdict) > .kbn-ctl-composer { grid-column: 1; grid-row: 1; }
+.ws-dock .kbn-ctl-compose > .kbn-ctl-verdict[data-place='composer'] {
+  grid-column: 2; grid-row: 1; align-self: start; align-items: center; gap: 2px; margin: 0;
+  height: calc(var(--ctl-h) + 8px);
+}
+.ws-dock .kbn-ctl-verdict[data-place='composer'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+  min-height: var(--ctl-h); padding-inline: 10px; background: transparent; border-color: transparent !important;
+}
+.ws-dock .kbn-ctl-verdict[data-place='composer'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
+  background: var(--verdict-tint); border-color: transparent !important;
+}
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  /* On the phone the pair sits beneath the field, at a full target. */
+  .ws-dock .kbn-ctl-compose:has(> .kbn-ctl-verdict) > .kbn-ctl-composer { grid-column: 1 / -1; }
+  .ws-dock .kbn-ctl-compose > .kbn-ctl-verdict[data-place='composer'] { grid-column: 1 / -1; grid-row: 2; height: auto; margin-top: var(--ws-small-gap); gap: var(--ws-small-gap); }
+  .ws-dock .kbn-ctl-verdict[data-place='composer'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+    min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px;
+    border-color: var(--verdict-edge) !important;
+  }
+}

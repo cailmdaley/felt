@@ -126,7 +126,7 @@ describe('workspace reader integration', () => {
     vi.useFakeTimers()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
     vi.advanceTimersByTime(3000)
-    document.querySelector<HTMLButtonElement>('.ws-review-plate .kbn-ctl-temper')!.click()
+    document.querySelector<HTMLButtonElement>('.ws-dock .kbn-ctl-verdict .kbn-ctl-temper')!.click()
     expect(commit).not.toHaveBeenCalled()
     expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
     expect(document.querySelector('.ws-verdict-toast')?.textContent).toMatch(/^Tempered/)
@@ -503,8 +503,8 @@ describe('workspace reader integration', () => {
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
     confirm.mockReturnValue(true)
-    // In flight, the head carries the verdict pair.
-    document.querySelector<HTMLButtonElement>('.ws-nav-verdicts .kbn-ctl-temper')!.click()
+    // In flight, the act zone carries the verdict pair in the composer's row.
+    band.querySelector<HTMLButtonElement>('.kbn-ctl-compose > .kbn-ctl-verdict[data-place="composer"] .kbn-ctl-temper')!.click()
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(transition).not.toHaveBeenCalled()
     vi.advanceTimersByTime(6000)

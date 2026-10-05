@@ -106,11 +106,11 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | Selector | Part |
 |---|---|
 | `[data-part='veil']` | Still backdrop beneath the reader |
-| `[data-part='page-band']` | The map beneath the stage: the tiles and the page count |
+| `[data-part='page-band']` | The map in the running head's centre, between the fiber's name and the worker |
 | `[data-part='tab-strip']` | The row of tiles, one per page |
 | `[data-part='tab']` | One page's tile; its face is a `[data-part='thumbnail']` |
 | `[data-part='tab'][aria-selected='true']` | Selected tile, lifted with an ink hairline |
-| `[data-part='tab-tip']` | Caption naming a hovered tile, above the band |
+| `[data-part='tab-tip']` | Caption naming a hovered tile, beneath the head |
 | `[data-part='label-bar']` | Bottom document label and its controls |
 | `[data-part='page-frame']` | Paper sheet enclosing content and label |
 | `[data-part='fiber-header']` | Fiber status header |

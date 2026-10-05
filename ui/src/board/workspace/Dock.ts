@@ -15,7 +15,7 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { fiberPageColumn } from './fiberPageState.js'
+import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import './tokens.css'
@@ -694,18 +694,6 @@ export class Dock {
     return row
   }
 
-  /** The compact verdict pair the navbar and the phone's page sheet carry
-   *  for every fiber still without a verdict, reachable from any page. */
-  verdictPlateFor(card: KanbanCard): HTMLElement {
-    const plate = document.createElement('div')
-    plate.className = 'ws-review-plate'
-    plate.dataset.part = 'act'; plate.dataset.act = 'verdict'
-    plate.setAttribute('role', 'group')
-    plate.setAttribute('aria-label', 'Verdict')
-    plate.append(this.verdictControlsFor(card))
-    return plate
-  }
-
   /** Refresh controls without replacing drafts or folded fields. */
   syncRuntime(card: KanbanCard | null): void {
     for (const band of this.bands.values()) band.syncRuntime(card)
@@ -760,7 +748,8 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    if (shuttleManaged) body.append(this.buildComposer(card))
+    const compose = shuttleManaged ? this.buildComposer(card) : null
+    if (compose) body.append(compose)
     body.append(this.buildTranscriptPane(card))
 
     const settings = document.createElement('div')
@@ -844,15 +833,21 @@ export class Dock {
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
     const verdict = this.verdictControlsFor(card)
+    verdict.setAttribute('role', 'group')
+    verdict.setAttribute('aria-label', 'Verdict')
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
-    // The verdict leads the act zone while the fiber awaits review; in every
-    // other column the reader's head carries it.
+    // Every fiber without a verdict carries Temper and Discard here. Awaiting
+    // review, the pair leads the act zone as plates; otherwise it rides the
+    // composer's row as quiet verbs beside the field, after its send.
     this.actPaint = () => {
       const column = fiberPageColumn(card)
       this.el.dataset.column = column
-      if (column === 'awaitingReview') { if (verdict.parentElement !== body) body.prepend(verdict) }
-      else verdict.remove()
+      const place = column === 'awaitingReview' || !compose ? 'lead' : 'composer'
+      verdict.dataset.place = place
+      if (!verdictReachable(card)) verdict.remove()
+      else if (place === 'lead') { if (body.firstElementChild !== verdict) body.prepend(verdict) }
+      else if (verdict.parentElement !== compose) compose!.insertBefore(verdict, compose!.firstElementChild?.nextSibling ?? null)
     }
     this.actPaint()
   }

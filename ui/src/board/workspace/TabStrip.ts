@@ -64,15 +64,15 @@ type TabRecord = { key: string; label: string; button: HTMLButtonElement; thumb?
 interface StripOptions { shuttleBase: string }
 
 /**
- * The reader's map of pages: one roving-focus tablist of tiles beneath the
- * stage, a scale model of the run, whose selected tile stays centred under
- * the page through one interruptible crossing. Every tile has a designed
+ * The reader's map of pages: one roving-focus tablist of tiles in the running
+ * head, a scale model of the run, whose selected tile stays over the page's
+ * centre through one interruptible crossing. Every tile has a designed
  * face at once (its title in the serif and a kind mark; a recording adds
  * its sketch); a live thumbnail fades in over it where one helps.
  */
 export class TabStrip {
   readonly el: HTMLDivElement
-  /** The hovered tile's name; the reader sets it in the gap above the band, outside the strip's mask. */
+  /** The hovered tile's name; the reader sets it beneath the head, outside the strip's mask. */
   readonly tip: HTMLDivElement
   private readonly onSelect: (index: number) => void
   private readonly onExpand: () => void
@@ -135,6 +135,9 @@ export class TabStrip {
     if (!this.visible) return
     for (const record of this.records) if (keys.has(record.key)) this.receiptMotion.tab(record.button)
   }
+
+  /** The selected tile's width, so the reader can keep it whole inside the strip. */
+  get selectedWidth(): number { return this.records[this.selectedIndex]?.button.offsetWidth ?? 0 }
 
   /** Where, inside the strip, the selected tile's centre belongs; null centres it. */
   setFocus(x: number | null): void {
@@ -365,11 +368,11 @@ export class TabStrip {
   }
 
   private onScreen(button: HTMLElement): boolean {
-    const band = this.el.getBoundingClientRect(), tab = button.getBoundingClientRect()
-    return tab.width > 0 && tab.right > band.left && tab.left < band.right
+    const strip = this.el.getBoundingClientRect(), tab = button.getBoundingClientRect()
+    return tab.width > 0 && tab.right > strip.left && tab.left < strip.right
   }
 
-  /** An edge fades only where a tile runs past it, not over the band's centring margin. */
+  /** An edge fades only where a tile runs past it, not over the strip's centring margin. */
   private updateFades(): void {
     const first = this.records[0]?.button, last = this.records[this.records.length - 1]?.button
     const left = this.el.scrollLeft, right = left + this.el.clientWidth
@@ -421,11 +424,11 @@ export class TabStrip {
     name.textContent = record?.doc?.kind === 'fiber' ? this.channel?.name ?? record.label : record?.label ?? ''
     this.tip.replaceChildren(name)
     this.tip.hidden = false
-    const band = this.tip.offsetParent?.getBoundingClientRect()
-    if (!band) return
+    const head = this.tip.offsetParent?.getBoundingClientRect()
+    if (!head) return
     const rect = tab.getBoundingClientRect()
     const half = this.tip.offsetWidth / 2
-    this.tip.style.left = `${Math.max(half + 8, Math.min(band.width - half - 8, rect.left + rect.width / 2 - band.left))}px`
+    this.tip.style.left = `${Math.max(half + 8, Math.min(head.width - half - 8, rect.left + rect.width / 2 - head.left))}px`
   }
   private readonly hideTip = (): void => {
     if (this.tipTimer !== null) clearTimeout(this.tipTimer)

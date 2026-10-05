@@ -1,7 +1,7 @@
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
+import { verdictReachable } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -33,7 +33,6 @@ export interface ReaderOptions {
   onCrossing?(travel: number): void
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
-  verdictPlate?(card: KanbanCard): HTMLElement
   onVerdict?(verdict: 'tempered' | 'composted'): void
   onCompose?(): void
   onConversation?(card: KanbanCard): void
@@ -91,14 +90,11 @@ export class Reader {
   private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
-  /** The awaiting-review verdicts, beside the fiber's name, reachable from any page. */
-  private readonly verdicts = element('span', 'ws-nav-verdicts')
-  private verdictKey: string | null = null
   private readonly position = element('span', 'ws-position')
-  /** The map's page count, at the band's right end. */
-  private readonly bandPosition = element('span', 'ws-position ws-band-position')
-  /** The map beneath the stage: the tiles, centred under the selected page, and the page count. */
-  private readonly band = element('div', 'ws-band')
+  /** The page count, at the head's right end. */
+  private readonly headPosition = element('span', 'ws-position ws-head-position')
+  /** The head's centre: the map of tiles, the selected one over the page's centre. */
+  private readonly headIndex = element('div', 'ws-head-index')
   /** The phone's sense of place: one tick per page along the bottom bar's top edge. */
   private readonly ticks = element('div', 'ws-page-ticks')
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
@@ -155,8 +151,6 @@ export class Reader {
     this.el.setAttribute('aria-label', 'Document reader')
     this.el.dataset.wsThemeBoundary = ''
     this.veil.dataset.part = 'veil'
-    this.verdicts.dataset.part = 'act'; this.verdicts.dataset.act = 'verdict'
-    this.verdicts.hidden = true
     this.el.inert = true
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), { shuttleBase: opts.shuttleBase })
     this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Constitutions')
@@ -165,17 +159,17 @@ export class Reader {
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
-    this.lead.append(this.sidebarToggle, this.returnButton, this.title, this.verdicts)
-    this.bandPosition.setAttribute('aria-hidden', 'true')
+    this.lead.append(this.sidebarToggle, this.returnButton, this.title)
+    this.headPosition.setAttribute('aria-hidden', 'true')
     this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
     this.headWorker.hidden = true
     const trail = element('div', 'ws-nav-trail')
-    trail.append(this.headWorker)
+    trail.append(this.headWorker, this.headPosition)
+    this.headIndex.dataset.part = 'page-band'
+    this.headIndex.append(this.tabs.el)
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
-    this.navbar.append(this.lead, trail)
-    this.band.dataset.part = 'page-band'
-    this.band.append(element('span', 'ws-band-balance'), this.tabs.el, this.bandPosition, this.tabs.tip)
+    this.navbar.append(this.lead, this.headIndex, trail, this.tabs.tip)
     this.ticks.setAttribute('aria-hidden', 'true')
     this.prev = button('ws-thumb-button', '', () => this.step(-1), 'Previous document')
     this.next = button('ws-thumb-button', '', () => this.step(1), 'Next document')
@@ -227,7 +221,7 @@ export class Reader {
     this.sidebarPicker.el.style.display = 'contents'
     this.sidebar.append(this.sidebarPicker.el)
     const column = element('div', 'ws-stage-column')
-    column.append(this.stage, this.band)
+    column.append(this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column)
     this.el.append(this.veil, this.navbar, main, thumb, this.announcement, this.pageSheet.el)
@@ -243,6 +237,8 @@ export class Reader {
     this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
+    // The index's slot moves with the lead's width (a name, a font arriving).
+    this.observer?.observe(this.tabs.el)
     window.addEventListener('resize', this.relayout)
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
@@ -285,7 +281,6 @@ export class Reader {
     this.title.textContent = channel.name
     this.title.title = channel.name
     if (!this.workerClock) this.workerClock = window.setInterval(() => this.paintWorker(), 30000)
-    this.paintVerdicts()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     if (!switching) this.tabs.arrive(arrivals)
@@ -417,27 +412,6 @@ export class Reader {
     if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
     this.swipeWatchdog = null
   }
-  /** Temper and Discard ride the navbar for every fiber still without a
-   *  verdict, and the phone's page sheet carries the same pair. On the fiber
-   *  page of a fiber awaiting review the act zone leads with its own pair, so
-   *  the head's keeps its place, unseen, and nothing beside it moves. */
-  private paintVerdicts(): void {
-    const card = this.currentCard
-    const reachable = !!card && verdictReachable(card)
-    // The pair is built once per fiber and lifecycle, so a repaint never
-    // swaps the buttons under the pointer or the focus.
-    const key = reachable && card ? JSON.stringify([card.originId, card.uid ?? card.id, card.path, card.status, card.tempered, card.workerState, card.tmuxSession]) : null
-    if (key !== this.verdictKey) {
-      this.verdictKey = key
-      const navbar = key && card ? this.opts.verdictPlate?.(card) ?? null : null
-      this.verdicts.replaceChildren(...(navbar ? [navbar] : []))
-      this.pageSheet.setActions(key && card ? this.opts.verdictPlate?.(card) ?? null : null)
-    }
-    this.verdicts.hidden = !key || !this.verdicts.firstChild
-    const actZoneLeads = !!card && this.document?.kind === 'fiber' && fiberPageColumn(card) === 'awaitingReview'
-    this.verdicts.classList.toggle('ws-nav-verdicts-held', actZoneLeads)
-    this.verdicts.inert = actZoneLeads
-  }
   /** Repaint the head's worker control from the current card, keeping its focus. */
   private paintWorker(): void {
     const card = this.currentCard
@@ -448,7 +422,6 @@ export class Reader {
     if (focused) this.headWorker.querySelector<HTMLElement>('.kbn-card-worker')?.focus({ preventScroll: true })
   }
   private paint(animate: boolean): void {
-    this.paintVerdicts()
     this.paintWorker()
     const ch = this.channel
     if (!ch) return
@@ -465,7 +438,10 @@ export class Reader {
     this.tabs.fresh(fresh)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
-    this.position.textContent = this.bandPosition.textContent = `${index + 1} / ${ch.documents.length}`
+    this.position.textContent = this.headPosition.textContent = `${index + 1} / ${ch.documents.length}`
+    // Held at the widest count, so stepping from 9 to 10 never moves the index.
+    const digits = 2 * String(ch.documents.length).length + 3
+    this.headPosition.style.minWidth = `calc(${digits}ch + ${digits} * var(--ws-mono-tracking))`
     this.paintTicks(index, ch.documents.length)
     const doc = ch.documents[index]
     if (doc) {
@@ -553,12 +529,12 @@ export class Reader {
     if (!ch || !this.active) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
     const W = this.stage.clientWidth, H = this.stage.clientHeight
     if (!W || !H) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
-    const inset = this.measure('stage-inset', 28), gap = this.measure('gap', 24)
+    const inset = this.measure('stage-inset', 28), top = this.measure('stage-top', 10), gap = this.measure('gap', 24)
     // Beside the sidebar the page keeps one page gap from the column and shrinks
     // before that gutter grows; the right neighbour has the room left over.
     // Without the sidebar the page is centred in the stage.
     const docked = this.sidebarShown
-    const boxW = docked ? W - gap - inset : W - inset * 2, boxH = H - inset * 2
+    const boxW = docked ? W - gap - inset : W - inset * 2, boxH = H - top - inset
     if (!animate || this.motion.matches) {
       this.stage.classList.add('ws-instant')
       void this.stage.offsetWidth
@@ -580,8 +556,10 @@ export class Reader {
       x += width + gap
     })
     const target = Math.round(docked ? gap - (centre - selectedWidth / 2) : W / 2 - centre)
-    // The map holds the selected tile under the page's centre.
-    this.tabs.setFocus(docked ? this.stage.offsetLeft + target + centre - this.band.offsetLeft - this.tabs.el.offsetLeft : null)
+    // The index holds the selected tile over the page's centre, or as near it as its slot allows.
+    const tile = this.tabs.selectedWidth / 2 + this.measure('index-fade', 40)
+    const focus = this.stage.offsetLeft + target + centre - this.tabs.el.offsetLeft
+    this.tabs.setFocus(Math.max(Math.min(tile, this.tabs.el.clientWidth / 2), Math.min(Math.max(this.tabs.el.clientWidth / 2, this.tabs.el.clientWidth - tile), focus)))
     if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
@@ -778,11 +756,11 @@ export class Reader {
     this.renderSidebar(); this.layout(false)
     if (before) this.slideSidebar(shown, before)
   }
-  private stagePlaces(): { page: number; tabs: number; sidebar: number } {
+  private stagePlaces(): { page: number; tabs: number[]; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
-    return { page, tabs: this.band.getBoundingClientRect().left, sidebar: this.sidebar.offsetWidth }
+    return { page, tabs: this.tabs.buttons.map(tab => tab.getBoundingClientRect().left), sidebar: this.sidebar.offsetWidth }
   }
-  private slideSidebar(shown: boolean, before: { page: number; tabs: number; sidebar: number }): void {
+  private slideSidebar(shown: boolean, before: { page: number; tabs: number[]; sidebar: number }): void {
     const after = this.stagePlaces()
     const options: KeyframeAnimationOptions = {
       duration: this.measure('sidebar-time', 220),
@@ -793,7 +771,8 @@ export class Reader {
       if (el && Math.abs(from) >= 1) animations.push(el.animate([{ translate: `${from}px 0` }, { translate: '0 0' }], options))
     }
     glide(this.parallax, before.page - after.page)
-    glide(this.band, before.tabs - after.tabs)
+    // The tiles follow their page across the head, inside the index's slot.
+    this.tabs.buttons.forEach((tab, i) => glide(tab, (before.tabs[i] ?? after.tabs[i]) - after.tabs[i]))
     const width = Math.max(before.sidebar, after.sidebar)
     const hidden = { translate: `${-width}px 0`, opacity: 0 }, rest = { translate: '0 0', opacity: 1 }
     this.el.classList.add('ws-sidebar-sliding')
