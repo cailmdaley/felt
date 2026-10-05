@@ -776,6 +776,7 @@ export class Dock {
     message.setAttribute('aria-label', 'Message for the next worker')
     // The resting composer is one line; focus or a draft gives it room to grow.
     const fit = (): void => {
+      box.classList.toggle('kbn-ctl-composer-draft', Boolean(message.value))
       message.style.height = 'auto'
       if (message.value || message === document.activeElement) message.style.height = `${message.scrollHeight}px`
     }

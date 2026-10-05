@@ -44,7 +44,7 @@
   color: var(--ws-ink-muted);
   font-size: var(--ws-label-size);
 }
-.ws-dock-body { display: grid; grid-template-columns: minmax(0, max-content) auto minmax(12px, 1fr) auto; align-items: center; gap: var(--ws-small-gap); padding-top: var(--ws-small-gap); }
+.ws-dock-body { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px auto; align-items: center; gap: var(--ws-small-gap); padding-top: var(--ws-small-gap); }
 .ws-dock-body > :is(.kbn-ctl-compose, .kbn-detail-transcript, .kbn-detail-controls-open, .kbn-ctl-history-open) { grid-column: 1 / -1; }
 .ws-dock .kbn-detail-controls {
   display: flex;
@@ -105,7 +105,9 @@
 .ws-dock :is(.kbn-ctl-send, .kbn-ctl-temper) { background: var(--ws-fill); }
 .ws-dock .kbn-ctl-resume { border-color: var(--ws-agent); }
 .ws-dock .kbn-ctl-discard { color: var(--ws-ink-muted); }
-.ws-dock .kbn-ctl-sends { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ws-small-gap); margin-left: auto; }
+.ws-dock .kbn-ctl-sends { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 0; margin-left: auto; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); overflow: hidden; }
+.ws-dock .kbn-ctl-sends .kbn-ctl-btn { border: 0; border-radius: 0; padding-inline: 10px; font: var(--ws-label-size)/1.4 var(--ws-mono) !important; background-color: transparent; }
+.ws-dock .kbn-ctl-sends > * + * { border-left: var(--ws-line-width) solid var(--ws-hairline); }
 .ws-dock :is(.kbn-ctl-select, .kbn-ctl-input) {
   min-width: 0;
   border: var(--ws-line-width) solid var(--ws-hairline);
@@ -137,7 +139,7 @@
 .ws-dock .kbn-ctl-toggle:has(input:checked) { background: var(--ws-fill); border-color: var(--ws-hairline); }
 .ws-dock .kbn-ctl-toggle:has(input:checked) span::before { background: var(--ws-ink); }
 .ws-dock .kbn-ctl-toggle:has(input:focus-visible) { outline: var(--ws-focus-width) solid var(--ws-ink); }
-.ws-dock .kbn-ctl-composer { border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); }
+.ws-dock .kbn-ctl-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); }
 .ws-dock .kbn-ctl-composer:focus-within { border-color: var(--ws-ink); }
 .ws-dock .kbn-detail-directive {
   display: block;
@@ -152,6 +154,9 @@
   resize: none;
   font: var(--ws-prose-size)/1.4 var(--ws-serif);
 }
+.ws-dock .kbn-ctl-composer:focus-within, .ws-dock .kbn-ctl-composer-draft { grid-template-columns: minmax(0, 1fr); }
+.ws-dock .kbn-ctl-composer :is(.kbn-ctl-images, .kbn-ctl-composer-foot) { grid-column: 1 / -1; }
+.ws-dock .kbn-ctl-composer:not(:focus-within, .kbn-ctl-composer-draft) .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; }
 .ws-dock .kbn-detail-directive:focus { min-height: 72px; }
 .ws-dock .kbn-detail-directive::placeholder { color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-composer-drop { border-style: dashed; border-color: var(--ws-ink); }
@@ -209,7 +214,10 @@
 .ws-dock .kbn-detail-parent-option-id { font: var(--ws-small-size) var(--ws-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
 .ws-dock .kbn-detail-parent-empty { cursor: default; color: var(--ws-ink-muted); font: italic var(--ws-chrome-size) var(--ws-serif); }
 .ws-dock .kbn-ctl-foot { grid-column: 4; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); }
-.ws-dock :is(.kbn-detail-controls-toggle, .kbn-ctl-history-toggle, .kbn-ctl-foot .kbn-ctl-btn) { font: var(--ws-label-size)/1.4 var(--ws-mono) !important; }
+.ws-dock :is(.kbn-detail-controls-toggle, .kbn-ctl-history-toggle, .kbn-ctl-foot .kbn-ctl-btn) { font: 12px/1.4 var(--ws-mono) !important; min-height: var(--ctl-h); display: flex; align-items: center; }
+.ws-dock .kbn-ctl-history-toggle { gap: 8px; }
+.ws-dock .kbn-ctl-history-toggle .kbn-ctl-label { font: inherit; color: inherit; }
+.ws-dock .kbn-ctl-history-chevron { display: inline-flex; align-items: center; line-height: 1; }
 .ws-dock .kbn-ctl-foot .kbn-ctl-btn { padding: 4px 8px; }
 .ws-dock .kbn-ctl-foot:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty)) { grid-column: 1 / -1; }
 .ws-dock .kbn-ctl-foot .kbn-detail-error { flex-basis: 100%; }
@@ -238,6 +246,8 @@
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-dock { --ctl-h: var(--ws-phone-target); }
   .ws-dock-body { grid-template-columns: minmax(0, 1fr) auto; }
+  .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
+  .ws-dock .kbn-ctl-composer:not(:focus-within, .kbn-ctl-composer-draft) .kbn-ctl-composer-foot { grid-column: 1; grid-row: auto; }
   .ws-dock .kbn-ctl-foot { grid-column: 1 / -1; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--ws-label-size); }
   .ws-dock :is(.kbn-ctl-menu-item, .kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
