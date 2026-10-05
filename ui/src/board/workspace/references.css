@@ -21,6 +21,6 @@ button.ws-reference-play:hover { background: var(--ws-hover, #e8dcc1); }
 a.ws-channel-reference:focus-visible, button.ws-reference-play:focus-visible {
   outline: 1px solid var(--ws-focus, #ac3b2a); outline-offset: 2px;
 }
-@media (max-width: 700px), (pointer: coarse) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-reader button.ws-reference-play, button.ws-reference-play { width: 44px; height: 44px; }
 }

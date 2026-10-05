@@ -22,7 +22,7 @@ async function open(p, expected = 'calibration-report') {
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(expected))
 }
 async function choose(p, label) {
-  await tab(p, label).click()
+  await tab(p, label).or(p.getByRole('tab', { name: label, exact: true })).click()
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
@@ -145,6 +145,41 @@ test('Channel references select from HTML, markdown, plain text and the fiber wi
   await selected(p).getByRole('link', { name: 'brief.md', exact: true }).click()
   assert.equal(await tab(p, 'brief.md').getAttribute('aria-selected'), 'true')
 })
+
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Inline channel audio plays and pauses in HTML and markdown without selecting (${device})`, async p => {
+  await open(p); await reportReady(p)
+  const inner = await reportDocument(p)
+  const initial = await selected(p).getAttribute('data-key')
+  const play = inner.getByRole('button', { name: 'Play tone.mp3', exact: true })
+  const audio = p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/deliverables/tone.mp3"] audio')
+  assert.equal(await inner.locator('button[aria-pressed="true"]').count(), 0, 'references never autoplay')
+  if (device === 'desktop') { await play.focus(); await p.keyboard.press('Enter') }
+  else await play.click()
+  await poll(p, () => { const audio = document.querySelector('.ws-page[data-key$="/tone.mp3"] audio'); return audio && !audio.paused && audio.currentTime > 0 })
+  assert.equal(await selected(p).getAttribute('data-key'), initial)
+  await inner.getByRole('button', { name: 'Pause tone.mp3', exact: true }).waitFor()
+  await inner.waitForFunction(() => parseFloat(document.querySelector('.ws-reference-play').style.getPropertyValue('--ws-reference-progress')) > 0)
+  await audio.evaluate(audio => { window.__inlineAudio = audio })
+  await mkdir(shots, { recursive: true }); await p.screenshot({ path: resolve(shots, `links-${device}-inline-playing.png`) })
+  await inner.getByRole('button', { name: 'Play tone.wav', exact: true }).click()
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.mp3"] audio').paused && !document.querySelector('.ws-page[data-key$="/tone.wav"] audio').paused)
+  await inner.getByRole('button', { name: 'Pause tone.wav', exact: true }).click()
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.wav"] audio').paused)
+  assert.equal(await selected(p).getAttribute('data-key'), initial)
+  await choose(p, 'brief.md')
+  await selected(p).getByRole('button', { name: 'Play tone.mp3', exact: true }).click()
+  await poll(p, () => !document.querySelector('.ws-page[data-key$="/tone.mp3"] audio').paused)
+  assert.equal(await tab(p, 'brief.md').getAttribute('aria-selected'), 'true')
+  await selected(p).getByRole('button', { name: 'Pause tone.mp3', exact: true }).click()
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.mp3"] audio').paused)
+  await selected(p).getByRole('button', { name: 'Play tone.mp3', exact: true }).click()
+  await choose(p, 'tone.mp3')
+  assert.ok(await audio.evaluate(audio => audio === window.__inlineAudio && audio.paused), 'selection uses the same audio page element and pauses inline playback')
+  await choose(p, 'calibration-report')
+  await inner.getByRole('button', { name: 'Play tone.mp3', exact: true }).click()
+  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.mp3"] audio').paused)
+}, viewport)
 
 test('Ambiguous code basenames stay unlinked while an explicit path still selects', async p => {
   await open(p); await reportReady(p)

@@ -3,12 +3,12 @@ import { keyIntent } from '../keymap.js'
 import { frameBridge, type DocumentKey } from './DocumentBridge.js'
 export { withWorkspaceKeyBridge } from './DocumentBridge.js'
 import {
-  buildFileViewer, disposeFileViewer, loadFileViewerOnce, resumeFileViewer, suspendFileViewer,
+  buildFileViewer, disposeFileViewer, loadFileViewerOnce, playFileViewerAudio, resumeFileViewer, suspendFileViewer,
   type FileViewerState,
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
 import { fileBytesUrl } from '../utils.js'
-import { cacheDocumentTitle } from './DocumentTitles.js'
+import { cacheDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
 import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
@@ -38,6 +38,7 @@ type FrameState = {
   transferTime: number | null
   weight: number
   references: ReferenceSurface | null
+  referenceCandidates: string[]
 }
 
 const RETAIN = 10
@@ -50,7 +51,9 @@ export class DocumentHost {
   private readonly audioPages = new Map<HTMLAudioElement, AudioPage>()
   private documents: WorkspaceDocument[] = []
   private selected: DocKey | null = null
+  private inlineAudio: { source: DocKey; target: DocKey } | null = null
   private disposed = false
+  private readonly stopTitles: () => void
   private readonly track: HTMLElement
   private readonly options: {
     shuttleBase: string
@@ -66,6 +69,7 @@ export class DocumentHost {
   constructor(track: HTMLElement, options: DocumentHost['options']) {
     this.track = track
     this.options = options
+    this.stopTitles = watchDocumentTitles(() => this.refreshReferences())
     document.addEventListener('keydown', this.onMediaKey, true)
   }
 
@@ -76,17 +80,14 @@ export class DocumentHost {
   setChannel(documents: WorkspaceDocument[], selected: DocKey): void {
     if (this.disposed) return
     this.documents = documents
+    if (this.inlineAudio && !documents.some(doc => doc.key === this.inlineAudio?.target)) this.stopInlineAudio()
     for (const doc of documents) {
       const state = this.frames.get(doc.key) ?? this.create(doc)
       // Provenance and labels can change without touching the live document.
       state.frame.doc = doc
     }
     this.select(selected)
-    for (const state of this.frames.values()) {
-      state.references?.scan()
-      const frame = state.frame.viewer?.querySelector('iframe')
-      if (frame) frameBridge(frame)?.command('references:scan')
-    }
+    this.refreshReferences()
     for (const page of this.audioPages.values()) page.updateDocuments(documents)
     this.pruneFrames()
   }
@@ -98,6 +99,7 @@ export class DocumentHost {
       this.parkAll()
       return
     }
+    if (key !== this.selected) this.stopInlineAudio()
     const previous = this.selected ? this.frames.get(this.selected) : undefined
     const oldAudio = previous?.frame.viewer?.querySelector('audio')
     const target = this.frames.get(key)!
@@ -148,7 +150,7 @@ export class DocumentHost {
   }
   private visibleKeys(): DocKey[] {
     const index = this.documents.findIndex(doc => doc.key === this.selected)
-    return index < 0 ? [] : this.documents.slice(Math.max(0, index - 1), index + 2).map(doc => doc.key)
+    return index < 0 ? [] : [...this.documents.slice(Math.max(0, index - 1), index + 2).map(doc => doc.key), ...(this.inlineAudio ? [this.inlineAudio.target] : [])]
   }
   /** Current-channel placeholders give the filmstrip its geometry, not retained state. */
   private pruneFrames(): void {
@@ -199,6 +201,7 @@ export class DocumentHost {
   }
 
   parkAll(): void {
+    this.stopInlineAudio()
     this.selected = null
     this.documents = []
     for (const state of this.frames.values()) {
@@ -218,6 +221,7 @@ export class DocumentHost {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.stopTitles()
     document.removeEventListener('keydown', this.onMediaKey, true)
     for (const state of this.frames.values()) {
       this.evict(state)
@@ -243,7 +247,7 @@ export class DocumentHost {
     const state: FrameState = {
       frame, pending: null, loaded: false, active: false, initialSuspended: false,
       scroll: readScroll(doc.key), readScroll: null, stopScroll: null,
-      notice: null, controller: null, revision: 0, transferTime: null, weight: 1, references: null,
+      notice: null, controller: null, revision: 0, transferTime: null, weight: 1, references: null, referenceCandidates: [],
     }
     this.placeholder(state)
     el.addEventListener('click', event => {
@@ -308,10 +312,20 @@ export class DocumentHost {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect)
           this.audioPages.set(audio, page)
           page.updateDocuments(this.documents)
-          return () => { page.dispose(); this.audioPages.delete(audio) }
+          const changed = (): void => this.updateReferencePlayback()
+          const events = ['play', 'pause', 'ended', 'timeupdate', 'durationchange', 'loadedmetadata']
+          for (const event of events) audio.addEventListener(event, changed)
+          return () => {
+            for (const event of events) audio.removeEventListener(event, changed)
+            page.dispose(); this.audioPages.delete(audio)
+          }
         },
         decorateText: pane => this.bindReferences(state, pane),
-        resolveReferences: candidates => referenceTargets(candidates, state.frame.doc, this.documents),
+        resolveReferences: candidates => {
+          state.referenceCandidates = candidates
+          queueMicrotask(() => this.updateReferencePlayback())
+          return referenceTargets(candidates, state.frame.doc, this.documents)
+        },
         onReferenceIntent: (type, candidate) => this.referenceIntent(state, type, candidate),
         onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
         onDocumentKey: key => this.forwardKey(state, key),
@@ -367,7 +381,7 @@ export class DocumentHost {
     state.initialSuspended = false
     this.clearNotice(state)
     this.transferAudioPosition(state)
-    if (!state.active) suspendFileViewer(viewer)
+    if (!state.active && this.inlineAudio?.target !== state.frame.doc.key) suspendFileViewer(viewer)
   }
 
   private setActive(state: FrameState, active: boolean): void {
@@ -519,19 +533,72 @@ export class DocumentHost {
     })
   }
 
+  private refreshReferences(): void {
+    if (this.disposed) return
+    for (const doc of this.documents) {
+      const state = this.frames.get(doc.key)
+      state?.references?.scan()
+      const frame = state?.frame.viewer?.querySelector('iframe')
+      if (frame) frameBridge(frame)?.command('references:scan')
+    }
+  }
+
   private bindReferences(state: FrameState, root: HTMLElement): void {
     state.references?.dispose()
     const surface = referenceRuntime(root,
-      candidates => surface.resolve(referenceTargets(candidates, state.frame.doc, this.documents)),
-      (type, candidate) => this.referenceIntent(state, type, candidate))
+      candidates => {
+        state.referenceCandidates = candidates
+        surface.resolve(referenceTargets(candidates, state.frame.doc, this.documents))
+        this.updateReferencePlayback()
+      },
+      (type, candidate) => this.referenceIntent(state, type, candidate), true)
     state.references = surface
     surface.scan()
   }
 
   private referenceIntent(state: FrameState, type: 'select' | 'play' | 'pause', candidate: string): void {
-    if (!state.active || state.frame.doc.key !== this.selected || type !== 'select') return
+    if (this.disposed || !state.active || state.frame.doc.key !== this.selected) return
     const target = resolveChannelReference(candidate, state.frame.doc, this.documents)
-    if (target) this.options.onSelect(target.key)
+    if (!target) return
+    if (type === 'select') { this.options.onSelect(target.key); return }
+    if (target.kind !== 'audio') return
+    const audioState = this.frames.get(target.key)
+    if (!audioState) return
+    if (type === 'pause') {
+      audioState.frame.viewer?.querySelector('audio')?.pause()
+      this.updateReferencePlayback()
+      return
+    }
+    this.stopInlineAudio()
+    this.inlineAudio = { source: state.frame.doc.key, target: target.key }
+    this.mount(audioState)
+    this.live.delete(target.key); this.live.set(target.key, audioState)
+    if (audioState.frame.viewer) playFileViewerAudio(audioState.frame.viewer)
+    this.enforceBudget([...this.visibleKeys(), target.key])
+  }
+
+  private stopInlineAudio(): void {
+    if (!this.inlineAudio) return
+    const target = this.inlineAudio.target
+    this.inlineAudio = null
+    suspendFileViewer(this.frames.get(target)?.frame.viewer ?? null)
+    this.updateReferencePlayback()
+  }
+
+  private updateReferencePlayback(): void {
+    if (this.disposed || !this.selected) return
+    const state = this.frames.get(this.selected)
+    if (!state) return
+    const states = state.referenceCandidates.flatMap(candidate => {
+      const target = resolveChannelReference(candidate, state.frame.doc, this.documents)
+      if (target?.kind !== 'audio') return []
+      const audio = this.frames.get(target.key)?.frame.viewer?.querySelector('audio')
+      return [{ candidate, playing: !!audio && !audio.paused,
+        progress: audio && Number.isFinite(audio.duration) && audio.duration > 0 ? audio.currentTime / audio.duration : 0 }]
+    })
+    for (const playback of states) state.references?.playback(playback)
+    const frame = state.frame.viewer?.querySelector('iframe')
+    if (frame) frameBridge(frame)?.command('references:playback', { states })
   }
 
   private saveScroll(state: FrameState): void {

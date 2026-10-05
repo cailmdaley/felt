@@ -1,5 +1,5 @@
 import { keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
-import { referenceRuntime, type ReferenceTarget } from './ChannelReferences.js'
+import { referenceRuntime, type ReferenceTarget, type ReferencePlayback } from './ChannelReferences.js'
 import referenceStyles from './references.css?inline'
 
 export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
@@ -49,8 +49,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   const send = (type: string, payload: Record<string, unknown> = {}): void => parent.postMessage({ protocol, version, type, payload }, '*')
   const style = document.createElement('style'); style.textContent = css
   ;(document.head ?? document.documentElement).append(style)
-  const links = references(document, candidates => send('references', { candidates }),
-    (type, candidate) => { if (active) send(type, { candidate }) })
+  let links: ReturnType<typeof references> | undefined
   const resolveScroller = (): HTMLElement | null => {
     if (scroller?.isConnected && scroller.scrollHeight > scroller.clientHeight + 1) return scroller
     const root = document.scrollingElement as HTMLElement | null
@@ -88,9 +87,13 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     if (data.type === 'active' && typeof payload.active === 'boolean') {
       active = payload.active
       if (!active) { pause(); position() }
-    } else if (data.type === 'references:scan') links.scan()
+    } else if (data.type === 'references:scan') links?.scan()
     else if (data.type === 'references:resolved' && Array.isArray(payload.targets)) {
-      links.resolve(payload.targets.filter((target: ReferenceTarget) => target && typeof target.candidate === 'string' && typeof target.title === 'string' && typeof target.audio === 'boolean'))
+      links?.resolve(payload.targets.filter((target: ReferenceTarget) => target && typeof target.candidate === 'string' && typeof target.title === 'string' && typeof target.audio === 'boolean'))
+    } else if (data.type === 'references:playback' && Array.isArray(payload.states)) {
+      for (const state of payload.states as ReferencePlayback[]) {
+        if (state && typeof state.candidate === 'string' && typeof state.playing === 'boolean' && Number.isFinite(state.progress)) links?.playback(state)
+      }
     } else if (data.type === 'pause') pause()
     else if (data.type === 'restore' && Number.isFinite(payload.x) && Number.isFinite(payload.y)) {
       cancelRestore()
@@ -129,6 +132,8 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     window.setTimeout(() => {
       if (!active) pause()
       send('ready', { media: !!document.querySelector('audio,video') })
+      links = references(document, candidates => send('references', { candidates }),
+        (type, candidate) => { if (active) send(type, { candidate }) })
       links.scan()
       // Report handlers installed at load get first refusal.
       window.addEventListener('keydown', event => {

@@ -21,6 +21,8 @@ describe('channel reference resolution', () => {
     expect(resolveChannelReference('notes.md', source, files)).toBeUndefined()
     expect(resolveChannelReference('./notes.md', source, files)?.owner).toBe('host-a')
     expect(resolveChannelReference('./tone%2Emp3', source, files)).toBe(audio)
+    const fiber = { ...doc('/channel/music.md'), name: 'Music', kind: 'fiber' as const }
+    expect(resolveChannelReference('music.md', source, [...files, fiber])).toBe(fiber)
     expect(resolveChannelReference('./tone.mp3', doc('/elsewhere/report.md'), files)).toBeUndefined()
     for (const value of ['https://example.com/tone.mp3', '//example.com/tone.mp3', 'javascript:alert(1)', '#tone.mp3', '%ff', 'bad\nname', 'host-a:/channel/tone.mp3']) expect(resolveChannelReference(value, source, files)).toBeUndefined()
   })
@@ -43,6 +45,25 @@ describe('channel reference resolution', () => {
     surface.scan()
     expect(document.querySelectorAll('.ws-reference-play')).toHaveLength(2)
     expect(document.querySelectorAll('.ws-channel-reference')).toHaveLength(3)
+  })
+
+  it('updates playback aliases and target-title tooltips without changing the code styling', () => {
+    document.body.innerHTML = '<code>tone.mp3</code><a href="./tone.mp3">The take</a>'
+    const intents = vi.fn()
+    const titled = [{ ...audio, provenance: [{ kind: 'embed' as const, title: 'Banjo étude' }] }]
+    surface = referenceRuntime(document.body, candidates => surface!.resolve(referenceTargets(candidates, source, titled)), intents)
+    surface.scan()
+    const buttons = [...document.querySelectorAll<HTMLButtonElement>('.ws-reference-play')]
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Play Banjo étude', 'Play Banjo étude'])
+    buttons[0].click()
+    expect(intents).toHaveBeenLastCalledWith('play', 'tone.mp3')
+    for (const candidate of ['tone.mp3', './tone.mp3']) surface.playback({ candidate, playing: true, progress: .25 })
+    expect(buttons.map(button => button.textContent)).toEqual(['❙❙', '❙❙'])
+    expect(buttons[0].style.getPropertyValue('--ws-reference-progress')).toBe('25%')
+    buttons[1].click()
+    expect(intents).toHaveBeenLastCalledWith('pause', './tone.mp3')
+    expect(document.querySelector('code')?.textContent).toBe('tone.mp3')
+    expect(document.querySelector('code')?.parentElement?.title).toBe('Banjo étude')
   })
 
   it('throttles mutation scans, removes stale matches, and gives document handlers first refusal', async () => {

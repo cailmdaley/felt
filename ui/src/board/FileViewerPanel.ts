@@ -195,7 +195,7 @@ export function buildFileViewer(
   return wrap
 }
 
-type MediaState = { media: HTMLMediaElement; active: boolean }
+type MediaState = { media: HTMLMediaElement; active: boolean; inline: boolean }
 const mediaViewers = new WeakMap<HTMLElement, MediaState>()
 const players = new Set<HTMLMediaElement>()
 type EmbeddedMediaState = { active: boolean; bridge: FrameBridge | null }
@@ -216,14 +216,15 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   media.preload = 'metadata'
   media.setAttribute('aria-label', basename(path))
   if (media instanceof HTMLVideoElement) media.playsInline = true
-  const state: MediaState = { media, active: options.active !== false }
+  const state: MediaState = { media, active: options.active !== false, inline: false }
   mediaViewers.set(wrap, state)
   players.add(media)
   media.addEventListener('play', () => {
-    if (!state.active) { media.pause(); return }
+    if (!state.active && !state.inline) { media.pause(); return }
     for (const other of players) if (other !== media) other.pause()
     for (const embedded of embeddedPlayers) embedded.bridge?.command('pause')
   })
+  media.addEventListener('pause', () => { state.inline = false })
   media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
   let disposed = false
   const controller = new AbortController()
@@ -401,12 +402,20 @@ export function disposeFileViewer(viewer: HTMLElement | null): void {
   viewerDisposers.delete(viewer)
 }
 
+/** A report's explicit gesture lends playback to the channel's retained audio element. */
+export function playFileViewerAudio(viewer: HTMLElement): void {
+  const state = mediaViewers.get(viewer)
+  if (!state || !(state.media instanceof HTMLAudioElement)) return
+  state.inline = true
+  void state.media.play().catch(() => { state.inline = false })
+}
+
 /** Pause a hidden reader tab without tearing down its viewer DOM. */
 export function suspendFileViewer(viewer: HTMLElement | null): void {
   if (viewer) {
     liveViewSubscriptions.get(viewer)?.suspend()
     const state = mediaViewers.get(viewer)
-    if (state) { state.active = false; state.media.pause() }
+    if (state) { state.active = false; state.inline = false; state.media.pause() }
     const embedded = embeddedMediaViewers.get(viewer)
     if (embedded) { embedded.active = false; embedded.bridge?.command('active', { active: false }) }
   }

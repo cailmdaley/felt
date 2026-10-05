@@ -18,7 +18,7 @@ export function resolveChannelReference(candidate: string, source: WorkspaceDocu
   try { decoded = decodeURIComponent(path) } catch { return }
   const matches = decoded.includes('/')
     ? documents.filter(doc => doc.owner === source.owner && doc.path === normalizeAbsolutePath(decoded, source.path.slice(0, source.path.lastIndexOf('/')) || '/'))
-    : documents.filter(doc => doc.name === decoded)
+    : documents.filter(doc => doc.path.split('/').at(-1) === decoded)
   return matches.length === 1 ? matches[0] : undefined
 }
 
@@ -26,8 +26,10 @@ export function resolveChannelReference(candidate: string, source: WorkspaceDocu
 export function referenceRuntime(root: Document | HTMLElement,
   request: (candidates: string[]) => void,
   intent: (type: 'select' | 'play' | 'pause', candidate: string) => void,
+  localFileLinks = false,
 ): ReferenceSurface {
   type Entry = { element: HTMLElement; candidates: string[]; title: string | null; target?: ReferenceTarget; link?: HTMLAnchorElement; button?: HTMLButtonElement }
+  const events = root.nodeType === 9 ? (root as Document).defaultView ?? root : root
   const entries = new Map<HTMLElement, Entry>()
   const playing = new Map<string, ReferencePlayback>()
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -44,8 +46,8 @@ export function referenceRuntime(root: Document | HTMLElement,
       return [element.textContent?.trim() ?? ''].filter(Boolean)
     }
     const link = element as HTMLAnchorElement
-    if (link.hasAttribute('download') || link.classList.contains('felt-wikilink') || link.dataset.fiberId) return []
-    const href = link.dataset.filePath ?? relative(link.getAttribute('href') ?? '')
+    if (link.hasAttribute('download') || link.classList.contains('kbn-wikilink') || link.dataset.fiber) return []
+    const href = localFileLinks && link.dataset.filePath ? link.dataset.filePath : relative(link.getAttribute('href') ?? '')
     if (!href) return []
     return [...new Set([href, link.textContent?.trim() ?? ''].filter(Boolean))]
   }
@@ -109,7 +111,7 @@ export function referenceRuntime(root: Document | HTMLElement,
       }
     },
     playback(state) { playing.set(state.candidate, state); for (const entry of entries.values()) paintPlayback(entry) },
-    dispose() { disposed = true; clearTimeout(timer); observer.disconnect(); root.removeEventListener('click', click); for (const entry of entries.values()) clear(entry); entries.clear() },
+    dispose() { disposed = true; clearTimeout(timer); observer.disconnect(); events.removeEventListener('click', click); for (const entry of entries.values()) clear(entry); entries.clear() },
   }
   const click = (event: Event): void => {
     const mouse = event as MouseEvent
@@ -126,7 +128,7 @@ export function referenceRuntime(root: Document | HTMLElement,
       }
     }
   }
-  root.addEventListener('click', click)
+  events.addEventListener('click', click)
   const observer = new MutationObserver(() => {
     if (timer || disposed) return
     timer = setTimeout(() => { timer = undefined; surface.scan() }, 100)

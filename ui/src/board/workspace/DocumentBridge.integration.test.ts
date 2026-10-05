@@ -375,6 +375,20 @@ describe('minified production document keyboard bridge', () => {
     expect(select).not.toHaveBeenCalled()
   })
 
+  it('gives document and load-time window click handlers first refusal on channel links', async () => {
+    reportHtml = `<html><head><script>
+      document.addEventListener('click', event => { if (event.target.id === 'owned') event.preventDefault() });
+      window.addEventListener('load', () => window.addEventListener('click', event => { if (event.target.id === 'load-owned') event.preventDefault() }));
+    </script></head><body><code id="owned">report-1.html</code><code id="load-owned">report-1.html</code>
+      <a href="https://example.com" data-file-path="/report-1.html">report-1.html</a></body></html>`
+    const frame = await report()
+    const content = frame.contentDocument!
+    ;(content.querySelector('#owned') as HTMLElement).click()
+    ;(content.querySelector('#load-owned') as HTMLElement).click()
+    expect(select).not.toHaveBeenCalled()
+    expect(content.querySelector('a[href="https://example.com"]')?.classList.contains('ws-channel-reference')).toBe(false)
+  })
+
   it('never applies the HTML transform to native PDF, image, or audio viewers', async () => {
     const transformHtml = vi.fn(production.withWorkspaceKeyBridge)
     for (const [path, kind, tag] of [
