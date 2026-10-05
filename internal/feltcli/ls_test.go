@@ -11,6 +11,7 @@ import (
 )
 
 func TestTreeDisplayID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		id   string
@@ -40,6 +41,7 @@ func TestTreeDisplayID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := treeDisplayID(tt.id); got != tt.want {
 				t.Fatalf("treeDisplayID(%q) = %q, want %q", tt.id, got, tt.want)
 			}
@@ -52,6 +54,7 @@ func TestTreeDisplayID(t *testing.T) {
 // which errors out on null — a single user with no active fibers shouldn't
 // have to handle two distinct empty shapes.
 func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 
 	for _, args := range [][]string{
@@ -71,6 +74,7 @@ func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
 }
 
 func TestLsBodySearchScansMarkdown(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "nothing special"},
@@ -96,6 +100,7 @@ func TestLsBodySearchScansMarkdown(t *testing.T) {
 // A multi-word query matches a fiber when every word occurs somewhere in it,
 // in any order and across fields; -r keeps the whole query as one pattern.
 func TestLsQueryMatchesEveryWord(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "email/reply-drafts", Name: "Draft replies", Outcome: "Every EMAIL gets a reply", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -136,6 +141,7 @@ func TestLsQueryMatchesEveryWord(t *testing.T) {
 // A query with no words is no query: ls lists as it would bare, and find asks
 // for something to search for, rather than zero terms matching every fiber.
 func TestLsWhitespaceQueryIsNoQuery(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/open", Name: "Open", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -169,6 +175,7 @@ func TestLsWhitespaceQueryIsNoQuery(t *testing.T) {
 // pointing at that sibling); a fiber without one omits/empties the field. Both
 // the plain walk and the --json-field projection must agree.
 func TestLsJSONReportPath(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/reported", Name: "Reported", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -229,6 +236,7 @@ func TestLsJSONReportPath(t *testing.T) {
 // ancestor stands in for its descendants with a count; -v restores the flat
 // listing; --json stays uncollapsed for the daemon and hook consumers.
 func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
@@ -288,6 +296,7 @@ func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
 // An exact match is the likeliest target of the query, so it survives collapse
 // even when an ancestor also matches.
 func TestLsCollapseKeepsExactMatch(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
@@ -315,6 +324,7 @@ func TestLsCollapseKeepsExactMatch(t *testing.T) {
 // matches are counted rather than printed — a store holds far more finished
 // work than live work.
 func TestLsQueryHidesClosedBehindHint(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
@@ -400,6 +410,7 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 // Closed suppression runs before the containment collapse, so a collapsed
 // ancestor's count describes lines that would actually have printed.
 func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
@@ -426,6 +437,7 @@ func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
 }
 
 func TestTreeDepthLimit(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{

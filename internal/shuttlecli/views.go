@@ -1,6 +1,9 @@
 package shuttlecli
 
-import "github.com/cailmdaley/felt/internal/feltcli"
+import (
+	"github.com/cailmdaley/felt/internal/feltcli"
+	"github.com/cailmdaley/felt/internal/sysenv"
+)
 
 func shuttleViewOptions() feltcli.ViewOptions {
 	return feltcli.ViewOptions{
@@ -16,6 +19,6 @@ func shuttleViewOptions() feltcli.ViewOptions {
 }
 
 func init() {
-	addShuttleCommand(feltcli.NewLsCmd(shuttleViewOptions()))
-	addShuttleCommand(feltcli.NewShowCmd(shuttleViewOptions()))
+	addShuttleCommand(feltcli.NewLsCmd(sysenv.OS(), shuttleViewOptions()))
+	addShuttleCommand(feltcli.NewShowCmd(sysenv.OS(), shuttleViewOptions()))
 }

@@ -4,14 +4,14 @@ import (
 	"fmt"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
-var rmCmd = &cobra.Command{
-	Use:   "rm <id>",
-	Short: "Delete a fiber",
-	Long: `Deletes the fiber's file. Nested fibers are not removed: they keep their ids
+func (a *app) rmCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "rm <id>",
+		Short: "Delete a fiber",
+		Long: `Deletes the fiber's file. Nested fibers are not removed: they keep their ids
 under a directory that no longer has a fiber of its own. Links to the deleted
 fiber are left broken; felt check reports them.
 
@@ -19,37 +19,35 @@ rm never acts on a guess. An id that resolves only by its last segment or as a
 prefix completion is refused, naming the fiber it would have reached; exact
 ids, scope-relative paths, unique bare slugs, and correct partial paths are
 not guesses.`,
-	Example: `  felt show analysis/scratch --citations   # the fibers whose links would break
+		Example: `  felt show analysis/scratch --citations   # the fibers whose links would break
   felt rm analysis/scratch`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, root, err := felt.RequireStore(sysenv.OS(), changeDir)
-		if err != nil {
-			return err
-		}
-		scopeID := felt.CommandScope(sysenv.OS(), root, changeDir)
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			storage, root, err := felt.RequireStore(a.env, a.dir)
+			if err != nil {
+				return err
+			}
+			scopeID := felt.CommandScope(a.env, root, a.dir)
 
-		// An id that names a fiber in the enclosing store is deleted there,
-		// and the output says where — a cross-store deletion is never silent.
-		target, err := felt.ResolveExactRef(storage, scopeID, args[0])
-		if err != nil {
-			return err
-		}
+			// An id that names a fiber in the enclosing store is deleted there,
+			// and the output says where — a cross-store deletion is never silent.
+			target, err := felt.ResolveExactRef(storage, scopeID, args[0])
+			if err != nil {
+				return err
+			}
 
-		if err := target.Storage.Delete(target.ID); err != nil {
-			return err
-		}
+			if err := target.Storage.Delete(target.ID); err != nil {
+				return err
+			}
 
-		// Deletion records nothing: every read walks the markdown tree, so a
-		// removed fiber is observable as absence. Git history of .felt/
-		// captures the deletion if archaeology is needed.
+			// Deletion records nothing: every read walks the markdown tree, so a
+			// removed fiber is observable as absence. Git history of .felt/
+			// captures the deletion if archaeology is needed.
 
-		fmt.Printf("Deleted %s%s\n", target.ID, target.Location())
-		return nil
-	},
-}
-
-func init() {
-	rmCmd.GroupID = groupFibers
-	rootCmd.AddCommand(rmCmd)
+			fmt.Fprintf(a.env.Stdout, "Deleted %s%s\n", target.ID, target.Location())
+			return nil
+		},
+	}
+	command.GroupID = groupFibers
+	return command
 }

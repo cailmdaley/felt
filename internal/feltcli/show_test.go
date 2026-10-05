@@ -3,35 +3,14 @@ package feltcli
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-// writeBrokenFiber plants a fiber dir whose `<slug>.md` holds the given raw
-// bytes, bypassing storage so unparseable frontmatter can reach disk.
-func writeBrokenFiber(t *testing.T, dir, slug string, content []byte) {
-	t.Helper()
-	badDir := filepath.Join(dir, ".felt", slug, slug)
-	if err := os.MkdirAll(badDir, 0755); err != nil {
-		t.Fatalf("MkdirAll %s fiber dir: %v", slug, err)
-	}
-	if err := os.WriteFile(filepath.Join(badDir, slug+".md"), content, 0644); err != nil {
-		t.Fatalf("WriteFile %s fiber: %v", slug, err)
-	}
-}
-
-func mustShowExtra(t *testing.T, f *felt.Felt, key string, value any) {
-	t.Helper()
-	if err := f.SetExtraField(key, value); err != nil {
-		t.Fatalf("SetExtraField(%s): %v", key, err)
-	}
-}
-
 func TestShowBodyIncludesStartLine(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
@@ -55,6 +34,7 @@ func TestShowBodyIncludesStartLine(t *testing.T) {
 }
 
 func TestShowBodyJSONIncludesStartLine(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
@@ -82,6 +62,7 @@ func TestShowBodyJSONIncludesStartLine(t *testing.T) {
 }
 
 func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	fiber := &felt.Felt{
 		ID:        "fiber-a",
@@ -109,6 +90,7 @@ func TestShowCompactRendersOutcomeAndFieldKeys(t *testing.T) {
 // Compact and summary report the body's size so a reader can decide whether a
 // full read is worth paying for before paying for it.
 func TestShowReportsBodySize(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{
@@ -143,6 +125,7 @@ func TestShowReportsBodySize(t *testing.T) {
 }
 
 func TestShowDefaultRendersBody(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
@@ -163,6 +146,7 @@ func TestShowDefaultRendersBody(t *testing.T) {
 }
 
 func TestShowFieldReadsOpaqueFrontmatter(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 
 	manualPath := dir + "/.felt/fiber-a/fiber-a.md"
@@ -206,6 +190,7 @@ Body here.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			out, err := runCommand(t, dir, "show", "fiber-a", "--field", tc.field)
 			if err != nil {
 				t.Fatalf("show --field %s: %v\n%s", tc.field, err, out)
@@ -218,6 +203,7 @@ Body here.
 }
 
 func TestShowSelectorsAreMutuallyExclusive(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)
@@ -233,6 +219,7 @@ func TestShowSelectorsAreMutuallyExclusive(t *testing.T) {
 }
 
 func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
+	t.Parallel()
 	parent := &felt.Felt{ID: "project", Name: "Project", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	current := &felt.Felt{ID: "project/analysis", Name: "Analysis", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "See [[question]] and [[method#step-a]]."}
 	sibling := &felt.Felt{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
@@ -251,6 +238,7 @@ func TestRenderFullResolvesScopedBodyRefs(t *testing.T) {
 }
 
 func TestRenderFullDedupesRepeatedBodyRefs(t *testing.T) {
+	t.Parallel()
 	// A fiber mentioned three times in a body is one address, printed once —
 	// the line is a list of things to hand back to `felt show`, not a count of
 	// mentions.
@@ -310,6 +298,7 @@ func consumerStore(t *testing.T, outputType string) string {
 }
 
 func TestShowIncludesCitations(t *testing.T) {
+	t.Parallel()
 	dir := citationStore(t)
 
 	out, err := runCommand(t, dir, "show", "project/question")
@@ -322,6 +311,7 @@ func TestShowIncludesCitations(t *testing.T) {
 }
 
 func TestShowIncludesConsumers(t *testing.T) {
+	t.Parallel()
 	dir := consumerStore(t, "data")
 
 	out, err := runCommand(t, dir, "show", "project/question")
@@ -334,6 +324,7 @@ func TestShowIncludesConsumers(t *testing.T) {
 }
 
 func TestShowConsumersSelectorPrintsOneLinePerConsumer(t *testing.T) {
+	t.Parallel()
 	dir := consumerStore(t, "")
 
 	out, err := runCommand(t, dir, "show", "project/question", "--consumers")
@@ -346,6 +337,7 @@ func TestShowConsumersSelectorPrintsOneLinePerConsumer(t *testing.T) {
 }
 
 func TestShowCitationsSelectorPrintsOneLinePerCitation(t *testing.T) {
+	t.Parallel()
 	dir := citationStore(t)
 
 	out, err := runCommand(t, dir, "show", "project/question", "--citations")
@@ -358,6 +350,7 @@ func TestShowCitationsSelectorPrintsOneLinePerCitation(t *testing.T) {
 }
 
 func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
+	t.Parallel()
 	dir := citationStore(t)
 	// A fiber with truncated frontmatter: commands must tolerate a single
 	// broken fiber without failing the whole walk.
@@ -373,6 +366,7 @@ func TestShowCitationsSelectorDoesNotSyncFiberIndex(t *testing.T) {
 }
 
 func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	fiber := &felt.Felt{ID: "fiber-a", Name: "Fiber A", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Outcome: "Shipped.", Body: "Body paragraph."}
 	mustShowExtra(t, fiber, "inputs", []map[string]any{{"id": "catalog", "from": "upstream.posterior", "description": "Posterior sample"}})
@@ -407,6 +401,7 @@ func TestShowFullIncludesOpaqueFrontmatter(t *testing.T) {
 }
 
 func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{
@@ -443,16 +438,8 @@ func TestShowFullAnnotatesBodyRefsWithoutStoreWalk(t *testing.T) {
 	}
 }
 
-func mustParseTime(t *testing.T, value string) time.Time {
-	t.Helper()
-	ts, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		t.Fatalf("parse time %q: %v", value, err)
-	}
-	return ts
-}
-
 func TestShowFieldRefusesJSON(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "fiber-a", Name: "Fiber A", Status: "active", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
 		t.Fatalf("Write() error: %v", err)

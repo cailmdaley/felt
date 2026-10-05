@@ -9,6 +9,7 @@ import (
 )
 
 func TestAddMintsNativeUID(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	out, err := runCommand(t, dir, "add", "project/federated", "Federated")
@@ -51,6 +52,7 @@ func TestAddMintsNativeUID(t *testing.T) {
 }
 
 func TestAddStampsUpdatedAtAtCreatedAt(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	out, err := runCommand(t, dir, "add", "born", "Born")
@@ -89,6 +91,7 @@ func looksLikeULID(value string) bool {
 // not capture the top-level roles namespace, whether a role is created by
 // path or created at the top level and nested there afterwards.
 func TestRolesPlacementIgnoresNestedRolesFibers(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	for _, args := range [][]string{
@@ -117,6 +120,7 @@ func TestRolesPlacementIgnoresNestedRolesFibers(t *testing.T) {
 // status is refused before anything is written, and -s closed stamps
 // closed-at just as closing through edit does.
 func TestAddValidatesStatusLikeEdit(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	out, err := runCommand(t, dir, "add", "bogus", "Bogus", "-s", "bogus")

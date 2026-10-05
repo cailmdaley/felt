@@ -5,6 +5,7 @@ import (
 )
 
 func TestExtractLede(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -64,6 +65,7 @@ func TestExtractLede(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := extractLede(tt.body)
 			if got != tt.want {
 				t.Errorf("extractLede() =\n%q\nwant:\n%q", got, tt.want)
@@ -73,6 +75,7 @@ func TestExtractLede(t *testing.T) {
 }
 
 func TestValidateDepth(t *testing.T) {
+	t.Parallel()
 	for _, d := range ValidDepths {
 		if err := validateDepth(d); err != nil {
 			t.Errorf("validateDepth(%q) returned error: %v", d, err)

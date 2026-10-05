@@ -1,117 +1,167 @@
 package feltcli
 
 import (
-	"bytes"
-	"io"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
-// executeCLI runs one `felt …` invocation in-process against dir and returns
-// what it wrote to stdout and stderr. Every test that drives rootCmd goes
-// through here.
-//
-// Cobra binds each flag to a package variable and only assigns it when the
-// flag is parsed, so a flag passed in one Execute stays set for every later
-// one — and a repeatable flag keeps appending. Tests then pass or fail by the
-// order they happen to run in. resetFlags returns the whole command tree to
-// its registered defaults before the run and again after it, so no invocation
-// can observe another's flags, whether it runs through Execute or calls a
-// command's function directly afterwards.
+// testEnv is an isolated environment for one test: the fenced process
+// environment (see TestMain) with HOME and the XDG cache and config homes
+// pointed at fresh directories of its own, and captured streams. A test
+// configures it with Set, Chdir and sysenvtest.FakeCommand, never by touching
+// the process.
+func testEnv(t *testing.T) (*sysenv.Env, *sysenvtest.Streams) {
+	t.Helper()
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return sysenvtest.FromProcess(t, map[string]string{
+		"HOME":            home,
+		"XDG_CACHE_HOME":  filepath.Join(dir, "cache"),
+		"XDG_CONFIG_HOME": filepath.Join(dir, "config"),
+	})
+}
+
+// testApp is one invocation bound to env, for a test that calls a command's
+// helper directly instead of through a command line.
+func testApp(t *testing.T, env *sysenv.Env) *app {
+	t.Helper()
+	return newApp(env)
+}
+
+// homeOf is env's HOME.
+func homeOf(t *testing.T, env *sysenv.Env) string {
+	t.Helper()
+	home, err := env.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// fakeCommand is sysenvtest.FakeCommand with each distinct script written
+// once per test binary and linked into env's bin. macOS assesses every new
+// executable file on its first exec — about half a second, queued
+// machine-wide, so dozens of fresh fakes in parallel tests cost seconds each
+// — and a link to a file it has already assessed skips that. A fake reads
+// anything test-specific (a log path, a state directory) from env.
+func fakeCommand(t *testing.T, env *sysenv.Env, name, script string) string {
+	t.Helper()
+	path := filepath.Join(sysenvtest.FakeBin(t, env), name)
+	linkScript(t, path, script)
+	return path
+}
+
+// linkScript makes path a link to the shared, read-only file holding script
+// (run under /bin/sh when it has no "#!" line), replacing whatever is there.
+func linkScript(t *testing.T, path, script string) {
+	t.Helper()
+	if !strings.HasPrefix(script, "#!") {
+		script = "#!/bin/sh\n" + script
+	}
+	shared := sharedScript(t, script)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var sharedScripts struct {
+	sync.Mutex
+	paths map[string]string // script → file
+}
+
+func sharedScript(t *testing.T, script string) string {
+	t.Helper()
+	sharedScripts.Lock()
+	defer sharedScripts.Unlock()
+	if path, ok := sharedScripts.paths[script]; ok {
+		return path
+	}
+	dir := filepath.Join(testScratch, "fakes")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(script))
+	path := filepath.Join(dir, hex.EncodeToString(sum[:12]))
+	// Read-only, so a write through one test's link fails loudly instead of
+	// changing every other test's fake.
+	if err := os.WriteFile(path, []byte(script), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if sharedScripts.paths == nil {
+		sharedScripts.paths = map[string]string{}
+	}
+	sharedScripts.paths[script] = path
+	return path
+}
+
+// fakeCallLog fakes name first on env's PATH with a script that appends each
+// invocation's arguments, one line per call, to a log and then runs body
+// (exiting 0 unless body exits first). It returns a reader of the log.
+func fakeCallLog(t *testing.T, env *sysenv.Env, name, body string) func() string {
+	t.Helper()
+	log := filepath.Join(t.TempDir(), name+"-calls.log")
+	env.Set("FAKE_CALL_LOG_"+name, log)
+	fakeCommand(t, env, name, "echo \"$@\" >> \"$FAKE_CALL_LOG_"+name+"\"\n"+body+"exit 0\n")
+	return func() string {
+		b, _ := os.ReadFile(log)
+		return string(b)
+	}
+}
+
+// executeCLI runs one `felt …` invocation in-process against dir, on a fresh
+// isolated environment, and returns what it wrote to stdout and stderr.
 func executeCLI(t *testing.T, dir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-
-	oldArgs, oldStdout, oldStderr := os.Args, os.Stdout, os.Stderr
-	defer func() {
-		os.Args, os.Stdout, os.Stderr = oldArgs, oldStdout, oldStderr
-		rootCmd.SetArgs(nil)
-		rootCmd.SetOut(io.Discard)
-		rootCmd.SetErr(io.Discard)
-		resetFlags(t)
-		changeDir = ""
-	}()
-
-	resetFlags(t)
-	changeDir = dir
-	rootCmd.SetArgs(args)
-
-	outR, outW, pipeErr := os.Pipe()
-	if pipeErr != nil {
-		t.Fatalf("os.Pipe (stdout): %v", pipeErr)
-	}
-	errR, errW, pipeErr := os.Pipe()
-	if pipeErr != nil {
-		t.Fatalf("os.Pipe (stderr): %v", pipeErr)
-	}
-	// Drain both pipes while the command runs: an output larger than the
-	// pipe buffer would otherwise block the write and hang the test.
-	var outBuf, errBuf bytes.Buffer
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); _, _ = io.Copy(&outBuf, outR) }()
-	go func() { defer wg.Done(); _, _ = io.Copy(&errBuf, errR) }()
-
-	os.Stdout, os.Stderr = outW, errW
-	rootCmd.SetOut(outW)
-	rootCmd.SetErr(errW)
-
-	err = rootCmd.Execute()
-
-	os.Stdout, os.Stderr = oldStdout, oldStderr
-	_ = outW.Close()
-	_ = errW.Close()
-	wg.Wait()
-	_ = outR.Close()
-	_ = errR.Close()
-	return outBuf.String(), errBuf.String(), err
+	env, _ := testEnv(t)
+	return executeIn(t, env, dir, args...)
 }
 
-// resetFlags returns every flag on every command to its registered default
-// and clears its Changed mark, and clears the SilenceUsage a previous run's
-// pre-run hook set, so a parse error still shows usage.
-func resetFlags(t *testing.T) {
+// executeIn runs one `felt …` invocation against dir in a copy of env, so
+// the invocation's output is its own and env stays unchanged for the next
+// one. Each run builds a fresh command tree: no flag value, persistent or
+// not, survives from one invocation to the next.
+func executeIn(t *testing.T, env *sysenv.Env, dir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	var walk func(*cobra.Command)
-	walk = func(c *cobra.Command) {
-		c.SilenceUsage = false
-		for _, set := range []*pflag.FlagSet{c.Flags(), c.PersistentFlags()} {
-			set.VisitAll(func(f *pflag.Flag) {
-				if err := resetFlag(f); err != nil {
-					t.Fatalf("reset --%s on %q: %v", f.Name, c.CommandPath(), err)
-				}
-			})
-		}
-		for _, sub := range c.Commands() {
-			walk(sub)
-		}
-	}
-	walk(rootCmd)
+	run := env.Clone()
+	streams := sysenvtest.Capture(run)
+	run.Stdin = env.Stdin
+	a := newApp(run)
+	root := a.rootCmd()
+	a.dir = dir
+	root.SetArgs(append([]string{}, args...))
+	err = root.Execute()
+	return streams.Stdout.String(), streams.Stderr.String(), err
 }
 
-func resetFlag(f *pflag.Flag) error {
-	f.Changed = false
-	// A slice flag's Set appends once the flag has been parsed, so its
-	// default goes back through Replace instead. pflag renders a slice
-	// default as "[a,b]".
-	if slice, ok := f.Value.(pflag.SliceValue); ok {
-		var values []string
-		if def := strings.TrimSuffix(strings.TrimPrefix(f.DefValue, "["), "]"); def != "" {
-			values = strings.Split(def, ",")
-		}
-		return slice.Replace(values)
-	}
-	return f.Value.Set(f.DefValue)
+// runCommand runs one `felt …` invocation against dir and returns its stdout
+// (see executeCLI).
+func runCommand(t *testing.T, dir string, args ...string) (string, error) {
+	t.Helper()
+	stdout, _, err := executeCLI(t, dir, args...)
+	return stdout, err
 }
 
 // TestUsageOnlyForCommandLineErrors: a command that fails at run time prints
 // its error, not the usage block — edit, add and sync included; a command
 // line cobra cannot parse still gets usage.
 func TestUsageOnlyForCommandLineErrors(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 	for _, args := range [][]string{
 		{"edit", "nowhere", "-s", "open"},
@@ -138,8 +188,11 @@ func TestUsageOnlyForCommandLineErrors(t *testing.T) {
 
 // TestFlagsDoNotLeakAcrossInvocations: a flag passed to one invocation is
 // absent from the next — a scalar, a repeatable slice flag, and the root's
-// persistent --json alike.
+// persistent --json alike. Each invocation builds its own command tree, so this
+// holds by construction; the test guards against a flag variable creeping back
+// to package level.
 func TestFlagsDoNotLeakAcrossInvocations(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	if out, err := runCommand(t, dir, "add", "first", "First", "-t", "alpha", "-s", "active", "--json"); err != nil {

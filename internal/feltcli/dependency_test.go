@@ -7,6 +7,7 @@ import (
 )
 
 func TestFeltBinaryHasNoShuttleOrMessagingDependencies(t *testing.T) {
+	t.Parallel()
 	cmd := exec.Command("go", "list", "-deps", "./cmd/felt")
 	cmd.Dir = repoRoot(t)
 	output, err := cmd.CombinedOutput()

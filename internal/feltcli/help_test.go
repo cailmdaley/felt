@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -288,11 +289,24 @@ func unknownFlags(c *cobra.Command, args []string) []string {
 	return bad
 }
 
-// initDefaultCommands adds the help and completion commands Execute would add,
-// so the tests see the tree a user does whatever ran before them.
-func initDefaultCommands() {
-	rootCmd.InitDefaultHelpCmd()
-	rootCmd.InitDefaultCompletionCmd()
+// helpTree is a fresh felt command tree with the help and completion commands
+// Execute would add, so a test sees the tree a user does.
+func helpTree(t *testing.T) *cobra.Command {
+	t.Helper()
+	root := NewRootCmd(sysenv.New(t.TempDir(), nil))
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	return root
+}
+
+// subcommand is the command root's args name.
+func subcommand(t *testing.T, root *cobra.Command, args ...string) *cobra.Command {
+	t.Helper()
+	c, _, err := root.Find(args)
+	if err != nil || c == root {
+		t.Fatalf("no felt command %v: %v", args, err)
+	}
+	return c
 }
 
 // helpReporter is where help checks report: a *testing.T, or a recorder that
@@ -312,7 +326,7 @@ func (r *helpRecorder) Errorf(format string, args ...any) {
 // resolveInvocation finds the command a help invocation names, reporting
 // each way it fails to be a real felt command line. It returns nil when the
 // invocation names no command.
-func resolveInvocation(t helpReporter, where string, inv helpInvocation) *cobra.Command {
+func resolveInvocation(t helpReporter, where string, rootCmd *cobra.Command, inv helpInvocation) *cobra.Command {
 	t.Helper()
 	hasFlag := false
 	for _, a := range inv.args {
@@ -356,7 +370,7 @@ func resolveInvocation(t helpReporter, where string, inv helpInvocation) *cobra.
 func checkHelpScan(t helpReporter, where string, target *cobra.Command, scan helpScan) {
 	t.Helper()
 	for _, inv := range scan.invocations {
-		named := resolveInvocation(t, where, inv)
+		named := resolveInvocation(t, where, target.Root(), inv)
 		if named == nil {
 			continue
 		}
@@ -384,6 +398,7 @@ func flagContext(text, flag string) string {
 // cobraGenerated reports a command cobra adds on its own: help, and the
 // completion tree.
 func cobraGenerated(c *cobra.Command) bool {
+	rootCmd := c.Root()
 	for ; c != nil && c != rootCmd; c = c.Parent() {
 		if c.Parent() == rootCmd && (c.Name() == "help" || c.Name() == "completion") {
 			return true
@@ -393,8 +408,8 @@ func cobraGenerated(c *cobra.Command) bool {
 }
 
 func TestHelpCommandLinesResolve(t *testing.T) {
-	initDefaultCommands()
-	walkCommands(rootCmd, func(c *cobra.Command) {
+	t.Parallel()
+	walkCommands(helpTree(t), func(c *cobra.Command) {
 		scan := scanHelp(c.Long, c.Example)
 		if cobraGenerated(c) {
 			// cobra writes this help; its bare flags are the shell's.
@@ -410,6 +425,7 @@ func TestHelpCommandLinesResolve(t *testing.T) {
 // The extractor itself must see what a reader sees; pin the shapes it has to
 // handle so a quiet regression cannot turn the drift test into a no-op.
 func TestHelpInvocationExtraction(t *testing.T) {
+	t.Parallel()
 	long := `Prose mentions felt sync --push. Then felt keeps going,
 and 'felt add launch/log' is quoted, as is ` + "`felt hook session`" + `.
 Code opens felt ` + "`ls -j`" + ` and prose closes felt nonsense --all.
@@ -463,7 +479,7 @@ Pipes: ` + "`felt ls | head -5`" + ` and ` + "`felt sync && felt ls -r`" + `.
 		t.Fatalf("bare flags outside invocations = %q, want %q", got, want)
 	}
 
-	bad := unknownFlags(lsCmd, []string{"ls", "-rv", "-s", "all", "--body", "--json", "-C", "dir", "-q", "--bogus=1", "--", "--after"})
+	bad := unknownFlags(subcommand(t, helpTree(t), "ls"), []string{"ls", "-rv", "-s", "all", "--body", "--json", "-C", "dir", "-q", "--bogus=1", "--", "--after"})
 	if strings.Join(bad, " ") != "-q --bogus=1" {
 		t.Fatalf("unknownFlags(ls) = %v, want [-q --bogus=1]", bad)
 	}
@@ -471,7 +487,9 @@ Pipes: ` + "`felt ls | head -5`" + ` and ` + "`felt sync && felt ls -r`" + `.
 
 // A misspelled flag or verb must fail wherever help can hold one.
 func TestHelpDriftIsCaught(t *testing.T) {
-	initDefaultCommands()
+	t.Parallel()
+	rootCmd := helpTree(t)
+	addCmd, lsCmd := subcommand(t, rootCmd, "add"), subcommand(t, rootCmd, "ls")
 	cases := []struct {
 		name  string
 		owner *cobra.Command
@@ -509,6 +527,8 @@ var rootHelpOmits = map[string]string{
 }
 
 func TestRootHelpCoversEveryVerb(t *testing.T) {
+	t.Parallel()
+	rootCmd := helpTree(t)
 	mentioned := map[string]bool{}
 	for _, m := range regexp.MustCompile(`felt ([a-z][a-z-]*)`).FindAllStringSubmatch(rootLong, -1) {
 		mentioned[m[1]] = true
@@ -533,8 +553,8 @@ func TestRootHelpCoversEveryVerb(t *testing.T) {
 }
 
 func TestEveryTopLevelCommandIsGrouped(t *testing.T) {
-	initDefaultCommands()
-	for _, c := range rootCmd.Commands() {
+	t.Parallel()
+	for _, c := range helpTree(t).Commands() {
 		if c.Hidden || c.Name() == "completion" {
 			continue
 		}
