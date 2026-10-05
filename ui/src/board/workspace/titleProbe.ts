@@ -1,6 +1,6 @@
 import { readThumbnailMetadata } from '../FileViewerPanel.js'
 import { liveFileWatched } from '../LiveFileRefresh.js'
-import { inLane } from '../requestLanes.js'
+import { PEEK_PRIORITY } from '../documentResources.js'
 import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, titleIsCurrent } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
@@ -26,7 +26,7 @@ export function documentVersion(doc: WorkspaceDocument): string {
 /**
  * Pages are named by their declared titles, so each titled document's first
  * 64 KiB is read once per version (revalidating any title recalled from an
- * earlier visit), reports first, in the quiet request lane. A report or text
+ * earlier visit), reports first, through the shared peek. A report or text
  * page mounted in the same render reads its whole body and names itself, so it
  * is not peeked as well.
  */
@@ -47,6 +47,8 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
     probed.set(doc.key, entry)
     if (probed.size > PROBED_LIMIT) probed.delete(probed.keys().next().value!)
     if (seen === undefined && titleIsCurrent(doc.key)) continue
+    // A version that moved past an earlier peek is read fresh, not from the shared peek.
+    const fresh = seen !== undefined
     jobs.push({ rank, run: async () => {
       const src = fileBytesUrl(shuttleBase, doc.path, doc.owner)
       // A page mounted in the same render reads these bytes in full and names itself.
@@ -59,11 +61,12 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
         if (probed.get(doc.key) !== entry) return
         const text = doc.kind === 'html' || doc.kind === 'text'
         cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
-      }, 'high')
+      }, PEEK_PRIORITY.title, fresh)
       // A peek that could not read (an unreachable owner, a refused request) is tried again on a later render.
       if (!read) setTimeout(() => { if (probed.get(doc.key) === entry) probed.delete(doc.key) }, PROBE_RETRY_MS)
     } })
   }
+  // Reports first: the shared peek queue keeps arrival order within a priority.
   jobs.sort((a, b) => a.rank - b.rank)
-  for (const job of jobs) void inLane('quiet', job.run, { rank: job.rank }).catch(() => {})
+  for (const job of jobs) void job.run()
 }
