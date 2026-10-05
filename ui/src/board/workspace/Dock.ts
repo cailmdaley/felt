@@ -21,7 +21,8 @@ import './dock.css'
 type Directive = string | (() => Promise<string>)
 interface AgentAxes { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }
 interface ComposerSend {
-  compose(): Promise<string>
+  draftKey(): string
+  compose(unlessUnchanged?: string): Promise<string>
   busy(): boolean
   setBusy(on: boolean, except?: HTMLButtonElement): void
   sent(): void
@@ -904,15 +905,22 @@ export class Dock {
     })
 
     // What the last compose took, so a send that lands clears exactly that.
-    let composed: { text: string; ids: number[] } = { text: '', ids: [] }
+    let composed: { text: string; ids: number[] } | null = null
+    const draftKey = (): string => JSON.stringify([message.value, images.list.map(image => image.id)])
     const send: ComposerSend = {
-      compose: () => {
+      draftKey,
+      compose: (unlessUnchanged) => {
+        if (unlessUnchanged === draftKey()) {
+          composed = null
+          return Promise.resolve('')
+        }
         composed = { text: message.value, ids: images.list.map((image) => image.id) }
         return this.composeWithImages(card, images, message.value)
       },
       busy: () => busy,
       setBusy,
       sent: () => {
+        if (!composed) return
         for (const id of composed.ids) images.remove(id)
         strip.paint()
         showImageError(null)
@@ -939,7 +947,8 @@ export class Dock {
     const pending = this.pendingStartPrompt
     if (pending?.cardId === card.id) {
       this.pendingStartPrompt = null
-      this.showStartPrompt(err, card, pending.body, send.compose, 'fresh', fresh)
+      const parked = send.draftKey()
+      this.showStartPrompt(err, card, pending.body, () => send.compose(parked), 'fresh', fresh)
     }
     fresh.addEventListener('click', (e) => {
       e.stopPropagation()
@@ -1628,7 +1637,9 @@ export class Dock {
    */
   openStartPrompt(card: KanbanCard, body: DispatchFailureBody): void {
     if (this.card?.id === card.id && this.card.originId === card.originId && this.composerSend && this.composerError && this.freshButton) {
-      this.showStartPrompt(this.composerError, this.card, body, this.composerSend.compose, 'fresh', this.freshButton)
+      const send = this.composerSend
+      const parked = send.draftKey()
+      this.showStartPrompt(this.composerError, this.card, body, () => send.compose(parked), 'fresh', this.freshButton)
       return
     }
     this.pendingStartPrompt = { cardId: card.id, body }
@@ -1743,7 +1754,7 @@ export class Dock {
       btn.disabled = false
       btn.textContent = original
       if (needsProjectDir(body)) {
-        this.showStartPrompt(errorEl, card, body, text, mode, btn)
+        this.showStartPrompt(errorEl, card, body, directive, mode, btn)
         return false
       }
       const msg = dispatchFailureMessage(body, `Requeue failed (${res.status})`, res.status)
@@ -1760,8 +1771,9 @@ export class Dock {
   /**
    * Answer a start refused for want of a project directory in place: the
    * owning host's reason and a directory field, prefilled from the nearest
-   * ancestor's `project_dir` when the card has one. Start retries the same
-   * launch (`mode`, the composer's message) with the confirmed directory.
+   * ancestor's `project_dir` when the card has one. Start composes the visible
+   * message again and retries the launch mode with the confirmed directory.
+   * A Desk drag carries no message unless the parked draft was edited.
    */
   private showStartPrompt(
     errorEl: HTMLElement,

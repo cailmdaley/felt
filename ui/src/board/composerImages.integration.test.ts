@@ -225,6 +225,51 @@ describe('the composer takes pasted images', () => {
     expect(dispatch.user_message).toBe('begin here\n[Image: /srv/.shuttle/attachments/u/abc.png]')
   })
 
+  it('re-composes a refused message from the text and images shown at retry', async () => {
+    fetch.mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({
+      reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir',
+    }) })
+    textarea().value = 'first version'
+    resume().click()
+    await vi.waitFor(() => expect(error().querySelector('.kbn-start-prompt')).not.toBeNull())
+    textarea().value = 'revised version'
+    paste(textarea(), [png('revision.png')])
+    fetch.mockResolvedValueOnce(uploaded('/srv/revision.png')).mockResolvedValueOnce(dispatched)
+    const dir = error().querySelector<HTMLInputElement>('.kbn-start-prompt-input')!
+    dir.value = '/srv/project'; dir.dispatchEvent(new Event('input'))
+    error().querySelector<HTMLButtonElement>('.kbn-start-prompt button.kbn-ctl-send')!.click()
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce())
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://daemon.example/api/v1/dispatch', 'https://daemon.example/api/v1/attachments', 'https://daemon.example/api/v1/dispatch',
+    ])
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toMatchObject({
+      user_message: 'revised version\n[Image: /srv/revision.png]', resume_mode: 'previous', project_dir: '/srv/project', origin: 'cluster',
+    })
+    expect(textarea().value).toBe('')
+    expect(chips()).toHaveLength(0)
+  })
+
+  it.each([false, true])('a refused Desk drag sends a parked draft only after an edit (%s)', async edited => {
+    const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
+    const band = panel.bandFor(task)
+    composer = band.el
+    document.body.append(composer)
+    textarea().value = 'parked thought'
+    paste(textarea(), [png('parked.png')])
+    band.openStartPrompt(task, { reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir' })
+    if (edited) { textarea().value = 'intentional message'; textarea().dispatchEvent(new Event('input')) }
+    fetch.mockClear()
+    fetch.mockImplementation(async (url: string) => url.endsWith('/attachments') ? uploaded('/srv/parked.png') : dispatched)
+    const dir = error().querySelector<HTMLInputElement>('.kbn-start-prompt-input')!
+    dir.value = '/srv/project'; dir.dispatchEvent(new Event('input'))
+    error().querySelector<HTMLButtonElement>('.kbn-start-prompt button.kbn-ctl-send')!.click()
+    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledTimes(edited ? 2 : 1)
+    expect(JSON.parse(fetch.mock.calls.at(-1)![1].body).user_message).toBe(edited ? 'intentional message\n[Image: /srv/parked.png]' : '')
+    expect(textarea().value).toBe(edited ? '' : 'parked thought')
+    expect(chips()).toHaveLength(edited ? 0 : 1)
+  })
+
   it('holds every verb and freezes the chips while a send is in flight', async () => {
     const meeting: MeetingJoinControl = {
       canJoin: () => true, current: () => null, join: vi.fn(async () => ({ error: null, delivered: true })),
