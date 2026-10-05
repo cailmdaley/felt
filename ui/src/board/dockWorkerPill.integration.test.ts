@@ -24,7 +24,7 @@ const channel = (current: KanbanCard): Channel => {
 
 let dock: Dock
 let reader: Reader
-let openWorker: ReturnType<typeof vi.fn>
+let openWorker: ReturnType<typeof vi.fn<(tmuxSessionName: string, shuttleHost?: string) => void>>
 let current: KanbanCard
 
 beforeEach(() => {

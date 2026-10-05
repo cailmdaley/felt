@@ -13,7 +13,7 @@ the host-local [ledgers](telemetry.md) — the board stores nothing of its own.
 | `⌘,` | **Settings** | Every operator file, on any host in the fleet |
 
 `#/desk`, `#/chronicle`, and `#/board` deep-link the views.
-A channel uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
+A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to the view you opened it from.
 
 !!! note "The tab named Board, and the board"
     Hotkey `3` is titled **Board** for the reader. Internally it is the
@@ -94,7 +94,7 @@ pinned role it accepts and re-parks to the strip, on a oneshot it writes the
 terminus. The outcome stays: the last run's digest is the card's headline until
 the next run writes its own.
 
-Opening a Desk card enters its document channel.
+Opening a Desk card enters its constitution's documents.
 The fiber's own page carries a compact control band above the outcome: worker pill, message box with New session, Resume and Meeting, folded settings and session history, and Temper / Discard.
 The message box starts at one line and grows on focus or with a draft.
 Settings include the next launch's agent, effort, surface and kind, plus the card's due day and parent.
@@ -151,23 +151,25 @@ data while Chronicle is closed.
 
 ## Board — what the work produced
 
-Hotkey `3` opens a contact sheet of fiber channels with documents sent in the last 30 days.
+Hotkey `3` opens a contact sheet of constitutions with documents sent in the last 30 days.
 A ribbon shows the twelve latest documents across the fleet.
 Below it, each fiber has a folio with a live thumbnail, name, outcome, document count and host marks.
 Recent work, Projects and Hosts regroup the sheet; Find filters names, paths and filenames.
 Thumbnails load near the viewport under a shared budget and cannot run scripts.
 Confirmed missing fibers' documents gather under **Unfiled** on their byte-owning host; an unreachable owner does not count as a missing fiber.
 
-Opening a folio or receipt enters the reader: one selected page, inert receded neighbours, and a tab strip for the channel.
+Opening a folio or receipt enters the reader: one selected page, inert receded neighbours, and a tab strip for the constitution.
 The fiber page anchors its body, embedded files, opened body links and sent documents.
 Repeated sends of the same owner/path are one page with multiple receipts.
-Selection, channel changes, metadata polls and the optional Channels sidebar preserve retained document instances and reading position.
+Selection, constitution changes, metadata polls and the optional Constitutions sidebar preserve retained document instances and reading position.
 The navbar's worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel.
-The Channels sidebar starts closed and remembers an explicit choice.
+The Constitutions sidebar starts closed and remembers an explicit choice.
 On phones, previous/next controls sit in a thumb bar, and browser Back returns to the originating view.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages; j/k or down/up scroll about three lines; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
-g/G or Home/End select first/last pages, J/K step channels, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
+Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions in sidebar order; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
+Alt-left/right step pages and Alt-down/up step constitutions, including while typing.
+A plain fiber reached by wikilink keeps the tab label **Note**.
 The tablist keeps one Tab stop and moves focus with its selected tab.
 HTML documents get first refusal on their own keys; native PDF and media viewers keep their controls.
 `?` shows the shared keyboard help.

@@ -186,7 +186,7 @@ describe('Reader channel sidebar', () => {
   })
 
   it('steps constitutions in sidebar order with j/k, even when the card feed differs', () => {
-    const reader = makeReader(alpha)
+    makeReader(alpha)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
     expect(onChannel).toHaveBeenLastCalledWith(gamma)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true }))
