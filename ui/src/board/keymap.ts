@@ -1,5 +1,11 @@
 export type KeySurface = 'desk' | 'overview' | 'reader'
 export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'undoVerdict' | 'compose' | 'conversation'
+/** Reports can request navigation only. New intents are excluded unless named here. */
+export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
+  'prev', 'next', 'prevChannel', 'nextChannel', 'first', 'last',
+  'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
+  'back', 'sidebar', 'find', 'help',
+]
 export interface KeyBinding {
   keys: readonly string[]
   intent: KeyIntent

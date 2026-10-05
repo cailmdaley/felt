@@ -174,6 +174,37 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   assert.equal(await reportY(p), readingY)
 })
 
+test('Hostile report keys cannot queue verdicts or open controls; trusted and posted navigation still work', async p => {
+  await open(p); await reportReady(p)
+  const inner = await reportDocument(p)
+  const key = await selected(p).getAttribute('data-key')
+  const before = (await records(p)).filter(r => r.method === 'POST').length
+  await inner.evaluate(() => {
+    for (const key of ['x', 't', 'z', '.', 'r', 'p', ',', '>', 'Enter', 'o']) {
+      parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'key', payload: { key } }, '*')
+    }
+  })
+  await p.waitForTimeout(150)
+  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal(await selected(p).getAttribute('data-key'), key)
+  assert.equal(await p.locator('.ws-expanded').count(), 0)
+  assert.equal((await records(p)).filter(r => r.method === 'POST').length, before)
+  assert.equal(await p.evaluate(() => window.__harness.events.filter(e => e.type === 'open-worker').length), 0)
+  await inner.evaluate(() => {
+    document.body.tabIndex = -1; document.body.focus()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true, cancelable: true }))
+  })
+  await p.waitForTimeout(100)
+  assert.equal(await selected(p).getAttribute('data-key'), key, 'untrusted report key events are ignored')
+  await p.keyboard.press('ArrowDown')
+  await pollReport(p, () => document.scrollingElement.scrollTop > 0)
+  await p.keyboard.press('Alt+ArrowRight')
+  assert.notEqual(await selected(p).getAttribute('data-key'), key)
+  await choose(p, 'calibration-report')
+  await inner.evaluate(() => parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'key', payload: { key: 'ArrowRight', altKey: true } }, '*'))
+  await poll(p, key => document.querySelector('.ws-selected')?.dataset.key !== key, key)
+})
+
 test('Channel references select from HTML, markdown, plain text and the fiber with coherent history', async p => {
   await open(p); await reportReady(p)
   const key = await selected(p).getAttribute('data-key')

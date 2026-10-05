@@ -1,5 +1,5 @@
 import type { WorkspaceDocument, DocKey } from './documents.js'
-import { keyIntent } from '../keymap.js'
+import { DOCUMENT_KEY_INTENTS, keyIntent } from '../keymap.js'
 import { frameBridge, type DocumentKey } from './DocumentBridge.js'
 export { withWorkspaceKeyBridge } from './DocumentBridge.js'
 import {
@@ -642,7 +642,8 @@ export class DocumentHost {
       metaKey: data.metaKey === true, shiftKey: data.shiftKey === true, repeat: data.repeat === true,
       bubbles: true, cancelable: true,
     })
-    if (!keyIntent(forwarded, 'reader')) return
+    const intent = keyIntent(forwarded, 'reader')
+    if (!intent || !DOCUMENT_KEY_INTENTS.includes(intent)) return
     // Bubble through the same app handler; keys never focus a document.
     this.track.dispatchEvent(forwarded)
   }

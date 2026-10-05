@@ -1,4 +1,4 @@
-import { keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
+import { DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeyIntent } from '../keymap.js'
 import { referenceRuntime, type ReferenceTarget, type ReferencePlayback } from './ChannelReferences.js'
 import referenceStyles from './references.css?inline'
 
@@ -19,7 +19,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
 }
 
 /** This function is serialized, so every dependency arrives as an argument. */
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, references: typeof referenceRuntime, css: string, protocol: string, version: number): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], references: typeof referenceRuntime, css: string, protocol: string, version: number): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -137,7 +137,9 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
       links.scan()
       // Report handlers installed at load get first refusal.
       window.addEventListener('keydown', event => {
-        if (!forward(event) || !intent(event, 'reader', bindings, target => !forward({ target, defaultPrevented: false } as KeyboardEvent))) return
+        if (!event.isTrusted || !forward(event)) return
+        const action = intent(event, 'reader', bindings, target => !forward({ target, defaultPrevented: false } as KeyboardEvent))
+        if (!action || !allowed.includes(action)) return
         event.preventDefault()
         send('key', { key: event.key, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
           shiftKey: event.shiftKey, repeat: event.repeat })
@@ -148,7 +150,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length
