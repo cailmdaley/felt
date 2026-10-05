@@ -4,6 +4,8 @@
  * so late audio would count twice.
  */
 
+import { hostZone, wallClock, type Zone } from '../board/civilDay.js'
+
 /** The relay socket's state. */
 export type LinkState =
   | 'idle'
@@ -99,10 +101,10 @@ export function relayUrl(
   return `${protocol}//${host}${prefix}/api/v1/meeting/audio${query}`
 }
 
-/** A wall-clock time as HH:MM:SS, local. */
-export function clockTime(ms: number): string {
-  const date = new Date(ms)
-  return [date.getHours(), date.getMinutes(), date.getSeconds()]
+/** A wall-clock time as HH:MM:SS, in the reader's zone. */
+export function clockTime(ms: number, z: Zone = hostZone()): string {
+  const { hour, minute, second } = wallClock(ms, z)
+  return [hour, minute, second]
     .map((part) => String(part).padStart(2, '0'))
     .join(':')
 }
