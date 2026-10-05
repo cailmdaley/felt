@@ -118,8 +118,8 @@
   --ws-chrome-size: 15px;
   --ws-prose-size: 18px;
   --ws-section-size: 21px;
-  /* The outcome under a fiber's title: a step above the prose it introduces, on every screen. */
-  --ws-lede-size: calc(1.2 * var(--ws-prose-size));
+  /* The outcome under a fiber's title: 1.2 times the prose it introduces, on every screen. */
+  --ws-lede-size: 21.6px;
   --ws-lede-leading: 1.4;
   --ws-heading-size: 34px;
   --ws-prose-width: 760px;
