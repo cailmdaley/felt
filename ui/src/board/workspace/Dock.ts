@@ -450,7 +450,9 @@ export class Dock {
   get openCardId(): string | null { return this.card?.id ?? null }
 
   open(card: KanbanCard): void {
-    if (this.card && (this.card.uid ?? this.card.id) === (card.uid ?? card.id) && this.card.originId === card.originId) {
+    // A plain note has no composer to preserve when it becomes Shuttle-managed.
+    const promoted = this.card !== null && !isAgentCard(this.card) && isAgentCard(card)
+    if (this.card && (this.card.uid ?? this.card.id) === (card.uid ?? card.id) && this.card.originId === card.originId && !promoted) {
       // Controls hold this copy, so renamed fibers keep drafts but write to their current address.
       for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir'] as const) {
         Object.assign(this.card, { [key]: card[key] })

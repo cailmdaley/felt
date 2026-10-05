@@ -273,6 +273,26 @@ describe('the composer takes pasted images', () => {
     expect(textarea().value).toBe('')
   })
 
+  it('rebuilds a same-identity note band when promotion adds its composer', () => {
+    const note = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster' })
+    const band = panel.bandFor(note)
+    const root = band.el
+    expect(root.querySelector('textarea')).toBeNull()
+
+    const managed = { ...note, shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol' }
+    expect(panel.bandFor(managed)).toBe(band)
+    expect(band.el).toBe(root)
+    const input = root.querySelector<HTMLTextAreaElement>('textarea')!
+    input.value = 'half a thought'
+    paste(input, [png('one.png')])
+
+    const updated = { ...managed, id: 'work/renamed', path: '/stores/cluster/.felt/work/renamed.md' }
+    expect(panel.bandFor(updated)).toBe(band)
+    expect(band.el.querySelector('textarea')).toBe(input)
+    expect(input.value).toBe('half a thought')
+    expect(band.el.querySelectorAll('.kbn-ctl-image')).toHaveLength(1)
+  })
+
   it('retains a draft and image chips in its owner+uid band across channel switches', () => {
     const task = card({ id: 'work/task', uid: 'task-uid', originId: 'cluster', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol' })
     const firstBand = panel.bandFor(task)
