@@ -1,10 +1,16 @@
 .ws-content .kbn-fileview-audio { background: var(--ws-paper); overflow: auto; padding: 0; }
 .ws-content .kbn-fileview-audio audio[hidden] { display: none !important; }
-.ws-content .kbn-fileview-audio .kbn-media-page { width: 100%; max-width: none; padding: 0; }
+.ws-content .kbn-fileview-audio .kbn-media-page {
+  width: 100%; max-width: none; min-height: 100%; padding: 0;
+  display: flex; flex-direction: column;
+}
 .ws-audio-page {
-  width: 100%; min-width: 0; padding: 48px 36px;
+  width: 100%; min-width: 0;
   color: var(--ws-ink); background: var(--ws-paper);
   font: 12px/1.4 var(--ws-mono);
+}
+.ws-content .kbn-fileview-audio .kbn-media-page > .ws-audio-page {
+  padding: var(--ws-prose-padding); margin-block: auto;
 }
 .ws-audio-plot { position: relative; margin: 0 0 16px; }
 .ws-audio-waveform { display: block; width: 100%; height: 160px; cursor: crosshair; touch-action: none; color: var(--ws-ink); }
@@ -32,7 +38,6 @@
 .ws-audio-duration { color: var(--ws-ink-muted); flex: none; font-variant-numeric: tabular-nums; }
 .ws-reader .ws-audio-page .ws-audio-play, .ws-audio-keep { font: 15px/1.4 var(--ws-serif) !important; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-audio-page { padding: 24px 12px; }
   .ws-audio-waveform { height: 180px; }
   .ws-audio-clock { order: 1; width: 100%; margin: 4px 0 0; text-align: center; }
   .ws-audio-transport select { margin-left: auto; }

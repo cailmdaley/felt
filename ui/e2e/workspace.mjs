@@ -863,6 +863,12 @@ test('Text, markdown, code, image, archive and missing-file cause', async p => {
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Receded media posters show cached audio peaks and the first video frame (${device})`, async p => {
   await open(p); await choose(p, 'tone.mp3')
   await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')
+  const geometry = await selected(p).locator('.ws-audio-page').evaluate(el => {
+    const page = el.parentElement.getBoundingClientRect(), audio = el.getBoundingClientRect()
+    return { paddingTop: getComputedStyle(el).paddingTop, topGap: audio.top - page.top, bottomGap: page.bottom - audio.bottom }
+  })
+  assert.equal(geometry.paddingTop, device === 'phone' ? '24px' : '44px', 'audio shares prose top inset')
+  assert.ok(Math.abs(geometry.topGap - geometry.bottomGap) <= 2, `short audio comparison is vertically centered: ${JSON.stringify(geometry)}`)
   await choose(p, 'tone.wav')
   const audioPage = p.locator('.ws-page[data-key$="/tone.mp3"]')
   const audioPoster = audioPage.locator('.ws-media-poster')
