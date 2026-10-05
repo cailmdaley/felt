@@ -87,7 +87,6 @@
   min-height: 36px; padding: 0 10px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
   font: var(--ws-label-size)/1.2 var(--ws-serif); background: var(--ws-paper);
 }
-.ws-reader .ws-review-plate .kbn-ctl-temper { color: var(--ws-verdict); border-color: var(--ws-verdict); }
 .ws-reader .ws-review-plate .kbn-ctl-btn:hover { background: var(--ws-hover); }
 .ws-tabs {
   display: flex; gap: var(--ws-tab-gap); overflow-x: auto; scrollbar-width: none;

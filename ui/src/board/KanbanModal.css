@@ -70,6 +70,10 @@
      and never wear it. */
   --kbn-tempered: #3F8278;
   --kbn-tempered-ink: #2E6862;
+  /* The verdict's other pole: a fiber discarded to compost, in the deletion
+     red. It marks the Discard verb and the discarded state, never an actor. */
+  --kbn-discarded: #A84A3E;
+  --kbn-discarded-ink: #8E3A2F;
 
   /* ── THE BOARD'S MATERIALS ─────────────────────────────────────────────
      The surfaces the pigments sit on, shared by the Desk and the document
@@ -1775,24 +1779,32 @@
   outline: 1px dashed var(--kbn-ink-muted);
   outline-offset: 1px;
 }
-.kbn-action-tempered {
-  background: rgba(63, 130, 120, 0.10);
-  color: var(--kbn-tempered-ink);
-  border-color: rgba(63, 130, 120, 0.40);
+/* THE VERDICT PLATE — one recipe wherever a verdict is offered: the Desk
+   card, the fiber page's act zone, the review plate and the undo toast.
+   Temper wears verdigris, Discard the deletion red. Ink, tint and border are
+   mixed against the paper and ink in force, so a theme's paper (which the act
+   zone keeps) never leaves the verb illegible. */
+:is(.kbn-action-tempered, .kbn-ctl-temper, .ws-verdict-word[data-verdict='tempered']) { --verdict-pigment: var(--kbn-tempered); }
+:is(.kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word[data-verdict='discarded']) { --verdict-pigment: var(--kbn-discarded); }
+:is(.kbn-action-tempered, .kbn-ctl-temper, .kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word) {
+  --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 72%, var(--ws-ink, var(--kbn-ink)));
+  --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 12%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 24%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 55%, var(--ws-paper, var(--kbn-paper)));
 }
-.kbn-action-tempered:hover {
-  background: rgba(63, 130, 120, 0.20);
-  color: #1E5852;
+.kbn-action:is(.kbn-action-tempered, .kbn-action-discard) {
+  background: var(--verdict-tint);
+  color: var(--verdict-ink);
+  border-color: var(--verdict-edge);
 }
-/* Discard — the `tempered: false` verdict, in the board's deletion red. */
-.kbn-action-discard {
-  background: rgba(168, 74, 62, 0.06);
-  color: #9A3F33;
-  border-color: rgba(168, 74, 62, 0.36);
+.kbn-action:is(.kbn-action-tempered, .kbn-action-discard):hover {
+  background: var(--verdict-tint-strong);
+  color: var(--verdict-ink);
+  border-color: var(--verdict-pigment);
 }
-.kbn-action-discard:hover {
-  background: rgba(168, 74, 62, 0.14);
-  color: #7E3127;
+.kbn-action:is(.kbn-action-tempered, .kbn-action-discard):focus-visible {
+  outline: 2px solid var(--verdict-pigment);
+  outline-offset: 2px;
 }
 /* Subtler card style inside the drafts column. */
 .kbn-card-drafts {

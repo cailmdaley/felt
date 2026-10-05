@@ -91,9 +91,8 @@
   white-space: nowrap;
 }
 .ws-dock .kbn-ctl-btn:hover:not(:disabled) { background-color: var(--ws-hover); border-color: var(--ws-ink); }
-.ws-dock :is(.kbn-ctl-send, .kbn-ctl-temper) { background: var(--ws-fill); }
+.ws-dock .kbn-ctl-send { background: var(--ws-fill); }
 .ws-dock .kbn-ctl-resume { border-color: var(--ws-agent); }
-.ws-dock .kbn-ctl-discard { color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-sends { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 0; margin-left: auto; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); overflow: hidden; }
 .ws-dock .kbn-ctl-sends .kbn-ctl-btn { border: 0; border-radius: 0; padding-inline: 10px; font: var(--ws-label-size)/1.4 var(--ws-serif) !important; background-color: transparent; }
 .ws-dock .kbn-ctl-sends > * + * { border-left: var(--ws-line-width) solid var(--ws-hairline); }
@@ -265,7 +264,6 @@
 .ws-dock .kbn-ctl-microphone .kbn-ctl-meet-btn::after { content: ''; position: absolute; left: calc(50% - 6px); top: calc(50% - 3px); width: 12px; height: 9px; border: 1px solid currentColor; border-top: 0; border-radius: 0 0 8px 8px; box-shadow: 0 5px 0 -4px currentColor; }
 .ws-dock .kbn-ctl-verdict { grid-column: 1 / -1; display: flex; gap: 8px; margin-bottom: 8px; }
 .ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 36px; padding-inline: 16px; }
-.ws-dock .kbn-ctl-verdict .kbn-ctl-temper { color: var(--ws-verdict); border-color: var(--ws-verdict) !important; background: color-mix(in srgb, var(--ws-verdict) 10%, var(--ws-paper)); }
 .ws-dock .kbn-ctl-verdict-menu { position: relative; }
 .ws-dock .kbn-ctl-verdict-menu summary { cursor: pointer; display: grid; place-items: center; min-width: 36px; min-height: 36px; list-style: none; font: var(--ws-section-size)/1 var(--ws-serif); }
 .ws-dock .kbn-ctl-verdict-menu summary::-webkit-details-marker { display: none; }

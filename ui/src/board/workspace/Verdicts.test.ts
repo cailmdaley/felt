@@ -35,6 +35,14 @@ describe('late verdicts', () => {
     expect(toast.style.cssText).toBe('')
   })
 
+  it('names its verdict in the verdict pigment hook', () => {
+    verdicts.queue(card({ id: 'a', name: 'Music' }), 'composted', vi.fn())
+    const toast = document.querySelector<HTMLElement>('.ws-verdict-toast')!
+    expect(toast.dataset.verdict).toBe('discarded')
+    const word = toast.querySelector<HTMLElement>('.ws-verdict-word')!
+    expect([word.dataset.verdict, word.textContent]).toEqual(['discarded', 'Discarded'])
+  })
+
   it('writes only after six seconds and keeps a polite, named Undo toast', () => {
     const commit = vi.fn()
     verdicts.queue(card({ id: 'music', name: 'Music' }), 'tempered', commit)

@@ -744,6 +744,46 @@ test('Review plate reaches verdicts from a delivery and leaves the fiber page it
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
 })
 
+async function verdictLook(locator) {
+  return locator.evaluate(el => {
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d')
+    const rgb = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3) }
+    const luminance = color => rgb(color).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0)
+    const style = getComputedStyle(el)
+    const ink = luminance(style.color), fill = luminance(style.backgroundColor === 'rgba(0, 0, 0, 0)' ? getComputedStyle(el.closest('.ws-verdict-toast') ?? document.body).backgroundColor : style.backgroundColor)
+    return { color: rgb(style.color), fill: rgb(style.backgroundColor), ratio: (Math.max(ink, fill) + .05) / (Math.min(ink, fill) + .05) }
+  })
+}
+const tealish = ([r, g, b]) => g > r && b > r
+const reddish = ([r, g, b]) => r > g + 30 && r > b + 30
+for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment on every surface${theme ? `: ${theme}` : ''}`, async p => {
+  if (theme) { const themed = new URL(url); themed.searchParams.set('theme-preview', `01KVBR1F9BWBVKF97473PV67K8:${theme}`); await p.goto(themed.href) }
+  await open(p)
+  const plate = p.locator('.ws-review-plate')
+  await plate.waitFor()
+  const looks = { plate: [await verdictLook(plate.locator('.kbn-ctl-temper')), await verdictLook(plate.locator('.kbn-ctl-discard'))] }
+  await choose(p, 'Constitution')
+  looks.act = [await verdictLook(selected(p).locator('.kbn-ctl-verdict .kbn-ctl-temper')), await verdictLook(selected(p).locator('.kbn-ctl-verdict .kbn-ctl-discard'))]
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  await selected(p).locator('.kbn-ctl-verdict .kbn-ctl-discard').click()
+  looks.toast = [await verdictLook(p.locator('.ws-verdict-toast .ws-verdict-word'))]
+  for (const [surface, [temper, discard]] of Object.entries(looks)) {
+    if (temper && discard) { assert.ok(tealish(temper.color), `${surface} Temper ink is verdigris: ${temper.color}`); assert.ok(reddish(discard.color), `${surface} Discard ink is red: ${discard.color}`) }
+    for (const look of [temper, discard].filter(Boolean)) assert.ok(look.ratio >= 4.5, `${surface} verdict ink ${look.color} on ${look.fill}: ${look.ratio.toFixed(2)}:1`)
+  }
+  assert.ok(reddish(looks.toast[0].color), 'the toast names a discard in red')
+  if (!theme) {
+    assert.deepEqual(looks.plate.map(l => l.color), looks.act.map(l => l.color), 'the plate and the act zone share one verdict ink')
+    await p.keyboard.press('z')
+    await p.goto(url)
+    const card = p.locator('.kbn-desk .kbn-card').filter({ hasText: name })
+    await card.hover()
+    const desk = [await verdictLook(card.locator('.kbn-action-tempered')), await verdictLook(card.locator('.kbn-action-discard'))]
+    assert.ok(tealish(desk[0].color) && reddish(desk[1].color), `Desk verdicts ${JSON.stringify(desk.map(d => d.color))}`)
+  }
+})
+
 test('Key discard then plate Temper replaces the pending verdict with one delayed write', async p => {
   await open(p); await reportReady(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
