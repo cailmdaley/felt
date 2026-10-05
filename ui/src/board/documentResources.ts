@@ -136,9 +136,10 @@ export function queued<T>(priority: ResourcePriority, work: () => Promise<T>, si
  * One read per question, queued at `priority`: a second asker joins the
  * first, a more urgent one moves a read that has not started up the queue,
  * and the read is cancelled when every asker holding a signal has aborted
- * and none came without one.
+ * and none came without one. `work` learns, through `onSelected`, when the
+ * selected page comes to wait on it, before or after it started.
  */
-function shared<T>(id: string, priority: ResourcePriority, work: (signal: AbortSignal) => Promise<T>, asker?: AbortSignal): Promise<T> {
+function shared<T>(id: string, priority: ResourcePriority, work: (signal: AbortSignal, onSelected: (lift: () => void) => void) => Promise<T>, asker?: AbortSignal): Promise<T> {
   const pending = inFlight.get(id)
   if (pending) { pending.join(priority, asker); return pending.promise as Promise<T> }
   let settle!: (outcome: T | Promise<T>) => void
@@ -149,16 +150,20 @@ function shared<T>(id: string, priority: ResourcePriority, work: (signal: AbortS
   let waiting = new AbortController()
   let kept = false
   let askers = 0
+  const lifts: Array<() => void> = []
+  const onSelected = (lift: () => void): void => { if (rank === RESOURCE_PRIORITY.selected) lift(); else lifts.push(lift) }
   const run = (): void => {
     const own = waiting
-    queued(rank, () => { started = true; return work(cancelled.signal) }, own.signal)
+    queued(rank, () => { started = true; return work(cancelled.signal, onSelected) }, own.signal)
       .then(settle, error => { if (!own.signal.aborted || cancelled.signal.aborted) settle(Promise.reject(error)) })
   }
   const entry: Pending = {
     promise,
     promote: next => {
-      if (started || next >= rank) return
+      if (next >= rank) return
       rank = next
+      if (rank === RESOURCE_PRIORITY.selected) for (const lift of lifts.splice(0)) lift()
+      if (started) return
       waiting.abort()
       waiting = new AbortController()
       run()
@@ -313,7 +318,7 @@ export const fetchDocument: DocumentFetch = async (url, init) => {
     if (init.signal?.aborted) throw init.signal.reason
     if (entry.text && isFresh(entry.text)) return heldAnswer(entry.text.value, ifNoneMatch(init.headers))
   }
-  return shared(id, priority, signal => readWhole(entry, { ...init, signal }, priority), init.signal ?? undefined)
+  return shared(id, priority, (signal, onSelected) => readWhole(entry, { ...init, signal }, onSelected), init.signal ?? undefined)
 }
 
 /** Move a whole-body read of `url` already waiting in the queue up to `priority`. */
@@ -331,10 +336,12 @@ function heldAnswer(body: TextBody, ifNoneMatch: string | undefined): Response {
   } as unknown as Response
 }
 
-async function readWhole(entry: Entry, init: RequestInit, priority: ResourcePriority): Promise<Response> {
+async function readWhole(entry: Entry, init: RequestInit, onSelected: (lift: () => void) => void): Promise<Response> {
   const etag = ifNoneMatch(init.headers)
-  // A selected body may be large and slow; a background read finishes, body and all, within the deadline.
-  const limit = deadline(init.signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
+  // A background read finishes, body and all, within the deadline; once the
+  // selected page waits on it, it may take as long as a large body needs.
+  const limit = deadline(init.signal, RESOURCE_DEADLINE_MS)
+  onSelected(limit.answered)
   try {
     const response = await fetch(entry.src, { ...init, signal: limit.signal })
     if (response.status === 304) {
@@ -372,9 +379,9 @@ export async function text(src: string, priority: ResourcePriority = RESOURCE_PR
     const whole = wholePeek(entry)
     if (whole) return whole
   }
-  return shared(`text\0${resourceKey(src)}`, priority, async signal => {
+  return shared(`text\0${resourceKey(src)}`, priority, async (signal, onSelected) => {
     const etag = entry.text?.value.etag
-    const response = await readWhole(entry, { cache: 'no-store', signal, headers: provesContent(etag) ? { 'If-None-Match': etag } : undefined }, priority)
+    const response = await readWhole(entry, { cache: 'no-store', signal, headers: provesContent(etag) ? { 'If-None-Match': etag } : undefined }, onSelected)
     return response.ok || response.status === 304 ? entry.text?.value ?? null : null
   }, options.signal).catch(() => null)
 }
@@ -400,8 +407,9 @@ export function recallText(src: string): TextBody | undefined {
  */
 export function bytes(src: string, priority: ResourcePriority, options: { maxBytes: number; signal?: AbortSignal }): Promise<ArrayBuffer | null> {
   const entry = entryFor(src)
-  return shared(`bytes\0${resourceKey(src)}`, priority, async signal => {
-    const limit = deadline(signal, priority === RESOURCE_PRIORITY.selected ? null : RESOURCE_DEADLINE_MS)
+  return shared(`bytes\0${resourceKey(src)}`, priority, async (signal, onSelected) => {
+    const limit = deadline(signal, RESOURCE_DEADLINE_MS)
+    onSelected(limit.answered)
     try {
       const response = await fetch(entry.src, { signal: limit.signal })
       return response.ok ? await boundedBytes(response, options.maxBytes) : null

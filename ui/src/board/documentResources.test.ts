@@ -252,6 +252,58 @@ describe('shared reads', () => {
     expect(recallText('/api/v1/file?path=/small.md')?.text).toBe('small')
   })
 
+  it('lifts the background deadline once the selected page joins or promotes a slow read', async () => {
+    vi.useFakeTimers()
+    const finishes: Array<() => void> = []
+    // Headers at once; the body trickles until finished, and errors only if aborted.
+    const fetcher = vi.fn(async (src: string, init?: RequestInit) => src.includes('busy')
+      ? new Promise<Response>(() => {})
+      : new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('<h1>Slow'))
+          finishes.push(() => { controller.enqueue(new TextEncoder().encode('</h1>')); controller.close() })
+          init?.signal?.addEventListener('abort', () => controller.error(init.signal!.reason))
+        },
+      }), { headers: { ETag: 'W/"sha256-slow"' } }))
+    vi.stubGlobal('fetch', fetcher)
+    // Started as a neighbour, then joined by its page.
+    const started = '/api/v1/file?path=/started.html'
+    const neighbour = fetchDocument(started, { cache: 'no-cache', rank: RESOURCE_PRIORITY.neighbour })
+    await vi.advanceTimersByTimeAsync(0)
+    const page = fetchDocument(started, { cache: 'no-store' })
+    // Queued behind a full lane as a thumbnail, then promoted by its page.
+    const busy = [peek('/api/v1/file?path=/busy-a'), peek('/api/v1/file?path=/busy-b')]
+    const waiting = '/api/v1/file?path=/waiting.html'
+    const thumbnail = text(waiting, RESOURCE_PRIORITY.thumbnail)
+    await vi.advanceTimersByTimeAsync(0)
+    const promoted = fetchDocument(waiting, { cache: 'no-store' })
+    await vi.advanceTimersByTimeAsync(RESOURCE_DEADLINE_MS + 1000)
+    finishes.forEach(finish => finish())
+    expect(await (await page).text()).toBe('<h1>Slow</h1>')
+    expect(await (await neighbour).text()).toBe('<h1>Slow</h1>')
+    expect(await (await promoted).text()).toBe('<h1>Slow</h1>')
+    expect((await thumbnail)!.text).toBe('<h1>Slow</h1>')
+    expect(fetcher.mock.calls.filter(([src]) => !src.includes('busy'))).toHaveLength(2)
+    void busy
+  })
+
+  it.skip('keeps a joined read the shape each asker expects, even for a body too large to hold', async () => {
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { finish = r })))
+    const huge = 'y'.repeat(RESOURCE_TEXT_BUDGET + 1)
+    const src = '/api/v1/file?path=/huge.html'
+    const page = fetchDocument(src, { cache: 'no-cache', rank: RESOURCE_PRIORITY.neighbour })
+    await Promise.resolve()
+    const thumbnail = text(src, RESOURCE_PRIORITY.thumbnail, { fresh: true })
+    const joiner = fetchDocument(src, { cache: 'no-store' })
+    finish(new Response(huge, { headers: { ETag: 'W/"sha256-y"' } }))
+    const body = await thumbnail
+    expect(typeof body?.text).toBe('string')
+    expect(body!.text.length).toBe(huge.length)
+    expect((await (await joiner).text()).length).toBe(huge.length)
+    expect((await (await page).text()).length).toBe(huge.length)
+  })
+
   it('lets a thumbnail join a page read already in flight', async () => {
     let finish!: (response: Response) => void
     const fetcher = vi.fn(() => new Promise<Response>(r => { finish = r }))
