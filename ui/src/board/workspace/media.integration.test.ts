@@ -6,6 +6,7 @@ import { envelope } from './DocumentBridge.js'
 import type { WorkspaceDocument } from './documents.js'
 
 vi.mock('../LiveFileRefresh.js', () => ({
+  liveFileWatched: () => false,
   watchLiveFile: (_url: string, content: (html: string) => void) => {
     queueMicrotask(() => content('<!doctype html><html><body>Listening room</body></html>'))
     return Object.assign(() => {}, { suspend: () => {}, resume: async () => {}, loadOnce: async () => {} })
