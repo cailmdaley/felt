@@ -147,7 +147,7 @@ describe('minified production document keyboard bridge', () => {
     const send = (key: string, extra = {}) => window.dispatchEvent(new MessageEvent('message', {
       source: frame.contentWindow, data: { protocol: 'shuttle-document', version: 1, type: 'key', payload: { key, ...extra } },
     }))
-    for (const key of ['x', 't', 'z', '.', 'r', 'p', ',', '>', 'Enter', 'o']) send(key)
+    for (const key of ['x', 't', 'z', '.', 'c', 'r', 'p', ',', '>', 'Enter', 'o']) send(key)
     expect(app).not.toHaveBeenCalled()
     send('ArrowDown'); send('ArrowRight', { altKey: true })
     expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'next'])
@@ -163,7 +163,7 @@ describe('minified production document keyboard bridge', () => {
     const frame = await report()
     const keys: Array<[string, KeyboardEventInit, string]> = [
       ['h', {}, 'prev'], ['l', {}, 'next'],
-      ['c', {}, 'sidebar'], ['/', {}, 'find'],
+      ['s', {}, 'sidebar'], ['/', {}, 'find'],
       ['j', {}, 'nextChannel'], ['k', {}, 'prevChannel'],
       ['ArrowDown', { repeat: true }, 'scrollDown'], ['?', { shiftKey: true }, 'help'],
       ['\\', { metaKey: true }, 'sidebar'], ['\\', { ctrlKey: true }, 'sidebar'],

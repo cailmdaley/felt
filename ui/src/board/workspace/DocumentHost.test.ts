@@ -550,3 +550,52 @@ describe('document keyboard bridge', () => {
     expect(keydown).toHaveBeenCalledTimes(3)
   })
 })
+
+describe('document swipe forwarding', () => {
+  const setup = () => {
+    host.dispose()
+    const onSwipe = vi.fn()
+    host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame, onScroll, onSwipe })
+    host.setChannel(docs.slice(0, 2), docs[0].key)
+    const call = render.calls.find(call => call.path === docs[0].path)!
+    return { onSwipe, call, swipe: call.options.onDocumentSwipe! }
+  }
+
+  it('cancels a swipe whose frame recedes before its release, and drops that late release', () => {
+    const { onSwipe, swipe } = setup()
+    swipe({ phase: 'move', dx: -40 })
+    expect(onSwipe).toHaveBeenLastCalledWith({ phase: 'move', dx: -40 })
+    host.select(docs[1].key)
+    expect(onSwipe).toHaveBeenLastCalledWith({ phase: 'cancel' })
+    swipe({ phase: 'end', dx: -200, velocity: -1 })
+    expect(onSwipe).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels a swipe whose frame is parked', () => {
+    const { onSwipe, swipe } = setup()
+    swipe({ phase: 'move', dx: -40 })
+    host.parkAll()
+    expect(onSwipe).toHaveBeenLastCalledWith({ phase: 'cancel' })
+  })
+
+  it('cancels a swipe whose live report is replaced by a fresh frame', () => {
+    const { onSwipe, call, swipe } = setup()
+    const iframe = document.createElement('iframe')
+    call.viewer.append(iframe)
+    call.frame!(iframe, false)
+    swipe({ phase: 'move', dx: -40 })
+    const next = document.createElement('iframe')
+    call.viewer.append(next)
+    call.frame!(next, true)
+    expect(onSwipe).toHaveBeenLastCalledWith({ phase: 'cancel' })
+  })
+
+  it('stays quiet when no swipe is open', () => {
+    const { onSwipe, swipe } = setup()
+    swipe({ phase: 'move', dx: -40 })
+    swipe({ phase: 'end', dx: -40, velocity: 0 })
+    host.select(docs[1].key)
+    host.parkAll()
+    expect(onSwipe.mock.calls.map(([signal]) => signal.phase)).toEqual(['move', 'end'])
+  })
+})

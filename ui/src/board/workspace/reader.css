@@ -43,7 +43,7 @@
   background: transparent; position: relative; z-index: 3; flex: none;
 }
 .ws-nav-lead, .ws-nav-trail { display: flex; align-items: center; min-width: 0; gap: var(--ws-small-gap); }
-.ws-nav-lead, .ws-nav-tabs, .ws-worker-pill:not(:empty) {
+.ws-nav-lead, .ws-nav-tabs {
   padding: var(--ws-chrome-padding); background: var(--ws-paper);
   border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-radius);
   box-shadow: var(--ws-chrome-shadow), var(--ws-paper-light);
@@ -78,16 +78,14 @@
 .ws-turn-active .ws-worker-dot { animation: ws-worker-breathe 2.4s ease-in-out infinite; }
 @keyframes ws-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
-.ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: center; gap: var(--ws-small-gap); }
+.ws-nav-verdicts { flex: none; }
+.ws-nav-verdicts[hidden] { display: none; }
+.ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: center; gap: 4px; }
 .ws-review-plate { font: var(--ws-label-size)/1.2 var(--ws-serif); }
-.ws-review-plate > span { font-variant-caps: all-small-caps; letter-spacing: .025em; }
-.ws-review-plate > span { color: var(--ws-owed); }
-.ws-review-plate > span::after { content: ' ·'; }
-.ws-reader .ws-review-plate .kbn-ctl-btn {
-  min-height: 36px; padding: 0 10px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
-  font: var(--ws-label-size)/1.2 var(--ws-serif); background: var(--ws-paper);
+.ws-reader .ws-nav-verdicts .kbn-ctl-btn {
+  height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
+  font: var(--ws-label-size)/1.2 var(--ws-serif);
 }
-.ws-reader .ws-review-plate .kbn-ctl-temper { color: var(--ws-verdict); border-color: var(--ws-verdict); }
 .ws-reader .ws-review-plate .kbn-ctl-btn:hover { background: var(--ws-hover); }
 .ws-tabs {
   display: flex; gap: var(--ws-tab-gap); overflow-x: auto; scrollbar-width: none;
@@ -131,6 +129,9 @@
 .ws-page.ws-parked { left: var(--ws-parking-x) !important; transition: none; pointer-events: none; }
 .ws-page.ws-parked::after { content: ''; position: absolute; inset: 0; background: var(--ws-paper); z-index: 4; }
 .ws-stage.ws-instant .ws-track, .ws-stage.ws-instant .ws-page, .ws-stage.ws-resizing .ws-track, .ws-stage.ws-resizing .ws-page { transition: none; }
+.ws-stage.ws-swiping .ws-track, .ws-stage.ws-swiping .ws-page { transition: none; }
+/* A released swipe decelerates from the finger's speed instead of starting a fresh crossing. */
+.ws-stage.ws-swipe-release .ws-track { transition: transform var(--ws-swipe-settle) cubic-bezier(0.2, 0.9, 0.3, 1); }
 .ws-stage.ws-resizing iframe { pointer-events: none; }
 .ws-labelbar {
   display: flex; align-items: center; flex: none; height: var(--ws-label-height); gap: var(--ws-small-gap);
@@ -202,6 +203,9 @@
 .ws-sidebar-flight .ws-constitution-card { overflow: hidden; pointer-events: none; transition: none; }
 .ws-sidebar-flight .ws-flight-current { background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light); }
 .ws-with-sidebar .ws-sidebar { display: flex; }
+/* A closing sidebar slides out over the stage that has already taken its room. */
+.ws-sidebar-sliding .ws-stage { overflow: visible; }
+.ws-sidebar-leaving .ws-sidebar { display: flex; position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
 /* The left context page stays under the column; only the right edge peeks into the stage. */
 .ws-with-sidebar .ws-page.ws-receded.ws-before { clip-path: inset(0 100% 0 0); pointer-events: none; }
 .ws-sidebar-toggle { flex: none; height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important; font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: all-small-caps; letter-spacing: .025em; white-space: nowrap; }
@@ -255,26 +259,20 @@
   .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
+  /* Phone neighbours are flat sheets beside the page, seen only while a swipe or crossing carries them in. */
+  .ws-page.ws-receded, .ws-page.ws-receded:is(.ws-text-page, .ws-before, .ws-after) { transform: none; opacity: 1; mask-image: none; }
+  .ws-page.ws-receded .ws-sheet { box-shadow: none; }
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
-  .ws-nav-lead, .ws-nav-tabs, .ws-worker-pill:not(:empty) { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .ws-nav-lead, .ws-nav-tabs { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+  .ws-nav-verdicts { display: none !important; }
   .ws-nav-tabs { display: none; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); }
-  .ws-worker-pill .ws-worker-control { width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0; justify-content: center; }
-  .ws-worker-pill :is(.ws-worker-state, .ws-worker-elapsed) { display: none; }
-  .ws-navbar:has(.ws-worker-review) { grid-template-columns: minmax(0, 1fr); }
-  .ws-navbar:has(.ws-worker-review) .ws-nav-trail { grid-column: 1 / -1; grid-row: 2; justify-content: center; }
-  .ws-navbar:has(.ws-worker-review) .ws-nav-tabs { grid-row: 3; }
-  .ws-reader .ws-review-plate .kbn-ctl-btn { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); }
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; }
   .ws-return::before { content: '‹'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: var(--ws-heading-size); text-indent: 0; }
   .ws-channel-title { text-align: center; flex: 1; height: 44px; font-size: var(--ws-label-size); }
   .ws-channel-title::after { display: none; }
-  .ws-worker-pill .kbn-card-worker { display: grid; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; background: none; }
-  .ws-worker-pill .kbn-card-worker:not(:has(.ws-worker-dot))::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--ws-machine); }
-  .ws-worker-pill :is(.kbn-card-worker-waiting,.kbn-card-worker-attention)::before { background: var(--ws-owed); }
-  .ws-worker-pill :is(.ws-worker-state,.ws-worker-elapsed) { display: none; }
   .ws-tabs { grid-row: 2; grid-column: 1 / -1; padding: 0 var(--ws-small-gap); border-top: var(--ws-line-width) solid var(--ws-hairline); }
   .ws-tab { height: var(--ws-phone-target); }
   .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) minmax(0, 1fr) var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); height: calc(var(--ws-thumb-height) + env(safe-area-inset-bottom)); flex: none; border-top: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); touch-action: pan-y; user-select: none; }
@@ -289,7 +287,11 @@
   .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
   .ws-content .kbn-fileview-text:not(:has(> .kbn-detail-prose)) { padding-inline: 16px; }
   .ws-content .kbn-fileview-text > .md-code-block { padding-inline: 0; }
+  /* A wide table scrolls inside itself, so the page keeps its width and its swipe. */
+  .ws-content .kbn-detail-prose table { display: block; width: max-content; max-width: 100%; overflow-x: auto; }
   .ws-menu-item { min-height: var(--ws-phone-target); }
+  /* While the keyboard is up the field owns the screen; the page bar would sit under Safari's input accessory. */
+  .ws-reader:has(.ws-content :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"]), [contenteditable="true"]):focus) .ws-thumbbar { display: none; }
 }
 @media (pointer: coarse) {
   .ws-worker-pill .kbn-card-worker { min-height: var(--ws-phone-target); display: inline-flex; align-items: center; }

@@ -1,6 +1,7 @@
 import type { WorkspaceDocument, DocKey } from './documents.js'
 import { DOCUMENT_KEY_INTENTS, keyIntent } from '../keymap.js'
 import { frameBridge, type DocumentKey } from './DocumentBridge.js'
+import type { SwipeSignal } from './PhoneGestures.js'
 export { withWorkspaceKeyBridge } from './DocumentBridge.js'
 import {
   buildFileViewer, disposeFileViewer, loadFileViewerOnce, playFileViewerAudio, resumeFileViewer, suspendFileViewer,
@@ -56,6 +57,9 @@ export class DocumentHost {
   private selected: DocKey | null = null
   private inlineAudio: { source: DocKey; target: DocKey } | null = null
   private disposed = false
+  private swipeAt = -Infinity
+  /** The frame whose latched swipe the reader is following, until its release. */
+  private swipeSource: FrameState | null = null
   private readonly stopTitles: () => void
   private readonly track: HTMLElement
   private readonly options: {
@@ -64,6 +68,8 @@ export class DocumentHost {
     onSelect: (key: DocKey) => void
     /** Active-document positions, including restoration, from local or validated bridge scrolls. */
     onScroll?: (key: DocKey, y: number) => void
+    /** Page swipes recognised inside the selected HTML document. */
+    onSwipe?: (signal: SwipeSignal) => void
     onFrame?: (frame: DocumentFrame) => void
     /** The controller owns fetching fiber bodies; it calls updateProse on success. */
     onRefreshProse?: (doc: WorkspaceDocument) => void | Promise<void>
@@ -224,6 +230,7 @@ export class DocumentHost {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.swipeSource = null
     this.stopTitles()
     document.removeEventListener('keydown', this.onMediaKey, true)
     for (const state of this.frames.values()) {
@@ -306,6 +313,8 @@ export class DocumentHost {
       this.options.shuttleBase, doc.path, doc.owner,
       (iframe, refreshed) => {
         if (state.revision !== revision || this.disposed) return
+        // A live replacement drops the old frame's bridge, and with it any release.
+        if (refreshed) this.abandonSwipe(state)
         if (replacement && state.pending) bindReplacementScroll = () => this.bindFrameScroll(state, iframe, false)
         else this.bindFrameScroll(state, iframe, refreshed)
       },
@@ -342,6 +351,7 @@ export class DocumentHost {
         onReferenceIntent: (type, candidate) => this.referenceIntent(state, type, candidate),
         onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
         onDocumentKey: key => this.forwardKey(state, key),
+        onDocumentSwipe: signal => this.forwardSwipe(state, signal),
         onWeight: weight => queueMicrotask(() => {
           if (this.disposed || state.revision !== revision) return
           state.weight = weight
@@ -400,6 +410,7 @@ export class DocumentHost {
       return
     }
     if (state.pending === viewer) {
+      this.abandonSwipe(state)
       const old = state.frame.viewer
       disposeFileViewer(old)
       old?.remove()
@@ -418,7 +429,7 @@ export class DocumentHost {
 
   private setActive(state: FrameState, active: boolean): void {
     if (state.active === active) return
-    if (!active) this.saveScroll(state)
+    if (!active) { this.saveScroll(state); this.abandonSwipe(state) }
     state.active = active
     if (active) {
       state.initialSuspended = false
@@ -433,6 +444,7 @@ export class DocumentHost {
   }
 
   private evict(state: FrameState): void {
+    this.abandonSwipe(state)
     state.stopVideoPoster?.()
     this.saveScroll(state)
     state.revision++
@@ -664,6 +676,33 @@ export class DocumentHost {
     event.stopImmediatePropagation()
     if (intent === 'audioPlay') toggleAudio(media)
     else seekAudio(media, media.currentTime + (intent === 'audioBack' ? -5 : 5))
+  }
+
+  /**
+   * Follow updates are bounded to one per frame interval; releases always
+   * pass. A release from a frame that is no longer the selected, active one
+   * only abandons the swipe it started.
+   */
+  private forwardSwipe(state: FrameState, signal: SwipeSignal): void {
+    if (this.disposed) return
+    if (state.frame.doc.key !== this.selected || !state.active || state.frame.doc.kind !== 'html') {
+      if (signal.phase !== 'move') this.abandonSwipe(state)
+      return
+    }
+    this.swipeSource = signal.phase === 'move' ? state : null
+    if (signal.phase === 'move') {
+      const now = performance.now()
+      if (now - this.swipeAt < 8) return
+      this.swipeAt = now
+    }
+    this.options.onSwipe?.(signal)
+  }
+
+  /** The frame that started a swipe can no longer release it: the reader cancels instead. */
+  private abandonSwipe(state: FrameState): void {
+    if (this.swipeSource !== state) return
+    this.swipeSource = null
+    if (!this.disposed) this.options.onSwipe?.({ phase: 'cancel' })
   }
 
   private forwardKey(state: FrameState, data: DocumentKey): void {

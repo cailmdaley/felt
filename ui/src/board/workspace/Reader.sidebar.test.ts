@@ -125,7 +125,8 @@ describe('Reader channel sidebar', () => {
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
     expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
-    expect(reader.el.querySelector('.ws-worker-pill')?.getAttribute('data-act')).toBe('worker')
+    expect(reader.el.querySelector('.ws-nav-verdicts')?.getAttribute('data-act')).toBe('verdict')
+    expect(reader.el.querySelector('.ws-navbar .ws-worker-pill, .ws-navbar .kbn-card-worker')).toBeNull()
     const revised = { ...alpha, outcome: 'A new result' }
     listedCards = [revised, beta]
     reader.refreshChannels()
@@ -169,9 +170,10 @@ describe('Reader channel sidebar', () => {
       source.getBoundingClientRect = rect
       reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="beta"]')!.getBoundingClientRect = rect
       reader.captureSidebar([{ card: beta, source }])
-      const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-      toggle.click()
-      toggle.click()
+      // The arrival flight (a toggle slides the column instead of flying cards).
+      const flight = reader as unknown as { setSidebarVisible(visible: boolean, animate?: boolean): void }
+      flight.setSidebarVisible(false, false)
+      flight.setSidebarVisible(true)
       const ghost = reader.el.querySelector<HTMLElement>('.ws-sidebar-flight [data-channel-uid="beta"]')!
       const scope = ghost.dataset.wsTheme
       expect(scope).toBeTruthy()
@@ -199,7 +201,7 @@ describe('Reader channel sidebar', () => {
     const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(wideToggle.textContent).toBe('▥ Constitutions')
-    expect(wideToggle.title).toBe('Constitutions (⌘\\)')
+    expect(wideToggle.title).toBe('Constitutions (s or ⌘\\)')
     expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
     disposeReader(wide)
 
@@ -233,9 +235,9 @@ describe('Reader channel sidebar', () => {
     expect(storedTrue.el.classList.contains('ws-with-sidebar')).toBe(true)
   })
 
-  it('toggles with c as well as the command alias', () => {
+  it('toggles with s as well as the command alias', () => {
     const reader = makeReader()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)

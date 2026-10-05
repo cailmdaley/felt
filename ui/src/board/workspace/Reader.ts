@@ -20,8 +20,9 @@ import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
 import { ReceiptArrivals } from './receiptMotion.js'
-import { installBarSwipe, PhoneTopbar } from './PhoneGestures.js'
+import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
+import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ReaderOptions {
   shuttleBase: string
@@ -63,6 +64,8 @@ function button(cls: string, text: string, action: () => void, label = text): HT
 /** The viewport at which the desktop sidebar defaults open. */
 export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
+/** A latched swipe that neither moves nor releases for this long has lost its release. */
+const SWIPE_QUIET = 500
 
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
@@ -89,12 +92,17 @@ export class Reader {
   private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
-  private readonly conversation = element('div', 'ws-worker-pill')
+  /** The awaiting-review verdicts, beside the fiber's name, reachable from any page. */
+  private readonly verdicts = element('span', 'ws-nav-verdicts')
+  private verdictKey: string | null = null
   private readonly position = element('span', 'ws-position')
   private readonly pageTitle = element('span', 'ws-thumb-title')
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
   private readonly stopSwipe: () => void
+  private swipeSettle: ReturnType<typeof setTimeout> | null = null
+  private swiping = false
+  private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
@@ -107,6 +115,7 @@ export class Reader {
   private expanded = false
   private active = false
   private menu: HTMLElement | null = null
+  private menuRelease: Release | null = null
   private menuAnchor: HTMLElement | null = null
   private sidebar = element('aside', 'ws-sidebar')
   private readonly sidebarPicker: ConstitutionPicker
@@ -120,15 +129,14 @@ export class Reader {
   private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
   private liveWidth: number | null = null
   private cancelResize: (() => void) | null = null
+  private cancelSidebarSlide: (() => void) | null = null
   private instantRaf = 0
   private sizes: Record<string, number> = {}
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly phone = window.matchMedia(MOBILE_MEDIA)
-  private readonly workerClock: number
 
   constructor(opts: ReaderOptions) {
     this.opts = opts
-    this.workerClock = window.setInterval(() => { if (this.active) { this.paintWorker(); this.layoutNavbar() } }, 30000)
     this.stopTitles = watchDocumentTitles(key => {
       const ch = this.channel
       if (!ch?.documents.some(d => d.key === key)) return
@@ -139,7 +147,8 @@ export class Reader {
     this.el.setAttribute('aria-label', 'Document reader')
     this.el.dataset.wsThemeBoundary = ''
     this.veil.dataset.part = 'veil'
-    this.conversation.dataset.part = 'act'
+    this.verdicts.dataset.part = 'act'; this.verdicts.dataset.act = 'verdict'
+    this.verdicts.hidden = true
     this.el.inert = true
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), {
       shuttleBase: opts.shuttleBase,
@@ -148,12 +157,11 @@ export class Reader {
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.sidebarToggle = button('ws-sidebar-toggle', '▥ Constitutions', () => this.toggleSidebar(), 'Constitutions')
-    this.sidebarToggle.title = 'Constitutions (⌘\\)'
+    this.sidebarToggle.title = 'Constitutions (s or ⌘\\)'
     this.lead = element('div', 'ws-nav-lead')
     this.lead.dataset.part = 'chrome-plate'
-    this.lead.append(this.returnButton, this.sidebarToggle, this.title)
+    this.lead.append(this.returnButton, this.sidebarToggle, this.title, this.verdicts)
     this.trail = element('div', 'ws-nav-trail')
-    this.trail.append(this.conversation)
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     const tabPlate = element('div', 'ws-nav-tabs')
@@ -168,13 +176,13 @@ export class Reader {
     }, 'Document menu')
     const thumb = element('div', 'ws-thumbbar')
     thumb.dataset.part = 'phone-bottom-bar'
+    thumb.dataset.wsSwipe = 'on'
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
     const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
     pageChoice.setAttribute('aria-haspopup', 'dialog')
     pageChoice.setAttribute('aria-expanded', 'false')
     pageChoice.append(this.pageTitle, this.arrivalSummary, this.position)
     thumb.append(this.prev, pageChoice, this.next, thumbMenu)
-    this.stopSwipe = installBarSwipe(thumb, () => this.active && this.phone.matches, delta => this.step(delta))
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -215,7 +223,9 @@ export class Reader {
       onSelect: key => opts.onSelect(key),
       onFrame: frame => this.prepareFrame(frame),
       onScroll: (key, y) => this.topbar.scroll(key, y),
+      onSwipe: signal => this.swipe(signal),
     })
+    this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
     window.addEventListener('resize', this.relayout)
@@ -241,6 +251,7 @@ export class Reader {
 
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
+    this.cancelSwipe()
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu(); this.pageSheet.hide() }
     const arrivals = this.receipts.observe(channel, ready)
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
@@ -258,7 +269,7 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
-    this.paintWorker()
+    this.paintVerdicts()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     if (!switching) this.tabs.arrive(arrivals)
@@ -272,6 +283,7 @@ export class Reader {
 
   select(key: DocKey): void {
     if (!this.channel?.documents.some(d => d.key === key) || key === this.selected) return
+    this.cancelSwipe()
     this.cancelResize?.()
     this.closeMenu()
     this.selected = key
@@ -285,6 +297,7 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
+    this.cancelSwipe()
     this.cancelResize?.()
     this.setSidebarVisible(false, animate)
     this.active = false
@@ -335,20 +348,77 @@ export class Reader {
   private step(delta: number): void {
     if (this.channel) this.selectIndex(this.channel.documents.findIndex(d => d.key === this.selected) + delta)
   }
-  private paintWorker(): void {
+  private get swipeable(): boolean {
+    return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
+      && (window.visualViewport?.scale ?? 1) <= 1.01 && (this.channel?.documents.length ?? 0) > 1
+  }
+  /**
+   * The track follows a latched page swipe, then settles on the page the
+   * release chose. A swipe whose release cannot be honoured, or that goes
+   * quiet for half a second, is cancelled so layout owns the track again.
+   */
+  private swipe(signal: SwipeSignal): void {
+    const ch = this.channel
+    const index = ch?.documents.findIndex(d => d.key === this.selected) ?? -1
+    const width = this.stage.clientWidth
+    if (!ch || index < 0 || !width) { this.cancelSwipe(); return }
+    if (!this.swiping && (signal.phase !== 'move' || !this.swipeable)) return
+    const hasPrevious = index > 0, hasNext = index < ch.documents.length - 1
+    if (signal.phase === 'move') {
+      if (this.swipeSettle !== null) { clearTimeout(this.swipeSettle); this.swipeSettle = null }
+      if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
+      this.swipeWatchdog = setTimeout(() => { this.swipeWatchdog = null; this.cancelSwipe() }, SWIPE_QUIET)
+      this.swiping = true
+      this.stage.classList.remove('ws-swipe-release')
+      this.stage.classList.add('ws-swiping')
+      this.track.style.transform = `translateX(${this.trackX + swipeFollow(signal.dx, width, hasPrevious, hasNext)}px)`
+      return
+    }
+    this.clearSwipeWatchdog()
+    this.swiping = false
+    const delta = signal.phase === 'end' && this.swipeable ? swipeOutcome(signal.dx, signal.velocity, width, hasPrevious, hasNext) : 0
+    const travelled = signal.phase === 'end' ? Math.abs(swipeFollow(signal.dx, width, hasPrevious, hasNext)) : 0
+    const settle = swipeSettleTime(delta ? width - travelled : travelled, signal.phase === 'end' ? signal.velocity : 0, this.measure('crossing', 280))
+    this.stage.classList.remove('ws-swiping')
+    if (!this.motion.matches) {
+      this.stage.style.setProperty('--ws-swipe-settle', `${settle}ms`)
+      this.stage.classList.add('ws-swipe-release')
+      this.swipeSettle = setTimeout(() => { this.swipeSettle = null; this.stage.classList.remove('ws-swipe-release') }, settle + 40)
+    }
+    if (delta) this.step(delta)
+    else this.layout(true)
+  }
+  /** Abandon a latched swipe in place: the track returns to the selected page without a release. */
+  private cancelSwipe(): void {
+    this.clearSwipeWatchdog()
+    if (!this.swiping) return
+    this.swiping = false
+    this.stage.classList.remove('ws-swiping')
+    this.layout(false)
+  }
+  private clearSwipeWatchdog(): void {
+    if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
+    this.swipeWatchdog = null
+  }
+  /** Temper and Discard ride the navbar while the fiber awaits review; the
+   *  fiber page carries its own pair in the act zone, and the phone's page
+   *  sheet carries one beside its heading. */
+  private paintVerdicts(): void {
     const card = this.currentCard
-    const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview' && this.document?.kind !== 'fiber'
-    const control = card ? review ? this.opts.verdictPlate?.(card) : workerPlate(card, this.opts.workerPill?.(card) ?? null) : null
-    const focused = this.conversation.contains(document.activeElement)
-      ? document.activeElement?.matches('.kbn-ctl-temper') ? '.kbn-ctl-temper'
-        : document.activeElement?.matches('.kbn-ctl-discard') ? '.kbn-ctl-discard' : '.kbn-card-worker' : null
-    this.conversation.classList.toggle('ws-worker-review', review)
-    this.conversation.dataset.act = review ? 'verdict' : 'worker'
-    this.conversation.replaceChildren(...(control ? [control] : []))
-    if (focused) this.conversation.querySelector<HTMLElement>(focused)?.focus({ preventScroll: true })
+    const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview'
+    // The pair is built once per reviewing fiber, so a repaint never swaps
+    // the buttons under the pointer or the focus.
+    const key = review && card ? JSON.stringify([card.originId, card.uid ?? card.id, card.path, card.status, card.tempered, card.workerState, card.tmuxSession]) : null
+    if (key !== this.verdictKey) {
+      this.verdictKey = key
+      const navbar = key && card ? this.opts.verdictPlate?.(card) ?? null : null
+      this.verdicts.replaceChildren(...(navbar ? [navbar] : []))
+      this.pageSheet.setActions(key && card ? this.opts.verdictPlate?.(card) ?? null : null)
+    }
+    this.verdicts.hidden = !key || !this.verdicts.firstChild || this.document?.kind === 'fiber'
   }
   private paint(animate: boolean): void {
-    this.paintWorker()
+    this.paintVerdicts()
     const ch = this.channel
     if (!ch) return
     const index = ch.documents.findIndex(d => d.key === this.selected)
@@ -447,8 +517,7 @@ export class Reader {
     const padLeft = parseFloat(style.paddingLeft) || 12
     const width = this.navbar.clientWidth - padLeft - (parseFloat(style.paddingRight) || 12)
     if (!width) return
-    const lead = this.returnButton.offsetWidth + this.sidebarToggle.offsetWidth + 2 * gap + Math.min(280, Math.max(100, this.title.scrollWidth))
-    const trail = this.conversation.offsetWidth
+    const lead = this.returnButton.offsetWidth + this.sidebarToggle.offsetWidth + this.verdicts.offsetWidth + 3 * gap + Math.min(280, Math.max(100, this.title.scrollWidth))
     const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + Math.max(0, this.tabs.buttons.length - 1) * 2 + 4
     // A fitting strip is centred over the stage, which starts after the sidebar;
     // a longer strip takes the remaining band, bounded by both controls.
@@ -456,9 +525,9 @@ export class Reader {
     const centre = sidebar + (this.navbar.clientWidth - sidebar) / 2 - padLeft
     const leadBand = Math.floor(centre - tabs / 2 - gap)
     const trailBand = width - leadBand - tabs - 2 * gap
-    this.navbar.style.gridTemplateColumns = leadBand >= lead && trailBand >= trail
+    this.navbar.style.gridTemplateColumns = leadBand >= lead && trailBand >= 0
       ? `${leadBand}px ${tabs}px minmax(0, 1fr)`
-      : `${Math.min(lead, width * 0.32)}px minmax(0, 1fr) ${trail}px`
+      : `${Math.min(lead, width * 0.4)}px minmax(0, 1fr) 0px`
   }
   private layout(animate: boolean): void {
     this.layoutNavbar()
@@ -493,7 +562,7 @@ export class Reader {
     const target = Math.round(W / 2 - centre)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
-    this.track.style.transform = `translateX(${target}px)`
+    if (!this.swiping) this.track.style.transform = `translateX(${target}px)`
     // Fade the visible margin, not an outer edge already clipped off-screen.
     for (const doc of ch.documents) {
       const frame = this.host.get(doc.key)
@@ -605,9 +674,7 @@ export class Reader {
     this.el.append(menu)
     this.menu = menu
     this.menuAnchor = anchor
-    const r = anchor.getBoundingClientRect()
-    menu.style.left = `${Math.max(12, Math.min(window.innerWidth - menu.offsetWidth - 12, r.right - menu.offsetWidth))}px`
-    menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 6)}px`
+    this.menuRelease = anchorPopover(menu, anchor, { placement: 'above-end', gap: 6, margin: 12 })
     if (this.keyboardInput) menu.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true })
   }
   private syncPlainToggle(item?: HTMLButtonElement): void {
@@ -622,6 +689,7 @@ export class Reader {
   private closeMenu(): boolean {
     if (this.picker.isOpen) { this.picker.close(); return true }
     if (!this.menu) return false
+    this.menuRelease?.(); this.menuRelease = null
     this.menu.remove()
     this.menu = null
     this.menuAnchor = null
@@ -668,13 +736,62 @@ export class Reader {
   private get sidebarShown(): boolean {
     return !this.phone.matches && (this.sidebarChoice ?? this.wide.matches)
   }
+  /**
+   * Opening or closing the sidebar is one coordinated motion: the column
+   * slides in or out while the stage and the tab strip glide to their new
+   * places. The layout lands at once and only `translate` and `opacity`
+   * animate back from where things were, so nothing reflows per frame.
+   * Under reduced motion it lands instantly.
+   */
   private toggleSidebar(): void {
     this.sidebarChoice = !this.sidebarShown
     try { localStorage.setItem(SIDEBAR_STORAGE, String(this.sidebarChoice)) } catch { /* Storage is optional. */ }
     this.closeMenu()
-    if (!this.sidebarShown) this.setSidebarVisible(false)
+    this.cancelSidebarSlide?.()
+    const shown = this.sidebarShown
+    const slide = !this.motion.matches && typeof this.sidebar.animate === 'function' && this.active
+    const before = slide ? this.stagePlaces() : null
+    this.setSidebarVisible(shown, false)
     this.renderSidebar(); this.layout(false)
-    if (this.sidebarShown) this.setSidebarVisible(true)
+    if (before) this.slideSidebar(shown, before)
+  }
+  private stagePlaces(): { page: number; tabs: number; sidebar: number } {
+    const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
+    const tabs = this.navbar.querySelector<HTMLElement>('.ws-nav-tabs')?.getBoundingClientRect().left ?? 0
+    return { page, tabs, sidebar: this.sidebar.offsetWidth }
+  }
+  private slideSidebar(shown: boolean, before: { page: number; tabs: number; sidebar: number }): void {
+    const after = this.stagePlaces()
+    const options: KeyframeAnimationOptions = {
+      duration: this.measure('sidebar-time', 220),
+      easing: getComputedStyle(this.el).getPropertyValue('--ws-sidebar-ease').trim() || 'ease',
+    }
+    const animations: Animation[] = []
+    const glide = (el: Element | null, from: number): void => {
+      if (el && Math.abs(from) >= 1) animations.push(el.animate([{ translate: `${from}px 0` }, { translate: '0 0' }], options))
+    }
+    glide(this.parallax, before.page - after.page)
+    glide(this.navbar.querySelector('.ws-nav-tabs'), before.tabs - after.tabs)
+    const width = Math.max(before.sidebar, after.sidebar)
+    const hidden = { translate: `${-width}px 0`, opacity: 0 }, rest = { translate: '0 0', opacity: 1 }
+    this.el.classList.add('ws-sidebar-sliding')
+    if (!shown) this.el.classList.add('ws-sidebar-leaving')
+    animations.push(this.sidebar.animate(shown ? [hidden, rest] : [rest, hidden], options))
+    // The left neighbour the sidebar covers fades with it instead of blinking.
+    for (const page of this.track.querySelectorAll<HTMLElement>('.ws-page.ws-receded.ws-before')) {
+      const opacity = getComputedStyle(page).opacity
+      animations.push(page.animate(shown
+        ? [{ clipPath: 'none', opacity }, { clipPath: 'none', opacity: 0 }]
+        : [{ opacity: 0 }, { opacity }], options))
+    }
+    const finish = (): void => {
+      if (this.cancelSidebarSlide !== cancel) return
+      this.cancelSidebarSlide = null
+      this.el.classList.remove('ws-sidebar-leaving', 'ws-sidebar-sliding')
+    }
+    const cancel = (): void => { for (const animation of animations) animation.cancel(); finish() }
+    this.cancelSidebarSlide = cancel
+    void Promise.allSettled(animations.map(animation => animation.finished)).then(finish)
   }
   private renderSidebar(): void {
     const shown = this.sidebarShown
@@ -776,13 +893,14 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)
     this.cancelResize?.()
     this.closeMenu()
     this.stopSwipe()
+    this.clearSwipeWatchdog()
     this.pageSheet.dispose()
     this.observer?.disconnect()
-    window.clearInterval(this.workerClock)
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
     cancelAnimationFrame(this.arrival)

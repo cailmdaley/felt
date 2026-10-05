@@ -130,12 +130,30 @@ export function documentActivity(document: WorkspaceDocument): number | undefine
   return times.length ? Math.max(...times) : undefined
 }
 
-export function compareDocuments(a: WorkspaceDocument, b: WorkspaceDocument): number {
-  const latest = (documentActivity(b) ?? -Infinity) - (documentActivity(a) ?? -Infinity)
-  if (latest && !Number.isNaN(latest)) return latest
-  const first = (doc: WorkspaceDocument): number => Math.min(...doc.provenance.flatMap(p => p.kind === 'sent' && Number.isFinite(p.time) ? [p.time] : []))
-  const delivery = first(a) - first(b)
-  return (Number.isNaN(delivery) ? 0 : delivery) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+/** The first receipt's time; undefined when no receipt carries a valid time. */
+export function firstSent(document: WorkspaceDocument): number | undefined {
+  const times = document.provenance.flatMap(p => p.kind === 'sent' && Number.isFinite(p.time) ? [p.time] : [])
+  return times.length ? Math.min(...times) : undefined
+}
+
+/**
+ * A channel's order after its fiber page: documents declared in the body and
+ * never sent, in body order; then sent documents by their first delivery,
+ * oldest first; then sends whose time is unknown. A re-send never moves a
+ * document. Identity breaks every tie. `declared` maps a document to its
+ * position among the body's declarations.
+ */
+export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map()) {
+  const rank = (doc: WorkspaceDocument): [number, number] => {
+    const sent = firstSent(doc)
+    if (sent !== undefined) return [1, sent]
+    const position = declared.get(doc.key)
+    return position !== undefined ? [0, position] : [2, 0]
+  }
+  return (a: WorkspaceDocument, b: WorkspaceDocument): number => {
+    const [ag, av] = rank(a), [bg, bv] = rank(b)
+    return ag - bg || av - bv || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+  }
 }
 
 /** Build one owner-aware row, retaining receipt history without mutating inputs. */
@@ -168,7 +186,14 @@ export function buildChannel(input: ChannelInput): Channel {
     }
   }
 
+  // Declarations keep their body order: embeds, then links.
+  const declared = new Map<DocKey, number>()
+  const declare = (path: string, owner: string | undefined): void => {
+    const key = docKey(resolveOwner(owner, input.owner), normalizeAbsolutePath(path, input.fiberDir), input.owner)
+    if (!declared.has(key)) declared.set(key, declared.size)
+  }
   for (const embed of input.embeds ?? extracted.attachments) {
+    declare(embed.path, input.owner)
     add(embed.path, input.owner, { kind: 'embed', ...(embed.title ? { title: embed.title } : {}) })
   }
 
@@ -188,6 +213,7 @@ export function buildChannel(input: ChannelInput): Channel {
     })
   }
   for (const link of input.links ?? []) {
+    declare(link.path, link.owner)
     add(link.path, link.owner, { kind: 'link', ...(link.title ? { title: link.title } : {}) })
   }
 
@@ -206,7 +232,7 @@ export function buildChannel(input: ChannelInput): Channel {
   }
 
   documents.delete(prose.key)
-  const ordered = [prose, ...[...documents.values()].sort(compareDocuments)]
+  const ordered = [prose, ...[...documents.values()].sort(compareDocuments(declared))]
 
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,

@@ -1,61 +1,160 @@
-const ANGLE = Math.tan(Math.PI / 6)
+/** A latched page swipe as it travels: the follow offset, then its release or abandonment. */
+export type SwipeSignal = { phase: 'move'; dx: number } | { phase: 'end'; dx: number; velocity: number } | { phase: 'cancel' }
 
-/** Horizontal intent is latched only beyond 12 px and within 30° of the bar. */
-export function barSwipeIntent(dx: number, dy: number): -1 | 0 | 1 {
-  return Math.abs(dx) > 12 && Math.abs(dy) < Math.abs(dx) * ANGLE ? (dx < 0 ? 1 : -1) : 0
-}
+/** Recognition measures, in CSS pixels and milliseconds. */
+export const SWIPE = { edge: 24, slop: 10, ratio: 1.75, hold: 500, window: 100 } as const
 
-/** A cancellable page gesture confined to chrome, leaving browser edges and vertical pans alone. */
-export function installBarSwipe(bar: HTMLElement, enabled: () => boolean, step: (delta: number) => void): () => void {
-  let drag: { id: number; x: number; y: number; dx: number; dy: number; latched: boolean } | null = null
-  let suppressClick = false
-  const cancel = (): void => {
+/**
+ * A one-finger horizontal page swipe over `root`, written as touch events so
+ * vertical scrolling stays native until the gesture is decisively sideways.
+ * Starts within `edge` px of either side belong to Safari's edge-back; content
+ * that pans sideways itself (scrollable regions, sliders, media, editing, a
+ * live selection, pinch zoom) keeps the touch, as does content whose
+ * touch-action withholds horizontal panning from the browser (reveal.js decks,
+ * carousels: their scripts own the sideways gesture) and content that has
+ * already called preventDefault on the touch. That last check runs in a
+ * bubble-phase listener on the window, after the content's own handlers; the
+ * recognizer latches there. It closes over nothing, because documents receive
+ * it serialized; `screen` measures travel in screen space, which a frame needs
+ * because it moves under the finger while following.
+ */
+export function installPageSwipe(root: Document | HTMLElement, signal: (signal: SwipeSignal) => void,
+  enabled: () => boolean, limits: { edge: number; slop: number; ratio: number; hold: number; window: number }, screen = false): () => void {
+  const doc = (root as Node).ownerDocument ?? (root as Document)
+  const win = doc.defaultView as Window
+  const boundary = root === doc ? null : root as HTMLElement
+  let drag: { id: number; x: number; y: number; at: number; dx: number; latched: boolean; samples: Array<[number, number]> } | null = null
+  // Content that leaves both pans to the browser leaves the sideways gesture to the reader too.
+  const browserPans = (touchAction: string): boolean => touchAction === 'auto' || touchAction === 'manipulation'
+    || (/pan-(x|left|right)/.test(touchAction) && /pan-(y|up|down)/.test(touchAction))
+  const along = (touch: Touch): number => screen && Number.isFinite(touch.screenX) ? touch.screenX : touch.clientX
+  // Both axes in the same space: a frame that moves under the finger (the phone top bar hiding) must not read as vertical travel.
+  const across = (touch: Touch): number => screen && Number.isFinite(touch.screenY) ? touch.screenY : touch.clientY
+  const claimed = (target: EventTarget | null): boolean => {
+    const selection = win.getSelection()
+    if (selection && !selection.isCollapsed) return true
+    if ((win.visualViewport?.scale ?? 1) > 1.01) return true
+    let el = (target as Node | null)?.nodeType === 1 ? target as Element : (target as Node | null)?.parentElement ?? null
+    for (; el && el !== boundary; el = el.parentElement) {
+      // The reader's own swipe surfaces may withhold horizontal panning for the reader's sake.
+      if (el.matches('[data-ws-swipe="on"]')) return false
+      if (el.matches('input,textarea,select,audio,video,iframe,embed,object,[role="slider"],[contenteditable]:not([contenteditable="false"]),[data-ws-swipe="off"]')) return true
+      const style = win.getComputedStyle(el)
+      if (!browserPans(style.touchAction || 'auto')) return true
+      if (el.scrollWidth > el.clientWidth + 1 && (/auto|scroll/.test(style.overflowX) || el === doc.scrollingElement)) return true
+    }
+    return false
+  }
+  const touchOf = (event: TouchEvent): Touch | null => {
+    for (const touch of Array.from(event.changedTouches)) if (touch.identifier === drag?.id) return touch
+    return null
+  }
+  const abandon = (): void => {
+    const latched = drag?.latched
+    drag = null
+    if (latched) signal({ phase: 'cancel' })
+  }
+  const start = (event: TouchEvent): void => {
+    if (drag) { abandon(); return }
+    const touch = event.touches.length === 1 ? event.touches[0] : null
+    if (!touch || !event.isTrusted || !enabled()) return
+    if (touch.clientX < limits.edge || touch.clientX > win.innerWidth - limits.edge || claimed(event.target)) return
+    drag = { id: touch.identifier, x: along(touch), y: across(touch), at: event.timeStamp, dx: 0, latched: false, samples: [] }
+  }
+  /** A touch whose start the content handled is the content's. */
+  const started = (event: TouchEvent): void => {
+    if (drag && !drag.latched && event.defaultPrevented && touchOf(event)) drag = null
+  }
+  /** Capture follows a latched swipe ahead of the content. */
+  const move = (event: TouchEvent): void => {
+    const touch = drag && touchOf(event)
+    if (!drag || !touch) return
+    if (event.touches.length > 1 || !event.isTrusted) { abandon(); return }
+    if (drag.latched) follow(event, touch)
+  }
+  /** Bubble decides the latch, once the content has had its say. */
+  const decide = (event: TouchEvent): void => {
+    const touch = drag && touchOf(event)
+    if (!drag || !touch || drag.latched || !event.isTrusted) return
+    if (event.defaultPrevented) { drag = null; return }
+    const dx = along(touch) - drag.x, dy = across(touch) - drag.y
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < limits.slop) return
+    if (event.timeStamp - drag.at > limits.hold || Math.abs(dx) < Math.abs(dy) * limits.ratio || !enabled()) { drag = null; return }
+    drag.latched = true
+    follow(event, touch)
+  }
+  const follow = (event: TouchEvent, touch: Touch): void => {
+    if (!drag) return
+    const dx = along(touch) - drag.x
+    if (event.cancelable) event.preventDefault()
+    drag.dx = dx
+    drag.samples.push([event.timeStamp, dx])
+    while (drag.samples.length > 2 && event.timeStamp - drag.samples[0][0] > limits.window) drag.samples.shift()
+    signal({ phase: 'move', dx })
+  }
+  const end = (event: TouchEvent): void => {
+    const touch = drag && touchOf(event)
+    if (!drag || !touch) return
     const current = drag
     drag = null
-    if (current?.latched && bar.hasPointerCapture(current.id)) bar.releasePointerCapture(current.id)
+    if (!current.latched) return
+    if (event.type === 'touchcancel' || !event.isTrusted) { signal({ phase: 'cancel' }); return }
+    const dx = along(touch) - current.x
+    const [first] = current.samples
+    const elapsed = first ? event.timeStamp - first[0] : 0
+    const velocity = first && elapsed > 0 ? (dx - first[1]) / elapsed : 0
+    signal({ phase: 'end', dx, velocity: Number.isFinite(velocity) ? Math.max(-20, Math.min(20, velocity)) : 0 })
   }
-  const down = (event: PointerEvent): void => {
-    suppressClick = false
-    if (!enabled() || !event.isPrimary || event.button !== 0 || event.clientX < 24 || event.clientX > window.innerWidth - 24) return
-    drag = { id: event.pointerId, x: event.clientX, y: event.clientY, dx: 0, dy: 0, latched: false }
+  const escape = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || !drag?.latched) return
+    event.preventDefault(); event.stopImmediatePropagation()
+    abandon()
   }
-  const move = (event: PointerEvent): void => {
-    if (!drag || drag.id !== event.pointerId) return
-    drag.dx = event.clientX - drag.x; drag.dy = event.clientY - drag.y
-    if (!drag.latched) {
-      if (Math.max(Math.abs(drag.dx), Math.abs(drag.dy)) <= 12) return
-      if (!barSwipeIntent(drag.dx, drag.dy)) { cancel(); return }
-      drag.latched = true
-      suppressClick = true
-      bar.setPointerCapture(event.pointerId)
-    }
-    event.preventDefault()
-  }
-  const up = (event: PointerEvent): void => {
-    if (!drag || drag.id !== event.pointerId) return
-    const delta = drag.latched ? barSwipeIntent(event.clientX - drag.x, event.clientY - drag.y) : 0
-    cancel()
-    if (delta && enabled()) step(delta)
-  }
-  const click = (event: MouseEvent): void => {
-    if (suppressClick) { suppressClick = false; event.preventDefault(); event.stopImmediatePropagation() }
-  }
-  const escape = (event: KeyboardEvent): void => { if (event.key === 'Escape' && drag) { cancel(); event.preventDefault(); event.stopImmediatePropagation() } }
-  bar.addEventListener('pointerdown', down)
-  bar.addEventListener('pointermove', move)
-  bar.addEventListener('pointerup', up)
-  bar.addEventListener('pointercancel', cancel)
-  const lostCapture = (event: PointerEvent): void => { if (event.target === bar) cancel() }
-  bar.addEventListener('lostpointercapture', lostCapture)
-  bar.addEventListener('click', click, true)
-  window.addEventListener('keydown', escape, true)
+  const passive = { capture: true, passive: true }
+  const active = { capture: true, passive: false }
+  const bubble = { capture: false, passive: true }
+  const bubbleActive = { capture: false, passive: false }
+  root.addEventListener('touchstart', start as EventListener, passive)
+  root.addEventListener('touchmove', move as EventListener, active)
+  root.addEventListener('touchend', end as EventListener, passive)
+  root.addEventListener('touchcancel', end as EventListener, passive)
+  win.addEventListener('touchstart', started as EventListener, bubble)
+  win.addEventListener('touchmove', decide as EventListener, bubbleActive)
+  win.addEventListener('keydown', escape, true)
   return () => {
-    cancel()
-    bar.removeEventListener('pointerdown', down); bar.removeEventListener('pointermove', move)
-    bar.removeEventListener('pointerup', up); bar.removeEventListener('pointercancel', cancel)
-    bar.removeEventListener('lostpointercapture', lostCapture); bar.removeEventListener('click', click, true)
-    window.removeEventListener('keydown', escape, true)
+    abandon()
+    root.removeEventListener('touchstart', start as EventListener, passive)
+    root.removeEventListener('touchmove', move as EventListener, active)
+    root.removeEventListener('touchend', end as EventListener, passive)
+    root.removeEventListener('touchcancel', end as EventListener, passive)
+    win.removeEventListener('touchstart', started as EventListener, bubble)
+    win.removeEventListener('touchmove', decide as EventListener, bubbleActive)
+    win.removeEventListener('keydown', escape, true)
   }
+}
+
+/** The page a released swipe settles on: past ~28% of the width, or flicked, toward an existing neighbour. */
+export function swipeOutcome(dx: number, velocity: number, width: number, hasPrevious: boolean, hasNext: boolean): -1 | 0 | 1 {
+  const direction = dx < 0 ? 1 : dx > 0 ? -1 : 0
+  if (!direction || (direction < 0 && !hasPrevious) || (direction > 0 && !hasNext)) return 0
+  const far = Math.abs(dx) > width * 0.28
+  const flick = Math.abs(dx) > 24 && Math.abs(velocity) > 0.3 && Math.sign(velocity) === Math.sign(dx)
+  const reversed = Math.abs(velocity) > 0.3 && Math.sign(velocity) === -Math.sign(dx)
+  return (far && !reversed) || flick ? direction : 0
+}
+
+/** Travel past the first or last page resists, as a native pager's edge does. */
+export function swipeFollow(dx: number, width: number, hasPrevious: boolean, hasNext: boolean): number {
+  const open = dx > 0 ? hasPrevious : hasNext
+  if (open) return Math.max(-width, Math.min(width, dx))
+  const limit = width * 0.18
+  return Math.sign(dx) * limit * (1 - 1 / (Math.abs(dx) / limit + 1))
+}
+
+/** A settle that carries the finger's speed: faster flicks finish sooner, never slower than a crossing. */
+export function swipeSettleTime(remaining: number, velocity: number, crossing: number): number {
+  const speed = Math.max(Math.abs(velocity), 0.6)
+  return Math.round(Math.max(160, Math.min(crossing, remaining / speed * 1.6)))
 }
 
 /** Small scroll reversals accumulate; document tops always reveal the return control. */

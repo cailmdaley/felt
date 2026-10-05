@@ -10,7 +10,7 @@ describe('bounded document messages', () => {
     expect(documentMessage(envelope('references', { candidates: Array(501).fill('a') }))).toBe(false)
     expect(documentMessage(envelope('references', { candidates: ['a'.repeat(257)] }))).toBe(false)
     expect(documentMessage(envelope('references', { candidates: Array(2) }))).toBe(false)
-    for (const type of ['ready', 'media', 'key', 'scroll', 'select', 'play', 'pause', 'restore', 'active', 'references:scan', 'references:resolved', 'references:playback']) {
+    for (const type of ['ready', 'media', 'key', 'scroll', 'swipe', 'select', 'play', 'pause', 'restore', 'active', 'references:scan', 'references:resolved', 'references:playback']) {
       expect(documentMessage(envelope(type, { excess: 'x'.repeat(4096) })), type).toBe(false)
     }
     expect(documentMessage(envelope('key', { key: 'x'.repeat(65) }))).toBe(false)
@@ -19,6 +19,18 @@ describe('bounded document messages', () => {
     expect(documentMessage(envelope('scroll', { x: 0, y: Infinity }))).toBe(false)
     expect(documentMessage(envelope('key', { key: 'ArrowRight', altKey: 'yes' }))).toBe(false)
     expect(documentMessage(envelope('references:resolved', { targets: [{ candidate: 'a', title: 'a'.repeat(257), audio: false }] }))).toBe(false)
+  })
+
+  it('carries page swipes as bounded travel and release, never extra fields', () => {
+    expect(documentMessage(envelope('swipe', { phase: 'move', dx: -120 }))).toBe(true)
+    expect(documentMessage(envelope('swipe', { phase: 'end', dx: -120, velocity: -0.8 }))).toBe(true)
+    expect(documentMessage(envelope('swipe', { phase: 'cancel' }))).toBe(true)
+    expect(documentMessage(envelope('swipe', { phase: 'move', dx: 9000 }))).toBe(false)
+    expect(documentMessage(envelope('swipe', { phase: 'move', dx: NaN }))).toBe(false)
+    expect(documentMessage(envelope('swipe', { phase: 'end', dx: 10, velocity: 50 }))).toBe(false)
+    expect(documentMessage(envelope('swipe', { phase: 'move', dx: 10, x: 4 }))).toBe(false)
+    expect(documentMessage(envelope('swipe', { phase: 'cancel', dx: 0 }))).toBe(false)
+    expect(documentMessage(envelope('swipe', { phase: 'start' }))).toBe(false)
   })
 
   it('accepts no more than four reference batches in any second per frame and disposes its budget', () => {

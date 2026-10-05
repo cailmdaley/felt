@@ -250,7 +250,7 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
-  it('owner-routes file mtimes in Unix seconds for embeds and body links, keeping selection on reorder', async () => {
+  it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input)
@@ -262,7 +262,8 @@ describe('workspace reader integration', () => {
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
-    expect(document.querySelectorAll('.ws-tab')[1].getAttribute('aria-label')).toBe('table.html')
+    const order = [...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))
+    expect(order.indexOf('table.html')).toBeGreaterThan(order.indexOf('Report'))
     const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
     expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
     document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
@@ -394,7 +395,7 @@ describe('workspace reader integration', () => {
     const innerWindow = iframe.contentWindow
     const toggle = document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(toggle.textContent).toBe('▥ Constitutions')
-    expect(toggle.title).toBe('Constitutions (⌘\\)')
+    expect(toggle.title).toBe('Constitutions (s or ⌘\\)')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(workspace.reader.el.classList.contains('ws-with-sidebar')).toBe(false)
     toggle.click()
@@ -468,8 +469,8 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(band.querySelector('.kbn-card-worker')).toBeNull()
-    expect(document.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *)')).toHaveLength(1)
+    expect(band.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
@@ -554,7 +555,7 @@ describe('workspace reader integration', () => {
     expect(visibility).toHaveBeenLastCalledWith(false)
   })
 
-  it('opens the real worker conversation from the navbar pill without a panel', async () => {
+  it('opens the real worker conversation from the act zone pill without a panel', async () => {
     const live = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', tmuxSession: 'terminal-alpha', shuttleHost: 'daemon-a' }
     const openWorker = vi.fn()
     bodyCards = [live]
@@ -565,8 +566,9 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
-    const pill = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-worker-pill button.kbn-card-worker')!
-    expect(pill).toBeDefined()
+    expect(document.querySelector('.ws-navbar .kbn-card-worker')).toBeNull()
+    const pill = document.querySelector<HTMLButtonElement>('.ws-dock .ws-worker-pill button.kbn-card-worker')!
+    expect(pill).not.toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
     pill.click()
     expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')
@@ -596,14 +598,15 @@ describe('workspace reader integration', () => {
 
     workspace.open(orderedCards[1])
     await flush()
-    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
+    // Each channel orders its declarations as its own body does.
+    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
     expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('shared')
     const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
     expect(prose.querySelector('.ws-prose-contents')?.textContent).toBe('3 pages2 reports')
-    expect(labels()).toEqual(['Note', 'shared', 'table.html'])
+    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
   })
 
   it('uses the shared Reader keymap for single-step tab roving focus', async () => {

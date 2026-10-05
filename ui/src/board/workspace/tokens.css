@@ -47,6 +47,8 @@
 
   --ws-crossing: 280ms;
   --ws-veil-time: var(--ws-crossing);
+  /* A released page swipe settles within a crossing; the reader shortens it for fast flicks. */
+  --ws-swipe-settle: var(--ws-crossing);
   --ws-desk-scale: 0.94;
   --ws-desk-opacity: 0.72;
   --ws-desk-pointer-drift: 8px;
@@ -108,6 +110,9 @@
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
   --ws-sidebar-width: 280px;
+  /* The sidebar's open and close: one slide, on the standard curve. */
+  --ws-sidebar-time: 220ms;
+  --ws-sidebar-ease: cubic-bezier(0.2, 0, 0, 1);
   --ws-sidebar-overflow: 32px;
   --ws-sidebar-pull: 18px;
   --ws-sidebar-lift: -2px;

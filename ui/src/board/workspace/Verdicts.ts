@@ -47,7 +47,12 @@ export class Verdicts {
     undo.textContent = 'Undo z'
     undo.setAttribute('aria-label', `Undo verdict on ${card.name}`)
     undo.addEventListener('click', () => this.undo(key))
-    toast.append(verdict === 'tempered' ? 'Tempered ' : 'Discarded ', name, ' · ', undo)
+    toast.dataset.verdict = verdict === 'tempered' ? 'tempered' : 'discarded'
+    const word = document.createElement('span')
+    word.className = 'ws-verdict-word'
+    word.dataset.verdict = toast.dataset.verdict
+    word.textContent = verdict === 'tempered' ? 'Tempered' : 'Discarded'
+    toast.append(word, ' ', name, ' · ', undo)
     this.el.append(toast)
     const timer = window.setTimeout(() => {
       this.pending.delete(key)
