@@ -55,7 +55,8 @@ const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
     }],
   }))
 }
-const flush = async (): Promise<void> => { for (let i = 0; i < 25; i++) await Promise.resolve() }
+// Microtask depth varies with the Node runtime (undici fetch/Response hops), so drain generously.
+const flush = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
 const changed = vi.fn()
 const visibility = vi.fn<(active: boolean) => void>()
 
