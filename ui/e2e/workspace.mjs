@@ -345,10 +345,12 @@ test('Opaque report denies parent DOM and same-origin API reads; links open outs
         event.preventDefault()
       })
       document.body.tabIndex = -1
-      document.body.focus()
     })
-    await p.keyboard.press('ArrowRight')
-    await inner.waitForFunction(() => sessionStorage.getItem('slide') === '2')
+    // A real click activates the opaque document; DOM focus alone need not
+    // make it Chrome's keyboard target.
+    await inner.locator('#report-sentinel').click()
+    await inner.locator('body').press('ArrowRight')
+    await inner.waitForFunction(() => sessionStorage.getItem('slide') === '2', undefined, { polling: 40 })
     assert.equal(await inner.evaluate(() => sessionStorage.getItem('slide')), '2')
     assert.equal(await selected(p).getAttribute('data-key'), key, 'deck-owned arrows never step workspace documents')
     assert.equal(await p.evaluate(() => localStorage.getItem('plot-theme')), null, 'report preferences cannot leak to board storage')
@@ -356,19 +358,26 @@ test('Opaque report denies parent DOM and same-origin API reads; links open outs
     await inner.evaluate(() => {
       const link = document.createElement('a'); link.href = 'opaque-popup.html'; link.textContent = 'Sibling hostile HTML'; document.body.prepend(link)
     })
-    const checkPopup = async click => {
+    const checkPopup = async (click, expectedURL) => {
       const opened = p.context().waitForEvent('page')
       await click()
       const popup = await opened
-      await popup.waitForFunction(() => window.__access)
-      const access = await popup.evaluate(() => window.__access)
-      await popup.close()
-      assert.deepEqual(access, { storageDenied: true, apiDenied: true, sentinel: null }, 'raw HTML popups cannot regain the board origin')
-      return access
+      try {
+        // The page event can precede navigation, and noopener popups need not
+        // paint. Wait for the intended document, then poll its network result
+        // without depending on animation frames.
+        await popup.waitForURL(expectedURL, { waitUntil: 'domcontentloaded' })
+        await popup.waitForFunction(() => window.__access, undefined, { polling: 40 })
+        const access = await popup.evaluate(() => window.__access)
+        assert.deepEqual(access, { storageDenied: true, apiDenied: true, sentinel: null }, 'raw HTML popups cannot regain the board origin')
+        return access
+      } finally { await popup.close() }
     }
-    const siblingPopup = await checkPopup(() => inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).click())
+    const siblingURL = await inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).evaluate(link => link.href)
+    const siblingPopup = await checkPopup(() => inner.getByRole('link', { name: 'Sibling hostile HTML', exact: true }).click(), siblingURL)
     await selected(p).getByRole('button', { name: 'Document menu', exact: true }).click()
-    const rawFilePopup = await checkPopup(() => p.getByRole('link', { name: 'Open in new tab', exact: true }).click())
+    const rawFile = p.getByRole('link', { name: 'Open in new tab', exact: true })
+    const rawFilePopup = await checkPopup(() => rawFile.click(), await rawFile.evaluate(link => link.href))
     await mkdir(shots, { recursive: true })
     await writeFile(resolve(shots, 'security-probes.json'), JSON.stringify({ iframe: access, relativeAssets: assets, siblingPopup, rawFilePopup, requests }, null, 2))
   } finally { await new Promise(resolve => server.close(resolve)) }
@@ -397,35 +406,57 @@ test('Embedded HTML media pauses on recede and park without reloading or auto-re
 })
 
 test('Late nested report layout retains its restore and then accepts reader scrolling', async p => {
+  // The bridge clamps an unsatisfied restore after 3 s. Model layout arriving
+  // before that deadline explicitly, independently of CPU scheduling.
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await open(p); await reportReady(p)
-  await p.locator('.ws-selected iframe').evaluate(frame => {
+  await report(p).evaluate(frame => new Promise(resolve => {
     const bridge = new DOMParser().parseFromString(frame.srcdoc, 'text/html').querySelector('[data-shuttle-workspace-bridge]').outerHTML
-    frame.srcdoc = '<!doctype html><html><head>' + bridge + '</head><body><p id="early">Short initial layout</p><script>window.addEventListener("load",()=>setTimeout(()=>window.__shortReady=true,0))</script></body></html>'
-  })
+    frame.addEventListener('load', resolve, { once: true })
+    frame.srcdoc = `<!doctype html><html><head>${bridge}</head><body>
+      <p id="early">Short initial layout</p>
+      <script>
+        window.addEventListener('message', event => {
+          if (event.source === parent && event.data?.protocol === 'shuttle-document' && event.data.type === 'active') {
+            window.__active = event.data.payload.active
+          }
+        })
+        window.addEventListener('load', () => setTimeout(() => window.__shortReady = true, 0))
+      </script>
+    </body></html>`
+  }))
   const inner = await reportDocument(p)
-  await inner.waitForFunction(() => window.__shortReady)
-  const command = async (type, payload) => p.locator('.ws-selected iframe').evaluate((frame, data) => frame.contentWindow.postMessage(data, '*'), { protocol: 'shuttle-document', version: 1, type, payload })
+  await p.clock.runFor(1)
+  await inner.waitForFunction(() => window.__shortReady, undefined, { polling: 40 })
+  const command = async (type, payload) => report(p).evaluate((frame, data) => frame.contentWindow.postMessage(data, '*'), { protocol: 'shuttle-document', version: 1, type, payload })
   await command('restore', { x: 0, y: 160 })
   await command('active', { active: false })
+  await inner.waitForFunction(() => window.__active === false, undefined, { polling: 40 })
   const saved = () => p.evaluate(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y)
-  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 160)
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 160, undefined, { polling: 40 })
+  await p.clock.runFor(1000)
+  assert.equal(await inner.evaluate(() => document.scrollingElement.scrollTop), 0, 'short layout cannot yet hold the restore')
   assert.equal(await saved(), 160, 'pending restore is not overwritten by a clamped zero')
   await inner.evaluate(() => {
     document.querySelector('#early').remove()
-    const main = document.createElement('main'); main.id = 'late'; main.style.cssText = 'height:280px;overflow:auto;line-height:20px'
+    const main = document.createElement('main'); main.id = 'late'; main.tabIndex = 0; main.style.cssText = 'height:280px;overflow:auto;line-height:20px'
     main.innerHTML = '<div style="height:6000px">Late asynchronous report content</div>'
     document.body.append(main)
   })
-  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 160)
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 160, undefined, { polling: 40 })
   await command('active', { active: true })
-  // Focus the report's scrollable content, not the frame's top-left boundary.
-  // The iframe element alone can be focused while its document has no focus.
-  await inner.locator('#late').click()
-  await inner.waitForFunction(() => document.hasFocus())
-  await p.keyboard.press('ArrowDown')
-  await inner.waitForFunction(() => document.querySelector('#late').scrollTop > 160)
-  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y > 160)
-  assert.ok(await saved() > 160)
+  // postMessage returns before the bridge processes activation. The fixture's
+  // listener runs after the bridge's listener, acknowledging delivery.
+  await inner.waitForFunction(() => window.__active === true, undefined, { polling: 40 })
+  const scroller = inner.locator('#late')
+  await scroller.click()
+  await inner.waitForFunction(() => document.hasFocus(), undefined, { polling: 40 })
+  await scroller.press('ArrowDown')
+  // Reader ArrowDown advances three 20 px lines; native scrolling alone is
+  // not enough to satisfy this assertion.
+  await inner.waitForFunction(() => document.querySelector('#late').scrollTop === 220, undefined, { polling: 40 })
+  await p.waitForFunction(() => JSON.parse(sessionStorage.getItem('shuttle:workspace:scroll:' + document.querySelector('.ws-selected').dataset.key))?.y === 220, undefined, { polling: 40 })
+  assert.equal(await saved(), 220)
 })
 
 test('Desk-opened channel reload and Back restore its Desk return control', async p => {
