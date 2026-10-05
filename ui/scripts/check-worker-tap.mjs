@@ -3,8 +3,8 @@
  * `node scripts/check-worker-tap.mjs [shot-dir]`.
  *
  * On a phone and an iPad it checks the Desk card, reader navbar, and fiber-page
- * control-band pills. The fiber-page pill has a 44px touch target; at a desktop
- * the terminal pill stays a button.
+ * control-band pills. The reader and fiber-page pills have 44px touch targets;
+ * at a desktop the terminal pill stays a button.
  */
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
@@ -95,6 +95,8 @@ try {
       if (!await outcomeControls.locator('.ws-dock-worker .kbn-card-worker').isVisible()) failures.push(`${device.name}: the fiber page did not show the worker pill`)
       const readerPill = page.locator('.ws-worker-pill .kbn-card-worker')
       await readerPill.waitFor({ state: 'visible', timeout: 3000 })
+      const readerTarget = await readerPill.evaluate(el => el.getBoundingClientRect().height)
+      assert.ok(readerTarget >= 44, `${device.name}: reader navbar pill target is ${readerTarget}px`)
       if (!await tap(readerPill, 'reader-navbar')) failures.push(`${device.name}: reader navbar pill tap did not land`)
       await page.goto(home)
     } else {

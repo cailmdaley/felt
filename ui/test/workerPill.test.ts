@@ -103,8 +103,9 @@ function declarationsFor(selector: string, css: string): string {
 }
 
 const DOCK_CSS = readBoardCss('workspace/dock.css')
+const READER_CSS = readBoardCss('workspace/reader.css')
 const TOKENS_CSS = readBoardCss('workspace/tokens.css')
-const TOUCH_CSS = [readBoardCss('KanbanModal.css'), DOCK_CSS].join('\n')
+const TOUCH_CSS = [readBoardCss('KanbanModal.css'), DOCK_CSS, READER_CSS].join('\n')
 const LINK = 'https://claude.ai/code/session_bridged'
 const now = Date.now()
 const worker = (phase: string, sessionLink?: string) => ({
@@ -157,7 +158,8 @@ describe('the terminal worker pill under a finger', () => {
       expect(fiberPill.classes).toContain('kbn-card-worker')
       expect(declarationsFor('.ws-dock', phoneMedia)).toMatch(/--ctl-h:\s*var\(--ws-phone-target\)/)
       expect(declarationsFor('.ws-dock .kbn-card-worker', DOCK_CSS)).toMatch(/min-height:\s*var\(--ctl-h\)/)
-      expect(coarseDeclarations(fiberPill, TOUCH_CSS).get('min-height')).toBe('var(--ws-phone-target)')
+      expect(coarseDeclarations(fiberPill, DOCK_CSS).get('min-height')).toBe('var(--ws-phone-target)')
+      expect(coarseDeclarations(fiberPill, READER_CSS).get('min-height')).toBe('var(--ws-phone-target)')
       expect(TOKENS_CSS).toMatch(/--ws-phone-target:\s*44px/)
     })
   }
