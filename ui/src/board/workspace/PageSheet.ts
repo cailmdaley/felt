@@ -132,7 +132,7 @@ export class PageSheet {
         const thumb = new Thumbnail({ key: `sheet:${doc.key}`, shuttleBase: this.base,
           file: doc.kind === 'fiber' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
           fallback: channel.outcome ?? channel.name, captioned: true, className: 'ws-page-sheet-thumb',
-          // Native PDF previews navigate subframes; the text face keeps this history layer self-contained.
+          // At 56 px, PDFs use their designed face instead of mounting a native viewer.
           priority: () => doc.kind !== 'pdf' && this.isOpen && this.onScreen(button) ? 4 : 0,
           distance: () => Math.abs(index - channel.documents.findIndex(d => d.key === this.model?.selected)),
         })
@@ -170,7 +170,8 @@ export class PageSheet {
   }
   private readonly keydown = (event: KeyboardEvent): void => {
     if (!this.isOpen) return
-    // The dialog owns every key while open; Tab uses the browser's native modal trap.
+    // The dialog owns every key while open; focus wraps without entering browser chrome.
+    this.el.closest('.ws-reader')?.classList.add('ws-keyboard')
     event.stopImmediatePropagation()
     if (event.key === 'Tab') {
       const buttons = [...this.el.querySelectorAll<HTMLButtonElement>('button')].filter(button => !button.closest('[inert]') && button.checkVisibility())

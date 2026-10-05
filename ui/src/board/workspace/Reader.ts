@@ -396,7 +396,11 @@ export class Reader {
     return Math.min(max, width)
   }
   private layoutNavbar(): void {
-    if (this.phone.matches) { this.navbar.style.removeProperty('grid-template-columns'); return }
+    if (this.phone.matches) {
+      this.navbar.style.removeProperty('grid-template-columns')
+      this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
+      return
+    }
     const style = getComputedStyle(this.navbar)
     const gap = parseFloat(style.columnGap) || 12
     const padLeft = parseFloat(style.paddingLeft) || 12
