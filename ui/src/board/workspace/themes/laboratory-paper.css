@@ -1,0 +1,116 @@
+/* Laboratory Paper lays graphite and restrained graph ruling over pale green-grey stock. */
+:scope {
+  --ws-ground: #e2e9e0;
+  --ws-paper: #f3f5eb;
+  --ws-sheet: #e9eee5;
+  --ws-ink: #29332d;
+  --ws-ink-soft: #39443d;
+  --ws-ink-muted: #4f5c53;
+  --ws-ink-faint: #56635a;
+  --ws-hairline: #9baa9b;
+  --ws-hairline-soft: #c2cec2;
+  --ws-fill: #dee7dd;
+  --ws-hover: rgb(67 92 73 / 8%);
+  --ws-you: #a43e34;
+  --ws-agent: #3d5ba0;
+  --ws-machine: var(--ws-agent);
+  --ws-machine-halo: rgb(61 91 160 / 16%);
+  --ws-owed: #6d592d;
+  --ws-fresh: #99751e;
+  --ws-verdict: #356d62;
+  --ws-focus: var(--ws-you);
+  --ws-red: var(--ws-owed);
+  --ws-veil: rgb(226 233 224 / 42%);
+  --ws-veil-filter: blur(9px) saturate(1.02) brightness(1.02);
+  --ws-float:
+    0 1px 2px rgb(41 51 45 / 10%),
+    0 28px 64px -14px rgb(41 51 45 / 25%);
+  --ws-mask: var(--ws-ink);
+  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
+  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
+  --ws-mono-tracking: 0.08em;
+  --ws-lab-grid: rgb(70 91 75 / 12%);
+  --ws-margin-rule: rgb(41 51 45 / 28%);
+  --ws-radius: 5px;
+  --ws-control-radius: 3px;
+}
+
+[data-part="veil"] {
+  background: var(--ws-veil);
+  -webkit-backdrop-filter: var(--ws-veil-filter);
+  backdrop-filter: var(--ws-veil-filter);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-part="veil"] {
+    background: var(--ws-ground);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+[data-part="tab"] { color: var(--ws-ink-muted); }
+[data-part="tab"][aria-selected="true"] {
+  color: var(--ws-ink);
+  background: var(--ws-fill);
+}
+
+[data-part="label-bar"] {
+  color: var(--ws-ink-muted);
+  background-color: var(--ws-paper);
+}
+
+[data-part="page-frame"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(var(--ws-lab-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-lab-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+[data-part="fiber-header"] {
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(90deg, transparent 17px, var(--ws-margin-rule) 17px 18px, transparent 18px),
+    linear-gradient(var(--ws-lab-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-lab-grid) 1px, transparent 1px);
+  background-repeat: no-repeat, repeat, repeat;
+  background-size: 42px 100%, 24px 24px, 24px 24px;
+}
+
+[data-part="fiber-title"] { color: var(--ws-ink); }
+
+[data-part="prose"] {
+  color: var(--ws-ink-soft);
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(90deg, transparent 17px, var(--ws-margin-rule) 17px 18px, transparent 18px),
+    linear-gradient(var(--ws-lab-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-lab-grid) 1px, transparent 1px);
+  background-repeat: no-repeat, repeat, repeat;
+  background-size: 42px 100%, 24px 24px, 24px 24px;
+  counter-reset: lab-section;
+}
+[data-part="prose"] h2 {
+  counter-increment: lab-section;
+}
+[data-part="prose"] h2::before {
+  content: counter(lab-section, decimal-leading-zero) " / ";
+  display: inline-block;
+  margin-inline-end: 0.55em;
+  color: var(--ws-ink-muted);
+  font: 500 0.5em/1 var(--ws-mono);
+  letter-spacing: 0.08em;
+  vertical-align: 0.18em;
+}
+
+:scope[data-part="folio"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(var(--ws-lab-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-lab-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  box-shadow: inset 0 0 0 1px var(--ws-hairline-soft);
+}

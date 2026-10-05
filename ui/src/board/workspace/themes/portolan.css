@@ -1,0 +1,92 @@
+/* Portolan keeps the Desk's parchment, card paper, and iron-gall ink. */
+:scope {
+  --ws-ground: color-mix(in srgb, var(--kbn-parchment) 60%, var(--kbn-paper));
+  --ws-paper: var(--kbn-paper);
+  --ws-sheet: var(--kbn-sheet);
+  --ws-ink: var(--kbn-ink);
+  --ws-ink-soft: var(--kbn-ink-soft);
+  --ws-ink-muted: color-mix(in srgb, var(--kbn-ink-muted) 70%, var(--kbn-ink-soft));
+  --ws-ink-faint: var(--ws-ink-muted);
+  --ws-hairline: var(--kbn-rule-strong);
+  --ws-hairline-soft: var(--kbn-rule);
+  --ws-fill: var(--kbn-plate);
+  --ws-hover: color-mix(in srgb, var(--kbn-plate) 55%, transparent);
+  --ws-you: var(--kbn-you);
+  --ws-agent: var(--kbn-agent);
+  --ws-machine: var(--ws-agent);
+  --ws-machine-halo: color-mix(in srgb, var(--ws-agent) 20%, transparent);
+  --ws-owed: color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-ink-soft));
+  --ws-fresh: var(--kbn-owed-bright);
+  --ws-verdict: var(--kbn-tempered-ink);
+  --ws-focus: var(--ws-you);
+  --ws-red: var(--ws-owed);
+  --ws-veil: color-mix(in srgb, var(--kbn-parchment) 42%, transparent);
+  --ws-veil-filter: blur(9px) saturate(1.05) brightness(1.02);
+  --ws-float:
+    0 1px 2px color-mix(in srgb, var(--ws-ink) 10%, transparent),
+    0 28px 64px -14px color-mix(in srgb, var(--ws-ink) 28%, transparent);
+  --ws-mask: var(--ws-ink);
+  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
+  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
+  --ws-mono-tracking: 0.08em;
+  --ws-rhumb: color-mix(in srgb, var(--ws-ink) 7%, transparent);
+}
+
+[data-part="veil"] {
+  background: var(--ws-veil);
+  -webkit-backdrop-filter: var(--ws-veil-filter);
+  backdrop-filter: var(--ws-veil-filter);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-part="veil"] {
+    background: var(--ws-ground);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+[data-part="tab"] { color: var(--ws-ink-muted); }
+[data-part="tab"][aria-selected="true"] {
+  color: var(--ws-ink);
+  background: var(--ws-fill);
+}
+
+[data-part="label-bar"] {
+  color: var(--ws-ink-muted);
+  background-color: var(--ws-paper);
+}
+
+[data-part="page-frame"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+}
+
+[data-part="fiber-header"] {
+  background-color: var(--ws-paper);
+  background-image:
+    repeating-linear-gradient(32deg, transparent 0 43px, var(--ws-rhumb) 43px 44px),
+    repeating-linear-gradient(148deg, transparent 0 43px, var(--ws-rhumb) 43px 44px);
+}
+
+[data-part="fiber-title"] { color: var(--ws-ink); }
+[data-part="fiber-title"]::after {
+  content: "✥";
+  display: inline-block;
+  margin-inline-start: 0.45em;
+  color: var(--ws-ink-muted);
+  font: 500 0.64em/1 var(--ws-mono);
+  vertical-align: 0.16em;
+  opacity: 0.72;
+}
+
+[data-part="prose"] {
+  color: var(--ws-ink-soft);
+  background-color: var(--ws-paper);
+}
+
+:scope[data-part="folio"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  box-shadow: inset 0 0 0 1px var(--ws-hairline-soft);
+}

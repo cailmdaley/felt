@@ -1,0 +1,118 @@
+/* Night Chart prints parchment, constellations, and navigation lines on navy-black stock. */
+:scope {
+  --ws-ground: #0a1019;
+  --ws-paper: #121b25;
+  --ws-sheet: #1b2531;
+  --ws-ink: #f4ebdd;
+  --ws-ink-soft: #e5dac7;
+  --ws-ink-muted: #ccc1ae;
+  --ws-ink-faint: #b6ab99;
+  --ws-hairline: #50545a;
+  --ws-hairline-soft: #363c43;
+  --ws-fill: #222d37;
+  --ws-hover: rgb(227 201 146 / 12%);
+  --ws-you: #f08a78;
+  --ws-agent: #9eb5f4;
+  --ws-machine: var(--ws-agent);
+  --ws-machine-halo: rgb(158 181 244 / 22%);
+  --ws-owed: #e7bd69;
+  --ws-fresh: #f3cc74;
+  --ws-verdict: #82c6a7;
+  --ws-focus: var(--ws-you);
+  --ws-red: var(--ws-owed);
+  --ws-veil: rgb(5 9 15 / 94%);
+  --ws-veil-filter: blur(9px) saturate(0.82) brightness(0.7);
+  --ws-float:
+    0 1px 2px rgb(0 0 0 / 38%),
+    0 28px 64px -14px rgb(0 0 0 / 68%);
+  --ws-mask: #fff;
+  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
+  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
+  --ws-mono-tracking: 0.08em;
+  --ws-chart-grid: rgb(181 152 99 / 6%);
+  --ws-chart-star: rgb(224 192 129 / 12%);
+  --ws-chart-ornament: #e0c081;
+  --ws-chart-route: rgb(189 167 121 / 3%);
+}
+
+[data-part="veil"] {
+  background: var(--ws-veil);
+  -webkit-backdrop-filter: var(--ws-veil-filter);
+  backdrop-filter: var(--ws-veil-filter);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-part="veil"] {
+    background: var(--ws-ground);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+[data-part="tab"] { color: var(--ws-ink-muted); }
+[data-part="tab"][aria-selected="true"] {
+  color: var(--ws-ink);
+  background: var(--ws-fill);
+}
+
+[data-part="label-bar"] {
+  color: var(--ws-ink-muted);
+  background-color: var(--ws-paper);
+}
+
+[data-part="page-frame"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image:
+    radial-gradient(circle at center, var(--ws-chart-star) 0.8px, transparent 1.2px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    repeating-linear-gradient(34deg, transparent 0 87px, var(--ws-chart-route) 88px 89px, transparent 90px 176px);
+  background-size: 48px 48px, 24px 24px, 24px 24px, 176px 176px;
+}
+
+[data-part="fiber-header"] {
+  background-color: var(--ws-paper);
+  background-image:
+    radial-gradient(circle at 82% 28%, rgb(224 192 129 / 8%), transparent 36%),
+    radial-gradient(circle at center, var(--ws-chart-star) 0.8px, transparent 1.2px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px);
+  background-size: auto, 48px 48px, 24px 24px, 24px 24px;
+}
+
+[data-part="fiber-title"] {
+  color: var(--ws-ink);
+  font-variant-caps: small-caps;
+  letter-spacing: 0.035em;
+}
+[data-part="fiber-title"]::after {
+  content: "✦";
+  display: inline-block;
+  margin-inline-start: 0.45em;
+  color: var(--ws-chart-ornament);
+  font-size: 0.62em;
+  vertical-align: 0.18em;
+}
+
+[data-part="prose"] {
+  color: var(--ws-ink-soft);
+  background-color: var(--ws-paper);
+  background-image:
+    radial-gradient(circle at center, var(--ws-chart-star) 0.8px, transparent 1.2px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    repeating-linear-gradient(34deg, transparent 0 87px, var(--ws-chart-route) 88px 89px, transparent 90px 176px);
+  background-size: 48px 48px, 24px 24px, 24px 24px, 176px 176px;
+}
+
+:scope[data-part="folio"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image:
+    radial-gradient(circle at center, var(--ws-chart-star) 0.8px, transparent 1.2px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px);
+  background-size: 48px 48px, 24px 24px, 24px 24px;
+  box-shadow: inset 0 0 0 1px var(--ws-hairline-soft);
+}

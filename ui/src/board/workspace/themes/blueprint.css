@@ -1,0 +1,127 @@
+/* Blueprint is a Prussian-blue cyanotype with pale-ink grid and clipped sheets. */
+:scope {
+  --ws-ground: #071a2b;
+  --ws-paper: #0d2942;
+  --ws-sheet: #12364f;
+  --ws-ink: #f4f8f5;
+  --ws-ink-soft: #dcebf0;
+  --ws-ink-muted: #b5d2dc;
+  --ws-ink-faint: #a5c8d6;
+  --ws-hairline: #4c8298;
+  --ws-hairline-soft: #315c72;
+  --ws-fill: #1a435d;
+  --ws-hover: rgb(139 207 225 / 12%);
+  --ws-you: #ff9585;
+  --ws-agent: #9ab4ff;
+  --ws-machine: var(--ws-agent);
+  --ws-machine-halo: rgb(154 180 255 / 24%);
+  --ws-owed: #e8c16b;
+  --ws-fresh: #f3cf77;
+  --ws-verdict: #84ceb0;
+  --ws-focus: var(--ws-you);
+  --ws-red: var(--ws-owed);
+  --ws-veil: rgb(5 18 31 / 94%);
+  --ws-veil-filter: blur(9px) saturate(0.88) brightness(0.78);
+  --ws-float:
+    0 1px 2px rgb(0 0 0 / 32%),
+    0 28px 64px -14px rgb(0 0 0 / 64%);
+  --ws-mask: #fff;
+  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
+  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
+  --ws-mono-tracking: 0.1em;
+  --ws-blueprint-grid: rgb(145 210 229 / 7%);
+  --ws-blueprint-mark: rgb(174 223 235 / 7%);
+  --ws-page-cut: 12px;
+  --ws-radius: 0px;
+  --ws-control-radius: 0px;
+}
+
+[data-part="veil"] {
+  background: var(--ws-veil);
+  -webkit-backdrop-filter: var(--ws-veil-filter);
+  backdrop-filter: var(--ws-veil-filter);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-part="veil"] {
+    background: var(--ws-ground);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+[data-part="tab"] {
+  color: var(--ws-ink-muted);
+  font-family: var(--ws-mono);
+  letter-spacing: var(--ws-mono-tracking);
+  text-transform: uppercase;
+}
+[data-part="tab"][aria-selected="true"] {
+  color: var(--ws-ink);
+  background: var(--ws-fill);
+}
+
+[data-part="label-bar"] {
+  color: var(--ws-ink-muted);
+  background-color: var(--ws-paper);
+  font-family: var(--ws-mono);
+  text-transform: uppercase;
+}
+
+[data-part="page-frame"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  clip-path: polygon(
+    0 var(--ws-page-cut), var(--ws-page-cut) 0,
+    calc(100% - var(--ws-page-cut)) 0, 100% var(--ws-page-cut),
+    100% calc(100% - var(--ws-page-cut)), calc(100% - var(--ws-page-cut)) 100%,
+    var(--ws-page-cut) 100%, 0 calc(100% - var(--ws-page-cut))
+  );
+}
+
+[data-part="fiber-header"] {
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(90deg, transparent 25px, var(--ws-blueprint-mark) 25px 26px, transparent 26px),
+    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
+  background-size: 100% 100%, 24px 24px, 24px 24px;
+}
+
+[data-part="fiber-title"] {
+  color: var(--ws-ink);
+  font-family: var(--ws-mono);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+[data-part="prose"] {
+  color: var(--ws-ink-soft);
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+[data-part="prose"] :is(h1, h2, h3, h4) {
+  color: var(--ws-ink);
+  font-family: var(--ws-mono);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+:scope[data-part="folio"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image:
+    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  box-shadow: inset 0 0 0 1px var(--ws-hairline-soft);
+}
