@@ -7,31 +7,37 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-func sendFileTestEnv(t *testing.T) (string, string) {
+// sendFileTestEnv is an env attributing sends to a Codex session on
+// test-host, with its event sink and an artifact to send.
+func sendFileTestEnv(t *testing.T) (env *sysenv.Env, sink, artifact string) {
 	t.Helper()
 	dir := t.TempDir()
-	sink := filepath.Join(dir, "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", sink)
-	t.Setenv("SHUTTLE_EVENTS", "")
-	t.Setenv("SHUTTLE_HOST", "test-host")
-	t.Setenv("SHUTTLE_TMUX_SESSION", "")
-	t.Setenv("TMUX", "")
-	t.Setenv("CODEX_THREAD_ID", "codex-session")
-	t.Setenv("CLAUDE_SESSION_ID", "")
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	t.Setenv("SHUTTLE_SESSIONS_FILE", filepath.Join(dir, "sessions.jsonl"))
-	artifact := filepath.Join(dir, "report with spaces.html")
+	sink = filepath.Join(dir, "events.jsonl")
+	env = testEnv(t)
+	env.Set("SHUTTLE_EVENTS_FILE", sink)
+	env.Set("SHUTTLE_EVENTS", "")
+	env.Set("SHUTTLE_HOST", "test-host")
+	env.Set("SHUTTLE_TMUX_SESSION", "")
+	env.Set("TMUX", "")
+	env.Set("CODEX_THREAD_ID", "codex-session")
+	env.Set("CLAUDE_SESSION_ID", "")
+	env.Set("CLAUDE_CODE_SESSION_ID", "")
+	env.Set("SHUTTLE_SESSIONS_FILE", filepath.Join(dir, "sessions.jsonl"))
+	artifact = filepath.Join(dir, "report with spaces.html")
 	if err := os.WriteFile(artifact, []byte("hello"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return sink, artifact
+	return env, sink, artifact
 }
 
 func TestSendFilesRecordsExplicitDelivery(t *testing.T) {
-	sink, artifact := sendFileTestEnv(t)
-	files, err := testApp(t).sendFiles([]string{artifact, artifact}, "")
+	t.Parallel()
+	env, sink, artifact := sendFileTestEnv(t)
+	files, err := newApp(env).sendFiles([]string{artifact, artifact}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,9 +64,11 @@ func TestSendFilesRecordsExplicitDelivery(t *testing.T) {
 }
 
 func TestSendFilesFailuresNeverRecord(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"missing", "directory", "disabled", "identity", "unwritable"} {
 		t.Run(scenario, func(t *testing.T) {
-			sink, artifact := sendFileTestEnv(t)
+			t.Parallel()
+			env, sink, artifact := sendFileTestEnv(t)
 			paths := []string{artifact}
 			switch scenario {
 			case "missing":
@@ -68,14 +76,14 @@ func TestSendFilesFailuresNeverRecord(t *testing.T) {
 			case "directory":
 				paths = append(paths, filepath.Dir(artifact))
 			case "disabled":
-				t.Setenv("SHUTTLE_EVENTS", "off")
+				env.Set("SHUTTLE_EVENTS", "off")
 			case "identity":
-				t.Setenv("CODEX_THREAD_ID", "")
-				t.Setenv("SHUTTLE_TMUX_SESSION", "ordinary-shell")
+				env.Set("CODEX_THREAD_ID", "")
+				env.Set("SHUTTLE_TMUX_SESSION", "ordinary-shell")
 			case "unwritable":
-				t.Setenv("SHUTTLE_EVENTS_FILE", artifact+"/events.jsonl")
+				env.Set("SHUTTLE_EVENTS_FILE", artifact+"/events.jsonl")
 			}
-			if _, err := testApp(t).sendFiles(paths, ""); err == nil {
+			if _, err := newApp(env).sendFiles(paths, ""); err == nil {
 				t.Fatal("expected error")
 			}
 			if _, err := os.Stat(sink); !os.IsNotExist(err) {
@@ -86,14 +94,15 @@ func TestSendFilesFailuresNeverRecord(t *testing.T) {
 }
 
 func TestSendFilesLedgerAndExplicitSession(t *testing.T) {
-	sink, artifact := sendFileTestEnv(t)
-	t.Setenv("CODEX_THREAD_ID", "")
-	t.Setenv("SHUTTLE_TMUX_SESSION", "worker")
+	t.Parallel()
+	env, sink, artifact := sendFileTestEnv(t)
+	env.Set("CODEX_THREAD_ID", "")
+	env.Set("SHUTTLE_TMUX_SESSION", "worker")
 	ledger := "{\"tmux\":\"worker\",\"session\":\"older\"}\n{\"tmux\":\"other\",\"session\":\"wrong\"}\n{\"tmux\":\"worker\",\"session\":\"newer\"}\n"
-	if err := os.WriteFile(os.Getenv("SHUTTLE_SESSIONS_FILE"), []byte(ledger), 0600); err != nil {
+	if err := os.WriteFile(env.Getenv("SHUTTLE_SESSIONS_FILE"), []byte(ledger), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testApp(t).sendFiles([]string{artifact}, ""); err != nil {
+	if _, err := newApp(env).sendFiles([]string{artifact}, ""); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(sink)
@@ -107,6 +116,7 @@ func TestSendFilesLedgerAndExplicitSession(t *testing.T) {
 }
 
 func TestSendFilesIdentityPrecedence(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, explicit, codex, claude, pi, aiAgent, want string }{
 		{"explicit", "chosen", "codex", "claude", "pi", "pi", "chosen"},
 		{"codex", "", "codex", "claude", "", "", "codex"},
@@ -115,17 +125,19 @@ func TestSendFilesIdentityPrecedence(t *testing.T) {
 		{"pi nested in claude", "", "", "claude", "pi", "pi", "pi"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sink, artifact := sendFileTestEnv(t)
-			t.Setenv("CODEX_THREAD_ID", tc.codex)
-			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.claude)
-			t.Setenv("PI_SESSION_ID", tc.pi)
-			t.Setenv("AI_AGENT", tc.aiAgent)
-			cwd, _ := os.Getwd()
+			t.Parallel()
+			env, sink, artifact := sendFileTestEnv(t)
+			env.Set("CODEX_THREAD_ID", tc.codex)
+			env.Set("CLAUDE_CODE_SESSION_ID", tc.claude)
+			env.Set("PI_SESSION_ID", tc.pi)
+			env.Set("AI_AGENT", tc.aiAgent)
+			cwd := t.TempDir()
+			env.Chdir(cwd)
 			relative, err := filepath.Rel(cwd, artifact)
 			if err != nil {
 				t.Fatal(err)
 			}
-			files, err := testApp(t).sendFiles([]string{relative}, tc.explicit)
+			files, err := newApp(env).sendFiles([]string{relative}, tc.explicit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -145,19 +157,23 @@ func TestSendFilesIdentityPrecedence(t *testing.T) {
 }
 
 func TestSendFilesRejectsFIFOWithoutBlocking(t *testing.T) {
-	_, artifact := sendFileTestEnv(t)
+	t.Parallel()
+	env, _, artifact := sendFileTestEnv(t)
 	fifo := artifact + ".fifo"
 	if err := syscall.Mkfifo(fifo, 0600); err != nil {
 		t.Fatal(err)
 	}
 	result := make(chan error, 1)
-	go func() { _, err := testApp(t).sendFiles([]string{fifo}, "test-session"); result <- err }()
+	a := newApp(env)
+	go func() { _, err := a.sendFiles([]string{fifo}, "test-session"); result <- err }()
+	// The rejection returns at once; the bound only names a send that opened
+	// the FIFO and is waiting for a writer that never comes.
 	select {
 	case err := <-result:
 		if err == nil {
 			t.Fatal("FIFO accepted")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("blocked opening FIFO")
 	}
 }

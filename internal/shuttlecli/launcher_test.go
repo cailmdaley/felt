@@ -2,19 +2,22 @@ package shuttlecli
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestShuttleLaunchRejectsARepositoryWithoutARelease(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shuttle-launch is a POSIX shell script")
 	}
 	repo := t.TempDir()
-	home := t.TempDir()
+	env := testEnv(t)
+	env.Set("SHUTTLE_DIR", repo)
 	script, err := os.ReadFile("../../bin/shuttle-launch")
 	if err != nil {
 		t.Fatal(err)
@@ -23,15 +26,14 @@ func TestShuttleLaunchRejectsARepositoryWithoutARelease(t *testing.T) {
 	if err := os.WriteFile(launcher, script, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("/bin/sh", launcher)
-	cmd.Env = append(os.Environ(), "HOME="+home, "SHUTTLE_DIR="+repo)
-	out, err := cmd.CombinedOutput()
+	out, err := env.Command("/bin/sh", launcher).CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "could not find a daemon release") {
 		t.Fatalf("release-less repository result err=%v output=%q", err, out)
 	}
 }
 
 func TestShuttleLaunchUsesGoDaemonLifecycleCommands(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shuttle-launch is a POSIX shell script")
 	}
@@ -43,7 +45,7 @@ func TestShuttleLaunchUsesGoDaemonLifecycleCommands(t *testing.T) {
 	if err := os.WriteFile(releaseLauncher, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fakeBin := t.TempDir()
+	env := testEnv(t)
 	dead := filepath.Join(root, "listener-dead")
 	calls := filepath.Join(root, "calls")
 	shuttle := `#!/bin/sh
@@ -59,9 +61,7 @@ case "$*" in
   *) echo "unexpected shuttle argv: $*" >&2; exit 2 ;;
 esac
 `
-	if err := os.WriteFile(filepath.Join(fakeBin, "shuttle"), []byte(shuttle), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.FakeCommand(t, env, "shuttle", shuttle)
 	sleep := `#!/bin/sh
 case "${1:-}" in
   5) : > "$SHUTTLE_TEST_DEAD" ;;
@@ -69,9 +69,7 @@ case "${1:-}" in
 esac
 exec /bin/sleep 0.02
 `
-	if err := os.WriteFile(filepath.Join(fakeBin, "sleep"), []byte(sleep), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.FakeCommand(t, env, "sleep", sleep)
 	script, err := os.ReadFile("../../bin/shuttle-launch")
 	if err != nil {
 		t.Fatal(err)
@@ -84,14 +82,12 @@ exec /bin/sleep 0.02
 	if err := os.MkdirAll(home, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("SHUTTLE_DIR", root)
-	t.Setenv("SHUTTLE_LOG", filepath.Join(root, "shuttle.log"))
-	t.Setenv("SHUTTLE_TEST_DEAD", dead)
-	t.Setenv("SHUTTLE_TEST_CALLS", calls)
-	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	cmd := exec.Command("/bin/sh", launcher, "--loop")
-	out, err := cmd.CombinedOutput()
+	env.Set("HOME", home)
+	env.Set("SHUTTLE_DIR", root)
+	env.Set("SHUTTLE_LOG", filepath.Join(root, "shuttle.log"))
+	env.Set("SHUTTLE_TEST_DEAD", dead)
+	env.Set("SHUTTLE_TEST_CALLS", calls)
+	out, err := env.Command("/bin/sh", launcher, "--loop").CombinedOutput()
 	if err == nil {
 		t.Fatalf("respawn loop survived its stop signal: %s", out)
 	}
