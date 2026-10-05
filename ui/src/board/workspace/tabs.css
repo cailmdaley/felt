@@ -86,10 +86,10 @@
 .ws-page-ticks { display: none; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-page-ticks {
-    position: absolute; left: var(--ws-phone-target); right: var(--ws-phone-target); top: 0; height: 5px;
+    position: absolute; left: calc(var(--ws-small-gap) + var(--ws-phone-target)); right: calc(var(--ws-small-gap) + 2 * var(--ws-phone-target)); top: 5px; height: 2px;
     display: flex; justify-content: center; gap: 3px; pointer-events: none;
   }
-  .ws-page-tick { flex: 0 1 12px; min-width: 1px; height: 2px; background: var(--ws-hairline); }
-  .ws-page-tick-current { height: 3px; background: var(--ws-ink); }
+  .ws-page-tick { flex: 0 1 10px; min-width: 2px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--ws-ink-muted) 32%, transparent); }
+  .ws-page-tick-current { background: var(--ws-ink); }
 }
 @media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab .ws-tab-thumb { transition: none; } }

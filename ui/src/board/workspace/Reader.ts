@@ -538,6 +538,7 @@ export class Reader {
   }
   /** One tick per page, the selected one in ink; a long run's ticks close up rather than wrap. */
   private paintTicks(index: number, count: number): void {
+    if (count < 2) count = 0
     if (this.ticks.childElementCount !== count) this.ticks.replaceChildren(...Array.from({ length: count }, () => element('i', 'ws-page-tick')))
     ;[...this.ticks.children].forEach((tick, i) => tick.classList.toggle('ws-page-tick-current', i === index))
   }
