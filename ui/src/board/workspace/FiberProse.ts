@@ -54,7 +54,7 @@ export function installBodyFileLinks(
     if (!path) continue
     link.title = `Open ${basename(path)} in the viewer`
     link.addEventListener('click', (event) => {
-      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
+      if (link.dataset.wsReference || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
       event.preventDefault()
       event.stopPropagation()
       onFile(link.dataset.filePath ?? path, link.textContent?.trim() || undefined)

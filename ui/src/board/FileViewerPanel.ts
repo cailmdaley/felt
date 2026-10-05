@@ -13,6 +13,7 @@
 import './FileViewerPanel.css'
 import './prose.css'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
+import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
 import { connectDocumentFrame, frameBridge, DOCUMENT_SANDBOX, withWorkspaceKeyBridge, type DocumentKey, type FrameBridge } from './workspace/DocumentBridge.js'
 import {
@@ -52,6 +53,10 @@ export interface FileViewerOptions {
   quietLoading?: boolean
   /** Listening controls use the same native element and lifecycle as video. */
   decorateAudio?: (audio: HTMLAudioElement) => () => void
+  /** Channel references are installed after every text-body replacement. */
+  decorateText?: (pane: HTMLElement) => void
+  resolveReferences?: (candidates: string[]) => ReferenceTarget[]
+  onReferenceIntent?: (type: 'select' | 'play' | 'pause', candidate: string) => void
 }
 
 /**
@@ -190,7 +195,7 @@ export function buildFileViewer(
   return wrap
 }
 
-type MediaState = { media: HTMLMediaElement; active: boolean }
+type MediaState = { media: HTMLMediaElement; active: boolean; inline: boolean }
 const mediaViewers = new WeakMap<HTMLElement, MediaState>()
 const players = new Set<HTMLMediaElement>()
 type EmbeddedMediaState = { active: boolean; bridge: FrameBridge | null }
@@ -211,14 +216,15 @@ function buildMediaViewer(src: string, path: string, kind: 'audio' | 'video', op
   media.preload = 'metadata'
   media.setAttribute('aria-label', basename(path))
   if (media instanceof HTMLVideoElement) media.playsInline = true
-  const state: MediaState = { media, active: options.active !== false }
+  const state: MediaState = { media, active: options.active !== false, inline: false }
   mediaViewers.set(wrap, state)
   players.add(media)
   media.addEventListener('play', () => {
-    if (!state.active) { media.pause(); return }
+    if (!state.active && !state.inline) { media.pause(); return }
     for (const other of players) if (other !== media) other.pause()
     for (const embedded of embeddedPlayers) embedded.bridge?.command('pause')
   })
+  media.addEventListener('pause', () => { state.inline = false })
   media.addEventListener('loadedmetadata', () => options.onState?.({ status: 'ready' }))
   let disposed = false
   const controller = new AbortController()
@@ -396,12 +402,20 @@ export function disposeFileViewer(viewer: HTMLElement | null): void {
   viewerDisposers.delete(viewer)
 }
 
+/** A report's explicit gesture lends playback to the channel's retained audio element. */
+export function playFileViewerAudio(viewer: HTMLElement): void {
+  const state = mediaViewers.get(viewer)
+  if (!state || !(state.media instanceof HTMLAudioElement)) return
+  state.inline = true
+  void state.media.play().catch(() => { state.inline = false })
+}
+
 /** Pause a hidden reader tab without tearing down its viewer DOM. */
 export function suspendFileViewer(viewer: HTMLElement | null): void {
   if (viewer) {
     liveViewSubscriptions.get(viewer)?.suspend()
     const state = mediaViewers.get(viewer)
-    if (state) { state.active = false; state.media.pause() }
+    if (state) { state.active = false; state.inline = false; state.media.pause() }
     const embedded = embeddedMediaViewers.get(viewer)
     if (embedded) { embedded.active = false; embedded.bridge?.command('active', { active: false }) }
   }
@@ -450,6 +464,7 @@ function buildHtmlViewer(
     frame.setAttribute('sandbox', DOCUMENT_SANDBOX)
     let announced = false
     let charged = 0
+    let resolved = new Set<string>()
     const charge = (media = false): void => {
       const weight = Math.max(charged, byteWeights.get(frame) ?? 1, media ? 2 : 1)
       if (weight <= charged) return
@@ -463,6 +478,16 @@ function buildHtmlViewer(
         announced = true
         charge(message.payload.media === true)
         ready(frame, bridge)
+      } else if (message.type === 'references' && embedded.bridge === bridge) {
+        const candidates = message.payload.candidates
+        if (!Array.isArray(candidates) || candidates.length > 4096 || candidates.some(candidate => typeof candidate !== 'string' || candidate.length > 4096)) return
+        const targets = options.resolveReferences?.(candidates) ?? []
+        resolved = new Set(targets.map(target => target.candidate))
+        bridge.command('references:resolved', { targets })
+      } else if (['select', 'play', 'pause'].includes(message.type) && embedded.bridge === bridge && embedded.active) {
+        const candidate = message.payload.candidate
+        if (typeof candidate !== 'string' || !resolved.has(candidate)) return
+        options.onReferenceIntent?.(message.type as 'select' | 'play' | 'pause', candidate)
       } else if (message.type === 'key' && embedded.bridge === bridge && embedded.active && typeof message.payload.key === 'string') {
         options.onDocumentKey?.(message.payload as unknown as DocumentKey)
       } else if (message.type === 'media') {
@@ -634,6 +659,19 @@ function buildTextViewer(
           `<pre class="md-code-block language-${escapeHtml(ext || 'plaintext')}">` +
           `<code class="language-${escapeHtml(ext || 'plaintext')}">${escapeHtml(text)}</code></pre>`
       }
+      if (options.decorateText && !MARKDOWN_EXTS.has(ext)) {
+        const block = pane.querySelector('code')!
+        const parts = text.split(/(`[^`\n]+`)/g)
+        if (parts.length > 1) {
+          block.replaceChildren(...parts.map((part, index) => {
+            if (index % 2 === 0) return document.createTextNode(part)
+            const code = document.createElement('code'); code.className = 'md-inline-code'
+            code.textContent = part.slice(1, -1)
+            return code
+          }))
+        }
+      }
+      options.decorateText?.(pane)
       wrap.scrollTop = scrollTop
       veil.remove()
       if (!hasContent) onReady?.(wrap)
