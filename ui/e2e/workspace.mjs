@@ -133,6 +133,18 @@ test('Overview lenses, Find, exact receipt ribbon route and scroll restoration',
   assert.ok(await p.locator('.ws-overview').evaluate(e => e.scrollTop === window.__overviewScroll))
 }, { width: 1440, height: 600 })
 
+test('Overview media thumbnails show duration and a paused first video frame', async p => {
+  await p.locator('[data-view="shelf"]').click()
+  const audioCard = p.locator('.ws-overview-ribbon button').filter({ hasText: 'tone.mp3' })
+  await audioCard.scrollIntoViewIfNeeded()
+  await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-audio')].some(t => /\d+:\d\d/.test(t.textContent)))
+  assert.match(await audioCard.innerText(), /\d+:\d\d/)
+  const videoCard = p.locator('.ws-overview-ribbon button').filter({ hasText: 'test.mp4' })
+  await videoCard.scrollIntoViewIfNeeded()
+  await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-video video')].some(v => v.readyState >= 2 && v.videoWidth > 0 && v.paused))
+  assert.ok(await videoCard.locator('video').evaluate(v => v.muted && !v.controls && v.paused && v.currentTime === 0 && v.closest('[inert]')))
+})
+
 test('Resent report is one document with three receipts', async p => {
   await open(p)
   assert.equal(await tab(p, 'calibration-report').count(), 1)
