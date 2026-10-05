@@ -2588,6 +2588,32 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   assert.ok(grown.height > before.height && Math.abs(grown.y - before.y) <= 0.5, `wrapped text grows the field downward: ${JSON.stringify({ before, grown })}`)
   await field.fill('')
   assert.equal((await field.boundingBox()).height, before.height, 'an emptied field returns to its resting height')
+  // Text that would reach the verbs takes the field's whole width, and the verbs
+  // drop to a row at its foot. The keystroke that tips it, and the one that
+  // tips it back, move nothing above the field and never shift the text's start.
+  const composer = p.locator(`${dock} .kbn-ctl-composer`)
+  const stacked = () => composer.evaluate(el => el.classList.contains('kbn-ctl-composer-stacked'))
+  const holds = [...above, `${dock} .kbn-detail-directive`]
+  let typed = ''
+  for (const word of 'Rerun the masks with the corrected weights then compare the null spectra at high ell against the previous run'.split(' ')) {
+    const shifts = unexpected(await layoutShift(p, { regions: holds, act: () => p.keyboard.type(`${typed ? ' ' : ''}${word}`), positionsOnly: true }))
+    typed += `${typed ? ' ' : ''}${word}`
+    assert.deepEqual(shifts, [], `typing "${word}" moved something above the field or the text's start`)
+    if (await stacked()) break
+  }
+  assert.ok(await stacked(), 'long text drops the verbs to their own row')
+  const span = await composer.evaluate(box => {
+    const text = box.querySelector('.kbn-detail-directive').getBoundingClientRect(), foot = box.querySelector('.kbn-ctl-composer-foot').getBoundingClientRect(), inner = box.getBoundingClientRect()
+    return { full: inner.width - text.width <= 12, below: foot.top >= text.bottom - 0.5, right: Math.abs(inner.right - foot.right) <= 6 }
+  })
+  assert.deepEqual(span, { full: true, below: true, right: true }, 'the text spans the field and the verbs sit beneath it at the right')
+  while (await stacked() && typed) {
+    const shifts = unexpected(await layoutShift(p, { regions: holds, act: () => p.keyboard.press('Backspace'), positionsOnly: true }))
+    typed = typed.slice(0, -1)
+    assert.deepEqual(shifts, [], 'deleting back to one line moved something above the field or the text\'s start')
+  }
+  if (!phone) assert.ok(typed.length > 0, 'the verbs return to the text\'s line while the message still fits beside them')
+  await field.fill('')
   await still(p, 'blurring the composer', () => p.evaluate(() => document.activeElement.blur()), keyboard)
   if (!phone) await composerKeyStaysPut(p)
   if (!phone) for (const control of ['.ws-fiber-acts .kbn-ctl-temper', '.ws-fiber-acts .kbn-ctl-discard', '.ws-dock .kbn-ctl-meet-switch', '.ws-dock .kbn-ctl-resume', '.ws-dock .kbn-ctl-secondary', '.ws-dock .kbn-detail-controls-toggle', '.ws-dock .kbn-ctl-history-toggle']) {

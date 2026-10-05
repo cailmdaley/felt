@@ -900,11 +900,31 @@ export class Dock {
     message.placeholder = 'What should the worker do next?'
     message.setAttribute('aria-label', 'Message for the next worker')
     // The field is one line, focused or not; only text that wraps grows it.
+    // The text always has the field's whole width: while it fits beside the
+    // verbs they ride its line, and once it would reach them (or holds a line
+    // break) they drop to a row of their own inside the field's foot. The
+    // decision measures the text against the room beside the verbs, so it is
+    // the same on either side of the switch and never flickers.
+    let ruler: CanvasRenderingContext2D | null = null
+    const stack = (): void => {
+      if (!box.isConnected || !box.clientWidth) return
+      ruler ??= document.createElement('canvas').getContext?.('2d') ?? null
+      if (!ruler) return
+      const text = getComputedStyle(message), field = getComputedStyle(box)
+      ruler.font = `${text.fontStyle} ${text.fontWeight} ${text.fontSize} ${text.fontFamily}`
+      const room = box.clientWidth - parseFloat(field.paddingLeft) - parseFloat(field.paddingRight)
+        - foot.offsetWidth - (parseFloat(field.columnGap) || 0) - parseFloat(text.paddingLeft) - parseFloat(text.paddingRight)
+      const longest = Math.max(0, ...message.value.split('\n').map(line => ruler!.measureText(line).width))
+      box.classList.toggle('kbn-ctl-composer-stacked', message.value.includes('\n') || longest > room)
+    }
     const fit = (): void => {
+      stack()
       message.style.height = ''
       if (message.value && message.scrollHeight > message.clientHeight) message.style.height = `${message.scrollHeight}px`
     }
     message.addEventListener('input', fit)
+    window.addEventListener('resize', fit)
+    this.composerDisposers.push(() => window.removeEventListener('resize', fit))
 
     // Two lines under the box: a send's outcome (and the project-directory
     // prompt a refused start raises), and the images turned away. Neither
@@ -1018,6 +1038,7 @@ export class Dock {
     const meeting = this.meeting ? this.buildMeeting(card, err, send, armed => {
       sends.hidden = armed
       this.composerPaint?.()
+      fit()
     }) : null
     sends.append(fresh, resume)
     foot.append(...(meeting ? [meeting] : []), sends)

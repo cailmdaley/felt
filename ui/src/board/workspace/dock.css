@@ -162,6 +162,9 @@
 }
 .ws-dock .kbn-ctl-composer .kbn-ctl-images { grid-column: 1 / -1; grid-row: 2; }
 .ws-dock .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: var(--ws-small-gap); }
+/* Text that would reach the verbs takes the whole width; the verbs drop to a row of their own at the field's foot. */
+.ws-dock .kbn-ctl-composer-stacked .kbn-detail-directive { grid-column: 1 / -1; }
+.ws-dock .kbn-ctl-composer-stacked .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 3; justify-self: end; }
 .ws-dock .kbn-ctl-sends { display: inline-flex; gap: var(--ws-small-gap); }
 /* Verbs inside the field: the default one is a plate, the others are words. */
 .ws-dock .kbn-ctl-composer .kbn-ctl-btn { min-height: var(--ctl-h); padding-inline: 10px; border-color: transparent !important; background-color: transparent; color: var(--ws-ink-muted); }
@@ -279,7 +282,7 @@
   .ws-dock .kbn-ctl-foot { grid-column: 3; }
   /* The verbs wrap beneath the field, inside its border, on their own row. */
   .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
-  .ws-dock .kbn-ctl-composer-foot { grid-column: 1; grid-row: 3; flex-wrap: wrap; justify-content: flex-end; }
+  .ws-dock .kbn-ctl-composer-foot, .ws-dock .kbn-ctl-composer-stacked .kbn-ctl-composer-foot { grid-column: 1; grid-row: 3; flex-wrap: wrap; justify-content: flex-end; justify-self: stretch; }
   .ws-dock .kbn-ctl-meet-noun { display: none; }
   .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment { min-width: var(--ws-phone-target); padding-inline: 7px; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--ws-label-size); }
