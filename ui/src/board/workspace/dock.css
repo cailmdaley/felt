@@ -245,6 +245,11 @@
   .ws-dock .kbn-ctl-image-remove { width: var(--ws-phone-target); height: var(--ws-phone-target); }
 }
 
+/* The fiber's worker pill: the sidebar card's own plate, on its own row. */
+.ws-dock-body > .ws-worker-pill { grid-column: 1 / -1; display: flex; justify-content: flex-start; }
+.ws-dock .ws-worker-pill .ws-worker-control { padding: 0 10px; border: var(--ws-line-width) solid var(--ws-hairline) !important; border-radius: 999px; background: var(--ws-paper); }
+.ws-dock .ws-worker-pill .ws-worker-control:hover { background: var(--ws-hover); }
+
 /* The agent and effort lists, opened as anchored popovers under their select. */
 .ws-dock .ws-select-picker {
   display: flex; flex-direction: column; gap: 1px; box-sizing: border-box;

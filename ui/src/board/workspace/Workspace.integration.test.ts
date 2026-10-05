@@ -469,8 +469,8 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(band.querySelector('.kbn-card-worker')).toBeNull()
-    expect(document.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *)')).toHaveLength(1)
+    expect(band.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
@@ -555,7 +555,7 @@ describe('workspace reader integration', () => {
     expect(visibility).toHaveBeenLastCalledWith(false)
   })
 
-  it('opens the real worker conversation from the navbar pill without a panel', async () => {
+  it('opens the real worker conversation from the act zone pill without a panel', async () => {
     const live = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', tmuxSession: 'terminal-alpha', shuttleHost: 'daemon-a' }
     const openWorker = vi.fn()
     bodyCards = [live]
@@ -566,8 +566,9 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
-    const pill = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-worker-pill button.kbn-card-worker')!
-    expect(pill).toBeDefined()
+    expect(document.querySelector('.ws-navbar .kbn-card-worker')).toBeNull()
+    const pill = document.querySelector<HTMLButtonElement>('.ws-dock .ws-worker-pill button.kbn-card-worker')!
+    expect(pill).not.toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
     pill.click()
     expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')

@@ -125,7 +125,8 @@ describe('Reader channel sidebar', () => {
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
     expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
-    expect(reader.el.querySelector('.ws-worker-pill')?.getAttribute('data-act')).toBe('worker')
+    expect(reader.el.querySelector('.ws-nav-verdicts')?.getAttribute('data-act')).toBe('verdict')
+    expect(reader.el.querySelector('.ws-navbar .ws-worker-pill, .ws-navbar .kbn-card-worker')).toBeNull()
     const revised = { ...alpha, outcome: 'A new result' }
     listedCards = [revised, beta]
     reader.refreshChannels()

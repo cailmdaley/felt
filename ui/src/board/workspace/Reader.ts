@@ -90,7 +90,8 @@ export class Reader {
   private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
-  private readonly conversation = element('div', 'ws-worker-pill')
+  /** The awaiting-review verdicts, beside the fiber's name, reachable from any page. */
+  private readonly verdicts = element('span', 'ws-nav-verdicts')
   private readonly position = element('span', 'ws-position')
   private readonly pageTitle = element('span', 'ws-thumb-title')
   private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
@@ -126,11 +127,9 @@ export class Reader {
   private sizes: Record<string, number> = {}
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly phone = window.matchMedia(MOBILE_MEDIA)
-  private readonly workerClock: number
 
   constructor(opts: ReaderOptions) {
     this.opts = opts
-    this.workerClock = window.setInterval(() => { if (this.active) { this.paintWorker(); this.layoutNavbar() } }, 30000)
     this.stopTitles = watchDocumentTitles(key => {
       const ch = this.channel
       if (!ch?.documents.some(d => d.key === key)) return
@@ -141,7 +140,8 @@ export class Reader {
     this.el.setAttribute('aria-label', 'Document reader')
     this.el.dataset.wsThemeBoundary = ''
     this.veil.dataset.part = 'veil'
-    this.conversation.dataset.part = 'act'
+    this.verdicts.dataset.part = 'act'; this.verdicts.dataset.act = 'verdict'
+    this.verdicts.hidden = true
     this.el.inert = true
     this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), {
       shuttleBase: opts.shuttleBase,
@@ -153,9 +153,8 @@ export class Reader {
     this.sidebarToggle.title = 'Constitutions (⌘\\)'
     this.lead = element('div', 'ws-nav-lead')
     this.lead.dataset.part = 'chrome-plate'
-    this.lead.append(this.returnButton, this.sidebarToggle, this.title)
+    this.lead.append(this.returnButton, this.sidebarToggle, this.title, this.verdicts)
     this.trail = element('div', 'ws-nav-trail')
-    this.trail.append(this.conversation)
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     const tabPlate = element('div', 'ws-nav-tabs')
@@ -260,7 +259,7 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
-    this.paintWorker()
+    this.paintVerdicts()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     if (!switching) this.tabs.arrive(arrivals)
@@ -337,20 +336,22 @@ export class Reader {
   private step(delta: number): void {
     if (this.channel) this.selectIndex(this.channel.documents.findIndex(d => d.key === this.selected) + delta)
   }
-  private paintWorker(): void {
+  /** Temper and Discard ride the navbar while the fiber awaits review; the
+   *  fiber page carries its own pair in the act zone, and the phone's page
+   *  sheet carries one beside its heading. */
+  private paintVerdicts(): void {
     const card = this.currentCard
-    const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview' && this.document?.kind !== 'fiber'
-    const control = card ? review ? this.opts.verdictPlate?.(card) : workerPlate(card, this.opts.workerPill?.(card) ?? null) : null
-    const focused = this.conversation.contains(document.activeElement)
-      ? document.activeElement?.matches('.kbn-ctl-temper') ? '.kbn-ctl-temper'
-        : document.activeElement?.matches('.kbn-ctl-discard') ? '.kbn-ctl-discard' : '.kbn-card-worker' : null
-    this.conversation.classList.toggle('ws-worker-review', review)
-    this.conversation.dataset.act = review ? 'verdict' : 'worker'
-    this.conversation.replaceChildren(...(control ? [control] : []))
-    if (focused) this.conversation.querySelector<HTMLElement>(focused)?.focus({ preventScroll: true })
+    const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview'
+    const navbar = review && this.document?.kind !== 'fiber' ? this.opts.verdictPlate?.(card) ?? null : null
+    const focused = this.verdicts.contains(document.activeElement)
+      ? document.activeElement?.matches('.kbn-ctl-temper') ? '.kbn-ctl-temper' : '.kbn-ctl-discard' : null
+    this.verdicts.replaceChildren(...(navbar ? [navbar] : []))
+    this.verdicts.hidden = !navbar
+    if (focused) this.verdicts.querySelector<HTMLElement>(focused)?.focus({ preventScroll: true })
+    this.pageSheet.setActions(review && card ? this.opts.verdictPlate?.(card) ?? null : null)
   }
   private paint(animate: boolean): void {
-    this.paintWorker()
+    this.paintVerdicts()
     const ch = this.channel
     if (!ch) return
     const index = ch.documents.findIndex(d => d.key === this.selected)
@@ -449,8 +450,7 @@ export class Reader {
     const padLeft = parseFloat(style.paddingLeft) || 12
     const width = this.navbar.clientWidth - padLeft - (parseFloat(style.paddingRight) || 12)
     if (!width) return
-    const lead = this.returnButton.offsetWidth + this.sidebarToggle.offsetWidth + 2 * gap + Math.min(280, Math.max(100, this.title.scrollWidth))
-    const trail = this.conversation.offsetWidth
+    const lead = this.returnButton.offsetWidth + this.sidebarToggle.offsetWidth + this.verdicts.offsetWidth + 3 * gap + Math.min(280, Math.max(100, this.title.scrollWidth))
     const tabs = this.tabs.buttons.reduce((sum, b) => sum + b.offsetWidth, 0) + Math.max(0, this.tabs.buttons.length - 1) * 2 + 4
     // A fitting strip is centred over the stage, which starts after the sidebar;
     // a longer strip takes the remaining band, bounded by both controls.
@@ -458,9 +458,9 @@ export class Reader {
     const centre = sidebar + (this.navbar.clientWidth - sidebar) / 2 - padLeft
     const leadBand = Math.floor(centre - tabs / 2 - gap)
     const trailBand = width - leadBand - tabs - 2 * gap
-    this.navbar.style.gridTemplateColumns = leadBand >= lead && trailBand >= trail
+    this.navbar.style.gridTemplateColumns = leadBand >= lead && trailBand >= 0
       ? `${leadBand}px ${tabs}px minmax(0, 1fr)`
-      : `${Math.min(lead, width * 0.32)}px minmax(0, 1fr) ${trail}px`
+      : `${Math.min(lead, width * 0.4)}px minmax(0, 1fr) 0px`
   }
   private layout(animate: boolean): void {
     this.layoutNavbar()
@@ -783,7 +783,6 @@ export class Reader {
     this.stopSwipe()
     this.pageSheet.dispose()
     this.observer?.disconnect()
-    window.clearInterval(this.workerClock)
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)
     cancelAnimationFrame(this.arrival)
