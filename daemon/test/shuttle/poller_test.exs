@@ -1325,7 +1325,6 @@ defmodule Shuttle.PollerTest do
     fiber = make_fiber("tests/slow-felt-read")
     MockRunner.set_fiber("tests/slow-felt-read", fiber)
     MockRunner.set_shuttle("tests/slow-felt-read", oneshot_shuttle())
-    MockRunner.set_ls_delay(1_000)
 
     {:ok, poller} =
       start_poller!(
@@ -1335,12 +1334,17 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    # Boot and its first cycle read undelayed; the delay applies to the
+    # cycle under test, whose listing is a command recorded after them.
+    settle_poller!(poller)
+    booted = length(MockRunner.commands())
+    MockRunner.set_ls_delay(1_000)
     send(poller, :run_poll_cycle)
 
     assert wait_until(fn ->
-             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "felt" and Enum.take(args, 2) == ["ls", "--json"]
-             end)
+             MockRunner.commands()
+             |> Enum.drop(booted)
+             |> Enum.any?(fn {cmd, args} -> cmd in ["felt", "shuttle"] and "ls" in args end)
            end)
 
     started_at_ms = System.monotonic_time(:millisecond)
