@@ -206,6 +206,19 @@ test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p =
   assert.equal(await p.locator('.ws-sidebar-source,.ws-card-travelling,.ws-sidebar-flight').count(), 0)
 }, undefined, null, 'no-preference')
 
+test('Review plate reaches verdicts from a delivery and leaves the fiber page its own row', async p => {
+  await open(p)
+  const plate = p.locator('.ws-review-plate')
+  await plate.waitFor()
+  assert.match(await plate.innerText(), /Awaiting review/)
+  await choose(p, 'Constitution')
+  assert.equal(await plate.count(), 0)
+  assert.ok(await selected(p).locator('.kbn-ctl-verdict').isVisible())
+  await choose(p, 'calibration-report')
+  await plate.getByRole('button', { name: 'Temper', exact: true }).click()
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+})
+
 test('Fiber composer isolates keys; settings and history use mocked daemon', async p => {
   await open(p); await choose(p, 'Constitution')
   const input = p.getByRole('textbox', { name: 'Message for the next worker' })

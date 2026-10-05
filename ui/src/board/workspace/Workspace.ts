@@ -102,6 +102,7 @@ export class Workspace {
         this.history.leave()
       },
       workerPill: card => this.dock.workerPillFor(card),
+      verdictPlate: card => this.dock.verdictPlateFor(card),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),

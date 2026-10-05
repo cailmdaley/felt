@@ -39,6 +39,24 @@ beforeEach(async () => {
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+describe('shared verdict controls', () => {
+  it('uses the same lifecycle callback from the fiber band and floating plate', async () => {
+    const transition = vi.fn()
+    const review = task({ status: 'closed', tempered: false })
+    const controls = new Dock('', saved, transition)
+    const band = controls.bandFor(review)
+    const plate = controls.verdictPlateFor(review)
+    document.body.append(band.el, plate)
+    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
+    plate.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
+    expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
+      ['task-uid', 'tempered'], ['task-uid', 'composted'],
+    ])
+    controls.reset()
+    await flush()
+  })
+})
+
 describe('Dock click boundary', () => {
   it('isolates all control clicks at the band rather than wiring each field', () => {
     const outside = document.createElement('div')

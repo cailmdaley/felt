@@ -1,6 +1,7 @@
 import './tokens.css'
 import './reader.css'
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
+import { fiberPageColumn } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -24,6 +25,7 @@ export interface ReaderOptions {
   onCrossing?(travel: number): void
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
+  verdictPlate?(card: KanbanCard): HTMLElement
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
@@ -213,8 +215,7 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
-    const pill = card ? this.opts.workerPill?.(card) : null
-    this.conversation.replaceChildren(...(pill ? [pill] : []))
+    this.paintWorker()
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     this.host.setChannel(channel.documents, selected)
@@ -287,7 +288,15 @@ export class Reader {
   private step(delta: number): void {
     if (this.channel) this.selectIndex(this.channel.documents.findIndex(d => d.key === this.selected) + delta)
   }
+  private paintWorker(): void {
+    const card = this.currentCard
+    const review = !!card && !hasLiveWorker(card) && fiberPageColumn(card) === 'awaitingReview' && this.document?.kind !== 'fiber'
+    const control = card ? review ? this.opts.verdictPlate?.(card) : this.opts.workerPill?.(card) : null
+    this.conversation.classList.toggle('ws-worker-review', review)
+    this.conversation.replaceChildren(...(control ? [control] : []))
+  }
   private paint(animate: boolean): void {
+    this.paintWorker()
     const ch = this.channel
     if (!ch) return
     const index = ch.documents.findIndex(d => d.key === this.selected)
