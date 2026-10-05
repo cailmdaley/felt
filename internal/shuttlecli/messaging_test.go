@@ -6,12 +6,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +36,7 @@ func (b *synchronizedMessageBuffer) String() string {
 }
 
 func TestReadMessageRequestFrameReturnsAtNewline(t *testing.T) {
+	t.Parallel()
 	reader, writer := io.Pipe()
 	done := make(chan struct{})
 	var (
@@ -52,7 +53,9 @@ func TestReadMessageRequestFrameReturnsAtNewline(t *testing.T) {
 	}
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(10 * time.Second):
+		// The writer stays open until after this select, so a reader that
+		// waits for EOF never returns: any bound catches it.
 		t.Fatal("request reader waited for EOF after receiving a complete frame")
 	}
 	_ = writer.Close()
@@ -159,6 +162,7 @@ func TestMessageCobraWakeFlags(t *testing.T) {
 }
 
 func TestPostMessageNarrowsWakeReceiptStages(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, status, transport string
 		wake, accepted          bool
@@ -175,17 +179,17 @@ func TestPostMessageNarrowsWakeReceiptStages(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			request := messaging.Request{Address: "shuttle://host/codex/thread", MessageID: "wake-check", Wake: tc.wake}
-			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
+			var calls atomic.Int32
+			env := testEnv(t)
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
 				_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: tc.status, Transport: tc.transport})
 			}))
-			defer server.Close()
-			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			receipt, err := testApp(t).postMessage(request)
-			if calls != 1 {
-				t.Fatalf("message retried automatically: %d", calls)
+			receipt, err := newApp(env).postMessage(request)
+			if n := calls.Load(); n != 1 {
+				t.Fatalf("message retried automatically: %d", n)
 			}
 			if tc.accepted {
 				if err != nil || receipt.Status != tc.status {
@@ -199,6 +203,7 @@ func TestPostMessageNarrowsWakeReceiptStages(t *testing.T) {
 }
 
 func TestMessageExitFollowsReceiptEvidence(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{messaging.StatusAccepted, messaging.StatusSubmitted, messaging.StatusQueued, messaging.StatusContextAdded} {
 		if err := messageReceiptError("message-id", messaging.Receipt{Status: status}, errors.New("stale transport error")); err != nil {
 			t.Errorf("%s should exit successfully after a valid receipt: %v", status, err)
@@ -229,7 +234,8 @@ func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
 	// address is the canonical one the retry and its dedup hash will use.
 	input := "shuttle://host/claude-code/session"
 	address := "shuttle://host/claude/session"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	env := testEnv(t)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(stderr.String(), "sending msg-interrupted to "+address) {
 			t.Errorf("request reached daemon before retry ID was printed: %q", stderr.String())
 		}
@@ -243,9 +249,6 @@ func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: messaging.StatusAccepted, Transport: "peer"})
 	}))
-	defer server.Close()
-	env := testEnv(t)
-	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 	var opts messageOptions
 	cmd := newApp(env).messageCmd(&opts)
 	opts.id, opts.from = "msg-interrupted", "test sender"
@@ -262,6 +265,7 @@ func TestMessagePrintsRetryIDBeforePosting(t *testing.T) {
 }
 
 func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "image.bin")
 	if err := os.WriteFile(path, []byte{0, 255, 13, 10}, 0600); err != nil {
 		t.Fatal(err)
@@ -273,9 +277,11 @@ func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
 	request := messaging.Request{Address: "shuttle://host/codex/id", MessageID: "files", Attachments: attachments}
 	for _, mode := range []string{"success", "old-daemon", "missing-files", "wrong-digest"} {
 		t.Run(mode, func(t *testing.T) {
-			calls := 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
+			t.Parallel()
+			var calls atomic.Int32
+			env := testEnv(t)
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
 				if r.URL.Path != "/api/v1/messages/files" {
 					t.Errorf("unsafe route: %s", r.URL.Path)
 				}
@@ -301,11 +307,9 @@ func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
 				}
 				_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: request.MessageID, Address: request.Address, Status: messaging.StatusAccepted, Transport: "codex", Files: files})
 			}))
-			defer server.Close()
-			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			receipt, err := testApp(t).postMessage(request)
-			if calls != 1 {
-				t.Fatalf("unexpected fallback or retry: %d calls", calls)
+			receipt, err := newApp(env).postMessage(request)
+			if n := calls.Load(); n != 1 {
+				t.Fatalf("unexpected fallback or retry: %d calls", n)
 			}
 			if mode == "success" {
 				if err != nil || len(receipt.Files) != 1 {
@@ -319,6 +323,7 @@ func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
 }
 
 func TestReadMessageRequestFrameRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
 	_, err := readMessageRequestFrame(strings.NewReader(`{"address":"shuttle://host/codex/id","text":"hi","message_id":"one"} {"message_id":"two"}` + "\n"))
 	if err == nil || !strings.Contains(err.Error(), "trailing JSON value") {
 		t.Fatalf("expected trailing JSON error, got %v", err)
@@ -326,6 +331,7 @@ func TestReadMessageRequestFrameRejectsTrailingJSON(t *testing.T) {
 }
 
 func TestReadMessageRequestFrameDefaultsWakeToTrue(t *testing.T) {
+	t.Parallel()
 	request, err := readMessageRequestFrame(strings.NewReader(`{"address":"shuttle://host/codex/id","text":"work","message_id":"one"}` + "\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -348,14 +354,17 @@ func TestReadMessageRequestFrameDefaultsWakeToTrue(t *testing.T) {
 }
 
 func TestPostMessagePreservesRequestAndReceipt(t *testing.T) {
+	t.Parallel()
 	want := messaging.Request{Address: "shuttle://host/codex/native%2Fid", Text: "a\n'b; $(noop)", From: "external", Wake: true, MessageID: "msg-fixed"}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	env := testEnv(t)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/messages" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
 		var got messaging.Request
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Fatal(err)
+			t.Error(err)
+			return
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("request mismatch:\n got %#v\nwant %#v", got, want)
@@ -363,10 +372,8 @@ func TestPostMessagePreservesRequestAndReceipt(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: got.MessageID, Address: got.Address, Status: messaging.StatusAccepted, Transport: "codex"})
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	got, err := testApp(t).postMessage(want)
+	got, err := newApp(env).postMessage(want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,14 +383,14 @@ func TestPostMessagePreservesRequestAndReceipt(t *testing.T) {
 }
 
 func TestPostMessageReturnsNon2xxReceipt(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+	env := testEnv(t)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: "msg-1", Address: "shuttle://host/codex/id", Status: messaging.StatusRejected, Transport: "dedup", Detail: "message_id conflict"})
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	receipt, err := testApp(t).postMessage(messaging.Request{MessageID: "msg-1", Address: "shuttle://host/codex/id"})
+	receipt, err := newApp(env).postMessage(messaging.Request{MessageID: "msg-1", Address: "shuttle://host/codex/id"})
 	if err == nil {
 		t.Fatal("expected non-2xx error")
 	}
@@ -393,15 +400,16 @@ func TestPostMessageReturnsNon2xxReceipt(t *testing.T) {
 }
 
 func TestPostMessageDiscardsUncorrelatedReceipts(t *testing.T) {
+	t.Parallel()
 	for _, status := range []int{200, 400, 502} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			t.Parallel()
+			env := testEnv(t)
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(status)
 				_ = json.NewEncoder(w).Encode(messaging.Receipt{MessageID: "other", Address: "shuttle://host/codex/other", Status: messaging.StatusAccepted, Transport: "codex"})
 			}))
-			defer server.Close()
-			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			receipt, err := testApp(t).postMessage(messaging.Request{MessageID: "requested", Address: "shuttle://host/codex/requested"})
+			receipt, err := newApp(env).postMessage(messaging.Request{MessageID: "requested", Address: "shuttle://host/codex/requested"})
 			if err == nil || !reflect.DeepEqual(receipt, messaging.Receipt{}) {
 				t.Fatalf("unrelated receipt retained: %#v, %v", receipt, err)
 			}
@@ -410,12 +418,15 @@ func TestPostMessageDiscardsUncorrelatedReceipts(t *testing.T) {
 }
 
 func TestResolveMessageSenderIsReplyAddress(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "sender")
-	t.Setenv("CODEX_THREAD_ID", "thread/id")
-	if got := testApp(t).resolveMessageSender(""); got != "shuttle://sender/codex/thread%2Fid" {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "sender")
+	env.Set("CODEX_THREAD_ID", "thread/id")
+	a := newApp(env)
+	if got := a.resolveMessageSender(""); got != "shuttle://sender/codex/thread%2Fid" {
 		t.Fatalf("sender = %q", got)
 	}
-	if got := testApp(t).resolveMessageSender("explicit"); got != "explicit" {
+	if got := a.resolveMessageSender("explicit"); got != "explicit" {
 		t.Fatalf("explicit sender = %q", got)
 	}
 }
@@ -423,15 +434,17 @@ func TestResolveMessageSenderIsReplyAddress(t *testing.T) {
 // Claude Code exports CLAUDE_CODE_SESSION_ID; a Claude sender must get a
 // reply address, not "external".
 func TestResolveMessageSenderFromClaudeCodeSession(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "sender")
-	t.Setenv("CODEX_THREAD_ID", "")
-	t.Setenv("CLAUDE_SESSION_ID", "")
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "f95c9363-1fc8-4d7c-bdb2-7910930a47e7")
-	if got := testApp(t).resolveMessageSender(""); got != "shuttle://sender/claude/f95c9363-1fc8-4d7c-bdb2-7910930a47e7" {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "sender")
+	env.Set("CODEX_THREAD_ID", "")
+	env.Set("CLAUDE_SESSION_ID", "")
+	env.Set("CLAUDE_CODE_SESSION_ID", "f95c9363-1fc8-4d7c-bdb2-7910930a47e7")
+	if got := newApp(env).resolveMessageSender(""); got != "shuttle://sender/claude/f95c9363-1fc8-4d7c-bdb2-7910930a47e7" {
 		t.Fatalf("sender = %q", got)
 	}
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	if got := testApp(t).resolveMessageSender(""); got != "external" {
+	env.Set("CLAUDE_CODE_SESSION_ID", "")
+	if got := newApp(env).resolveMessageSender(""); got != "external" {
 		t.Fatalf("sender outside a harness = %q", got)
 	}
 }
@@ -441,7 +454,7 @@ func TestResolveMessageSenderFromClaudeCodeSession(t *testing.T) {
 // address, including when Pi runs nested under a Claude or Codex session whose
 // ids it inherits.
 func TestResolveMessageSenderFromPiSession(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "sender")
+	t.Parallel()
 	const pi = "019a8f2e-7c1d-7b3e-9f40-5d6c7b8a9e01"
 	for _, tc := range []struct{ name, aiAgent, codex, claude, piID, want string }{
 		{"pi alone", "pi", "", "", pi, "shuttle://sender/pi/" + pi},
@@ -454,12 +467,15 @@ func TestResolveMessageSenderFromPiSession(t *testing.T) {
 		{"outside a harness", "pi", "", "", "", "external"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("AI_AGENT", tc.aiAgent)
-			t.Setenv("CODEX_THREAD_ID", tc.codex)
-			t.Setenv("CLAUDE_SESSION_ID", "")
-			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.claude)
-			t.Setenv("PI_SESSION_ID", tc.piID)
-			if got := testApp(t).resolveMessageSender(""); got != tc.want {
+			t.Parallel()
+			env := testEnv(t)
+			env.Set("SHUTTLE_HOST", "sender")
+			env.Set("AI_AGENT", tc.aiAgent)
+			env.Set("CODEX_THREAD_ID", tc.codex)
+			env.Set("CLAUDE_SESSION_ID", "")
+			env.Set("CLAUDE_CODE_SESSION_ID", tc.claude)
+			env.Set("PI_SESSION_ID", tc.piID)
+			if got := newApp(env).resolveMessageSender(""); got != tc.want {
 				t.Fatalf("sender = %q, want %q", got, tc.want)
 			}
 		})
@@ -467,6 +483,7 @@ func TestResolveMessageSenderFromPiSession(t *testing.T) {
 }
 
 func TestFilterPeerDirectoryAppliesHostAndHarness(t *testing.T) {
+	t.Parallel()
 	directory := messaging.Directory{
 		Host: "hub",
 		Sessions: []messaging.Session{
