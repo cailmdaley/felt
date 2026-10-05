@@ -25,6 +25,17 @@ async function choose(p, label) {
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
+async function revealLatestFiles(p) {
+  const latest = p.locator('.ws-overview-latest')
+  await latest.waitFor()
+  const summary = latest.locator('summary')
+  await summary.getByText('Latest files', { exact: true }).waitFor()
+  assert.equal(await latest.evaluate(details => details.open), false, 'Latest files starts folded')
+  await summary.click()
+  const ribbon = latest.locator('.ws-overview-ribbon')
+  await ribbon.waitFor({ state: 'visible' })
+  return ribbon
+}
 const reportPage = p => p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/.felt/research/workspace/calibration-report/report.html"]')
 const report = p => reportPage(p).locator('iframe')
 async function reportReady(p) {
@@ -247,19 +258,74 @@ test('Body wikilink opens a fiber absent from the card index', async p => {
   await selected(p).getByText('The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.', { exact: true }).waitFor()
 })
 
-test('Overview lenses, Find, exact receipt ribbon route and scroll restoration', async p => {
+test('Overview first visit names its window and a numeric stored visit survives reload', async p => {
   await p.locator('[data-view="shelf"]').click()
-  for (const lens of ['Recent work', 'Projects', 'Hosts']) {
+  await poll(p, () => document.querySelector('.ws-overview-masthead')?.textContent?.includes('The last 30 days'))
+  const key = 'shuttle.workspace.overview.seen'
+  const seen = Date.parse('2026-10-03T14:00:00Z')
+  await p.evaluate(({ key, seen }) => localStorage.setItem(key, JSON.stringify(seen)), { key, seen })
+  const readSeen = () => p.evaluate(key => JSON.parse(localStorage.getItem(key) ?? 'null'), key)
+  assert.equal(typeof await readSeen(), 'number', 'the visit is stored as a JSON number')
+  assert.equal(await readSeen(), seen)
+  await p.reload()
+  await p.locator('.kbn-card').filter({ hasText: name }).waitFor()
+  assert.equal(await readSeen(), seen, 'reload retains the seeded visit timestamp')
+})
+
+test('Overview g selects the first change before folios and its main button opens the fiber', async p => {
+  await p.locator('[data-view="shelf"]').click()
+  const changes = p.locator('.ws-overview-change[data-uid]')
+  await changes.first().waitFor()
+  const first = changes.first()
+  const uid = await first.getAttribute('data-uid')
+  assert.equal(uid, '01KVBR1F9BWBVKF97473PV67K8')
+  assert.ok(await first.locator('.ws-overview-change-open').count(), 'the row has a main open button')
+  assert.ok(await first.locator('.ws-overview-change-doc').count(), 'the row has document thumbnails')
+  await p.locator('.ws-overview-masthead').click()
+  await p.keyboard.press('g')
+  await poll(p, uid => {
+    const selected = document.querySelector('.ws-overview .ws-key-selected')
+    return !!selected && (selected.closest('.ws-overview-change')?.getAttribute('data-uid') ?? selected.getAttribute('data-uid')) === uid
+  }, uid)
+  assert.equal(await p.locator('.ws-overview-folio.ws-key-selected').count(), 0, 'g selects a change ahead of the folios')
+  await first.locator('.ws-overview-change-open').click()
+  await poll(p, expected => document.querySelector('.ws-channel-title')?.textContent === expected, name)
+})
+
+test('Overview document thumbnails open the exact receipt, and seen constitutions recede', async p => {
+  await p.locator('[data-view="shelf"]').click()
+  const row = p.locator('.ws-overview-change[data-uid="01KVBR1F9BWBVKF97473PV67K8"]')
+  const thumbnail = row.locator('.ws-overview-change-doc').nth(1)
+  await thumbnail.waitFor()
+  const key = await thumbnail.getAttribute('data-key')
+  await thumbnail.click()
+  await poll(p, key => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key') === key, key)
+  await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
+  assert.equal(await row.count(), 0, 'opening the constitution acknowledges its change row')
+  const folio = p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]')
+  assert.ok(await folio.evaluate(el => el.classList.contains('ws-overview-seen')))
+})
+
+test('Overview lenses, declared-title Find, exact receipt ribbon route and scroll restoration', async p => {
+  await p.locator('[data-view="shelf"]').click()
+  for (const lens of ['Recent', 'Projects', 'Hosts']) {
     const radio = p.getByRole('radio', { name: lens, exact: true }); await radio.click()
     assert.equal(await radio.getAttribute('aria-checked'), 'true')
   }
-  const find = p.getByRole('searchbox', { name: 'Find work or files' })
+  const ribbon = await revealLatestFiles(p)
+  const find = p.getByRole('searchbox', { name: 'Find work or files', exact: true })
   await find.fill('Calibrate')
   assert.equal(await p.locator('.ws-overview-folio:visible').count(), 1)
+  await poll(p, () => document.querySelector('.ws-overview-ribbon')?.textContent?.includes('Calibration report'))
+  await find.fill('Calibration report')
+  await poll(p, () => [...document.querySelectorAll('.ws-overview-change[data-uid]')].some(row => row.dataset.uid === '01KVBR1F9BWBVKF97473PV67K8' && row.getClientRects().length > 0))
+  assert.ok(await p.locator('.ws-overview-change[data-uid="01KVBR1F9BWBVKF97473PV67K8"] .ws-overview-change-doc').count(), 'Find includes the report’s declared title')
   await find.fill('')
-  await p.locator('.ws-overview').evaluate(e => { e.scrollTop = 120; window.__overviewScroll = e.scrollTop })
+  const receipt = ribbon.locator('button[title*="brief.md"]')
+  await receipt.scrollIntoViewIfNeeded()
+  await p.locator('.ws-overview').evaluate(e => { window.__overviewScroll = e.scrollTop })
   assert.ok(await p.evaluate(() => window.__overviewScroll > 0), 'overview must actually scroll')
-  await p.locator('.ws-overview-ribbon button[title*="brief.md"]').click()
+  await receipt.click()
   assert.equal(await tab(p, 'brief.md').getAttribute('aria-selected'), 'true')
   await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
   assert.ok(await p.locator('.ws-overview').evaluate(e => e.scrollTop === window.__overviewScroll))
@@ -267,12 +333,13 @@ test('Overview lenses, Find, exact receipt ribbon route and scroll restoration',
 
 test('Overview media thumbnails show duration and a paused first video frame', async p => {
   await p.locator('[data-view="shelf"]').click()
-  const audioCard = p.locator('.ws-overview-ribbon button').filter({ hasText: 'tone.mp3' })
+  const ribbon = await revealLatestFiles(p)
+  const audioCard = ribbon.locator('button').filter({ hasText: 'tone.mp3' })
   await audioCard.scrollIntoViewIfNeeded()
   await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-audio')].some(t => /\d+:\d\d/.test(t.textContent)))
   assert.match(await audioCard.innerText(), /\d+:\d\d/)
   assert.doesNotMatch(await audioCard.locator('.ws-overview-thumb').innerText(), /tone\.mp3/, 'ribbon caption owns the filename')
-  const videoCard = p.locator('.ws-overview-ribbon button').filter({ hasText: 'test.mp4' })
+  const videoCard = ribbon.locator('button').filter({ hasText: 'test.mp4' })
   await videoCard.scrollIntoViewIfNeeded()
   await poll(p, () => [...document.querySelectorAll('.kbn-thumbnail-video video')].some(v => v.readyState >= 2 && v.videoWidth > 0 && v.paused))
   assert.ok(await videoCard.locator('video').evaluate(v => v.muted && !v.controls && v.paused && v.currentTime === 0 && v.closest('[inert]')))
@@ -403,6 +470,7 @@ test('Native PDF renderer loads fixture; owner route and first-page preview', as
   assert.ok((await records(p)).some(r => r.url.includes('origin=basalt-login-02') && r.url.includes('remote-summary.pdf')))
   await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
   await p.locator('[data-view="shelf"]').click()
+  await revealLatestFiles(p)
   await poll(p, () => [...document.querySelectorAll('.ws-overview iframe')].some(f => f.src.includes('#page=1')))
 })
 
@@ -417,6 +485,15 @@ test('Remote worker pill records attach handler without launching a terminal', a
 
 test('Phone overview single column, reader tabs, footer stepping and Back', async p => {
   await p.locator('[data-view="shelf"]').click()
+  await poll(p, () => document.querySelector('.ws-overview-change[data-uid]')?.getClientRects().length > 0)
+  const firstChange = p.locator('.ws-overview-change[data-uid]').first()
+  const firstBounds = await firstChange.evaluate(row => {
+    const root = row.closest('.ws-overview')
+    const rowBounds = row.getBoundingClientRect(), rootBounds = root.getBoundingClientRect()
+    return { scrollTop: root.scrollTop, top: rowBounds.top, bottom: rowBounds.bottom, viewTop: rootBounds.top, viewBottom: rootBounds.bottom }
+  })
+  assert.equal(firstBounds.scrollTop, 0, 'the phone overview has not scrolled')
+  assert.ok(firstBounds.top >= firstBounds.viewTop && firstBounds.bottom <= firstBounds.viewBottom, 'the first changed row is visible on entry')
   await poll(p, () => document.querySelectorAll('.ws-overview-folio:not([hidden])').length >= 2)
   const folios = await p.locator('.ws-overview-folio:visible').evaluateAll(es => es.map(e => e.getBoundingClientRect().x))
   assert.ok(folios.length > 1 && folios.every(x => Math.abs(x - folios[0]) < 2))
@@ -428,7 +505,7 @@ test('Phone overview single column, reader tabs, footer stepping and Back', asyn
   await p.getByRole('button', { name: 'Previous document', exact: true }).click()
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
-  assert.ok(await p.getByRole('searchbox', { name: 'Find work or files' }).isVisible())
+  assert.ok(await p.getByRole('searchbox', { name: 'Find work or files', exact: true }).isVisible())
 }, { width: 390, height: 844 })
 
 test('Reader c and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
