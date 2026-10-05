@@ -39,6 +39,7 @@ export class AudioPage {
   private animation = 0
   private cancelDrag: (() => void) | null = null
   private disposed = false
+  private decodeAsked = false
 
   private readonly audio: HTMLAudioElement
   private readonly doc: WorkspaceDocument
@@ -113,8 +114,18 @@ export class AudioPage {
     this.observer?.observe(this.waveform)
     document.addEventListener('workspace-theme-change', this.themeChanged)
     this.update()
-    void loadWaveform(doc.key, fileBytesUrl(base, doc.path, doc.owner), this.controller.signal).then(data => {
-      if (this.disposed) return
+    this.loadPeaks(false)
+  }
+
+  /** Only a selected page decodes its recording; a neighbour draws peaks already decoded this session. */
+  setSelected(selected: boolean): void {
+    if (selected && !this.peaks && !this.decodeAsked) this.loadPeaks(true)
+  }
+
+  private loadPeaks(decode: boolean): void {
+    if (decode) this.decodeAsked = true
+    void loadWaveform(this.doc.key, fileBytesUrl(this.base, this.doc.path, this.doc.owner), this.controller.signal, decode).then(data => {
+      if (this.disposed || (!data && this.peaks)) return
       this.peaks = data?.peaks ?? null
       this.waveformDuration = data?.duration ?? null
       this.el.dataset.waveform = this.peaks ? 'decoded' : 'progress'

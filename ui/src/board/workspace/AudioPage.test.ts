@@ -103,3 +103,17 @@ it('reads a channel of songs two at a time, so Play never waits behind the compa
     listening.dispose()
   }
 })
+
+it('decodes its recording only once it is selected', async () => {
+  const audio = document.createElement('audio')
+  document.body.append(audio)
+  page = new AudioPage(audio, doc, '', vi.fn())
+  expect(vi.mocked(loadWaveform).mock.calls.at(-1)?.[3]).toBe(false)
+  const calls = vi.mocked(loadWaveform).mock.calls.length
+  page.setSelected(false)
+  expect(loadWaveform).toHaveBeenCalledTimes(calls)
+  page.setSelected(true)
+  expect(vi.mocked(loadWaveform).mock.calls.at(-1)?.[3]).toBe(true)
+  page.setSelected(true)
+  expect(loadWaveform).toHaveBeenCalledTimes(calls + 1)
+})

@@ -333,6 +333,7 @@ export class DocumentHost {
               if (!this.disposed && state.revision === revision) state.poster?.setAudio(peaks, duration)
             })
           this.audioPages.set(audio, page)
+          page.setSelected(state.active)
           page.updateDocuments(this.documents)
           const changed = (): void => this.updateReferencePlayback()
           const events = ['play', 'pause', 'ended', 'timeupdate', 'durationchange', 'loadedmetadata']
@@ -434,6 +435,8 @@ export class DocumentHost {
 
   private setActive(state: FrameState, active: boolean): void {
     if (state.active === active) return
+    const audio = state.frame.viewer?.querySelector('audio')
+    if (audio) this.audioPages.get(audio)?.setSelected(active)
     if (!active) { this.saveScroll(state); this.abandonSwipe(state) }
     state.active = active
     if (active) {
