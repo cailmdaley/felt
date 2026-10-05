@@ -33,7 +33,9 @@ async function reportReady(p) {
 }
 async function records(p) { return p.evaluate(() => window.__harness.requests) }
 
-test('Desk keyboard starts in awaiting review and Enter opens report first', async p => {
+test('Fresh Desk leaves focus alone; the first j selects awaiting review and Enter opens first', async p => {
+  assert.ok(await p.evaluate(() => document.activeElement !== document.querySelector('.kbn-col-head')), 'load must not focus a column head')
+  assert.equal(await p.locator('.kbn-key-selected').count(), 0)
   await p.keyboard.press('j')
   assert.match(await p.locator('.kbn-card.kbn-key-selected').innerText(), /Calibrate the shear response/)
   await p.keyboard.press('Enter')

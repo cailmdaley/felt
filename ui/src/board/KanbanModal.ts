@@ -258,7 +258,6 @@ export class KanbanModal {
   private dragAutoScrollFrame: number | null = null
   private dragAutoScrollVelocity = 0
   private bannerTimer: number | null = null
-  private hasClaimedInitialFocus = false
   /** Lightweight auto-poll while mounted. 15s default. */
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
@@ -1021,7 +1020,6 @@ export class KanbanModal {
     this.viewFallbackSig = null
     this.lastFetchFailed = false
     this.dragSourceId = null
-    this.hasClaimedInitialFocus = false
     this.stopDragAutoScroll()
     if (this.bannerTimer !== null) {
       window.clearTimeout(this.bannerTimer)
@@ -2270,7 +2268,6 @@ export class KanbanModal {
 
     this.restoreScrollSnapshot(scrollSnapshot)
     this.deskKeyboard?.refresh(true)
-    this.claimInitialFocus()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
     // Expand line-clamp on outcomes in now-section columns with spare
@@ -2372,22 +2369,6 @@ export class KanbanModal {
 
       col.style.setProperty('--card-line-clamp', String(clamp))
     }
-  }
-
-  private claimInitialFocus(): void {
-    if (this.hasClaimedInitialFocus || !this.body) return
-    // Nothing to claim while a temporal view is up — the Desk's column heads
-    // are hidden, so focusing one would be a silent no-op that also burns the
-    // one-shot flag.
-    if (this.activeViewId !== 'desk') return
-
-    this.hasClaimedInitialFocus = true
-    window.requestAnimationFrame(() => {
-      if (!this.body) return
-      const active = document.activeElement
-      if (active instanceof HTMLElement && this.container?.contains(active)) return
-      this.body.querySelector<HTMLElement>('.kbn-col-head')?.focus({ preventScroll: true })
-    })
   }
 
   private ensureFleetDefaultAgents(data: KanbanResponse): void {

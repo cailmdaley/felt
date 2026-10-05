@@ -64,6 +64,13 @@ beforeEach(() => {
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Desk keyboard selection', () => {
+  it('leaves initial focus alone and selects the top review card with the first j or k', () => {
+    expect(document.activeElement).not.toBe(document.querySelector('.kbn-col-head'))
+    expect(selected()).toBeUndefined()
+    press('j'); expect(selected()).toBe('review')
+    press('u')
+    press('k'); expect(selected()).toBe('review')
+  })
   it('opens Find over Desk without entering Reader until a match is selected', () => {
     const previous = document.createElement('button')
     inside.deskEl.append(previous); previous.focus()
