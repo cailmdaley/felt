@@ -711,6 +711,36 @@ func TestListMetadataByUIDMatchesFrontmatterOnly(t *testing.T) {
 	}
 }
 
+// TestReadResolvedRescansAMovedUID: a fiber that moves between resolving its
+// UID and reading it is found again by one more resolution.
+func TestReadResolvedRescansAMovedUID(t *testing.T) {
+	s := NewStorage(t.TempDir())
+	s.Init()
+	f, _ := New("before", "Moving")
+	s.Write(f)
+
+	reads := 0
+	ref, got, err := ReadResolved(s, "", f.UID, func(r Ref) (*Felt, error) {
+		reads++
+		if reads == 1 {
+			moved := s.Path("after")
+			if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(s.Path("before"), moved); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return r.Storage.FindInScope("", r.ID)
+	})
+	if err != nil {
+		t.Fatalf("ReadResolved: %v", err)
+	}
+	if reads != 2 || ref.ID != "after" || got.UID != f.UID {
+		t.Fatalf("ReadResolved = %q (%d reads), want %q after 2 reads", ref.ID, reads, "after")
+	}
+}
+
 func TestLooksLikeUID(t *testing.T) {
 	if !LooksLikeUID(NewULID()) {
 		t.Error("LooksLikeUID(NewULID()) = false, want true")

@@ -1546,8 +1546,9 @@ func (s *Storage) readUIDCandidate(file fiberFile, uid string) *Felt {
 }
 
 // frontmatterMayHoldUID is a byte-level prefilter: a UID is a plain ASCII
-// token, so frontmatter whose parsed UID matches always contains it, in some
-// case. A hit still has to parse and match.
+// token, so frontmatter whose parsed UID matches contains it, in some case. A
+// hit still has to parse and match. A UID spelled with YAML escapes
+// (`id: "\x30\x31…"`) would be missed; felt writes ids as plain scalars.
 func frontmatterMayHoldUID(frontmatter []byte, uid string) bool {
 	return bytes.Contains(bytes.ToUpper(frontmatter), []byte(strings.ToUpper(uid)))
 }
