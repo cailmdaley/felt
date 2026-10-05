@@ -154,18 +154,18 @@
   box-shadow: var(--ws-float);
 }
 .ws-menu-item { display: block; width: 100%; text-align: left; text-decoration: none; color: var(--ws-ink); padding: var(--ws-small-gap) var(--ws-inset); border-radius: var(--ws-control-radius); }
-.ws-menu-item { font-size: var(--ws-small-size); }
+.ws-menu-item { font: var(--ws-label-size)/1.4 var(--ws-serif); letter-spacing: 0; }
 .ws-menu-item:hover { background: var(--ws-fill); }
 .ws-path { display: block; user-select: text; font: var(--ws-small-size)/1.5 var(--ws-mono); overflow-wrap: anywhere; padding: var(--ws-small-gap) var(--ws-inset); }
 .ws-receipts { color: var(--ws-ink-muted); padding: var(--ws-small-gap) var(--ws-inset); font-size: var(--ws-small-size); }
 .ws-receipts > div { overflow-wrap: anywhere; padding: var(--ws-small-gap) 0; }
 .ws-receipts summary { cursor: pointer; }
 .ws-switcher { width: var(--ws-menu-ceiling); display: flex; flex-direction: column; gap: var(--ws-small-gap); }
-.ws-channel-find { width: 100%; background: var(--ws-paper); color: var(--ws-ink); font: var(--ws-label-size)/1.4 var(--ws-mono); padding: var(--ws-small-gap); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+.ws-channel-find { width: 100%; background: var(--ws-paper); color: var(--ws-ink); font: var(--ws-label-size)/1.4 var(--ws-serif); padding: var(--ws-small-gap); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
 .ws-reader .ws-channel-find:focus-visible { outline: none; border-color: var(--ws-ink-faint); }
 .ws-channel-find::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .ws-channel-list { overflow: auto; }
-.ws-channel-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius); background: none; cursor: pointer; font: 500 var(--ws-row-size)/1.25 var(--ws-serif); color: var(--ws-ink-soft); }
+.ws-channel-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius); background: none; cursor: pointer; font: 500 var(--ws-prose-size)/1.25 var(--ws-serif); color: var(--ws-ink-soft); }
 .ws-channel-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .ws-channel-row small { font: var(--ws-small-size)/1.5 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); color: var(--ws-ink-faint); }
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
