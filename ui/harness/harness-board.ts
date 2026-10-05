@@ -33,7 +33,7 @@
  */
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { workshopExample } from './workshop-example.js'
-import { installWorkspaceNativeURLs, WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_REMOTE, workspaceExample } from './workspace-fixtures.js'
+import { installWorkspaceNativeURLs, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {

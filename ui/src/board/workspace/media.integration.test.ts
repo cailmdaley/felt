@@ -21,13 +21,13 @@ const doc = (path: string, kind: 'audio' | 'video' | 'other'): WorkspaceDocument
 })
 beforeEach(() => {
   document.body.replaceChildren()
-  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function () { playing.delete(this) })
-  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function () {
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) { playing.delete(this) })
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
     playing.add(this)
     this.dispatchEvent(new Event('play'))
     return Promise.resolve()
   })
-  vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function () { return !playing.has(this) })
+  vi.spyOn(HTMLMediaElement.prototype, 'paused', 'get').mockImplementation(function (this: HTMLMediaElement) { return !playing.has(this) })
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {})
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: true, size: 2048 }))))
 })
