@@ -23,7 +23,7 @@
 .ws-reader.ws-dormant .ws-veil, .ws-reader.ws-dormant .ws-navbar, .ws-reader.ws-dormant .ws-stage-row,
 .ws-reader.ws-dormant .ws-thumbbar, .ws-reader.ws-dormant .ws-stage { transition: none; }
 .ws-reader.ws-arriving .ws-stage, .ws-reader.ws-departing .ws-stage { transform: var(--ws-settle); }
-.ws-reader button:not(.kbn-card-worker, .ws-channel-row) { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; }
+.ws-reader button { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; }
 .ws-reader button:focus, .ws-reader a:focus { outline: none; }
 .ws-reader button:not(.ws-channel-row):focus, .ws-reader a:focus { box-shadow: none; }
 .ws-reader:not(.ws-keyboard) :is(button,a,input,textarea,select):focus-visible { outline: none; }
@@ -33,8 +33,8 @@
 .ws-reader.ws-keyboard button:focus-visible, .ws-reader.ws-keyboard a:focus-visible, .ws-reader.ws-keyboard input:focus-visible {
   outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: var(--ws-focus-offset);
 }
-.ws-mono, .ws-return, .ws-sidebar-toggle, .ws-tab, .ws-labelbar, .ws-menu-item, .ws-receipts, .ws-position {
-  font-family: var(--ws-mono) !important; letter-spacing: var(--ws-mono-tracking);
+.ws-mono, .ws-labelbar, .ws-receipts, .ws-position {
+  font-family: var(--ws-mono); letter-spacing: var(--ws-mono-tracking);
 }
 .ws-navbar {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto;
@@ -52,23 +52,24 @@
 .ws-nav-trail { justify-content: flex-end; }
 .ws-return {
   flex: none; white-space: nowrap; color: var(--ws-ink-muted) !important; padding: var(--ws-small-gap) var(--ws-small-gap);
-  border-radius: var(--ws-control-radius); font-size: var(--ws-label-size) !important; text-transform: uppercase;
+  border-radius: var(--ws-control-radius); font: var(--ws-label-size)/1.2 var(--ws-serif);
+  font-variant-caps: all-small-caps; letter-spacing: .025em;
 }
 .ws-channel-title {
-  font: 500 var(--ws-title-size)/1.2 var(--ws-serif) !important; padding: var(--ws-small-gap); border-radius: var(--ws-control-radius);
+  font: 500 var(--ws-section-size)/1.2 var(--ws-serif); padding: var(--ws-small-gap); border-radius: var(--ws-control-radius);
   flex: 1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; min-width: 0;
 }
 .ws-return:hover { color: var(--ws-ink) !important; }
 .ws-channel-title:hover { background: var(--ws-hover); }
-.ws-channel-title::after { content: ' ▾'; font-size: 0.7em; color: var(--ws-ink-faint); }
+.ws-channel-title::after { content: ' ▾'; font-size: var(--ws-small-size); color: var(--ws-ink-faint); }
 .ws-worker-pill { flex: none; white-space: nowrap; }
 .ws-worker-pill .ws-worker-control {
   display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; height: 36px;
   color: var(--ws-ink); border: 0; background: transparent; animation: none;
   text-transform: none; letter-spacing: 0; white-space: nowrap;
 }
-.ws-worker-state { font: 15px/1.2 var(--ws-serif); }
-.ws-worker-elapsed { font: 11px/1.4 var(--ws-mono); }
+.ws-worker-state { font: var(--ws-label-size)/1.2 var(--ws-serif); }
+.ws-worker-elapsed { font: var(--ws-small-size)/1.4 var(--ws-mono); }
 .ws-worker-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ws-machine); flex: none; }
 .ws-worker-control[data-worker-state='waiting'] .ws-worker-dot,
 .ws-worker-control[data-worker-state='attention'] .ws-worker-dot,
@@ -78,12 +79,13 @@
 @keyframes ws-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
 .ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: center; gap: var(--ws-small-gap); }
-.ws-review-plate { font: 15px/1.2 var(--ws-serif); }
+.ws-review-plate { font: var(--ws-label-size)/1.2 var(--ws-serif); }
+.ws-review-plate > span { font-variant-caps: all-small-caps; letter-spacing: .025em; }
 .ws-review-plate > span { color: var(--ws-owed); }
 .ws-review-plate > span::after { content: ' ·'; }
 .ws-reader .ws-review-plate .kbn-ctl-btn {
   min-height: 36px; padding: 0 10px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius);
-  font: 15px/1.2 var(--ws-serif); background: var(--ws-paper);
+  font: var(--ws-label-size)/1.2 var(--ws-serif); background: var(--ws-paper);
 }
 .ws-reader .ws-review-plate .kbn-ctl-temper { color: var(--ws-verdict); border-color: var(--ws-verdict); }
 .ws-reader .ws-review-plate .kbn-ctl-btn:hover { background: var(--ws-hover); }
