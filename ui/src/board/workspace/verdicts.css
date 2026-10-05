@@ -14,7 +14,7 @@
 }
 .ws-verdict-toast button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
 @keyframes ws-verdict-arrive { from { opacity: 0; transform: translateY(6px); } }
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-verdict-toasts { bottom: calc(var(--ws-thumb-height) + 12px + env(safe-area-inset-bottom)); }
   .ws-verdict-toast button { min-height: 44px; min-width: 44px; }
 }

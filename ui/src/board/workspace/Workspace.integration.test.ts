@@ -373,7 +373,7 @@ describe('workspace reader integration', () => {
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
     expect(band.querySelector('.kbn-card-worker')).toBeNull()
-    expect(document.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('Aloft')
+    expect(document.querySelector('.ws-worker-pill .kbn-card-worker')?.textContent).toBe('aloft')
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
