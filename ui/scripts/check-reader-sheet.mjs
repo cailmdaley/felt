@@ -1,13 +1,12 @@
-/** Under a finger, every file the board opens fills the screen; under a mouse
- * it keeps its windows. Run `npm run harness:board` then
+/** Under a finger, ShelfReader fills the screen; under a mouse it keeps its
+ * windows. Run `npm run harness:board` then
  * `node scripts/check-reader-sheet.mjs [shot-dir]`.
  *
- * Four devices — a phone either way up, an iPad, a desktop — through the three
- * doors a file comes in by: the `:::{embed}` attachment in a card's body, the
- * card's sent-files trail, and the Board canvas's ↗. For each it asserts the
- * reader's frame (a sheet covering the viewport, or a window that does not),
- * and that closing it leaves the card open at the scroll it was read at.
- * With a shot directory, each open is photographed there.
+ * Five device sizes — a phone either way up, an iPad, a desktop — open a file
+ * from the Board canvas's ↗ and assert the reader's frame (a sheet covering
+ * the viewport, or a window that does not). A narrow desktop window also
+ * reframes as it widens and narrows. With a shot directory, each open is
+ * photographed there.
  */
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
@@ -63,40 +62,12 @@ try {
       return win
     }
 
-    // ── A card: its embed, then its sent-files trail ──
-    await page.getByText('Daily arXiv digest', { exact: true }).first().click()
-    const card = page.locator('.kbn-detail-overlay:not(.kbn-fileview-window)').first()
-    await card.waitFor({ state: 'visible' })
-    await page.locator('.kbn-detail-attach-card').first().waitFor({ state: 'visible', timeout: 3000 })
-    await shot('card')
-
-    const scroller = device.name.startsWith('phone') ? card : card.locator('.kbn-detail-page')
-    await scroller.evaluate((el) => { el.scrollTop = 40 })
-    const scrollBefore = await scroller.evaluate((el) => el.scrollTop)
-
-    await page.locator('.kbn-detail-attach-card').first().click()
-    let win = await expectFrame('embed')
-    await win.locator('.kbn-fileview-win-close').click()
-    await win.waitFor({ state: 'detached' })
-    assert.ok(await card.isVisible(), `${device.name}: the card survives the reader's close`)
-    assert.equal(await scroller.evaluate((el) => el.scrollTop), scrollBefore, `${device.name}: card scroll kept`)
-
-    const sent = page.locator('.kbn-detail-sent-file').first()
-    await sent.scrollIntoViewIfNeeded()
-    await sent.click()
-    win = await expectFrame('sent')
-    await win.locator('.kbn-fileview-win-close').click()
-    await win.waitFor({ state: 'detached' })
-    assert.ok(await card.isVisible(), `${device.name}: the card survives the second close`)
-
     // ── The Board canvas's ↗ ──
-    await page.keyboard.press('Escape')
-    await card.waitFor({ state: 'hidden' })
     await page.keyboard.press('3')
     const open = page.locator('.kbn-shelf-open:not([hidden])').first()
     await open.waitFor({ state: 'attached', timeout: 3000 })
     await open.evaluate((el) => el.click())
-    win = await expectFrame('shelf')
+    const win = await expectFrame('shelf')
     await win.locator('.kbn-fileview-win-close').click()
     await win.waitFor({ state: 'detached' })
 
@@ -131,16 +102,6 @@ try {
       console.log(`${label}: ${sheet ? 'sheet' : 'window'} ${Math.round(box.width)}x${Math.round(box.height)}`)
     }
 
-    await page.getByText('Daily arXiv digest', { exact: true }).first().click()
-    await page.locator('.kbn-detail-sent-file').first().click()
-    await frame('card viewer at 600', true)
-    await page.setViewportSize(wide)
-    await frame('card viewer widened to 1440', false)
-    await page.setViewportSize(narrow)
-    await frame('card viewer narrowed to 600', true)
-    await page.locator('.kbn-fileview-win-close').last().click()
-    await page.keyboard.press('Escape')
-
     await page.keyboard.press('3')
     const open = page.locator('.kbn-shelf-open:not([hidden])').first()
     await open.waitFor({ state: 'attached', timeout: 3000 })
@@ -150,6 +111,7 @@ try {
     await frame('shelf reader widened to 1440', false)
     await page.setViewportSize(narrow)
     await frame('shelf reader narrowed to 600', true)
+    await page.locator('.kbn-fileview-win-close').last().click()
 
     assert.deepEqual(errors, [], 'reframe: no page errors')
     await context.close()
