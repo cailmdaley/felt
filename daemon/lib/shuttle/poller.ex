@@ -66,6 +66,10 @@ defmodule Shuttle.Poller do
   # The daemon-wide identity `freeze_daemon_host_id!/1` resolves once at
   # application start; per-Poller slots fall back to it.
   @daemon_host_key {@own_host_pt_namespace, :daemon}
+  # How long a caller waits on a Poller call that may spawn or stop a worker
+  # (dispatch, claim, kill, capture, lifecycle transitions): well past
+  # GenServer's 5 s default, since a spawn on a loaded host can take seconds.
+  # `config :shuttle, :dispatch_call_timeout_ms` overrides it.
   @dispatch_call_timeout_ms 30_000
   @orchestrator_state_call_timeout_ms 30_000
 
@@ -449,8 +453,13 @@ defmodule Shuttle.Poller do
   @spec dispatch_fiber(GenServer.server(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(server, fiber_id, opts) do
-    GenServer.call(server, {:dispatch, fiber_id, opts}, @dispatch_call_timeout_ms)
+    GenServer.call(server, {:dispatch, fiber_id, opts}, dispatch_call_timeout_ms())
   end
+
+  @doc "The timeout of the Poller's worker-changing calls, in milliseconds."
+  @spec dispatch_call_timeout_ms() :: timeout()
+  def dispatch_call_timeout_ms,
+    do: Application.get_env(:shuttle, :dispatch_call_timeout_ms, @dispatch_call_timeout_ms)
 
   @doc """
   First-class claim: register an already-live tmux session as the running
@@ -481,7 +490,7 @@ defmodule Shuttle.Poller do
     GenServer.call(
       server,
       {:claim_session, fiber_id, tmux_session, opts},
-      @dispatch_call_timeout_ms
+      dispatch_call_timeout_ms()
     )
   end
 
@@ -511,7 +520,7 @@ defmodule Shuttle.Poller do
   @spec kill_session(GenServer.server(), String.t()) ::
           {:ok, String.t() | :no_session} | {:error, String.t()}
   def kill_session(server, fiber_id) do
-    GenServer.call(server, {:kill_session, fiber_id}, @dispatch_call_timeout_ms)
+    GenServer.call(server, {:kill_session, fiber_id}, dispatch_call_timeout_ms())
   end
 
   @doc """
@@ -527,7 +536,7 @@ defmodule Shuttle.Poller do
 
   @spec capture(GenServer.server(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def capture(server, yap, opts) do
-    GenServer.call(server, {:capture, yap, opts}, @dispatch_call_timeout_ms)
+    GenServer.call(server, {:capture, yap, opts}, dispatch_call_timeout_ms())
   end
 
   @doc """
@@ -540,7 +549,7 @@ defmodule Shuttle.Poller do
   @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t()) ::
           Shuttle.Felt.result()
   def lifecycle_transition(server \\ __MODULE__, verb, fiber_id) do
-    GenServer.call(server, {:lifecycle_transition, verb, fiber_id}, @dispatch_call_timeout_ms)
+    GenServer.call(server, {:lifecycle_transition, verb, fiber_id}, dispatch_call_timeout_ms())
   end
 
   @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()

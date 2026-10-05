@@ -4,6 +4,8 @@ defmodule Shuttle.TailnetDial.Bridge do
   use GenServer
 
   @connect_timeout_ms 5_000
+  # How long a relay with one side closed waits for the other to finish
+  # draining before it gives up as a failed drain.
   @drain_timeout_ms 5_000
   # Ceiling on a relay that has carried a request and not yet seen any answer.
   # The caller's own HTTP timeout is what ends a slow exchange (httpc closes
@@ -333,7 +335,9 @@ defmodule Shuttle.TailnetDial.Bridge do
     in_flight =
       Application.get_env(:shuttle, :tailnet_dial_in_flight_timeout_ms, @in_flight_timeout_ms)
 
-    %{idle: idle, in_flight: max(in_flight, idle)}
+    drain = Application.get_env(:shuttle, :tailnet_dial_drain_timeout_ms, @drain_timeout_ms)
+
+    %{idle: idle, in_flight: max(in_flight, idle), drain: drain}
   end
 
   defp pump(client, tls_socket, timeouts) do
@@ -348,7 +352,7 @@ defmodule Shuttle.TailnetDial.Bridge do
   defp pump(client, tls_socket, client_open?, tls_open?, timeouts, awaiting?) do
     timeout =
       cond do
-        not (client_open? and tls_open?) -> @drain_timeout_ms
+        not (client_open? and tls_open?) -> timeouts.drain
         awaiting? -> timeouts.in_flight
         true -> timeouts.idle
       end

@@ -99,6 +99,14 @@ defmodule ShuttleWeb.APIControllerTest do
     refute forwarded =~ "origin"
   end
 
+  # A suspended Poller or RemoteRegistry never answers, so a degraded state
+  # read costs the controller's whole state timeout. Shrink it for this test.
+  defp shrink_state_timeout do
+    previous = Application.get_env(:shuttle, :state_call_timeout_ms)
+    Application.put_env(:shuttle, :state_call_timeout_ms, 50)
+    on_exit(fn -> restore_app_env(:state_call_timeout_ms, previous) end)
+  end
+
   # ── POST /api/v1/dispatch ──
 
   test "dispatches a fiber via API" do
@@ -195,9 +203,7 @@ defmodule ShuttleWeb.APIControllerTest do
     fiber = make_fiber(fiber_id)
     MockRunner.set_fiber(fiber_id, fiber)
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    MockRunner.set_new_session_delay(5_250)
-
-    started_at_ms = System.monotonic_time(:millisecond)
+    MockRunner.set_new_session_delay(300)
 
     conn =
       post(
@@ -208,14 +214,28 @@ defmodule ShuttleWeb.APIControllerTest do
         })
       )
 
-    elapsed_ms = System.monotonic_time(:millisecond) - started_at_ms
-
-    assert elapsed_ms >= 5_000
     assert conn.status == 200
     body = Jason.decode!(conn.resp_body)
     assert body["dispatched"] == true
     assert body["fiber_id"] == fiber_id
     assert body["tmux_session"] == FiberUid.session(fiber_id)
+
+    # The request waits on the Poller's dispatch call timeout, which clears
+    # GenServer's 5 s default (PollerTest pins that): shrunk below a spawn's
+    # duration, the request gives up first, so it holds no shorter wait of its
+    # own and no GenServer default in between.
+    late_id = "tests/api-late-dispatch"
+    MockRunner.set_fiber(late_id, make_fiber(late_id))
+    MockRunner.set_shuttle(late_id, oneshot_shuttle())
+    previous = Application.get_env(:shuttle, :dispatch_call_timeout_ms)
+    on_exit(fn -> restore_app_env(:dispatch_call_timeout_ms, previous) end)
+    Application.put_env(:shuttle, :dispatch_call_timeout_ms, 200)
+    MockRunner.set_new_session_delay(600)
+
+    assert {:timeout, {GenServer, :call, _}} =
+             catch_exit(
+               post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => late_id}))
+             )
   end
 
   test "dispatch returns 400 without fiber_id" do
@@ -1027,6 +1047,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "state degrades to JSON when the poller is unavailable" do
+    shrink_state_timeout()
     :sys.suspend(Shuttle.Poller)
 
     try do
@@ -1101,6 +1122,8 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "composite degrades remote snapshots when the remote registry is unavailable" do
+    shrink_state_timeout()
+
     start_supervised!({
       Shuttle.RemoteRegistry,
       remotes: [
@@ -1135,6 +1158,7 @@ defmodule ShuttleWeb.APIControllerTest do
   end
 
   test "composite degrades local snapshot when the poller is unavailable" do
+    shrink_state_timeout()
     :sys.suspend(Shuttle.Poller)
 
     try do
