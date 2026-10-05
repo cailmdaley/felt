@@ -2199,6 +2199,15 @@
   gap: 4px;
   align-items: center;
   flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.kbn-card-awaitingReview:hover .kbn-card-review-meta-actions,
+.kbn-card-awaitingReview:focus-within .kbn-card-review-meta-actions,
+.kbn-card-awaitingReview.kbn-key-selected .kbn-card-review-meta-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 .kbn-review-meta-btn {
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
@@ -2207,6 +2216,20 @@
 }
 .kbn-review-meta-btn:hover {
   opacity: 1;
+}
+@media (hover: none) {
+  .kbn-card-review-meta-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .kbn-card-review-meta-actions .kbn-review-meta-btn {
+    height: 44px;
+    min-width: 44px;
+    padding: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kbn-card-review-meta-actions { transition: none; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

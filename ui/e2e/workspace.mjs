@@ -11,7 +11,7 @@ const browser = await chromium.launch({ executablePath: chrome, headless: true,
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 const name = 'Calibrate the shear response'
 const tests = []
-const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce') => tests.push({ name, run, viewport, sidebarChoice, reducedMotion })
+const test = (name, run, viewport, sidebarChoice = 'false', reducedMotion = 'reduce', touch = false) => tests.push({ name, run, viewport, sidebarChoice, reducedMotion, touch })
 const selected = p => p.locator('.ws-page.ws-selected')
 const displayLabel = label => ({ 'calibration-report': 'Calibration report', 'brief.md': 'Field note' })[label] ?? label
 const tab = (p, label) => p.getByRole('tab', { name: displayLabel(label), exact: true })
@@ -41,6 +41,48 @@ test('Desk keyboard starts in awaiting review and Enter opens report first', asy
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await p.evaluate(() => document.activeElement?.tagName !== 'IFRAME' && !document.activeElement?.closest('.ws-content')), 'keyboard entry must keep app-level focus')
 })
+
+test('Awaiting-review actions reveal without shifting and remain thumb-sized on touch', async p => {
+  const drafts = p.locator('[data-column="drafts"]')
+  const flight = p.locator('[data-column="inFlight"]')
+  const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
+  const actions = review.locator('.kbn-card-review-meta-actions')
+  assert.equal(await drafts.locator('.kbn-card-review-meta-actions').count(), 0)
+  assert.equal(await flight.locator('.kbn-card-review-meta-actions').count(), 0)
+  assert.equal(await actions.locator('button').count(), 2)
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  const before = await actions.evaluate(el => {
+    const { width, height } = el.getBoundingClientRect()
+    return { width, height }
+  })
+  const box = await review.boundingBox()
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  assert.deepEqual(await actions.evaluate(el => {
+    const { width, height } = el.getBoundingClientRect()
+    return { width, height }
+  }), before)
+  await p.mouse.move(0, 0)
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await actions.locator('button').first().focus()
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  await p.evaluate(() => document.activeElement?.blur())
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await p.keyboard.press('j')
+  assert.ok(await review.evaluate(el => el.classList.contains('kbn-key-selected')))
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  await p.keyboard.press('u')
+  await p.evaluate(() => document.activeElement?.blur())
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+}, undefined, undefined, 'reduce')
+
+test('Awaiting-review actions stay visible and thumb-sized without hover', async p => {
+  const actions = p.locator('[data-column="awaitingReview"] .kbn-card-review-meta-actions').first()
+  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  for (const button of await actions.locator('button').all()) {
+    assert.ok((await button.boundingBox()).height >= 44)
+  }
+}, { width: 390, height: 844 }, undefined, 'reduce', true)
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
   await open(p)
@@ -696,9 +738,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 const started = performance.now()
 let passed = 0
 try {
-  for (const { name, run, viewport, sidebarChoice, reducedMotion } of tests) {
+  for (const { name, run, viewport, sidebarChoice, reducedMotion, touch } of tests) {
     const context = await browser.newContext({ viewport: viewport ?? { width: 1440, height: 900 },
-      reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
+      reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris',
+      ...(touch ? { hasTouch: true, isMobile: true } : {}) })
     const page = await context.newPage()
     page.setDefaultTimeout(2000)
     const errors = []

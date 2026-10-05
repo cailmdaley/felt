@@ -1833,7 +1833,7 @@ export class KanbanSurfaceRenderer {
     // badge / held pill / worker pill are the RIGHT region, built further
     // down and collected into `rightChip` for the same reason.
     let reviewMetaActions: HTMLDivElement | undefined
-    if (!isStale) {
+    if (kind === 'awaitingReview' && !isStale) {
       reviewMetaActions = document.createElement('div')
       reviewMetaActions.className = 'kbn-card-review-meta-actions'
       const verdictBtn = (label: string, modifier: string, target: ColumnKind): HTMLButtonElement => {
