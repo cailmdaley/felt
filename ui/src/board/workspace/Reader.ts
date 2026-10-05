@@ -115,6 +115,8 @@ export class Reader {
   private readonly stopSwipe: () => void
   private swipeSettle: ReturnType<typeof setTimeout> | null = null
   private swiping = false
+  /** A press that began on the bare stage, which closes the reader if it ends there too. */
+  private stagePress: { id: number; x: number; y: number } | null = null
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
@@ -259,6 +261,9 @@ export class Reader {
       onScroll: (key, y) => this.topbar.scroll(key, y),
       onSwipe: signal => this.swipe(signal),
     })
+    this.stage.addEventListener('pointerdown', this.stageDown)
+    this.stage.addEventListener('pointerup', this.stageUp)
+    this.stage.addEventListener('pointercancel', () => { this.stagePress = null })
     this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
@@ -738,6 +743,29 @@ export class Reader {
     this.menu = null
     this.menuAnchor = null
     return true
+  }
+  /** The stage's bare ground, around the pages: not a page, a tile, the sidebar or the bar. */
+  private bareStage(target: EventTarget | null): boolean {
+    return target === this.stage || target === this.parallax || target === this.track
+  }
+  private readonly stageDown = (e: PointerEvent): void => {
+    // A press that dismisses an open menu does only that.
+    this.stagePress = e.button === 0 && e.isPrimary && !this.phone.matches && !this.expanded && !this.menu && !this.picker.isOpen && this.bareStage(e.target)
+      ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null
+  }
+  /**
+   * A click on the bare stage closes the reader back to its origin, as a click
+   * outside a modal does, by the same path as Escape. It must start and end on
+   * the stage, barely move, select no text and interrupt no resize; expanded,
+   * the stage is the page's and a click there does nothing.
+   */
+  private readonly stageUp = (e: PointerEvent): void => {
+    const press = this.stagePress
+    this.stagePress = null
+    if (!press || press.id !== e.pointerId || !this.active || this.expanded || this.cancelResize || !this.bareStage(e.target)) return
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > this.measure('drag-latch', 4)) return
+    if (window.getSelection()?.toString()) return
+    this.opts.onReturn()
   }
   private readonly pointerInput = (): void => { this.keyboardInput = false; this.el.classList.remove('ws-keyboard') }
   private readonly keyboardModality = (): void => { this.keyboardInput = true; this.el.classList.add('ws-keyboard') }

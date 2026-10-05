@@ -667,6 +667,31 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
 })
 
+test('A click on the bare stage closes the reader to its origin; a press on a neighbour selects it; expanded, nothing', async p => {
+  await open(p); await reportReady(p)
+  // A receded neighbour is still a page: pressing it selects it and the reader stays.
+  const neighbour = p.locator('.ws-page.ws-receded.ws-after').first()
+  const key = await neighbour.getAttribute('data-key')
+  await neighbour.click({ position: { x: 40, y: 200 } })
+  await poll(p, key => document.querySelector('.ws-page.ws-selected')?.dataset.key === key, key)
+  assert.ok(await p.locator('.kbn-reader-open').count(), 'pressing a neighbour keeps the reader open')
+  // Expanded, the stage is the page's: a click below it does nothing.
+  await appFocus(p); await p.keyboard.press('Enter')
+  await poll(p, () => !!document.querySelector('.ws-expand-mode'))
+  const size = p.viewportSize()
+  await p.mouse.click(size.width / 2, size.height - 6)
+  assert.ok(await p.locator('.kbn-reader-open').count(), 'expanded, a stage click leaves the reader open')
+  await p.keyboard.press('Escape')
+  await poll(p, () => !document.querySelector('.ws-expand-mode'))
+  // A drag across the bare stage is not a click.
+  await p.mouse.move(size.width / 2, size.height - 8); await p.mouse.down(); await p.mouse.move(size.width / 2 + 60, size.height - 8, { steps: 4 }); await p.mouse.up()
+  assert.ok(await p.locator('.kbn-reader-open').count(), 'a drag on the stage leaves the reader open')
+  // The bare stage beneath the page closes the reader back to the Desk, as Escape does.
+  await p.mouse.click(size.width / 2, size.height - 8)
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.equal(await activeBarView(p), 'desk', 'the reader closes back to its origin view')
+})
+
 test('The map in the board bar indexes pages as legible tiles, captions a hover, and follows a re-send to the front', async p => {
   await open(p); await reportReady(p)
   const film = p.locator('.kbn-viewtabs-reader > [data-part="page-band"].ws-head-index > .ws-tabs')
