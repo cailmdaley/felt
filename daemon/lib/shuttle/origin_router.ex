@@ -209,14 +209,14 @@ defmodule Shuttle.OriginRouter do
   end
 
   @doc """
-  Forward a file GET with conditional request headers and retain the response
-  validators for the caller. The owner's `ETag`, `Last-Modified`, and cache
-  policy can then reach the browser, while a 304 crosses the same tunnel as a
+  Forward a file GET with conditional and range request headers, retaining the
+  owner's representation, range, and validator headers for the caller. A 206
+  or 416 crosses the same tunnel with its byte metadata, and a 304 remains a
   bodyless response.
 
   Clients without `get_file/3` use their binary-safe `get_file/2` callback and
-  return no response validators. This keeps older transport adapters functional;
-  callers still receive a 200 body and can compare its content locally.
+  return no response headers. This keeps older transport adapters functional;
+  callers still receive a body and can compare its content locally.
   """
   @spec forward_file_get(Remote.t(), String.t(), map(), [{String.t(), String.t()}], keyword()) ::
           {:forwarded, non_neg_integer(), [{String.t(), String.t()}], String.t(), binary()}

@@ -65,9 +65,9 @@ defmodule ShuttleWeb.RelayHelpers do
   end
 
   @doc """
-  Relay an owner-routed file response with only its end-to-end cache headers.
-  The allowlist preserves conditional-GET semantics without leaking hop-by-hop
-  headers from the remote HTTP connection.
+  Relay an owner-routed file response with its representation and cache headers.
+  The allowlist preserves range and conditional-GET semantics without leaking
+  hop-by-hop headers from the remote HTTP connection.
   """
   def relay_file_bytes(conn, {:forwarded, status, headers, content_type, body}) do
     conn = if status == 304, do: conn, else: put_resp_content_type(conn, content_type, nil)
@@ -75,7 +75,16 @@ defmodule ShuttleWeb.RelayHelpers do
     conn =
       Enum.reduce(headers, conn, fn {name, value}, acc ->
         case String.downcase(name) do
-          name when name in ["etag", "last-modified", "cache-control"] ->
+          name
+          when name in [
+                 "accept-ranges",
+                 "content-range",
+                 "content-length",
+                 "content-type",
+                 "etag",
+                 "last-modified",
+                 "cache-control"
+               ] ->
             put_resp_header(acc, name, value)
 
           _ ->
