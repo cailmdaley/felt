@@ -1623,9 +1623,11 @@ export class Dock {
       dropdown.style.display = 'none'
       search.setAttribute('aria-expanded', 'false')
     }
+    /** Each render of the results places them again: their height, and so their side, may have changed. */
     const showDropdown = (): void => {
       dropdown.style.display = ''
-      release ??= anchorPopover(dropdown, search, { placement: 'below-start', matchWidth: true })
+      if (release) release.reposition()
+      else release = anchorPopover(dropdown, search, { placement: 'below-start', matchWidth: true })
     }
     this.composerDisposers.push(() => { release?.(); release = null })
     const closeSearch = (): void => {

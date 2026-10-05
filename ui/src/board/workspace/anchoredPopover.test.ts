@@ -50,6 +50,27 @@ describe('anchorPopover', () => {
     expect(panel.style.top).toBe('248px')
     expect(panel.style.maxHeight).toBe(`${788 - 8 - 248}px`)
   })
+  it('re-places on request when its content changes size', () => {
+    viewport(400, 800)
+    const anchor = document.createElement('input')
+    anchor.getBoundingClientRect = () => rect(16, 600, 200, 30)
+    const panel = document.createElement('div')
+    let height = 100
+    Object.defineProperty(panel, 'offsetWidth', { get: () => 200 })
+    Object.defineProperty(panel, 'offsetHeight', { get: () => height })
+    document.body.append(anchor, panel)
+    const anchored = anchorPopover(panel, anchor)
+    expect([panel.dataset.side, panel.style.top]).toEqual(['below', '634px'])
+    height = 300
+    anchored.reposition()
+    expect([panel.dataset.side, panel.style.top]).toEqual(['above', `${600 - 4 - 300}px`])
+    height = 40
+    anchored.reposition()
+    expect([panel.dataset.side, panel.style.top]).toEqual(['below', '634px'])
+    anchored()
+    anchored.reposition()
+    expect(panel.style.top).toBe('')
+  })
   it('matches the trigger width on request and clears every placement on release', () => {
     viewport(1000, 800)
     const { anchor, panel } = fixture(rect(100, 200, 180, 30), { width: 150, height: 100 })

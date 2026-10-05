@@ -7,7 +7,8 @@
  * Where the Popover API exists the panel is promoted to the top layer, which
  * escapes clipping and transformed containing blocks while leaving it in place
  * in the DOM, so scoped styles, inheritance and event delegation still apply.
- * The panel follows its trigger through scrolling and resizing until released.
+ * The panel follows its trigger through scrolling and resizing until released;
+ * a panel whose content changes size asks to be placed again with `reposition`.
  */
 export type Placement = 'below-start' | 'below-end' | 'above-start' | 'above-end'
 
@@ -22,8 +23,12 @@ export interface AnchorOptions {
   matchWidth?: boolean
 }
 
-/** Releases an anchored panel: stops following and leaves the top layer. */
-export type Release = () => void
+/**
+ * Releases an anchored panel when called: stops following and leaves the top
+ * layer. `reposition` places it again against its trigger, for content that
+ * has changed size; after release it does nothing.
+ */
+export type Release = (() => void) & { reposition: () => void }
 
 const STYLE_KEYS = ['position', 'inset', 'margin', 'left', 'top', 'maxHeight', 'minWidth', 'overflowY', 'color', 'zIndex'] as const
 
@@ -48,8 +53,9 @@ export function anchorPopover(panel: HTMLElement, trigger: HTMLElement, options:
   Object.assign(panel.style, { position: 'fixed', inset: 'auto', margin: '0', color: 'inherit', zIndex: '10000' })
   panel.dataset.anchored = ''
 
+  let released = false
   const place = (): void => {
-    if (!panel.isConnected || !trigger.isConnected) return
+    if (released || !panel.isConnected || !trigger.isConnected) return
     const anchor = trigger.getBoundingClientRect()
     panel.style.maxHeight = ''
     panel.style.overflowY = ''
@@ -84,8 +90,7 @@ export function anchorPopover(panel: HTMLElement, trigger: HTMLElement, options:
   window.addEventListener('resize', follow)
   window.visualViewport?.addEventListener('resize', follow)
 
-  let released = false
-  return () => {
+  const release = (): void => {
     if (released) return
     released = true
     if (frame) cancelAnimationFrame(frame)
@@ -98,4 +103,5 @@ export function anchorPopover(panel: HTMLElement, trigger: HTMLElement, options:
     delete panel.dataset.anchored
     delete panel.dataset.side
   }
+  return Object.assign(release, { reposition: place })
 }
