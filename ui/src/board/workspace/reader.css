@@ -71,35 +71,24 @@
 /* The right end: the worker control, then the position. */
 .ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0; }
 .ws-head-worker { flex: none; display: flex; align-items: baseline; }
-.ws-head-worker[hidden] { display: none; }
-/* The card's own pill, bare: a pigmented dot, the state in the serif, the time in mono. */
-/* Dot, state and time are three words, wherever the plate is drawn. */
-.ws-worker-control { display: inline-flex; align-items: center; gap: .45em; }
-.ws-reader .ws-navbar .ws-head-worker .ws-worker-control {
-  display: inline-flex; align-items: baseline; gap: 6px; height: var(--ws-control-height); margin: 0 calc(-1 * var(--ws-small-gap));
-  padding: 0 var(--ws-small-gap); border: 0; border-radius: var(--ws-control-radius); background: transparent; box-shadow: none;
-  color: var(--ws-ink-muted); font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif);
-  letter-spacing: 0; text-transform: none; text-decoration: none; animation: none;
+/* The worker's room is held while no worker runs, so one starting never moves the index. */
+.ws-head-worker[hidden] { display: flex; visibility: hidden; }
+/* The head's worker control is the card's own pill (KanbanModal.css, "THE
+   WORKER PILL") at the head's scale, on the head's row and in the room's
+   pigments. Widths are held for the longest state and a three-figure age, so
+   a state change never moves the index beside it. */
+.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker {
+  --worker-size: var(--ws-label-size);
+  height: var(--ws-control-height); margin: 0 calc(-1 * var(--ws-small-gap)); padding: 0 var(--ws-small-gap);
+  border: 0; border-radius: var(--ws-control-radius); color: var(--ws-ink-soft); line-height: var(--ws-control-height);
 }
-.ws-reader .ws-navbar .ws-head-worker .ws-worker-control:hover { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-head-worker .ws-worker-dot { align-self: center; width: 7px; height: 7px; }
-/* Widths held for the longest state (attention) and a minutes count, so a
-   state change never moves the index beside it. */
-.ws-head-worker .ws-worker-state { font: inherit; min-width: 3.6em; }
-.ws-head-worker .ws-worker-elapsed { min-width: 4ch; font: var(--ws-small-size)/1 var(--ws-mono); font-variant-numeric: tabular-nums; letter-spacing: 0; }
-.ws-worker-state { font: var(--ws-label-size)/1.2 var(--ws-serif); }
-.ws-worker-elapsed { font: var(--ws-small-size)/1.4 var(--ws-mono); }
-/* A dot is too small for ink-mixed pigments: working is the machine's own cobalt, waiting the undiluted gold. */
-.ws-worker-dot { --ws-dot: var(--ws-machine); width: 8px; height: 8px; border-radius: 50%; background: var(--ws-dot); flex: none; }
-.ws-worker-control[data-worker-state='waiting'] .ws-worker-dot,
-.ws-worker-control[data-worker-state='attention'] .ws-worker-dot,
-.ws-worker-control[data-worker-state='blocked'] .ws-worker-dot { --ws-dot: var(--ws-fresh); }
-.ws-worker-control[data-worker-state='no worker'] .ws-worker-dot { --ws-dot: var(--ws-ink-muted); }
-/* In the head the dot wears a faint ring of its own pigment, so it reads at dot size on any paper. */
-.ws-reader .ws-head-worker .ws-worker-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ws-dot) 20%, transparent); }
-.ws-turn-active .ws-worker-dot { animation: ws-worker-breathe 2.4s ease-in-out infinite; }
-@keyframes ws-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
+.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker:hover { color: var(--ws-ink); background: var(--ws-hover); }
+.ws-head-worker { min-width: 8.5em; justify-content: flex-end; }
+/* In the reader the dot takes the room's own pigments. */
+.ws-reader .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-machine); }
+.ws-reader .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
+.ws-reader .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--ws-you); }
+.ws-reader .kbn-card-worker[data-worker-state='no worker'] .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
 .ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .ws-stage {
@@ -267,9 +256,11 @@
   .ws-head-index, .ws-head-position, .ws-tab-tip { display: none !important; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
-  .ws-reader .ws-navbar .ws-head-worker .ws-worker-control { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
-  .ws-head-worker :is(.ws-worker-state, .ws-worker-elapsed) { display: none; }
-  .ws-head-worker .ws-worker-dot { width: 9px; height: 9px; }
+  .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
+  .ws-head-worker :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { display: none; }
+  .ws-head-worker { min-width: 0; }
+  .ws-head-worker[hidden] { display: none; }
+  .ws-head-worker .ws-worker-dot { width: 9px; height: 9px; align-self: center; top: 0; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
   /* One chevron drawing for back and stepping: a drawn stroke in ink, legible at 44 px. */
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }

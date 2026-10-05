@@ -1849,7 +1849,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.equal(await selected(p).locator('.kbn-card-worker, [data-act="worker"]').count(), 0, 'the fiber page draws no worker control; the reader head carries it')
     const head = p.locator('.ws-navbar .ws-head-worker .ws-worker-control')
     await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.dataset.workerState === 'aloft')
-    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.textContent.includes('12 m'))
+    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.textContent.includes('12m'))
     const dot = head.locator('.ws-worker-dot')
     assert.ok(await dot.isVisible(), 'the head shows the worker dot')
     assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none', 'reduced motion suppresses breathing')
@@ -1863,7 +1863,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       assert.ok(headBox.width >= 44 && headBox.height >= 44, `the phone dot is a full target: ${JSON.stringify(headBox)}`)
       assert.ok(headBox.x + headBox.width >= viewport.width - 16, 'the phone dot sits at the right end of the top bar')
     } else {
-      assert.match(await head.innerText(), /aloft\s*12 m/)
+      assert.match(await head.innerText(), /aloft\s*12m/)
       const count = await p.locator('.ws-nav-trail .ws-head-position').boundingBox()
       assert.ok(count.x >= headBox.x + headBox.width && count.x + count.width >= viewport.width - 48, `the worker control and then the count end the head: ${JSON.stringify({ headBox, count })}`)
     }
