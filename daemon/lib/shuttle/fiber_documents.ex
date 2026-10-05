@@ -462,13 +462,11 @@ defmodule Shuttle.FiberDocuments do
       fiber: fiber
     }
 
-    # The fiber's own directory (`dirname(felt.path)`) is the anchor two clients
-    # need: the detail panel resolves a relative `:::{embed}` / image against it
-    # before calling `/file?path=…`, and report.html is just its `report.html`
-    # sibling. Emitted unconditionally (not gated on report.html existing) so
-    # relative artifacts render for every local fiber, not only reported ones.
-    # felt's `path` is symlink-canonicalized and already absolute — the exact
-    # form `/file` reads by.
+    # The fiber's own directory (`dirname(felt.path)`) anchors relative
+    # `:::{embed}` paths and images opened by the document workspace. The field
+    # is present for every local fiber, whether or not `report.html` exists.
+    # felt's `path` is symlink-canonicalized and already absolute — the form
+    # `/file` reads.
     case fiber_dir(fiber) do
       {:ok, dir} ->
         entry = Map.put(entry, :dir, dir)

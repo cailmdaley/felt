@@ -10,7 +10,7 @@
 //   • Resting drop — the due-preservation policy, whose whole protocol is the
 //     PRESENCE OF A KEY in the JSON body: absent leaves the date, `null`
 //     clears it.
-//   • The conversation dock's due editor — one `/felt-edit` carrying a bare civil
+//   • The fiber controls' due editor — one `/felt-edit` carrying a bare civil
 //     day, never an instant.
 //
 // So the assertion here is always the REQUEST: url, method, and the parsed
@@ -712,7 +712,7 @@ describe('verdicts stop app workers before changing the card lifecycle', () => {
   })
 })
 
-// ── The conversation dock's due editor ────────────────────────────────────────────
+// ── The fiber controls' due editor ────────────────────────────────────────────────
 
 describe('Dock.livePatch — the due branch', () => {
   const makePanel = (): Dock => new Dock(BASE, () => {})
@@ -771,9 +771,9 @@ describe('Dock.livePatch — the due branch', () => {
   })
 })
 
-// ── The conversation dock's kind control ───────────────────────────────────────────
+// ── The fiber controls' kind control ──────────────────────────────────────────────
 //
-// The dock's Kind control is three-way — One-shot | Standing | Pinned — and
+// The fiber page's Kind control is three-way — One-shot | Standing | Pinned — and
 // every one of its writes is SHAPE-ONLY. That is the deliberate divergence from
 // `commitPin` above: the drag targets a surface (the Pinned strip = at rest) and
 // therefore also kills and pauses; this control edits a field and must not.

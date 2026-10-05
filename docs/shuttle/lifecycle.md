@@ -123,8 +123,10 @@ views behind a hotkey row.
 |---|---|---|
 | `1` | **Desk** | What needs doing, and what is running right now — the kanban |
 | `2` | **Chronicle** | What a stretch of weeks was about, under a strip of cycle bands |
-| `3` | **Board** | What the work produced — every file a worker sent, rendered on a canvas |
+| `3` | **Board** | Documents produced by the work, in an overview and reader |
 
+The Board opens on a document overview and a reader for one fiber's channel.
+The fiber page carries its controls inline, and its worker pill opens the conversation.
 The board holds no state of its own. It views the same fibers the daemon polls,
 plus tmux liveness and the host-local [ledgers](telemetry.md).
 

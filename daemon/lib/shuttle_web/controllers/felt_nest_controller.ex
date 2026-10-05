@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.FeltNestController do
   @moduledoc """
-  Felt re-parenting (nest / unnest) for kanban cards — the detail modal's
-  parent edit, posted directly to Shuttle.
+  Felt re-parenting (nest / unnest) for kanban cards — the Board reader's
+  inline Parent control, posted directly to Shuttle.
 
   Owner-routed via `Shuttle.OriginRouter`, same as `/felt-edit`: a local-owned
   card is re-parented here; a remote-owned card's request is forwarded to the
