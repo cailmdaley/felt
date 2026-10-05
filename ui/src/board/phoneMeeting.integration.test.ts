@@ -22,7 +22,7 @@ interface BoardState {
   fetchMeetingStatus(): Promise<void>
   fetchAndRender(): Promise<void>
   showBanner(message: string, tone: string): void
-  detailModal: { buildMeeting(card: KanbanCard, error: HTMLElement, send: Send): HTMLElement }
+  dock: { buildMeeting(card: KanbanCard, error: HTMLElement, send: Send): HTMLElement }
   teardownState(): void
 }
 interface Send {
@@ -131,7 +131,7 @@ describe('board phone meeting card wiring', () => {
         status: reply.status,
         json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: current },
       }))
-      const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), sendWith())
+      const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), sendWith())
       document.body.append(menu)
       menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
       order.length = 0
@@ -157,7 +157,7 @@ describe('board phone meeting card wiring', () => {
     vi.spyOn(state, 'showBanner').mockImplementation(() => {})
     fetcher.mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'hark unavailable' }) })
     const error = document.createElement('div')
-    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), error, sendWith())
+    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), error, sendWith())
     menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
     menu.querySelector<HTMLButtonElement>('[role="menuitem"]:last-child')!.click()
     await flush()
@@ -179,7 +179,7 @@ describe('board phone meeting card wiring', () => {
         ? { meeting: current, delivery: { delivery: 'message', delivered: true } }
         : { available: true, meeting: current },
     }))
-    const menu = state.detailModal.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), send)
+    const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), send)
     menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
     ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!.click()
     expect(order).toEqual(['mic'])
@@ -198,7 +198,7 @@ describe('board phone meeting card wiring', () => {
     state.meetingStatus.meeting = null
     const error = document.createElement('div')
     const send = sendWith(async () => { throw new Error("Couldn't upload images: fiber not found: science/task") })
-    const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), error, send)
+    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), error, send)
     menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
     ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Phone')!.click()
     await vi.waitFor(() => expect(error.textContent).toBe("Couldn't upload images: fiber not found: science/task"))
@@ -223,7 +223,7 @@ describe('board phone meeting card wiring', () => {
         json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: null },
       }))
       const send = sendWith(async () => '[Image: /h/a.png]')
-      const menu = state.detailModal.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), send)
+      const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), send)
       menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!.click()
       ;[...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((item) => item.textContent === 'Room')!.click()
       await vi.waitFor(() => expect(send.setBusy).toHaveBeenLastCalledWith(false))

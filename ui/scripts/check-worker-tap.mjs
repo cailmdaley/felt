@@ -1,17 +1,26 @@
-/** Under a finger, the worker pill does in the open card what it does on the
- * compact card: a bridged session's pill is a link into the Claude app, and a
+/** Under a finger, the conversation dock's worker pill does what the compact
+ * Desk pill does: a bridged session's pill is a link into the Claude app, and a
  * tap on it lands. Run `npm run harness:board` then
  * `node scripts/check-worker-tap.mjs [shot-dir]`.
  *
  * On a phone and an iPad it taps the waiting worker's pill on the Desk card
- * and in its opened card, and asserts each tap navigates to the session link
- * through a hit area at least 44px tall. At a desktop the pill stays a button.
+ * and in the reader's conversation dock, and asserts each tap navigates to the
+ * session link through a hit area at least 44px tall. At a desktop the pill stays a button.
  */
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright-core'
+
+async function openDock(page) {
+  const conversation = page.locator('.ws-conversation')
+  await conversation.waitFor({ state: 'visible' })
+  await conversation.click()
+  const dock = page.locator('.ws-dock')
+  await dock.waitFor({ state: 'visible' })
+  return dock
+}
 
 const SHOTS = process.argv[2] ? resolve(process.argv[2]) : null
 if (SHOTS) mkdirSync(SHOTS, { recursive: true })
@@ -66,8 +75,8 @@ try {
       assert.equal(await cardPill.evaluate((el) => el.tagName), 'A', `${device.name}: card pill is a link`)
       if (!await tap(cardPill, 'card')) failures.push(`${device.name}: card pill tap did not land`)
       await page.goto(home)
-      // The outcome line just above the pill belongs to the card: a tap on it,
-      // as close to the pill as the outcome reaches, opens the card.
+      // A tap on the outcome just above the pill opens the reader, not the
+      // worker conversation.
       const outcome = card.locator('.kbn-card-outcome')
       await outcome.scrollIntoViewIfNeeded()
       const point = await cardPill.evaluate((pill, text) => {
@@ -80,35 +89,42 @@ try {
       await page.touchscreen.tap(point.x, point.y)
       await page.waitForTimeout(400)
       await shot('outcome-tapped')
-      const opened = await page.locator('.kbn-detail-aloft').isVisible()
-      console.log(`${device.name} outcome ${point.gap.toFixed(1)}px above the pill: navigated=${landed.length > before} card opened=${opened}`)
+      const conversation = page.locator('.ws-conversation')
+      await conversation.waitFor({ state: 'visible', timeout: 3000 })
+      const opened = await conversation.isVisible()
+      console.log(`${device.name} outcome ${point.gap.toFixed(1)}px above the pill: navigated=${landed.length > before} reader opened=${opened}`)
       if (landed.length > before) failures.push(`${device.name}: a tap on the outcome opened the session`)
-      if (!opened) failures.push(`${device.name}: a tap on the outcome did not open the card`)
+      if (!opened) failures.push(`${device.name}: a tap on the outcome did not open the reader`)
+      const outcomeDock = await openDock(page)
+      if (!await outcomeDock.locator('.kbn-detail-aloft').isVisible()) failures.push(`${device.name}: opening the dock did not show the worker pill`)
       await page.goto(home)
     } else {
       assert.equal(await cardPill.evaluate((el) => el.tagName), 'BUTTON', 'desktop: card pill is a button')
     }
 
     await card.locator('.kbn-card-name').click()
-    const detailPill = page.locator('.kbn-detail-aloft')
+    const dock = await openDock(page)
+    const detailPill = dock.locator('.kbn-detail-aloft')
     await detailPill.waitFor({ state: 'visible', timeout: 3000 })
     await page.waitForTimeout(400)
-    await shot('open-card')
+    await shot('conversation-dock')
     if (device.touch) {
       assert.equal(await detailPill.getAttribute('href'), LINK, `${device.name}: detail pill links to the session`)
-      if (!await tap(detailPill, 'open card')) failures.push(`${device.name}: open-card pill tap did not land`)
+      if (!await tap(detailPill, 'dock')) failures.push(`${device.name}: dock pill tap did not land`)
       // A 44px target: a tap 20px below the pill's centre still lands on it.
       await page.goto(home)
       await page.locator('.kbn-card').filter({ has: page.getByText(CARD, { exact: true }) }).locator('.kbn-card-name').click()
-      await detailPill.waitFor({ state: 'visible', timeout: 3000 })
+      const reopenedDock = await openDock(page)
+      const reopenedPill = reopenedDock.locator('.kbn-detail-aloft')
+      await reopenedPill.waitFor({ state: 'visible', timeout: 3000 })
       await page.waitForTimeout(400)
-      if (!await tap(detailPill, 'open card', 20)) failures.push(`${device.name}: open-card pill hit area is under 44px`)
+      if (!await tap(reopenedPill, 'dock', 20)) failures.push(`${device.name}: dock pill hit area is under 44px`)
     } else {
-      assert.equal(await detailPill.evaluate((el) => el.tagName), 'BUTTON', 'desktop: detail pill is a button')
-      assert.equal(await detailPill.evaluate((el) => getComputedStyle(el).pointerEvents), 'auto', 'desktop: detail pill takes clicks')
+      assert.equal(await detailPill.evaluate((el) => el.tagName), 'BUTTON', 'desktop: dock pill is a button')
+      assert.equal(await detailPill.evaluate((el) => getComputedStyle(el).pointerEvents), 'auto', 'desktop: dock pill takes clicks')
     }
     await context.close()
   }
 } finally { await browser.close() }
 if (failures.length) { console.error(failures.join('\n')); process.exit(1) }
-console.log('Worker pill taps land on the card and in the open card, phone and iPad')
+console.log('Worker pill taps land on the Desk card and in the conversation dock, phone and iPad')

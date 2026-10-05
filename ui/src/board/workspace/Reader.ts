@@ -1,6 +1,7 @@
 import './tokens.css'
 import './reader.css'
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
+import { workerVariant } from '../appConversation.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
@@ -14,6 +15,7 @@ export interface ReaderOptions {
   onSelect(key: DocKey): void
   onReturn(): void
   onConversation(): void
+  onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
   /** The overview's compact rows, independent of channel stepping's entry order. */
@@ -39,6 +41,9 @@ export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
 
 /** A single stage whose identity-keyed pages stay attached across channels. */
+/** The Conversation button's reading of the worker, matching the Desk's pill. */
+const WORKER_WORDS = { aloft: 'working', waiting: 'waiting on you', attention: 'needs attention', none: 'no worker' } as const
+
 export class Reader {
   readonly el = element('section', 'ws-reader ws-dormant')
   /** The vellum the reader floats on; the only blurred layer, and it never moves. */
@@ -57,6 +62,7 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly conversation: HTMLButtonElement
+  private readonly dockSlot = element('aside', 'ws-dock-slot')
   private readonly position = element('span', 'ws-position')
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
@@ -95,6 +101,9 @@ export class Reader {
     this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Channels')
     this.sidebarToggle.title = 'Channels (⌘\\)'
     this.conversation = button('ws-conversation', 'Conversation', () => opts.onConversation())
+    this.conversation.setAttribute('aria-expanded', 'false')
+    this.conversation.setAttribute('aria-controls', 'ws-conversation-dock')
+    this.dockSlot.setAttribute('aria-label', 'Conversation dock')
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.sidebarToggle, this.title)
     this.trail = element('div', 'ws-nav-trail')
@@ -119,7 +128,7 @@ export class Reader {
     this.sidebarFind.addEventListener('input', () => this.fillSidebar())
     this.sidebar.append(this.sidebarFind, this.sidebarList)
     const main = element('div', 'ws-stage-row')
-    main.append(this.sidebar, this.stage)
+    main.append(this.sidebar, this.stage, this.dockSlot)
     this.el.append(this.veil, this.navbar, main, thumb, this.announcement)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
@@ -151,6 +160,17 @@ export class Reader {
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
+  /** Change the available page box without replacing any live document. */
+  mountDock(dock: HTMLElement | null, restoreFocus = false): void {
+    if (dock) dock.id = 'ws-conversation-dock'
+    this.dockSlot.replaceChildren(...(dock ? [dock] : []))
+    this.el.classList.toggle('ws-with-dock', dock !== null)
+    this.conversation.setAttribute('aria-expanded', String(dock !== null))
+    this.syncDockSemantics()
+    this.layout(false)
+    if (restoreFocus) this.conversation.focus({ preventScroll: true })
+  }
+
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     if (switching) { this.cancelResize?.(); this.expanded = false; this.closeMenu() }
@@ -165,11 +185,14 @@ export class Reader {
     this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
     this.title.textContent = channel.name
     this.title.title = channel.name
-    const state = card?.runtimePhase ?? card?.workerState ?? card?.status ?? 'open'
-    const dot = element('span', `ws-state-dot ws-state-${state}`)
-    this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'))
-    this.agent = card?.workerAgent ?? card?.shuttleAgent ?? ''
-    this.conversation.title = `${this.agent} · ${state}`
+    const worker = card && hasLiveWorker(card) ? workerVariant(card) : 'none'
+    const state = WORKER_WORDS[worker]
+    const dot = element('span', `ws-worker-dot ws-worker-${worker}`)
+    const agent = card?.workerAgent ?? card?.shuttleAgent ?? ''
+    this.conversation.replaceChildren(dot, element('span', 'ws-conversation-label', 'Conversation'), element('span', 'ws-conversation-agent', agent))
+    this.conversation.title = `${agent ? `${agent} · ` : ''}${state}`
+    this.conversation.setAttribute('aria-label', `Conversation${agent ? ` · ${agent}` : ''} · ${state}`)
+    this.agent = agent
     this.tabs.render(channel.labels)
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && animate)
@@ -369,7 +392,16 @@ export class Reader {
     })
     this.track.style.transform = `translateX(${Math.round(W / 2 - centre)}px)`
   }
+  private syncDockSemantics(): void {
+    const sheet = this.phone.matches && this.dockSlot.childElementCount > 0
+    this.stage.inert = sheet
+    this.sidebar.inert = sheet
+    this.dockSlot.setAttribute('role', sheet ? 'dialog' : 'complementary')
+    if (sheet) this.dockSlot.setAttribute('aria-modal', 'true')
+    else this.dockSlot.removeAttribute('aria-modal')
+  }
   private readonly relayout = (): void => {
+    this.syncDockSemantics()
     this.renderSidebar()
     this.layout(false)
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
@@ -539,11 +571,25 @@ export class Reader {
   private readonly keydown = (e: KeyboardEvent): void => {
     this.keyboardInput = true
     if (!this.active || e.isComposing || document.querySelector('.kbn-detail-overlay,[data-state="open"][role="dialog"]')) return
+    if (e.key === 'Tab' && this.phone.matches && this.dockSlot.childElementCount) {
+      const controls = [...this.dockSlot.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],textarea,input:not(:disabled),select:not(:disabled),[tabindex="0"]')]
+        .filter(el => !el.closest('[hidden]') && getComputedStyle(el).display !== 'none')
+      const first = controls[0], last = controls.at(-1)
+      if (first && ((e.shiftKey && (document.activeElement === first || !this.dockSlot.contains(document.activeElement))) || (!e.shiftKey && document.activeElement === last))) {
+        e.preventDefault(); e.stopImmediatePropagation()
+        ;(e.shiftKey ? last : first)?.focus()
+        return
+      }
+    }
     if ((e.metaKey || e.ctrlKey) && (e.key === '\\' || e.code === 'Backslash')) {
       e.preventDefault(); e.stopImmediatePropagation()
       this.toggleSidebar()
       return
     }
+    // A field in the dock keeps its own editing keys (⌥← moves by word);
+    // only Escape unwinds from there.
+    const target = e.target instanceof HTMLElement ? e.target : null
+    if (e.key !== 'Escape' && target && this.dockSlot.contains(target) && target.matches('input,textarea,select,[contenteditable]')) return
     if (this.handleKey(e.key, e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey)) {
       e.preventDefault(); e.stopImmediatePropagation()
     }
@@ -552,6 +598,7 @@ export class Reader {
     if (key === 'Escape') {
       if (this.cancelResize) this.cancelResize()
       else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
+      else if (this.opts.onEscapeLayer?.()) { /* The dock owns the next layer. */ }
       else if (this.expanded) this.toggleExpand()
       else this.opts.onReturn()
       return true

@@ -11,6 +11,12 @@ describe('workspace style contracts', () => {
     for (const token of [...css.matchAll(/var\((--ws-[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
     expect(css).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(/i)
   })
+  it('draws the dock from workspace tokens alone', () => {
+    const dock = read('dock.css').replace(/\/\*[\s\S]*?\*\//g, '')
+    const declarations = new Set([...`${tokens}\n${dock}`.matchAll(/(--(?:ws|ctl)-[\w-]+)\s*:/g)].map(m => m[1]))
+    for (const token of [...dock.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
+    expect(dock).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(|url\(/i)
+  })
   it('parks documents under an opaque cover without removing their layout', () => {
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m => m[1].includes('.ws-parked')).map(m => m[2]).join('\n')
     expect(rules).toContain('background: var(--ws-paper)')

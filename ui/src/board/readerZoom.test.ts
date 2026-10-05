@@ -16,8 +16,8 @@ import {
 /**
  * THE ZOOM GESTURE, AS NUMBERS.
  *
- * Both readers on the board magnify a file the same way, and the part that is
- * easy to get subtly wrong is not the DOM write — it is the anchor. A zoom that
+ * The floating file reader magnifies a file around its anchor. The part that
+ * is easy to get subtly wrong is not the DOM write — it is the anchor. A zoom that
  * does not hold the point under the cursor walks the reader away from the thing
  * they were pointing at, one notch at a time, and it does it plausibly enough
  * that nobody files it as a bug. So that arithmetic is pinned here.

@@ -95,9 +95,21 @@ function coarseDeclarations(el: FakeElement, css: string): Map<string, string> {
   return out
 }
 
-const TOUCH_CSS = ['KanbanModal.css', 'FiberDetailModal.css']
-  .map((file) => readFileSync(fileURLToPath(new URL(`../src/board/${file}`, import.meta.url)), 'utf8'))
-  .join('\n')
+function readBoardCss(file: string): string {
+  return readFileSync(fileURLToPath(new URL(`../src/board/${file}`, import.meta.url)), 'utf8')
+}
+
+function declarationsFor(selector: string, css: string): string {
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  return [...clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((rule) => rule[1].trim() === selector)
+    .map((rule) => rule[2])
+    .join(';')
+}
+
+const DOCK_CSS = readBoardCss('workspace/dock.css')
+const TOKENS_CSS = readBoardCss('workspace/tokens.css')
+const TOUCH_CSS = [readBoardCss('KanbanModal.css'), DOCK_CSS].join('\n')
 const LINK = 'https://claude.ai/code/session_bridged'
 const now = Date.now()
 const worker = (phase: string, sessionLink?: string) => ({
@@ -110,7 +122,7 @@ const worker = (phase: string, sessionLink?: string) => ({
 /** Where the pill is built: the Desk card, and the open card's header. */
 const SURFACES = [
   ['Desk card', {}],
-  ['open card', { classes: 'kbn-detail-aloft' }],
+  ['conversation dock', { classes: 'kbn-detail-aloft' }],
 ] as const
 
 afterEach(() => vi.unstubAllGlobals())
@@ -139,17 +151,17 @@ describe('the terminal worker pill under a finger', () => {
     }
   })
 
-  it('gives the open card\'s link a 44px target band, and the Desk card\'s none', () => {
+  it('gives the conversation dock worker pill a 44px touch target', () => {
     useDevice(PHONE_PORTRAIT)
-    const code = TOUCH_CSS.replace(/\/\*[\s\S]*?\*\//g, '')
-    const bands = [...code.matchAll(/([^{}]+)::after\s*\{([^}]*)\}/g)]
-      .filter(([, , body]) => /calc\(50% - 22px\)/.test(body))
-      .map(([, selector]) => selector.trim())
-    expect(bands).toEqual(['a.kbn-detail-aloft[href]'])
-    const open = terminalWorkerPill(worker('waiting', LINK), { classes: 'kbn-detail-aloft' }) as unknown as FakeElement
-    const desk = terminalWorkerPill(worker('waiting', LINK)) as unknown as FakeElement
-    expect(matchesCompound(open, bands[0])).toBe(true)
-    expect(matchesCompound(desk, bands[0])).toBe(false)
+    const phoneMedia = DOCK_CSS.match(
+      /@media\s*\(max-width:\s*700px\),\s*\(max-height:\s*500px\)\s*and\s*\(pointer:\s*coarse\)\s*\{([\s\S]*)\n\}\s*$/,
+    )?.[1] ?? ''
+    const dockPill = terminalWorkerPill(worker('waiting', LINK), { classes: 'kbn-detail-aloft' }) as unknown as FakeElement
+
+    expect(dockPill.classes).toContain('kbn-card-worker')
+    expect(declarationsFor('.ws-dock', phoneMedia)).toMatch(/--ctl-h:\s*var\(--ws-phone-target\)/)
+    expect(declarationsFor('.ws-dock .kbn-card-worker', DOCK_CSS)).toMatch(/min-height:\s*var\(--ctl-h\)/)
+    expect(TOKENS_CSS).toMatch(/--ws-phone-target:\s*44px/)
   })
 })
 

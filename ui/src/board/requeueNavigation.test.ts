@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FiberDetailModal } from './FiberDetailModal.js'
+import { Dock } from './workspace/Dock.js'
 import { card } from './testFixtures.js'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -16,7 +16,7 @@ describe('requeue returns phones to the board for an explicit session-link tap',
         vi.stubGlobal('fetch', fetch)
         const refreshed = vi.fn()
         const openWorker = vi.fn()
-        const panel = new FiberDetailModal('http://daemon', refreshed, undefined, openWorker)
+        const panel = new Dock('http://daemon', refreshed, undefined, openWorker)
         const close = vi.spyOn(panel, 'close').mockImplementation(() => {})
         const requeue = panel as unknown as {
           runRequeue: (c: ReturnType<typeof card>, directive: string, mode: 'fresh',

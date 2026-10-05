@@ -29,7 +29,7 @@
  *   • Drag back up to the now-board → clear horizon/cold.
  *   • Drop on a now-board column header routes through the daemon's
  *     /api/v1/transition lifecycle path.
- *   • Click a card body to open its detail modal.
+ *   • Click a card body to open its channel in the document workspace.
  *
  * Classification happens once, frontend-side: `classifyFiber` in
  * `KanbanRules.ts` buckets the composite feed into surfaces. The drag handler's
@@ -38,7 +38,7 @@
 
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
-import { FiberDetailModal, type MeetingJoinResult } from './FiberDetailModal.js'
+import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
 import type {
   ColumnKind,
@@ -268,16 +268,16 @@ export class KanbanModal {
    * reads it; the gesture's own refetch is a direct call and always runs.
    */
   private gestureDepth = 0
-  /** Intermediate fiber-detail modal — one instance, re-used across opens. */
-  private readonly detailModal: FiberDetailModal
   private workspace: Workspace | null = null
+  /** The conversation dock — one instance, lent to the workspace's reader. */
+  private readonly dock: Dock
   private workspaceReturnFocus: HTMLElement | null = null
   private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
   private readonly surfaces: KanbanSurfaceRenderer
 
   private readonly handleConversationOpening = (): void => {
     if (this.lastResponse) this.render(this.lastResponse)
-    this.detailModal.refreshConversationOpening()
+    this.dock.refreshConversationOpening()
   }
 
   constructor(options: KanbanModalOptions) {
@@ -312,14 +312,12 @@ export class KanbanModal {
     this.onSettingsClick = options.onSettingsClick
     this.shuttleBase = options.shuttleBase ?? `http://${window.location.hostname}:4000`
     this.temporal = options.temporalFetchers ?? createTemporalFetchers(this.shuttleBase)
-    this.detailModal = new FiberDetailModal(
+    this.dock = new Dock(
       this.shuttleBase,
       () => { void this.fetchAndRender() },
-      // Terminal moves (Temper / Compost) route through the same optimistic
-      // path as the inline card buttons and drags — instant relocation,
-      // background commit, reconcile.
+      // Temper / Discard route through the same optimistic path as the inline
+      // card buttons and drags — instant relocation, background commit, reconcile.
       (card, target) => this.transition(card, target),
-      // The terminal action → focus the running worker's Kitty tab.
       this.openWorkerAfterGesture,
       {
         meeting: {
@@ -485,7 +483,7 @@ export class KanbanModal {
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
       onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
-      onConversation: (card) => this.openWorkspaceConversation(card),
+      dock: this.dock,
     })
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
@@ -502,11 +500,9 @@ export class KanbanModal {
    */
   unmount(): void {
     if (this.container === null) return
-    // The fiber-detail panel floats on document.body, not in our container —
-    // an unmount would otherwise orphan it over whatever is behind.
-    this.detailModal.close()
     this.workspace?.dispose()
     this.workspace = null
+    this.dock.reset()
     this.phoneAudio.unmount()
     // A mounted temporal view may hold timers/listeners of its own — give it
     // its unmount() before the container (and its host) go away.
@@ -608,18 +604,11 @@ export class KanbanModal {
     })
   }
 
-  /** Card entry points share the workspace route; worker controls stay separate. */
+  /** Desk and Chronicle cards enter the same owner-addressed document channel. */
   private openDocumentChannel(card: KanbanCard): void {
-    this.detailModal.close()
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
-    if (this.workspace) this.workspace.open(card)
-    else this.detailModal.open(card)
-  }
-
-  /** The Conversation control's bridge to the floating control surface. */
-  private openWorkspaceConversation(card: KanbanCard): void {
-    this.detailModal.open(card)
+    this.workspace?.open(card)
   }
 
   private showWorkspace(active: boolean): void {
@@ -950,7 +939,7 @@ export class KanbanModal {
    * `1`–`3` switch views. Deliberately narrow: a bare digit only, so
    * `Cmd/Ctrl+1` stays the browser's tab switch, and only when the keystroke
    * is not going somewhere it matters — a focused text field, or a Radix
-   * dialog / fiber-detail panel layered over the board. Returns true when the
+   * dialog layered over the board. Returns true when the
    * key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
@@ -999,10 +988,10 @@ export class KanbanModal {
    * awaiting).
    *
    * Drag-to-inFlight is the launch verb. It routes through the unified
-   * force-dispatch path (the same one FiberDetailModal's "New session ▸"
+   * force-dispatch path (the same one the dock's "New session ▸"
    * uses): a single fresh POST /api/v1/dispatch with `force: true, ad_hoc:
    * true` and no message — drag carries no directive (resume-previous and
-   * "talk first" intent live behind the detail modal). force bypasses status /
+   * "talk first" intent live in the conversation dock). force bypasses status /
    * enabled / review_state / schedule / validity gates, so closed (tempered or
    * composted), paused, awaiting-review, and dormant-standing cards all
    * fire a worker immediately — no waiting on the 15s poller; the dispatch
@@ -1044,7 +1033,7 @@ export class KanbanModal {
     // asked first. Confirm the destructive one too. Gated on `hasWorkerToStop`, so
     // the overwhelmingly common case (a verdict on a finished run) stays a
     // single click. This is the choke point for every path — the card's inline
-    // buttons, the detail panel's terminal moves, and a drag onto the column —
+    // buttons, the dock's Temper / Discard, and a drag onto the column —
     // so one guard covers all three.
     if ((target === 'tempered' || target === 'composted') && hasWorkerToStop(card)) {
       const verb = target === 'tempered' ? 'temper' : 'discard'
@@ -1204,7 +1193,7 @@ export class KanbanModal {
    * a second write would race it into a 409 already_running.
    *
    * A drag carries no message and always starts fresh; resuming and saying
-   * something first live behind the detail panel, where they are chosen on
+   * something first live in the conversation dock, where they are chosen on
    * purpose. `fresh` is stamped explicitly rather than left to the daemon's
    * auto-decide, which would resume a transcript that died dirty.
    *
@@ -1222,7 +1211,9 @@ export class KanbanModal {
     if (res.ok) return true
     const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
     if (needsProjectDir(body)) {
-      this.detailModal.openStartPrompt(card, body)
+      this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+      this.workspace?.openStartPrompt(card, body)
       return false
     }
     throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`))
@@ -1954,7 +1945,7 @@ export class KanbanModal {
         this.meetingStatus = status
         this.phoneAudio.observe(status.meeting)
         this.syncMeetingClock()
-        this.detailModal.syncMeeting()
+        this.dock.syncMeeting()
         if (availabilityChanged && this.lastResponse) this.render(this.lastResponse)
         else this.presentMeeting()
       } catch {
@@ -2038,7 +2029,7 @@ export class KanbanModal {
         // still gets its poll: its content moves with the clock (and with
         // activity and the ledgers), not only with the fiber feed. The open
         // card's worker pill crosses its idle threshold on the clock too.
-        this.syncDetailRuntime(data)
+        this.syncWorkspaceRuntime(data)
         this.mountOrRefreshActiveView()
         return
       }
@@ -2150,20 +2141,20 @@ export class KanbanModal {
     if (view) this.renderViewFallback(view.title)
   }
 
-  /** Hand the open card's fresh copy to its panel, whose worker pill follows
-   *  the worker's runtime phase. */
-  private syncDetailRuntime(data: KanbanResponse): void {
-    const id = this.detailModal.openCardId
-    if (id) this.detailModal.syncRuntime(findCardById(data, id))
+  /** Runtime changes repaint the dock's worker controls and the reader's
+   *  Conversation button without replacing documents. */
+  private syncWorkspaceRuntime(data: KanbanResponse): void {
+    const id = this.dock.openCardId
+    if (id) this.dock.syncRuntime(findCardById(data, id))
+    this.workspace?.update()
   }
 
   private render(data: KanbanResponse): void {
     if (!this.body || !this.deskEl) return
-    this.syncDetailRuntime(data)
+    this.syncWorkspaceRuntime(data)
     if (this.workspace?.isActive) {
       this.lastResponse = data
       this.pendingDeskData = data
-      this.workspace.update()
       return
     }
 
@@ -2784,7 +2775,7 @@ export class KanbanModal {
 
   /**
    * Off the strip: reshape a pinned role back to a one-shot so it can be
-   * planned again. The exact write the detail panel's kind segmented control
+   * planned again. The exact write the dock's kind segmented control
    * makes — `reshape` rewrites the shape keys alone, leaving agent, host and
    * project_dir where they are. The strip's only exit that is not a verdict,
    * and the inverse of {@link commitPin}'s first call.

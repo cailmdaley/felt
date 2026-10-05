@@ -1,39 +1,21 @@
 /**
- * ReaderZoom — Cmd/Ctrl + wheel over an open file, anchored on the cursor.
+ * ReaderZoom — cursor-anchored magnification for the Shelf's floating file
+ * reader.
  *
- * The two tabbed readers on the board (the fiber detail panel's file viewer and
- * the Shelf's Reader) zoom identically, because there is only one right answer
- * to "magnify this file": the point under the pointer must not move, and the
- * magnified box must be a real layout box so the cell's `overflow:auto` gives
- * you scrollbars to pan it with. Both had their own copy of that answer, down
- * to the same clamp constants and the same deferral frame.
+ * Zoom keeps the point under the pointer fixed and scales a real layout box so
+ * the cell's `overflow: auto` can pan it. The arithmetic is separate from the
+ * element writes: `nextZoom` and `zoomAnchorScroll` are covered as pure
+ * functions, while `applyZoom` and `zoomOnWheel` write to the DOM.
  *
- * The arithmetic is separated from the DOM deliberately. `nextZoom` and
- * `zoomAnchorScroll` are the whole gesture as numbers, and are what the tests
- * cover; `applyZoom` and `zoomOnWheel` are the element writes, which this repo
- * keeps headless and therefore untested. The split is not ceremony — the anchor
- * arithmetic is the part that is easy to get subtly wrong, and it is now pinned.
- *
- * ZOOMING OUT is the other half, and it arrived late because a mouse never
- * needed it: on a desktop a file that overflows its column is fine, you
- * scroll. On a phone a PDF fit to the column's width is a page you can only
- * ever read a third of at a time, with no wheel to pull back with. So the
- * reader carries an explicit FIT — the magnification at which the whole page
- * is on screen — and on a coarse pointer it gets buttons and a double-tap,
- * because a gesture nobody can perform is not an affordance.
- *
- * KNOWN GAP, deliberately left alone here: the wheel reads `deltaY` as pixels
- * and ignores `WheelEvent.deltaMode`, so a line-mode wheel (Firefox, some mice)
- * zooms roughly forty times too fast. `views/shelfGesture.ts` already solved
- * exactly this — `wheelZoomFactor(deltaY, deltaMode, viewportH)`, with tests
- * that say "the units are the bug" — and adopting it here is one line. It is
- * not taken now because it changes the zoom feel of BOTH readers at once, which
- * is a decision about how the thing should feel, not a cleanup.
+ * The reader also has an explicit FIT action for phones, where a PDF fitted to
+ * the column width can otherwise show only part of a page. Coarse pointers get
+ * fit controls and double-tap, alongside the wheel gesture available elsewhere.
+ * The wheel uses `deltaY` as pixels; line-mode `WheelEvent.deltaMode` values
+ * therefore produce faster zoom steps than pixel-mode input.
  */
 
-/** What zoom needs of a tab: the pan surface, what is being scaled, where the
- *  zoom currently stands, and an image's fit-width at zoom 1. Both readers'
- *  tab records extend this, which is what lets one gesture drive either. */
+/** What zoom needs of a file-reader tab: its pan surface, zoom target, current
+ *  magnification, and an image's fit-width at zoom 1. */
 export interface ZoomableTab {
   /** The `overflow:auto` cell the file is drawn in — the pan surface. */
   cell: HTMLElement
@@ -257,9 +239,8 @@ export function stepZoom(z: number, dir: -1 | 1): number {
 /** Point the entry's zoom at the right element for the file it just built, and
  *  apply whatever magnification it is carrying.
  *
- *  Both readers had this line twice and it is not a one-liner any more: an
- *  image is scaled by its own px width, a PDF is a sheet scaled the same way,
- *  and everything else is the wrap under CSS `zoom`. */
+ *  Images scale by their own pixel width, PDFs by their fixed page dimensions,
+ *  and other files by the viewer wrap under CSS `zoom`. */
 export function setZoomTarget(entry: ZoomableTab, viewer: HTMLElement, path: string): void {
   entry.fixedPage = /\.pdf$/i.test(path)
   entry.zoomTarget = viewer.querySelector<HTMLElement>('img.kbn-fileview-image') ?? viewer

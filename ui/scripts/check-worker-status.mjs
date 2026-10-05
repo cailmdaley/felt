@@ -56,20 +56,33 @@ try {
     const destination = mobile ? 'chatgpt://' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     assert.equal(await appMark.getAttribute('href'), destination)
     await appCard.locator('.kbn-card-name').click()
-    assert.equal(await page.locator('.kbn-detail-aloft').textContent(), 'Aloft')
-    assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('href'), destination)
-    await page.locator('.kbn-detail-aloft').evaluate(detail => {
-      const card = document.querySelector('.kbn-card-worker')
-      if (!card) throw new Error('card worker marker missing')
-      for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform']) {
-        if (getComputedStyle(detail)[property] !== getComputedStyle(card)[property]) {
-          throw new Error(`detail ${property} differs from card: ${getComputedStyle(detail)[property]} vs ${getComputedStyle(card)[property]}`)
+    await page.locator('.ws-conversation').click()
+    const dock = page.locator('.ws-dock')
+    await dock.waitFor({ state: 'visible' })
+    const detailPill = dock.locator('.kbn-detail-aloft')
+    assert.equal(await detailPill.textContent(), 'Aloft')
+    assert.equal(await detailPill.getAttribute('href'), destination)
+    // The dock pill uses its control scale while keeping one typography across
+    // worker states, just as the compact Desk pill does at its own scale.
+    await detailPill.evaluate(detail => {
+      const original = detail.className
+      const typography = ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'textTransform']
+      detail.className = 'kbn-card-worker kbn-detail-aloft'
+      const baseline = Object.fromEntries(typography.map(property => [property, getComputedStyle(detail)[property]]))
+      for (const variant of ['aloft', 'waiting', 'attention', 'blocked']) {
+        detail.className = `kbn-card-worker kbn-detail-aloft${variant === 'aloft' ? '' : ` kbn-card-worker-${variant}`}`
+        const style = getComputedStyle(detail)
+        for (const property of typography) {
+          if (style[property] !== baseline[property]) {
+            throw new Error(`${variant} ${property}: expected dock baseline ${baseline[property]}, got ${style[property]}`)
+          }
         }
       }
+      detail.className = original
     })
     if (mobile) {
-      assert.match(await page.locator('.kbn-detail-app-guide').innerText(), /Remote → ada-workstation → loom/)
-      assert.equal(await page.locator('.kbn-detail-aloft').getAttribute('aria-label'), 'Open ChatGPT app')
+      assert.match(await dock.locator('.kbn-detail-app-guide').innerText(), /Remote → ada-workstation → loom/)
+      assert.equal(await detailPill.getAttribute('aria-label'), 'Open ChatGPT app')
       // The native chatgpt:// scheme is handed to iOS; the href assertion above
       // is the browser-safe check for that handoff.
     }

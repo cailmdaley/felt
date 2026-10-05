@@ -27,7 +27,6 @@
  * buckets, and ledger records over an instant range — so what the views are
  * exercised against is the shape they really receive.
  *
- * Distinct from harness/harness.ts (slice C), which mounts FiberDetailModal.
  * Build: `npm run harness:board`; open the emitted
  * harness-board-dist/index.html via file://. The page ships with the bundle,
  * so the output directory is self-sufficient — nothing to copy in by hand.
@@ -131,7 +130,7 @@ const shuttleBlockElsewhere = () => ({
 })
 
 /** A shuttle block carrying a concluded run's `runtime` stamps — what the
- *  detail panel's session-window line reads (dispatched → handed off → span). */
+ *  dock's session-window line reads (dispatched → handed off → span). */
 const shuttleBlockWithRun = (dispatchedMsAgo: number, ranForMs: number) => ({
   ...shuttleBlock(),
   runtime: {
@@ -376,7 +375,7 @@ const RESTING: MockFiber[] = [
   })),
 ]
 
-// A standing role, for the humanized-cron chip in the detail panel.
+// A standing role, for the humanized-cron chip in the conversation dock.
 const STANDING: MockFiber[] = [
   {
     id: 'loom/email/morning-post/run',

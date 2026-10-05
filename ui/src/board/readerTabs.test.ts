@@ -1,5 +1,5 @@
 /**
- * ReaderTabs — the tab-set rules both readers on the board obey.
+ * ReaderTabs — the tab-set rules for the Board's floating file reader.
  *
  * These are the invariants a tabbed viewer is judged on: a file opened twice
  * is one tab, the strip never reorders itself under a click, and closing what

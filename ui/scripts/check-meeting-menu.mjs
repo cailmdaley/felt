@@ -1,4 +1,4 @@
-/** The drawer's Meeting menu picks under both engines' focus rules. Run
+/** The dock's Meeting menu picks under both engines' focus rules. Run
  * `npm run harness:board` then `node scripts/check-meeting-menu.mjs`.
  *
  * WebKit gives a clicked button no focus: pressing Room blurs the focused Call
@@ -19,7 +19,10 @@ for (const engine of [webkit, chromium]) {
     page.on('pageerror', error => errors.push(error.message))
     await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
     await page.getByText('Run the 2D B-mode null tests', { exact: true }).click()
-    await page.locator('.kbn-detail-controls-toggle').click()
+    await page.locator('.ws-conversation').click()
+    const dock = page.locator('.ws-dock')
+    await dock.waitFor({ state: 'visible' })
+    await dock.locator('.kbn-detail-controls-toggle').click()
     await page.evaluate(() => {
       window.joins = []
       const originalFetch = window.fetch
@@ -28,10 +31,10 @@ for (const engine of [webkit, chromium]) {
         return originalFetch(input, init)
       }
     })
-    const menu = page.getByRole('menu', { name: 'Meeting kind', exact: true })
-    await page.getByRole('button', { name: 'Meeting', exact: true }).click()
+    const menu = dock.getByRole('menu', { name: 'Meeting kind', exact: true })
+    await dock.getByRole('button', { name: 'Meeting', exact: true }).click()
     assert.ok(await menu.isVisible(), `${engine.name()}: Meeting opens its kinds`)
-    await page.getByRole('menuitem', { name: 'Room', exact: true }).click({ timeout: 2000 })
+    await dock.getByRole('menuitem', { name: 'Room', exact: true }).click({ timeout: 2000 })
     await page.waitForTimeout(200)
     const joins = await page.evaluate(() => window.joins)
     assert.deepEqual(joins.map(j => j.meeting.mode), ['room'], `${engine.name()}: picking Room starts one room meeting`)

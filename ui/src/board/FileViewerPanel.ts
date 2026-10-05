@@ -1,5 +1,5 @@
 /**
- * Shared file renderer for sent-file tabs and the Shelf reader.
+ * Shared file renderer for workspace documents and the Shelf reader.
  *
  * Images and audio use native elements, markdown and text render in a scrolling
  * pane, HTML renders in a scrollable iframe, and browser-native formats such
@@ -10,6 +10,7 @@
  */
 
 import './FileViewerPanel.css'
+import './prose.css'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import {
   AUDIO_EXTS,
@@ -42,11 +43,11 @@ export interface FileViewerOptions {
 
 /**
  * Render a deliverable into a fresh element by extension — the shared dispatch
- * the accordion mounts per open file. The iframe variant carries a loading veil
+ * a reader mounts for each open file. The iframe variant carries a loading veil
  * (a remote `report.html` can be multi-MB over a slow tunnel; a blank frame
  * reads as broken) that lifts on `load` and flips to an error note on `error`.
  *
- * `onFrameLoad` fires after each HTML document update — the accordion uses it
+ * `onFrameLoad` fires after each HTML document update — the reader uses it
  * to restore scroll position on a persistence rehydrate and reconnect its
  * scroll listener. `onTextPane`
  * is its twin for the self-rendered text pane, which has no document and so no

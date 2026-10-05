@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FiberDetailModal, type MeetingJoinControl } from './FiberDetailModal'
+import { Dock, type MeetingJoinControl } from './workspace/Dock.js'
 import { card } from './testFixtures'
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
@@ -35,7 +35,7 @@ const dispatched = { ok: true, status: 200, json: async () => ({ tmux_session: '
 
 let composer: HTMLElement
 let fetch: ReturnType<typeof vi.fn>
-let panel: FiberDetailModal
+let panel: Dock
 let closeSpy: ReturnType<typeof vi.spyOn>
 
 interface PanelInternals {
@@ -47,7 +47,7 @@ interface PanelInternals {
  *  control and a start prompt waiting for the card. */
 function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = {}): void {
   document.body.innerHTML = ''
-  panel = new FiberDetailModal('https://daemon.example', vi.fn(), undefined, undefined,
+  panel = new Dock('https://daemon.example', vi.fn(), undefined, undefined,
     opts.meeting ? { meeting: opts.meeting } : undefined)
   closeSpy = vi.spyOn(panel, 'close').mockImplementation(() => {})
   const internals = panel as unknown as PanelInternals
@@ -273,10 +273,19 @@ describe('the composer takes pasted images', () => {
     expect(textarea().value).toBe('')
   })
 
-  it('revokes every thumbnail URL when the panel closes', () => {
-    paste(textarea(), [png('one.png'), png('two.png')])
+  it('keeps the draft and its images when the dock is put away', () => {
+    paste(textarea(), [png('one.png')])
+    textarea().value = 'half a thought'
     closeSpy.mockRestore()
     panel.close()
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    expect(textarea().value).toBe('half a thought')
+    expect(chips()).toHaveLength(1)
+  })
+
+  it('revokes every thumbnail URL when the dock forgets its card', () => {
+    paste(textarea(), [png('one.png'), png('two.png')])
+    panel.reset()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-2')
   })

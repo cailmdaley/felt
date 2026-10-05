@@ -19,12 +19,12 @@
  * does an opened FILE take the whole screen? It does on every mobile viewport,
  * and it also does under any finger at all — which is what brings in a tablet.
  * An iPad is wider than 700px and taller than 500px, so it is not mobile and
- * the board, the card and the followed-reference panel keep their desktop
- * arrangement there. But the file reader's desktop arrangement is side-by-side
- * windows you drag and resize by their edges, a posture built for a mouse; a
- * hand on a tablet reads one document at a time, and wants it the size of the
- * glass with one obvious way back. The reader is therefore the one surface
- * whose layout keys off the pointer rather than the shape. Written out, the
+ * the Desk and document workspace keep their desktop arrangements there. The
+ * floating file reader's desktop form is a window you drag and resize by its
+ * edges, a posture built for a mouse; a hand on a tablet reads one document at
+ * a time and wants it the size of the glass with one obvious way back. The
+ * file reader is therefore the surface whose layout keys off the pointer
+ * rather than the shape. Written out, the
  * form is `MOBILE_MEDIA, (pointer: coarse)` with the short-and-coarse face
  * absorbed into the broader `(pointer: coarse)`.
  *
@@ -56,9 +56,9 @@ export function isMobileViewport(win: Pick<Window, 'matchMedia'> = window): bool
   return win.matchMedia?.(MOBILE_MEDIA)?.matches ?? false
 }
 
-/** Does an opened file take the whole screen, as a sheet with one ✕, rather
- *  than a window beside the card? True on a phone in either orientation and on
- *  a tablet; false on a desktop unless its window is narrower than a phone. */
+/** Does the floating file reader take the whole screen as a sheet with one ✕?
+ *  True on a phone in either orientation and on a tablet; false on a desktop
+ *  unless its window is narrower than a phone. */
 export function readerFillsScreen(win: Pick<Window, 'matchMedia'> = window): boolean {
   return win.matchMedia?.(READER_MEDIA)?.matches ?? false
 }

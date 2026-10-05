@@ -26,6 +26,8 @@
   --ws-float: 0 1px 2px color-mix(in srgb, var(--kbn-ink) 10%, transparent),
     0 24px 56px -16px color-mix(in srgb, var(--kbn-ink) 22%, transparent);
   --ws-mask: var(--kbn-ink);
+  --ws-agent: var(--kbn-agent);
+  --ws-red: var(--kbn-owed);
 
   --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
   --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);

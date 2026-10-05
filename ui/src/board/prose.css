@@ -1,0 +1,185 @@
+/* ── Fiber prose ─────────────────────────────────────────────────────────
+   `.kbn-detail-prose` wraps the `marked`-rendered body
+   (utils.renderMarkdown); the lede is the outcome. It fills the available
+   reader width in EB Garamond, on the vellum-and-ink palette. */
+.kbn-detail-prose {
+  display: block;
+  /* Use the reader's full width with a slim gutter around the text. */
+  max-width: none;
+  margin: 0;
+  padding: 1.5rem 1.6rem 3rem;
+  font-family: var(--font-main, 'EB Garamond', Georgia, serif);
+  /* The base size sets the reading scale; every heading below is em-relative,
+     so this one number carries the whole hierarchy. */
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  line-height: 1.62;
+  color: #2E2A26;
+}
+@container kbn-detail (max-width: 600px) {
+  .kbn-detail-prose {
+    padding: 1.2rem 1.1rem 2.5rem;
+    font-size: calc(12.2px * var(--kbn-type-scale, 1));
+  }
+}
+
+/* The lede = the fiber's outcome, set above the body as a quoted callout —
+   a left ochre rule + warm tint, a heavier cousin of the body's blockquote.
+   Upright (not italic): outcomes are often long and information-dense, so
+   the rule + offset carry the "quote" read without the readability cost of a
+   full italic paragraph. */
+.kbn-detail-lede {
+  margin: 0 0 1.7rem;
+  padding: 0.5rem 0.9rem 0.55rem 1.1rem;
+  border-left: 3px solid #C2963B;
+  border-radius: 0 3px 3px 0;
+  background: rgba(194, 150, 59, 0.07);
+  font-size: 1.04em;
+  color: #3a352e;
+}
+.kbn-detail-lede > :first-child { margin-top: 0; }
+.kbn-detail-lede > :last-child { margin-bottom: 0; }
+
+/* Block rhythm */
+.kbn-detail-prose > :first-child { margin-top: 0; }
+.kbn-detail-prose p { margin: 0 0 0.95em; }
+.kbn-detail-prose h1,
+.kbn-detail-prose h2,
+.kbn-detail-prose h3,
+.kbn-detail-prose h4 {
+  font-family: var(--font-main, 'EB Garamond', Georgia, serif);
+  font-weight: 600;
+  line-height: 1.2;
+  color: #1f1b16;
+  margin: 1.7em 0 0.5em;
+}
+.kbn-detail-prose h1 { font-size: 1.6em; font-weight: 500; font-style: italic; }
+.kbn-detail-prose h2 { font-size: 1.34em; }
+.kbn-detail-prose h3 { font-size: 1.13em; }
+.kbn-detail-prose h4 { font-size: 1em; letter-spacing: 0.01em; }
+.kbn-detail-prose h2 {
+  padding-bottom: 0.18em;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.10);
+}
+
+.kbn-detail-prose ul,
+.kbn-detail-prose ol { margin: 0 0 0.95em; padding-left: 1.4em; }
+.kbn-detail-prose li { margin-bottom: 0.35em; }
+.kbn-detail-prose li > ul,
+.kbn-detail-prose li > ol { margin: 0.35em 0 0; }
+
+.kbn-detail-prose blockquote {
+  margin: 0 0 0.95em;
+  padding-left: 1em;
+  border-left: 2px solid #C2963B;
+  font-style: italic;
+  color: #5e564b;
+}
+
+.kbn-detail-prose hr {
+  border: none;
+  border-top: 1px solid rgba(27, 22, 17, 0.14);
+  margin: 1.8em 0;
+}
+
+.kbn-detail-prose a,
+.kbn-detail-prose a.md-link {
+  color: #2f7d6f;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+.kbn-detail-prose a:hover { color: #B5453A; }
+
+/* ── [[wikilinks]] ────────────────────────────────────────────────────────
+   A body's reference to another fiber, which the workspace reader can open as
+   a document. Quiet on purpose: a body can be dense with references, and a
+   page of underlined coloured text stops being a page. So the text itself stays
+   ink — the prose colour, never web-blue — and the only mark is a hairline in
+   the board's attention pigment, cinnabar. A red rule at 1px is legible as "this
+   goes somewhere" at a glance without competing with the sentence it sits in;
+   under the cursor it firms up rather than changing character.
+
+   Only `.kbn-wikilink-live` carries the affordance: a reference resolved
+   against the fiber index. An unresolved one never reaches CSS at all —
+   installWikilinks puts it back to literal `[[…]]` text. */
+.kbn-detail-prose a.kbn-wikilink {
+  color: inherit;
+  text-decoration: none;
+  cursor: text;
+}
+.kbn-detail-prose a.kbn-wikilink-live {
+  cursor: pointer;
+  /* Cinnabar hairline — the Board's attention pigment, a clear signal for a
+     link you can follow. One pixel, offset below the descenders. The fallback
+     color keeps links legible without the Board's theme variables. */
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  /* Two thirds strength at rest so a paragraph of references still reads as a
+     paragraph; the plain hex first for anything without color-mix. */
+  text-decoration-color: rgba(188, 69, 56, 0.66);
+  text-decoration-color: color-mix(in srgb, var(--kbn-you, #BC4538) 66%, transparent);
+  transition: text-decoration-color 120ms ease, color 120ms ease;
+}
+.kbn-detail-prose a.kbn-wikilink-live:hover,
+.kbn-detail-prose a.kbn-wikilink-live:focus-visible {
+  /* Firmer, not louder: the same rule at full pigment, the ink darkened. */
+  color: #1B1611;
+  text-decoration-color: var(--kbn-you, #BC4538);
+  text-decoration-thickness: 1.5px;
+  outline: none;
+}
+
+.kbn-detail-prose code.md-inline-code {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 0.86em;
+  background: rgba(46, 42, 38, 0.07);
+  padding: 0.08em 0.34em;
+  border-radius: 3px;
+}
+.kbn-detail-prose pre.md-code-block {
+  margin: 0 0 0.95em;
+  padding: 0.9em 1.05em;
+  background: #2E2A26;
+  color: #E4DCCB;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 0.82em;
+  line-height: 1.5;
+}
+.kbn-detail-prose pre.md-code-block code {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  background: none;
+  padding: 0;
+  color: inherit;
+}
+
+.kbn-detail-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 1.1em;
+  font-size: 0.9em;
+}
+.kbn-detail-prose th,
+.kbn-detail-prose td {
+  text-align: left;
+  padding: 0.4em 0.6em;
+  border-bottom: 1px solid rgba(27, 22, 17, 0.14);
+  vertical-align: top;
+}
+.kbn-detail-prose th {
+  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-size: 0.82em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7A7368;
+  font-weight: 500;
+}
+
+.kbn-detail-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 0.4em 0;
+}
+

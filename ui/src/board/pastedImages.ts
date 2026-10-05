@@ -1,5 +1,5 @@
 /**
- * Images pasted or dropped into the detail panel's composer.
+ * Images pasted or dropped into the conversation dock's composer.
  *
  * The composer holds them as chips until a send. Then {@link uploadPastedImages}
  * writes them to the daemon that owns the fiber (`POST /api/v1/attachments`,
