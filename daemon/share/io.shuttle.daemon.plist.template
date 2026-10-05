@@ -115,6 +115,18 @@
     <key>KeepAlive</key>
     <true/>
 
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>8192</integer>
+    </dict>
+
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>8192</integer>
+    </dict>
+
     <key>ThrottleInterval</key>
     <integer>10</integer>
 

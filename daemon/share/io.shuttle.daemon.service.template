@@ -34,6 +34,7 @@ Documentation=https://cailmdaley.github.io/felt/shuttle/installation/
 
 [Service]
 Type=simple
+LimitNOFILE=8192
 WorkingDirectory=__WORKING_DIRECTORY__
 # StandardOutput=append: (below) never rotates on its own, unlike the tmux
 # respawn loop's own log (bin/shuttle-launch), which size-rotates at 64MB on
