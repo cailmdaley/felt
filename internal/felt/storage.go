@@ -1452,29 +1452,25 @@ func (s *Storage) find(scopeID, query string, mode ParseMode) (*Felt, resolution
 }
 
 // findByUIDWithMode resolves a fiber by an exact (case-insensitive) UID match.
-// The UID is frontmatter-only, so this walks the file list; frontmatterMayHoldUID
-// keeps the YAML parse to the files that could match. The caller gates it on
-// LooksLikeUID so the scan only runs for UID-shaped queries that slug
-// resolution already failed to resolve.
+// The UID is frontmatter-only, so this scans the file list (see uidMatches).
+// The caller gates it on LooksLikeUID so the scan only runs for UID-shaped
+// queries that slug resolution already failed to resolve.
 func (s *Storage) findByUIDWithMode(files []fiberFile, query string, mode ParseMode) (*Felt, bool, error) {
-	for _, file := range files {
-		meta, ok := s.readUIDCandidate(file, query)
-		if !ok {
-			continue
-		}
-		f := meta
-		if mode != ParseMetadataOnly {
-			var err error
-			if f, err = s.readPathWithMode(file.path, file.id, mode); err != nil {
-				return nil, true, err
-			}
-		}
-		if info, statErr := os.Stat(file.path); statErr == nil {
-			f.ModifiedAt = info.ModTime()
-		}
-		return f, true, nil
+	matches := s.uidMatches(files, query)
+	if len(matches) == 0 {
+		return nil, false, nil
 	}
-	return nil, false, nil
+	file, f := matches[0].file, matches[0].meta
+	if mode != ParseMetadataOnly {
+		var err error
+		if f, err = s.readPathWithMode(file.path, file.id, mode); err != nil {
+			return nil, true, err
+		}
+	}
+	if info, statErr := os.Stat(file.path); statErr == nil {
+		f.ModifiedAt = info.ModTime()
+	}
+	return f, true, nil
 }
 
 // ListMetadataByUID returns the metadata of every fiber whose UID matches uid
@@ -1485,31 +1481,68 @@ func (s *Storage) ListMetadataByUID(uid string) ([]*Felt, error) {
 	if err != nil {
 		return nil, err
 	}
-	var matches []*Felt
-	for _, file := range files {
-		if f, ok := s.readUIDCandidate(file, uid); ok {
-			f.EntryPoint = file.entryPoint
-			f.ReportPath = file.reportPath
-			matches = append(matches, f)
-		}
+	var felts []*Felt
+	for _, m := range s.uidMatches(files, uid) {
+		m.meta.EntryPoint = m.file.entryPoint
+		m.meta.ReportPath = m.file.reportPath
+		felts = append(felts, m.meta)
 	}
-	return matches, nil
+	return felts, nil
 }
 
-// readUIDCandidate parses file's metadata only when its raw frontmatter holds
-// uid, and reports whether the parsed UID matches. A store walk by UID then
-// costs one frontmatter read per fiber and one YAML parse per match, not a
-// parse per fiber.
-func (s *Storage) readUIDCandidate(file fiberFile, uid string) (*Felt, bool) {
+type uidMatch struct {
+	file fiberFile
+	meta *Felt
+}
+
+// uidScanWorkers bounds the concurrent frontmatter reads of a UID scan. The
+// scan waits on file reads, not CPU, and on a network filesystem each read
+// is a round trip.
+const uidScanWorkers = 16
+
+// uidMatches returns, in file order, every file whose parsed UID matches uid.
+// Each frontmatter is read once, concurrently, and YAML-parsed only when its
+// raw bytes hold the UID, so a scan costs one read per fiber and one parse
+// per match.
+func (s *Storage) uidMatches(files []fiberFile, uid string) []uidMatch {
+	found := make([]*Felt, len(files))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range min(uidScanWorkers, len(files)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				found[i] = s.readUIDCandidate(files[i], uid)
+			}
+		}()
+	}
+	for i := range files {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+
+	var matches []uidMatch
+	for i, meta := range found {
+		if meta != nil {
+			matches = append(matches, uidMatch{file: files[i], meta: meta})
+		}
+	}
+	return matches
+}
+
+// readUIDCandidate returns file's metadata when its UID matches uid, or nil.
+func (s *Storage) readUIDCandidate(file fiberFile, uid string) *Felt {
 	frontmatter, err := readFrontmatterFile(file.path)
 	if err != nil || !frontmatterMayHoldUID(frontmatter, uid) {
-		return nil, false
+		return nil
 	}
 	meta, err := s.readPathWithMode(file.path, file.id, ParseMetadataOnly)
 	if err != nil || !meta.MatchesUID(uid) {
-		return nil, false
+		return nil
 	}
-	return meta, true
+	return meta
 }
 
 // frontmatterMayHoldUID is a byte-level prefilter: a UID is a plain ASCII
