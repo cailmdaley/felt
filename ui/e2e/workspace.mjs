@@ -41,6 +41,20 @@ async function choose(p, label) {
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
+// The board bar: one row of view tabs, Find, the view's centre and Settings, on every view.
+const barTab = (p, view) => p.locator(`.kbn-viewtabs .kbn-viewtab[data-view="${view}"]`)
+// Hand the keyboard back to the app (no field, no frame holds it).
+const appFocus = p => p.evaluate(() => document.activeElement?.blur())
+const activeBarView = p => p.evaluate(() => document.querySelector('.kbn-viewtabs .kbn-viewtab-active')?.dataset.view ?? null)
+const barFind = p => p.locator('.kbn-viewtabs-find input')
+// Leave the reader: the phone's back chevron, or on the desktop the bar's
+// origin tab (the view the reader was opened from), which closes it back there.
+async function leave(p) {
+  const back = p.locator('.ws-return')
+  if (await back.isVisible()) await back.click()
+  else await p.locator('.kbn-viewtabs .kbn-viewtab-active').click()
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+}
 async function chooseDeskColumn(p, index) {
   const segment = p.locator(`.kbn-folio-seg[data-folio="${index}"]`)
   if (!await segment.isVisible()) return
@@ -92,15 +106,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.ok(actual.family.includes(family), `${selector}: ${actual.family}`)
   }
   await open(p); await reportReady(p)
-  await type('.ws-channel-title', 15, 'EB Garamond')
   if (device === 'desktop') {
-    for (const selector of ['.ws-return', '.ws-selected .ws-label-title']) await type(selector, 15, 'EB Garamond')
+    await type('.ws-selected .ws-label-title', 15, 'EB Garamond')
     // A map tile's face names its page in the serif, small; the head's count is data.
     await type('.ws-tab:not(.ws-tab-anchor) .ws-thumbnail-title', 11, 'EB Garamond')
     await type('.ws-selected .ws-provenance', 11, 'IBM Plex Mono')
     await type('.ws-head-position', 11, 'IBM Plex Mono')
   } else {
-    await type('.ws-thumb-title', 15, 'EB Garamond')
+    for (const selector of ['.ws-channel-title', '.ws-thumb-title']) await type(selector, 15, 'EB Garamond')
     await type('.ws-thumb-arrival', 11, 'IBM Plex Mono')
   }
   await choose(p, 'Constitution')
@@ -240,7 +253,7 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   await p.setViewportSize({ width: 1250, height: 760 })
   assert.ok(await iframe.evaluate(f => f === window.__reportFrame && f.contentWindow === window.__reportWindow), 'browser resize must retain the iframe')
   assert.equal(await inner.evaluate(() => window.__sentinel), 'kept')
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   await open(p)
   assert.ok(await iframe.evaluate(f => f === window.__reportFrame && f.contentWindow === window.__reportWindow))
   assert.equal(await inner.evaluate(() => document.querySelector('#report-identity').textContent), identity)
@@ -361,7 +374,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.ok(await audio.evaluate(audio => audio === window.__inlineAudio && audio.paused), 'selection uses the same audio page element and pauses inline playback')
   await choose(p, 'calibration-report')
   await inner.getByRole('button', { name: 'Play tone.mp3', exact: true }).click()
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.mp3"] audio').paused)
 }, viewport)
 
@@ -377,7 +390,7 @@ test('Ambiguous code basenames stay unlinked while an explicit path still select
       return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } })
     }
   })
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   await open(p); await reportReady(p)
   const inner = await reportDocument(p)
   await inner.waitForFunction(() => ![...document.querySelectorAll('a.ws-channel-reference')].some(link => link.textContent === 'tone.mp3'))
@@ -519,7 +532,7 @@ test('Embedded HTML media pauses on recede and park without reloading or auto-re
   await choose(p, 'calibration-report')
   assert.ok(await inner.evaluate(position => document.querySelector('audio') === window.__mediaIdentity && document.querySelector('audio').paused && document.querySelector('audio').currentTime === position, position))
   await inner.evaluate(() => document.querySelector('audio').play())
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   await pollReport(p, () => document.querySelector('audio').paused)
   await open(p)
   assert.ok(await inner.evaluate(() => document.querySelector('audio') === window.__mediaIdentity && document.querySelector('audio').paused))
@@ -579,42 +592,105 @@ test('Late nested report layout retains its restore and then accepts reader scro
   assert.equal(await saved(), 220)
 })
 
-test('Desk-opened channel reload and Back restore its Desk return control', async p => {
+test('Desk-opened channel reload and Back restore its Desk origin in the bar', async p => {
+  const deskOrigin = () => poll(p, () => document.querySelector('.kbn-reader-open') && document.querySelector('.kbn-viewtabs .kbn-viewtab-active')?.dataset.view === 'desk')
   await open(p); await reportReady(p)
   await choose(p, 'brief.md')
   await p.reload()
   await tab(p, 'brief.md').waitFor()
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).waitFor()
+  await deskOrigin()
   assert.ok(await p.locator('.kbn-modal').count(), 'Desk stays behind the reader')
-  await p.locator('.ws-channel-title').focus()
+  await appFocus(p)
   await p.keyboard.press('j')
+  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent !== 'Calibrate the shear response')
   await p.goBack()
   await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Calibrate the shear response')
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).waitFor()
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await deskOrigin()
+  await leave(p)
+  assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
+  assert.equal(await activeBarView(p), 'desk', 'the origin tab closes the reader back to the Desk')
+})
+
+// The bar stands in one place on every view: its tabs, Find and Settings
+// never move between the Desk, the reader, the Board and the Chronicle.
+test('The board bar holds its tabs, Find and Settings to the pixel on every view and over the reader', async p => {
+  const bar = () => p.evaluate(() => {
+    const box = el => { const r = el.getBoundingClientRect(); return [r.x, r.y, r.width, r.height].map(v => +v.toFixed(2)) }
+    return { tabs: [...document.querySelectorAll('.kbn-viewtabs .kbn-viewtab')].map(box), find: box(document.querySelector('.kbn-viewtabs-find')),
+      gear: box(document.querySelector('.kbn-viewtabs-settings')) }
+  })
+  const desk = await bar()
+  assert.equal(desk.tabs.length, 3)
+  await open(p); await reportReady(p)
+  await p.waitForTimeout(350)
+  assert.deepEqual(await bar(), desk, 'over the reader')
+  await leave(p)
+  await barTab(p, 'shelf').click()
+  await p.locator('.ws-overview-folio').first().waitFor()
+  await p.waitForTimeout(350)
+  assert.deepEqual(await bar(), desk, 'on the Board')
+  await barTab(p, 'chronicle').click()
+  await p.locator('.chr-name').first().waitFor()
+  await p.waitForTimeout(350)
+  assert.deepEqual(await bar(), desk, 'on the Chronicle')
+})
+
+// While the reader is open the bar marks the view it came from: that tab (or
+// its key) closes the reader back to it; another tab switches and closes.
+const origins = {
+  desk: { other: 'chronicle', open: async p => { await barTab(p, 'desk').click(); await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click() } },
+  shelf: { other: 'desk', open: async p => { await barTab(p, 'shelf').click(); await p.locator('.ws-overview-folio').filter({ hasText: name }).click() } },
+  chronicle: { other: 'shelf', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
+}
+for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(`The bar marks the reader's origin (${origin}): its tab and key close back to it, another tab switches and closes`, async p => {
+  const state = () => p.evaluate(() => ({ open: !!document.querySelector('.kbn-reader-open'), view: document.querySelector('.kbn-viewtabs .kbn-viewtab-active')?.dataset.view,
+    selected: [...document.querySelectorAll('.kbn-viewtabs .kbn-viewtab[aria-selected="true"]')].map(t => t.dataset.view) }))
+  const opened = async () => {
+    await openFrom(p)
+    await p.locator('.ws-tab[aria-selected="true"]').waitFor()
+    await poll(p, () => !!document.querySelector('.kbn-reader-open'))
+    assert.deepEqual(await state(), { open: true, view: origin, selected: [origin] }, `the bar marks ${origin} as the origin`)
+  }
+  await opened()
+  await barTab(p, origin).click()
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.deepEqual(await state(), { open: false, view: origin, selected: [origin] }, 'the origin tab closes the reader back to its view')
+  await opened()
+  const key = (await barTab(p, origin).locator('.kbn-viewtab-hotkey').textContent()).trim()
+  await appFocus(p); await p.keyboard.press(key)
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.deepEqual(await state(), { open: false, view: origin, selected: [origin] }, `the origin's key ${key} closes the reader back to its view`)
+  await opened()
+  await barTab(p, other).click()
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.deepEqual(await state(), { open: false, view: other, selected: [other] }, `another tab (${other}) switches view and closes the reader`)
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
 })
 
-test('The map in the running head indexes pages as legible tiles, captions a hover, and follows a re-send to the front', async p => {
+test('The map in the board bar indexes pages as legible tiles, captions a hover, and follows a re-send to the front', async p => {
   await open(p); await reportReady(p)
-  const film = p.locator('.ws-navbar [data-part="page-band"] .ws-tabs')
-  const head = await p.locator('.ws-navbar').boundingBox(), page = await selected(p).boundingBox()
-  assert.ok(head.height <= 60, `the head is one row: ${head.height}`)
+  const film = p.locator('.kbn-viewtabs-reader > [data-part="page-band"].ws-head-index > .ws-tabs')
+  const bar = await p.locator('.kbn-viewtabs').boundingBox(), page = await selected(p).boundingBox()
+  assert.ok(bar.height <= 60, `the bar is one row: ${bar.height}`)
+  assert.equal(await p.locator('.ws-navbar').isVisible(), false, 'the desktop reader draws no head of its own')
   assert.ok(page.y <= 70, `the page starts no lower than 70 px: ${page.y}`)
   assert.ok(innerHeightGap(page, p.viewportSize()) <= 30, `the page runs to the foot, less the gutter: ${JSON.stringify(page)}`)
   assert.equal(await p.locator('[data-part="chrome-plate"]').count(), 0, 'no chrome plates')
-  assert.equal(await p.locator('.ws-navbar [role="tablist"]').count(), 1, 'the head carries the one list of pages')
-  assert.equal(await p.locator('.ws-stage-column [role="tablist"]').count(), 0, 'nothing beneath the stage lists the pages')
-  // The tiles sit between the lead and the trail, sharing the head's row, and the count joins the trail.
+  assert.equal(await p.locator('.kbn-viewtabs-reader [role="tablist"]').count(), 1, 'the bar carries the one list of pages')
+  assert.equal(await p.locator('.ws-reader [role="tablist"]').count(), 0, 'nothing in the reader lists the pages')
+  // The tiles sit between Find and the count, hang from the bar level with its tabs, and clear the pages below.
   const geometry = await p.evaluate(() => {
     const rect = sel => document.querySelector(sel).getBoundingClientRect()
-    const lead = rect('.ws-nav-lead'), strip = rect('.ws-navbar .ws-tabs'), trail = rect('.ws-nav-trail'), title = rect('.ws-channel-title')
-    return { lead: lead.right, left: strip.left, right: strip.right, trail: trail.left, stripMiddle: strip.top + strip.height / 2, titleMiddle: title.top + title.height / 2,
-      count: !!document.querySelector('.ws-nav-trail .ws-head-position'), overflow: getComputedStyle(document.querySelector('.ws-navbar .ws-tabs')).flexWrap }
+    const find = rect('.kbn-viewtabs-find'), strip = rect('.kbn-viewtabs-reader .ws-tabs'), count = rect('.kbn-viewtabs-position .ws-head-position'), gear = rect('.kbn-viewtabs-settings')
+    const viewtab = rect('.kbn-viewtab'), tile = rect('.ws-tab:not([aria-selected="true"])'), page = rect('.ws-page.ws-selected')
+    return { find: find.right, left: strip.left, right: strip.right, count: count.left, countRight: count.right, gear: gear.left, tileTop: tile.top, tabTop: viewtab.top, tileBottom: tile.bottom, pageTop: page.top,
+      tile: [tile.width, tile.height], overflow: getComputedStyle(document.querySelector('.kbn-viewtabs-reader .ws-tabs')).flexWrap }
   })
-  assert.ok(geometry.left >= geometry.lead && geometry.right <= geometry.trail, `the index stays between the lead and the trail: ${JSON.stringify(geometry)}`)
-  assert.ok(Math.abs(geometry.stripMiddle - geometry.titleMiddle) <= 1, `the tiles share the head's row: ${JSON.stringify(geometry)}`)
-  assert.ok(geometry.count && geometry.overflow === 'nowrap', `the count is in the trail and the tiles never wrap: ${JSON.stringify(geometry)}`)
+  assert.ok(geometry.left >= geometry.find && geometry.right <= geometry.count && geometry.countRight <= geometry.gear, `the index stays between Find and the count, and the count before Settings: ${JSON.stringify(geometry)}`)
+  assert.ok(Math.abs(geometry.tileTop - geometry.tabTop) <= 3, `the tiles hang level with the bar's tabs: ${JSON.stringify(geometry)}`)
+  assert.ok(geometry.tileBottom <= geometry.pageTop, `the pages start below the tiles: ${JSON.stringify(geometry)}`)
+  assert.deepEqual(geometry.tile, [64, 44], 'a tile is 64 by 44')
+  assert.equal(geometry.overflow, 'nowrap', 'the tiles never wrap')
   // Every tile has a face at once: a title in the serif, or the constitution's §.
   const faces = await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => ({
     kind: t.dataset.kind, title: t.querySelector('.ws-thumbnail-title')?.textContent ?? '', mark: t.querySelector('.ws-thumbnail-kind')?.textContent ?? '',
@@ -639,8 +715,8 @@ test('The map in the running head indexes pages as legible tiles, captions a hov
   await poll(p, () => document.querySelector('.ws-tab:last-child')?.getAttribute('aria-selected') === 'true')
   await p.waitForTimeout(350)
   const last = await p.evaluate(() => {
-    const strip = document.querySelector('.ws-navbar .ws-tabs').getBoundingClientRect(), tile = document.querySelector('.ws-tab[aria-selected="true"]').getBoundingClientRect()
-    return { inside: tile.left >= strip.left && tile.right <= strip.right, scrolled: document.querySelector('.ws-navbar .ws-tabs').scrollLeft > 0 }
+    const strip = document.querySelector('.kbn-viewtabs-reader .ws-tabs').getBoundingClientRect(), tile = document.querySelector('.ws-tab[aria-selected="true"]').getBoundingClientRect()
+    return { inside: tile.left >= strip.left && tile.right <= strip.right, scrolled: document.querySelector('.kbn-viewtabs-reader .ws-tabs').scrollLeft > 0 }
   })
   assert.deepEqual(last, { inside: true, scrolled: true }, 'the last tile is in view')
   await p.keyboard.press('Home')
@@ -676,8 +752,11 @@ test('The map in the running head indexes pages as legible tiles, captions a hov
   await report(p).evaluate(f => { window.__filmReport = f.contentWindow })
   const before = await film.boundingBox()
   await p.locator('.ws-selected .ws-expand-button').click()
-  assert.deepEqual(await film.boundingBox(), before, 'expanding leaves the map as it is')
-  await p.locator('.ws-selected .ws-expand-button').click()
+  await poll(p, () => getComputedStyle(document.querySelector('.kbn-viewtabs')).visibility === 'hidden')
+  assert.ok(await p.locator('.kbn-modal').evaluate(el => el.classList.contains('kbn-reader-expanded')), 'expanding takes the whole window, the bar and its map with it')
+  await p.keyboard.press('Escape')
+  await poll(p, () => getComputedStyle(document.querySelector('.kbn-viewtabs')).visibility === 'visible')
+  assert.deepEqual(await film.boundingBox(), before, 'the map returns where it was')
   await p.evaluate(() => {
     const original = window.fetch
     window.fetch = async (...args) => {
@@ -692,7 +771,7 @@ test('The map in the running head indexes pages as legible tiles, captions a hov
     }
   })
   const sendOrder = await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label')))
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   await open(p)
   await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
@@ -762,7 +841,7 @@ for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps 
   const geometry = async () => p.evaluate(() => {
     const rect = el => el.getBoundingClientRect()
     const page = rect(document.querySelector('.ws-page.ws-selected')), sidebar = rect(document.querySelector('.ws-sidebar'))
-    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage')), strip = rect(document.querySelector('.ws-navbar .ws-tabs'))
+    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage')), strip = rect(document.querySelector('.kbn-viewtabs-reader .ws-tabs'))
     return { gutter: page.left - sidebar.right, right: stage.right - page.right, page: page.left + page.width / 2, tile: tile.left + tile.width / 2,
       clamped: tile.right <= strip.right && strip.right - tile.right <= 48,
       ground: getComputedStyle(document.querySelector('.ws-sidebar')).backgroundColor }
@@ -811,7 +890,7 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
   const tabs = await p.evaluate(() => window.__receiptAnimations.filter(a => a.tab))
   assert.equal(tabs.length, reducedMotion === 'reduce' ? 0 : 1)
   if (tabs.length) { assert.equal(tabs[0].options.duration, 280); assert.equal(tabs[0].options.easing, 'ease') }
-  await p.locator('.ws-return').click()
+  await leave(p)
   await p.locator('[data-view="shelf"]').click()
   await poll(p, () => document.querySelector('.ws-overview-ribbon [title*="brief.md"]'))
   if (reducedMotion !== 'reduce') await poll(p, () => window.__receiptAnimations.some(a => !a.tab))
@@ -824,31 +903,49 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
   }
 }, undefined, 'false', reducedMotion)
 
-test('j/k step constitutions in Board folio order', async p => {
-  await p.locator('[data-view="shelf"]').click()
+test('j/k step constitutions in the sidebar order from a Board-opened reader, the sidebar shut', async p => {
+  await barTab(p, 'shelf').click()
+  // Read a draft first, so the sidebar's last group has a member.
+  await p.locator('.ws-overview-folio').filter({ hasText: 'Weekly shear summary' }).click()
+  await p.locator('.ws-tab[aria-selected="true"]').waitFor()
+  assert.equal(await activeBarView(p), 'shelf', 'the bar marks the Board as the origin')
+  await leave(p)
+  assert.equal(await activeBarView(p), 'shelf', 'the origin tab closes the reader back to the Board')
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await reportReady(p)
-  await p.locator('.ws-channel-title').click()
-  const rows = p.locator('.ws-switcher .ws-channel-row')
+  await appFocus(p)
+  await p.keyboard.press('s')
+  const sidebar = p.locator('.ws-sidebar')
+  await sidebar.waitFor()
+  // One grouped list wherever the reader opens: review, then work in flight, then what was read lately.
+  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Awaiting review', 'Working', 'Read lately'])
+  const rows = sidebar.locator('.ws-channel-row')
   const names = await rows.locator('.ws-channel-name').allTextContents()
-  assert.ok(names.length >= 2)
+  assert.equal(names.at(-1), 'Weekly shear summary', 'what was read lately closes the list')
   await rows.first().click()
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[0])
+  await p.keyboard.press('s')
+  await poll(p, () => !document.querySelector('.ws-sidebar')?.checkVisibility())
   await p.keyboard.press('j')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
+  await p.keyboard.press('j')
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[2])
   await p.keyboard.press('k')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[0])
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
 })
 
 test('Wide reader takes the Desk column as cards, steps visibly, and returns selection to the current card', async p => {
   const column = p.locator('[data-column="awaitingReview"]')
-  const names = await column.locator('.kbn-card > .kbn-card-header .kbn-card-name').allTextContents()
+  const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-header .kbn-card-name`).allTextContents()
+  const review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
+  const names = [...review, ...flight]
   await open(p)
   const sidebar = p.locator('.ws-sidebar').first()
   assert.ok(await sidebar.isVisible(), 'wide desktop defaults open')
-  assert.deepEqual(await sidebar.locator('.ws-channel-name').allTextContents(), names)
+  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Awaiting review', 'Working'], 'the sidebar groups review and work in flight')
+  assert.deepEqual(await sidebar.locator('.ws-channel-name').allTextContents(), names, 'in Desk order')
   assert.equal(await sidebar.locator('.kbn-card').count(), names.length, 'sidebar uses the Desk paper renderer')
-  assert.equal(await column.locator('.ws-sidebar-source').count(), names.length)
+  assert.equal(await column.locator('.ws-sidebar-source').count(), review.length, "the opened card's column flies its cards into their places")
   const raised = await p.locator('.kbn-desk').evaluate(e => ({ transform: getComputedStyle(e).transform, filter: getComputedStyle(e).filter }))
   assert.match(raised.transform, /0\.94/)
   assert.match(raised.filter, /saturate\(0\.25\)/)
@@ -881,14 +978,14 @@ test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p =
   await p.locator('.ws-sidebar-toggle').click()
   await p.waitForTimeout(330)
   assert.ok(await p.locator('.ws-sidebar-source').count())
-  await p.locator('.ws-return').click()
+  await leave(p)
   await p.waitForTimeout(330)
   assert.equal(await p.locator('.ws-sidebar-source,.ws-card-travelling,.ws-sidebar-flight').count(), 0)
 }, undefined, null, 'no-preference')
 
 test('Verdicts live on the constitution: leading plates in review, the composer row in flight; keys reach them from any page', async p => {
   await open(p)
-  assert.equal(await p.locator('.ws-navbar :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the head carries no verdicts')
+  assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'neither bar carries verdicts')
   await choose(p, 'Constitution')
   const lead = selected(p).locator('.ws-prose-header .ws-fiber-acts .kbn-ctl-verdict')
   assert.equal(await lead.getAttribute('aria-label'), 'Verdict')
@@ -896,13 +993,13 @@ test('Verdicts live on the constitution: leading plates in review, the composer 
   assert.ok(await lead.locator('.kbn-ctl-temper').evaluate(el => getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'), 'awaiting review, the pair is plated on the status line')
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  await p.locator('.ws-channel-title').focus(); await p.keyboard.press('t')
+  await appFocus(p); await p.keyboard.press('t')
   assert.equal(await p.locator('.ws-verdict-toast').count(), 1, 't still works from a delivery')
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
   await p.clock.runFor(6000)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
   // In flight the pair rides the composer's row, after the field, quieter than its send.
-  await p.locator('.ws-return').click()
+  await leave(p)
   await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
@@ -1014,7 +1111,7 @@ test('Phone fiber page: the folded settings line ends in an ellipsis', async p =
 
 test('Landscape phone keeps a one-row top bar while the fiber awaits review', async p => {
   await open(p)
-  assert.equal(await p.locator('.ws-navbar :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the head carries no verdicts')
+  assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'neither bar carries verdicts')
   const bar = await p.locator('.ws-navbar').boundingBox()
   const title = await p.locator('.ws-channel-title').boundingBox()
   assert.ok(bar.height <= title.height + 12, `one row: navbar ${bar.height}px for a ${title.height}px title`)
@@ -1074,7 +1171,7 @@ for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is
 test('Key discard then act-zone Temper replaces the pending verdict with one delayed write', async p => {
   await open(p); await reportReady(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
-  await p.locator('.ws-channel-title').focus(); await p.keyboard.press('x')
+  await appFocus(p); await p.keyboard.press('x')
   await p.clock.runFor(3000)
   await choose(p, 'Constitution')
   await selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict').getByRole('button', { name: 'Temper', exact: true }).click()
@@ -1113,7 +1210,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   assert.ok(await composer.evaluate(el => el === document.activeElement))
   await composer.press('t'); await composer.press('x')
   assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
-  await p.locator('.ws-channel-title').focus()
+  await appFocus(p)
   for (const init of [{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }]) {
     await p.evaluate(init => document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', bubbles: true, ...init })), init)
   }
@@ -1131,7 +1228,7 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   await p.clock.runFor(6000)
   assert.equal((await posts()).length, 0)
   await p.keyboard.press('x')
-  await p.locator('.ws-return').click()
+  await leave(p)
   await p.clock.runFor(5999)
   assert.equal((await posts()).length, 0)
   await p.clock.runFor(1)
@@ -1148,7 +1245,7 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
   await p.locator('.ws-verdict-toast').waitFor()
   await p.keyboard.press('z')
   await poll(p, () => !document.querySelector('.ws-verdict-toast'))
-  await p.locator('.ws-return').click()
+  await leave(p)
   await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
@@ -1165,9 +1262,9 @@ test('Pending verdicts on two fibers commit independently', async p => {
   await open(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await p.keyboard.press('t')
-  await p.locator('.ws-return').click()
+  await leave(p)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Mask validation notes' }).click()
-  await p.locator('.ws-channel-title').waitFor()
+  await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Mask validation notes')
   await p.keyboard.press('x')
   assert.equal(await p.locator('.ws-verdict-toast').count(), 2)
   await p.clock.runFor(6000)
@@ -1181,7 +1278,7 @@ test('Conversation c (and its dot alias) uses the pill destination in reader and
   await p.keyboard.press('c'); await opened(1)
   assert.ok(!await p.locator('.ws-sidebar').isVisible(), 'c no longer toggles the sidebar')
   await p.keyboard.press('.'); await opened(2)
-  await p.locator('.ws-return').click()
+  await leave(p)
   await p.keyboard.press('c'); await opened(3)
   await p.keyboard.press('.'); await opened(4)
 })
@@ -1266,7 +1363,7 @@ test('Overview document thumbnails open the exact receipt, and seen constitution
   const key = await thumbnail.getAttribute('data-key')
   await thumbnail.click()
   await poll(p, key => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key') === key, key)
-  await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
+  await leave(p)
   assert.equal(await row.count(), 0, 'opening the constitution acknowledges its change row')
   const folio = p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]')
   assert.ok(await folio.evaluate(el => el.classList.contains('ws-overview-seen')))
@@ -1279,7 +1376,9 @@ test('Overview lenses, declared-title Find, exact receipt ribbon route and scrol
     assert.equal(await radio.getAttribute('aria-checked'), 'true')
   }
   const ribbon = await revealLatestFiles(p)
-  const find = p.getByRole('searchbox', { name: 'Find work or files', exact: true })
+  // On the desktop the bar's Find filters the sheet; the sheet's own field is the phone's.
+  assert.equal(await p.getByRole('searchbox', { name: 'Find work or files', exact: true }).isVisible(), false)
+  const find = barFind(p)
   await find.fill('Calibrate')
   assert.equal(await p.locator('.ws-overview-folio:visible').count(), 1)
   await poll(p, () => document.querySelector('.ws-overview-ribbon')?.textContent?.includes('Calibration report'))
@@ -1293,7 +1392,7 @@ test('Overview lenses, declared-title Find, exact receipt ribbon route and scrol
   assert.ok(await p.evaluate(() => window.__overviewScroll > 0), 'overview must actually scroll')
   await receipt.click()
   assert.equal(await tab(p, 'brief.md').getAttribute('aria-selected'), 'true')
-  await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
+  await leave(p)
   assert.ok(await p.locator('.ws-overview').evaluate(e => e.scrollTop === window.__overviewScroll))
 }, { width: 1440, height: 600 })
 
@@ -1388,7 +1487,7 @@ for (const format of ['mp3', 'wav']) test(`Audio ${format} plays, progresses, pa
   await choose(p, `tone.${format}`); assert.ok(await audio.evaluate(a => a.paused && a === window.__audio && a.currentTime === window.__audioPausedTime))
   assert.equal(await p.locator('audio').evaluateAll(as => as.filter(a => !a.paused).length), 0)
   await audio.evaluate(async a => { a.currentTime = 0; await a.play() })
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   assert.ok(await audio.evaluate(a => a.paused))
   await audio.evaluate(a => { window.__audioParkedTime = a.currentTime })
   await open(p, `tone.${format}`)
@@ -1468,7 +1567,7 @@ test('Native PDF renderer loads fixture; owner route and first-page preview', as
   await choose(p, 'remote-summary.pdf')
   await poll(p, () => window.__harness.nativeFiles.rewrites.some(r => r.owner === 'basalt-login-02' && r.path.endsWith('remote-summary.pdf')))
   assert.ok((await records(p)).some(r => r.url.includes('origin=basalt-login-02') && r.url.includes('remote-summary.pdf')))
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   await p.locator('[data-view="shelf"]').click()
   await revealLatestFiles(p)
   await poll(p, () => [...document.querySelectorAll('.ws-overview iframe')].some(f => f.src.includes('#page=1')))
@@ -1484,9 +1583,10 @@ test('Remote worker conversation records attach handler without launching a term
   assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
 })
 
-test('The head worker control opens the same remote worker as the pill', async p => {
+test("The fiber page's worker pill opens the same remote worker as c", async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  await p.locator('.ws-navbar .ws-head-worker .kbn-card-worker').click()
+  await choose(p, 'Constitution')
+  await selected(p).locator('.ws-prose-header .ws-fiber-acts .kbn-card-worker').click()
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')
@@ -1524,7 +1624,7 @@ test('Phone overview single column, reader sheet, footer stepping and Back', asy
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'false')
   await p.getByRole('button', { name: 'Previous document', exact: true }).click()
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
-  await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
+  await leave(p)
   assert.ok(await p.getByRole('searchbox', { name: 'Find work or files', exact: true }).isVisible())
 }, { width: 390, height: 844 })
 
@@ -1600,7 +1700,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     const grabber = await sheet.getByRole('button', { name: 'Close pages' }).boundingBox()
     await swipe(p, grabber.x + grabber.width / 2, grabber.y + 20, grabber.x + grabber.width / 2, grabber.y + 90)
     await poll(p, () => !document.querySelector('.ws-page-sheet').open)
-    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await leave(p)
     await poll(p, () => document.querySelector('.ws-reader')?.inert)
   }, viewport)
 }
@@ -1706,11 +1806,11 @@ async function swipe(p, x, y, endX, endY, cancel = false) {
   await cdp.detach()
 }
 
-test('Reader s and Cmd-Backslash toggle sidebar; slash focuses Find, filters filenames and Enter selects', async p => {
+test('Reader s and Cmd-Backslash toggle sidebar; slash focuses the bar Find, which filters the sidebar in place, and Enter selects', async p => {
   await open(p)
-  const title = p.locator('.ws-channel-title')
   const sidebar = p.locator('.ws-sidebar')
-  await title.focus()
+  const find = barFind(p)
+  await appFocus(p)
   await p.keyboard.press('s')
   assert.ok(await sidebar.isVisible())
   for (const page of await p.locator('.ws-page.ws-receded.ws-before').all()) {
@@ -1718,23 +1818,26 @@ test('Reader s and Cmd-Backslash toggle sidebar; slash focuses Find, filters fil
   }
   assert.notEqual(await p.locator('.ws-page.ws-receded.ws-after').first().evaluate(el => getComputedStyle(el).maskImage), 'none', 'right neighbour keeps its edge fade')
   assert.equal(await p.getByRole('button', { name: 'Hide constitutions', exact: true }).getAttribute('aria-expanded'), 'true')
-  await title.focus()
+  assert.equal(await sidebar.locator('input').count(), 0, 'the sidebar has no find field of its own')
+  await appFocus(p)
   await p.keyboard.press('/')
-  const find = sidebar.getByRole('searchbox', { name: 'Find a constitution', exact: true })
-  assert.ok(await find.evaluate(e => e === document.activeElement))
+  assert.ok(await find.evaluate(e => e === document.activeElement), '/ focuses the bar Find')
   for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report', 'TONE.MP3']) {
     await find.fill(query)
-    if (!query.includes('/')) assert.equal(await sidebar.locator('.ws-channel-row').count(), 1, `sidebar matches ${query}`)
-    assert.ok((await sidebar.locator('.ws-channel-name').allTextContents()).includes(name), `sidebar includes the constitution matching ${query}`)
+    if (!query.includes('/')) assert.equal(await sidebar.locator('.ws-channel-row:visible').count(), 1, `sidebar matches ${query}`)
+    assert.ok((await sidebar.locator('.ws-channel-row:visible .ws-channel-name').allTextContents()).includes(name), `sidebar includes the constitution matching ${query}`)
+    assert.equal(await p.locator('.ws-switcher').count(), 0, 'with the sidebar open, Find filters it in place')
   }
   await find.press('Enter')
-  assert.equal(await p.locator('.ws-channel-title').innerText(), name)
+  assert.equal(await p.locator('.ws-channel-title').textContent(), name)
   assert.ok(await sidebar.isVisible(), 'selection keeps the sidebar open')
-  await title.focus(); await p.keyboard.press('/')
+  await appFocus(p); await p.keyboard.press('/')
   assert.ok(await find.evaluate(e => e === document.activeElement))
   await find.press('Escape')
-  assert.ok(await sidebar.isVisible(), 'Escape from sidebar Find does not return to Desk')
-  assert.ok(await title.evaluate(e => e === document.activeElement), 'Escape restores Find opener focus')
+  assert.ok(await sidebar.isVisible(), 'Escape from Find does not leave the reader or hide the sidebar')
+  assert.ok(await p.locator('.kbn-modal').evaluate(el => el.classList.contains('kbn-reader-open')))
+  assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'one Escape clears and blurs Find')
+  assert.equal(await sidebar.locator('.ws-channel-row:visible').count(), await sidebar.locator('.ws-channel-row').count(), 'the cleared query shows every row again')
   await p.keyboard.press('s')
   assert.equal(await sidebar.isVisible(), false)
   await p.keyboard.press('Meta+Backslash')
@@ -1743,50 +1846,57 @@ test('Reader s and Cmd-Backslash toggle sidebar; slash focuses Find, filters fil
   assert.equal(await sidebar.isVisible(), false)
 })
 
-test('Reader slash opens constitution picker; Escape restores focus and Enter chooses file match', async p => {
+test('Reader slash with the sidebar shut hangs the constitution list under the bar Find; Escape puts it away and Enter chooses a file match', async p => {
   await open(p)
-  const title = p.locator('.ws-channel-title')
-  await title.focus(); await p.keyboard.press('/')
-  const picker = p.locator('.ws-switcher')
-  // Both search and text inputs are valid native Find fields; focus is the contract.
-  const input = picker.locator('input[aria-label="Find a constitution"]')
-  await input.waitFor()
-  assert.ok(await input.evaluate(e => e === document.activeElement))
-  await input.fill('remote-summary.pdf')
+  const find = barFind(p)
+  await appFocus(p); await p.keyboard.press('/')
+  const picker = p.locator('.ws-menu.ws-switcher')
+  assert.ok(await find.evaluate(e => e === document.activeElement))
+  await find.fill('remote-summary.pdf')
+  await picker.waitFor()
+  assert.equal(await picker.locator('input').count(), 0, 'the list holds rows only; the field is the bar\'s')
+  const [list, field] = await Promise.all([picker.boundingBox(), find.boundingBox()])
+  assert.ok(list.y >= field.y + field.height - 1 && Math.abs(list.y - (field.y + field.height)) <= 12, `the list hangs under the field: ${JSON.stringify({ list, field })}`)
   assert.equal(await picker.locator('.ws-channel-row').count(), 1)
   assert.equal(await picker.locator('.ws-channel-name').innerText(), name)
-  await input.press('Escape')
+  await find.press('Escape')
   assert.equal(await picker.count(), 0)
-  assert.ok(await title.evaluate(e => e === document.activeElement))
-  assert.equal(await p.locator('.ws-sidebar').isVisible(), false)
+  assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'one Escape closes the list, clears and blurs Find')
+  await p.keyboard.press('s')
+  await poll(p, () => document.querySelector('.ws-sidebar')?.checkVisibility())
+  assert.equal(await find.inputValue(), '', 'bare keys act on the app again: s toggles the sidebar, not the field')
+  await p.keyboard.press('s')
+  await poll(p, () => !document.querySelector('.ws-sidebar')?.checkVisibility())
   await p.keyboard.press('/')
-  await input.fill('transfer.txt')
+  await find.fill('transfer.txt')
   assert.equal(await picker.locator('.ws-channel-row').count(), 1)
   assert.equal(await picker.locator('.ws-channel-name').innerText(), 'Remote covariance review')
-  await input.press('Enter')
+  await find.press('Enter')
   await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Remote covariance review')
   assert.equal(await picker.count(), 0)
 })
 
-test('Sidebar current card follows Board folio j/k, Alt navigation and browser Back immediately', async p => {
+test('Sidebar current card follows j/k, Alt navigation and browser Back immediately in a Board-opened reader', async p => {
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await reportReady(p)
-  await p.locator('.ws-channel-title').focus()
+  await appFocus(p)
   await p.keyboard.press('s')
   const sidebar = p.locator('.ws-sidebar')
   const rows = sidebar.locator('.ws-channel-row')
   assert.ok(await sidebar.isVisible())
   const names = await rows.locator('.ws-channel-name').allTextContents()
-  assert.ok(names.length >= 4, 'navigation exercises several constitutions')
+  assert.ok(names.length >= 3, 'navigation exercises several constitutions')
   await rows.first().click()
   await poll(p, first => document.querySelector('.ws-channel-title')?.textContent === first, names[0])
   await assertCurrent(names[0])
   let index = 0
-  for (const [key, delta] of [['j', 1], ['j', 1], ['j', 1], ['k', -1], ['k', -1], ['Alt+ArrowDown', 1], ['Alt+ArrowUp', -1]]) {
+  for (const [key, delta] of [['j', 1], ['j', 1], ['k', -1], ['k', -1], ['Alt+ArrowDown', 1], ['Alt+ArrowDown', 1], ['Alt+ArrowUp', -1]]) {
     await p.keyboard.press(key)
     index += delta
     await assertCurrent(names[index])
+    // A keyboard switch hands focus to the selected tile in the bar's map.
+    if (key.startsWith('Alt+')) await poll(p, () => document.activeElement?.matches('.kbn-viewtabs-reader .ws-tab[aria-selected="true"]'))
   }
   await p.goBack()
   await poll(p, previous => document.querySelector('.ws-channel-title')?.textContent === previous, names[index + 1])
@@ -1822,29 +1932,37 @@ test('Sidebar current card follows Board folio j/k, Alt navigation and browser B
   }
 }, { width: 1440, height: 460 })
 
-test('Desk slash opens the same constitution picker without opening reader; Escape and Enter work', async p => {
-  const opener = p.locator('[data-view="shelf"]')
-  await opener.focus(); await p.keyboard.press('/')
+for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Chronicle'} slash hangs the constitution list under the bar Find without opening the reader; Escape and Enter work`, async p => {
+  if (view !== 'desk') { await barTab(p, view).click(); await poll(p, view => document.querySelector('.kbn-viewtab-active')?.dataset.view === view, view) }
+  const find = barFind(p)
+  await appFocus(p); await p.keyboard.press('/')
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0, 'Find does not enter the reader')
-  const picker = p.locator('.ws-switcher')
-  const input = picker.locator('input[aria-label="Find a constitution"]')
-  await input.waitFor()
-  assert.ok(await input.evaluate(e => e === document.activeElement))
+  assert.ok(await find.evaluate(e => e === document.activeElement))
+  const picker = p.locator('.ws-menu.ws-switcher')
   for (const query of ['Calibrate the shear response', 'research/workspace/calibration-report', 'tone.mp3']) {
-    await input.fill(query)
-    if (!query.includes('/')) assert.equal(await picker.locator('.ws-channel-row').count(), 1, `Desk picker matches ${query}`)
-    assert.ok((await picker.locator('.ws-channel-name').allTextContents()).includes(name), `Desk picker includes the constitution matching ${query}`)
+    await find.fill(query)
+    await picker.waitFor()
+    if (!query.includes('/')) assert.equal(await picker.locator('.ws-channel-row').count(), 1, `the list matches ${query}`)
+    assert.ok((await picker.locator('.ws-channel-name').allTextContents()).includes(name), `the list includes the constitution matching ${query}`)
   }
-  await input.press('Escape')
+  assert.equal(await picker.locator('input').count(), 0, 'the bar holds the field')
+  await find.press('Escape')
   assert.equal(await picker.count(), 0)
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
-  assert.ok(await opener.evaluate(e => e === document.activeElement), 'Desk Find restores opener focus')
+  assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'one Escape closes the list, clears and blurs Find')
+  assert.equal(await activeBarView(p), view)
+  // With the list closed and the field focused, Escape still clears and blurs.
   await p.keyboard.press('/')
-  await input.fill('tone.mp3')
-  await input.press('Enter')
+  await find.fill('zzzz-no-match')
+  await find.press('Escape')
+  assert.deepEqual(await find.evaluate(e => [e === document.activeElement, e.value]), [false, ''], 'Escape on a field with no list clears and blurs')
+  await p.keyboard.press('/')
+  await find.fill('tone.mp3')
+  await find.press('Enter')
   await reportReady(p)
-  assert.equal(await p.locator('.ws-channel-title').innerText(), name)
+  assert.equal(await p.locator('.ws-channel-title').textContent(), name)
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
+  assert.equal(await activeBarView(p), view, 'the bar marks the view Find opened the reader from')
 })
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
@@ -1857,7 +1975,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     }
     await open(p)
     assert.ok(await p.locator('.ws-navbar .ws-head-worker').isHidden(), 'a fiber with no worker leaves the head without a worker control')
-    assert.equal(await p.locator('.ws-navbar :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the head carries no verdicts')
+    assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'neither bar carries verdicts')
     if (device === 'phone') {
       await choose(p, 'Constitution')
       const buttons = await selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict button').evaluateAll(es => es.map(e => {
@@ -1879,31 +1997,41 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.ok(toastBox.y + toastBox.height <= labelBox.y - 12, 'undo toast clears the page label or phone bottom bar by 12 px')
     await shot('toast')
     await p.keyboard.press('z')
-    await p.locator('.ws-return').click()
+    await leave(p)
     await chooseDeskColumn(p, 1)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     // Opening the reader is navigation, not a state change: wait for it before the short poll.
     await choose(p, 'Constitution')
-    assert.equal(await selected(p).locator('.kbn-card-worker, [data-act="worker"]').count(), 0, 'the fiber page draws no worker control; the reader head carries it')
-    const head = p.locator('.ws-navbar .ws-head-worker .ws-worker-control')
-    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.dataset.workerState === 'aloft')
-    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.textContent.includes('12m'))
+    // The desktop § page's status line carries the worker pill; the phone's top bar carries its dot.
+    const where = device === 'phone' ? '.ws-navbar .ws-head-worker .ws-worker-control' : '.ws-selected .ws-prose-header .ws-fiber-acts .ws-worker-control'
+    const elsewhere = device === 'phone' ? '.ws-selected .ws-fiber-acts .kbn-card-worker' : '.ws-navbar .ws-head-worker .kbn-card-worker'
+    assert.equal(await p.locator(elsewhere).isVisible(), false, 'one worker control on screen')
+    const head = p.locator(where)
+    await poll(p, where => document.querySelector(where)?.dataset.workerState === 'aloft', where)
+    await poll(p, where => document.querySelector(where)?.textContent.includes('12m'), where)
     const dot = head.locator('.ws-worker-dot')
-    assert.ok(await dot.isVisible(), 'the head shows the worker dot')
+    assert.ok(await dot.isVisible(), 'the worker dot shows')
     assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none', 'reduced motion suppresses breathing')
-    assert.ok(await p.locator('.ws-navbar .ws-head-worker .ws-turn-active').count(), 'a working turn is marked active')
+    assert.ok(await head.evaluate(el => el.classList.contains('ws-turn-active')), 'a working turn is marked active')
     const headDot = await dot.evaluate(el => getComputedStyle(el).backgroundColor)
-    const headLook = await head.evaluate(el => ({ border: getComputedStyle(el).borderTopWidth, background: getComputedStyle(el).backgroundColor }))
-    assert.deepEqual(headLook, { border: '0px', background: 'rgba(0, 0, 0, 0)' }, 'the head draws the worker bare')
     const headBox = await head.boundingBox()
     if (device === 'phone') {
+      const headLook = await head.evaluate(el => ({ border: getComputedStyle(el).borderTopWidth, background: getComputedStyle(el).backgroundColor }))
+      assert.deepEqual(headLook, { border: '0px', background: 'rgba(0, 0, 0, 0)' }, 'the top bar draws the worker bare')
       assert.ok(await head.locator('.ws-worker-elapsed').isHidden() && await head.locator('.ws-worker-state').evaluate(el => getComputedStyle(el).fontSize === '0px'), 'the phone top bar shows the dot alone')
       assert.ok(headBox.width >= 44 && headBox.height >= 44, `the phone dot is a full target: ${JSON.stringify(headBox)}`)
       assert.ok(headBox.x + headBox.width >= viewport.width - 16, 'the phone dot sits at the right end of the top bar')
     } else {
-      assert.match(await head.innerText(), /aloft\s*12m/)
-      const count = await p.locator('.ws-nav-trail .ws-head-position').boundingBox()
-      assert.ok(count.x >= headBox.x + headBox.width && count.x + count.width >= viewport.width - 48, `the worker control and then the count end the head: ${JSON.stringify({ headBox, count })}`)
+      // Dot, state word, compact age.
+      assert.equal(await head.textContent(), 'aloft12m')
+      assert.equal(await head.locator('.ws-worker-state').textContent(), 'aloft')
+      assert.equal(await head.locator('.ws-worker-elapsed').textContent(), '12m')
+      const line = await selected(p).evaluate(page => {
+        const rect = sel => page.querySelector(sel).getBoundingClientRect()
+        const status = rect('.ws-prose-status'), worker = rect('.ws-fiber-acts .ws-worker-control'), temper = rect('.ws-fiber-acts .kbn-ctl-temper')
+        return { order: status.right <= worker.left && worker.right <= temper.left, row: Math.abs((status.top + status.bottom) / 2 - (worker.top + worker.bottom) / 2) <= 4 }
+      })
+      assert.deepEqual(line, { order: true, row: true }, 'the pill rides the status line between the kicker and the verdicts')
     }
     await shot('aloft')
     await p.evaluate(async () => {
@@ -1912,14 +2040,19 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       row.runtime.last_activity_at = Date.now() - 120000
       await window.__harness.modal.fetchAndRender()
     })
-    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker .ws-worker-control')?.dataset.workerState === 'waiting')
-    assert.equal(await p.locator('.ws-navbar .ws-head-worker .ws-turn-active').count(), 0, 'a waiting worker does not breathe')
-    assert.notEqual(await dot.evaluate(el => getComputedStyle(el).backgroundColor), headDot, 'a waiting worker turns the head dot gold')
+    await poll(p, where => document.querySelector(where)?.dataset.workerState === 'waiting', where)
+    assert.equal(await p.locator(`${where}.ws-turn-active`).count(), 0, 'a waiting worker does not breathe')
+    assert.notEqual(await dot.evaluate(el => getComputedStyle(el).backgroundColor), headDot, 'a waiting worker turns the dot gold')
+    if (device !== 'phone') assert.equal(await head.locator('.ws-worker-elapsed').textContent(), '2m', 'a waiting worker counts from its last activity')
     await shot('waiting')
-    await p.locator('.ws-return').click()
+    await leave(p)
     await chooseDeskColumn(p, 0)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
-    await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker')?.hidden === true)
+    if (device === 'phone') await poll(p, () => document.querySelector('.ws-navbar .ws-head-worker')?.hidden === true)
+    else {
+      await choose(p, 'Constitution')
+      assert.equal(await selected(p).locator('.ws-fiber-acts .kbn-card-worker').count(), 0, 'a fiber with no worker draws no pill')
+    }
     await shot('no-worker')
   }, viewport)
 }
@@ -1946,8 +2079,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   test(`Say it once: ${device} fiber, media, PDF and unsupported metadata`, async p => {
     await open(p); await choose(p, 'Constitution')
     const header = selected(p).locator('.ws-prose-header')
-    assert.equal((await header.innerText()).trim().toLowerCase(), 'awaiting your review', 'fiber kicker uses the Desk state')
-    assert.equal(await header.locator(':scope > *').count(), 1)
+    assert.equal((await header.locator('.ws-prose-status').innerText()).trim().toLowerCase(), 'awaiting your review', 'fiber kicker uses the Desk state')
+    // The status line reads the kicker, then the act zone: the worker pill (none here) and the verdicts.
+    assert.deepEqual(await header.locator(':scope > *').evaluateAll(es => es.map(e => e.className)), ['ws-prose-status', 'ws-fiber-acts'])
+    assert.deepEqual(await header.locator('.ws-fiber-acts button:visible').allTextContents(), ['Temper', 'Discard'])
     const settings = selected(p).locator('.kbn-detail-controls-toggle')
     assert.equal(await settings.getAttribute('aria-expanded'), 'false')
     assert.match(await settings.innerText(), /claude-opus/)
@@ -2018,14 +2153,15 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await choose(p, 'remote-summary.pdf')
     assert.match(await selected(p).locator('.ws-provenance').innerText(), /basalt-login-02/, 'foreign document owner remains in label')
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
-    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await leave(p)
     if (device === 'phone') {
       await p.locator('.kbn-folio-seg[data-folio="1"]').click()
       await poll(p, () => document.querySelector('.kbn-folio-seg[data-folio="1"]')?.getAttribute('aria-selected') === 'true')
     }
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await choose(p, 'Constitution')
-    assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0, 'the fiber page draws no worker control')
+    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), device === 'phone' ? 0 : 1, 'the desktop status line carries the one worker pill')
+    assert.equal(await p.locator('.ws-navbar .kbn-card-worker:visible').count(), device === 'phone' ? 1 : 0, 'the phone top bar carries the worker dot instead')
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1)
     assert.ok((await cadence.innerText()).trim(), 'standing cadence lives in the settings line')
@@ -2035,7 +2171,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       return copy.textContent
     })
     assert.ok(!outsideSettings.includes(await cadence.innerText()), 'cadence is not repeated outside its editable settings')
-    await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+    await leave(p)
     await p.locator('[data-view="shelf"]').click()
     await p.locator('.ws-overview-folio').first().waitFor()
     await p.screenshot({ path: resolve(shots, `${device}-overview.png`) })
@@ -2168,7 +2304,7 @@ test('Custom theme is scoped with private keyframes, hoisted fonts and condition
   assert.equal(await p.locator('.kbn-card').first().evaluate(el => getComputedStyle(el).opacity), desk, 'Desk is outside the theme scope')
   const other = p.locator('.ws-overview-folio[data-uid="01KVBR2G7CXDWMG85592QW78M9"]')
   assert.equal(await other.evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '', 'another channel does not inherit the custom theme')
-  await p.getByRole('button', { name: 'Return to Board', exact: true }).click()
+  await leave(p)
   await other.click()
   assert.equal(await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-custom-ready').trim()), '')
 })
@@ -2185,7 +2321,7 @@ test('Plain removes custom and bundled styling, persists, and can restore custom
   assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
   assert.equal(await p.locator('.ws-overview-folio[data-uid="01KVBR1F9BWBVKF97473PV67K8"]').getAttribute('data-ws-theme'), null)
   await p.reload()
-  await p.locator('.ws-channel-title').waitFor()
+  await p.locator('.ws-channel-title').waitFor({ state: 'attached' })
   assert.equal(await p.locator('.ws-reader').getAttribute('data-ws-theme'), null)
   const plainAfterReload = await openPlainThemeMenu(p)
   await plainAfterReload.click()
@@ -2264,7 +2400,7 @@ test('Overview and sidebar never fan out theme.css probes; folios reuse the read
   await p.clock.fastForward(16000)
   await poll(p, () => window.__harness.requests.some(r => decodeURIComponent(r.url).includes('calibration-report/theme.css') && r.headers?.['if-none-match']))
   const count = (await themeReads()).length
-  await p.locator('.ws-return').click()
+  await leave(p)
   await p.locator('.ws-overview-folio').first().waitFor()
   await p.clock.fastForward(16000)
   assert.equal((await themeReads()).length, count, 'overview does not revalidate any custom theme')
@@ -2323,13 +2459,13 @@ test('Protected verdict plate and portaled toast retain material without author 
   assert.notEqual(await plate.getByRole('button', { name: 'Temper', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
   await choose(p, 'calibration-report')
   const material = await p.locator('.ws-reader').evaluate(el => ({ paper: getComputedStyle(el).getPropertyValue('--ws-paper').trim(), ink: getComputedStyle(el).getPropertyValue('--ws-ink').trim() }))
-  await p.locator('.ws-channel-title').focus(); await p.keyboard.press('t')
+  await appFocus(p); await p.keyboard.press('t')
   const toast = p.locator('.ws-verdict-toast')
   await toast.waitFor()
   assert.equal(await toast.getAttribute('data-part'), 'act')
   assert.equal(await toast.getAttribute('data-act'), 'toast')
   assert.equal(await toast.getAttribute('data-ws-theme'), null)
-  await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await leave(p)
   assert.deepEqual(await toast.evaluate(el => ({ paper: getComputedStyle(el).getPropertyValue('--ws-paper').trim(), ink: getComputedStyle(el).getPropertyValue('--ws-ink').trim() })), material)
   assert.ok(!await toast.getByRole('button').evaluate(el => getComputedStyle(el).fontFamily.includes('fantasy')))
   await p.keyboard.press('z')
@@ -2420,7 +2556,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await field.scrollIntoViewIfNeeded()
   await still(p, 'focusing the composer', () => field.click(), keyboard)
   await still(p, 'typing a word', () => p.keyboard.type('Rerun'))
-  const above = ['.ws-navbar', '.ws-selected .ws-prose-status', '.ws-selected .ws-fiber-acts']
+  const above = ['.kbn-viewtabs', '.ws-selected .ws-prose-status', '.ws-selected .ws-fiber-acts']
   const before = await field.boundingBox()
   assert.ok(unexpected(await layoutShift(p, { regions: above, act: () => p.keyboard.type(' the masks with the corrected weights, then compare the null spectra at high ell against the previous run') })).length === 0, 'wrapped text moves nothing above the field')
   const grown = await field.boundingBox()
@@ -2440,7 +2576,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     await still(p, 'opening the Effort list', () => p.locator(`${dock} select[aria-label="Effort"]`).click(), { allow: ['.ws-select-picker'] })
     await p.keyboard.press('Escape')
   }
-  await p.locator('.ws-return').click()
+  await leave(p)
   await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
@@ -2448,7 +2584,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   // In flight, the composer's row carries the verdict pair; the head carries none.
   const acts = '.ws-selected .ws-fiber-acts'
   assert.ok(await p.locator(`${acts} .kbn-ctl-temper`).isVisible(), 'the status line carries Temper in flight')
-  assert.equal(await p.locator('.ws-navbar :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the head carries no verdicts')
+  assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'neither bar carries verdicts')
   if (!phone) for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
     await still(p, `hovering the in-flight ${control}`, () => p.locator(`${acts} ${control}`).hover(), { allow: [`${acts} ${control}`] })
   }
@@ -2460,35 +2596,48 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.evaluate(() => document.activeElement.blur())
 }, viewport)
 
-for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the head, label bar and sidebar (${device})`, async p => {
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['narrow', { width: 1000, height: 800 }]]) test(`Nothing moves when you touch the bar, label bar and sidebar (${device})`, async p => {
   await open(p); await reportReady(p)
-  for (const control of ['.ws-return', '.ws-channel-title', '.ws-selected .ws-expand-button']) {
+  for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="shelf"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-sidebar-toggle', '.ws-selected .ws-expand-button']) {
     await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
   }
-  await still(p, 'hovering a tab', () => p.locator('.ws-tab').nth(3).hover(), { settle: 600 })
+  await still(p, 'hovering a tile', () => p.locator('.ws-tab').nth(3).hover(), { settle: 600 })
   await p.mouse.move(viewport.width / 2, viewport.height - 4)
   await still(p, 'opening the document menu', () => p.locator('.ws-selected .ws-menu-button').click(), { allow: ['[popover]', '.ws-menu'] })
   await p.keyboard.press('Escape')
-  await still(p, 'opening the switcher', () => p.locator('.ws-channel-title').click(), { allow: ['[popover]', 'dialog'] })
-  await p.keyboard.press('Escape')
-  // Selecting a page crosses the tabs; the head's other parts hold.
-  assert.deepEqual(unexpected(await layoutShift(p, { regions: ['.ws-navbar'], act: () => p.keyboard.press('Alt+ArrowRight'), allow: ['.ws-tabs'], settle: 400 })), [], 'selecting a page')
+  // Find hangs its list under the field; nothing else moves.
+  await still(p, 'summoning Find', () => p.keyboard.press('/'), { allow: ['.kbn-viewtabs-find'] })
+  // The list's own rows refilter as you type; the bar and the reader hold.
+  assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-reader'], act: () => p.keyboard.type('cal'), allow: ['.kbn-viewtabs-find'] }), [], 'typing into Find')
+  // One Escape closes the list, clears the query and blurs the field.
+  await barFind(p).press('Escape')
+  // Selecting a page crosses the tiles; the bar's other parts hold.
+  assert.deepEqual(unexpected(await layoutShift(p, { regions: ['.kbn-viewtabs'], act: () => p.keyboard.press('Alt+ArrowRight'), allow: ['.ws-tabs'], settle: 400 })), [], 'selecting a page')
   await still(p, 'a poll repaint', () => repaint(p))
   await p.keyboard.press('s')
   await p.locator('.ws-sidebar .kbn-card').nth(1).waitFor()
   await p.waitForTimeout(400)
   await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover())
   await still(p, 'a sidebar poll repaint', () => repaint(p))
-  // A worker starting on a fiber that awaits review moves nothing in the head
-  // but its trail: the index only yields room at its far end to the worker control.
+  // A worker starting on a fiber that awaits review moves nothing in the bar
+  // or on a document page.
   await choose(p, 'calibration-report')
-  await still(p, 'a worker starting under review', () => p.evaluate(async () => {
+  assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-stage'], act: () => p.evaluate(async () => {
     const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
     row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', last_activity_at: Date.now(), started_at: Date.now() - 60000 }
     await window.__harness.modal.fetchAndRender()
-  }), { regions: ['.ws-navbar'], allow: ['.ws-head-worker', '.ws-nav-trail'], positionsOnly: true, settle: 100 })
+  }), settle: 100 }), [], 'a worker starting under review')
   await choose(p, 'Constitution')
   await composerKeyStaysPut(p)
+  // The § page's pill and the sidebar card's change word and age in place.
+  for (const control of ['.ws-fiber-acts .ws-worker-control', '.ws-fiber-acts .kbn-ctl-temper', '.ws-fiber-acts .kbn-ctl-discard']) {
+    await still(p, `hovering ${control}`, () => selected(p).locator(control).hover(), { allow: [`.ws-selected ${control}`] })
+  }
+  await still(p, 'a worker-state change on the § page', () => p.evaluate(async () => {
+    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
+    row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
+    await window.__harness.modal.fetchAndRender()
+  }), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
   await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
 }, viewport)
 
@@ -2537,8 +2686,8 @@ try {
       if (sidebarChoice !== null) await page.addInitScript(choice => {
         if (window === window.top) localStorage.setItem('shuttle:workspace:sidebar', choice)
       }, sidebarChoice)
-      await page.goto(url)
-      await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor()
+      await page.goto(url, { timeout: 15000 })
+      await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor({ timeout: 15000 })
       await run(page)
     } catch (error) { failure = error }
     finally {
