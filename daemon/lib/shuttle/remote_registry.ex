@@ -1483,15 +1483,17 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   defp current_tailscale_socket do
     # The resolved file path matters independently of its stat token: two
     # selected files can have the same `{mtime, size}` and different sockets.
+    # The slot is per test scope (`Shuttle.Env.scope_key/1`): the answer also
+    # depends on `:tailscale_home`, HOME and `:os_type`, which a test scopes.
     key = {remotes_file_snapshot(), Shuttle.Env.app(:tailscale_socket)}
 
-    case :persistent_term.get(@tailscale_socket_key, :unset) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@tailscale_socket_key), :unset) do
       {^key, socket} ->
         socket
 
       _ ->
         socket = Shuttle.Remotes.tailscale_socket()
-        :persistent_term.put(@tailscale_socket_key, {key, socket})
+        :persistent_term.put(Shuttle.Env.scope_key(@tailscale_socket_key), {key, socket})
         socket
     end
   end
@@ -1592,13 +1594,13 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   defp current_proxy do
     key = {remotes_file_snapshot(), Shuttle.Env.app(:https_proxy)}
 
-    case :persistent_term.get(@proxy_key, :unset) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@proxy_key), :unset) do
       {^key, proxy} ->
         proxy
 
       _ ->
         proxy = Shuttle.Remotes.https_proxy()
-        :persistent_term.put(@proxy_key, {key, proxy})
+        :persistent_term.put(Shuttle.Env.scope_key(@proxy_key), {key, proxy})
         proxy
     end
   end
