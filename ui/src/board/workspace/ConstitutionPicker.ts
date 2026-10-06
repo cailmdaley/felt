@@ -15,6 +15,8 @@ export interface ConstitutionPickerOptions {
   /** A field the picker reads instead of its own (the board bar's Find), heard only while `active`. */
   find?: HTMLInputElement
   active?(): boolean
+  /** Escape on one of the list's rows, where the list reads a shared field: its owner puts the list away. */
+  onEscape?(): void
 }
 
 /** Shared constitution rows and Find behavior for the sidebar and floating picker. */
@@ -153,8 +155,12 @@ export class ConstitutionPicker {
   private readonly keydown = (event: KeyboardEvent): void => {
     const mine = this.el.contains(event.target as Node) || (event.target === this.find && this.listening)
     if (!this.el.isConnected || !mine || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.altKey || event.metaKey || event.ctrlKey) return
-    // A shared field's owner puts it away on Escape.
-    if (event.key === 'Escape') { if (this.opts.find) return; this.close(true) }
+    // A shared field's owner puts it away on Escape, from the field or from a row.
+    if (event.key === 'Escape') {
+      if (!this.opts.find) this.close(true)
+      else if (event.target === this.find) return
+      else this.opts.onEscape?.()
+    }
     else if (event.key === 'Enter' && event.target === this.find) {
       if (event.repeat) return
       this.list.querySelector<HTMLElement>('.ws-channel-row')?.click()

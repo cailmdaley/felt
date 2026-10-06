@@ -116,7 +116,10 @@ export class Workspace {
       },
     }
     this.picker = new ConstitutionPicker(pickerOptions)
-    this.barPicker = new ConstitutionPicker({ ...pickerOptions, find: opts.find, active: () => this.barPicker.isOpen })
+    this.barPicker = new ConstitutionPicker({
+      ...pickerOptions, find: opts.find, active: () => this.barPicker.isOpen,
+      onEscape: () => { this.clearFind(); opts.find?.blur(); (document.activeElement as HTMLElement | null)?.blur?.() },
+    })
     this.reader = new Reader({
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
