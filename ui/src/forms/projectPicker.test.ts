@@ -33,13 +33,43 @@ describe('projectsForHost', () => {
     { selector: (p) => p.n, maxLength: 12 },
   ).map((rows) => rows.map(({ n, originId }) => ({ id: `${originId}:/p${n}`, originId })))
 
-  it('is exactly the selected host’s projects, in incoming order', () => {
-    // Order is the form’s recency ranking, so the answer must be the input
-    // with every other host’s rows struck out — nothing reordered, nothing
-    // dropped. `cineca` is often absent from a generated list, which is the
-    // add row’s case: a host with nothing on it yet answers empty.
+  it('keeps only the selected host’s projects', () => {
+    expect(projectsForHost(projects, 'local').map((p) => p.id)).toEqual([
+      'local:/dev/felt',
+      'local:/dev/sample',
+    ])
+  })
+
+  it('scopes to a remote host on its bare name', () => {
+    expect(projectsForHost(projects, 'candide').map((p) => p.id)).toEqual(['candide:/home/x/cmbx'])
+  })
+
+  it('answers empty for a host with nothing on it yet — the add row’s case', () => {
+    expect(projectsForHost(projects, 'cineca')).toEqual([])
+  })
+
+  it('preserves the incoming order, which is the form’s recency ranking', () => {
+    const reversed = [...projects].reverse()
+    expect(projectsForHost(reversed, 'local').map((p) => p.id)).toEqual([
+      'local:/dev/sample',
+      'local:/dev/felt',
+    ])
+  })
+
+  it('returns the input with every other host’s rows struck out', () => {
+    // Every row it returns is on the host, every row on the host is returned,
+    // and the rows come back as a subsequence of the input — nothing
+    // reordered, nothing dropped, nothing added.
     fc.assert(fc.property(generated, fc.constantFrom(...HOSTS), (list, host) => {
-      expect(projectsForHost(list, host).map((p) => p.id)).toEqual(list.flatMap((p) => (p.originId === host ? [p.id] : [])))
+      const out = projectsForHost(list, host)
+      for (const p of out) expect(p.originId, p.id).toBe(host)
+      for (const p of list) if (p.originId === host) expect(out, p.id).toContain(p)
+      let at = 0
+      for (const p of out) {
+        while (at < list.length && list[at] !== p) at += 1
+        expect(at, `${p.id} in input order`).toBeLessThan(list.length)
+        at += 1
+      }
     }), { seed: 0x9e57ed, numRuns: 200 })
   })
 
