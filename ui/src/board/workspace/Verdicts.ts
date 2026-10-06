@@ -4,7 +4,7 @@ import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import './verdicts.css'
 
 export type Verdict = 'tempered' | 'composted'
-export const VERDICT_DELAY_MS = 6000
+export const VERDICT_DELAY_MS = 4000
 
 /** A verdict stops any worker the card owns, so it asks first, as "New session"
  * does; a verdict on a finished run stays a single gesture. */
@@ -23,6 +23,7 @@ export class Verdicts {
   private readonly el = document.createElement('div')
   constructor() {
     this.el.className = 'ws-verdict-toasts'
+    this.el.style.setProperty('--ws-verdict-life', `${VERDICT_DELAY_MS}ms`)
     this.el.setAttribute('aria-live', 'polite')
     this.el.setAttribute('aria-relevant', 'additions')
     document.body.append(this.el)
@@ -40,11 +41,11 @@ export class Verdicts {
       toast.style.setProperty('--ws-ink', material.ink)
     }
     toast.setAttribute('aria-atomic', 'true')
-    const name = document.createElement('em')
-    name.textContent = card.name
     const undo = document.createElement('button')
     undo.type = 'button'
-    undo.textContent = 'Undo z'
+    const key_ = document.createElement('kbd')
+    key_.textContent = 'z'
+    undo.append('undo ', key_)
     undo.setAttribute('aria-label', `Undo verdict on ${card.name}`)
     undo.addEventListener('click', () => this.undo(key))
     toast.dataset.verdict = verdict === 'tempered' ? 'tempered' : 'discarded'
@@ -52,7 +53,11 @@ export class Verdicts {
     word.className = 'ws-verdict-word'
     word.dataset.verdict = toast.dataset.verdict
     word.textContent = verdict === 'tempered' ? 'Tempered' : 'Discarded'
-    toast.append(word, ' ', name, ' · ', undo)
+    // The fiber's name is spoken, not shown: the line stays two words.
+    const name = document.createElement('span')
+    name.className = 'ws-sr-only'
+    name.textContent = ` ${card.name} · `
+    toast.append(word, name, undo)
     this.el.append(toast)
     const timer = window.setTimeout(() => {
       this.pending.delete(key)

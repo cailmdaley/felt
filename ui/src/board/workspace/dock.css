@@ -142,8 +142,17 @@
   border: var(--ws-line-width) solid var(--ws-hairline);
   border-radius: var(--ws-control-radius);
   background: var(--ws-paper);
+  position: relative;
 }
 .ws-dock .kbn-ctl-composer:focus-within { border-color: var(--ws-ink-muted); }
+/* The field opens with a faint prompt chevron that stays; text begins just
+   after it, on the first line. */
+.ws-dock .kbn-ctl-composer::before {
+  content: '›'; position: absolute; left: 10px; top: calc(3px + (var(--ctl-h) - var(--ctl-line-height)) / 2);
+  font: var(--ws-prose-size)/var(--ctl-line-height) var(--ws-serif); color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent);
+  pointer-events: none;
+}
+.ws-dock .kbn-ctl-composer:focus-within::before { color: var(--ws-ink-muted); }
 .ws-dock .kbn-detail-directive {
   grid-column: 1;
   grid-row: 1;
@@ -153,7 +162,7 @@
   height: var(--ctl-h);
   min-height: var(--ctl-h);
   max-height: 35vh;
-  padding: calc((var(--ctl-h) - var(--ctl-line-height)) / 2) 7px;
+  padding: calc((var(--ctl-h) - var(--ctl-line-height)) / 2) 7px calc((var(--ctl-h) - var(--ctl-line-height)) / 2) 22px;
   border: none;
   outline: none;
   background: transparent;
@@ -193,7 +202,6 @@
   .ws-dock .kbn-ctl-meet-switch:hover:not(:has(input:disabled)) { color: var(--ws-ink); background: var(--ws-hover); }
   .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment:hover:not(:disabled, [aria-checked='true']) { color: var(--ws-ink); background: var(--ws-hover); }
 }
-/* The empty field says only that it is a prompt: a faint chevron. */
 .ws-dock .kbn-detail-directive::placeholder { color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent); }
 .ws-dock .kbn-ctl-composer-drop { border-style: dashed; border-color: var(--ws-ink); }
 .ws-dock .kbn-ctl-images { display: flex; flex-wrap: wrap; gap: var(--ws-small-gap); padding: 6px 10px; }

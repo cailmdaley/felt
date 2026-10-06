@@ -23,7 +23,7 @@ describe('late verdicts', () => {
     expect(toast.style.getPropertyValue('--ws-paper')).toBe('rgb(10, 20, 30)')
     expect(toast.style.getPropertyValue('--ws-ink')).toBe('rgb(240, 230, 220)')
     window.dispatchEvent(new PopStateEvent('popstate'))
-    vi.advanceTimersByTime(5999); expect(commit).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(3999); expect(commit).not.toHaveBeenCalled()
     verdicts.dispose()
     vi.advanceTimersByTime(1); expect(commit).not.toHaveBeenCalled()
   })
@@ -43,11 +43,11 @@ describe('late verdicts', () => {
     expect([word.dataset.verdict, word.textContent]).toEqual(['discarded', 'Discarded'])
   })
 
-  it('writes only after six seconds and keeps a polite, named Undo toast', () => {
+  it('writes only after four seconds and keeps a polite, named undo line', () => {
     const commit = vi.fn()
     verdicts.queue(card({ id: 'music', name: 'Music' }), 'tempered', commit)
-    expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe('Tempered Music · Undo z')
-    vi.advanceTimersByTime(5999)
+    expect(document.querySelector('[aria-live="polite"]')?.textContent).toBe('Tempered Music · undo z')
+    vi.advanceTimersByTime(3999)
     expect(commit).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(commit).toHaveBeenCalledTimes(1)

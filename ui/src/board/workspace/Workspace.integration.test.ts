@@ -131,7 +131,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
     expect(document.querySelector('.ws-verdict-toast')?.textContent).toMatch(/^Tempered/)
     live = { ...reviewing, id: 'elsewhere/renamed', path: 'elsewhere/renamed/renamed.md', fiberDir: '/notes/renamed' }
-    vi.advanceTimersByTime(5999)
+    vi.advanceTimersByTime(3999)
     expect(commit).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(commit).toHaveBeenCalledExactlyOnceWith(live, 'tempered')

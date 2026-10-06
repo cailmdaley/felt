@@ -3,19 +3,27 @@
   left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px;
   width: max-content; max-width: calc(100vw - 24px); pointer-events: none;
 }
+/* A verdict's undo window is one quiet line: the verdict in its pigment and
+   "undo z", on a small paper plate with a hairline. It fades through its
+   last moments, so its going is not a surprise. */
 .ws-verdict-toast {
-  pointer-events: auto; padding: 8px 16px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-radius);
-  background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-float); font: var(--ws-prose-size)/1.4 var(--ws-serif);
-  animation: ws-verdict-arrive 180ms ease;
+  pointer-events: auto; display: inline-flex; align-items: baseline; gap: 12px; padding: 4px 12px;
+  border: var(--ws-line-width) solid var(--ws-hairline-soft, var(--ws-hairline)); border-radius: var(--ws-control-radius);
+  background: var(--ws-paper); box-shadow: var(--ws-shadow-low);
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-serif);
+  animation: ws-verdict-arrive 160ms ease, ws-verdict-leave 600ms ease calc(var(--ws-verdict-life, 4000ms) - 600ms) forwards;
 }
 .ws-verdict-toast button {
-  border: 0; border-bottom: 1px solid var(--ws-hairline); color: var(--ws-ink); background: transparent;
-  font: var(--ws-label-size)/1.4 var(--ws-serif); min-height: 36px; cursor: pointer;
+  border: 0; padding: 0; color: var(--ws-ink-muted); background: transparent; font: inherit; cursor: pointer;
 }
+.ws-verdict-toast button:hover { color: var(--ws-ink); }
+.ws-verdict-toast kbd { font: var(--ws-small-size)/1 var(--ws-mono); opacity: .7; }
 .ws-verdict-toast button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
-@keyframes ws-verdict-arrive { from { opacity: 0; transform: translateY(6px); } }
+@keyframes ws-verdict-arrive { from { opacity: 0; transform: translateY(4px); } }
+@keyframes ws-verdict-leave { to { opacity: 0; } }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-verdict-toasts { bottom: calc(var(--ws-thumb-height) + 12px + env(safe-area-inset-bottom)); }
+  .ws-verdict-toast { padding-block: 0; align-items: center; }
   .ws-verdict-toast button { min-height: 44px; min-width: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .ws-verdict-toast { animation: none; } }
@@ -32,9 +40,6 @@
   outline: 2px solid var(--verdict-pigment); outline-offset: 2px;
 }
 .ws-verdict-word { color: var(--verdict-ink); }
-.ws-verdict-toast[data-verdict] { border-left: 3px solid var(--verdict-edge); }
-.ws-verdict-toast[data-verdict='tempered'] { --verdict-edge: color-mix(in srgb, var(--kbn-tempered) 55%, var(--ws-paper)); }
-.ws-verdict-toast[data-verdict='discarded'] { --verdict-edge: color-mix(in srgb, var(--kbn-discarded) 55%, var(--ws-paper)); }
 /* The fiber page's status line: the kicker, the worker pill, then Temper and
    Discard at the line's right end. Outside review the pair is two verbs in
    their pigments, plated only under the pointer; awaiting review they are

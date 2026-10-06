@@ -897,7 +897,7 @@ export class Dock {
     const message = document.createElement('textarea')
     message.className = 'kbn-detail-directive'
     message.rows = 1
-    message.placeholder = '›'
+    message.placeholder = ''
     message.setAttribute('aria-label', 'Message for the next worker')
     // The field is one line, focused or not; only text that wraps grows it.
     // The text always has the field's whole width: while it fits beside the
@@ -959,7 +959,7 @@ export class Dock {
       resume.title = resumable ? 'Resume the previous session (⌥↵)' : ''
       resume.hidden = !resumable
       message.placeholder = this.meetingArmed() ? 'A note for the meeting (optional)'
-        : '›'
+        : ''
     }
     this.composerPaint()
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
