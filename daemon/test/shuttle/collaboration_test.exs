@@ -173,15 +173,14 @@ defmodule Shuttle.CollaborationTest do
     refute multi =~ "opus"
   end
 
-  test "a fiber without a roster is prompted to take up and assign a role" do
+  test "a fiber without a roster reports no roster and the role store" do
     prompt = Collaboration.prompt_section({:ok, nil}, "/tmp/shared loom")
 
     assert prompt =~
-             ~r"\ACollaboration: no roster — before substantive work, take up the role that fits \(felt find -t role\) or create one, and assign it \(shuttle assign\); role store: (/private)?/tmp/shared loom\z"
+             ~r"\ACollaboration: no roster; role store: (/private)?/tmp/shared loom\z"
 
     assert Collaboration.prompt_section({:ok, nil}) ==
-             "Collaboration: no roster — before substantive work, take up the role that fits " <>
-               "(felt find -t role) or create one, and assign it (shuttle assign)"
+             "Collaboration: no roster"
   end
 
   test "no snapshot or a non-result renders no collaboration line" do

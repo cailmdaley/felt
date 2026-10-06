@@ -216,8 +216,8 @@ shuttle skills.` and otherwise carry only this dispatch's facts:
   the line says so and gives its transcript path.
 - `Collaboration:` — the assigned role and collaborator (named when the
   roster has exactly one of each) and the shared role store. A fiber with no
-  roster gets `Collaboration: no roster — …` instead, telling the worker to
-  take up (or create) the fitting role and assign it, with the same role store.
+  roster gets `Collaboration: no roster` instead, with the same role store;
+  what to do about it is the shuttle skill's.
 - `From User:` followed by the exact user message, when nonblank.
 
 Syncing the store, reading the fiber and its `## Status`, what to do with a

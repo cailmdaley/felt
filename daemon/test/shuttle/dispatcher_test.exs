@@ -571,7 +571,7 @@ defmodule Shuttle.DispatcherTest do
           )
         ] do
       assert prompt =~
-               ~r"Collaboration: no roster — .*\(shuttle assign\); role store: (/private)?/tmp/loom"
+               ~r"Collaboration: no roster; role store: (/private)?/tmp/loom"
     end
   end
 
