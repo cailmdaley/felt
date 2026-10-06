@@ -6,6 +6,7 @@ import (
 )
 
 func TestSetJSONFieldOverridesTopLevelValueWithoutChangingFrontmatter(t *testing.T) {
+	t.Parallel()
 	fiber, err := New("plain", "Plain")
 	if err != nil {
 		t.Fatalf("New: %v", err)

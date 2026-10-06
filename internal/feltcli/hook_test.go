@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // TestHookSessionEnvelope verifies the SessionStart envelope shape and that
@@ -20,35 +21,22 @@ import (
 // directive line, then either Active / Open + entries (or the empty marker),
 // then Recently Touched with truncated outcomes.
 func TestUnknownHookVerbDrainsStdinWithoutOutput(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
-	stdin, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload := `{"hook":"event","message":"payload"}`
-	if _, err := writer.WriteString(payload); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	previous := os.Stdin
-	os.Stdin = stdin
-	t.Cleanup(func() {
-		os.Stdin = previous
-		_ = stdin.Close()
-	})
-	stdout, stderr, err := executeCLI(t, dir, "hook", "event")
+	env, _ := testEnv(t)
+	stdin := strings.NewReader(`{"hook":"event","message":"payload"}`)
+	env.Stdin = stdin
+	stdout, stderr, err := executeIn(t, env, dir, "hook", "event")
 	if err != nil || stdout != "" || stderr != "" {
 		t.Fatalf("unknown hook result stdout=%q stderr=%q err=%v", stdout, stderr, err)
 	}
-	remaining, err := io.ReadAll(stdin)
-	if err != nil || len(remaining) != 0 {
-		t.Fatalf("unknown hook left unread stdin %q, err=%v", remaining, err)
+	if stdin.Len() != 0 {
+		t.Fatalf("unknown hook left %d bytes of stdin unread", stdin.Len())
 	}
 }
 
 func TestOldEventHookPipesPayloadToSilentUnknownVerb(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	hookDir := t.TempDir()
 	oldEvent, err := os.ReadFile("testdata/old-event.sh")
@@ -86,19 +74,17 @@ FELT_TEST_HOOK_ARGS="$*" exec "$FELT_TEST_BINARY" -test.run=^TestUnknownHookVerb
 }
 
 func TestUnknownHookVerbSubprocessHelper(t *testing.T) {
+	t.Parallel()
 	args := os.Getenv("FELT_TEST_HOOK_ARGS")
 	if args == "" {
 		return
 	}
-	rootCmd.SetArgs(strings.Fields(args))
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	// This is the felt binary's main, run in a child process.
+	os.Exit(Run(sysenv.OS(), strings.Fields(args)))
 }
 
 func TestHookSessionEnvelope(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	active := &felt.Felt{
@@ -157,6 +143,7 @@ func TestHookSessionEnvelope(t *testing.T) {
 // closed and untracked fibers land in Recently Touched. A fiber appears in at
 // most one section.
 func TestSessionSectionPlacement(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	base := mustParseTime(t, "2026-04-10T09:00:00Z")
@@ -196,6 +183,7 @@ func TestSessionSectionPlacement(t *testing.T) {
 // TestSessionRecencyOrdering: sections sort by the git-durable RecencyAnchor
 // (updated-at when present, else created-at) DESC — never file mtime.
 func TestSessionRecencyOrdering(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	// Three closed fibers, created oldest→newest as old/mid/noev. We give `old`
@@ -229,6 +217,7 @@ func TestSessionRecencyOrdering(t *testing.T) {
 // timestamp (updated-at) rendered in local time, so the visible label matches
 // the sort key — and shows the update time, not the fiber's created-at.
 func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	created := mustParseTime(t, "2026-04-01T00:00:00Z")
@@ -253,6 +242,7 @@ func TestSessionHeadShowsRecencyTimestamp(t *testing.T) {
 // TestSessionSectionCaps: each section renders at most five fibers even when
 // more qualify.
 func TestSessionSectionCaps(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	base := mustParseTime(t, "2026-04-01T00:00:00Z")
@@ -288,6 +278,7 @@ func TestSessionSectionCaps(t *testing.T) {
 }
 
 func TestSessionCommandPrintsPlainContext(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 
 	active := &felt.Felt{
@@ -315,6 +306,7 @@ func TestSessionCommandPrintsPlainContext(t *testing.T) {
 }
 
 func TestSessionWarnsOnLegacyFlatStore(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, name := range []string{"old-thing-1a2b3c4d", "other-9f8e7d6c"} {
 		content := "---\nname: " + name + "\n---\n"
@@ -336,6 +328,7 @@ func TestSessionWarnsOnLegacyFlatStore(t *testing.T) {
 // folder raises the same Attention note, named for what it is; a blocked one,
 // which migrate cannot fold, does not recommend migrate.
 func TestSessionWarnsOnStrayFiberFiles(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	parent := &felt.Felt{ID: "parent", Name: "Parent", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}
 	if err := storage.Write(parent); err != nil {
@@ -361,6 +354,7 @@ func TestSessionWarnsOnStrayFiberFiles(t *testing.T) {
 }
 
 func TestSessionLayoutNoteNamesBothShapes(t *testing.T) {
+	t.Parallel()
 	hint := "; " + felt.LegacyFlatMigrationHint
 	note := sessionLayoutNote([]felt.CheckIssue{
 		{Level: felt.CheckLevelError, FiberID: ".", Message: "multiple bare fiber files at .felt/ root: a, b" + hint},
@@ -377,6 +371,7 @@ func TestSessionLayoutNoteNamesBothShapes(t *testing.T) {
 }
 
 func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
+	t.Parallel()
 	now := mustParseTime(t, "2026-05-26T12:00:00Z")
 	var felts []*felt.Felt
 	for i := 0; i < sessionTopLevelLimit+1; i++ {
@@ -405,6 +400,7 @@ func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
 }
 
 func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
+	t.Parallel()
 	now := mustParseTime(t, "2026-05-26T12:00:00Z")
 	felts := []*felt.Felt{
 		{
@@ -437,6 +433,7 @@ func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
 // TestHookSessionNoRepoEnvelope: outside a felt repo, we still emit the
 // directive plus a hint to felt init. No "Active / Open" header.
 func TestHookSessionNoRepoEnvelope(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir() // no .felt inside
 
 	out := runHookCommand(t, dir, "hook", "session")
@@ -457,6 +454,7 @@ func TestHookSessionNoRepoEnvelope(t *testing.T) {
 // TestHookSessionEmptyEnvelope: felt repo exists but no active or open fibers
 // — we emit the empty marker, not the Active / Open header.
 func TestHookSessionEmptyEnvelope(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 
 	out := runHookCommand(t, dir, "hook", "session")
@@ -477,14 +475,18 @@ func TestHookSessionEmptyEnvelope(t *testing.T) {
 // outside felt repos. Sibling-skill activations (shuttle, etc) must not satisfy
 // the gate.
 func TestHookPreToolGate(t *testing.T) {
+	t.Parallel()
 	feltDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(feltDir, ".felt"), 0755); err != nil {
 		t.Fatalf("mkdir .felt: %v", err)
 	}
 	plainDir := t.TempDir()
 
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env, _ := testEnv(t)
+	tmp := t.TempDir()
+	env.Set("TMPDIR", tmp)
+	a := testApp(t, env)
+	home := homeOf(t, env)
 	claudeTranscript := filepath.Join(home, ".claude", "projects", "x", "log.jsonl")
 	codexTranscript := filepath.Join(t.TempDir(), "codex.jsonl")
 	piTranscript := filepath.Join(home, ".pi", "agent", "sessions", "-Users-x", "log.jsonl")
@@ -585,14 +587,9 @@ func TestHookPreToolGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Clean flag files used in this case.
-			for _, sid := range []string{tc.flagFor, tc.noFlagFor, tc.input.SessionID} {
-				if sid != "" {
-					_ = os.Remove(filepath.Join(os.TempDir(), "felt-reminded-"+sid))
-				}
-			}
-
-			out := runPreToolWithInput(t, tc.input)
+			// Each case has its own session id, so its flag file is its own.
+			t.Parallel()
+			out := runPreToolWithInput(t, a, tc.input)
 
 			if tc.expectOut {
 				if !strings.Contains(out, "\"permissionDecision\": \"deny\"") {
@@ -605,12 +602,12 @@ func TestHookPreToolGate(t *testing.T) {
 			}
 
 			if tc.flagFor != "" {
-				if _, err := os.Stat(filepath.Join(os.TempDir(), "felt-reminded-"+tc.flagFor)); err != nil {
+				if _, err := os.Stat(filepath.Join(tmp, "felt-reminded-"+tc.flagFor)); err != nil {
 					t.Fatalf("expected flag file for %s: %v", tc.flagFor, err)
 				}
 			}
 			if tc.noFlagFor != "" {
-				if _, err := os.Stat(filepath.Join(os.TempDir(), "felt-reminded-"+tc.noFlagFor)); err == nil {
+				if _, err := os.Stat(filepath.Join(tmp, "felt-reminded-"+tc.noFlagFor)); err == nil {
 					t.Fatalf("did not expect flag file for %s", tc.noFlagFor)
 				}
 			}
@@ -621,19 +618,20 @@ func TestHookPreToolGate(t *testing.T) {
 // TestHookPreToolFlagPersists: once the flag is set, a subsequent non-Skill
 // tool call passes silently.
 func TestHookPreToolFlagPersists(t *testing.T) {
+	t.Parallel()
 	feltDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(feltDir, ".felt"), 0755); err != nil {
 		t.Fatalf("mkdir .felt: %v", err)
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	claudeTranscript := filepath.Join(home, ".claude", "projects", "x", "log.jsonl")
+	env, _ := testEnv(t)
+	env.Set("TMPDIR", t.TempDir())
+	a := testApp(t, env)
+	claudeTranscript := filepath.Join(homeOf(t, env), ".claude", "projects", "x", "log.jsonl")
 
 	sid := "persist-test"
-	_ = os.Remove(filepath.Join(os.TempDir(), "felt-reminded-"+sid))
 
 	// Activate felt skill: marks flag, no output.
-	out := runPreToolWithInput(t, preToolInput{
+	out := runPreToolWithInput(t, a, preToolInput{
 		SessionID:      sid,
 		ToolName:       "Skill",
 		CWD:            feltDir,
@@ -647,7 +645,7 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 	}
 
 	// Subsequent Bash: silent pass.
-	out = runPreToolWithInput(t, preToolInput{
+	out = runPreToolWithInput(t, a, preToolInput{
 		SessionID:      sid,
 		ToolName:       "Bash",
 		CWD:            feltDir,
@@ -713,50 +711,25 @@ func runHookCommand(t *testing.T, dir string, args ...string) string {
 	return out
 }
 
-// stdinPipe marshals input onto a pipe the hook can read as its stdin.
-func stdinPipe(t *testing.T, input any) *os.File {
+// stdinPipe marshals input into a reader the hook can read as its stdin.
+func stdinPipe(t *testing.T, input any) io.Reader {
 	t.Helper()
 	payload, err := json.Marshal(input)
 	if err != nil {
 		t.Fatalf("marshal input: %v", err)
 	}
-	stdinR, stdinW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("stdin pipe: %v", err)
-	}
-	if _, err := stdinW.Write(payload); err != nil {
-		t.Fatalf("write stdin: %v", err)
-	}
-	stdinW.Close()
-	return stdinR
+	return bytes.NewReader(payload)
 }
 
 // runPreToolWithInput invokes runPreToolHook directly with a constructed
 // payload — easier than wiring stdin through the cobra layer in tests.
-func runPreToolWithInput(t *testing.T, input preToolInput) string {
+func runPreToolWithInput(t *testing.T, a *app, input preToolInput) string {
 	t.Helper()
-
-	stdinR := stdinPipe(t, input)
-
-	stdoutR, stdoutW, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
-	defer stdoutR.Close()
-
-	done := make(chan struct{})
-	var buf bytes.Buffer
-	go func() {
-		_, _ = buf.ReadFrom(stdoutR)
-		close(done)
-	}()
-
-	if err := runPreToolHook(stdinR, stdoutW); err != nil {
+	var out bytes.Buffer
+	if err := a.runPreToolHook(stdinPipe(t, input), &out); err != nil {
 		t.Fatalf("runPreToolHook: %v", err)
 	}
-	stdoutW.Close()
-	<-done
-	return buf.String()
+	return out.String()
 }
 
 // runPostToolWithInput invokes runPostToolHook directly with a constructed
@@ -776,6 +749,7 @@ func postEditInput(tool, filePath string) postToolInput {
 }
 
 func TestPostToolHookStampsEdit(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		tool string
@@ -794,6 +768,7 @@ func TestPostToolHookStampsEdit(t *testing.T) {
 		{"lowercase tool name", "edit", func(s *felt.Storage) string { return s.Path("alpha") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			_, storage := newStore(t)
 			created := mustParseTime(t, "2026-04-10T09:00:00Z")
 			if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: created}); err != nil {
@@ -819,6 +794,7 @@ func TestPostToolHookStampsEdit(t *testing.T) {
 // file alone — whether the freshness comes from a recent stamp or from a fiber
 // that was only just created.
 func TestPostToolHookSkipsFreshAnchor(t *testing.T) {
+	t.Parallel()
 	_, storage := newStore(t)
 	old := mustParseTime(t, "2026-04-10T09:00:00Z")
 	stamped := time.Now().Add(-5 * time.Minute)
@@ -854,6 +830,7 @@ func TestPostToolHookSkipsFreshAnchor(t *testing.T) {
 }
 
 func TestPostToolHookIgnoresNonEditAndNonFelt(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{ID: "gamma", Name: "Gamma", CreatedAt: created}); err != nil {
@@ -875,6 +852,7 @@ func TestPostToolHookIgnoresNonEditAndNonFelt(t *testing.T) {
 }
 
 func TestFiberFromEditedPath(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{ID: "root-fiber", Name: "Root"}); err != nil {
 		t.Fatalf("Write root: %v", err)
@@ -896,6 +874,7 @@ func TestFiberFromEditedPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			gotRoot, gotID, ok := fiberFromEditedPath(tc.path)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v (id=%q)", ok, tc.wantOK, gotID)
@@ -914,6 +893,7 @@ func TestFiberFromEditedPath(t *testing.T) {
 }
 
 func TestPostToolHookSkipsDuringGitOperation(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	old := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{ID: "alpha", Name: "Alpha", CreatedAt: old}); err != nil {

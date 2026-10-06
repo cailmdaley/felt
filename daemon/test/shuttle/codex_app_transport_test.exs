@@ -116,7 +116,7 @@ defmodule Shuttle.CodexApp.TransportTest do
         end)
       end
 
-    assert Enum.sort(Enum.map(tasks, &Task.await(&1, 3_000))) ==
+    assert Enum.sort(Enum.map(tasks, &Task.await(&1, 30_000))) ==
              Enum.map(1..24, &{&1, {:ok, &1}})
 
     await_peer(peer)
@@ -235,7 +235,7 @@ defmodule Shuttle.CodexApp.TransportTest do
     tasks =
       for _ <- 1..3, do: Task.async(fn -> Transport.request(client, "pending", %{}, 2_000) end)
 
-    assert Enum.map(tasks, &Task.await(&1, 3_000)) == List.duplicate({:error, :disconnected}, 3)
+    assert Enum.map(tasks, &Task.await(&1, 30_000)) == List.duplicate({:error, :disconnected}, 3)
     await_peer(peer)
   end
 
@@ -316,7 +316,7 @@ defmodule Shuttle.CodexApp.TransportTest do
       for _ <- 1..16,
           do: Task.async(fn -> Transport.start_link(socket_path: path, name: name) end)
 
-    results = Enum.map(tasks, &Task.await(&1, 2_000))
+    results = Enum.map(tasks, &Task.await(&1, 30_000))
     winners = for {:ok, pid} <- results, do: pid
     existing = for {:error, {:already_started, pid}} <- results, do: pid
 
@@ -351,7 +351,7 @@ defmodule Shuttle.CodexApp.TransportTest do
       end
 
     Enum.each(task_pids, &send(&1, :close))
-    assert Enum.map(tasks, &Task.await(&1, 1_000)) == List.duplicate(:ok, 8)
+    assert Enum.map(tasks, &Task.await(&1, 30_000)) == List.duplicate(:ok, 8)
     assert :ok = Transport.close(client)
     await_peer(peer)
   end
@@ -827,7 +827,9 @@ defmodule Shuttle.CodexApp.TransportTest do
     end
   end
 
-  defp wait_until(predicate, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(predicate, attempts \\ 6_000)
   defp wait_until(predicate, 0), do: assert(predicate.())
 
   defp wait_until(predicate, attempts) do

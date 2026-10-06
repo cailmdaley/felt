@@ -1,4 +1,4 @@
-import katex from 'katex'
+import type Katex from 'katex'
 import type { MarkedExtension, Tokens } from 'marked'
 
 // Dollar-delimited TeX for marked, with Pandoc's `tex_math_dollars` rules so
@@ -22,12 +22,38 @@ function matchInline(src: string): RegExpMatchArray | null {
   return src.match(INLINE_DISPLAY) ?? src.match(INLINE)
 }
 
+// KaTeX is most of the bundle's weight and few pages carry math, so it loads
+// on first need (or at idle, see main.ts). Until then a formula renders as a
+// placeholder holding its source, and every placeholder in the document is
+// typeset once KaTeX arrives.
+let katex: typeof Katex | undefined
+let loading: Promise<void> | undefined
+
+const typeset = (tex: string, displayMode: boolean): string =>
+  katex!.renderToString(tex, { throwOnError: false, output: 'html', displayMode })
+
+/** Load KaTeX and typeset any formula drawn while it was loading. */
+export function loadMath(): Promise<void> {
+  loading ??= import('katex').then(module => {
+    katex = module.default
+    if (typeof document === 'undefined') return
+    for (const pending of document.querySelectorAll<HTMLElement>('.math-pending')) {
+      pending.outerHTML = typeset(pending.dataset.tex ?? '', pending.dataset.display === 'true')
+    }
+  }, (error: unknown) => {
+    loading = undefined
+    throw error
+  })
+  return loading
+}
+
+const escapeHtml = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
 function render(token: MathToken, trailing = ''): string {
-  return katex.renderToString(token.text, {
-    throwOnError: false,
-    output: 'html',
-    displayMode: token.displayMode,
-  }) + trailing
+  if (katex) return typeset(token.text, token.displayMode) + trailing
+  void loadMath().catch(() => { /* The source stays readable; the next render retries. */ })
+  return `<span class="math-pending" data-tex="${escapeHtml(token.text)}" data-display="${token.displayMode}">${escapeHtml(token.raw)}</span>${trailing}`
 }
 
 export function mathDollars(): MarkedExtension {

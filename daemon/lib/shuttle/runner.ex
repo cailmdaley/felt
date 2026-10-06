@@ -113,7 +113,7 @@ defmodule Shuttle.Runner do
     # `:os.cmd`-free, port-free kill: /bin/kill exists on macOS and every
     # Linux cluster. Spawned bare (not through cmd/3) to avoid recursion.
     defp kill9(os_pid) do
-      System.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
+      Shuttle.Env.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
     rescue
       # No `kill` on PATH (pathological) — the process leaks, but the caller
       # still unblocks; nothing better to do here.

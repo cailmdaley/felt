@@ -10,6 +10,7 @@ import (
 )
 
 func TestShuttleDeployWaitsForFreshReadyVersion(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +131,7 @@ func installFlag(t *testing.T, call []string, name string) string {
 }
 
 func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T) {
+	t.Parallel()
 	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +158,7 @@ func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T
 		options.SSHSocket != "/tmp/ssh agent.sock" {
 		t.Fatalf("migrated supervisor options = %+v", options)
 	}
-	rendered, err := renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
+	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +178,7 @@ func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T
 }
 
 func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
 	if err != nil {
@@ -186,7 +189,7 @@ func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T)
 		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
 		SSHSocket: "/tmp/agent.sock",
 	}
-	current, err := renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
+	current, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,6 +250,7 @@ func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T)
 }
 
 func TestDeployConfigMigrationCopiesWithoutRemovingOrOverwriting(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -372,6 +376,7 @@ respawn_launcher_restart_cmd "$CHECKOUT" | /bin/bash
 }
 
 func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.T) {
+	t.Parallel()
 	home, _, got, supervisorCalls := runLauncherRestart(t, "")
 	if got == "" {
 		t.Fatal("tmux was not called")
@@ -385,11 +390,13 @@ func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.
 }
 
 func TestLauncherRestartsThroughAnInstalledSupervisor(t *testing.T) {
+	t.Parallel()
 	for supervisor, want := range map[string]string{
 		"systemd": "systemctl --user restart shuttle-daemon.service",
 		"launchd": "launchctl kickstart -k gui/",
 	} {
 		t.Run(supervisor, func(t *testing.T) {
+			t.Parallel()
 			_, _, tmuxCalls, supervisorCalls := runLauncherRestart(t, supervisor)
 			if tmuxCalls != "" {
 				t.Fatalf("a supervised host started a respawn loop: %s", tmuxCalls)
@@ -402,6 +409,7 @@ func TestLauncherRestartsThroughAnInstalledSupervisor(t *testing.T) {
 }
 
 func TestShuttleDeployReportsBootingAtReadyTimeout(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -440,6 +448,7 @@ func shellFunction(t *testing.T, script, name string) string {
 }
 
 func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -508,6 +517,7 @@ func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
 }
 
 func TestDeployBuildCommandStampsBothCLIs(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
@@ -540,6 +550,7 @@ eval "$(build_checkout_cmd "$SOURCE" 1)"
 }
 
 func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
+	t.Parallel()
 	old := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "old"))
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "revision"))
 	template, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
@@ -552,7 +563,7 @@ func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
 		SSHSocket: "/tmp/agent.sock", TmuxTmpdir: "/tmp/tmux operator",
 		CodexSocket: "/tmp/codex.sock", CodexHome: "/tmp/codex home",
 	}
-	rendered, err := renderSupervisorTemplate("Linux", string(template), options, old)
+	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(template), options, old)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,6 +586,7 @@ func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
 }
 
 func TestDeployRefRejectsWrongDaemonVersion(t *testing.T) {
+	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)

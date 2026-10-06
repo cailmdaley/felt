@@ -9,7 +9,7 @@ describe('workspace style contracts', () => {
   it('keeps the default type scale named and workspace font sizes on those tokens', () => {
     for (const [token, size] of Object.entries({
       'small-size': 11, 'label-size': 15, 'chrome-size': 15, 'prose-size': 18,
-      'section-size': 21, 'lede-size': 24, 'heading-size': 34,
+      'section-size': 21, 'lede-size': 21.6, 'heading-size': 34,
     })) expect(tokens).toMatch(new RegExp(`--ws-${token}:\\s*${size}px;`))
     const styleFiles = [...readdirSync(new URL('../src/board/workspace/', import.meta.url)).filter(name => name.endsWith('.css') && name !== 'tokens.css'), '../keymap.css']
     for (const name of styleFiles) {

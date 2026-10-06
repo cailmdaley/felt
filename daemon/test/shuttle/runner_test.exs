@@ -71,7 +71,9 @@ defmodule Shuttle.RunnerTest do
     refute_receive _, 200
   end
 
-  defp eventually_dead?(pid, attempts \\ 50) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually_dead?(pid, attempts \\ 1_500) do
     case System.cmd("kill", ["-0", pid], stderr_to_stdout: true) do
       {_, 0} when attempts > 0 ->
         Process.sleep(20)

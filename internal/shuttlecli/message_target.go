@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"fmt"
 	"maps"
-	"os"
 	"regexp"
 	"slices"
 	"sort"
@@ -30,7 +29,7 @@ func looksLikeNativeSessionID(target string) bool {
 // resolveMessageTarget canonicalizes explicit addresses, checks both session
 // sources for bare ids, and resolves other targets locally before making network
 // requests. If both a session and a fiber match, it refuses to choose.
-func resolveMessageTarget(target string) (string, error) {
+func (a *app) resolveMessageTarget(target string) (string, error) {
 	if strings.HasPrefix(target, "shuttle://") {
 		address, err := messaging.ParseAddress(target)
 		if err != nil {
@@ -46,7 +45,7 @@ func resolveMessageTarget(target string) (string, error) {
 	fiberLookup := addressFiberLookup{}
 	if !sessionShaped {
 		var err error
-		fiberLookup, err = lookupShuttleAddressFibers(target)
+		fiberLookup, err = a.lookupShuttleAddressFibers(target)
 		if err != nil {
 			return "", err
 		}
@@ -55,7 +54,7 @@ func resolveMessageTarget(target string) (string, error) {
 	var lookupErrors []string
 	sessionCandidates := make([]messageTargetCandidate, 0)
 	var peerSessions []messaging.Session
-	directory, liveErr := fetchPeerDirectory("", "")
+	directory, liveErr := a.fetchPeerDirectory("", "")
 	if liveErr != nil {
 		lookupErrors = append(lookupErrors, "session discovery: "+liveErr.Error())
 	} else {
@@ -66,7 +65,7 @@ func resolveMessageTarget(target string) (string, error) {
 	var ledgerRecords []SessionProvenance
 	var ledgerOrigins map[string]any
 	var unmappedLedger []string
-	ledger, ledgerErr := fetchSessionLedger()
+	ledger, ledgerErr := a.fetchSessionLedger()
 	if ledgerErr != nil {
 		lookupErrors = append(lookupErrors, "session ledger: "+ledgerErr.Error())
 	} else {
@@ -79,7 +78,7 @@ func resolveMessageTarget(target string) (string, error) {
 
 	if sessionShaped {
 		var err error
-		fiberLookup, err = lookupShuttleAddressFibers(target)
+		fiberLookup, err = a.lookupShuttleAddressFibers(target)
 		if err != nil {
 			return "", err
 		}
@@ -102,7 +101,7 @@ func resolveMessageTarget(target string) (string, error) {
 		if liveErr != nil {
 			return "", fmt.Errorf("cannot resolve fiber %q: session discovery is unavailable, so a session-id collision cannot be ruled out: %w", fiberLookup.Fibers[0].ID, liveErr)
 		}
-		return currentFiberMessageAddress(fiberLookup.Fibers[0], ledgerRecords, ledgerOrigins, peerSessions)
+		return a.currentFiberMessageAddress(fiberLookup.Fibers[0], ledgerRecords, ledgerOrigins, peerSessions)
 	}
 	if len(lookupErrors) > 0 {
 		return "", fmt.Errorf("message target %q did not resolve (%s)", target, strings.Join(lookupErrors, "; "))
@@ -236,7 +235,7 @@ func uniqueMessageCandidates(candidates []messageTargetCandidate) []messageTarge
 // from the worker's host or the fiber's owning host is not fresh (a newer
 // dispatch there could be missing), when a Codex worker's thread id cannot be
 // established, or when the peer mapping is ambiguous.
-func currentFiberMessageAddress(f *felt.Felt, records []SessionProvenance, origins map[string]any, peers []messaging.Session) (string, error) {
+func (a *app) currentFiberMessageAddress(f *felt.Felt, records []SessionProvenance, origins map[string]any, peers []messaging.Session) (string, error) {
 	fiberName := f.ID
 	block, ok, err := shuttle.BlockOf(f)
 	if err != nil {
@@ -269,14 +268,14 @@ func currentFiberMessageAddress(f *felt.Felt, records []SessionProvenance, origi
 		return "", fmt.Errorf("fiber %q session %q has unsupported ledger harness %q", fiberName, worker.Session, worker.Harness)
 	}
 	if block.Host != "" && worker.Host != block.Host && worker.Kind != "claim" {
-		fmt.Fprintf(os.Stderr, "note: fiber %q is owned by host %q but its newest ledger worker is on host %q\n", fiberName, block.Host, worker.Host)
+		fmt.Fprintf(a.env.Stderr, "note: fiber %q is owned by host %q but its newest ledger worker is on host %q\n", fiberName, block.Host, worker.Host)
 	}
 
 	address, err := fiberWorkerAddress(f, worker, harness, runtimeID, peers)
 	if err != nil {
 		return "", err
 	}
-	noteFiberWorkerDisagreements(f, runtimeID, worker, address, peers)
+	a.noteFiberWorkerDisagreements(f, runtimeID, worker, address, peers)
 	return address, nil
 }
 
@@ -348,13 +347,13 @@ func fiberWorkerAddress(f *felt.Felt, worker *SessionProvenance, harness, runtim
 // noteFiberWorkerDisagreements tells the sender, on stderr, when the local
 // runtime field or other live peers registered for the fiber differ from the
 // ledger's worker. Neither changes the recipient.
-func noteFiberWorkerDisagreements(f *felt.Felt, runtimeID string, worker *SessionProvenance, address string, peers []messaging.Session) {
+func (a *app) noteFiberWorkerDisagreements(f *felt.Felt, runtimeID string, worker *SessionProvenance, address string, peers []messaging.Session) {
 	chosen, _ := messaging.ParseAddress(address)
 	if runtimeID != "" && runtimeID != worker.Session && runtimeID != worker.ThreadID && runtimeID != chosen.ID {
-		fmt.Fprintf(os.Stderr, "note: fiber %q's local shuttle.runtime.session_uuid %q is behind the session ledger; using the ledger's worker %s\n", f.ID, runtimeID, address)
+		fmt.Fprintf(a.env.Stderr, "note: fiber %q's local shuttle.runtime.session_uuid %q is behind the session ledger; using the ledger's worker %s\n", f.ID, runtimeID, address)
 	}
 	if others := staleFiberPeerCandidates(f, chosen.ID, worker, peers); len(others) > 0 {
-		fmt.Fprintf(os.Stderr, "note: other live sessions registered for fiber %q: %s\n", f.ID, strings.Join(others, ", "))
+		fmt.Fprintf(a.env.Stderr, "note: other live sessions registered for fiber %q: %s\n", f.ID, strings.Join(others, ", "))
 	}
 }
 

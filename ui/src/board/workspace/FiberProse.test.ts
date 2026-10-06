@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { loadMath } from '../mathDollars.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import type { Channel } from './documents.js'
+import { resetDocumentResources } from '../documentResources.js'
 import { buildFiberProse, installBodyFileLinks, ledeHtml, renderFiberMarkdown, settleBodyFileLink } from './FiberProse.js'
 
 vi.mock('../wikilinks.js', async (original) => {
@@ -28,9 +30,10 @@ const channel: Channel = {
     { key: 'host-a:/fibers/task/report.html', owner: 'host-a', path: '/fibers/task/report.html', name: 'report.html', kind: 'html', provenance: [] },
   ],
 }
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); resetDocumentResources() })
 
 describe('fiber prose', () => {
+  beforeAll(loadMath)
   it('shares embed removal, outcome math and owner-aware markdown with the modal', () => {
     const rendered = renderFiberMarkdown(channel.body, channel.outcome!, card)
     expect(rendered.attachments).toHaveLength(1)
@@ -59,11 +62,11 @@ describe('fiber prose', () => {
     expect(onFile).toHaveBeenCalledWith('/fibers/task/notes.md', 'notes')
   })
 
-  it('uses the project-directory fallback after a failed HEAD, but not a network error', async () => {
+  it('uses the project-directory fallback when the fiber directory has no such file, but not when its owner is unreachable', async () => {
     const pane = document.createElement('div')
     pane.innerHTML = renderFiberMarkdown('[notes](notes.md)', '', card).html
     const link = pane.querySelector<HTMLAnchorElement>('a')!
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: false }))))
     await settleBodyFileLink(link)
     expect(link.dataset.filePath).toBe('/project/notes.md')
     const onFile = vi.fn()
@@ -72,6 +75,7 @@ describe('fiber prose', () => {
     expect(onFile).toHaveBeenCalledWith('/project/notes.md', 'notes')
 
     pane.innerHTML = renderFiberMarkdown('[notes](notes.md)', '', card).html
+    resetDocumentResources()
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
     await settleBodyFileLink(pane.querySelector('a')!)
     expect(pane.querySelector<HTMLAnchorElement>('a')!.dataset.filePath).toBe('/fibers/task/notes.md')

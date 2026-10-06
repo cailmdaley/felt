@@ -233,7 +233,7 @@ defmodule Shuttle.CodexApp do
     cwd = opts[:cwd]
 
     if is_binary(cwd) and Path.type(cwd) == :absolute do
-      cwd = Path.expand(cwd)
+      cwd = Shuttle.Env.expand(cwd)
 
       case find_project(cwd, nil, MapSet.new()) do
         {:ok, id} -> {:ok, id}

@@ -107,7 +107,7 @@ describe('Reader channel sidebar', () => {
     })
     expect(reader.el.querySelector('.ws-sidebar .ws-worker-control')).toBe(target)
     expect(target.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
-    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1 m')
+    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m')
     expect(target.dataset.part).toBe('act')
     target.click()
     expect(open).toHaveBeenCalledOnce()
@@ -125,14 +125,14 @@ describe('Reader channel sidebar', () => {
     const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
     expect(head.hidden).toBe(false)
     expect(head.dataset.part).toBe('act')
-    expect(head.nextElementSibling).toBeNull()
-    expect(reader.el.querySelector('.ws-navbar [role="tablist"]')).toBeNull()
-    expect(reader.el.querySelector('.ws-band [role="tablist"] + .ws-band-position')).not.toBeNull()
+    // The trail ends with the page count; the head's centre holds the map.
+    expect(head.nextElementSibling?.classList.contains('ws-head-position')).toBe(true)
+    expect(reader.el.querySelector('.ws-navbar .ws-nav-lead + [data-part="page-band"] > [role="tablist"]')).not.toBeNull()
     const control = head.querySelector<HTMLElement>('.ws-worker-control')!
     expect(control.dataset.workerState).toBe('aloft')
     expect(control.querySelector('.ws-worker-dot')).not.toBeNull()
     expect(control.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
-    expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34 m')
+    expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34m')
     control.click()
     expect(open).toHaveBeenCalledOnce()
   })
@@ -155,7 +155,7 @@ describe('Reader channel sidebar', () => {
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
     expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
-    expect(reader.el.querySelector('.ws-nav-verdicts')?.getAttribute('data-act')).toBe('verdict')
+    expect(reader.el.querySelector('.ws-navbar .kbn-ctl-temper, .ws-navbar .kbn-ctl-discard')).toBeNull()
     expect(reader.el.querySelector<HTMLElement>('.ws-navbar .ws-head-worker')?.hidden).toBe(true)
     const revised = { ...alpha, outcome: 'A new result' }
     listedCards = [revised, beta]

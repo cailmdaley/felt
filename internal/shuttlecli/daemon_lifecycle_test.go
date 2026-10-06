@@ -10,13 +10,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 )
 
 func TestDaemonLifecycleHTTPUsesTCPAndUnixListeners(t *testing.T) {
+	t.Parallel()
 	t.Run("tcp", func(t *testing.T) {
+		t.Parallel()
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/api/v1/version" {
 				http.NotFound(w, r)
@@ -29,18 +32,21 @@ func TestDaemonLifecycleHTTPUsesTCPAndUnixListeners(t *testing.T) {
 		if err != nil || host != "127.0.0.1" {
 			t.Fatalf("test server address %q: %v", server.URL, err)
 		}
-		t.Setenv("SHUTTLE_LISTEN", "tcp://127.0.0.1:"+port)
-		settings, err := resolveHostSettings()
+		env := testEnv(t)
+		env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:"+port)
+		a := newApp(env)
+		settings, err := a.resolveHostSettings()
 		if err != nil {
 			t.Fatal(err)
 		}
-		body, err := daemonLifecycleGet(settings, "/api/v1/version", daemonReadTimeout)
+		body, err := a.daemonLifecycleGet(settings, "/api/v1/version", daemonReadTimeout)
 		if err != nil || string(body) != `{"ready":true}` {
 			t.Fatalf("TCP request = %q, %v", body, err)
 		}
 	})
 
 	t.Run("unix socket", func(t *testing.T) {
+		t.Parallel()
 		socket := filepath.Join(shortPrivateTempDir(t), "daemon.sock")
 		listener, err := net.Listen("unix", socket)
 		if err != nil {
@@ -55,12 +61,14 @@ func TestDaemonLifecycleHTTPUsesTCPAndUnixListeners(t *testing.T) {
 		})}
 		go func() { _ = server.Serve(listener) }()
 		defer server.Close()
-		t.Setenv("SHUTTLE_LISTEN", "unix://"+socket)
-		settings, err := resolveHostSettings()
+		env := testEnv(t)
+		env.Set("SHUTTLE_LISTEN", "unix://"+socket)
+		a := newApp(env)
+		settings, err := a.resolveHostSettings()
 		if err != nil {
 			t.Fatal(err)
 		}
-		body, err := daemonLifecycleGet(settings, "/api/v1/version", daemonReadTimeout)
+		body, err := a.daemonLifecycleGet(settings, "/api/v1/version", daemonReadTimeout)
 		if err != nil || !daemonVersionIsBooting(body) {
 			t.Fatalf("unix request = %q, %v", body, err)
 		}
@@ -68,22 +76,23 @@ func TestDaemonLifecycleHTTPUsesTCPAndUnixListeners(t *testing.T) {
 }
 
 func TestDaemonLifecycleChecksTCPListenerOwnershipBeforeRequest(t *testing.T) {
-	called := false
-	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	t.Parallel()
+	var called atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called.Store(true) }))
 	defer server.Close()
-	previous := daemonLifecycleOwnerCheck
-	daemonLifecycleOwnerCheck = func(hostSettings) error { return errors.New("foreign listener") }
-	t.Cleanup(func() { daemonLifecycleOwnerCheck = previous })
+	a := newApp(testEnv(t))
+	a.daemonLifecycleOwnerCheck = func(hostSettings) error { return errors.New("foreign listener") }
 	settings := hostSettings{Listen: "tcp://127.0.0.1:4000", listen: listenAddr{Network: "tcp", Address: "127.0.0.1:4000"}}
-	if _, err := daemonLifecycleGet(settings, "/api/v1/version", daemonReadTimeout); err == nil || !strings.Contains(err.Error(), "foreign listener") {
+	if _, err := a.daemonLifecycleGet(settings, "/api/v1/version", daemonReadTimeout); err == nil || !strings.Contains(err.Error(), "foreign listener") {
 		t.Fatalf("owner-refused request error = %v", err)
 	}
-	if called {
+	if called.Load() {
 		t.Fatal("HTTP request reached a listener before the owner check passed")
 	}
 }
 
 func TestDaemonStatusReportsBootingAndFallsBackToVersion(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		version    string
@@ -96,6 +105,7 @@ func TestDaemonStatusReportsBootingAndFallsBackToVersion(t *testing.T) {
 		{"state ready", `{"ready":true}`, http.StatusOK, true, `{"state":"running"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			stateRequested := false
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -113,8 +123,9 @@ func TestDaemonStatusReportsBootingAndFallsBackToVersion(t *testing.T) {
 			}))
 			defer server.Close()
 			port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
-			t.Setenv("SHUTTLE_LISTEN", "tcp://127.0.0.1:"+port)
-			out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "status")
+			env := testEnv(t)
+			env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:"+port)
+			out, stderr, err := executeIn(t, env, t.TempDir(), "daemon", "status")
 			if err != nil {
 				t.Fatalf("daemon status: %v\n%s", err, stderr)
 			}
@@ -126,6 +137,7 @@ func TestDaemonStatusReportsBootingAndFallsBackToVersion(t *testing.T) {
 }
 
 func TestDaemonStatusDownUsesExitCodeTwo(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -136,8 +148,9 @@ func TestDaemonStatusDownUsesExitCodeTwo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SHUTTLE_LISTEN", "tcp://"+net.JoinHostPort(host, port))
-	_, stderr, err := executeCLI(t, t.TempDir(), "daemon", "status")
+	env := testEnv(t)
+	env.Set("SHUTTLE_LISTEN", "tcp://"+net.JoinHostPort(host, port))
+	_, stderr, err := executeIn(t, env, t.TempDir(), "daemon", "status")
 	var exitErr *cliExitError
 	if !errors.As(err, &exitErr) || exitErr.code != 2 {
 		t.Fatalf("daemon status error = %v, want exit code 2\n%s", err, stderr)
@@ -148,6 +161,7 @@ func TestDaemonStatusDownUsesExitCodeTwo(t *testing.T) {
 }
 
 func TestDaemonReleaseGatesBootingAndPostsWhenReady(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		ready       bool
@@ -158,6 +172,7 @@ func TestDaemonReleaseGatesBootingAndPostsWhenReady(t *testing.T) {
 		{"ready", true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			posted := false
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -171,8 +186,9 @@ func TestDaemonReleaseGatesBootingAndPostsWhenReady(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			t.Setenv("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
-			_, stderr, err := executeCLI(t, t.TempDir(), "daemon", "release")
+			env := testEnv(t)
+			env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
+			_, stderr, err := executeIn(t, env, t.TempDir(), "daemon", "release")
 			if (err == nil) != tc.wantSuccess || posted != tc.wantPost {
 				t.Fatalf("release err=%v posted=%t stderr=%q", err, posted, stderr)
 			}
@@ -184,6 +200,7 @@ func TestDaemonReleaseGatesBootingAndPostsWhenReady(t *testing.T) {
 }
 
 func TestDaemonResetEscapesRemoteName(t *testing.T) {
+	t.Parallel()
 	posted := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.EscapedPath() == "/api/v1/remotes/one%2Ftwo/reset" {
@@ -194,64 +211,69 @@ func TestDaemonResetEscapesRemoteName(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer server.Close()
-	t.Setenv("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
-	out, err := runCommand(t, t.TempDir(), "daemon", "reset", "one/two")
+	env := testEnv(t)
+	env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
+	out, _, err := executeIn(t, env, t.TempDir(), "daemon", "reset", "one/two")
 	if err != nil || !posted || !strings.Contains(out, "circuit breaker reset for one/two") {
 		t.Fatalf("reset output=%q posted=%t err=%v", out, posted, err)
 	}
 }
 
 func TestShuttleVersionPrefersLiveDaemonAndFallsBackToRelease(t *testing.T) {
+	t.Parallel()
 	t.Run("live", func(t *testing.T) {
+		t.Parallel()
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/api/v1/version" {
 				fmt.Fprint(w, `{"version":"live"}`)
 			}
 		}))
 		defer server.Close()
-		t.Setenv("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
-		previous := runDaemonReleaseVersion
-		runDaemonReleaseVersion = func(string) error { t.Fatal("release fallback ran with a live daemon"); return nil }
-		t.Cleanup(func() { runDaemonReleaseVersion = previous })
-		out, err := runCommand(t, t.TempDir(), "version")
+		env := testEnv(t)
+		env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
+		a := newApp(env)
+		a.runDaemonReleaseVersion = func(string) error { t.Fatal("release fallback ran with a live daemon"); return nil }
+		out, _, err := executeApp(t, a, t.TempDir(), "version")
 		if err != nil || !strings.Contains(out, `"version":"live"`) {
 			t.Fatalf("live version output=%q err=%v", out, err)
 		}
 	})
 
 	t.Run("release fallback", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
 		release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-		t.Setenv("SHUTTLE_RELEASE", release.Dir)
+		env.Set("SHUTTLE_RELEASE", release.Dir)
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
 		address := listener.Addr().String()
 		_ = listener.Close()
-		t.Setenv("SHUTTLE_LISTEN", "tcp://"+address)
-		previous := runDaemonReleaseVersion
-		t.Cleanup(func() { runDaemonReleaseVersion = previous })
+		env.Set("SHUTTLE_LISTEN", "tcp://"+address)
+		a := newApp(env)
 		called := ""
-		runDaemonReleaseVersion = func(path string) error { called = path; return nil }
-		if _, err := runCommand(t, t.TempDir(), "version"); err != nil || called != release.Launcher {
+		a.runDaemonReleaseVersion = func(path string) error { called = path; return nil }
+		if _, _, err := executeApp(t, a, t.TempDir(), "version"); err != nil || called != release.Launcher {
 			t.Fatalf("version fallback path=%q err=%v, want %q", called, err, release.Launcher)
 		}
 	})
 }
 
 func TestDaemonStartForceExecutesReleaseLauncher(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	t.Setenv("SHUTTLE_RELEASE", release.Dir)
-	t.Setenv("SHUTTLE_LISTEN", "invalid listener ignored by --force")
-	previous := execDaemonRelease
-	t.Cleanup(func() { execDaemonRelease = previous })
+	env.Set("SHUTTLE_RELEASE", release.Dir)
+	env.Set("SHUTTLE_LISTEN", "invalid listener ignored by --force")
+	a := newApp(env)
 	var gotPath string
 	var gotArgs []string
-	execDaemonRelease = func(path string, args ...string) error {
+	a.execDaemonRelease = func(path string, args ...string) error {
 		gotPath, gotArgs = path, args
 		return nil
 	}
-	if _, err := runCommand(t, t.TempDir(), "daemon", "start", "--force"); err != nil {
+	if _, _, err := executeApp(t, a, t.TempDir(), "daemon", "start", "--force"); err != nil {
 		t.Fatalf("forced start: %v", err)
 	}
 	if gotPath != release.Launcher || strings.Join(gotArgs, " ") != "start" {
@@ -260,42 +282,43 @@ func TestDaemonStartForceExecutesReleaseLauncher(t *testing.T) {
 }
 
 func TestDaemonStartGuardRefusesWhenTCPOwnerCheckFails(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	t.Setenv("SHUTTLE_RELEASE", release.Dir)
-	t.Setenv("SHUTTLE_LISTEN", "tcp://127.0.0.1:4000")
-	previousOwnerCheck, previousExec := daemonLifecycleOwnerCheck, execDaemonRelease
-	t.Cleanup(func() {
-		daemonLifecycleOwnerCheck, execDaemonRelease = previousOwnerCheck, previousExec
-	})
-	daemonLifecycleOwnerCheck = func(hostSettings) error { return errors.New("foreign listener") }
+	env.Set("SHUTTLE_RELEASE", release.Dir)
+	env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:4000")
+	a := newApp(env)
+	a.daemonLifecycleOwnerCheck = func(hostSettings) error { return errors.New("foreign listener") }
 	launched := false
-	execDaemonRelease = func(string, ...string) error { launched = true; return nil }
-	_, stderr, err := executeCLI(t, t.TempDir(), "daemon", "start")
+	a.execDaemonRelease = func(string, ...string) error { launched = true; return nil }
+	_, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "start")
 	if err == nil || launched || !strings.Contains(err.Error(), "foreign listener") || strings.Contains(stderr, "Daemon already running") {
 		t.Fatalf("start result err=%v launched=%t stderr=%q", err, launched, stderr)
 	}
 }
 
 func TestDaemonStartGuardRefusesAnAnsweringListener(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	t.Setenv("SHUTTLE_RELEASE", release.Dir)
+	env.Set("SHUTTLE_RELEASE", release.Dir)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"ready":false}`)
 	}))
 	defer server.Close()
 	port := strings.TrimPrefix(server.URL, "http://127.0.0.1:")
-	t.Setenv("SHUTTLE_LISTEN", "tcp://127.0.0.1:"+port)
-	previous := execDaemonRelease
-	t.Cleanup(func() { execDaemonRelease = previous })
+	env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:"+port)
+	a := newApp(env)
 	launched := false
-	execDaemonRelease = func(string, ...string) error { launched = true; return nil }
-	_, stderr, err := executeCLI(t, t.TempDir(), "daemon", "start")
+	a.execDaemonRelease = func(string, ...string) error { launched = true; return nil }
+	_, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "start")
 	if err == nil || launched || !strings.Contains(stderr, "Daemon already running") {
 		t.Fatalf("start result err=%v launched=%t stderr=%q", err, launched, stderr)
 	}
 }
 
 func TestAbsoluteExecutablePathPreservesHomebrewLauncherSymlink(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "Cellar", "shuttle", "1.0", "bin", "shuttle")
 	link := filepath.Join(dir, "bin", "shuttle")
@@ -311,7 +334,7 @@ func TestAbsoluteExecutablePathPreservesHomebrewLauncherSymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	got, err := absoluteExecutablePath(link)
+	got, err := newApp(testEnv(t)).absoluteExecutablePath(link)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,6 +344,7 @@ func TestAbsoluteExecutablePathPreservesHomebrewLauncherSymlink(t *testing.T) {
 }
 
 func TestFindDaemonReleasePrecedence(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configured := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "configured"))
 	sibling := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "sibling"))
@@ -332,26 +356,29 @@ func TestFindDaemonReleasePrecedence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".shuttle", "repo"), []byte(repo+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	env := testEnv(t)
+	env.Set("HOME", home)
+	a := newApp(env)
 
-	got, err := findDaemonReleaseAt(configured.Dir, filepath.Join(sibling.Dir, "bin", "shuttle"), home)
+	got, err := a.findDaemonReleaseAt(configured.Dir, filepath.Join(sibling.Dir, "bin", "shuttle"), home)
 	if err != nil || got.Dir != configured.Dir {
 		t.Fatalf("environment release = %+v, %v", got, err)
 	}
-	got, err = findDaemonReleaseAt("", filepath.Join(sibling.Dir, "bin", "shuttle"), home)
+	got, err = a.findDaemonReleaseAt("", filepath.Join(sibling.Dir, "bin", "shuttle"), home)
 	if err != nil || got.Dir != sibling.Dir {
 		t.Fatalf("sibling release = %+v, %v", got, err)
 	}
-	if _, err := findDaemonReleaseAt("", filepath.Join(repo, "shuttle"), t.TempDir()); err == nil {
+	if _, err := a.findDaemonReleaseAt("", filepath.Join(repo, "shuttle"), t.TempDir()); err == nil {
 		t.Fatal("release lookup should require SHUTTLE_RELEASE, a sibling launcher, or ~/.shuttle/repo")
 	}
-	got, err = findDaemonReleaseAt("", filepath.Join(t.TempDir(), "shuttle"), home)
+	got, err = a.findDaemonReleaseAt("", filepath.Join(t.TempDir(), "shuttle"), home)
 	if err != nil || got.Dir != repository.Dir {
 		t.Fatalf("repository release = %+v, %v", got, err)
 	}
 }
 
 func TestFindDaemonReleaseSupportsFetchedReleaseInShuttleState(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	fetched := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "fetched"))
 	if err := os.MkdirAll(filepath.Join(home, ".shuttle"), 0o755); err != nil {
@@ -360,22 +387,21 @@ func TestFindDaemonReleaseSupportsFetchedReleaseInShuttleState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".shuttle", "repo"), []byte(fetched.Dir+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := findDaemonReleaseAt("", filepath.Join(t.TempDir(), "shuttle"), home)
+	got, err := newApp(testEnv(t)).findDaemonReleaseAt("", filepath.Join(t.TempDir(), "shuttle"), home)
 	if err != nil || got.Dir != fetched.Dir {
 		t.Fatalf("fetched release = %+v, %v; want %q", got, err, fetched.Dir)
 	}
 }
 
 func TestStopDaemonMarksAndSignalsOnlyThisRelease(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release.with.dots"))
 	dataDir := filepath.Join(t.TempDir(), "daemon-data")
-	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
-	previousFind, previousSignal, previousPause := daemonFindPIDs, daemonSignalPID, daemonPause
-	t.Cleanup(func() {
-		daemonFindPIDs, daemonSignalPID, daemonPause = previousFind, previousSignal, previousPause
-	})
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", dataDir)
+	a := newApp(env)
 	finds := 0
-	daemonFindPIDs = func(pattern string) ([]int, error) {
+	a.daemonFindPIDs = func(pattern string) ([]int, error) {
 		if !strings.Contains(pattern, regexp.QuoteMeta(release.Dir)) {
 			t.Fatalf("process pattern %q does not identify release %q", pattern, release.Dir)
 		}
@@ -386,7 +412,7 @@ func TestStopDaemonMarksAndSignalsOnlyThisRelease(t *testing.T) {
 		return nil, nil
 	}
 	var signals []syscall.Signal
-	daemonSignalPID = func(pid int, signal syscall.Signal) error {
+	a.daemonSignalPID = func(pid int, signal syscall.Signal) error {
 		if pid != 1234 {
 			t.Fatalf("signal pid %d, want 1234", pid)
 		}
@@ -396,8 +422,8 @@ func TestStopDaemonMarksAndSignalsOnlyThisRelease(t *testing.T) {
 		signals = append(signals, signal)
 		return nil
 	}
-	daemonPause = func(time.Duration) {}
-	if err := stopDaemonRelease(release); err != nil {
+	a.daemonPause = func(time.Duration) {}
+	if err := a.stopDaemonRelease(release); err != nil {
 		t.Fatal(err)
 	}
 	if len(signals) != 1 || signals[0] != syscall.SIGTERM {
@@ -406,6 +432,7 @@ func TestStopDaemonMarksAndSignalsOnlyThisRelease(t *testing.T) {
 }
 
 func TestDaemonProcessPatternMatchesOnlyReleasePath(t *testing.T) {
+	t.Parallel()
 	release := filepath.Join(t.TempDir(), "release.v1")
 	pattern := daemonProcessPattern(release)
 	for _, tc := range []struct {
@@ -431,7 +458,7 @@ func writeTestDaemonRelease(t *testing.T, dir string) daemonRelease {
 	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	release, err := validateDaemonRelease(dir)
+	release, err := newApp(testEnv(t)).validateDaemonRelease(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

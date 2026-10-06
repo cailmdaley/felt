@@ -7,8 +7,10 @@ import (
 )
 
 func TestResolveModelFamily(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	home := t.TempDir()
-	t.Setenv("CODEX_HOME", home)
+	env.Set("CODEX_HOME", home)
 	cache := `{"models":[
 	  {"slug":"gpt-6-sol","visibility":"list"},
 	  {"slug":"gpt-6.1-sol","visibility":"list"},
@@ -19,7 +21,7 @@ func TestResolveModelFamily(t *testing.T) {
 		t.Fatal(err)
 	}
 	pi := t.TempDir()
-	t.Setenv("PI_CODING_AGENT_DIR", pi)
+	env.Set("PI_CODING_AGENT_DIR", pi)
 	store := `{"github-copilot":{"models":[{"id":"gpt-6-luna"},{"id":"gpt-6.1-luna"}]},
 	  "openai-codex":{"models":[{"id":"gpt-6-sol"},{"id":"gpt-7-sol"}]}}`
 	if err := os.WriteFile(filepath.Join(pi, "models-store.json"), []byte(store), 0o644); err != nil {
@@ -39,12 +41,12 @@ func TestResolveModelFamily(t *testing.T) {
 		{AgentRecord{CLI: "claude", Model: "opus"}, "opus"},
 	}
 	for _, c := range cases {
-		if got := resolveModelFamily(c.rec); got != c.want {
+		if got := resolveModelFamily(env, c.rec); got != c.want {
 			t.Errorf("%+v = %q, want %q", c.rec, got, c.want)
 		}
 	}
-	t.Setenv("CODEX_HOME", t.TempDir())
-	if got := resolveModelFamily(AgentRecord{CLI: "codex", Model: "gpt-sol"}); got != "gpt-sol" {
+	env.Set("CODEX_HOME", t.TempDir())
+	if got := resolveModelFamily(env, AgentRecord{CLI: "codex", Model: "gpt-sol"}); got != "gpt-sol" {
 		t.Errorf("no catalog: got %q", got)
 	}
 }

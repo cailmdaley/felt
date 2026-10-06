@@ -21,6 +21,8 @@ func decodeAssignment(t *testing.T, storage *felt.Storage) map[string][]string {
 }
 
 func TestShuttleAssign_WritesReadableMultiRoleRosterAndAddsMembership(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/vizier/fable", assignTestUID, "", nil, nil)
@@ -29,7 +31,7 @@ func TestShuttleAssign_WritesReadableMultiRoleRosterAndAddsMembership(t *testing
 	seedFiber(t, storage, "roles/organizer/opus", "01C7QH6R8X9M2Q8D6Y0D5Q4C1B", "", nil, nil)
 	seedFiber(t, storage, "work", "", felt.StatusActive, map[string]any{"kind": "oneshot"}, nil)
 
-	out, err := runCommand(t, dir, "assign", "work",
+	out, err := runIn(t, env, dir, "assign", "work",
 		"--role", "vizier", "--collaborator", "fable", "--collaborator", "astra",
 		"--role", "organizer", "--collaborator", "roles/organizer/opus")
 	if err != nil {
@@ -43,10 +45,10 @@ func TestShuttleAssign_WritesReadableMultiRoleRosterAndAddsMembership(t *testing
 		t.Fatal("assignment changed lifecycle status")
 	}
 
-	if _, err := runCommand(t, dir, "assign", "work", "--role", "research"); err == nil {
+	if _, err := runIn(t, env, dir, "assign", "work", "--role", "research"); err == nil {
 		t.Fatal("assignment accepted nonexistent role")
 	}
-	if _, err := runCommand(t, dir, "assign", "work", "--role", "vizier", "--collaborator", "astra"); err != nil {
+	if _, err := runIn(t, env, dir, "assign", "work", "--role", "vizier", "--collaborator", "astra"); err != nil {
 		t.Fatalf("idempotent patch: %v", err)
 	}
 	got = decodeAssignment(t, storage)
@@ -56,11 +58,13 @@ func TestShuttleAssign_WritesReadableMultiRoleRosterAndAddsMembership(t *testing
 }
 
 func TestShuttleAssign_RoleOnlyAndJSONReplacement(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/role", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/collaborator", assignTestOtherUID, "", nil, nil)
 	seedFiber(t, storage, "work", "", "", nil, nil)
-	if _, err := runCommand(t, dir, "assign", "work", "--role", "role"); err != nil {
+	if _, err := runIn(t, env, dir, "assign", "work", "--role", "role"); err != nil {
 		t.Fatalf("role-only assign: %v", err)
 	}
 	if got := decodeAssignment(t, storage); len(got) != 1 || got["role"] == nil || len(got["role"]) != 0 {
@@ -69,14 +73,14 @@ func TestShuttleAssign_RoleOnlyAndJSONReplacement(t *testing.T) {
 
 	// These valid role slugs also name fields used by the legacy representation.
 	json := `{"role":[],"collaborator":[]}`
-	if _, err := runCommand(t, dir, "assign", "work", "--json-assignment", json); err != nil {
+	if _, err := runIn(t, env, dir, "assign", "work", "--json-assignment", json); err != nil {
 		t.Fatalf("JSON replacement: %v", err)
 	}
 	if got := decodeAssignment(t, storage); len(got) != 2 || got["role"] == nil || got["collaborator"] == nil {
 		t.Fatalf("JSON roster = %#v", got)
 	}
 
-	if _, err := runCommand(t, dir, "assign", "work", "--clear"); err != nil {
+	if _, err := runIn(t, env, dir, "assign", "work", "--clear"); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	if _, ok := mustRead(t, storage, "work").ExtraFields[collaborationField]; ok {
@@ -85,6 +89,8 @@ func TestShuttleAssign_RoleOnlyAndJSONReplacement(t *testing.T) {
 }
 
 func TestShuttleAssign_RejectsAmbiguousUIDAndNestedNotesIdentity(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/other", assignTestOtherUID, "", nil, nil)
@@ -99,13 +105,15 @@ func TestShuttleAssign_RejectsAmbiguousUIDAndNestedNotesIdentity(t *testing.T) {
 		{"--role", "vizier", "--collaborator", "01C7QH6R8X9M2Q8D6Y0D5Q4C1B"},
 	} {
 		args := append([]string{"assign", "work"}, flags...)
-		if out, err := runCommand(t, dir, args...); err == nil {
+		if out, err := runIn(t, env, dir, args...); err == nil {
 			t.Fatalf("assign %v unexpectedly succeeded: %s", flags, out)
 		}
 	}
 }
 
 func TestShuttleAssign_JSONValidatesCanonicalSlugPaths(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/vizier/fable-alias", assignTestUID, "", nil, nil)
@@ -115,19 +123,21 @@ func TestShuttleAssign_JSONValidatesCanonicalSlugPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedFiber(t, storage, "work", "", "", nil, nil)
-	if out, err := runCommand(t, dir, "assign", "work", "--json-assignment", `{"vizier":["fable"]}`); err == nil {
+	if out, err := runIn(t, env, dir, "assign", "work", "--json-assignment", `{"vizier":["fable"]}`); err == nil {
 		t.Fatalf("JSON accepted a display-name alias as a slug path: %s", out)
 	}
 }
 
 func TestShuttleAssign_ProjectViewUsesEnclosingRoleStore(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	loom, project := newCrossStoreFixture(t)
 	root := felt.NewStorage(loom)
 	seedFiber(t, root, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, root, "roles/vizier/fable", assignTestUID, "", nil, nil)
 	local := felt.NewStorage(project)
 	seedFiber(t, local, "work", "", "", nil, nil)
-	if out, err := runCommand(t, project, "assign", "work", "--role", "vizier", "--collaborator", "fable"); err != nil {
+	if out, err := runIn(t, env, project, "assign", "work", "--role", "vizier", "--collaborator", "fable"); err != nil {
 		t.Fatalf("assign through project view: %v\n%s", err, out)
 	}
 	if got := decodeAssignment(t, local); len(got) != 1 || got["vizier"][0] != "fable" {
@@ -136,6 +146,8 @@ func TestShuttleAssign_ProjectViewUsesEnclosingRoleStore(t *testing.T) {
 }
 
 func TestShuttleAssign_EditingLegacyPairWritesReadableMapping(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "roles/vizier", assignTestRoleUID, "", nil, nil)
 	seedFiber(t, storage, "roles/vizier/fable", assignTestUID, "", nil, nil)
@@ -151,7 +163,7 @@ func TestShuttleAssign_EditingLegacyPairWritesReadableMapping(t *testing.T) {
 	if err := storage.Write(work); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runCommand(t, dir, "assign", "work", "--collaborator", "astra"); err != nil {
+	if _, err := runIn(t, env, dir, "assign", "work", "--collaborator", "astra"); err != nil {
 		t.Fatalf("patch legacy pair: %v", err)
 	}
 	if got := decodeAssignment(t, storage); strings.Join(got["vizier"], ",") != "fable,astra" {

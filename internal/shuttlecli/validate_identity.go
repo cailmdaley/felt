@@ -18,8 +18,7 @@ import (
 // analogue.
 
 var (
-	identityDaemonURLs []string
-	ulidPattern        = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
+	ulidPattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{26}$`)
 )
 
 type identityReport struct {
@@ -75,10 +74,12 @@ type daemonFiberRow struct {
 	Fiber     map[string]any `json:"fiber"`
 }
 
-var validateIdentityCmd = &cobra.Command{
-	Use:   "validate-identity",
-	Short: "Validate fiber UID invariants across daemon feeds",
-	Long: `Queries the shuttle daemon document surface and checks the
+func (a *app) validateIdentityCmd() *cobra.Command {
+	var identityDaemonURLs []string
+	validateIdentityCmd := &cobra.Command{
+		Use:   "validate-identity",
+		Short: "Validate fiber UID invariants across daemon feeds",
+		Long: `Queries the shuttle daemon document surface and checks the
 intrinsic-identity invariants:
 
   - /api/v1/fibers rows carry ULID uid values
@@ -89,51 +90,54 @@ intrinsic-identity invariants:
 By default it checks the local daemon (its listener per 'shuttle host')
 plus every configured remote's URL (see 'shuttle remotes list').
 Pass --daemon-url repeatedly to validate another set of daemon base URLs.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		urls := identityDaemonURLs
-		if len(urls) == 0 {
-			var err error
-			urls, err = defaultIdentityDaemonURLs()
-			if err != nil {
-				return err
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			urls := identityDaemonURLs
+			if len(urls) == 0 {
+				var err error
+				urls, err = a.defaultIdentityDaemonURLs()
+				if err != nil {
+					return err
+				}
 			}
-		}
 
-		report := validateIdentity(urls)
-		hasGaps := report.Summary.MissingUIDCount > 0 ||
-			report.Summary.DocumentSkewCount > 0 ||
-			report.Summary.DuplicateUIDCount > 0 ||
-			report.Summary.HostlessOpenCount > 0
+			report := a.validateIdentity(urls)
+			hasGaps := report.Summary.MissingUIDCount > 0 ||
+				report.Summary.DocumentSkewCount > 0 ||
+				report.Summary.DuplicateUIDCount > 0 ||
+				report.Summary.HostlessOpenCount > 0
 
-		if jsonOutput {
-			if err := outputJSON(report); err != nil {
-				return err
+			if a.json {
+				if err := a.outputJSON(report); err != nil {
+					return err
+				}
+				if hasGaps {
+					return fmt.Errorf("identity validation found gaps")
+				}
+				return nil
 			}
+
+			a.printIdentityReport(report)
 			if hasGaps {
 				return fmt.Errorf("identity validation found gaps")
 			}
 			return nil
-		}
-
-		printIdentityReport(report)
-		if hasGaps {
-			return fmt.Errorf("identity validation found gaps")
-		}
-		return nil
-	},
+		},
+	}
+	validateIdentityCmd.Flags().StringArrayVar(&identityDaemonURLs, "daemon-url", nil, "Daemon base URL to validate; repeat for multiple hosts")
+	return validateIdentityCmd
 }
 
 // defaultIdentityDaemonURLs is the local daemon plus every resolved remote's
 // URL: the fleet file's entries and the local daemon's discovered peers, the
 // same fleet the daemon polls.
-func defaultIdentityDaemonURLs() ([]string, error) {
-	local, err := daemonURL()
+func (a *app) defaultIdentityDaemonURLs() ([]string, error) {
+	local, err := a.daemonURL()
 	if err != nil {
 		return nil, err
 	}
 	urls := []string{local}
-	remotes, err := resolvedRemotes()
+	remotes, err := a.resolvedRemotes()
 	if err != nil {
 		return nil, err
 	}
@@ -143,10 +147,10 @@ func defaultIdentityDaemonURLs() ([]string, error) {
 	return urls, nil
 }
 
-func validateIdentity(urls []string) identityReport {
+func (a *app) validateIdentity(urls []string) identityReport {
 	report := identityReport{GeneratedAt: time.Now().UTC()}
 	for _, url := range urls {
-		daemon := validateIdentityDaemon(strings.TrimRight(url, "/"))
+		daemon := a.validateIdentityDaemon(strings.TrimRight(url, "/"))
 		report.Daemons = append(report.Daemons, daemon)
 		report.Summary.DaemonCount++
 		report.Summary.FiberCount += daemon.FiberCount
@@ -158,11 +162,11 @@ func validateIdentity(urls []string) identityReport {
 	return report
 }
 
-func validateIdentityDaemon(baseURL string) identityDaemonReport {
+func (a *app) validateIdentityDaemon(baseURL string) identityDaemonReport {
 	report := identityDaemonReport{URL: baseURL}
 
 	fibersURL := baseURL + "/api/v1/fibers?shuttle=true"
-	fibers, err := getDaemonJSON[daemonFibersResponse](fibersURL, fmt.Sprintf("decoding %s", fibersURL))
+	fibers, err := getDaemonJSON[daemonFibersResponse](a, fibersURL, fmt.Sprintf("decoding %s", fibersURL))
 	if err != nil {
 		report.Error = err.Error()
 		return report
@@ -261,9 +265,9 @@ func isOpenStatus(status string) bool {
 	return status == "open" || status == "active"
 }
 
-func printIdentityReport(report identityReport) {
-	fmt.Printf("Federated identity validation (%s)\n", report.GeneratedAt.Format(time.RFC3339))
-	fmt.Printf("Daemons: %d  Fibers: %d  Missing UID: %d  Document skew: %d  Duplicate UID: %d  Hostless open: %d\n\n",
+func (a *app) printIdentityReport(report identityReport) {
+	fmt.Fprintf(a.env.Stdout, "Federated identity validation (%s)\n", report.GeneratedAt.Format(time.RFC3339))
+	fmt.Fprintf(a.env.Stdout, "Daemons: %d  Fibers: %d  Missing UID: %d  Document skew: %d  Duplicate UID: %d  Hostless open: %d\n\n",
 		report.Summary.DaemonCount,
 		report.Summary.FiberCount,
 		report.Summary.MissingUIDCount,
@@ -277,20 +281,20 @@ func printIdentityReport(report identityReport) {
 		if host == "" {
 			host = "(unknown)"
 		}
-		fmt.Printf("%s (%s): %d fibers\n", daemon.URL, host, daemon.FiberCount)
+		fmt.Fprintf(a.env.Stdout, "%s (%s): %d fibers\n", daemon.URL, host, daemon.FiberCount)
 		if daemon.Error != "" {
-			fmt.Printf("  error: %s\n\n", daemon.Error)
+			fmt.Fprintf(a.env.Stdout, "  error: %s\n\n", daemon.Error)
 			continue
 		}
-		printFindingGroup("missing uid", daemon.MissingUID)
-		printFindingGroup("document id != uid", daemon.DocumentSkew)
-		printFindingGroup("hostless open/active", daemon.HostlessOpen)
-		printDuplicateGroup(daemon.DuplicateUIDs)
-		fmt.Println()
+		a.printFindingGroup("missing uid", daemon.MissingUID)
+		a.printFindingGroup("document id != uid", daemon.DocumentSkew)
+		a.printFindingGroup("hostless open/active", daemon.HostlessOpen)
+		a.printDuplicateGroup(daemon.DuplicateUIDs)
+		fmt.Fprintln(a.env.Stdout)
 	}
 }
 
-func printFindingGroup(label string, rows []identityFiberFinding) {
+func (a *app) printFindingGroup(label string, rows []identityFiberFinding) {
 	if len(rows) == 0 {
 		return
 	}
@@ -299,26 +303,21 @@ func printFindingGroup(label string, rows []identityFiberFinding) {
 	if len(shown) > cap {
 		shown = shown[:cap]
 	}
-	fmt.Printf("  %s (%d):\n", label, len(rows))
+	fmt.Fprintf(a.env.Stdout, "  %s (%d):\n", label, len(rows))
 	for _, row := range shown {
-		fmt.Printf("    - %s [status=%s id=%s uid=%s host=%s]\n", row.Slug, row.Status, row.ID, row.UID, row.Host)
+		fmt.Fprintf(a.env.Stdout, "    - %s [status=%s id=%s uid=%s host=%s]\n", row.Slug, row.Status, row.ID, row.UID, row.Host)
 	}
 	if len(rows) > cap {
-		fmt.Printf("    ... %d more\n", len(rows)-cap)
+		fmt.Fprintf(a.env.Stdout, "    ... %d more\n", len(rows)-cap)
 	}
 }
 
-func printDuplicateGroup(rows []identityDuplicateUID) {
+func (a *app) printDuplicateGroup(rows []identityDuplicateUID) {
 	if len(rows) == 0 {
 		return
 	}
-	fmt.Printf("  duplicate uid (%d):\n", len(rows))
+	fmt.Fprintf(a.env.Stdout, "  duplicate uid (%d):\n", len(rows))
 	for _, row := range rows {
-		fmt.Printf("    - %s (%d rows)\n", row.UID, row.Count)
+		fmt.Fprintf(a.env.Stdout, "    - %s (%d rows)\n", row.UID, row.Count)
 	}
-}
-
-func init() {
-	validateIdentityCmd.Flags().StringArrayVar(&identityDaemonURLs, "daemon-url", nil, "Daemon base URL to validate; repeat for multiple hosts")
-	addShuttleCommand(validateIdentityCmd)
 }

@@ -96,7 +96,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
   # Poll feeds until the named origin has fibers (or give up). The stub returns
   # instantly, so a populated feed arrives within a few ticks; this just avoids
   # racing the async Task without a fixed sleep.
-  defp wait_for_feed(pid, name, attempts \\ 100) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_for_feed(pid, name, attempts \\ 6_000) do
     entry = Map.get(RemoteFiberRegistry.feeds(pid), name, %{fibers: []})
 
     cond do
@@ -110,6 +112,14 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         Process.sleep(5)
         wait_for_feed(pid, name, attempts - 1)
     end
+  end
+
+  # A clock the test owns: `clock` reads it, `advance.(ms)` moves it forward.
+  defp fake_clock do
+    agent = start_supervised!({Agent, fn -> DateTime.utc_now() end}, id: make_ref())
+    clock = fn -> Agent.get(agent, & &1) end
+    advance = fn ms -> Agent.update(agent, &DateTime.add(&1, ms, :millisecond)) end
+    {clock, advance}
   end
 
   defp sample_fiber(id) do
@@ -449,11 +459,11 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     # poll_interval (here 1 × 200ms), or there has been none. A failed poll
     # records its error and keeps the last-good fibers but leaves that clock
     # alone, so a single blip does not flip the badge while sustained failure
-    # does; a success clears staleness at once. The window is wide enough that
-    # the GenServer round trips after a poll land well inside it. The last two
-    # waits are each shorter than it and the feed is not read between them (a
-    # loaded scheduler can stretch a sleep), so only a clock that a failure
-    # leaves untouched reads stale at the end. A nil expectation reads nothing.
+    # does; a success clears staleness at once. The registry reads a clock the
+    # test owns, so the feed ages only when an :aging step advances it. The last
+    # two advances are each shorter than the window and the feed is not read
+    # between them, so only a clock that a failure leaves untouched reads stale
+    # at the end. A nil expectation reads nothing.
     @window_ms 200
     @history [
       {:never_polled, nil, %{stale: true, fibers: [], last_error: nil}},
@@ -467,6 +477,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     ]
 
     test "a feed is stale from the last success, not the last poll", %{dir: dir} do
+      {clock, advance} = fake_clock()
       remote = candide(poll_interval_ms: @window_ms, stale_multiplier: 1)
       url = Remote.fibers_url(remote)
 
@@ -477,7 +488,8 @@ defmodule Shuttle.RemoteFiberRegistryTest do
            remotes: [remote],
            client: MockClient,
            auto_poll: false,
-           store_dir: dir}
+           store_dir: dir,
+           clock: clock}
         )
 
       for {step, arg, expected} <- @history do
@@ -486,7 +498,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
             :ok
 
           :aging ->
-            Process.sleep(arg)
+            advance.(arg)
 
           ok when ok in [:success, :recovery] ->
             poll(pid, url, {:ok, feed_body([sample_fiber(arg)])})

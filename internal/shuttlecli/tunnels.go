@@ -5,10 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"text/template"
 
@@ -41,11 +39,6 @@ var tunnelPlistTemplate string
 
 //go:embed shuttle-tunnel.service.tmpl
 var tunnelServiceTemplate string
-
-// hostGOOS is runtime.GOOS behind a variable so the tests can render and place
-// the other platform's job without a machine of that platform. Tests swap and
-// restore it; nothing else assigns it.
-var hostGOOS = runtime.GOOS
 
 type tunnelSpec struct {
 	Name       string
@@ -85,13 +78,14 @@ type tunnelTemplateData struct {
 	Multiplex   bool
 }
 
-var (
-	tunnelsJobDir    string
-	tunnelsLogDir    string
-	tunnelsAutoSSH   string
-	tunnelsWriteOnly bool
-	tunnelsDryRun    bool
-)
+// tunnelsInstallOptions are the flags of shuttle tunnels install.
+type tunnelsInstallOptions struct {
+	jobDir    string
+	logDir    string
+	autoSSH   string
+	writeOnly bool
+	dryRun    bool
+}
 
 // tunnelSupervisor is the host's job supervisor. It answers the questions
 // install has to ask per platform: where a job file lives, what it is called,
@@ -127,10 +121,11 @@ type tunnelSupervisor struct {
 	Note string
 }
 
-var tunnelsCmd = &cobra.Command{
-	Use:   "tunnels",
-	Short: "Install supervised autossh tunnels for shuttle remotes",
-	Long: `Manage the hub-side autossh tunnels that map remote shuttle daemons
+func (a *app) tunnelsCmd() *cobra.Command {
+	tunnelsCmd := &cobra.Command{
+		Use:   "tunnels",
+		Short: "Install supervised autossh tunnels for shuttle remotes",
+		Long: `Manage the hub-side autossh tunnels that map remote shuttle daemons
 onto local ports. The generated jobs go to the host's own supervisor: launchd
 LaunchAgents in ~/Library/LaunchAgents on macOS, systemd user units in
 ~/.config/systemd/user on Linux. Single-host use needs no tunnels at all.
@@ -155,18 +150,30 @@ Examples:
   shuttle tunnels install <name>          # only that remote, no pruning
   shuttle tunnels install --dry-run       # print what would be installed and removed, touching nothing
   shuttle tunnels install --write-only    # write job files but don't start them or prune`,
+	}
+	tunnelsCmd.AddCommand(a.tunnelsInstallCmd())
+	return tunnelsCmd
 }
 
-var tunnelsInstallCmd = &cobra.Command{
-	Use:   "install [name ...]",
-	Short: "Write and optionally start the supervisor jobs for shuttle tunnels",
-	Args:  cobra.ArbitraryArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return installTunnels(args)
-	},
+func (a *app) tunnelsInstallCmd() *cobra.Command {
+	var tunnelsInstallOpts tunnelsInstallOptions
+	tunnelsInstallCmd := &cobra.Command{
+		Use:   "install [name ...]",
+		Short: "Write and optionally start the supervisor jobs for shuttle tunnels",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.installTunnels(args, tunnelsInstallOpts)
+		},
+	}
+	tunnelsInstallCmd.Flags().StringVar(&tunnelsInstallOpts.jobDir, "unit-dir", "", "Directory to write supervisor jobs into (default: ~/Library/LaunchAgents on macOS, ~/.config/systemd/user on Linux)")
+	tunnelsInstallCmd.Flags().StringVar(&tunnelsInstallOpts.logDir, "log-dir", "", "Directory for autossh logs (default: ~/.local/state/shuttle)")
+	tunnelsInstallCmd.Flags().StringVar(&tunnelsInstallOpts.autoSSH, "autossh-path", "", "Path to autossh (default: resolve on PATH)")
+	tunnelsInstallCmd.Flags().BoolVar(&tunnelsInstallOpts.writeOnly, "write-only", false, "Write the job files but do not load or start them")
+	tunnelsInstallCmd.Flags().BoolVar(&tunnelsInstallOpts.dryRun, "dry-run", false, "Print what would be installed, and (with no remote named) which orphaned jobs would be removed; writes nothing and shells no supervisor")
+	return tunnelsInstallCmd
 }
 
-func installTunnels(requested []string) error {
+func (a *app) installTunnels(requested []string, o tunnelsInstallOptions) error {
 	// The all-remotes form is convergent: it installs every remote the fleet
 	// file currently names with a managed tunnel, AND prunes every job on this
 	// host that our own naming convention recognizes but the file no longer
@@ -177,32 +184,32 @@ func installTunnels(requested []string) error {
 
 	var specs []tunnelSpec
 	if convergent {
-		doc, err := loadRemotesFile()
+		doc, err := a.loadRemotesFile()
 		if err != nil {
 			return err
 		}
 		specs = resolveManagedTunnelSpecs(doc)
 		if len(specs) == 0 {
-			fmt.Println("no remotes use a supervisor-managed tunnel; checking for orphaned tunnel jobs")
+			fmt.Fprintln(a.env.Stdout, "no remotes use a supervisor-managed tunnel; checking for orphaned tunnel jobs")
 		}
 	} else {
 		var err error
-		specs, err = resolveTunnelSpecs(requested)
+		specs, err = a.resolveTunnelSpecs(requested)
 		if err != nil {
 			return err
 		}
 	}
 
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
-	sup, err := supervisorForHost(home)
+	sup, err := a.supervisorForHost(home)
 	if err != nil {
 		return err
 	}
 
-	jobDir := tunnelsJobDir
+	jobDir := o.jobDir
 	if jobDir == "" {
 		jobDir = sup.JobDir
 	}
@@ -212,12 +219,12 @@ func installTunnels(requested []string) error {
 	// probe and the autossh lookup, which only an install about to act needs
 	// answered; failing a preview on a missing autossh would hide the orphan
 	// listing the operator asked for. It prints everything and exits 0.
-	if tunnelsDryRun {
+	if o.dryRun {
 		for _, spec := range specs {
-			fmt.Printf("would install %s -> %s\n", spec.Name, filepath.Join(jobDir, sup.JobFile(spec)))
+			fmt.Fprintf(a.env.Stdout, "would install %s -> %s\n", spec.Name, filepath.Join(jobDir, sup.JobFile(spec)))
 		}
-		if convergent && !tunnelsWriteOnly {
-			return pruneOrphanTunnels(sup, jobDir, specs, true)
+		if convergent && !o.writeOnly {
+			return a.pruneOrphanTunnels(sup, jobDir, specs, true)
 		}
 		return nil
 	}
@@ -228,20 +235,20 @@ func installTunnels(requested []string) error {
 		// and should hear why. --write-only is an explicit "just render
 		// them", so it skips the probe exactly as it skips the activation the
 		// probe guards.
-		if !tunnelsWriteOnly && sup.Preflight != nil {
+		if !o.writeOnly && sup.Preflight != nil {
 			if err := sup.Preflight(); err != nil {
 				return err
 			}
 		}
 
-		logDir := tunnelsLogDir
+		logDir := o.logDir
 		if logDir == "" {
 			logDir = filepath.Join(home, ".local", "state", "shuttle")
 		}
 
-		autosshPath := tunnelsAutoSSH
+		autosshPath := o.autoSSH
 		if autosshPath == "" {
-			autosshPath, err = exec.LookPath("autossh")
+			autosshPath, err = a.env.LookPath("autossh")
 			if err != nil {
 				return fmt.Errorf("autossh not found on PATH (install with `%s`, or pass --autossh-path)", sup.AutoSSHHint)
 			}
@@ -271,7 +278,7 @@ func installTunnels(requested []string) error {
 				RemoteEnd:   spec.remoteEnd(),
 				Multiplex:   spec.Multiplex,
 				AutoSSHPath: autosshPath,
-				SSHAuthSock: os.Getenv("SSH_AUTH_SOCK"),
+				SSHAuthSock: a.env.Getenv("SSH_AUTH_SOCK"),
 				LogPath:     logPath,
 				Home:        home,
 				// The PATH this command was typed with, which is the user's real
@@ -279,7 +286,7 @@ func installTunnels(requested []string) error {
 				// with `bash -lc` because make may be invoked from anywhere. Only
 				// the systemd template reads it (see its header); launchd's own
 				// default PATH already finds ssh.
-				Path: os.Getenv("PATH"),
+				Path: a.env.Getenv("PATH"),
 			})
 			if err != nil {
 				return fmt.Errorf("render %s: %w", spec.Name, err)
@@ -288,10 +295,10 @@ func installTunnels(requested []string) error {
 				return fmt.Errorf("write %s: %w", jobPath, err)
 			}
 
-			fmt.Printf("installed %s -> %s\n", spec.Name, jobPath)
-			fmt.Printf("  log: %s\n", logPath)
+			fmt.Fprintf(a.env.Stdout, "installed %s -> %s\n", spec.Name, jobPath)
+			fmt.Fprintf(a.env.Stdout, "  log: %s\n", logPath)
 
-			if tunnelsWriteOnly {
+			if o.writeOnly {
 				continue
 			}
 			if err := sup.Activate(spec, jobPath); err != nil {
@@ -299,16 +306,16 @@ func installTunnels(requested []string) error {
 			}
 		}
 
-		if !tunnelsWriteOnly && sup.Note != "" {
-			fmt.Println(sup.Note)
+		if !o.writeOnly && sup.Note != "" {
+			fmt.Fprintln(a.env.Stdout, sup.Note)
 		}
 	}
 
 	// --write-only means "render, don't touch the supervisor" — pruning stops
 	// jobs and deletes files, which is exactly the touching write-only asks us
 	// to skip, so it sits out this pass entirely rather than half-applying.
-	if convergent && !tunnelsWriteOnly {
-		if err := pruneOrphanTunnels(sup, jobDir, specs, false); err != nil {
+	if convergent && !o.writeOnly {
+		if err := a.pruneOrphanTunnels(sup, jobDir, specs, false); err != nil {
 			return err
 		}
 	}
@@ -319,19 +326,19 @@ func installTunnels(requested []string) error {
 // supervisorForHost picks the keep-alive this machine actually has. The two
 // arms mirror the daemon's own (share/io.shuttle.daemon.{plist,service}.template,
 // selected by the Makefile's `uname -s` branch).
-func supervisorForHost(home string) (tunnelSupervisor, error) {
-	switch hostGOOS {
+func (a *app) supervisorForHost(home string) (tunnelSupervisor, error) {
+	switch a.hostGOOS {
 	case "darwin":
-		return launchdSupervisor(home), nil
+		return a.launchdSupervisor(home), nil
 	case "linux":
-		return systemdSupervisor(home), nil
+		return a.systemdSupervisor(home), nil
 	default:
 		return tunnelSupervisor{}, fmt.Errorf(
-			"no tunnel supervisor for %s (launchd on macOS, systemd --user on Linux)", hostGOOS)
+			"no tunnel supervisor for %s (launchd on macOS, systemd --user on Linux)", a.hostGOOS)
 	}
 }
 
-func launchdSupervisor(home string) tunnelSupervisor {
+func (a *app) launchdSupervisor(home string) tunnelSupervisor {
 	uid := os.Getuid()
 	return tunnelSupervisor{
 		Name:        "launchd",
@@ -349,14 +356,14 @@ func launchdSupervisor(home string) tunnelSupervisor {
 			// reinstall it always is; booting it out first is the only way the
 			// second install of a tunnel picks up the plist just written.
 			// Nothing loaded is not an error, so the result is dropped.
-			_ = runSupervisor("launchctl", "bootout", target)
-			if err := runSupervisor("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), path); err != nil {
+			_ = a.runSupervisor("launchctl", "bootout", target)
+			if err := a.runSupervisor("launchctl", "bootstrap", fmt.Sprintf("gui/%d", uid), path); err != nil {
 				return err
 			}
-			if err := runSupervisor("launchctl", "kickstart", "-k", target); err != nil {
+			if err := a.runSupervisor("launchctl", "kickstart", "-k", target); err != nil {
 				return err
 			}
-			fmt.Printf("  bootstrapped %s\n", target)
+			fmt.Fprintf(a.env.Stdout, "  bootstrapped %s\n", target)
 			return nil
 		},
 		Deactivate: func(jobFile, jobDir string) error {
@@ -366,7 +373,7 @@ func launchdSupervisor(home string) tunnelSupervisor {
 			// the name is the only option, and it is exact by construction.
 			label := jobFile[:len(jobFile)-len(".plist")]
 			target := fmt.Sprintf("gui/%d/%s", uid, label)
-			_ = runSupervisor("launchctl", "bootout", target)
+			_ = a.runSupervisor("launchctl", "bootout", target)
 			path := filepath.Join(jobDir, jobFile)
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err
@@ -376,7 +383,7 @@ func launchdSupervisor(home string) tunnelSupervisor {
 	}
 }
 
-func systemdSupervisor(home string) tunnelSupervisor {
+func (a *app) systemdSupervisor(home string) tunnelSupervisor {
 	return tunnelSupervisor{
 		Name:        "systemd",
 		JobDir:      filepath.Join(home, ".config", "systemd", "user"),
@@ -384,16 +391,16 @@ func systemdSupervisor(home string) tunnelSupervisor {
 		AutoSSHHint: "apt install autossh",
 		JobFile:     func(spec tunnelSpec) string { return spec.UnitName },
 		JobPattern:  regexp.MustCompile(`^shuttle-tunnel-(.+)\.service$`),
-		Preflight:   requireSystemdUserSession,
+		Preflight:   a.requireSystemdUserSession,
 		Activate: func(spec tunnelSpec, _ string) error {
 			// daemon-reload per unit rather than once for the batch: it is
 			// cheap and idempotent, and it keeps a partial install (one unit
 			// written, the next one failing) from leaving systemd's view of
 			// the units it already has stale.
-			if err := runSupervisor("systemctl", "--user", "daemon-reload"); err != nil {
+			if err := a.runSupervisor("systemctl", "--user", "daemon-reload"); err != nil {
 				return err
 			}
-			if err := runSupervisor("systemctl", "--user", "enable", spec.UnitName); err != nil {
+			if err := a.runSupervisor("systemctl", "--user", "enable", spec.UnitName); err != nil {
 				return err
 			}
 			// restart, not `enable --now`: --now starts a unit that is stopped
@@ -401,10 +408,10 @@ func systemdSupervisor(home string) tunnelSupervisor {
 			// tunnel would keep serving the old unit. restart covers the first
 			// install and every one after it — the analog of launchctl's
 			// kickstart -k.
-			if err := runSupervisor("systemctl", "--user", "restart", spec.UnitName); err != nil {
+			if err := a.runSupervisor("systemctl", "--user", "restart", spec.UnitName); err != nil {
 				return err
 			}
-			fmt.Printf("  enabled + started %s\n", spec.UnitName)
+			fmt.Fprintf(a.env.Stdout, "  enabled + started %s\n", spec.UnitName)
 			return nil
 		},
 		Deactivate: func(jobFile, jobDir string) error {
@@ -413,13 +420,13 @@ func systemdSupervisor(home string) tunnelSupervisor {
 			// forgotten (never loaded this boot, or already stopped) fails
 			// both calls harmlessly, and that is not a reason to leave its
 			// file behind.
-			_ = runSupervisor("systemctl", "--user", "stop", jobFile)
-			_ = runSupervisor("systemctl", "--user", "disable", jobFile)
+			_ = a.runSupervisor("systemctl", "--user", "stop", jobFile)
+			_ = a.runSupervisor("systemctl", "--user", "disable", jobFile)
 			path := filepath.Join(jobDir, jobFile)
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err
 			}
-			_ = runSupervisor("systemctl", "--user", "daemon-reload")
+			_ = a.runSupervisor("systemctl", "--user", "daemon-reload")
 			return nil
 		},
 		Note: "tunnels survive logout and start at boot after:  loginctl enable-linger $(id -un)",
@@ -432,8 +439,8 @@ func systemdSupervisor(home string) tunnelSupervisor {
 // ssh, and a container may have no systemd at all. There the units would be
 // files nothing ever reads, and reporting success for tunnels that will never
 // come up is worse than refusing.
-func requireSystemdUserSession() error {
-	if err := exec.Command("systemctl", "--user", "show-environment").Run(); err != nil {
+func (a *app) requireSystemdUserSession() error {
+	if err := a.env.Command("systemctl", "--user", "show-environment").Run(); err != nil {
 		return fmt.Errorf(`no systemd user session here (systemctl --user is unavailable or not reachable); nothing was written.
 Write the units anyway and supervise them yourself:
   shuttle tunnels install --write-only
@@ -446,8 +453,8 @@ Or hold one up by hand, in a tmux session that outlives your login:
 // resolveTunnelSpecs is exactly the named remotes' tunnels. An unknown name is
 // an error that names what IS configured — the fleet lives in one file, so the
 // error can always be specific.
-func resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
-	doc, err := loadRemotesFile()
+func (a *app) resolveTunnelSpecs(requested []string) ([]tunnelSpec, error) {
+	doc, err := a.loadRemotesFile()
 	if err != nil {
 		return nil, err
 	}
@@ -546,7 +553,7 @@ func (s tunnelSpec) remoteEnd() string {
 // never touched. Removing a job that was never there, or that the supervisor
 // had already forgotten, is success: prune runs on every convergent install,
 // so "nothing to clean up" is the ordinary outcome.
-func pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, dryRun bool) error {
+func (a *app) pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, dryRun bool) error {
 	entries, err := os.ReadDir(jobDir)
 	if err != nil {
 		// No job directory at all reads the same as an empty one: there is
@@ -578,13 +585,13 @@ func pruneOrphanTunnels(sup tunnelSupervisor, jobDir string, keep []tunnelSpec, 
 		}
 		remoteName := match[1]
 		if dryRun {
-			fmt.Printf("would remove %s (no longer in the fleet file)\n", remoteName)
+			fmt.Fprintf(a.env.Stdout, "would remove %s (no longer in the fleet file)\n", remoteName)
 			continue
 		}
 		if err := sup.Deactivate(name, jobDir); err != nil {
 			return fmt.Errorf("remove orphaned tunnel %s: %w", remoteName, err)
 		}
-		fmt.Printf("removed %s (no longer in the fleet file)\n", remoteName)
+		fmt.Fprintf(a.env.Stdout, "removed %s (no longer in the fleet file)\n", remoteName)
 	}
 	return nil
 }
@@ -606,8 +613,8 @@ func renderTunnelJob(tmpl *template.Template, data tunnelTemplateData) ([]byte, 
 // runSupervisor shells the host's job supervisor and folds its output into the
 // error, which is where launchctl and systemctl both say what actually went
 // wrong.
-func runSupervisor(bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
+func (a *app) runSupervisor(bin string, args ...string) error {
+	cmd := a.env.Command(bin, args...)
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil
@@ -617,14 +624,4 @@ func runSupervisor(bin string, args ...string) error {
 		msg = err.Error()
 	}
 	return fmt.Errorf("%s %v: %s", bin, args, msg)
-}
-
-func init() {
-	tunnelsInstallCmd.Flags().StringVar(&tunnelsJobDir, "unit-dir", "", "Directory to write supervisor jobs into (default: ~/Library/LaunchAgents on macOS, ~/.config/systemd/user on Linux)")
-	tunnelsInstallCmd.Flags().StringVar(&tunnelsLogDir, "log-dir", "", "Directory for autossh logs (default: ~/.local/state/shuttle)")
-	tunnelsInstallCmd.Flags().StringVar(&tunnelsAutoSSH, "autossh-path", "", "Path to autossh (default: resolve on PATH)")
-	tunnelsInstallCmd.Flags().BoolVar(&tunnelsWriteOnly, "write-only", false, "Write the job files but do not load or start them")
-	tunnelsInstallCmd.Flags().BoolVar(&tunnelsDryRun, "dry-run", false, "Print what would be installed, and (with no remote named) which orphaned jobs would be removed; writes nothing and shells no supervisor")
-	tunnelsCmd.AddCommand(tunnelsInstallCmd)
-	addShuttleCommand(tunnelsCmd)
 }

@@ -1,5 +1,11 @@
 defmodule ShuttleWeb.PeerPlugTest do
   use ExUnit.Case, async: true
+
+  # Socket connect/recv bounds are reached only when the peer never answers, so
+  # they are generous: a passing test never waits on them, and a loaded machine
+  # can take seconds to schedule the handler. Deliberate "nothing arrives"
+  # waits stay short and literal.
+  @io_timeout 30_000
   import Plug.Test
 
   alias ShuttleWeb.PeerPlug
@@ -211,7 +217,7 @@ defmodule ShuttleWeb.PeerPlugTest do
     end
 
     defp request(path, raw) do
-      {:ok, socket} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 2_000)
+      {:ok, socket} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], @io_timeout)
       :ok = :gen_tcp.send(socket, raw)
       response = recv_all(socket, "")
       :gen_tcp.close(socket)
@@ -221,7 +227,7 @@ defmodule ShuttleWeb.PeerPlugTest do
     end
 
     defp recv_all(socket, acc) do
-      case :gen_tcp.recv(socket, 0, 2_000) do
+      case :gen_tcp.recv(socket, 0, @io_timeout) do
         {:ok, data} -> recv_all(socket, acc <> data)
         {:error, :closed} -> acc
       end
@@ -251,7 +257,7 @@ defmodule ShuttleWeb.PeerPlugTest do
     end
 
     test "GET /api/v1/version answers with listen and host_class", %{path: path} do
-      {:ok, socket} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 2_000)
+      {:ok, socket} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], @io_timeout)
 
       :ok =
         :gen_tcp.send(

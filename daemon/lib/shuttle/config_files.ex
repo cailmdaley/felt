@@ -113,8 +113,8 @@ defmodule Shuttle.ConfigFiles do
 
   def path(:agents) do
     case Shuttle.Env.get("SHUTTLE_AGENTS_FILE") do
-      value when is_binary(value) and value != "" -> Path.expand(value)
-      _ -> Path.expand("~/.config/shuttle/agents.json")
+      value when is_binary(value) and value != "" -> Shuttle.Env.expand(value)
+      _ -> Shuttle.Env.expand("~/.config/shuttle/agents.json")
     end
   end
 

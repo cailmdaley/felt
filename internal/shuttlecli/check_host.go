@@ -25,8 +25,8 @@ import (
 // fail on a store legitimately shared with other hosts. An unresolvable local
 // identity yields no issues rather than an error — `check` lints fibers, and
 // a machine with no shuttle identity has nothing to compare against.
-func checkHostDrift(felts []*felt.Felt) []felt.CheckIssue {
-	own, err := resolveOwnHost("")
+func (a *app) checkHostDrift(felts []*felt.Felt) []felt.CheckIssue {
+	own, err := a.resolveOwnHost("")
 	if err != nil {
 		return nil
 	}

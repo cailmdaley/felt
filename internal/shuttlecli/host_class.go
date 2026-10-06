@@ -200,7 +200,7 @@ type hostSettings struct {
 	Listen       string `json:"listen"`
 	ListenSource string `json:"listen_source"`
 	File         string `json:"file"`
-	// DataDir is shuttle.DataDir(): the resolved host-local state directory, so
+	// DataDir is shuttle.DataDir(a.env): the resolved host-local state directory, so
 	// a shell (the stop-marker writers) applies the same trim and leading-~
 	// rule the CLI and the daemon share. Empty when it cannot be resolved.
 	DataDir string `json:"data_dir"`
@@ -209,8 +209,8 @@ type hostSettings struct {
 }
 
 // hostClassFilePath is $SHUTTLE_HOST_CONFIG_FILE, else ~/.config/shuttle/host.json.
-func hostClassFilePath() (string, error) {
-	return shuttleConfigPath("SHUTTLE_HOST_CONFIG_FILE", "host.json")
+func (a *app) hostClassFilePath() (string, error) {
+	return a.shuttleConfigPath("SHUTTLE_HOST_CONFIG_FILE", "host.json")
 }
 
 // readHostFile returns the file's object with every key preserved (the class
@@ -289,13 +289,13 @@ func stringKey(doc map[string]json.RawMessage, key, path string) (string, bool, 
 
 // resolveHostSettings resolves class and listener from the environment and
 // the host file. It does not resolve the host id; the verb adds that.
-func resolveHostSettings() (hostSettings, error) {
-	path, err := hostClassFilePath()
+func (a *app) resolveHostSettings() (hostSettings, error) {
+	path, err := a.hostClassFilePath()
 	if err != nil {
 		return hostSettings{}, err
 	}
 	s := hostSettings{File: path, Class: string(hostClassSingleUser), ClassSource: hostSourceDefault}
-	if dir, err := shuttle.DataDir(); err == nil {
+	if dir, err := shuttle.DataDir(a.env); err == nil {
 		s.DataDir = dir
 	}
 
@@ -320,8 +320,8 @@ func resolveHostSettings() (hostSettings, error) {
 
 	var listen listenAddr
 	switch {
-	case strings.TrimSpace(os.Getenv("SHUTTLE_LISTEN")) != "":
-		listen, err = parseListen(os.Getenv("SHUTTLE_LISTEN"))
+	case strings.TrimSpace(a.env.Getenv("SHUTTLE_LISTEN")) != "":
+		listen, err = parseListen(a.env.Getenv("SHUTTLE_LISTEN"))
 		if err != nil {
 			return hostSettings{}, fmt.Errorf("$SHUTTLE_LISTEN: %w", err)
 		}
@@ -333,7 +333,7 @@ func resolveHostSettings() (hostSettings, error) {
 		}
 		s.ListenSource = hostSourceHostFile
 	default:
-		listen, err = classDefaultListen(hostClass(s.Class))
+		listen, err = a.classDefaultListen(hostClass(s.Class))
 		if err != nil {
 			return hostSettings{}, err
 		}
@@ -344,9 +344,9 @@ func resolveHostSettings() (hostSettings, error) {
 }
 
 // classDefaultListen is the listener a class gets when nothing overrides it.
-func classDefaultListen(class hostClass) (listenAddr, error) {
+func (a *app) classDefaultListen(class hostClass) (listenAddr, error) {
 	if class.usesSocket() {
-		dir, err := shuttle.DataDir()
+		dir, err := shuttle.DataDir(a.env)
 		if err != nil {
 			return listenAddr{}, err
 		}
@@ -359,7 +359,7 @@ func classDefaultListen(class hostClass) (listenAddr, error) {
 		return l, nil
 	}
 	port := defaultDaemonPort
-	if v := strings.TrimSpace(os.Getenv("SHUTTLE_PORT")); v != "" {
+	if v := strings.TrimSpace(a.env.Getenv("SHUTTLE_PORT")); v != "" {
 		p, err := parsePort(v)
 		if err != nil {
 			return listenAddr{}, hostErr(hostErrBadPort, "$SHUTTLE_PORT: %v", err)
@@ -380,11 +380,11 @@ func hostClassList() string {
 // writeHostClass sets "class" in the host file, keeping every other key. A
 // malformed file is refused rather than overwritten: it may hold a listener
 // someone chose on purpose. The write is atomic and 0600.
-func writeHostClass(class hostClass) (string, error) {
+func (a *app) writeHostClass(class hostClass) (string, error) {
 	if !class.valid() {
 		return "", hostErr(hostErrBadClass, "class %q is not one of %s", class, hostClassList())
 	}
-	path, err := hostClassFilePath()
+	path, err := a.hostClassFilePath()
 	if err != nil {
 		return "", err
 	}
@@ -412,10 +412,11 @@ func writeHostClass(class hostClass) (string, error) {
 
 // ── CLI ──
 
-var shuttleHostCmd = &cobra.Command{
-	Use:   "host",
-	Short: "Show this host's identity, class, and daemon listener",
-	Long: `Report the host id the daemon dispatches as, the host class, and the
+func (a *app) shuttleHostCmd() *cobra.Command {
+	shuttleHostCmd := &cobra.Command{
+		Use:   "host",
+		Short: "Show this host's identity, class, and daemon listener",
+		Long: `Report the host id the daemon dispatches as, the host class, and the
 listener the daemon binds and the CLI dials.
 
 The class says who else can reach this machine and sets the default listener
@@ -435,96 +436,110 @@ Examples:
   shuttle host --json
   shuttle host seed
   shuttle host class shared-multi-user`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		s, err := resolveHostSettings()
-		if err != nil {
-			return err
-		}
-		id, source, err := resolveOwnHostSourced("")
-		if err != nil {
-			return err
-		}
-		s.ID = id
-		if jsonOutput {
-			// Shells scrape data_dir and listen out of this with sed, so a
-			// path's & < > print as themselves rather than &-style.
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			enc.SetEscapeHTML(false)
-			return enc.Encode(s)
-		}
-		fmt.Printf("id      %s (%s)\n", s.ID, source.describe())
-		fmt.Printf("class   %s (%s)\n", s.Class, describeHostSource(s.ClassSource, s.File))
-		fmt.Printf("listen  %s (%s)\n", s.Listen, describeHostSource(s.ListenSource, s.File))
-		fmt.Printf("data    %s\n", s.DataDir)
-		return nil
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			id, source, err := a.resolveOwnHostSourced("")
+			if err != nil {
+				return err
+			}
+			s.ID = id
+			if a.json {
+				// Shells scrape data_dir and listen out of this with sed, so a
+				// path's & < > print as themselves rather than &-style.
+				enc := json.NewEncoder(a.env.Stdout)
+				enc.SetIndent("", "  ")
+				enc.SetEscapeHTML(false)
+				return enc.Encode(s)
+			}
+			fmt.Fprintf(a.env.Stdout, "id      %s (%s)\n", s.ID, source.describe(a.hostConfigFilePath()))
+			fmt.Fprintf(a.env.Stdout, "class   %s (%s)\n", s.Class, describeHostSource(s.ClassSource, s.File))
+			fmt.Fprintf(a.env.Stdout, "listen  %s (%s)\n", s.Listen, describeHostSource(s.ListenSource, s.File))
+			fmt.Fprintf(a.env.Stdout, "data    %s\n", s.DataDir)
+			return nil
+		},
+	}
+	shuttleHostCmd.AddCommand(a.shuttleHostClassCmd())
+	shuttleHostCmd.AddCommand(a.shuttleHostCheckOwnerCmd())
+	shuttleHostCmd.AddCommand(a.shuttleHostSeedCmd())
+	return shuttleHostCmd
 }
 
-var shuttleHostCheckOwnerCmd = &cobra.Command{
-	Use:   "check-owner",
-	Short: "Verify ownership of the resolved daemon TCP listener",
-	Long: `Check a socket-class TCP listener by connecting and matching the server-side
+func (a *app) shuttleHostCheckOwnerCmd() *cobra.Command {
+	shuttleHostCheckOwnerCmd := &cobra.Command{
+		Use:   "check-owner",
+		Short: "Verify ownership of the resolved daemon TCP listener",
+		Long: `Check a socket-class TCP listener by connecting and matching the server-side
 established row in /proc/net/tcp{,6}. A refused connection means no listener
 is running yet. Unix listeners, non-socket classes, and platforms without
 Linux /proc need no check.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		settings, err := resolveHostSettings()
-		if err != nil {
-			return err
-		}
-		return checkResolvedDaemonPortOwner(settings)
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			return checkResolvedDaemonPortOwner(settings)
+		},
+	}
+	return shuttleHostCheckOwnerCmd
 }
 
-var shuttleHostClassCmd = &cobra.Command{
-	Use:       "class <single-user|shared-multi-user|exposed>",
-	Short:     "Declare this host's class in the host file",
-	Args:      cobra.ExactArgs(1),
-	ValidArgs: []string{string(hostClassSingleUser), string(hostClassShared), string(hostClassExposed)},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := writeHostClass(hostClass(args[0]))
-		if err != nil {
-			return err
-		}
-		s, err := resolveHostSettings()
-		if err != nil {
-			return err
-		}
-		fmt.Printf("class %s saved to %s; the daemon listens on %s after its next restart\n", s.Class, path, s.Listen)
-		return nil
-	},
+func (a *app) shuttleHostClassCmd() *cobra.Command {
+	shuttleHostClassCmd := &cobra.Command{
+		Use:       "class <single-user|shared-multi-user|exposed>",
+		Short:     "Declare this host's class in the host file",
+		Args:      cobra.ExactArgs(1),
+		ValidArgs: []string{string(hostClassSingleUser), string(hostClassShared), string(hostClassExposed)},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := a.writeHostClass(hostClass(args[0]))
+			if err != nil {
+				return err
+			}
+			s, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.env.Stdout, "class %s saved to %s; the daemon listens on %s after its next restart\n", s.Class, path, s.Listen)
+			return nil
+		},
+	}
+	return shuttleHostClassCmd
 }
 
-var shuttleHostSeedCmd = &cobra.Command{
-	Use:   "seed",
-	Short: "Write this host's identity to the host file if it holds none",
-	Long: `Make this machine's host id durable in the host file ($SHUTTLE_HOST_FILE,
+func (a *app) shuttleHostSeedCmd() *cobra.Command {
+	shuttleHostSeedCmd := &cobra.Command{
+		Use:   "seed",
+		Short: "Write this host's identity to the host file if it holds none",
+		Long: `Make this machine's host id durable in the host file ($SHUTTLE_HOST_FILE,
 else ~/.shuttle/host), creating its directory.
 
 An id already in the file is kept. Otherwise $SHUTTLE_HOST, else the
 normalized OS hostname, is written, so the daemon and every later CLI call
 resolve the same name. shuttle daemon install runs this before it starts
 the daemon it supervises.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		id, source, seeded, err := seedOwnHost()
-		if err != nil {
-			return err
-		}
-		path := hostConfigFilePath()
-		switch {
-		case !seeded:
-			fmt.Printf("host identity → %s   (%s)\n", id, path)
-		case source == hostSourceEnv:
-			fmt.Printf("host identity → %s   (seeded from $SHUTTLE_HOST into %s)\n", id, path)
-		default:
-			fmt.Printf("host identity → %s   (seeded from this machine's hostname into %s)\n", id, path)
-		}
-		return nil
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, source, seeded, err := a.seedOwnHost()
+			if err != nil {
+				return err
+			}
+			path := a.hostConfigFilePath()
+			switch {
+			case !seeded:
+				fmt.Fprintf(a.env.Stdout, "host identity → %s   (%s)\n", id, path)
+			case source == hostSourceEnv:
+				fmt.Fprintf(a.env.Stdout, "host identity → %s   (seeded from $SHUTTLE_HOST into %s)\n", id, path)
+			default:
+				fmt.Fprintf(a.env.Stdout, "host identity → %s   (seeded from this machine's hostname into %s)\n", id, path)
+			}
+			return nil
+		},
+	}
+	return shuttleHostSeedCmd
 }
 
 func describeHostSource(source, file string) string {
@@ -537,11 +552,4 @@ func describeHostSource(source, file string) string {
 		return "class default"
 	}
 	return "default; no class in " + file
-}
-
-func init() {
-	shuttleHostCmd.AddCommand(shuttleHostClassCmd)
-	shuttleHostCmd.AddCommand(shuttleHostCheckOwnerCmd)
-	shuttleHostCmd.AddCommand(shuttleHostSeedCmd)
-	addShuttleCommand(shuttleHostCmd)
 }

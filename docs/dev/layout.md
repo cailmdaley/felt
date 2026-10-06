@@ -82,9 +82,31 @@ else (`src/board/workspace/` excepted, whose suite still guards on the pin).
 CI runs `npm test`, then type-checks and builds the bundle with
 `npm run build`.
 
-The browser suite uses `playwright-core`, a fixed clock, and Europe/Paris time.
-Set `CHROME_PATH` to override the system Chrome executable.
-It tests a mocked daemon and never operates real fibers.
+### Browser checks
+
+The workspace e2e suite, live workspace depth probe, and `themeScope` test use `ui/e2e/browser.mjs` and connect to a healthy shared browser on port 9333 when one is running.
+Set `SHARED_BROWSER=1` to start or reuse it explicitly; without a shared browser, these checks launch their local Chromium as configured.
+The one-off scripts under `ui/scripts` retain their own browser launch paths.
+Set `SHARED_BROWSER_PORT` to choose another port, and `CHROME_PATH` to select a fallback executable for checks that accept it.
+
+`bin/shared-browser` supports `start`, `endpoint`, `status`, `stop`, and `reap [minutes]`.
+`endpoint` starts the browser if needed and refreshes its idle clock; `status` reports the PID, CDP endpoint, process count, and process-tree RSS.
+`reap` defaults to 30 idle minutes; `SHARED_BROWSER_IDLE_MINUTES` changes that threshold.
+It treats blank tabs and Chrome's internal New Tab targets as idle; any other page keeps the browser running.
+The shared browser stays headless and muted, uses the mock keychain on macOS or the basic password store on Linux, and does not access the login keychain.
+
+Give every browser lane a unique `LANE` name so it gets a pinned tab in the shared Chrome instead of launching another browser:
+
+```bash
+LANE=tests-browser-1
+agent-browser --session "$LANE" connect "$(bin/shared-browser endpoint)"
+agent-browser --session "$LANE" --pin-tab tab new
+agent-browser --session "$LANE" open http://127.0.0.1:4000/
+agent-browser --session "$LANE" tab close
+agent-browser --session "$LANE" close
+```
+
+The board e2e suite uses a fixed clock, Europe/Paris time, and a mocked daemon; it never operates real fibers.
 
 ### The stranger test: bootstrap in a clean container
 
@@ -130,13 +152,25 @@ account configuration, MCP credentials, or credential backups either. Fixtures
 use a fresh home and config with synthetic data and a controlled environment;
 they must not fall back to installed harness executables.
 
+Production code under `internal/` reads the process — environment variables,
+home and working directory, executable lookup, child processes, standard
+streams — only through a `*sysenv.Env` (`internal/sysenv`) handed down from
+the command's entry point; `cmd/felt` and `cmd/shuttle` build it from the live
+process, and each invocation gets a fresh command tree. A test builds an
+isolated env instead (`sysenv.New`, or `sysenvtest.FromProcess` plus
+`sysenvtest.FakeCommand` for fake executables on its own PATH), so tests run
+with `t.Parallel()` and none mutates process state. `internal/sysenv`'s
+`TestProductionReadsTheProcessOnlyThroughEnv` fails on a direct read outside
+the seam; its allowlist names each deliberate exception and why.
+
 The felt CLI and shuttle CLI unit-test binaries each run behind a `TestMain`
 fence (`internal/feltcli/testmain_test.go` and
-`internal/shuttlecli/testmain_test.go`). The felt CLI fences its home, cache,
+`internal/shuttlecli/testmain_test.go`), and each package's `testEnv(t)`
+carries the same fence as a per-test env. The felt CLI fences its home, cache,
 and config paths; the shuttle CLI fences its home, Shuttle config files, host
 identity, and daemon URL. A test never reaches the machine's live daemon or its
-fleet; one that needs a daemon starts an `httptest` server and sets
-`SHUTTLE_DAEMON_URL` itself.
+fleet; one that needs a daemon starts an `httptest` server and points its
+env's `SHUTTLE_DAEMON_URL` at it.
 
 Real harness smoke is an explicit integration operation against the operator's
 runtime. Even starting an idle CLI or running plugin setup can initialize or

@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -70,15 +69,15 @@ type codexInstallationState struct {
 	Installed  bool
 }
 
-func captureClaudeInstallation() claudeInstallationState {
+func (a *app) captureClaudeInstallation() claudeInstallationState {
 	// Native capture must describe the filesystem generation that will remain
 	// active. Recovery is intentionally first: a kill during native activation
 	// can leave the candidate in current while the journal still points at the
 	// last known-good previous copy.
-	if !recoverPluginRuntimeBeforeNativeCapture() {
+	if !a.recoverPluginRuntimeBeforeNativeCapture() {
 		return claudeInstallationState{}
 	}
-	return captureClaudeInstallationRaw()
+	return a.captureClaudeInstallationRaw()
 }
 
 func claudeMarketplaceSource(entry claudeMarketplaceEntry) string {
@@ -100,16 +99,16 @@ func claudeMarketplaceSource(entry claudeMarketplaceEntry) string {
 	return ""
 }
 
-func restoreClaudeInstallation(state claudeInstallationState) error {
-	if _, err := exec.LookPath("claude"); err != nil {
+func (a *app) restoreClaudeInstallation(state claudeInstallationState) error {
+	if _, err := a.env.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI unavailable while restoring native installation: %w", err)
 	}
 	pluginRef := "felt@" + marketplaceName
 	if !state.Configured {
 		// The failed candidate may have installed the plugin before returning an
 		// error. Best effort uninstall is safe for the absent-plugin case.
-		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
-		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
+		_, _ = a.claudePluginCommand("uninstall", pluginRef).Output()
+		if err := a.runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing failed marketplace: %w", err)
 		}
 		return nil
@@ -118,32 +117,32 @@ func restoreClaudeInstallation(state claudeInstallationState) error {
 	if source == "" {
 		return errors.New("previous Claude marketplace source is not recoverable from CLI JSON")
 	}
-	if err := runHarnessCLI("claude", "plugin", "marketplace", "add", source); err != nil {
+	if err := a.runHarnessCLI("claude", "plugin", "marketplace", "add", source); err != nil {
 		return fmt.Errorf("restoring Claude marketplace: %w", err)
 	}
 	if state.Installed {
-		if err := runHarnessCLI("claude", "plugin", "update", pluginRef); err != nil {
+		if err := a.runHarnessCLI("claude", "plugin", "update", pluginRef); err != nil {
 			return fmt.Errorf("restoring Claude plugin: %w", err)
 		}
 	} else {
-		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
+		_, _ = a.claudePluginCommand("uninstall", pluginRef).Output()
 	}
 	return nil
 }
 
-func captureCodexInstallation() codexInstallationState {
-	if !recoverPluginRuntimeBeforeNativeCapture() {
+func (a *app) captureCodexInstallation() codexInstallationState {
+	if !a.recoverPluginRuntimeBeforeNativeCapture() {
 		return codexInstallationState{}
 	}
-	if _, err := exec.LookPath("codex"); err != nil {
+	if _, err := a.env.LookPath("codex"); err != nil {
 		return codexInstallationState{}
 	}
-	source, configured := codexMarketplaceState()
-	return codexInstallationState{Source: source, Configured: configured, Installed: codexPluginInstalled()}
+	source, configured := a.codexMarketplaceState()
+	return codexInstallationState{Source: source, Configured: configured, Installed: a.codexPluginInstalled()}
 }
 
-func recoverPluginRuntimeBeforeNativeCapture() bool {
-	runtimeDir, err := pluginRuntimeDir()
+func (a *app) recoverPluginRuntimeBeforeNativeCapture() bool {
+	runtimeDir, err := a.pluginRuntimeDir()
 	if err != nil {
 		return false
 	}
@@ -151,11 +150,11 @@ func recoverPluginRuntimeBeforeNativeCapture() bool {
 	// reaches staging. Capture functions cannot return an error without
 	// changing their long-standing API, so they only provide the ordering
 	// guarantee here.
-	return recoverPluginPromotion(runtimeDir) == nil
+	return a.recoverPluginPromotion(runtimeDir) == nil
 }
 
-func codexMarketplaceState() (string, bool) {
-	out, err := runCodexCLIQuiet("plugin", "marketplace", "list", "--json")
+func (a *app) codexMarketplaceState() (string, bool) {
+	out, err := a.runCodexCLIQuiet("plugin", "marketplace", "list", "--json")
 	if err != nil {
 		return "", false
 	}
@@ -182,8 +181,8 @@ func codexMarketplaceState() (string, bool) {
 	return "", false
 }
 
-func codexPluginInstalled() bool {
-	out, err := runCodexCLIQuiet("plugin", "list", "--json")
+func (a *app) codexPluginInstalled() bool {
+	out, err := a.runCodexCLIQuiet("plugin", "list", "--json")
 	if err != nil {
 		return false
 	}
@@ -200,31 +199,31 @@ func codexPluginInstalled() bool {
 	return false
 }
 
-func restoreCodexInstallation(state codexInstallationState) error {
-	if _, err := exec.LookPath("codex"); err != nil {
+func (a *app) restoreCodexInstallation(state codexInstallationState) error {
+	if _, err := a.env.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI unavailable while restoring native installation: %w", err)
 	}
 	if !state.Configured || state.Source == "" {
-		_, _ = runCodexCLIQuiet("plugin", "remove", codexPluginRef)
-		out, err := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
-		return reportCodexRemoval(out, err)
+		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
+		out, err := a.runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
+		return a.reportCodexRemoval(out, err)
 	}
 	// A failed candidate install can leave its marketplace registered under the
 	// same name. Codex rejects adding a different source for an existing name,
 	// so restoration must first clear the candidate registration.
-	removeOut, removeErr := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
-	if err := reportCodexRemoval(removeOut, removeErr); err != nil {
+	removeOut, removeErr := a.runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
+	if err := a.reportCodexRemoval(removeOut, removeErr); err != nil {
 		return fmt.Errorf("removing failed Codex marketplace: %w", err)
 	}
-	if _, err := runCodexCLIQuiet("plugin", "marketplace", "add", state.Source); err != nil {
+	if _, err := a.runCodexCLIQuiet("plugin", "marketplace", "add", state.Source); err != nil {
 		return fmt.Errorf("restoring Codex marketplace: %w", err)
 	}
 	if state.Installed {
-		if err := runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
+		if err := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 			return fmt.Errorf("restoring Codex plugin: %w", err)
 		}
 	} else {
-		_, _ = runCodexCLIQuiet("plugin", "remove", codexPluginRef)
+		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
 	}
 	return nil
 }
@@ -388,8 +387,8 @@ func validateFeltExecutable(executable string) error {
 	return nil
 }
 
-func pluginRuntimeDir() (string, error) {
-	home, err := os.UserHomeDir()
+func (a *app) pluginRuntimeDir() (string, error) {
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("getting home directory: %w", err)
 	}
@@ -399,8 +398,8 @@ func pluginRuntimeDir() (string, error) {
 // withPluginPromotionLock serializes capture, source promotion, native CLI
 // mutation, and any rollback across setup processes. Atomic renames protect a
 // single filesystem operation; this lock protects the transaction they form.
-func withPluginPromotionLock(operation func() error) (returnErr error) {
-	runtimeDir, err := pluginRuntimeDir()
+func (a *app) withPluginPromotionLock(operation func() error) (returnErr error) {
+	runtimeDir, err := a.pluginRuntimeDir()
 	if err != nil {
 		return err
 	}
@@ -418,8 +417,8 @@ func withPluginPromotionLock(operation func() error) (returnErr error) {
 
 // stagePluginCandidate copies only the marketplace payload, so a candidate
 // cannot accidentally expose a checkout's .git, .felt, or unrelated files.
-func stagePluginCandidate(source, executable string) (string, error) {
-	root, err := filepath.Abs(source)
+func (a *app) stagePluginCandidate(source, executable string) (string, error) {
+	root, err := a.env.Abs(source)
 	if err != nil {
 		return "", err
 	}
@@ -429,14 +428,14 @@ func stagePluginCandidate(source, executable string) (string, error) {
 	if err := validatePluginCandidate(root, executable); err != nil {
 		return "", fmt.Errorf("validating plugin source: %w", err)
 	}
-	runtimeDir, err := pluginRuntimeDir()
+	runtimeDir, err := a.pluginRuntimeDir()
 	if err != nil {
 		return "", err
 	}
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating plugin runtime directory: %w", err)
 	}
-	if err := recoverPluginPromotion(runtimeDir); err != nil {
+	if err := a.recoverPluginPromotion(runtimeDir); err != nil {
 		return "", err
 	}
 	candidate, err := os.MkdirTemp(runtimeDir, ".candidate-")
@@ -463,9 +462,9 @@ func stagePluginCandidate(source, executable string) (string, error) {
 // promotePluginCandidate atomically swaps current/previous around an
 // installer operation. A journal makes both rename gaps recoverable after a
 // kill or power loss; only a committed promotion discards the previous copy.
-func promotePluginCandidate(candidate string, install func(string) error, restore func() error, intents ...*pluginNativeIntent) error {
+func (a *app) promotePluginCandidate(candidate string, install func(string) error, restore func() error, intents ...*pluginNativeIntent) error {
 	runtimeDir := filepath.Dir(candidate)
-	if err := recoverPluginPromotion(runtimeDir); err != nil {
+	if err := a.recoverPluginPromotion(runtimeDir); err != nil {
 		return err
 	}
 	var native *pluginNativeIntent
@@ -533,14 +532,14 @@ func promotePluginCandidate(candidate string, install func(string) error, restor
 	return nil
 }
 
-func capturePluginNativeIntent() *pluginNativeIntent {
+func (a *app) capturePluginNativeIntent() *pluginNativeIntent {
 	intent := &pluginNativeIntent{}
-	if _, err := exec.LookPath("claude"); err == nil {
-		state := captureClaudeInstallation()
+	if _, err := a.env.LookPath("claude"); err == nil {
+		state := a.captureClaudeInstallation()
 		intent.Claude = &state
 	}
-	if _, err := exec.LookPath("codex"); err == nil {
-		state := captureCodexInstallation()
+	if _, err := a.env.LookPath("codex"); err == nil {
+		state := a.captureCodexInstallation()
 		intent.Codex = &state
 	}
 	return intent
@@ -566,7 +565,7 @@ func rollbackPluginPromotion(runtimeDir, candidate string, hadOld bool, cause er
 	return cause
 }
 
-func recoverPluginPromotion(runtimeDir string) error {
+func (a *app) recoverPluginPromotion(runtimeDir string) error {
 	journalPath := filepath.Join(runtimeDir, pluginJournalName)
 	data, err := os.ReadFile(journalPath)
 	if os.IsNotExist(err) {
@@ -619,7 +618,7 @@ func recoverPluginPromotion(runtimeDir string) error {
 	// native CLIs must be pointed at the restored current generation, never at
 	// a candidate that happened to be active when the process was killed.
 	if journal.Native != nil {
-		if err := reconcilePluginNativeIntent(current, journal.Native); err != nil {
+		if err := a.reconcilePluginNativeIntent(current, journal.Native); err != nil {
 			// Keep the journal as a retry token. In particular, an acquisition
 			// failure immediately after recovery must not erase the intent needed
 			// by the next setup attempt.
@@ -635,107 +634,107 @@ func recoverPluginPromotion(runtimeDir string) error {
 	return nil
 }
 
-func reconcilePluginNativeIntent(current string, intent *pluginNativeIntent) error {
+func (a *app) reconcilePluginNativeIntent(current string, intent *pluginNativeIntent) error {
 	if intent.Claude != nil {
-		if err := reconcileClaudeInstallation(*intent.Claude, current); err != nil {
+		if err := a.reconcileClaudeInstallation(*intent.Claude, current); err != nil {
 			return err
 		}
 	}
 	if intent.Codex != nil {
-		if err := reconcileCodexInstallation(*intent.Codex, current); err != nil {
+		if err := a.reconcileCodexInstallation(*intent.Codex, current); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func reconcileClaudeInstallation(intent claudeInstallationState, current string) error {
-	if _, err := exec.LookPath("claude"); err != nil {
+func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, current string) error {
+	if _, err := a.env.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude CLI unavailable: %w", err)
 	}
 	// Recovery is retried until it succeeds. If the process died before the
 	// native CLI changed anything, the desired absent state is already true;
 	// do not turn an idempotent recovery into a permanent pending journal by
 	// asking Claude to remove a marketplace which does not exist.
-	if state := captureClaudeInstallationRaw(); claudeInstallationMatches(state, intent, current) {
+	if state := a.captureClaudeInstallationRaw(); a.claudeInstallationMatches(state, intent, current) {
 		return nil
 	}
 	pluginRef := "felt@" + marketplaceName
 	if !intent.Configured {
-		_, _ = claudePluginCommand("uninstall", pluginRef).Output()
-		if err := runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
+		_, _ = a.claudePluginCommand("uninstall", pluginRef).Output()
+		if err := a.runHarnessCLI("claude", "plugin", "marketplace", "remove", marketplaceName); err != nil {
 			return fmt.Errorf("removing Claude marketplace: %w", err)
 		}
 	} else {
-		if err := installClaudePluginAtSource(current); err != nil {
+		if err := a.installClaudePluginAtSource(current); err != nil {
 			return fmt.Errorf("reinstalling Claude from restored current: %w", err)
 		}
 		if !intent.Installed {
-			if err := runHarnessCLI("claude", "plugin", "uninstall", pluginRef); err != nil {
+			if err := a.runHarnessCLI("claude", "plugin", "uninstall", pluginRef); err != nil {
 				return fmt.Errorf("restoring absent Claude plugin: %w", err)
 			}
 		}
 	}
-	state := captureClaudeInstallationRaw()
+	state := a.captureClaudeInstallationRaw()
 	if state.Configured != intent.Configured || state.Installed != intent.Installed {
 		return fmt.Errorf("Claude native state did not reconcile (configured=%t installed=%t, want configured=%t installed=%t)", state.Configured, state.Installed, intent.Configured, intent.Installed)
 	}
-	if intent.Configured && !samePluginSource(claudeMarketplaceSource(state.Marketplace), current) {
+	if intent.Configured && !a.samePluginSource(claudeMarketplaceSource(state.Marketplace), current) {
 		return fmt.Errorf("Claude marketplace source %q does not point at restored current %q", claudeMarketplaceSource(state.Marketplace), current)
 	}
 	return nil
 }
 
-func claudeInstallationMatches(state, intent claudeInstallationState, current string) bool {
+func (a *app) claudeInstallationMatches(state, intent claudeInstallationState, current string) bool {
 	if state.Configured != intent.Configured || state.Installed != intent.Installed {
 		return false
 	}
-	return !intent.Configured || samePluginSource(claudeMarketplaceSource(state.Marketplace), current)
+	return !intent.Configured || a.samePluginSource(claudeMarketplaceSource(state.Marketplace), current)
 }
 
-func reconcileCodexInstallation(intent codexInstallationState, current string) error {
-	if _, err := exec.LookPath("codex"); err != nil {
+func (a *app) reconcileCodexInstallation(intent codexInstallationState, current string) error {
+	if _, err := a.env.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI unavailable: %w", err)
 	}
 	if !intent.Configured {
-		_, _ = runCodexCLIQuiet("plugin", "remove", codexPluginRef)
-		out, err := runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
-		if err := reportCodexRemoval(out, err); err != nil {
+		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
+		out, err := a.runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
+		if err := a.reportCodexRemoval(out, err); err != nil {
 			return fmt.Errorf("removing Codex marketplace: %w", err)
 		}
 	} else {
-		if err := installCodexPluginAtSource(current); err != nil {
+		if err := a.installCodexPluginAtSource(current); err != nil {
 			return fmt.Errorf("reinstalling Codex from restored current: %w", err)
 		}
 		if !intent.Installed {
-			if _, err := runCodexCLIQuiet("plugin", "remove", codexPluginRef); err != nil {
+			if _, err := a.runCodexCLIQuiet("plugin", "remove", codexPluginRef); err != nil {
 				return fmt.Errorf("restoring absent Codex plugin: %w", err)
 			}
 		}
 	}
-	source, configured := codexMarketplaceState()
-	installed := codexPluginInstalled()
+	source, configured := a.codexMarketplaceState()
+	installed := a.codexPluginInstalled()
 	if configured != intent.Configured || installed != intent.Installed {
 		return fmt.Errorf("Codex native state did not reconcile (configured=%t installed=%t, want configured=%t installed=%t)", configured, installed, intent.Configured, intent.Installed)
 	}
-	if intent.Configured && !samePluginSource(source, current) {
+	if intent.Configured && !a.samePluginSource(source, current) {
 		return fmt.Errorf("Codex marketplace source %q does not point at restored current %q", source, current)
 	}
 	return nil
 }
 
-func captureClaudeInstallationRaw() claudeInstallationState {
-	entry, configured := marketplaceEntry(marketplaceName)
-	return claudeInstallationState{Marketplace: entry, Configured: configured, Installed: isPluginInstalled("felt@" + marketplaceName)}
+func (a *app) captureClaudeInstallationRaw() claudeInstallationState {
+	entry, configured := a.marketplaceEntry(marketplaceName)
+	return claudeInstallationState{Marketplace: entry, Configured: configured, Installed: a.isPluginInstalled("felt@" + marketplaceName)}
 }
 
-func samePluginSource(a, b string) bool {
-	if a == b {
+func (a *app) samePluginSource(x, y string) bool {
+	if x == y {
 		return true
 	}
-	aa, aerr := filepath.Abs(a)
-	bb, berr := filepath.Abs(b)
-	return aerr == nil && berr == nil && filepath.Clean(aa) == filepath.Clean(bb)
+	xx, xerr := a.env.Abs(x)
+	yy, yerr := a.env.Abs(y)
+	return xerr == nil && yerr == nil && filepath.Clean(xx) == filepath.Clean(yy)
 }
 
 func writePluginJournal(path string, journal pluginPromotionJournal) error {
@@ -813,10 +812,11 @@ func syncTreeDirs(root string) error {
 	})
 }
 
-func currentFeltExecutable() (string, error) {
-	if configured := os.Getenv("FELT_BIN"); configured != "" {
+func (a *app) currentFeltExecutable() (string, error) {
+	if configured := a.env.Getenv("FELT_BIN"); configured != "" {
 		return configured, nil
 	}
+	// The running binary is this process's own, whatever env says.
 	path, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("locating felt executable: %w", err)
@@ -828,55 +828,55 @@ func currentFeltExecutable() (string, error) {
 // validated transaction. Remote refs are acquired ephemerally; native harness
 // CLIs see only the promoted local generation and continue to own their
 // caches/config.
-func withStagedPluginCandidateWithRestore(source string, install func(string) error, restore func() error) error {
+func (a *app) withStagedPluginCandidateWithRestore(source string, install func(string) error, restore func() error) error {
 	// Recover before remote acquisition as well as before local staging. This
 	// makes a retry after an interrupted native phase deterministic even when
 	// the retry's acquisition itself fails.
-	runtimeDir, err := pluginRuntimeDir()
+	runtimeDir, err := a.pluginRuntimeDir()
 	if err != nil {
 		return err
 	}
-	if err := recoverPluginPromotion(runtimeDir); err != nil {
+	if err := a.recoverPluginPromotion(runtimeDir); err != nil {
 		return err
 	}
 	if !isLocalPath(source) {
-		executable, err := currentFeltExecutable()
+		executable, err := a.currentFeltExecutable()
 		if err != nil {
 			return err
 		}
 		if err := validateFeltExecutable(executable); err != nil {
 			return err
 		}
-		checkout, cleanup, err := acquireRemoteMarketplace(source)
+		checkout, cleanup, err := a.acquireRemoteMarketplace(source)
 		if err != nil {
 			return err
 		}
 		defer cleanup()
-		candidate, err := stagePluginCandidate(checkout, executable)
+		candidate, err := a.stagePluginCandidate(checkout, executable)
 		if err != nil {
 			return err
 		}
-		identity, err := remotePluginGeneration(source, checkout, candidate)
-		return sealAndPromote(candidate, identity, err, install, restore)
+		identity, err := a.remotePluginGeneration(source, checkout, candidate)
+		return a.sealAndPromote(candidate, identity, err, install, restore)
 	}
 	if !hasMarketplaceManifest(source) {
 		return fmt.Errorf("local plugin source %q has no marketplace manifest", source)
 	}
-	executable, err := currentFeltExecutable()
+	executable, err := a.currentFeltExecutable()
 	if err != nil {
 		return err
 	}
-	candidate, err := stagePluginCandidate(source, executable)
+	candidate, err := a.stagePluginCandidate(source, executable)
 	if err != nil {
 		return err
 	}
-	identity, err := localPluginGeneration(source, candidate)
-	return sealAndPromote(candidate, identity, err, install, restore)
+	identity, err := a.localPluginGeneration(source, candidate)
+	return a.sealAndPromote(candidate, identity, err, install, restore)
 }
 
 // sealAndPromote finishes a staged candidate: a generation-identity failure
 // discards the candidate before it can reach a harness CLI.
-func sealAndPromote(candidate string, identity pluginGenerationIdentity, err error, install func(string) error, restore func() error) error {
+func (a *app) sealAndPromote(candidate string, identity pluginGenerationIdentity, err error, install func(string) error, restore func() error) error {
 	if err != nil {
 		_ = os.RemoveAll(candidate)
 		return err
@@ -885,7 +885,7 @@ func sealAndPromote(candidate string, identity pluginGenerationIdentity, err err
 		_ = os.RemoveAll(candidate)
 		return err
 	}
-	return promotePluginCandidate(candidate, install, restore, capturePluginNativeIntent())
+	return a.promotePluginCandidate(candidate, install, restore, a.capturePluginNativeIntent())
 }
 
 // remoteMarketplaceRef is the small subset of GitHub's ref syntax accepted by
@@ -948,12 +948,12 @@ func validGitRevision(ref string) bool {
 // mechanism. Acquisitions live under the locked runtime directory so a later
 // setup can reap debris left by SIGKILL or power loss. Their contents are
 // copied into the validated Felt candidate before any native installer runs.
-func acquireRemoteMarketplace(source string) (string, func(), error) {
+func (a *app) acquireRemoteMarketplace(source string) (string, func(), error) {
 	ref, err := parseRemoteMarketplaceRef(source)
 	if err != nil {
 		return "", func() {}, err
 	}
-	runtimeDir, err := pluginRuntimeDir()
+	runtimeDir, err := a.pluginRuntimeDir()
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -979,7 +979,7 @@ func acquireRemoteMarketplace(source string) (string, func(), error) {
 		args = append(args, "--branch="+ref.ref)
 	}
 	args = append(args, "--", "https://github.com/"+ref.repository+".git", parent)
-	output, err := exec.Command("git", args...).CombinedOutput()
+	output, err := a.env.Command("git", args...).CombinedOutput()
 	if err != nil {
 		cleanup()
 		message := strings.TrimSpace(string(output))

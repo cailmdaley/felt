@@ -1,6 +1,12 @@
 defmodule ShuttleWeb.PeerGatePlugTest do
   use ExUnit.Case, async: true
 
+  # Socket connect/recv bounds are reached only when the peer never answers, so
+  # they are generous: a passing test never waits on them, and a loaded machine
+  # can take seconds to schedule the handler. Deliberate "nothing arrives"
+  # waits stay short and literal.
+  @io_timeout 30_000
+
   import ExUnit.CaptureLog
   import Plug.Test
 
@@ -201,7 +207,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     header =
       "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n"
 
-    {:ok, socket} = :gen_tcp.connect(@loopback, port, [:binary, active: false], 2_000)
+    {:ok, socket} = :gen_tcp.connect(@loopback, port, [:binary, active: false], @io_timeout)
     {:ok, {_address, client_port}} = :inet.sockname(socket)
 
     File.write!(
@@ -228,7 +234,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
       :gen_tcp.send(socket, "GET /api/v1/version HTTP/1.1\r\nhost: localhost\r\n\r\n")
 
     {:ok, <<"HTTP/1.1 ", status::binary-size(3), _rest::binary>>} =
-      :gen_tcp.recv(socket, 0, 2_000)
+      :gen_tcp.recv(socket, 0, @io_timeout)
 
     drain(socket)
     String.to_integer(status)
@@ -257,7 +263,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
   end
 
   defp request_version(port) do
-    {:ok, socket} = :gen_tcp.connect(@loopback, port, [:binary, active: false], 2_000)
+    {:ok, socket} = :gen_tcp.connect(@loopback, port, [:binary, active: false], @io_timeout)
 
     :ok =
       :gen_tcp.send(
@@ -272,7 +278,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
   end
 
   defp recv_all(socket, acc) do
-    case :gen_tcp.recv(socket, 0, 2_000) do
+    case :gen_tcp.recv(socket, 0, @io_timeout) do
       {:ok, data} -> recv_all(socket, acc <> data)
       {:error, :closed} -> acc
     end

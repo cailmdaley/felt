@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // Supported harness hook interfaces accept additional context without starting
@@ -75,24 +76,24 @@ func mailboxKey(s string) string {
 	return hex.EncodeToString(h[:])
 }
 
-func mailboxDir(harness, id string) string {
-	return filepath.Join(dataDir(), "mailboxes", harness, mailboxKey(id))
+func mailboxDir(env *sysenv.Env, harness, id string) string {
+	return filepath.Join(dataDir(env), "mailboxes", harness, mailboxKey(id))
 }
 
 // RegisterMailbox is called by the receiver's hooks, never by a sender, with
 // the receiver's harness process (see HookReceiverPID). A SessionEnd withdraws
 // availability without deleting already queued messages.
-func RegisterMailbox(harness, id, host, cwd string, pid int, active bool) error {
+func RegisterMailbox(env *sysenv.Env, harness, id, host, cwd string, pid int, active bool) error {
 	if harness != "claude" && harness != "codex" && harness != "pi" {
 		return errCode("invalid_request", "unsupported mailbox harness")
 	}
 	if id == "" || len(id) > 4096 || strings.ContainsAny(id, "\x00\r\n") {
 		return errCode("invalid_request", "invalid mailbox session")
 	}
-	if _, err := os.Stat(dataDir()); err != nil {
+	if _, err := os.Stat(dataDir(env)); err != nil {
 		return err
 	}
-	dir := mailboxDir(harness, id)
+	dir := mailboxDir(env, harness, id)
 	if !active {
 		err := os.Remove(filepath.Join(dir, "receiver.json"))
 		if errors.Is(err, os.ErrNotExist) {
@@ -117,14 +118,14 @@ func RegisterMailbox(harness, id, host, cwd string, pid int, active bool) error 
 	return mailboxWrite(filepath.Join(dir, "receiver.json"), b, false)
 }
 
-func MailboxAvailable(harness, id, host string) bool {
-	return mailboxUnavailable(harness, id, host) == ""
+func MailboxAvailable(env *sysenv.Env, harness, id, host string) bool {
+	return mailboxUnavailable(env, harness, id, host) == ""
 }
 
 // mailboxUnavailable says why a session cannot take a queued message, or
 // returns "" when a live receiver on host registered it.
-func mailboxUnavailable(harness, id, host string) string {
-	r, err := mailboxRegistrationFor(harness, id)
+func mailboxUnavailable(env *sysenv.Env, harness, id, host string) string {
+	r, err := mailboxRegistrationFor(env, harness, id)
 	if err != nil || r.ID != id || r.Host != host {
 		return "session has not registered a Shuttle message hook on this host"
 	}
@@ -134,8 +135,8 @@ func mailboxUnavailable(harness, id, host string) string {
 	return ""
 }
 
-func mailboxRegistrationFor(harness, id string) (mailboxRegistration, error) {
-	b, err := readBounded(filepath.Join(mailboxDir(harness, id), "receiver.json"), 16384)
+func mailboxRegistrationFor(env *sysenv.Env, harness, id string) (mailboxRegistration, error) {
+	b, err := readBounded(filepath.Join(mailboxDir(env, harness, id), "receiver.json"), 16384)
 	var r mailboxRegistration
 	if err != nil {
 		return r, err
@@ -146,18 +147,18 @@ func mailboxRegistrationFor(harness, id string) (mailboxRegistration, error) {
 	return r, nil
 }
 
-func queueMailbox(a Address, r Request) (Receipt, error) {
+func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	transport := a.Harness + "-hook"
 	if a.Harness != "claude" && a.Harness != "codex" && a.Harness != "pi" {
 		return rejected(r, transport, "harness has no Shuttle message hook"), errCode("unavailable", "harness has no Shuttle message hook")
 	}
-	if reason := mailboxUnavailable(a.Harness, a.ID, a.Host); reason != "" {
+	if reason := mailboxUnavailable(env, a.Harness, a.ID, a.Host); reason != "" {
 		return rejected(r, transport, reason), errCode("unavailable", "%s", reason)
 	}
 	if r.Wake {
 		return rejected(r, transport, "hook mailboxes cannot wake a session"), errCode("wake_required", "hook mailboxes cannot wake a session")
 	}
-	dir := filepath.Join(mailboxDir(a.Harness, a.ID), "pending")
+	dir := filepath.Join(mailboxDir(env, a.Harness, a.ID), "pending")
 	if err := ensureDir(dir, 0700); err != nil {
 		return rejected(r, transport, err.Error()), err
 	}
@@ -188,11 +189,11 @@ func queueMailbox(a Address, r Request) (Receipt, error) {
 // writes to the hook's output. A crash between output and acknowledgment can
 // repeat a message; its stable message_id lets the receiver recognize it.
 // Offered payloads remain host-local for diagnosis and are never copied to git.
-func OfferMailbox(harness, id, host string, emit func([]Request) error) error {
-	if !MailboxAvailable(harness, id, host) {
+func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request) error) error {
+	if !MailboxAvailable(env, harness, id, host) {
 		return nil
 	}
-	dir := mailboxDir(harness, id)
+	dir := mailboxDir(env, harness, id)
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
@@ -279,8 +280,8 @@ func OfferMailbox(harness, id, host string, emit func([]Request) error) error {
 // mailboxSessions returns hook-registered receivers for one harness and host
 // whose harness process still runs. A registration means the hook was
 // observed, not that a model turn is live.
-func mailboxSessions(harness, host string) []Session {
-	root := filepath.Join(dataDir(), "mailboxes", harness)
+func mailboxSessions(env *sysenv.Env, harness, host string) []Session {
+	root := filepath.Join(dataDir(env), "mailboxes", harness)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return []Session{}

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -131,47 +130,48 @@ type receiptInstalledPlugin struct {
 
 // setupReceiptCmd reports Felt's installed executable, plugin bundles, hooks,
 // and promoted generation without inspecting Shuttle's host or daemon state.
-var setupReceiptCmd = &cobra.Command{
-	Use:   "receipt",
-	Short: "Report whether Felt's installed pieces are present and compatible",
-	Long: `Reports the Felt executable, enabled plugin bundles, hooks, and promoted
+func (a *app) setupReceiptCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "receipt",
+		Short: "Report whether Felt's installed pieces are present and compatible",
+		Long: `Reports the Felt executable, enabled plugin bundles, hooks, and promoted
 plugin generation. It exits non-zero unless every enabled component is present
 and compatible and exactly one Felt build is on PATH. -j prints the
 machine-readable receipt.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		receipt := collectRuntimeReceipt()
-		if jsonOutput {
-			if err := outputJSON(receipt); err != nil {
-				return err
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			receipt := a.collectRuntimeReceipt()
+			if a.json {
+				if err := a.outputJSON(receipt); err != nil {
+					return err
+				}
+			} else {
+				fmt.Fprintf(a.env.Stdout, "runtime %s\n", receipt.Status)
+				fmt.Fprintf(a.env.Stdout, "felt: %s\n", receipt.Felt.Status)
+				for _, bundle := range receipt.Bundles {
+					fmt.Fprintf(a.env.Stdout, "%s plugin: %s\n", bundle.Harness, bundle.Status)
+				}
+				fmt.Fprintf(a.env.Stdout, "hooks: %s\ngeneration: %s\n", receipt.Hooks.Status, receipt.Generation.Status)
+				if receipt.Repair != "" {
+					fmt.Fprintf(a.env.Stdout, "repair: %s\n", receipt.Repair)
+				}
 			}
-		} else {
-			fmt.Printf("runtime %s\n", receipt.Status)
-			fmt.Printf("felt: %s\n", receipt.Felt.Status)
-			for _, bundle := range receipt.Bundles {
-				fmt.Printf("%s plugin: %s\n", bundle.Harness, bundle.Status)
+			if receipt.Status != receiptHealthy {
+				return fmt.Errorf("runtime receipt is %s", receipt.Status)
 			}
-			fmt.Printf("hooks: %s\ngeneration: %s\n", receipt.Hooks.Status, receipt.Generation.Status)
-			if receipt.Repair != "" {
-				fmt.Printf("repair: %s\n", receipt.Repair)
-			}
-		}
-		if receipt.Status != receiptHealthy {
-			return fmt.Errorf("runtime receipt is %s", receipt.Status)
-		}
-		return nil
-	},
+			return nil
+		},
+	}
+	return command
 }
 
-func init() { setupCmd.AddCommand(setupReceiptCmd) }
-
-func collectRuntimeReceipt() RuntimeReceipt {
+func (a *app) collectRuntimeReceipt() RuntimeReceipt {
 	r := RuntimeReceipt{Schema: 1}
-	r.Felt = collectFeltReceipt()
-	r.Bundles = collectCodexBundle()
-	r.Bundles = append(r.Bundles, collectClaudeBundle()...)
-	r.Hooks = collectHookReceipt(r.Bundles)
-	r.Generation = collectGenerationReceipt(r.Bundles, r.Felt)
+	r.Felt = a.collectFeltReceipt()
+	r.Bundles = a.collectCodexBundle()
+	r.Bundles = append(r.Bundles, a.collectClaudeBundle()...)
+	r.Hooks = a.collectHookReceipt(r.Bundles)
+	r.Generation = a.collectGenerationReceipt(r.Bundles, r.Felt)
 	r.Status, r.Repair = combineReceiptStatus(r.Felt.Status, r.Bundles, r.Hooks.Status, r.Generation.Status)
 	if r.Felt.Status != receiptHealthy && r.Felt.Status == r.Status && r.Felt.Repair != "" {
 		r.Repair = r.Felt.Repair
@@ -182,21 +182,21 @@ func collectRuntimeReceipt() RuntimeReceipt {
 	return r
 }
 
-func collectFeltReceipt() ReceiptComponent {
-	path := resolveReceiptFelt()
+func (a *app) collectFeltReceipt() ReceiptComponent {
+	path := a.resolveReceiptFelt()
 	if path == "" {
 		return ReceiptComponent{Status: receiptMissing, Repair: "install felt or put it on PATH (the hooks probe PATH and ~/.local/bin/felt)"}
 	}
-	build := receiptExecutableBuild(path)
+	build := a.receiptExecutableBuild(path)
 	if build == "" {
 		return ReceiptComponent{Status: receiptMismatch, Path: path, Repair: "run the resolved felt executable with --version; replace a non-felt or unreadable binary"}
 	}
 	r := ReceiptComponent{Status: receiptHealthy, Path: path, Version: strings.Fields(build)[0], Build: build}
-	for _, other := range feltExecutablesOnPath() {
+	for _, other := range a.feltExecutablesOnPath() {
 		if sameExecutable(other, path) {
 			continue
 		}
-		if otherBuild := receiptExecutableBuild(other); otherBuild != build {
+		if otherBuild := a.receiptExecutableBuild(other); otherBuild != build {
 			r.Shadowed = append(r.Shadowed, ReceiptFeltCopy{Path: other, Build: otherBuild})
 		}
 	}
@@ -211,14 +211,14 @@ func collectFeltReceipt() ReceiptComponent {
 	return r
 }
 
-func resolveReceiptFelt() string {
-	if p := os.Getenv("FELT_BIN"); p != "" && executableFile(p) {
+func (a *app) resolveReceiptFelt() string {
+	if p := a.env.Getenv("FELT_BIN"); p != "" && executableFile(p) {
 		return p
 	}
-	if p, err := exec.LookPath("felt"); err == nil && executableFile(p) {
+	if p, err := a.env.LookPath("felt"); err == nil && executableFile(p) {
 		return p
 	}
-	home, _ := os.UserHomeDir()
+	home, _ := a.env.UserHomeDir()
 	for _, p := range []string{filepath.Join(home, ".local", "bin", "felt"), "/opt/homebrew/bin/felt", "/usr/local/bin/felt"} {
 		if executableFile(p) {
 			return p
@@ -229,9 +229,9 @@ func resolveReceiptFelt() string {
 
 // feltExecutablesOnPath lists every felt executable reachable through PATH,
 // in PATH order, one entry per distinct file.
-func feltExecutablesOnPath() []string {
+func (a *app) feltExecutablesOnPath() []string {
 	var out []string
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+	for _, dir := range filepath.SplitList(a.env.Getenv("PATH")) {
 		if dir == "" {
 			continue
 		}
@@ -258,8 +258,8 @@ func executableFile(path string) bool {
 // receiptExecutableBuild is the identity an executable prints for --version
 // ("dev (3e5bcef70529)", "1.2.3 (abc, built …)"), without the "felt version"
 // prefix, or "" when it prints nothing usable.
-func receiptExecutableBuild(path string) string {
-	out, err := exec.Command(path, "--version").Output()
+func (a *app) receiptExecutableBuild(path string) string {
+	out, err := a.env.Command(path, "--version").Output()
 	if err != nil {
 		return ""
 	}
@@ -267,9 +267,9 @@ func receiptExecutableBuild(path string) string {
 	return strings.TrimSpace(strings.TrimPrefix(line, "felt version"))
 }
 
-func collectCodexBundle() []ReceiptBundle {
-	if _, err := exec.LookPath("codex"); err == nil {
-		out, err := exec.Command("codex", "plugin", "list", "--json").Output()
+func (a *app) collectCodexBundle() []ReceiptBundle {
+	if _, err := a.env.LookPath("codex"); err == nil {
+		out, err := a.env.Command("codex", "plugin", "list", "--json").Output()
 		if err == nil {
 			var response struct {
 				Installed []receiptInstalledPlugin `json:"installed"`
@@ -282,25 +282,25 @@ func collectCodexBundle() []ReceiptBundle {
 					if !plugin.Enabled {
 						return nil
 					}
-					return []ReceiptBundle{bundleFromActivePlugin("codex", plugin)}
+					return []ReceiptBundle{a.bundleFromActivePlugin("codex", plugin)}
 				}
 				// A host may intentionally use only Claude (or only Codex). The
 				// authoritative list omitting Felt is therefore not itself a
 				// failure; consult local wiring only to catch an interrupted or
 				// orphaned Felt setup.
-				return collectCodexBundleFallback()
+				return a.collectCodexBundleFallback()
 			}
 		}
 		// A present CLI whose structured output cannot be read is not safe to
 		// interpret as a healthy cache; make the degraded boundary visible.
 		return []ReceiptBundle{{Harness: "codex", Enabled: true, Inspection: inspectionUnknown, Evidence: "codex plugin list unavailable", Status: receiptPartial, Repair: "upgrade Codex or repair its plugin list, then rerun `felt setup codex`"}}
 	}
-	return collectCodexBundleFallback()
+	return a.collectCodexBundleFallback()
 }
 
-func collectCodexBundleFallback() []ReceiptBundle {
-	home, _ := os.UserHomeDir()
-	cfg, err := readCodexConfig()
+func (a *app) collectCodexBundleFallback() []ReceiptBundle {
+	home, _ := a.env.UserHomeDir()
+	cfg, err := a.readCodexConfig()
 	if err != nil {
 		return []ReceiptBundle{{Harness: "codex", Enabled: true, Inspection: inspectionUnknown, Status: receiptMismatch, Repair: "repair ~/.codex/config.toml, then rerun `felt setup codex`"}}
 	}
@@ -323,7 +323,7 @@ func collectCodexBundleFallback() []ReceiptBundle {
 	if len(manifestPaths) != 1 {
 		return []ReceiptBundle{{Harness: "codex", Path: root, Enabled: true, Inspection: inspectionConfigured, Status: receiptMissing, Repair: "run `felt setup codex` to materialize exactly one active plugin cache"}}
 	}
-	b := bundleFromManifest("codex", manifestPaths[0], codexSource(cfg))
+	b := a.bundleFromManifest("codex", manifestPaths[0], codexSource(cfg))
 	b.Evidence = "config/cache fallback"
 	b.Inspection = inspectionConfigured
 	if b.Status == receiptHealthy {
@@ -346,9 +346,9 @@ func codexSource(cfg map[string]interface{}) string {
 	return ""
 }
 
-func collectClaudeBundle() []ReceiptBundle {
-	if _, err := exec.LookPath("claude"); err == nil {
-		out, err := claudePluginCommand("list", "--json").Output()
+func (a *app) collectClaudeBundle() []ReceiptBundle {
+	if _, err := a.env.LookPath("claude"); err == nil {
+		out, err := a.claudePluginCommand("list", "--json").Output()
 		if err == nil {
 			var plugins []receiptInstalledPlugin
 			if json.Unmarshal(out, &plugins) == nil {
@@ -359,24 +359,24 @@ func collectClaudeBundle() []ReceiptBundle {
 					if !plugin.Enabled {
 						return nil
 					}
-					bundle := bundleFromActivePlugin("claude", plugin)
+					bundle := a.bundleFromActivePlugin("claude", plugin)
 					if bundle.Source == "" {
-						bundle.Source = claudeConfiguredSource()
+						bundle.Source = a.claudeConfiguredSource()
 					}
 					return []ReceiptBundle{bundle}
 				}
 				// No Felt entry is a valid single-harness installation when there
 				// is no local Felt wiring to recover. The fallback distinguishes
 				// that state from an enabled-but-missing cache.
-				return collectClaudeBundleFallback()
+				return a.collectClaudeBundleFallback()
 			}
 		}
 		return []ReceiptBundle{{Harness: "claude", Enabled: true, Inspection: inspectionUnknown, Evidence: "claude plugin list unavailable", Status: receiptPartial, Repair: "upgrade Claude Code or repair its plugin list, then rerun `felt setup claude`"}}
 	}
-	return collectClaudeBundleFallback()
+	return a.collectClaudeBundleFallback()
 }
 
-func bundleFromActivePlugin(harness string, plugin receiptInstalledPlugin) ReceiptBundle {
+func (a *app) bundleFromActivePlugin(harness string, plugin receiptInstalledPlugin) ReceiptBundle {
 	root := plugin.Source.Path
 	if harness == "claude" {
 		root = plugin.InstallPath
@@ -388,7 +388,7 @@ func bundleFromActivePlugin(harness string, plugin receiptInstalledPlugin) Recei
 	if harness == "claude" {
 		manifest = filepath.Join(root, ".claude-plugin", "plugin.json")
 	}
-	b := bundleFromManifest(harness, manifest, plugin.Marketplace.Source)
+	b := a.bundleFromManifest(harness, manifest, plugin.Marketplace.Source)
 	b.Path = root
 	b.Version = plugin.Version
 	b.Evidence = harness + " plugin list"
@@ -404,8 +404,8 @@ func bundleFromActivePlugin(harness string, plugin receiptInstalledPlugin) Recei
 	return b
 }
 
-func collectClaudeBundleFallback() []ReceiptBundle {
-	home, _ := os.UserHomeDir()
+func (a *app) collectClaudeBundleFallback() []ReceiptBundle {
+	home, _ := a.env.UserHomeDir()
 	settings, err := readJSONFile[receiptClaudeSettings](filepath.Join(home, ".claude", "settings.json"))
 	if os.IsNotExist(err) {
 		return nil
@@ -416,13 +416,13 @@ func collectClaudeBundleFallback() []ReceiptBundle {
 	if !settings.EnabledPlugins["felt@"+marketplaceName] {
 		return nil
 	}
-	root := claudeMarketplaceClonePath()
+	root := a.claudeMarketplaceClonePath()
 	manifest := filepath.Join(root, "claude-plugin", ".claude-plugin", "plugin.json")
 	if _, err := os.Stat(manifest); err != nil {
 		return []ReceiptBundle{{Harness: "claude", Enabled: true, Inspection: inspectionConfigured, Path: root, Status: receiptMissing, Repair: "run `felt setup claude` to restore the enabled marketplace clone"}}
 	}
 	source := claudeConfiguredSourceFrom(settings)
-	b := bundleFromManifest("claude", manifest, source)
+	b := a.bundleFromManifest("claude", manifest, source)
 	b.Evidence = "settings/cache fallback"
 	b.Inspection = inspectionConfigured
 	if b.Status == receiptHealthy {
@@ -432,8 +432,8 @@ func collectClaudeBundleFallback() []ReceiptBundle {
 	return []ReceiptBundle{b}
 }
 
-func claudeConfiguredSource() string {
-	home, _ := os.UserHomeDir()
+func (a *app) claudeConfiguredSource() string {
+	home, _ := a.env.UserHomeDir()
 	settings, err := readJSONFile[receiptClaudeSettings](filepath.Join(home, ".claude", "settings.json"))
 	if err != nil {
 		return ""
@@ -463,7 +463,7 @@ func readPluginVersion(path string) string {
 	return manifest.Version
 }
 
-func bundleFromManifest(harness, path, source string) ReceiptBundle {
+func (a *app) bundleFromManifest(harness, path, source string) ReceiptBundle {
 	pluginRoot := filepath.Dir(filepath.Dir(path))
 	b := ReceiptBundle{Harness: harness, Path: pluginRoot, Source: source, Enabled: true}
 	data, err := os.ReadFile(path)
@@ -482,13 +482,13 @@ func bundleFromManifest(harness, path, source string) ReceiptBundle {
 		b.Status, b.Repair = receiptMissing, "restore the felt and shuttle skill files with the matching setup command"
 		return b
 	}
-	if Version != "dev" && Version != "" && manifest.Version != Version {
-		b.Status, b.Repair = receiptStale, fmt.Sprintf("plugin %s is stale for felt %s; rerun `felt setup %s`", manifest.Version, Version, harness)
+	if a.version != "dev" && a.version != "" && manifest.Version != a.version {
+		b.Status, b.Repair = receiptStale, fmt.Sprintf("plugin %s is stale for felt %s; rerun `felt setup %s`", manifest.Version, a.version, harness)
 	}
 	return b
 }
 
-func collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
+func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 	if len(bundles) == 0 {
 		return ReceiptComponent{Status: receiptMissing, Repair: "enable a felt Claude or Codex plugin with `felt setup claude` or `felt setup codex`"}
 	}
@@ -500,7 +500,7 @@ func collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 		if !hookFilesCompatible(root) {
 			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore Felt and Shuttle hook files and their SessionStart, PreToolUse, and PostToolUse wiring", b.Harness)}
 		}
-		if b.Harness == "codex" && strings.Contains(b.Evidence, "plugin list") && !codexHooksTrusted() {
+		if b.Harness == "codex" && strings.Contains(b.Evidence, "plugin list") && !a.codexHooksTrusted() {
 			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: "open a Codex session and approve felt's hooks, then rerun the receipt"}
 		}
 	}
@@ -575,8 +575,8 @@ func hookValueContains(value any, suffix string) bool {
 	return false
 }
 
-func codexHooksTrusted() bool {
-	cfg, err := readCodexConfig()
+func (a *app) codexHooksTrusted() bool {
+	cfg, err := a.readCodexConfig()
 	if err != nil {
 		return false
 	}
@@ -605,9 +605,9 @@ func codexHooksTrusted() bool {
 // source with every enabled harness cache. An install without markers is
 // reported as partial and repaired by rerunning setup; once either side has a
 // marker, both sides must be present, internally valid, and agree.
-func collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) ReceiptGenerationReceipt {
+func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) ReceiptGenerationReceipt {
 	receipt := ReceiptGenerationReceipt{Status: receiptHealthy}
-	runtimeDir, err := pluginRuntimeDir()
+	runtimeDir, err := a.pluginRuntimeDir()
 	if err != nil {
 		return ReceiptGenerationReceipt{Status: receiptPartial, Repair: fmt.Sprintf("cannot locate the promoted runtime: %v; repair ~/.felt/plugin-runtime and rerun the receipt", err)}
 	}

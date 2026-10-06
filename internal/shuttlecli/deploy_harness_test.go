@@ -236,6 +236,7 @@ harness_setup_cmd "$CHECKOUT" | /bin/bash
 }
 
 func TestDeployHarnessSetup(t *testing.T) {
+	t.Parallel()
 	cases := map[string]harnessDeployCase{
 		"a passing receipt sealed at HEAD by a clean build is left alone": {
 			receipt: fakeHarnessReceipt(t, harnessHead, "claude", "codex"), receiptRC: "0", afterRC: "0",
@@ -441,6 +442,7 @@ func TestDeployHarnessSetup(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			out, calls, err := runHarnessDeploy(t, c)
 			if failed := err != nil; failed != c.wantFailed {
 				t.Fatalf("failed = %v, want %v\n%s", failed, c.wantFailed, out)

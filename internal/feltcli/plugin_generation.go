@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,28 +32,28 @@ type pluginGenerationIdentity struct {
 	PayloadSHA256  string `json:"payload_sha256"`
 }
 
-func localPluginGeneration(source, candidate string) (pluginGenerationIdentity, error) {
-	abs, err := filepath.Abs(source)
+func (a *app) localPluginGeneration(source, candidate string) (pluginGenerationIdentity, error) {
+	abs, err := a.env.Abs(source)
 	if err != nil {
 		return pluginGenerationIdentity{}, fmt.Errorf("resolving local plugin source: %w", err)
 	}
-	commit := gitResolvedCommit(abs)
-	return buildPluginGeneration("local", abs, "", commit, candidate)
+	commit := a.gitResolvedCommit(abs)
+	return a.buildPluginGeneration("local", abs, "", commit, candidate)
 }
 
-func remotePluginGeneration(source, checkout, candidate string) (pluginGenerationIdentity, error) {
+func (a *app) remotePluginGeneration(source, checkout, candidate string) (pluginGenerationIdentity, error) {
 	ref, err := parseRemoteMarketplaceRef(source)
 	if err != nil {
 		return pluginGenerationIdentity{}, err
 	}
-	commit := gitResolvedCommit(checkout)
+	commit := a.gitResolvedCommit(checkout)
 	if commit == "" {
 		return pluginGenerationIdentity{}, fmt.Errorf("resolving acquired marketplace commit for %q", source)
 	}
-	return buildPluginGeneration("github", ref.repository, ref.ref, commit, candidate)
+	return a.buildPluginGeneration("github", ref.repository, ref.ref, commit, candidate)
 }
 
-func buildPluginGeneration(kind, source, requestedRef, commit, candidate string) (pluginGenerationIdentity, error) {
+func (a *app) buildPluginGeneration(kind, source, requestedRef, commit, candidate string) (pluginGenerationIdentity, error) {
 	manifest, err := readJSONFile[pluginManifest](filepath.Join(candidate, "claude-plugin", ".claude-plugin", "plugin.json"))
 	if err != nil {
 		return pluginGenerationIdentity{}, fmt.Errorf("reading promoted plugin version: %w", err)
@@ -70,16 +69,16 @@ func buildPluginGeneration(kind, source, requestedRef, commit, candidate string)
 		RequestedRef:   requestedRef,
 		ResolvedCommit: commit,
 		PluginVersion:  manifest.Version,
-		FeltBuild:      feltBuildIdentity(),
+		FeltBuild:      a.feltBuildIdentity(),
 		PayloadSHA256:  digest,
 	}, nil
 }
 
-func feltBuildIdentity() string {
-	if strings.TrimSpace(rootCmd.Version) != "" {
-		return rootCmd.Version
+func (a *app) feltBuildIdentity() string {
+	if strings.TrimSpace(displayVersion) != "" {
+		return displayVersion
 	}
-	return Version
+	return a.version
 }
 
 func sealPluginGeneration(candidate string, identity pluginGenerationIdentity) error {
@@ -145,8 +144,8 @@ func validatePluginGeneration(pluginRoot string) (pluginGenerationIdentity, erro
 	return identity, nil
 }
 
-func gitResolvedCommit(root string) string {
-	out, err := exec.Command("git", "-C", root, "rev-parse", "--verify", "HEAD^{commit}").Output()
+func (a *app) gitResolvedCommit(root string) string {
+	out, err := a.env.Command("git", "-C", root, "rev-parse", "--verify", "HEAD^{commit}").Output()
 	if err != nil {
 		return ""
 	}

@@ -2,8 +2,8 @@ package feltcli
 
 import "path/filepath"
 
-func canonicalPath(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
+func (a *app) canonicalPath(path string) (string, error) {
+	absolute, err := a.env.Abs(path)
 	if err != nil {
 		return "", err
 	}

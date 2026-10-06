@@ -2,16 +2,16 @@ package feltcli
 
 import (
 	"fmt"
+	"io"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
-
-var treeDepth int
 
 // listForOutput lists fibers the way the active output mode needs them: --json
 // carries mod times, and a --has filter that only names frontmatter keys is
@@ -32,7 +32,9 @@ func listForOutput(storage *felt.Storage, hasFields []string, jsonMode bool) ([]
 }
 
 // NewLsCmd builds the shared fiber-listing command for a Felt-compatible view.
-func NewLsCmd(view ViewOptions) *cobra.Command {
+// It reads the store through env and writes to the output stream its root
+// command was given (the felt root sets it from env).
+func NewLsCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var lsStatus string
 	var lsTags []string
 	var lsRecent int
@@ -66,10 +68,11 @@ felt find searches the rest of it.`,
   felt ls --json --json-field id,status   machine-readable, two fields`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			storage, _, err := felt.RequireStore(view.directory())
+			storage, _, err := felt.RequireStore(env, view.directory())
 			if err != nil {
 				return err
 			}
+			out := env.Stdout
 			query := ""
 			if len(args) == 1 {
 				query = plainQuery(args[0], lsRegex)
@@ -153,9 +156,9 @@ felt find searches the rest of it.`,
 					if err != nil {
 						return err
 					}
-					return outputJSON(projected)
+					return writeJSON(out, projected)
 				}
-				return outputJSON(filtered)
+				return writeJSON(out, filtered)
 			}
 
 			// Closed suppression is a human-output concern only: --json is the wire
@@ -171,25 +174,25 @@ felt find searches the rest of it.`,
 
 			if len(shown) == 0 {
 				if query != "" {
-					fmt.Printf("No fibers matching %q\n", query)
+					fmt.Fprintf(out, "No fibers matching %q\n", query)
 				} else {
-					fmt.Println("No fibers found")
+					fmt.Fprintln(out, "No fibers found")
 				}
 			} else {
 				for _, f := range shown {
-					fmt.Print(formatFeltTwoLine(f, collapsed[f.ID]))
+					fmt.Fprint(out, formatFeltTwoLine(f, collapsed[f.ID]))
 				}
 			}
 
 			if closedSuppressed > 0 {
-				fmt.Printf("\n(+%d closed — add -s closed)\n", closedSuppressed)
+				fmt.Fprintf(out, "\n(+%d closed — add -s closed)\n", closedSuppressed)
 			}
 
 			// Show count of hidden fibers when the default filter is active
 			if !statusExplicit && !hasFilters {
 				hidden := len(felts) - len(filtered)
 				if hidden > 0 {
-					fmt.Printf("\n(%d more — use -s all to see everything)\n", hidden)
+					fmt.Fprintf(out, "\n(%d more — use -s all to see everything)\n", hidden)
 				}
 			}
 
@@ -200,7 +203,7 @@ felt find searches the rest of it.`,
 			// memoized symlink-eval and an ancestor walk — no outer ids are read.
 			if (hasFilters || statusExplicit) && !view.jsonOutput() {
 				if outerRoot, _, ok := storage.EnclosingStore(); ok {
-					fmt.Printf("\n(view-local — `felt find` searches the whole store at %s)\n", outerRoot)
+					fmt.Fprintf(out, "\n(view-local — `felt find` searches the whole store at %s)\n", outerRoot)
 				}
 			}
 
@@ -222,12 +225,6 @@ felt find searches the rest of it.`,
 		command.Example = strings.ReplaceAll(command.Example, "felt ls", view.commandName("ls"))
 	}
 	return command
-}
-
-var lsCmd = NewLsCmd(ViewOptions{})
-
-func init() {
-	rootCmd.AddCommand(lsCmd)
 }
 
 // lsSearch is one compiled query: the flags and the regex, applied by apply()
@@ -675,58 +672,64 @@ type ContainmentNode struct {
 	Children []*ContainmentNode `json:"children,omitempty"`
 }
 
-// tree command - containment hierarchy
-var treeCmd = &cobra.Command{
-	Use:   "tree [id]",
-	Short: "Show the containment tree",
-	Long: `Draws fibers by nesting, every status included: the whole view, or with an id
+// treeCmd draws the containment hierarchy.
+func (a *app) treeCmd() *cobra.Command {
+	var treeDepth int
+	command := &cobra.Command{
+		Use:   "tree [id]",
+		Short: "Show the containment tree",
+		Long: `Draws fibers by nesting, every status included: the whole view, or with an id
 that fiber's subtree, from the enclosing store when it lives there. A branch
 cut at the depth limit shows how many fibers lie below it; --json is always
 the full tree.`,
-	Example: `  felt tree analysis -L 2`,
-	Args:    cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := felt.RequireStore(changeDir)
-		if err != nil {
-			return err
-		}
-
-		// Resolve the argument before listing anything: an id that names a
-		// fiber in the enclosing store draws THAT store's tree — the fiber is
-		// real, it just is not in this view — so the ref decides which store
-		// gets walked, and the walk happens exactly once either way.
-		target := felt.Ref{Storage: storage}
-		if len(args) == 1 {
-			target, err = felt.ResolveRef(storage, "", args[0])
+		Example: `  felt tree analysis -L 2`,
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			storage, _, err := felt.RequireStore(a.env, a.dir)
 			if err != nil {
 				return err
 			}
-		}
 
-		felts, err := listForOutput(target.Storage, nil, jsonOutput)
-		if err != nil {
-			return err
-		}
-
-		roots := buildContainmentTree(felts)
-		if len(args) == 1 {
-			node := findContainmentNode(roots, target.ID)
-			if node == nil {
-				return fmt.Errorf("fiber %s not found in tree", target.ID)
+			// Resolve the argument before listing anything: an id that names a
+			// fiber in the enclosing store draws THAT store's tree — the fiber is
+			// real, it just is not in this view — so the ref decides which store
+			// gets walked, and the walk happens exactly once either way.
+			target := felt.Ref{Storage: storage}
+			if len(args) == 1 {
+				target, err = felt.ResolveRef(storage, "", args[0])
+				if err != nil {
+					return err
+				}
 			}
-			roots = []*ContainmentNode{node}
-		}
 
-		if jsonOutput {
-			return outputJSON(roots)
-		}
+			felts, err := listForOutput(target.Storage, nil, a.json)
+			if err != nil {
+				return err
+			}
 
-		for i, root := range roots {
-			printContainmentNode(root, "", i == len(roots)-1, 0)
-		}
+			roots := buildContainmentTree(felts)
+			if len(args) == 1 {
+				node := findContainmentNode(roots, target.ID)
+				if node == nil {
+					return fmt.Errorf("fiber %s not found in tree", target.ID)
+				}
+				roots = []*ContainmentNode{node}
+			}
 
-		return nil
-	},
+			if a.json {
+				return a.outputJSON(roots)
+			}
+
+			for i, root := range roots {
+				printContainmentNode(a.env.Stdout, root, "", i == len(roots)-1, 0, treeDepth)
+			}
+
+			return nil
+		},
+	}
+	command.GroupID = groupSearch
+	command.Flags().IntVarP(&treeDepth, "depth", "L", 0, "Maximum nesting depth to display (1 = direct children only; 0 = unlimited)")
+	return command
 }
 
 // buildContainmentTree constructs a tree from fiber IDs based on path nesting.
@@ -800,7 +803,9 @@ func countDescendants(node *ContainmentNode) int {
 	return n
 }
 
-func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth int) {
+// printContainmentNode draws node and its subtree to w, eliding what lies
+// below maxDepth (0 draws everything).
+func printContainmentNode(w io.Writer, node *ContainmentNode, prefix string, last bool, depth, maxDepth int) {
 	connector := "├── "
 	if last {
 		connector = "└── "
@@ -809,7 +814,7 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 		connector = ""
 	}
 
-	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), treeDisplayID(node.ID), node.Name)
+	fmt.Fprintf(w, "%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), treeDisplayID(node.ID), node.Name)
 
 	var childPrefix string
 	if prefix == "" {
@@ -822,20 +827,14 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 
 	// At the depth limit the subtree is elided; say how much was left out so
 	// the truncation is visible rather than silent.
-	if treeDepth > 0 && depth+1 > treeDepth {
+	if maxDepth > 0 && depth+1 > maxDepth {
 		if hidden := countDescendants(node); hidden > 0 {
-			fmt.Printf("%s└── … (%d more below)\n", childPrefix, hidden)
+			fmt.Fprintf(w, "%s└── … (%d more below)\n", childPrefix, hidden)
 		}
 		return
 	}
 
 	for i, child := range node.Children {
-		printContainmentNode(child, childPrefix, i == len(node.Children)-1, depth+1)
+		printContainmentNode(w, child, childPrefix, i == len(node.Children)-1, depth+1, maxDepth)
 	}
-}
-
-func init() {
-	treeCmd.GroupID = groupSearch
-	rootCmd.AddCommand(treeCmd)
-	treeCmd.Flags().IntVarP(&treeDepth, "depth", "L", 0, "Maximum nesting depth to display (1 = direct children only; 0 = unlimited)")
 }

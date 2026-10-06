@@ -9,14 +9,16 @@ import (
 )
 
 func TestShuttleCheckValidatesBlocksAndReportsHostDrift(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "work/invalid", "invalid-uid", felt.StatusActive, map[string]any{
 		"kind": "unknown",
 		"host": "MyHost.local",
 	}, nil)
-	t.Setenv("SHUTTLE_HOST", "myhost")
+	env.Set("SHUTTLE_HOST", "myhost")
 
-	out, err := runCommand(t, dir, "check", "--json")
+	out, err := runIn(t, env, dir, "check", "--json")
 	if err == nil || !strings.Contains(err.Error(), "shuttle check failed: 1 error(s)") {
 		t.Fatalf("shuttle check error = %v, want one schema error", err)
 	}
@@ -36,13 +38,15 @@ func TestShuttleCheckValidatesBlocksAndReportsHostDrift(t *testing.T) {
 }
 
 func TestShuttleCheckAcceptsValidBlock(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "work/valid", "valid-uid", felt.StatusActive, map[string]any{
 		"kind": "oneshot",
 		"host": "another-host",
 	}, nil)
 
-	out, err := runCommand(t, dir, "check")
+	out, err := runIn(t, env, dir, "check")
 	if err != nil {
 		t.Fatalf("shuttle check: %v", err)
 	}

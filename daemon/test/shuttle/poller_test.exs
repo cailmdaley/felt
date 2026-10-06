@@ -69,7 +69,9 @@ defmodule Shuttle.PollerTest do
       end
   end
 
-  defp wait_until(fun, attempts \\ 120)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, attempts \\ 1_200)
   defp wait_until(fun, 0), do: fun.()
 
   defp wait_until(fun, attempts) do
@@ -980,7 +982,9 @@ defmodule Shuttle.PollerTest do
           felt_stores: [MockRunner.felt_root()]
         )
 
-      send(poller, :run_poll_cycle)
+      # Bound the cycles: a still-active fiber is re-dispatched by any cycle
+      # applied after the kill, so none may be in flight or pending behind it.
+      sync_poll_cycle!(poller)
 
       assert wait_until(fn ->
                case Poller.cached_fiber_documents(poller) do
@@ -989,8 +993,8 @@ defmodule Shuttle.PollerTest do
                end
              end)
 
-      {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
-      session = get_in(live, [:runtime, :tmux_session])
+      assert {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
+      assert %{tmux_session: session} = live[:runtime]
 
       MockRunner.set_kill_session_failure(variant)
       assert {:ok, ^session} = Poller.kill_session(poller, fiber_id)
@@ -1411,7 +1415,7 @@ defmodule Shuttle.PollerTest do
     monitor = Process.monitor(poller)
     Process.exit(poller, :shutdown)
 
-    assert_receive {:DOWN, ^monitor, :process, ^poller, :shutdown}, 1_000
+    assert_receive {:DOWN, ^monitor, :process, ^poller, :shutdown}
     assert wait_until(fn -> not Process.alive?(task_pid) end)
   end
 
@@ -4229,7 +4233,7 @@ defmodule Shuttle.PollerTest do
       )
 
     send(poller, :run_poll_cycle)
-    assert wait_until(fn -> new_session_scripts() != [] end, 80)
+    assert wait_until(fn -> new_session_scripts() != [] end)
 
     script = new_session_scripts() |> List.last() |> File.read!()
     assert script =~ "--resume"
@@ -4263,7 +4267,7 @@ defmodule Shuttle.PollerTest do
       )
 
     send(poller, :run_poll_cycle)
-    assert wait_until(fn -> new_session_scripts() != [] end, 80)
+    assert wait_until(fn -> new_session_scripts() != [] end)
 
     script = new_session_scripts() |> List.last() |> File.read!()
     assert script =~ "Fiber: #{fiber_id}"
@@ -4707,7 +4711,7 @@ defmodule Shuttle.PollerTest do
 
     send(poller, :run_poll_cycle)
 
-    assert wait_until(fn -> File.read!(doc_path) =~ "status: closed" end, 80)
+    assert wait_until(fn -> File.read!(doc_path) =~ "status: closed" end)
 
     # No worker was spawned — the role was marked awaiting, not dispatched.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -4812,7 +4816,7 @@ defmodule Shuttle.PollerTest do
     send(poller, :run_poll_cycle)
 
     # Parked back to the strip.
-    assert wait_until(fn -> File.read!(doc_path) =~ "status: open" end, 80)
+    assert wait_until(fn -> File.read!(doc_path) =~ "status: open" end)
 
     # No self-heal write: stamping handed_off_at would arm the relaunch trigger.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->

@@ -591,8 +591,6 @@ defmodule ShuttleWeb.FileControllerTest do
       # This test's own boot snapshot, not the one every request reads.
       Shuttle.Test.Env.own_scope!()
       Shuttle.Readiness.begin_boot()
-      key = Shuttle.Env.scope_key({Shuttle.Readiness, :boot_state})
-      on_exit(fn -> :persistent_term.erase(key) end)
 
       for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
         conn = get(api_conn(), url)

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 const (
@@ -151,10 +153,10 @@ func validatePart(name, s string) error {
 }
 
 type adapter interface {
-	discover(context.Context, string) ([]Session, error)
-	send(context.Context, Address, Request) (Receipt, error)
+	discover(context.Context, *sysenv.Env, string) ([]Session, error)
+	send(context.Context, *sysenv.Env, Address, Request) (Receipt, error)
 }
 
 type dedupMetadataSender interface {
-	sendWithDedupMetadata(context.Context, Address, Request) (Receipt, error, dedupMetadata)
+	sendWithDedupMetadata(context.Context, *sysenv.Env, Address, Request) (Receipt, error, dedupMetadata)
 }

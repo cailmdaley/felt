@@ -28,18 +28,18 @@ import (
 // runStatusCrossHost handles `--all` (local + every remote) and `--remote NAME`
 // (filter to one remote). It fetches the composite state from the local daemon,
 // renders rows, and prints them.
-func runStatusCrossHost() error {
-	composite, err := fetchComposite()
+func (a *app) runStatusCrossHost(o statusOptions) error {
+	composite, err := a.fetchComposite()
 	if err != nil {
 		return err
 	}
-	if statusRemote != "" {
-		if _, ok := composite.Remotes[statusRemote]; !ok {
-			return fmt.Errorf("unknown origin %q; configured: local, %s", statusRemote, joinNames(composite.Remotes))
+	if o.remote != "" {
+		if _, ok := composite.Remotes[o.remote]; !ok {
+			return fmt.Errorf("unknown origin %q; configured: local, %s", o.remote, joinNames(composite.Remotes))
 		}
 	}
 
-	rows := compositeRows(composite, statusRemote)
+	rows := compositeRows(composite, o.remote)
 
 	sort.Slice(rows, func(i, j int) bool {
 		// Local first, then remotes alphabetically; within each origin sort by
@@ -56,11 +56,11 @@ func runStatusCrossHost() error {
 		return rows[i].FiberID < rows[j].FiberID
 	})
 
-	if jsonOutput {
-		return outputJSON(rows)
+	if a.json {
+		return a.outputJSON(rows)
 	}
 
-	printCrossHostTable(rows, composite, statusRemote)
+	a.printCrossHostTable(rows, composite, o.remote, o.closed)
 	return nil
 }
 
@@ -224,22 +224,22 @@ func formatUnixMS(ms int64) string {
 // printStatusTable's shape but adds an ORIGIN column on the left so the per-host
 // grouping is obvious at a glance. Stale rows get a "[stale]" suffix in the STATE
 // column.
-func printCrossHostTable(rows []FiberStatus, c *CompositeState, only string) {
-	rows, hidden := hideClosedRows(rows)
+func (a *app) printCrossHostTable(rows []FiberStatus, c *CompositeState, only string, showClosed bool) {
+	rows, hidden := hideClosedRows(rows, showClosed)
 	if len(rows) == 0 {
 		if only != "" {
-			fmt.Printf("no rows for remote %q (configured: %s)\n",
+			fmt.Fprintf(a.env.Stdout, "no rows for remote %q (configured: %s)\n",
 				only, joinNames(c.Remotes))
 		} else {
-			fmt.Println("no shuttle fibers (local or remote)")
+			fmt.Fprintln(a.env.Stdout, "no shuttle fibers (local or remote)")
 		}
-		printHiddenClosedTrailer(hidden)
+		a.printHiddenClosedTrailer(hidden)
 		return
 	}
 
-	fmt.Printf("%-12s  %-50s  %-9s  %-16s  %-18s  %s\n",
+	fmt.Fprintf(a.env.Stdout, "%-12s  %-50s  %-9s  %-16s  %-18s  %s\n",
 		"ORIGIN", "FIBER", "KIND", "STATE", "NEXT_DUE_AT", "AGENT")
-	fmt.Println(strings.Repeat("─", 122))
+	fmt.Fprintln(a.env.Stdout, strings.Repeat("─", 122))
 
 	for _, r := range rows {
 		origin := shuttleNonEmpty(r.Origin, "(local)")
@@ -250,10 +250,10 @@ func printCrossHostTable(rows []FiberStatus, c *CompositeState, only string) {
 		if r.Stale {
 			state = state + " [stale]"
 		}
-		fmt.Printf("%-12s  %-50s  %-9s  %-16s  %-18s  %s\n",
+		fmt.Fprintf(a.env.Stdout, "%-12s  %-50s  %-9s  %-16s  %-18s  %s\n",
 			shuttleTruncateID(origin, 12), shuttleTruncateID(r.FiberID, 50), kind, state, next, agent)
 	}
-	printHiddenClosedTrailer(hidden)
+	a.printHiddenClosedTrailer(hidden)
 }
 
 func joinNames(remotes map[string]*RemoteSnapshot) string {

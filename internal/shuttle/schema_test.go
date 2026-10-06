@@ -11,6 +11,7 @@ import (
 // ---- Validation tests -------------------------------------------------------
 
 func TestValidate_ValidOneshot(t *testing.T) {
+	t.Parallel()
 	b := &Block{Kind: "oneshot", ProjectDir: "/tmp/project", Host: "test-host"}
 	if errs := Validate(b, nil); len(errs) != 0 {
 		t.Fatalf("expected no errors, got: %v", errs)
@@ -18,6 +19,7 @@ func TestValidate_ValidOneshot(t *testing.T) {
 }
 
 func TestValidate_ValidStanding(t *testing.T) {
+	t.Parallel()
 	b := &Block{
 		Kind:       "standing",
 		ProjectDir: "/tmp/project",
@@ -30,6 +32,7 @@ func TestValidate_ValidStanding(t *testing.T) {
 }
 
 func TestValidate_MinimalBlockValidates(t *testing.T) {
+	t.Parallel()
 	// Validate keys only on kind (+ schedule for standing, + agent registry).
 	// project_dir/host requirements for an armed install belong to the install
 	// path, which knows the status. A host-less, project_dir-less oneshot block
@@ -41,6 +44,7 @@ func TestValidate_MinimalBlockValidates(t *testing.T) {
 }
 
 func TestValidate_BadCron(t *testing.T) {
+	t.Parallel()
 	b := &Block{
 		Kind:       "standing",
 		ProjectDir: "/tmp/project",
@@ -57,6 +61,7 @@ func TestValidate_BadCron(t *testing.T) {
 }
 
 func TestValidate_BadTimezone(t *testing.T) {
+	t.Parallel()
 	b := &Block{
 		Kind:       "standing",
 		ProjectDir: "/tmp/project",
@@ -73,6 +78,7 @@ func TestValidate_BadTimezone(t *testing.T) {
 }
 
 func TestValidate_MissingScheduleForStanding(t *testing.T) {
+	t.Parallel()
 	b := &Block{Kind: "standing", ProjectDir: "/tmp/project"}
 	errs := Validate(b, nil)
 	if len(errs) == 0 {
@@ -81,6 +87,7 @@ func TestValidate_MissingScheduleForStanding(t *testing.T) {
 }
 
 func TestValidate_BadKind(t *testing.T) {
+	t.Parallel()
 	b := &Block{Kind: "weekly"}
 	errs := Validate(b, nil)
 	if len(errs) == 0 {
@@ -89,6 +96,7 @@ func TestValidate_BadKind(t *testing.T) {
 }
 
 func TestValidate_ValidPinned(t *testing.T) {
+	t.Parallel()
 	// A pinned role is schedule-less and valid without a schedule.
 	b := &Block{Kind: "pinned", ProjectDir: "/tmp/project", Host: "test-host"}
 	if errs := Validate(b, nil); len(errs) != 0 {
@@ -97,6 +105,7 @@ func TestValidate_ValidPinned(t *testing.T) {
 }
 
 func TestValidate_PinnedRejectsSchedule(t *testing.T) {
+	t.Parallel()
 	// A schedule on a pinned role is contradictory (pinned never auto-dispatches)
 	// and must be rejected loudly.
 	b := &Block{
@@ -123,6 +132,7 @@ func TestValidate_PinnedRejectsSchedule(t *testing.T) {
 // ---- Cron next occurrence ---------------------------------------------------
 
 func TestNextOccurrence(t *testing.T) {
+	t.Parallel()
 	s := &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}
 	// Use a reference time: Monday 2026-05-04 08:00 Paris time.
 	paris, _ := time.LoadLocation("Europe/Paris")
@@ -137,6 +147,7 @@ func TestNextOccurrence(t *testing.T) {
 }
 
 func TestPrevOccurrence(t *testing.T) {
+	t.Parallel()
 	s := &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}
 	paris, _ := time.LoadLocation("Europe/Paris")
 
@@ -176,6 +187,7 @@ func TestPrevOccurrence(t *testing.T) {
 // exactly next — i.e. (prev, next) contains no occurrence, so "a tick fired
 // since last_serviced" reduces to "prev > last_serviced".
 func TestPrevNextBracketNow(t *testing.T) {
+	t.Parallel()
 	s := &Schedule{Expr: "30 14 10 * *", TZ: "Europe/Paris"} // 14:30 on the 10th, monthly
 	now := time.Date(2026, 6, 21, 9, 3, 17, 0, time.UTC)     // arbitrary mid-month instant
 	prev, err := PrevOccurrence(s, now)
@@ -205,6 +217,7 @@ func TestPrevNextBracketNow(t *testing.T) {
 // ---- Agent registry ---------------------------------------------------------
 
 func TestAgentRegistry_FindByID(t *testing.T) {
+	t.Parallel()
 	// Build a minimal registry via loadAgentRegistryFromFile on a temp JSON.
 	dir := t.TempDir()
 	agentJSON := `[{"id":"test-agent","cli":"test","wrapper":"test","aliases":[],"default":true}]`
@@ -225,6 +238,7 @@ func TestAgentRegistry_FindByID(t *testing.T) {
 }
 
 func TestAgentRegistry_FindByAlias(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	agentJSON := `[{"id":"my-agent","cli":"cli","wrapper":"w","aliases":["shortname"],"default":false}]`
 	_ = os.WriteFile(filepath.Join(dir, "agents.json"), []byte(agentJSON), 0644)
@@ -237,6 +251,7 @@ func TestAgentRegistry_FindByAlias(t *testing.T) {
 }
 
 func TestValidate_UnknownAgent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	agentJSON := `[{"id":"known","cli":"cli","wrapper":"w","aliases":[],"default":true}]`
 	_ = os.WriteFile(filepath.Join(dir, "agents.json"), []byte(agentJSON), 0644)

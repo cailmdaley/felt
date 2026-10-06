@@ -3,9 +3,10 @@ defmodule Shuttle.Env do
   The daemon's one reader of process-global configuration: the OS environment,
   the `:shuttle` application env, and executable lookup on `PATH`.
 
-  Production code calls `get/2`, `app/2`, `fetch_app/1` and `find_executable/1`
-  instead of `System.get_env/2`, `Application.get_env(:shuttle, …)` and
-  `System.find_executable/1`. In `:dev` and `:prod` each is a straight
+  Production code calls `get/2`, `app/2`, `find_executable/1`,
+  `home/0`, `expand/1` and `cmd/3` instead of `System.get_env/2`,
+  `Application.get_env(:shuttle, …)`, `System.find_executable/1`,
+  `System.user_home!/0`, `Path.expand/1` and `System.cmd/3`. In `:dev` and `:prod` each is a straight
   passthrough to the global value.
 
   Test builds (`config :shuttle, scoped_env: true`, read at compile time) first
@@ -38,6 +39,7 @@ defmodule Shuttle.Env do
 
   if @scoped do
     @max_walk 64
+    @owner_key :"$shuttle_env_owner"
 
     @doc "`System.get_env/2`, through the caller's scope."
     @spec get(String.t(), String.t() | nil) :: String.t() | nil
@@ -59,16 +61,6 @@ defmodule Shuttle.Env do
       end
     end
 
-    @doc "`Application.fetch_env(:shuttle, key)`, through the caller's scope."
-    @spec fetch_app(atom()) :: {:ok, term()} | :error
-    def fetch_app(key) do
-      case lookup(:app, key) do
-        {:ok, {:set, value}} -> {:ok, value}
-        {:ok, :delete} -> :error
-        :error -> Application.fetch_env(:shuttle, key)
-      end
-    end
-
     @doc """
     `System.find_executable/1` against the caller's `PATH`: a scoped `PATH`
     override is searched instead of the VM's.
@@ -80,6 +72,49 @@ defmodule Shuttle.Env do
         {:ok, :delete} -> nil
         :error -> System.find_executable(name)
       end
+    end
+
+    @doc "The user's home directory: a scoped `HOME`, else `System.user_home!/0`."
+    @spec home() :: String.t()
+    def home do
+      case lookup(:env, "HOME") do
+        {:ok, {:set, home}} -> home
+        _ -> System.user_home!()
+      end
+    end
+
+    @doc "`Path.expand/1`, with a leading `~` resolved against a scoped `HOME`."
+    @spec expand(Path.t()) :: String.t()
+    def expand(path) do
+      case {path, lookup(:env, "HOME")} do
+        {"~", {:ok, {:set, home}}} -> Path.expand(home)
+        {"~/" <> rest, {:ok, {:set, home}}} -> Path.expand(Path.join(home, rest))
+        _ -> Path.expand(path)
+      end
+    end
+
+    @doc """
+    `System.cmd/3` as the caller's scope sees it: the executable resolved on
+    the scoped `PATH`, the scoped env handed to the child (an `env:` entry the
+    caller passes wins).
+    """
+    @spec cmd(String.t(), [String.t()], keyword()) :: {Collectable.t(), non_neg_integer()}
+    def cmd(command, args, opts \\ []) do
+      executable =
+        if Path.type(command) == :absolute, do: command, else: find_executable(command) || command
+
+      opts =
+        case child_env() do
+          [] ->
+            opts
+
+          scoped ->
+            caller = Keyword.get(opts, :env, [])
+            names = MapSet.new(caller, &elem(&1, 0))
+            Keyword.put(opts, :env, caller ++ Enum.reject(scoped, &(elem(&1, 0) in names)))
+        end
+
+      System.cmd(executable, args, opts)
     end
 
     @doc """
@@ -108,12 +143,23 @@ defmodule Shuttle.Env do
     """
     @spec owner() :: pid() | nil
     def owner do
-      if :ets.whereis(@table) == :undefined do
-        nil
-      else
-        callers = Process.get(:"$callers", [])
-        ancestors = Process.get(:"$ancestors", [])
-        walk([self() | callers ++ ancestors], MapSet.new(), 0)
+      cond do
+        :ets.whereis(@table) == :undefined ->
+          nil
+
+        # Resolved once, then held by pid: a name in `$ancestors` may later
+        # be registered by another process.
+        is_pid(cached = Process.get(@owner_key)) ->
+          if :ets.member(@table, {:owner, cached}), do: cached
+
+        true ->
+          callers = Process.get(:"$callers", [])
+          ancestors = Process.get(:"$ancestors", [])
+
+          with owner when is_pid(owner) <- walk([self() | callers ++ ancestors], MapSet.new(), 0) do
+            Process.put(@owner_key, owner)
+            owner
+          end
       end
     end
 
@@ -225,13 +271,21 @@ defmodule Shuttle.Env do
     @spec app(atom(), term()) :: term()
     def app(key, default \\ nil), do: Application.get_env(:shuttle, key, default)
 
-    @doc "`Application.fetch_env(:shuttle, key)`."
-    @spec fetch_app(atom()) :: {:ok, term()} | :error
-    def fetch_app(key), do: Application.fetch_env(:shuttle, key)
-
     @doc "`System.find_executable/1`."
     @spec find_executable(String.t()) :: String.t() | nil
     def find_executable(name), do: System.find_executable(name)
+
+    @doc "`System.user_home!/0`."
+    @spec home() :: String.t()
+    def home, do: System.user_home!()
+
+    @doc "`Path.expand/1`."
+    @spec expand(Path.t()) :: String.t()
+    def expand(path), do: Path.expand(path)
+
+    @doc "`System.cmd/3`."
+    @spec cmd(String.t(), [String.t()], keyword()) :: {Collectable.t(), non_neg_integer()}
+    def cmd(command, args, opts \\ []), do: System.cmd(command, args, opts)
 
     @doc "No scoped overrides exist outside test builds."
     @spec child_env() :: []

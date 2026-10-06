@@ -2,9 +2,10 @@ package shuttle
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // DataDir is the host-local shuttle state directory: $SHUTTLE_DATA_DIR, else
@@ -18,12 +19,12 @@ import (
 // daemon/test/fixtures/data_dir/cases.json holds both readers to it.
 //
 // It errors only when a home directory is needed and cannot be resolved.
-func DataDir() (string, error) {
-	v := strings.TrimSpace(os.Getenv("SHUTTLE_DATA_DIR"))
+func DataDir(env *sysenv.Env) (string, error) {
+	v := strings.TrimSpace(env.Getenv("SHUTTLE_DATA_DIR"))
 	if v != "" && v != "~" && !strings.HasPrefix(v, "~/") {
 		return v, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := env.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}

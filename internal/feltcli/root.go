@@ -3,20 +3,41 @@ package feltcli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"runtime/debug"
+	"time"
 
+	"github.com/cailmdaley/felt/internal/clistreams"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
-var (
-	jsonOutput bool
-	changeDir  string
-)
+// app is one felt invocation: the process surface it runs against and the
+// root's persistent flags. Commands read env vars, the home and working
+// directories, executables and the standard streams through a.env, never
+// through package os.
+type app struct {
+	env     *sysenv.Env
+	json    bool   // --json
+	dir     string // -C
+	version string // the release version this binary reports and pins plugins to
+	// probeTimeout bounds how long felt update waits for a sibling shuttle or
+	// brew to report its version or prefix.
+	probeTimeout time.Duration
+}
+
+func newApp(env *sysenv.Env) *app {
+	return &app{env: env, version: Version, probeTimeout: 3 * time.Second}
+}
 
 // Version is the current release version, set through build metadata.
 var Version = "dev"
+
+// displayVersion is what --version prints; SetVersionInfo writes it once,
+// before any command tree is built.
+var displayVersion string
 
 // SetVersionInfo records the release version and display identity for the binary.
 func SetVersionInfo(v, commit, date string) {
@@ -26,11 +47,11 @@ func SetVersionInfo(v, commit, date string) {
 	}
 	switch {
 	case commit == "":
-		rootCmd.Version = v
+		displayVersion = v
 	case date == "unknown":
-		rootCmd.Version = fmt.Sprintf("%s (%s)", v, commit)
+		displayVersion = fmt.Sprintf("%s (%s)", v, commit)
 	default:
-		rootCmd.Version = fmt.Sprintf("%s (%s, built %s)", v, commit, date)
+		displayVersion = fmt.Sprintf("%s (%s, built %s)", v, commit, date)
 	}
 }
 
@@ -103,51 +124,109 @@ mechanically, never discard another worker's edits.
 Hygiene: felt check reports broken links and layout problems; felt session
 prints the start-of-session context, including its Attention list.`
 
-var rootCmd = &cobra.Command{
-	Use:   "felt",
-	Short: "Markdown fiber tracker with containment, wikilinks, and extra YAML",
-	Long:  rootLong,
-	CompletionOptions: cobra.CompletionOptions{
-		HiddenDefaultCmd: true,
-	},
-	SilenceErrors: true,
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if err := cmd.ValidateRequiredFlags(); err != nil {
-			return err
-		}
-		if err := cmd.ValidateFlagGroups(); err != nil {
-			return err
-		}
-		cmd.SilenceUsage = true
-		return nil
-	},
+func init() {
+	cobra.EnableTraverseRunHooks = true
+}
+
+// NewRootCmd builds a fresh felt command tree bound to env.
+func NewRootCmd(env *sysenv.Env) *cobra.Command {
+	return newApp(env).rootCmd()
+}
+
+// Run executes one felt invocation with args in env and returns its exit
+// code, printing a failure to env.Stderr.
+func Run(env *sysenv.Env, args []string) int {
+	root := NewRootCmd(env)
+	if args == nil {
+		args = []string{}
+	}
+	root.SetArgs(args)
+	if err := root.Execute(); err != nil {
+		fmt.Fprintln(env.Stderr, err)
+		return 1
+	}
+	return 0
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	os.Exit(Run(sysenv.OS(), os.Args[1:]))
 }
 
-func init() {
-	cobra.EnableTraverseRunHooks = true
-	rootCmd.AddGroup(
+func (a *app) rootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:     "felt",
+		Short:   "Markdown fiber tracker with containment, wikilinks, and extra YAML",
+		Long:    rootLong,
+		Version: displayVersion,
+		CompletionOptions: cobra.CompletionOptions{
+			HiddenDefaultCmd: true,
+		},
+		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.ValidateRequiredFlags(); err != nil {
+				return err
+			}
+			if err := cmd.ValidateFlagGroups(); err != nil {
+				return err
+			}
+			cmd.SilenceUsage = true
+			return nil
+		},
+	}
+	root.AddGroup(
 		&cobra.Group{ID: groupFibers, Title: "Fibers:"},
 		&cobra.Group{ID: groupSearch, Title: "Finding:"},
 		&cobra.Group{ID: groupStore, Title: "Store:"},
 		&cobra.Group{ID: groupAgents, Title: "Integration:"},
 	)
-	rootCmd.SetHelpCommandGroupID(groupAgents)
-	rootCmd.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "Output in JSON format")
-	rootCmd.PersistentFlags().StringVarP(&changeDir, "directory", "C", "", "Run as if felt was started in `dir`")
+	root.SetHelpCommandGroupID(groupAgents)
+	root.PersistentFlags().BoolVarP(&a.json, "json", "j", false, "Output in JSON format")
+	root.PersistentFlags().StringVarP(&a.dir, "directory", "C", "", "Run as if felt was started in `dir`")
+	view := a.view()
+	root.AddCommand(
+		a.addCmd(),
+		a.editCmd(),
+		NewShowCmd(a.env, view),
+		a.rmCmd(),
+		NewLsCmd(a.env, view),
+		a.treeCmd(),
+		a.findCmd(),
+		a.checkCmd(),
+		a.initCmd(),
+		a.syncCmd(),
+		a.nestCmd(),
+		a.unnestCmd(),
+		a.migrateCmd(),
+		a.backfillIDsCmd(),
+		a.sessionCmd(),
+		a.hookCmd(),
+		a.setupCmd(),
+		a.updateCmd(),
+		a.uninstallCmd(),
+	)
+	clistreams.Bind(root, a.env.Stdin, a.env.Stdout, a.env.Stderr)
+	return root
 }
 
-func outputJSON(data interface{}) error {
-	enc := json.NewEncoder(os.Stdout)
+// view is the felt binary's own view options: -C and --json of this
+// invocation.
+func (a *app) view() ViewOptions {
+	return ViewOptions{
+		Directory: func() string { return a.dir },
+		IsJSON:    func() bool { return a.json },
+	}
+}
+
+// writeJSON encodes data to w, indented, with a nil slice as [].
+func writeJSON(w io.Writer, data interface{}) error {
+	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	if v := reflect.ValueOf(data); v.Kind() == reflect.Slice && v.IsNil() {
 		data = reflect.MakeSlice(v.Type(), 0, 0).Interface()
 	}
 	return enc.Encode(data)
+}
+
+func (a *app) outputJSON(data interface{}) error {
+	return writeJSON(a.env.Stdout, data)
 }

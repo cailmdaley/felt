@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 type piAdapter struct{}
@@ -59,25 +61,25 @@ type piJob struct {
 	PiSessionID                              string `json:"piSessionId"`
 }
 
-func conferStateDir() string {
-	if p := os.Getenv("SHUTTLE_CONFER_STATE_DIR"); p != "" {
+func conferStateDir(env *sysenv.Env) string {
+	if p := env.Getenv("SHUTTLE_CONFER_STATE_DIR"); p != "" {
 		return p
 	}
-	h, _ := os.UserHomeDir()
+	h, _ := env.UserHomeDir()
 	return filepath.Join(h, ".local/state/confer-agent")
 }
 func liveSocket(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.Mode()&os.ModeSocket != 0
 }
-func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
-	hookSessions := mailboxSessions("pi", host)
-	nativeSessions := piNativeSessions(host)
+func (piAdapter) discover(ctx context.Context, env *sysenv.Env, host string) ([]Session, error) {
+	hookSessions := mailboxSessions(env, "pi", host)
+	nativeSessions := piNativeSessions(env, host)
 	nativeIDs := make(map[string]bool, len(nativeSessions))
 	for _, session := range nativeSessions {
 		nativeIDs[session.ID] = true
 	}
-	root := conferStateDir()
+	root := conferStateDir(env)
 	ss := mergeSessions(nativeSessions, hookSessions)
 	var conferSessions []Session
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -116,9 +118,9 @@ func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
 	}
 	return mergeSessions(ss, conferSessions), err
 }
-func findPi(ctx context.Context, id string) (piJob, error) {
+func findPi(ctx context.Context, env *sysenv.Env, id string) (piJob, error) {
 	var matches []piJob
-	err := filepath.WalkDir(conferStateDir(), func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(conferStateDir(env), func(path string, d os.DirEntry, err error) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -151,17 +153,17 @@ func findPi(ctx context.Context, id string) (piJob, error) {
 	}
 	return matches[0], nil
 }
-func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error) {
+func (piAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if !r.Wake {
-		if MailboxAvailable("pi", a.ID, a.Host) {
-			return queueMailbox(a, r)
+		if MailboxAvailable(env, "pi", a.ID, a.Host) {
+			return queueMailbox(env, a, r)
 		}
 		return rejected(r, "pi-rpc+unix-socket", "Confer messages can start a turn; wake is required"), errCode("wake_required", "Confer requires wake=true")
 	}
-	if piNativeAvailable(a.ID, a.Host) {
-		return sendPiNative(ctx, a, r)
+	if piNativeAvailable(env, a.ID, a.Host) {
+		return sendPiNative(ctx, env, a, r)
 	}
-	j, err := findPi(ctx, a.ID)
+	j, err := findPi(ctx, env, a.ID)
 	if err != nil {
 		return rejected(r, "pi-rpc+unix-socket", err.Error()), errCode("session_not_found", "%v", err)
 	}

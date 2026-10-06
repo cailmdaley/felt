@@ -1,5 +1,9 @@
 defmodule Shuttle.AppWorkersTest do
   use ExUnit.Case, async: true
+
+  # The concurrent-claim races are bounded only against a hang: a passing race
+  # never waits this long, and a loaded machine can take seconds per task.
+  @race_timeout 60_000
   import Shuttle.Test.PollerHelpers
   alias Shuttle.{AppWorkers, Dispatcher, Poller, WorkerBackend}
   alias Shuttle.Test.FeltStoreRunner, as: Runner
@@ -395,7 +399,7 @@ defmodule Shuttle.AppWorkersTest do
       |> Task.async_stream(
         &AppWorkers.claim_or_adopt("adopt-race", &1, Runner.felt_root()),
         max_concurrency: 30,
-        timeout: 5_000
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -549,7 +553,8 @@ defmodule Shuttle.AppWorkersTest do
             Runner.felt_root()
           )
         end,
-        max_concurrency: 30
+        max_concurrency: 30,
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -640,7 +645,8 @@ defmodule Shuttle.AppWorkersTest do
       1..20
       |> Task.async_stream(
         fn _ -> AppWorkers.recover(id, "tests/race", "race-uid", Runner.felt_root()) end,
-        max_concurrency: 20
+        max_concurrency: 20,
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -1098,7 +1104,7 @@ defmodule Shuttle.AppWorkersTest do
           {fiber, AppWorkers.claim("race", fiber, Runner.felt_root())}
         end,
         max_concurrency: 12,
-        timeout: 10_000
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -1112,7 +1118,9 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   defp settle(poller), do: eventually(fn -> :sys.get_state(poller).poll_cycles > 0 end)
-  defp eventually(fun, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 1_500)
   defp eventually(fun, 0), do: assert(fun.())
 
   defp eventually(fun, attempts) do

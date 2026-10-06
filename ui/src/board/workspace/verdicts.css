@@ -1,5 +1,5 @@
 .ws-verdict-toasts {
-  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: calc(var(--ws-band-height) + var(--ws-stage-inset) + var(--ws-label-height) + var(--ws-inset) + var(--ws-line-width));
+  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: calc(var(--ws-stage-inset) + var(--ws-label-height) + var(--ws-inset) + var(--ws-line-width));
   left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px;
   width: max-content; max-width: calc(100vw - 24px); pointer-events: none;
 }
@@ -35,3 +35,37 @@
 .ws-verdict-toast[data-verdict] { border-left: 3px solid var(--verdict-edge); }
 .ws-verdict-toast[data-verdict='tempered'] { --verdict-edge: color-mix(in srgb, var(--kbn-tempered) 55%, var(--ws-paper)); }
 .ws-verdict-toast[data-verdict='discarded'] { --verdict-edge: color-mix(in srgb, var(--kbn-discarded) 55%, var(--ws-paper)); }
+/* The fiber page's status line: the kicker, the worker pill, then Temper and
+   Discard at the line's right end. Outside review the pair is two verbs in
+   their pigments, plated only under the pointer; awaiting review they are
+   the page's plates, verdigris and the Desk's deletion red. */
+.ws-fiber-prose .ws-prose-header { display: flex; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
+.ws-fiber-prose .ws-fiber-acts {
+  flex: 1; display: flex; align-items: center; gap: var(--ws-gap); min-width: 0;
+  font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: normal; letter-spacing: 0; text-transform: none; color: var(--ws-ink);
+}
+.ws-fiber-acts .ws-fiber-worker { display: contents; }
+.ws-fiber-acts .ws-fiber-worker[hidden] { display: none; }
+.ws-fiber-acts .kbn-ctl-verdict { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.ws-fiber-acts .kbn-ctl-verdict[hidden] { display: none; }
+.ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+  min-height: var(--ws-control-height); padding: 0 10px; border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius);
+  background: transparent; font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; cursor: pointer;
+}
+.ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) { background: transparent; border-color: transparent !important; }
+.ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); border-color: transparent !important; }
+.ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-verdict { gap: 8px; }
+.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+  min-height: 36px; padding: 0 16px; background: var(--verdict-tint); border-color: var(--verdict-edge) !important;
+}
+.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
+  background: var(--verdict-tint-strong); border-color: var(--verdict-pigment) !important;
+}
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  /* The phone's top bar carries the worker's dot; its status line carries the verdicts alone, at a full target. */
+  .ws-fiber-acts .ws-fiber-worker { display: none; }
+  .ws-reader .ws-fiber-acts[data-column] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+    min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px; border-color: var(--verdict-edge) !important;
+  }
+  .ws-fiber-acts .kbn-ctl-verdict { gap: var(--ws-small-gap); }
+}

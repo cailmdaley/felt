@@ -11,6 +11,7 @@ import (
 )
 
 func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	fiber := &felt.Felt{
 		ID:        "work/task",

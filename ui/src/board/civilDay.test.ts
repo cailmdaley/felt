@@ -294,11 +294,17 @@ describe('years Date.UTC would remap', () => {
 
 describe('formatSpanMinutes', () => {
   // The bare form — no `pad`, no `empty` — is what the fiber controls' session
-  // summary renders. The padded and em-dash variants the views use are
-  // pinned in chronicleJoin.test.ts.
+  // summary renders; the em-dash variant is what the Chronicle's look-back reads.
   it('renders a whole hour with an unpadded zero, not a bare hour', () => {
     expect(formatSpanMinutes(120)).toBe('2h 0m');
     expect(formatSpanMinutes(216)).toBe('3h 36m');
+  });
+
+  it('reads a duration the way a person says it, and an empty one as its placeholder', () => {
+    expect(formatSpanMinutes(0, { empty: '—' })).toBe('—');
+    expect(formatSpanMinutes(45, { empty: '—' })).toBe('45m');
+    expect(formatSpanMinutes(200, { empty: '—' })).toBe('3h 20m');
+    expect(formatSpanMinutes(120, { empty: '—' })).toBe('2h 0m');
   });
 
   it('renders a sub-hour span as minutes alone, and zero as 0m', () => {
