@@ -100,3 +100,23 @@ func TestDaemonInstallLogResolvesInTheInvocationDirectory(t *testing.T) {
 		t.Fatalf("unit does not log to %s:\n%s", want, out)
 	}
 }
+
+func TestTunnelsInstallDirsResolveInTheInvocationDirectory(t *testing.T) {
+	t.Parallel()
+	h := newTunnelHost(t, "darwin", `[{"name":"alpha","port":4001,"tunnel":{"manager":"launchd"}}]`)
+	h.stubSupervisors(t, 0)
+	h.installIntoTemp(t, "")
+	cwd := t.TempDir()
+	h.env.Chdir(cwd)
+	h.opts.jobDir, h.opts.logDir = "relative-units", "relative-logs"
+
+	if err := h.install([]string{"alpha"}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "relative-units", "io.shuttle.shuttle-tunnel-alpha.plist")); err != nil {
+		t.Fatalf("job not written in the invocation directory: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(cwd, "relative-logs")); err != nil || !info.IsDir() {
+		t.Fatalf("log dir not created in the invocation directory: %v", err)
+	}
+}
