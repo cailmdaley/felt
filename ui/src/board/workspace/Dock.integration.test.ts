@@ -195,8 +195,8 @@ describe('Dock dispatch recovery', () => {
     expect(verb.disabled).toBe(true)
     dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
     expect(verb.disabled).toBe(false)
-    // The verb names the state it now stands in: a live session makes a fresh start the secondary "New session".
-    expect(verb.textContent).toBe(name === 'Resume' ? label : 'New session')
+    // The verb names the state it now stands in: a live session makes a fresh start "New session ↵".
+    expect(verb.textContent).toBe(name === 'Resume' ? label : 'New session ↵')
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
   })
 })
@@ -238,29 +238,29 @@ describe('state-shaped act zone', () => {
   })
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
-    ['pinned with a session', { status: 'active', shuttleKind: 'pinned', sessionUuid: 's' }, ['New session', 'Resume ↵']],
-    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session', 'Resume ↵']],
+    ['pinned with a session', { status: 'active', shuttleKind: 'pinned', sessionUuid: 's' }, ['New session ↵', 'Resume']],
+    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session ↵', 'Resume']],
     ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
-    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session', 'Resume ↵']],
+    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
     ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
   ] as const)('offers a sensible verb set: %s', (_name, patch, verbs) => {
     band = dock.bandFor(task(patch as Partial<KanbanCard>))
     const shown = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-sends button')].filter(b => !b.hidden)
     expect(shown.map(b => b.textContent)).toEqual(verbs)
-    const fresh = shown[0]
-    expect(fresh.classList.contains('kbn-ctl-secondary')).toBe(verbs.length > 1)
+    expect(shown[0].classList.contains('kbn-ctl-secondary')).toBe(false)
+    expect(shown[1]?.classList.contains('kbn-ctl-secondary') ?? false).toBe(verbs.length > 1)
   })
-  it('Enter resumes the named session and Alt-Enter explicitly starts fresh', async () => {
+  it('Enter starts a new session and Alt-Enter resumes the named one', async () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
-    message.value = 'Continue'
+    message.value = 'Restart'
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
-    message.value = 'Restart'
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Restart' })
+    message.value = 'Continue'
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
     await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Restart' })
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
   })
 })
 

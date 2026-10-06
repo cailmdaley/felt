@@ -2026,12 +2026,12 @@
 /* THE WORKER PILL — one treatment wherever a worker is drawn: the Desk card,
    the reader's sidebar card and the reader's head. A dot carries the state's
    pigment (cobalt aloft, gold waiting, cinnabar attention or blocked); the
-   state word and its compact age ("11m", "3h", "2d") are lowercase ink, set
-   tight, with no plate. Only the pointer or the keyboard draws a plate. */
+   state word and its compact age ("11m", "3h", "2d") are mono capitals,
+   set tight, with no plate. Only the pointer or the keyboard draws a plate. */
 .kbn-card-worker, .kbn-card-phase {
-  --worker-size: calc(13px * var(--kbn-type-scale, 1));
-  --worker-word: 400 var(--worker-size)/1 var(--font-serif, 'EB Garamond', Georgia, serif);
-  --worker-time: 400 var(--worker-size)/1 var(--font-serif, 'EB Garamond', Georgia, serif);
+  --worker-size: calc(10.5px * var(--kbn-type-scale, 1));
+  --worker-word: 400 var(--worker-size)/1 var(--font-mono, 'JetBrains Mono', monospace);
+  --worker-time: 400 var(--worker-size)/1 var(--font-mono, 'JetBrains Mono', monospace);
   --worker-figures: oldstyle-nums tabular-nums;
   --worker-gap: 0.32em;
 }
@@ -2046,8 +2046,8 @@
   background: transparent;
   color: var(--kbn-ink-soft);
   font: var(--worker-word);
-  letter-spacing: 0;
-  text-transform: none;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   text-decoration: none;
   text-align: left;
   cursor: pointer;
@@ -2088,8 +2088,8 @@
 .kbn-card-phase {
   font: var(--worker-word);
   font-variant-numeric: var(--worker-figures);
-  letter-spacing: 0;
-  text-transform: none;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--kbn-owed-ink);
   white-space: nowrap;
   flex-shrink: 0;
