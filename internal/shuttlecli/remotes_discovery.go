@@ -63,7 +63,7 @@ func (doc remotesFile) discoverEnabled() bool {
 // resolveRemotes merges a normalized fleet document with discovered peers:
 // the document's enabled entries in file order, then the admitted peers by
 // name. Each carries its Source. Pure; see admitDiscovered for the rule.
-func resolveRemotes(doc remotesFile, discovered []discoveredPeer) []remoteSpec {
+func (a *app) resolveRemotes(doc remotesFile, discovered []discoveredPeer) []remoteSpec {
 	out := make([]remoteSpec, 0, len(doc.Remotes)+len(discovered))
 	for _, r := range doc.Remotes {
 		if r.enabledOr() {
@@ -71,7 +71,7 @@ func resolveRemotes(doc remotesFile, discovered []discoveredPeer) []remoteSpec {
 			out = append(out, r)
 		}
 	}
-	return append(out, admitDiscovered(doc, discovered)...)
+	return append(out, a.admitDiscovered(doc, discovered)...)
 }
 
 // admitDiscovered is the discovered half of the merge. A configured entry wins
@@ -80,7 +80,7 @@ func resolveRemotes(doc remotesFile, discovered []discoveredPeer) []remoteSpec {
 // suppresses a discovered host. defaults.discover false admits none. An
 // admitted peer is a portless URL remote with the document's polling
 // defaults, no tunnel and no ssh path.
-func admitDiscovered(doc remotesFile, discovered []discoveredPeer) []remoteSpec {
+func (a *app) admitDiscovered(doc remotesFile, discovered []discoveredPeer) []remoteSpec {
 	if !doc.discoverEnabled() {
 		return nil
 	}
@@ -103,7 +103,7 @@ func admitDiscovered(doc remotesFile, discovered []discoveredPeer) []remoteSpec 
 			continue
 		}
 		one := remotesFile{Defaults: doc.Defaults, Remotes: []remoteSpec{{Name: name, URL: peer.URL}}}
-		if err := normalizeRemotes(&one); err != nil {
+		if err := a.normalizeRemotes(&one); err != nil {
 			continue
 		}
 		spec := one.Remotes[0]
@@ -127,27 +127,27 @@ type resolvedFleet struct {
 // loadResolvedFleet reads and validates the fleet file, then asks the local
 // daemon for its discovered peers. A malformed file is an error; an
 // unreachable daemon is not.
-func loadResolvedFleet() (resolvedFleet, error) {
-	doc, err := loadRemotesFile()
+func (a *app) loadResolvedFleet() (resolvedFleet, error) {
+	doc, err := a.loadRemotesFile()
 	if err != nil {
 		return resolvedFleet{}, err
 	}
 	fleet := resolvedFleet{Doc: doc}
 	if doc.discoverEnabled() {
-		fleet.Discovery, fleet.DiscoveryErr = fetchDaemonDiscovery()
+		fleet.Discovery, fleet.DiscoveryErr = a.fetchDaemonDiscovery()
 	}
 	var peers []discoveredPeer
 	if fleet.Discovery != nil {
 		peers = fleet.Discovery.Peers
 	}
-	fleet.Remotes = resolveRemotes(doc, peers)
+	fleet.Remotes = a.resolveRemotes(doc, peers)
 	return fleet, nil
 }
 
 // resolvedRemotes is the enabled fleet every caller that routes by remote name
 // uses: configured entries and discovered peers alike.
-func resolvedRemotes() ([]remoteSpec, error) {
-	fleet, err := loadResolvedFleet()
+func (a *app) resolvedRemotes() ([]remoteSpec, error) {
+	fleet, err := a.loadResolvedFleet()
 	if err != nil {
 		return nil, err
 	}
@@ -155,12 +155,12 @@ func resolvedRemotes() ([]remoteSpec, error) {
 }
 
 // fetchDaemonDiscovery reads the local daemon's discovery report.
-func fetchDaemonDiscovery() (*daemonDiscovery, error) {
-	endpoint, err := daemonEndpoint("/api/v1/version")
+func (a *app) fetchDaemonDiscovery() (*daemonDiscovery, error) {
+	endpoint, err := a.daemonEndpoint("/api/v1/version")
 	if err != nil {
 		return nil, err
 	}
-	body, err := getDaemon(endpoint, discoveryReadTimeout)
+	body, err := a.getDaemon(endpoint, discoveryReadTimeout)
 	if err != nil {
 		return nil, err
 	}

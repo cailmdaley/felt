@@ -3,8 +3,6 @@ package shuttlecli
 import (
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"syscall"
@@ -54,8 +52,8 @@ type guessedAddressFiber struct {
 // lookupShuttleAddressFibers searches every configured store without prefix,
 // tail, or last-segment guessing. Physical copies reached through views collapse
 // by their symlink-resolved path; distinct files remain distinct candidates.
-func lookupShuttleAddressFibers(query string) (addressFiberLookup, error) {
-	stores, err := shuttleStores()
+func (a *app) lookupShuttleAddressFibers(query string) (addressFiberLookup, error) {
+	stores, err := a.shuttleStores()
 	if err != nil {
 		return addressFiberLookup{}, err
 	}
@@ -124,8 +122,8 @@ func (lookup addressFiberLookup) candidateLabels() []string {
 
 // shuttleAddressFiber resolves a unique exact fiber from anywhere. Addressing a
 // worker cannot safely inherit the read commands' prefix and tail completion.
-func shuttleAddressFiber(query string) (*felt.Felt, error) {
-	lookup, err := lookupShuttleAddressFibers(query)
+func (a *app) shuttleAddressFiber(query string) (*felt.Felt, error) {
+	lookup, err := a.lookupShuttleAddressFibers(query)
 	if err != nil {
 		return nil, err
 	}
@@ -138,70 +136,71 @@ func shuttleAddressFiber(query string) (*felt.Felt, error) {
 	return nil, fmt.Errorf("no fiber found matching %q", query)
 }
 
-var sessionNameCmd = &cobra.Command{
-	Use:   "session-name <fiber>",
-	Short: "Print the canonical tmux session name for a fiber",
-	Long: `Resolves the fiber and prints the tmux session name shuttle uses for its
+func (a *app) sessionNameCmd() *cobra.Command {
+	sessionNameCmd := &cobra.Command{
+		Use:   "session-name <fiber>",
+		Short: "Print the canonical tmux session name for a fiber",
+		Long: `Resolves the fiber and prints the tmux session name shuttle uses for its
 worker: <leaf>-<uid>-shuttle, keyed by the fiber's intrinsic id. A fiber
 without an id has no session name and the command fails. It searches the
 -C / --store when set, otherwise every configured store, so it
 works from any directory.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, err := shuttleAddressFiber(args[0])
-		if err != nil {
-			return err
-		}
-		session := shuttleTmuxSessionName(f.ID, f.UID)
-		if session == "" {
-			return errFiberWithoutUID(f.ID)
-		}
-		if jsonOutput {
-			// Emit the dispatch-canonical id (matches the daemon);
-			// the session name itself is leaf+uid keyed, so prefix-independent.
-			id := f.ID
-			if canonical, err := canonicalFiberID(f.Path); err == nil && canonical != "" {
-				id = canonical
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, err := a.shuttleAddressFiber(args[0])
+			if err != nil {
+				return err
 			}
-			return outputJSON(map[string]string{"fiber_id": id, "session": session})
-		}
-		fmt.Println(session)
-		return nil
-	},
+			session := shuttleTmuxSessionName(f.ID, f.UID)
+			if session == "" {
+				return errFiberWithoutUID(f.ID)
+			}
+			if a.json {
+				// Emit the dispatch-canonical id (matches the daemon);
+				// the session name itself is leaf+uid keyed, so prefix-independent.
+				id := f.ID
+				if canonical, err := a.canonicalFiberID(f.Path); err == nil && canonical != "" {
+					id = canonical
+				}
+				return a.outputJSON(map[string]string{"fiber_id": id, "session": session})
+			}
+			fmt.Fprintln(a.env.Stdout, session)
+			return nil
+		},
+	}
+	return sessionNameCmd
 }
 
-var attachCmd = &cobra.Command{
-	Use:   "attach <fiber>",
-	Short: "Attach to a running worker's tmux session",
-	Long: `Resolves the fiber to its worker's tmux session name and execs
+func (a *app) attachCmd() *cobra.Command {
+	attachCmd := &cobra.Command{
+		Use:   "attach <fiber>",
+		Short: "Attach to a running worker's tmux session",
+		Long: `Resolves the fiber to its worker's tmux session name and execs
 'tmux attach'. Resolves the fiber from any directory, like session-name.
 Exits with a clear error if no session is live.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, err := shuttleAddressFiber(args[0])
-		if err != nil {
-			return err
-		}
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, err := a.shuttleAddressFiber(args[0])
+			if err != nil {
+				return err
+			}
 
-		want := shuttleTmuxSessionName(f.ID, f.UID)
-		if want == "" {
-			return errFiberWithoutUID(f.ID)
-		}
-		session, _ := liveWorkerSession(f)
-		if session == "" {
-			return fmt.Errorf("no tmux session %q — fiber %s has no live worker\n(run 'shuttle ps' to list active workers)", want, args[0])
-		}
+			want := shuttleTmuxSessionName(f.ID, f.UID)
+			if want == "" {
+				return errFiberWithoutUID(f.ID)
+			}
+			session, _ := a.liveWorkerSession(f)
+			if session == "" {
+				return fmt.Errorf("no tmux session %q — fiber %s has no live worker\n(run 'shuttle ps' to list active workers)", want, args[0])
+			}
 
-		tmux, err := exec.LookPath("tmux")
-		if err != nil {
-			return fmt.Errorf("tmux not found: %w", err)
-		}
-		// Replace this process with tmux attach.
-		return syscall.Exec(tmux, []string{"tmux", "attach", "-t", session}, os.Environ())
-	},
-}
-
-func init() {
-	addShuttleCommand(sessionNameCmd)
-	addShuttleCommand(attachCmd)
+			tmux, err := a.env.LookPath("tmux")
+			if err != nil {
+				return fmt.Errorf("tmux not found: %w", err)
+			}
+			// Replace this process with tmux attach.
+			return syscall.Exec(tmux, []string{"tmux", "attach", "-t", session}, a.env.Environ())
+		},
+	}
+	return attachCmd
 }

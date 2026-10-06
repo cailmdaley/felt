@@ -5,16 +5,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // writeUserRegistry points $SHUTTLE_AGENTS_FILE at a temp file holding body.
-func writeUserRegistry(t *testing.T, body string) string {
+func writeUserRegistry(t *testing.T, env *sysenv.Env, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "agents.json")
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("writing fixture: %v", err)
 	}
-	t.Setenv("SHUTTLE_AGENTS_FILE", path)
+	env.Set("SHUTTLE_AGENTS_FILE", path)
 	return path
 }
 
@@ -29,9 +31,11 @@ func find(t *testing.T, reg *AgentRegistry, id string) AgentRecord {
 }
 
 func TestLoadAgentRegistry_NoUserFile(t *testing.T) {
-	t.Setenv("SHUTTLE_AGENTS_FILE", filepath.Join(t.TempDir(), "absent.json"))
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_AGENTS_FILE", filepath.Join(t.TempDir(), "absent.json"))
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -55,6 +59,8 @@ func TestLoadAgentRegistry_NoUserFile(t *testing.T) {
 // The environment override wins over ~/.config/shuttle/agents.json — asserted
 // with a fake HOME carrying a registry that must not be read.
 func TestLoadAgentRegistry_EnvFileWinsOverHome(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".config", "shuttle"), 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -63,12 +69,12 @@ func TestLoadAgentRegistry_EnvFileWinsOverHome(t *testing.T) {
 	if err := os.WriteFile(homeFile, []byte(`{"version":1,"agents":[{"id":"from-home","cli":"x"}]}`), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	env.Set("HOME", home)
+	env.Set("USERPROFILE", home)
 
 	// With no env var, HOME is the source.
-	t.Setenv("SHUTTLE_AGENTS_FILE", "")
-	reg, err := LoadAgentRegistry()
+	env.Set("SHUTTLE_AGENTS_FILE", "")
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -78,8 +84,8 @@ func TestLoadAgentRegistry_EnvFileWinsOverHome(t *testing.T) {
 	find(t, reg, "from-home")
 
 	// The env var overrides it.
-	envFile := writeUserRegistry(t, `{"version":1,"agents":[{"id":"from-env","cli":"x"}]}`)
-	reg, err = LoadAgentRegistry()
+	envFile := writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"from-env","cli":"x"}]}`)
+	reg, err = LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -93,6 +99,8 @@ func TestLoadAgentRegistry_EnvFileWinsOverHome(t *testing.T) {
 }
 
 func TestLoadAgentRegistryDoesNotReadFeltNamedEnvironment(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config", "shuttle")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -106,12 +114,12 @@ func TestLoadAgentRegistryDoesNotReadFeltNamedEnvironment(t *testing.T) {
 	if err := os.WriteFile(feltNamedFile, []byte(`{"version":1,"agents":[{"id":"from-felt-variable","cli":"x"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("SHUTTLE_AGENTS_FILE", "")
-	t.Setenv("FELT_AGENTS_FILE", feltNamedFile)
+	env.Set("HOME", home)
+	env.Set("USERPROFILE", home)
+	env.Set("SHUTTLE_AGENTS_FILE", "")
+	env.Set("FELT_AGENTS_FILE", feltNamedFile)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,12 +130,14 @@ func TestLoadAgentRegistryDoesNotReadFeltNamedEnvironment(t *testing.T) {
 }
 
 func TestLoadAgentRegistry_MergeAddsNewID(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[
 	  {"id":"my-agent","cli":"mycli","effort_levels":["low","high"],"default_effort":"high"}
 	]}`)
 
 	builtin, _ := LoadBuiltinAgentRegistry()
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -153,12 +163,14 @@ func TestLoadAgentRegistry_MergeAddsNewID(t *testing.T) {
 // An override replaces the built-in record wholesale and keeps its position, so
 // listing order does not shuffle when a user pins one agent.
 func TestLoadAgentRegistry_MergeOverridesInPlace(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	before, _ := LoadBuiltinAgentRegistry()
-	writeUserRegistry(t, `{"version":1,"agents":[
+	writeUserRegistry(t, env, `{"version":1,"agents":[
 	  {"id":"claude-opus","cli":"claude","model":"opus-4.5","effort_levels":["low"],"default_effort":"low"}
 	]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -180,11 +192,13 @@ func TestLoadAgentRegistry_MergeOverridesInPlace(t *testing.T) {
 }
 
 func TestLoadAgentRegistry_Restrict(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"builtins":"restrict","agents":[
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"builtins":"restrict","agents":[
 	  {"id":"only-mine","cli":"x","default":true}
 	]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -194,17 +208,21 @@ func TestLoadAgentRegistry_Restrict(t *testing.T) {
 }
 
 func TestLoadAgentRegistry_RejectsLegacyReplace(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"builtins":"replace","agents":[]}`)
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"builtins":"replace","agents":[]}`)
 
-	if _, err := LoadAgentRegistry(); err == nil {
+	if _, err := LoadAgentRegistry(env); err == nil {
 		t.Fatal("LoadAgentRegistry accepted legacy builtins=replace")
 	}
 }
 
 func TestLoadAgentRegistry_UserDefaultRetiresBuiltinDefault(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[{"id":"mine","cli":"x","default":true}]}`)
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"mine","cli":"x","default":true}]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -227,12 +245,14 @@ func TestLoadAgentRegistry_UserDefaultRetiresBuiltinDefault(t *testing.T) {
 }
 
 func TestLoadAgentRegistry_TwoUserDefaultsLastWinsWithWarning(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[
 	  {"id":"first","cli":"x","default":true},
 	  {"id":"second","cli":"x","default":true}
 	]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -246,10 +266,12 @@ func TestLoadAgentRegistry_TwoUserDefaultsLastWinsWithWarning(t *testing.T) {
 }
 
 func TestLoadAgentRegistry_BareArrayIsAMergeLayer(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	before, _ := LoadBuiltinAgentRegistry()
-	writeUserRegistry(t, `[{"id":"bare","cli":"x"}]`)
+	writeUserRegistry(t, env, `[{"id":"bare","cli":"x"}]`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -264,6 +286,8 @@ func TestLoadAgentRegistry_BareArrayIsAMergeLayer(t *testing.T) {
 // A present-but-broken file is fatal, and the error names the path. Falling back
 // to the built-ins would make a typo read as "my agents vanished".
 func TestLoadAgentRegistry_MalformedIsFatal(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	cases := map[string]string{
 		"bad json":        `{"version":1,"agents":[`,
 		"bad version":     `{"version":2,"agents":[]}`,
@@ -272,8 +296,8 @@ func TestLoadAgentRegistry_MalformedIsFatal(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			path := writeUserRegistry(t, body)
-			_, err := LoadAgentRegistry()
+			path := writeUserRegistry(t, env, body)
+			_, err := LoadAgentRegistry(env)
 			if err == nil {
 				t.Fatal("expected a fatal error")
 			}
@@ -287,9 +311,11 @@ func TestLoadAgentRegistry_MalformedIsFatal(t *testing.T) {
 // Provenance is the loader's to assign. A file claiming source:"builtin" for its
 // own record cannot launder it into the built-in layer.
 func TestLoadAgentRegistry_SourceCannotBeSpoofed(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[{"id":"sneaky","cli":"x","source":"builtin"}]}`)
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"sneaky","cli":"x","source":"builtin"}]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -299,9 +325,11 @@ func TestLoadAgentRegistry_SourceCannotBeSpoofed(t *testing.T) {
 }
 
 func TestLoadAgentRegistry_DanglingAliasWarnsThenErrorsOnResolve(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[{"id":"ghost","alias_of":"not-a-thing"}]}`)
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"ghost","alias_of":"not-a-thing"}]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("a dangling alias must load (and warn), not fail: %v", err)
 	}
@@ -314,9 +342,11 @@ func TestLoadAgentRegistry_DanglingAliasWarnsThenErrorsOnResolve(t *testing.T) {
 }
 
 func TestLoadAgentRegistry_UnknownFieldWarnsButLoads(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[{"id":"mine","cli":"x","turbo":true}]}`)
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"mine","cli":"x","turbo":true}]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("an unknown field must warn, not fail: %v", err)
 	}
@@ -327,12 +357,14 @@ func TestLoadAgentRegistry_UnknownFieldWarnsButLoads(t *testing.T) {
 }
 
 func TestUserAgentsPath_ExpandsTilde(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("SHUTTLE_AGENTS_FILE", "~/somewhere/agents.json")
+	env.Set("HOME", home)
+	env.Set("USERPROFILE", home)
+	env.Set("SHUTTLE_AGENTS_FILE", "~/somewhere/agents.json")
 
-	got, err := UserAgentsPath()
+	got, err := UserAgentsPath(env)
 	if err != nil {
 		t.Fatalf("UserAgentsPath: %v", err)
 	}
@@ -362,9 +394,11 @@ func indexOf(list []string, want string) int {
 // ---- overrides ----------------------------------------------------------------
 
 func TestOverrides_PatchBuiltinDefaultEffort(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[],"overrides":{"claude-opus":{"default_effort":"high"}}}`)
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[],"overrides":{"claude-opus":{"default_effort":"high"}}}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -385,10 +419,12 @@ func TestOverrides_PatchBuiltinDefaultEffort(t *testing.T) {
 }
 
 func TestOverrides_ReachUserRecords(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[{"id":"mine","cli":"x","effort_levels":["a","b"],"default_effort":"a"}],
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"mine","cli":"x","effort_levels":["a","b"],"default_effort":"a"}],
 		"overrides":{"mine":{"default_effort":"b"}}}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -398,10 +434,12 @@ func TestOverrides_ReachUserRecords(t *testing.T) {
 }
 
 func TestOverrides_AliasLandsOnCanonical(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[{"id":"deep","alias_of":"claude-opus","axes":{"chrome":true}}],
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"deep","alias_of":"claude-opus","axes":{"chrome":true}}],
 		"overrides":{"deep":{"default_effort":"max"},"gpt-6-astra":{"default_effort":"ultra"}}}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -417,6 +455,8 @@ func TestOverrides_AliasLandsOnCanonical(t *testing.T) {
 }
 
 func TestOverrides_LoudFailures(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	cases := map[string]string{
 		"invalid level":      `{"overrides":{"claude-opus":{"default_effort":"ludicrous"}}}`,
 		"unknown agent":      `{"overrides":{"no-such-agent":{"default_effort":"high"}}}`,
@@ -428,8 +468,8 @@ func TestOverrides_LoudFailures(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			path := writeUserRegistry(t, body)
-			_, err := LoadAgentRegistry()
+			path := writeUserRegistry(t, env, body)
+			_, err := LoadAgentRegistry(env)
 			if err == nil {
 				t.Fatal("expected a load error")
 			}
@@ -441,9 +481,11 @@ func TestOverrides_LoudFailures(t *testing.T) {
 }
 
 func TestOverrides_ProvenanceCannotBeSpoofed(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"agents":[{"id":"sneaky","cli":"x","default_effort_source":"override"}]}`)
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"agents":[{"id":"sneaky","cli":"x","default_effort_source":"override"}]}`)
 
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -455,7 +497,9 @@ func TestOverrides_ProvenanceCannotBeSpoofed(t *testing.T) {
 // ---- the override writer --------------------------------------------------------
 
 func TestSetEffortOverride_RoundTripPreservesTheFile(t *testing.T) {
-	path := writeUserRegistry(t, `{
+	t.Parallel()
+	env := testEnv(t)
+	path := writeUserRegistry(t, env, `{
   "builtins": "merge",
   "comment": {"why": "kept"},
   "agents": [
@@ -465,11 +509,11 @@ func TestSetEffortOverride_RoundTripPreservesTheFile(t *testing.T) {
   "version": 1
 }`)
 
-	_, id, changed, err := SetEffortOverride("claude-opus", "high")
+	_, id, changed, err := SetEffortOverride(env, "claude-opus", "high")
 	if err != nil || !changed || id != "claude-opus" {
 		t.Fatalf("set = %q, %v, %v", id, changed, err)
 	}
-	if _, _, _, err := SetEffortOverride("zeta", "hi"); err != nil {
+	if _, _, _, err := SetEffortOverride(env, "zeta", "hi"); err != nil {
 		t.Fatalf("set zeta: %v", err)
 	}
 	body := readFile(t, path)
@@ -483,7 +527,7 @@ func TestSetEffortOverride_RoundTripPreservesTheFile(t *testing.T) {
 		strings.Index(body, `"overrides"`)}; !ascending(order) {
 		t.Fatalf("keys or agents reordered (%v):\n%s", order, body)
 	}
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -492,11 +536,11 @@ func TestSetEffortOverride_RoundTripPreservesTheFile(t *testing.T) {
 	}
 
 	for _, name := range []string{"claude-opus", "zeta"} {
-		if _, _, changed, err := SetEffortOverride(name, ""); err != nil || !changed {
+		if _, _, changed, err := SetEffortOverride(env, name, ""); err != nil || !changed {
 			t.Fatalf("reset %s = %v, %v", name, changed, err)
 		}
 	}
-	if _, _, changed, err := SetEffortOverride("claude-opus", ""); err != nil || changed {
+	if _, _, changed, err := SetEffortOverride(env, "claude-opus", ""); err != nil || changed {
 		t.Fatalf("a second reset should be a no-op: %v, %v", changed, err)
 	}
 	body = readFile(t, path)
@@ -509,9 +553,11 @@ func TestSetEffortOverride_RoundTripPreservesTheFile(t *testing.T) {
 }
 
 func TestSetEffortOverride_AliasKeysByCanonicalAndReplacesAliasKey(t *testing.T) {
-	path := writeUserRegistry(t, `{"version":1,"agents":[],"overrides":{"gpt-6-astra":{"default_effort":"low"}}}`)
+	t.Parallel()
+	env := testEnv(t)
+	path := writeUserRegistry(t, env, `{"version":1,"agents":[],"overrides":{"gpt-6-astra":{"default_effort":"low"}}}`)
 
-	_, id, _, err := SetEffortOverride("gpt-6-astra", "max")
+	_, id, _, err := SetEffortOverride(env, "gpt-6-astra", "max")
 	if err != nil || id != "codex-astra" {
 		t.Fatalf("set via alias = %q, %v", id, err)
 	}
@@ -522,13 +568,15 @@ func TestSetEffortOverride_AliasKeysByCanonicalAndReplacesAliasKey(t *testing.T)
 }
 
 func TestSetEffortOverride_Refusals(t *testing.T) {
-	path := writeUserRegistry(t, `{"version":1,"agents":[]}`)
+	t.Parallel()
+	env := testEnv(t)
+	path := writeUserRegistry(t, env, `{"version":1,"agents":[]}`)
 	before := readFile(t, path)
 
-	if _, _, _, err := SetEffortOverride("claude-opus", "ludicrous"); err == nil {
+	if _, _, _, err := SetEffortOverride(env, "claude-opus", "ludicrous"); err == nil {
 		t.Fatal("an effort outside effort_levels must be refused")
 	}
-	if _, _, _, err := SetEffortOverride("no-such-agent", "high"); err == nil {
+	if _, _, _, err := SetEffortOverride(env, "no-such-agent", "high"); err == nil {
 		t.Fatal("an unknown agent must be refused")
 	}
 	if readFile(t, path) != before {
@@ -537,16 +585,18 @@ func TestSetEffortOverride_Refusals(t *testing.T) {
 }
 
 func TestSetEffortOverride_CreatesMissingFile(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "nested", "agents.json")
-	t.Setenv("SHUTTLE_AGENTS_FILE", path)
+	env.Set("SHUTTLE_AGENTS_FILE", path)
 
-	if _, _, changed, err := SetEffortOverride("claude-opus", ""); err != nil || changed {
+	if _, _, changed, err := SetEffortOverride(env, "claude-opus", ""); err != nil || changed {
 		t.Fatalf("resetting with no file = %v, %v; want a no-op", changed, err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("a no-op reset must not create the file")
 	}
-	if _, _, _, err := SetEffortOverride("claude-opus", "high"); err != nil {
+	if _, _, _, err := SetEffortOverride(env, "claude-opus", "high"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	want := `{
@@ -566,16 +616,18 @@ func TestSetEffortOverride_CreatesMissingFile(t *testing.T) {
 }
 
 func TestSetEffortOverride_ConvertsBareArray(t *testing.T) {
-	path := writeUserRegistry(t, `[{"id":"mine","cli":"x","effort_levels":["a","b"]}]`)
+	t.Parallel()
+	env := testEnv(t)
+	path := writeUserRegistry(t, env, `[{"id":"mine","cli":"x","effort_levels":["a","b"]}]`)
 
-	if _, _, _, err := SetEffortOverride("mine", "b"); err != nil {
+	if _, _, _, err := SetEffortOverride(env, "mine", "b"); err != nil {
 		t.Fatalf("set: %v", err)
 	}
 	body := readFile(t, path)
 	if !strings.HasPrefix(body, "{\n  \"version\": 1,\n  \"builtins\": \"merge\",\n  \"agents\": [") {
 		t.Fatalf("bare array should become the object form:\n%s", body)
 	}
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -585,8 +637,10 @@ func TestSetEffortOverride_ConvertsBareArray(t *testing.T) {
 }
 
 func TestSetEffortOverride_RefusesABrokenFile(t *testing.T) {
-	writeUserRegistry(t, `{"version":1,"overrides":{"claude-opus":{"default_effort":"ludicrous"}}}`)
-	if _, _, _, err := SetEffortOverride("claude-sonnet", "high"); err == nil {
+	t.Parallel()
+	env := testEnv(t)
+	writeUserRegistry(t, env, `{"version":1,"overrides":{"claude-opus":{"default_effort":"ludicrous"}}}`)
+	if _, _, _, err := SetEffortOverride(env, "claude-sonnet", "high"); err == nil {
 		t.Fatal("an edit must not build on a registry that fails to load")
 	}
 }

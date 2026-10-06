@@ -13,6 +13,7 @@ import (
 // though nothing much had happened, and it named neither the path nor a next
 // step.
 func TestInitCommandNamesWhatItCreated(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	output, err := runCommand(t, dir, "init")
@@ -35,7 +36,7 @@ func TestInitCommandNamesWhatItCreated(t *testing.T) {
 	}
 
 	// -C is honored: the store lands where the flag points, not in the
-	// process's cwd (runCommand sets changeDir, never chdir's).
+	// process's cwd (runCommand passes the directory as -C, never chdir's).
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		t.Fatalf("expected .felt/ at %s: %v", root, err)
 	}
@@ -47,6 +48,7 @@ func TestInitCommandNamesWhatItCreated(t *testing.T) {
 // TestInitCommandOverExistingStoreStaysIdempotent keeps the "nothing much
 // happened" register where it belongs — the re-run, not the first run.
 func TestInitCommandOverExistingStoreStaysIdempotent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	if _, err := runCommand(t, dir, "init"); err != nil {
@@ -61,5 +63,21 @@ func TestInitCommandOverExistingStoreStaysIdempotent(t *testing.T) {
 	}
 	if !strings.Contains(output, "already present") {
 		t.Fatalf("second init does not report the store as pre-existing:\n%s", output)
+	}
+}
+
+// TestInitWithoutDirectoryUsesTheInvocationsWorkingDirectory: bare init
+// creates the store in the working directory the invocation runs in, not
+// the test process's.
+func TestInitWithoutDirectoryUsesTheInvocationsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	env, _ := testEnv(t)
+	env.Chdir(dir)
+	if out, _, err := executeIn(t, env, "", "init"); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if info, err := os.Stat(filepath.Join(dir, ".felt")); err != nil || !info.IsDir() {
+		t.Fatalf("expected .felt/ in the invocation's working directory %s: %v", dir, err)
 	}
 }

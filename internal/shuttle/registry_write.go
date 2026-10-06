@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // The user registry's one structured writer: `shuttle agents effort`.
@@ -22,8 +24,8 @@ import (
 // file. It returns the file's path, the canonical agent id the override is
 // keyed by, and whether the file changed. The current file must load cleanly:
 // an edit never builds on a broken registry.
-func SetEffortOverride(name, level string) (path, id string, changed bool, err error) {
-	path, err = UserAgentsPath()
+func SetEffortOverride(env *sysenv.Env, name, level string) (path, id string, changed bool, err error) {
+	path, err = UserAgentsPath(env)
 	if err != nil {
 		return "", "", false, err
 	}

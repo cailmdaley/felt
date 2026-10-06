@@ -52,12 +52,14 @@ type remoteFixtureDoc struct {
 const remotesFixtureDir = "../../daemon/test/fixtures/remotes"
 
 func TestShuttleRemotesPathUsesShuttleConfigLocation(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SHUTTLE_REMOTES_FILE", "")
-	t.Setenv("FELT_REMOTES_FILE", filepath.Join(t.TempDir(), "felt-remotes.json"))
+	env.Set("HOME", home)
+	env.Set("SHUTTLE_REMOTES_FILE", "")
+	env.Set("FELT_REMOTES_FILE", filepath.Join(t.TempDir(), "felt-remotes.json"))
 
-	got, err := shuttleRemotesPath()
+	got, err := newApp(env).shuttleRemotesPath()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +73,7 @@ func TestShuttleRemotesPathUsesShuttleConfigLocation(t *testing.T) {
 // assert the SAME expected.json. A default that changes in one language fails in
 // both. SHUTTLE_STORES parity is guarded only by comments; this one is executable.
 func TestRemotesFixtureParity(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join(remotesFixtureDir, "expected.json"))
 	if err != nil {
 		t.Fatalf("read expected.json: %v", err)
@@ -88,13 +91,15 @@ func TestRemotesFixtureParity(t *testing.T) {
 		cases++
 		fixture, blob := fixture, blob
 		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
 			var want remoteFixtureDoc
 			if err := json.Unmarshal(blob, &want); err != nil {
 				t.Fatalf("parse expectation: %v", err)
 			}
-			t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
+			env := testEnv(t)
+			env.Set("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
 
-			doc, err := loadRemotesFile()
+			doc, err := newApp(env).loadRemotesFile()
 			if err != nil {
 				t.Fatalf("loadRemotesFile: %v", err)
 			}
@@ -153,6 +158,7 @@ func TestRemotesFixtureParity(t *testing.T) {
 // TestRemotesFixtureRejected — the fixtures under expected.json's _rejected
 // fail to load, naming the offending remote and field.
 func TestRemotesFixtureRejected(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join(remotesFixtureDir, "expected.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -173,8 +179,9 @@ func TestRemotesFixtureRejected(t *testing.T) {
 		if err := json.Unmarshal(blob, &want); err != nil {
 			t.Fatalf("%s: %v", fixture, err)
 		}
-		t.Setenv("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
-		_, err := loadRemotesFile()
+		env := testEnv(t)
+		env.Set("SHUTTLE_REMOTES_FILE", filepath.Join(remotesFixtureDir, fixture))
+		_, err := newApp(env).loadRemotesFile()
 		if err == nil {
 			t.Errorf("%s loaded; want a refusal of %s.%s", fixture, want.Remote, want.Field)
 			continue
@@ -207,6 +214,7 @@ func sameRemoteFixture(a, b remoteFixture) bool {
 }
 
 func TestNormalizeRemotes_Validation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -243,8 +251,10 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			writeRemotes(t, tc.body)
-			_, err := loadRemotesFile()
+			t.Parallel()
+			env := testEnv(t)
+			writeRemotesIn(t, env, tc.body)
+			_, err := newApp(env).loadRemotesFile()
 			if err == nil {
 				t.Fatalf("want error containing %q, got none", tc.want)
 			}
@@ -258,14 +268,16 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 // TestSaveRemotes_RoundTrip — atomic write, and an empty fleet deletes the file
 // (matching the stores/projects writers).
 func TestSaveRemotes_RoundTrip(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	path := filepath.Join(t.TempDir(), "remotes.json")
-	t.Setenv("SHUTTLE_REMOTES_FILE", path)
+	env.Set("SHUTTLE_REMOTES_FILE", path)
 
 	doc := remotesFile{Remotes: []remoteSpec{{Name: "a", Port: 4001}}}
-	if err := saveRemotes(doc); err != nil {
+	if err := newApp(env).saveRemotes(doc); err != nil {
 		t.Fatalf("saveRemotes: %v", err)
 	}
-	reloaded, err := loadRemotesFile()
+	reloaded, err := newApp(env).loadRemotesFile()
 	if err != nil {
 		t.Fatalf("loadRemotesFile: %v", err)
 	}
@@ -276,7 +288,7 @@ func TestSaveRemotes_RoundTrip(t *testing.T) {
 		t.Errorf("version = %d, want 1", reloaded.Version)
 	}
 
-	if err := saveRemotes(remotesFile{}); err != nil {
+	if err := newApp(env).saveRemotes(remotesFile{}); err != nil {
 		t.Fatalf("saveRemotes(empty): %v", err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -292,15 +304,17 @@ func TestSaveRemotes_RoundTrip(t *testing.T) {
 // `"build_ui": false` and later runs `remotes add` on an unrelated host must not
 // silently get a six-minute `npm ci` back.
 func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
-	path := writeRemotes(t, `{"version":1,"remotes":[
+	t.Parallel()
+	env := testEnv(t)
+	path := writeRemotesIn(t, env, `{"version":1,"remotes":[
 	  {"name":"hub-a","port":4001,"checkout":"/srv/felt","auth":"interactive",
 	   "ssh_flags":["-o","ClearAllForwardings=yes"],"build_ui":false}]}`)
 
-	doc, err := loadRemotesFileRaw()
+	doc, err := newApp(env).loadRemotesFileRaw()
 	if err != nil {
 		t.Fatalf("loadRemotesFileRaw: %v", err)
 	}
-	if err := saveRemotes(doc); err != nil {
+	if err := newApp(env).saveRemotes(doc); err != nil {
 		t.Fatalf("saveRemotes: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -313,7 +327,7 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 		}
 	}
 
-	reloaded, err := loadRemotesFileRaw()
+	reloaded, err := newApp(env).loadRemotesFileRaw()
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -324,24 +338,13 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	// Absent means "this host builds its own UI", and the sparse file says so by
 	// omitting the key rather than writing true.
 	doc.Remotes[0].BuildUI = nil
-	if err := saveRemotes(doc); err != nil {
+	if err := newApp(env).saveRemotes(doc); err != nil {
 		t.Fatalf("saveRemotes(absent): %v", err)
 	}
 	raw, _ = os.ReadFile(path)
 	if strings.Contains(string(raw), "build_ui") {
 		t.Errorf("absent build_ui should not be written:\n%s", raw)
 	}
-}
-
-// writeRemotes points SHUTTLE_REMOTES_FILE at a temp file holding body.
-func writeRemotes(t *testing.T, body string) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "remotes.json")
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SHUTTLE_REMOTES_FILE", path)
-	return path
 }
 
 // TestParseProxyEndpoint is the proxy grammar's full table, and it is mirrored
@@ -355,6 +358,7 @@ func writeRemotes(t *testing.T, body string) string {
 // the table lives in both suites instead: change a rule in one language and the
 // other language's table is what fails.
 func TestParseProxyEndpoint(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -398,6 +402,7 @@ func TestParseProxyEndpoint(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := parseProxyEndpoint(tc.in)
 			if tc.wantErr {
 				if err == nil {
@@ -419,6 +424,7 @@ func TestParseProxyEndpoint(t *testing.T) {
 // proxy comes back bracketed so an operator can paste the line straight back
 // into the fleet file and have it parse.
 func TestProxyEndpoint_String(t *testing.T) {
+	t.Parallel()
 	if got := (proxyEndpoint{Host: "localhost", Port: 1055}).String(); got != "localhost:1055" {
 		t.Errorf("String() = %q", got)
 	}
@@ -437,20 +443,24 @@ func TestProxyEndpoint_String(t *testing.T) {
 // wrong wrote a unit with `-L 0:localhost:4000` and no ssh destination, which
 // the convergent prune then protected because the fleet file still named it.
 func TestNormalizeRemotes_TunnelManagerDefaultFollowsTheTransport(t *testing.T) {
+	t.Parallel()
 	for _, goos := range []string{"darwin", "linux"} {
 		t.Run(goos, func(t *testing.T) {
-			useHostGOOS(t, goos)
-			writeRemotes(t, `[{"name":"meshnode","url":"https://meshnode.example.ts.net"},
+			t.Parallel()
+			env := testEnv(t)
+			writeRemotesIn(t, env, `[{"name":"meshnode","url":"https://meshnode.example.ts.net"},
 			  {"name":"hub-a","port":4001}]`)
-			doc, err := loadRemotesFile()
+			a := newApp(env)
+			a.hostGOOS = goos
+			doc, err := a.loadRemotesFile()
 			if err != nil {
 				t.Fatalf("loadRemotesFile: %v", err)
 			}
 			if got := doc.Remotes[0].tunnelOpts().Manager; got != "none" {
 				t.Errorf("portless remote manager = %q, want none", got)
 			}
-			if got := doc.Remotes[1].tunnelOpts().Manager; got != defaultTunnelManager() {
-				t.Errorf("port remote manager = %q, want %q", got, defaultTunnelManager())
+			if got := doc.Remotes[1].tunnelOpts().Manager; got != a.defaultTunnelManager() {
+				t.Errorf("port remote manager = %q, want %q", got, a.defaultTunnelManager())
 			}
 			// And nothing portless ever reaches the installer.
 			if specs := resolveManagedTunnelSpecs(doc); len(specs) != 1 || specs[0].Name != "hub-a" {

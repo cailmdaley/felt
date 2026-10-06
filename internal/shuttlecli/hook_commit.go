@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -33,10 +32,11 @@ import (
 // always. A tracking hook that can fail a tool call is worse than no tracking
 // hook, so every step below is guarded and any surprise records nothing.
 
-var hookCommitCmd = &cobra.Command{
-	Use:   "commit",
-	Short: "Record the commit a Bash call just made on the host-local ledger",
-	Long: `Reads the PostToolUse payload from stdin and, when the Bash call ran a
+func (a *app) hookCommitCmd() *cobra.Command {
+	hookCommitCmd := &cobra.Command{
+		Use:   "commit",
+		Short: "Record the commit a Bash call just made on the host-local ledger",
+		Long: `Reads the PostToolUse payload from stdin and, when the Bash call ran a
 git commit, appends one JSON line to the commit ledger (SHUTTLE_COMMITS_FILE,
 else $SHUTTLE_DATA_DIR/commits.jsonl, else ~/.shuttle/commits.jsonl) naming
 the commit and the session that made it. The board's Chronicle narrates work
@@ -51,10 +51,12 @@ the same command, or a git commit that failed and left HEAD where it was,
 records nothing.
 
 Prints nothing and exits 0 on every path, including malformed input.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runCommitHook(os.Stdin)
-	},
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return a.runCommitHook(a.env.Stdin)
+		},
+	}
+	return hookCommitCmd
 }
 
 type commitHookInput struct {
@@ -122,7 +124,7 @@ const (
 // failure — unparseable stdin, another tool, no commit in the command, no
 // repository, a sha already recorded, an unwritable ledger — returns nil
 // without output.
-func runCommitHook(stdin io.Reader) error {
+func (a *app) runCommitHook(stdin io.Reader) error {
 	var input commitHookInput
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return nil
@@ -138,11 +140,11 @@ func runCommitHook(stdin io.Reader) error {
 	if !gitCommitPattern.MatchString(input.ToolInput.Command) {
 		return nil
 	}
-	path, enabled := commitsSink()
+	path, enabled := a.commitsSink()
 	if !enabled {
 		return nil
 	}
-	line, ok := renderCommitLine(input, path)
+	line, ok := a.renderCommitLine(input, path)
 	if !ok {
 		return nil
 	}
@@ -157,10 +159,10 @@ func runCommitHook(stdin io.Reader) error {
 // renderCommitLine reads HEAD back out of the repository the Bash call ran in
 // and builds the newline-terminated JSONL line for it, or ok=false when there
 // is nothing to record.
-func renderCommitLine(input commitHookInput, ledgerPath string) (string, bool) {
+func (a *app) renderCommitLine(input commitHookInput, ledgerPath string) (string, bool) {
 	repoDir := strings.TrimSpace(input.CWD)
 	if repoDir == "" {
-		wd, err := os.Getwd()
+		wd, err := a.env.Getwd()
 		if err != nil {
 			return "", false
 		}
@@ -168,11 +170,11 @@ func renderCommitLine(input commitHookInput, ledgerPath string) (string, bool) {
 	}
 	// Not a repository, a deleted cwd, no commits yet: all mean "nothing to
 	// record", never "fail".
-	repoRoot, ok := gitOutput(repoDir, "rev-parse", "--show-toplevel")
+	repoRoot, ok := a.gitOutput(repoDir, "rev-parse", "--show-toplevel")
 	if !ok || repoRoot == "" {
 		return "", false
 	}
-	head, ok := gitOutput(repoRoot, "log", "-1", "--format=%H%x09%at%x09%s")
+	head, ok := a.gitOutput(repoRoot, "log", "-1", "--format=%H%x09%at%x09%s")
 	if !ok {
 		return "", false
 	}
@@ -195,14 +197,14 @@ func renderCommitLine(input commitHookInput, ledgerPath string) (string, bool) {
 	if at == 0 {
 		// An unreadable commit date still gets a stamp: the reader drops a
 		// record with no usable `at`, and "now" is within seconds of the truth.
-		at = eventNow().UnixMilli()
+		at = a.eventNow().UnixMilli()
 	}
 	var subject string
 	if len(parts) > 2 {
 		subject = parts[2]
 	}
 	files, insertions, deletions := 0, 0, 0
-	if shortstat, ok := gitOutput(repoRoot, "log", "-1", "--shortstat", "--format="); ok {
+	if shortstat, ok := a.gitOutput(repoRoot, "log", "-1", "--shortstat", "--format="); ok {
 		files, insertions, deletions = parseShortstat(shortstat)
 	}
 
@@ -216,7 +218,7 @@ func renderCommitLine(input commitHookInput, ledgerPath string) (string, bool) {
 		Insertions: insertions,
 		Deletions:  deletions,
 		Session:    nullableField(sessionOrAnonymous(input.SessionID)),
-		Tmux:       nullableField(currentTmuxSession()),
+		Tmux:       nullableField(a.currentTmuxSession()),
 		CWD:        nullableField(input.CWD),
 	}
 	encoded, err := encodeJSONLine(line)
@@ -265,10 +267,10 @@ func parseShortstat(shortstat string) (files, insertions, deletions int) {
 // gitOutput runs one git command in dir and returns its trimmed stdout, or
 // ok=false on any failure — including the timeout, which is the point of
 // running it under a context at all.
-func gitOutput(dir string, args ...string) (string, bool) {
+func (a *app) gitOutput(dir string, args ...string) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitProbeTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
+	out, err := a.env.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
 	if err != nil {
 		return "", false
 	}

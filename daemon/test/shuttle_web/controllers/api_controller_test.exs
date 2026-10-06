@@ -7,7 +7,6 @@ defmodule ShuttleWeb.APIControllerTest do
   alias Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
   import Shuttle.Test.PollerHelpers
-  import Plug.Conn
   import Phoenix.ConnTest
 
   @endpoint ShuttleWeb.Endpoint
@@ -309,23 +308,60 @@ defmodule ShuttleWeb.APIControllerTest do
     args |> Enum.drop_while(&(&1 != "-c")) |> Enum.at(1)
   end
 
-  test "a forced start of a block with no project_dir asks for one and writes nothing" do
-    fiber_id = "tests/api-start-no-dir"
-    closed_bare_oneshot(fiber_id)
+  # Every fiber kind a forced start can reach, without a directory this host
+  # can use: none declared, one confirmed that is not here, a blank one, or a
+  # declared one missing here. Each asks for a project_dir before any write:
+  # no reopen, no re-arm, no agent pick, no worker.
+  test "a forced start without a usable project_dir asks for one before any write" do
+    closed = %{"status" => "closed", "closed-at" => "2026-09-29T10:00:00Z", "tempered" => false}
+    bare_oneshot = "kind: oneshot\nproject_dir: \"\"\n"
 
-    assert {422, body} = post_start(fiber_id)
+    standing = """
+    kind: standing
+    project_dir: ""
+    schedule:
+      expr: "0 9 * * 1-5"
+      tz: Europe/Paris
+    """
 
-    assert %{
-             "dispatched" => false,
-             "reason" => "arm_refused",
-             "fiber_id" => ^fiber_id,
-             "needs" => "project_dir",
-             "message" => message
-           } = body
+    rows = [
+      {"tests/api-start-no-dir", closed, bare_oneshot, %{}, "no project_dir"},
+      {"tests/api-start-bad-dir", closed, bare_oneshot,
+       %{"project_dir" => "/nonexistent/checkout"}, "no such file or directory"},
+      {"tests/api-start-blank-dir", closed, bare_oneshot, %{"project_dir" => "   "},
+       "no project_dir"},
+      {"tests/api-standing-no-dir", closed, standing, %{}, "no project_dir"},
+      {"tests/api-pinned-no-dir", %{"status" => "open"}, "kind: pinned\nproject_dir: \"\"\n", %{},
+       "no project_dir"},
+      {"tests/api-start-missing-dir", %{}, "kind: oneshot\nproject_dir: /nonexistent/elsewhere\n",
+       %{}, "/nonexistent/elsewhere"}
+    ]
 
-    assert body["host"] == Poller.own_host_id()
-    assert message =~ "no project_dir"
+    for {fiber_id, fields, block, extra, message} <- rows do
+      fiber = make_fiber(fiber_id, fields)
+      MockRunner.set_fiber(fiber_id, fiber)
+      MockRunner.set_shuttle(fiber_id, block, fiber["status"])
+
+      assert {422, body} = post_start(fiber_id, extra)
+
+      assert %{
+               "dispatched" => false,
+               "reason" => "arm_refused",
+               "fiber_id" => ^fiber_id,
+               "needs" => "project_dir"
+             } = body,
+             fiber_id
+
+      assert body["host"] == Poller.own_host_id(), fiber_id
+      assert body["message"] =~ message, fiber_id
+      assert MockRunner.fiber(fiber_id)["status"] == fiber["status"], fiber_id
+
+      assert File.read!(MockRunner.fiber(fiber_id)["path"]) =~ "status: #{fiber["status"]}",
+             fiber_id
+    end
+
     assert shuttle_calls("reopen") == []
+    assert shuttle_calls("set-agent") == []
     refute spawned?()
   end
 
@@ -434,18 +470,6 @@ defmodule ShuttleWeb.APIControllerTest do
     refute spawned?()
   end
 
-  test "a confirmed project_dir the host cannot use is asked for again, before any write" do
-    fiber_id = "tests/api-start-bad-dir"
-    closed_bare_oneshot(fiber_id)
-
-    assert {422, body} = post_start(fiber_id, %{"project_dir" => "/nonexistent/checkout"})
-    assert body["reason"] == "arm_refused"
-    assert body["needs"] == "project_dir"
-    assert body["message"] =~ "no such file or directory"
-    assert shuttle_calls("reopen") == []
-    refute spawned?()
-  end
-
   @tag :tmp_dir
   test "an arm the CLI refuses for another reason shows its words and asks for nothing",
        %{tmp_dir: tmp_dir} do
@@ -511,62 +535,6 @@ defmodule ShuttleWeb.APIControllerTest do
     assert [{"shuttle", reopen_args}] = shuttle_calls("reopen")
     assert "--project-dir" in reopen_args
     assert spawn_dir() == tmp_dir
-  end
-
-  test "a blank project_dir confirms nothing" do
-    fiber_id = "tests/api-start-blank-dir"
-    closed_bare_oneshot(fiber_id)
-
-    assert {422, %{"needs" => "project_dir"}} = post_start(fiber_id, %{"project_dir" => "   "})
-    assert shuttle_calls("set-agent") == []
-  end
-
-  test "a forced start of a standing role with no project_dir is refused before its re-arm" do
-    fiber_id = "tests/api-standing-no-dir"
-
-    MockRunner.set_fiber(
-      fiber_id,
-      make_fiber(fiber_id, %{"status" => "closed", "closed-at" => "2026-09-29T10:00:00Z"})
-    )
-
-    MockRunner.set_shuttle(
-      fiber_id,
-      """
-      kind: standing
-      project_dir: ""
-      schedule:
-        expr: "0 9 * * 1-5"
-        tz: Europe/Paris
-      """,
-      "closed"
-    )
-
-    assert {422, %{"reason" => "arm_refused", "needs" => "project_dir"}} = post_start(fiber_id)
-    assert MockRunner.fiber(fiber_id)["status"] == "closed"
-    assert File.read!(MockRunner.fiber(fiber_id)["path"]) =~ "status: closed"
-    refute spawned?()
-  end
-
-  test "a forced start of a pinned role with no project_dir is refused" do
-    fiber_id = "tests/api-pinned-no-dir"
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "open"}))
-    MockRunner.set_shuttle(fiber_id, "kind: pinned\nproject_dir: \"\"\n", "open")
-
-    assert {422, %{"reason" => "arm_refused", "needs" => "project_dir"}} = post_start(fiber_id)
-    assert File.read!(MockRunner.fiber(fiber_id)["path"]) =~ "status: open"
-    refute spawned?()
-  end
-
-  test "a forced start whose declared project_dir is missing here asks for another" do
-    fiber_id = "tests/api-start-missing-dir"
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
-    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nproject_dir: /nonexistent/elsewhere\n")
-
-    assert {422, body} = post_start(fiber_id)
-    assert body["reason"] == "arm_refused"
-    assert body["needs"] == "project_dir"
-    assert body["message"] =~ "/nonexistent/elsewhere"
-    refute spawned?()
   end
 
   # ── POST /api/v1/transition ──
@@ -659,52 +627,6 @@ defmodule ShuttleWeb.APIControllerTest do
     body = Jason.decode!(conn.resp_body)
     assert body["error"] == "not_found"
     assert body["invoked"] == false
-  end
-
-  # A remote-owned fiber: the local daemon forwards to the OWNING remote's
-  # /transition over the tunnel and relays its response verbatim, re-stamped with
-  # the origin the caller routed to. The forwarded payload carries no origin (so
-  # the remote runs its own local branch); only fiber_id + target cross the wire.
-  test "transition forwards a remote-owned fiber to the owning daemon" do
-    StubPostClient.start!()
-
-    StubPostClient.set_response(
-      {:ok, 200,
-       Jason.encode!(%{
-         "fiber_id" => "tests/remote-work",
-         "target" => "drafts",
-         "origin" => "local",
-         "action" => "pause",
-         "invoked" => true
-       })}
-    )
-
-    Env.put_app_env(:remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Env.put_app_env(:write_forward_client, StubPostClient)
-
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/transition",
-        Jason.encode!(%{
-          fiber_id: "tests/remote-work",
-          target: "drafts",
-          origin: "candide"
-        })
-      )
-
-    assert conn.status == 200
-    body = Jason.decode!(conn.resp_body)
-    assert body["invoked"] == true
-    assert body["action"] == "pause"
-    # Origin re-stamped to what the caller routed to, not the remote's "local".
-    assert body["origin"] == "candide"
-
-    # Forwarded to the owning remote's /transition, fiber_id + target only.
-    last = StubPostClient.last()
-    assert last.url == "http://localhost:4001/api/v1/transition"
-    forwarded = Jason.decode!(last.body)
-    assert forwarded == %{"fiber_id" => "tests/remote-work", "target" => "drafts"}
   end
 
   test "successful remote transition refreshes the cached remote fiber feed" do
@@ -807,99 +729,58 @@ defmodule ShuttleWeb.APIControllerTest do
   defp stub_forward(remote_name, remote_url, response),
     do: ForwardStub.stub_forward(remote_name, remote_url, response, StubPostClient)
 
-  test "felt-edit forwards a remote-owned card to the owning daemon" do
-    stub_forward("candide", "http://localhost:4001", {:ok, 200, "edited"})
+  # Each write verb, forwarded to the owner's identical endpoint with every key
+  # but `origin` intact. The response comes back verbatim, except that
+  # /transition re-stamps `origin` with the one the caller routed to: the owner
+  # computed its answer treating the fiber as local, so its own would read
+  # "local".
+  test "a remote-owned write forwards to the owner, origin stripped, and relays its answer" do
+    dispatched = Jason.encode!(%{"dispatched" => true, "fiber_id" => "tests/remote-card"})
 
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/felt-edit",
-        Jason.encode!(%{fiber_id: "tests/remote-card", origin: "candide", add: ["idea"]})
-      )
+    transitioned =
+      Jason.encode!(%{
+        "fiber_id" => "tests/remote-card",
+        "target" => "drafts",
+        "origin" => "local",
+        "action" => "pause",
+        "invoked" => true
+      })
 
-    assert conn.status == 200
-    assert conn.resp_body == "edited"
+    rows = [
+      {"/api/v1/felt-edit", %{"fiber_id" => "tests/remote-card", "add" => ["idea"]}, "edited",
+       :verbatim},
+      {"/api/v1/lifecycle", %{"action" => "pause", "fiber" => "tests/remote-card"}, "paused",
+       :verbatim},
+      {"/api/v1/dispatch", %{"fiber_id" => "tests/remote-card"}, dispatched, :verbatim},
+      # The user's directive and continuation mode ride the dispatch call.
+      {"/api/v1/dispatch",
+       %{
+         "fiber_id" => "tests/remote-card",
+         "user_message" => "talk to me first",
+         "resume_mode" => "previous"
+       }, dispatched, :verbatim},
+      {"/api/v1/transition", %{"fiber_id" => "tests/remote-card", "target" => "drafts"},
+       transitioned, Map.put(Jason.decode!(transitioned), "origin", "candide")}
+    ]
 
-    last = StubPostClient.last()
-    assert last.url == "http://localhost:4001/api/v1/felt-edit"
-    # origin stripped so the owner treats the fiber as local; the rest crosses.
-    assert Jason.decode!(last.body) == %{"fiber_id" => "tests/remote-card", "add" => ["idea"]}
-  end
+    stub_forward("candide", "http://localhost:4001", nil)
 
-  test "lifecycle forwards a remote-owned card to the owning daemon" do
-    stub_forward("candide", "http://localhost:4001", {:ok, 200, "paused"})
+    for {path, payload, answer, relayed} <- rows do
+      label = "#{path} #{inspect(payload)}"
+      StubPostClient.set_response({:ok, 200, answer})
 
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/lifecycle",
-        Jason.encode!(%{action: "pause", fiber: "tests/remote-card", origin: "candide"})
-      )
+      conn = post(api_conn(), path, Jason.encode!(Map.put(payload, "origin", "candide")))
 
-    assert conn.status == 200
-    assert conn.resp_body == "paused"
+      assert conn.status == 200, label
 
-    last = StubPostClient.last()
-    assert last.url == "http://localhost:4001/api/v1/lifecycle"
-    assert Jason.decode!(last.body) == %{"action" => "pause", "fiber" => "tests/remote-card"}
-  end
+      if relayed == :verbatim,
+        do: assert(conn.resp_body == answer, label),
+        else: assert(Jason.decode!(conn.resp_body) == relayed, label)
 
-  test "dispatch forwards a remote-owned card and relays its JSON" do
-    stub_forward(
-      "candide",
-      "http://localhost:4001",
-      {:ok, 200, Jason.encode!(%{"dispatched" => true, "fiber_id" => "tests/remote-card"})}
-    )
-
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/dispatch",
-        Jason.encode!(%{fiber_id: "tests/remote-card", origin: "candide"})
-      )
-
-    assert conn.status == 200
-    assert Jason.decode!(conn.resp_body)["dispatched"] == true
-
-    last = StubPostClient.last()
-    assert last.url == "http://localhost:4001/api/v1/dispatch"
-    assert Jason.decode!(last.body) == %{"fiber_id" => "tests/remote-card"}
-  end
-
-  test "dispatch owner-routes the user_message + resume_mode intact" do
-    # The user's directive + continuation mode ride the dispatch call
-    # (replacing the old file-a-review-comment-then-dispatch two-step). For a
-    # remote-owned card they must owner-route to the owning daemon's /dispatch
-    # with origin stripped — the body otherwise verbatim.
-    stub_forward(
-      "cineca",
-      "http://localhost:4002",
-      {:ok, 200, Jason.encode!(%{"dispatched" => true, "fiber_id" => "tests/remote-card"})}
-    )
-
-    conn =
-      post(
-        api_conn(),
-        "/api/v1/dispatch",
-        Jason.encode!(%{
-          fiber_id: "tests/remote-card",
-          origin: "cineca",
-          user_message: "talk to me first",
-          resume_mode: "previous"
-        })
-      )
-
-    assert conn.status == 200
-    assert Jason.decode!(conn.resp_body)["dispatched"] == true
-
-    last = StubPostClient.last()
-    assert last.url == "http://localhost:4002/api/v1/dispatch"
-    # origin stripped; user_message + resume_mode survive the hop.
-    assert Jason.decode!(last.body) == %{
-             "fiber_id" => "tests/remote-card",
-             "user_message" => "talk to me first",
-             "resume_mode" => "previous"
-           }
+      last = StubPostClient.last()
+      assert last.url == "http://localhost:4001" <> path, label
+      assert Jason.decode!(last.body) == payload, label
+    end
   end
 
   test "felt-edit relays a tunnel failure as 502" do
@@ -1142,7 +1023,9 @@ defmodule ShuttleWeb.APIControllerTest do
 
   # Poll to a deadline instead of sleeping a guess. Returns false on timeout so
   # the caller's `assert` names the test that timed out.
-  defp wait_until(fun, remaining_ms \\ 3_000) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, remaining_ms \\ 30_000) do
     cond do
       fun.() ->
         true

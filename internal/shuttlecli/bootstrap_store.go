@@ -12,7 +12,7 @@ import (
 
 // A missing registry gets an existing project store or a home-directory store.
 // An operator-authored registry, including an empty one, always wins.
-func bootstrapSupervisorStore(options supervisorOptions, cwd string) error {
+func (a *app) bootstrapSupervisorStore(options supervisorOptions, cwd string) error {
 	if options.Stores != "" {
 		return nil
 	}
@@ -21,9 +21,9 @@ func bootstrapSupervisorStore(options supervisorOptions, cwd string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	root, err := nearestBootstrapStore(cwd)
+	root, err := a.nearestBootstrapStore(cwd)
 	if err != nil {
-		home, homeErr := os.UserHomeDir()
+		home, homeErr := a.env.UserHomeDir()
 		if homeErr != nil {
 			return homeErr
 		}
@@ -58,17 +58,17 @@ func bootstrapSupervisorStore(options supervisorOptions, cwd string) error {
 	} else if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "Registered felt store: %s\n", root)
+	fmt.Fprintf(a.env.Stderr, "Registered felt store: %s\n", root)
 	return nil
 }
 
-func nearestBootstrapStore(cwd string) (string, error) {
-	dir, err := filepath.Abs(cwd)
+func (a *app) nearestBootstrapStore(cwd string) (string, error) {
+	dir, err := a.env.Abs(cwd)
 	if err != nil {
 		return "", err
 	}
 	for {
-		if root, err := felt.ProjectRoot(dir); err == nil {
+		if root, err := felt.ProjectRoot(a.env, dir); err == nil {
 			return root, nil
 		}
 		parent := filepath.Dir(dir)
@@ -79,9 +79,9 @@ func nearestBootstrapStore(cwd string) (string, error) {
 	}
 }
 
-func supervisorBootstrapDirectory() (string, error) {
-	if changeDir != "" {
-		return felt.ProjectRoot(changeDir)
+func (a *app) supervisorBootstrapDirectory() (string, error) {
+	if a.dir != "" {
+		return felt.ProjectRoot(a.env, a.dir)
 	}
-	return os.Getwd()
+	return a.env.Getwd()
 }

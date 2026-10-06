@@ -11,16 +11,53 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 // testFenceDir is the throwaway root TestMain points every machine-level path
 // at; TestTestMainFencesLiveMachineState asserts the fence holds.
 var testFenceDir string
 
+// testEnv is the TestMain fence as a per-test value: an isolated copy of the
+// fenced process environment whose machine-level paths point into a fresh
+// t.TempDir() of its own, with captured streams. A test configures it with
+// env.Set and runs commands in it, so it can run in parallel with every other.
+func testEnv(t testing.TB) *sysenv.Env {
+	t.Helper()
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := sysenvtest.FromProcess(t, fenceOverrides(dir, home))
+	return env
+}
+
+// fenceOverrides points HOME, the XDG roots and every shuttle config file at
+// dir. SHUTTLE_DAEMON_URL is not among them: the process fence's closed
+// loopback port carries over.
+func fenceOverrides(dir, home string) map[string]string {
+	return map[string]string{
+		"HOME":                         home,
+		"XDG_CACHE_HOME":               filepath.Join(dir, "cache"),
+		"XDG_CONFIG_HOME":              filepath.Join(dir, "config"),
+		"SHUTTLE_HOST_FILE":            filepath.Join(dir, "host"),
+		"SHUTTLE_HOST_CONFIG_FILE":     filepath.Join(dir, "host.json"),
+		"SHUTTLE_REMOTES_FILE":         filepath.Join(dir, "remotes.json"),
+		"SHUTTLE_STORES_FILE":          filepath.Join(dir, "stores.json"),
+		"SHUTTLE_AGENTS_FILE":          filepath.Join(dir, "agents.json"),
+		"SHUTTLE_PROJECTS_FILE":        filepath.Join(dir, "projects.json"),
+		"SHUTTLE_TRANSCRIPT_CACHE_DIR": filepath.Join(dir, "transcripts"),
+	}
+}
+
 // fencedEnv lists the variables TestMain clears because the developer's shell
 // (often a live shuttle worker) carries them and they select real machine
 // state: the daemon listener, identity, ledgers, worker context and harness
-// homes. A test that needs one sets it with t.Setenv.
+// homes. A test that needs one sets it on its testEnv.
 var fencedEnv = []string{
 	"SHUTTLE_HOST", "SHUTTLE_HOST_FILE", "SHUTTLE_HOST_CONFIG_FILE", "SHUTTLE_LISTEN",
 	"SHUTTLE_PORT", "SHUTTLE_DATA_DIR", "SHUTTLE_RELEASE", "SHUTTLE_DAEMON_URL",
@@ -77,19 +114,9 @@ func runFenced(m *testing.M) int {
 			panic(err)
 		}
 	}
-	for key, value := range map[string]string{
-		"HOME":                         home,
-		"XDG_CACHE_HOME":               filepath.Join(dir, "cache"),
-		"XDG_CONFIG_HOME":              filepath.Join(dir, "config"),
-		"SHUTTLE_HOST_FILE":            filepath.Join(dir, "host"),
-		"SHUTTLE_HOST_CONFIG_FILE":     filepath.Join(dir, "host.json"),
-		"SHUTTLE_REMOTES_FILE":         filepath.Join(dir, "remotes.json"),
-		"SHUTTLE_STORES_FILE":          filepath.Join(dir, "stores.json"),
-		"SHUTTLE_AGENTS_FILE":          filepath.Join(dir, "agents.json"),
-		"SHUTTLE_PROJECTS_FILE":        filepath.Join(dir, "projects.json"),
-		"SHUTTLE_TRANSCRIPT_CACHE_DIR": filepath.Join(dir, "transcripts"),
-		"SHUTTLE_DAEMON_URL":           "http://" + closedLoopbackAddr(),
-	} {
+	overrides := fenceOverrides(dir, home)
+	overrides["SHUTTLE_DAEMON_URL"] = "http://" + closedLoopbackAddr()
+	for key, value := range overrides {
 		if err := os.Setenv(key, value); err != nil {
 			panic(err)
 		}
@@ -135,35 +162,69 @@ func closedLoopbackAddr() string {
 	return addr
 }
 
+// TestTestMainFencesLiveMachineState asserts both fences: the process
+// environment TestMain scrubs, and the per-test env testEnv derives from it,
+// whose machine-level paths sit inside that test's own temp dir.
 func TestTestMainFencesLiveMachineState(t *testing.T) {
-	endpoint, err := daemonEndpoint("/api/v1/lifecycle")
+	t.Run("process", func(t *testing.T) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertFenced(t, sysenv.OS(), testFenceDir)
+		if !strings.HasPrefix(home, testFenceDir) {
+			t.Fatalf("process home %q is outside the test fence %q", home, testFenceDir)
+		}
+	})
+	t.Run("per-test env", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
+		home, err := env.UserHomeDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := filepath.Dir(home)
+		if strings.HasPrefix(root, testFenceDir) || !strings.Contains(root, "TestTestMainFences") {
+			t.Fatalf("per-test home %q is not under this test's temp dir", home)
+		}
+		assertFenced(t, env, root)
+	})
+}
+
+// assertFenced checks that env reaches no live daemon and that every config
+// path it resolves lies inside root.
+func assertFenced(t *testing.T, env *sysenv.Env, root string) {
+	t.Helper()
+	a := newApp(env)
+	endpoint, err := a.daemonEndpoint("/api/v1/lifecycle")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.HasSuffix(strings.SplitN(strings.TrimPrefix(endpoint, "http://"), "/", 2)[0], ":4000") {
 		t.Fatalf("daemon endpoint %q escapes the test fence", endpoint)
 	}
-	if _, err := postDaemon(endpoint, []byte(`{}`), daemonReadTimeout); err == nil || requestCouldHaveReachedDaemon(err) {
+	if _, err := a.postDaemon(endpoint, []byte(`{}`), daemonReadTimeout); err == nil || requestCouldHaveReachedDaemon(err) {
 		t.Fatalf("fenced daemon endpoint accepted a connection: %v", err)
 	}
 	for name, resolve := range map[string]func() (string, error){
-		"remotes":       shuttleRemotesPath,
-		"stores":        feltStoresRegistryPath,
-		"agents":        func() (string, error) { return shuttleConfigPath("SHUTTLE_AGENTS_FILE", "agents.json") },
-		"projects":      func() (string, error) { return shuttleConfigPath("SHUTTLE_PROJECTS_FILE", "projects.json") },
-		"home":          os.UserHomeDir,
-		"host config":   hostClassFilePath,
-		"host identity": func() (string, error) { return hostConfigFilePath(), nil },
+		"remotes":       a.shuttleRemotesPath,
+		"stores":        a.feltStoresRegistryPath,
+		"agents":        func() (string, error) { return a.shuttleConfigPath("SHUTTLE_AGENTS_FILE", "agents.json") },
+		"projects":      func() (string, error) { return a.shuttleConfigPath("SHUTTLE_PROJECTS_FILE", "projects.json") },
+		"home":          env.UserHomeDir,
+		"host config":   a.hostClassFilePath,
+		"host identity": func() (string, error) { return a.hostConfigFilePath(), nil },
+		"data dir":      func() (string, error) { return shuttle.DataDir(env) },
 	} {
 		path, err := resolve()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasPrefix(path, testFenceDir) {
-			t.Fatalf("%s path %q is outside the test fence %q", name, path, testFenceDir)
+		if !strings.HasPrefix(path, root) {
+			t.Fatalf("%s path %q is outside the test fence %q", name, path, root)
 		}
 	}
-	remotes, err := loadRemotesFile()
+	remotes, err := a.loadRemotesFile()
 	if err != nil || len(remotes.Remotes) != 0 {
 		t.Fatalf("remotes file = %v, %v; want none", remotes.Remotes, err)
 	}

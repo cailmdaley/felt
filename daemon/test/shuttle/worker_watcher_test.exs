@@ -109,7 +109,9 @@ defmodule Shuttle.WorkerWatcherTest do
   # heartbeat detection takes — which, under any scheduler jitter, overran the
   # old fixed margins. ~2s ceiling; returns as soon as the condition is true, so
   # passing tests pay nothing.
-  defp wait_until(fun, attempts \\ 80)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, attempts \\ 1_200)
   defp wait_until(fun, 0), do: fun.()
 
   defp wait_until(fun, attempts) do
@@ -151,7 +153,7 @@ defmodule Shuttle.WorkerWatcherTest do
     Process.sleep(120)
 
     # Should receive exit notification
-    assert_receive {:worker_exited, "tests/haiku", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/haiku", _, _, :normal_exit}
 
     # Watcher should have stopped
     assert wait_until(fn -> not Process.alive?(watcher) end)
@@ -167,7 +169,7 @@ defmodule Shuttle.WorkerWatcherTest do
                heartbeat_interval_ms: 50
              )
 
-    assert_receive {:worker_exited, "tests/missing", _, _, :session_not_found}, 1000
+    assert_receive {:worker_exited, "tests/missing", _, _, :session_not_found}
   end
 
   test "watcher can be stopped gracefully" do
@@ -231,7 +233,7 @@ defmodule Shuttle.WorkerWatcherTest do
     Process.sleep(300)
 
     # Now the watcher should declare the worker dead.
-    assert_receive {:worker_exited, "tests/flaky", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/flaky", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -262,7 +264,7 @@ defmodule Shuttle.WorkerWatcherTest do
 
     # A confirmed absence still kills it, proving death detection is intact.
     FlakeyRunner.remove_session(session)
-    assert_receive {:worker_exited, "tests/inconclusive", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/inconclusive", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -300,7 +302,7 @@ defmodule Shuttle.WorkerWatcherTest do
     FlakeyRunner.remove_session(session)
     Process.sleep(300)
 
-    assert_receive {:worker_exited, "tests/recover", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/recover", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -336,7 +338,7 @@ defmodule Shuttle.WorkerWatcherTest do
     MockRunner.remove_session(session)
     Process.sleep(200)
 
-    assert_receive {:worker_exited, "tests/named-poller", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/named-poller", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 

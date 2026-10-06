@@ -193,64 +193,62 @@ defmodule ShuttleWeb.ConfigControllerTest do
       {:ok, digest: ConfigFiles.digest(:stores)}
     end
 
-    test "an ABSENT key is last-write-wins — a script, or an older client", %{paths: paths} do
-      assert post_config("stores", %{"text" => "[]"}).status == 200
-      assert File.read!(paths[:stores]) == "[]"
-    end
-
-    test "a matching digest commits", %{paths: paths, digest: digest} do
-      conn = post_config("stores", %{"text" => "[]", "expected_digest" => digest})
-
-      assert conn.status == 200
-      assert File.read!(paths[:stores]) == "[]"
-    end
-
-    test "a stale digest is a 409 and leaves the file byte-identical", %{paths: paths} do
-      # 409, not 400, and the distinction is load-bearing rather than
-      # pedantic: the editor's recovery affordance keys off the STATUS, so
-      # that it survives a rewording of the sentence. While this answered 400
-      # the button that offers to re-read the file never rendered at all — and
-      # nothing went red, because the only thing that knew was prose.
-      conn =
-        post_config("stores", %{"text" => "[]", "expected_digest" => String.duplicate("0", 64)})
-
-      assert conn.status == 409
-      body = Jason.decode!(conn.resp_body)
-      assert body["conflict"] == true
-      assert body["error"] =~ "changed since you opened it"
-      assert File.read!(paths[:stores]) == @stores_doc
-    end
-
-    test "a PRESENT null means 'I read no file', so an existing one is a conflict", %{
-      paths: paths
-    } do
-      conn = post_config("stores", %{"text" => "[]", "expected_digest" => nil})
-
-      assert conn.status == 409
-      assert Jason.decode!(conn.resp_body)["error"] =~ "changed since you opened it"
-      assert File.read!(paths[:stores]) == @stores_doc
-    end
-
-    test "a present null against a genuinely absent file writes", %{paths: paths} do
-      File.rm!(paths[:stores])
-
-      conn = post_config("stores", %{"text" => @stores_doc, "expected_digest" => nil})
-
-      assert conn.status == 200
-      assert File.read!(paths[:stores]) == @stores_doc
-    end
-
-    test "a digest for a file deleted underneath the editor says so", %{
+    # Every file state against every precondition. An ABSENT key is
+    # last-write-wins: a script, or an older client. A PRESENT null means "I
+    # read no file", so it writes only where there is still none.
+    #
+    # A refusal is a 409, not a 400, and the distinction is load-bearing rather
+    # than pedantic: the editor's recovery affordance keys off the STATUS, so
+    # that it survives a rewording of the sentence. While this answered 400 the
+    # button that offers to re-read the file never rendered at all — and
+    # nothing went red, because the only thing that knew was prose.
+    test "a write commits only when its precondition matches the file as it is now", %{
       paths: paths,
       digest: digest
     } do
-      File.rm!(paths[:stores])
+      stale = String.duplicate("0", 64)
+      changed = "changed since you opened it"
+      deleted = "was deleted since you opened it"
 
-      conn = post_config("stores", %{"text" => "[]", "expected_digest" => digest})
+      rows = [
+        {:present, :omit, :commits},
+        {:present, digest, :commits},
+        {:present, stale, changed},
+        {:present, nil, changed},
+        {:absent, :omit, :commits},
+        {:absent, nil, :commits},
+        {:absent, digest, deleted},
+        {:absent, stale, deleted}
+      ]
 
-      assert conn.status == 409
-      assert Jason.decode!(conn.resp_body)["error"] =~ "was deleted since you opened it"
-      refute File.exists?(paths[:stores])
+      for {file, expected, outcome} <- rows do
+        label = "#{file} file, expected_digest #{inspect(expected)}"
+
+        if file == :present,
+          do: File.write!(paths[:stores], @stores_doc),
+          else: File.rm(paths[:stores])
+
+        payload =
+          if expected == :omit,
+            do: %{"text" => "[]"},
+            else: %{"text" => "[]", "expected_digest" => expected}
+
+        conn = post_config("stores", payload)
+
+        if outcome == :commits do
+          assert conn.status == 200, label
+          assert File.read!(paths[:stores]) == "[]", label
+        else
+          assert conn.status == 409, label
+          body = Jason.decode!(conn.resp_body)
+          assert body["conflict"] == true, label
+          assert body["error"] =~ outcome, label
+
+          if file == :present,
+            do: assert(File.read!(paths[:stores]) == @stores_doc, label),
+            else: refute(File.exists?(paths[:stores]), label)
+        end
+      end
     end
   end
 

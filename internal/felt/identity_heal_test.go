@@ -11,6 +11,7 @@ import (
 // stamps the struct, and WriteFiberFile stamps raw content that lacks one.
 
 func TestStorageWriteStampsMissingIntrinsicID(t *testing.T) {
+	t.Parallel()
 	s := NewStorage(t.TempDir())
 	if err := s.Init(); err != nil {
 		t.Fatal(err)
@@ -45,6 +46,7 @@ func TestStorageWriteStampsMissingIntrinsicID(t *testing.T) {
 }
 
 func TestWriteFiberFileStampsMissingIntrinsicID(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "f.md")
 	if err := WriteFiberFile(path, []byte("---\nname: F\nstatus: open\n---\n\nbody\n")); err != nil {
 		t.Fatal(err)
@@ -66,6 +68,7 @@ func TestWriteFiberFileStampsMissingIntrinsicID(t *testing.T) {
 }
 
 func TestWriteFiberFileFillsBlankIDInPlace(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "f.md")
 	if err := WriteFiberFile(path, []byte("---\nid: \"\"\nname: F\n---\n")); err != nil {
 		t.Fatal(err)
@@ -87,6 +90,7 @@ func TestWriteFiberFileFillsBlankIDInPlace(t *testing.T) {
 }
 
 func TestWriteFiberFileLeavesExistingIDAndBytesAlone(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "f.md")
 	content := "---\nid: 01KTHDNZS287ZSSG8X8V59XKWB\nname: F\n# kept verbatim\n---\n\nbody\n"
 	if err := WriteFiberFile(path, []byte(content)); err != nil {

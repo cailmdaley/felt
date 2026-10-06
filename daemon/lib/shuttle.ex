@@ -45,9 +45,9 @@ defmodule Shuttle do
   @spec data_dir() :: String.t()
   def data_dir do
     case String.trim(Shuttle.Env.get("SHUTTLE_DATA_DIR", "")) do
-      "" -> Path.join(System.user_home!(), ".shuttle")
-      "~" -> System.user_home!()
-      "~/" <> rest -> System.user_home!() <> "/" <> rest
+      "" -> Path.join(Shuttle.Env.home(), ".shuttle")
+      "~" -> Shuttle.Env.home()
+      "~/" <> rest -> Shuttle.Env.home() <> "/" <> rest
       dir -> dir
     end
   end
@@ -177,6 +177,9 @@ defmodule Shuttle.Application do
       # Shares one felt read among concurrent board requests for the same
       # fiber, and among concurrent misses for a store's listing.
       Shuttle.SingleFlight,
+      # Owns the ETS tables of fiber addresses, polled and learned, so a read
+      # by UID goes through a known `{store, id}` instead of a store walk.
+      Shuttle.FiberAddresses,
       Shuttle.Meeting.Control,
       # Owns the ETS table past sessions' bridge URLs are cached in, keyed on
       # each transcript's {mtime, size}. Pure cache: a restart costs one

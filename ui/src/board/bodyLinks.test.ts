@@ -7,15 +7,7 @@
 // the regex escaper to the DOM path was checked against a real browser.)
 
 import { describe, expect, it } from 'vitest'
-import { fileInfoUrl, renderMarkdown } from './utils.js'
-
-describe('file metadata URL', () => {
-  it('routes metadata probes through the owning daemon', () => {
-    expect(fileInfoUrl('http://d:4000', '/tmp/a b.html', 'candide')).toBe(
-      'http://d:4000/api/v1/file-info?path=%2Ftmp%2Fa%20b.html&origin=candide',
-    )
-  })
-})
+import { renderMarkdown } from './utils.js'
 
 describe('relative links in a fiber body', () => {
   const opts = { basePath: '/home/ada/loom/.felt/proj', originId: 'local' }

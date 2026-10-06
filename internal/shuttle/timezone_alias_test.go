@@ -8,6 +8,7 @@ import (
 )
 
 func TestSchedule_AcceptsLegacyTimezone(t *testing.T) {
+	t.Parallel()
 	const yamlSrc = `
 expr: "0 9 * * 1-5"
 kind: cron
@@ -26,6 +27,7 @@ timezone: Europe/Paris
 }
 
 func TestSchedule_PrefersTzOverTimezone(t *testing.T) {
+	t.Parallel()
 	const yamlSrc = `
 expr: "0 9 * * *"
 tz: UTC
@@ -41,6 +43,7 @@ timezone: Europe/Paris
 }
 
 func TestSchedule_EmitsOnlyTz(t *testing.T) {
+	t.Parallel()
 	s := Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}
 	out, err := yaml.Marshal(&s)
 	if err != nil {

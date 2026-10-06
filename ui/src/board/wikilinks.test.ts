@@ -69,32 +69,22 @@ describe('resolving a wikilink against the fiber index', () => {
     { id: 'loom/email/triage', name: 'Morning mail triage' },
   ]
 
-  it('takes an exact id', () => {
-    expect(resolveWikilink('ai-futures/forth-crete-tutorial', index))
-      .toBe('ai-futures/forth-crete-tutorial')
-  })
-
-  it('takes a unique trailing segment, which is how a body names a sibling', () => {
-    expect(resolveWikilink('shear_2d', index)).toBe('science/unions/shear_2d')
-  })
-
-  it('takes a unique exact name for a body that cites a fiber by title', () => {
-    expect(resolveWikilink('FORTH Crete tutorial', index))
-      .toBe('ai-futures/forth-crete-tutorial')
-  })
-
-  it('refuses an ambiguous segment rather than guessing', () => {
-    // Two fibers end in `/triage`. Sending the reader to the wrong one is worse
-    // than leaving the text inert, so the reference stays literal.
-    expect(resolveWikilink('triage', index)).toBeNull()
-  })
-
-  it('resolves nothing for a target no fiber carries', () => {
-    expect(resolveWikilink('not/a/fiber', index)).toBeNull()
-    expect(resolveWikilink('', index)).toBeNull()
-  })
-
-  it('tolerates stray slashes and case', () => {
-    expect(resolveWikilink('/AI-Futures/', index)).toBe('ai-futures')
+  it('resolves a target only to the one fiber it names, after normalization', () => {
+    const cases: [target: string, resolves: string | null, why: string][] = [
+      ['ai-futures/forth-crete-tutorial', 'ai-futures/forth-crete-tutorial', 'an exact id'],
+      ['shear_2d', 'science/unions/shear_2d', 'a unique trailing segment — how a body names a sibling'],
+      ['FORTH Crete tutorial', 'ai-futures/forth-crete-tutorial', 'a unique exact name — a body citing by title'],
+      ['/AI-Futures/', 'ai-futures', 'stray slashes and case'],
+      // Two fibers end in `/triage`. Sending the reader to the wrong one is
+      // worse than leaving the text inert, so the reference stays literal.
+      ['triage', null, 'an ambiguous segment is refused rather than guessed'],
+      ['not/a/fiber', null, 'a target no fiber carries'],
+      ['', null, 'an empty target'],
+    ]
+    const failures = cases.flatMap(([target, want, why]) => {
+      const got = resolveWikilink(target, index)
+      return got === want ? [] : [`${why}: [[${target}]] → ${got}, want ${want}`]
+    })
+    expect(failures).toEqual([])
   })
 })

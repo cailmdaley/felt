@@ -1,5 +1,6 @@
 defmodule Shuttle.ContinuationTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Shuttle.Continuation
 
@@ -46,67 +47,60 @@ defmodule Shuttle.ContinuationTest do
     end
   end
 
-  describe "nested-only readers (C5 — the flat fallback is retired)" do
-    test "reads the nested runtime block, ignoring flat legacy siblings entirely" do
-      fiber = %{
-        "shuttle" => %{
-          "kind" => "oneshot",
-          "dispatched_at" => "2026-01-01T00:00:00Z",
-          "session_uuid" => "flat-uuid",
-          "runtime" => %{
-            "dispatched_at" => "2026-06-21T12:00:00Z",
-            "session_uuid" => "nested-uuid"
-          }
-        }
-      }
+  describe "nested-only readers" do
+    @timestamps ["2026-01-01T00:00:00Z", "2026-06-21T12:00:00Z", "2026-06-21T13:00:00Z"]
 
-      assert Continuation.dispatched_at(fiber) == ~U[2026-06-21 12:00:00Z]
-      assert Continuation.resumable_session_id(fiber) == "nested-uuid"
+    defp runtime_keys do
+      optional_map(%{
+        "dispatched_at" => member_of(@timestamps),
+        "handed_off_at" => member_of(@timestamps),
+        "session_uuid" => member_of(["flat-uuid", "nested-uuid", ""]),
+        "run_id" => member_of(["adhoc-1", "2026-06-21T12:00", ""])
+      })
     end
 
-    test "does NOT fall back to a flat key when its nested counterpart is absent" do
-      fiber = %{
-        "shuttle" => %{
-          "dispatched_at" => "2026-01-01T00:00:00Z",
-          "handed_off_at" => "2026-01-02T00:00:00Z",
-          "runtime" => %{"session_uuid" => "nested-uuid"}
-        }
-      }
+    # Every runtime reader consults `shuttle.runtime` alone: the same keys flat
+    # on the `shuttle:` block never supply, shadow or complete a value, and a
+    # missing or non-map `runtime` reads as no continuation state at all.
+    property "readers see only the nested runtime map, never its flat siblings" do
+      check all(
+              flat <- runtime_keys(),
+              runtime <- one_of([constant(:absent), member_of(["oops", nil, 42]), runtime_keys()]),
+              max_runs: 100
+            ) do
+        nested_only = if is_map(runtime), do: runtime, else: %{}
+        block = if runtime == :absent, do: flat, else: Map.put(flat, "runtime", runtime)
+        fiber = %{"shuttle" => Map.put(block, "kind", "oneshot")}
+        without_flat = %{"shuttle" => %{"runtime" => nested_only}}
+        row = "flat #{inspect(flat)}, runtime #{inspect(runtime)}"
 
-      refute Continuation.dispatched_at(fiber)
-      refute Continuation.handed_off_at(fiber)
-      assert Continuation.resumable_session_id(fiber) == "nested-uuid"
+        assert Continuation.dispatched_at(fiber) == timestamp(nested_only["dispatched_at"]), row
+        assert Continuation.handed_off_at(fiber) == timestamp(nested_only["handed_off_at"]), row
+
+        assert Continuation.resumable_session_id(fiber) == present(nested_only["session_uuid"]),
+               row
+
+        assert Continuation.run_id(fiber) == present(nested_only["run_id"]), row
+
+        assert Continuation.clean_handoff_since_dispatch?(fiber) ==
+                 Continuation.clean_handoff_since_dispatch?(without_flat),
+               row
+
+        assert Continuation.deliberate_handoff_since_dispatch?(fiber) ==
+                 Continuation.deliberate_handoff_since_dispatch?(without_flat),
+               row
+      end
     end
 
-    test "an un-migrated fiber (flat keys, no runtime sub-map at all) reads as having no continuation state" do
-      fiber = %{
-        "shuttle" => %{"dispatched_at" => "2026-01-01T00:00:00Z", "session_uuid" => "flat"}
-      }
+    defp timestamp(nil), do: nil
 
-      refute Continuation.dispatched_at(fiber)
-      refute Continuation.resumable_session_id(fiber)
+    defp timestamp(iso) do
+      {:ok, dt, 0} = DateTime.from_iso8601(iso)
+      dt
     end
 
-    test "tolerates a degenerate (non-map) runtime value, reading as absent rather than falling back to flat" do
-      fiber = %{"shuttle" => %{"dispatched_at" => "2026-01-01T00:00:00Z", "runtime" => "oops"}}
-      refute Continuation.dispatched_at(fiber)
-    end
-
-    test "clean_handoff?: a nested dispatch with only a FLAT handoff reads as no handoff → resume" do
-      # C5: the flat handed_off_at is invisible now (no fallback) — a nested
-      # dispatched_at with nothing nested under handed_off_at reads as "never
-      # handed off since this dispatch", same conclusion as before the
-      # fallback was retired, but for the right reason now (absent, not
-      # shadowed-because-flat).
-      fiber = %{
-        "shuttle" => %{
-          "handed_off_at" => "2026-01-02T00:00:00Z",
-          "runtime" => %{"dispatched_at" => "2026-06-21T12:00:00Z"}
-        }
-      }
-
-      refute Continuation.clean_handoff_since_dispatch?(fiber)
-    end
+    defp present(value) when value in [nil, ""], do: nil
+    defp present(value), do: value
 
     test "clean_handoff?: nested handoff >= nested dispatch → fresh" do
       fiber = %{

@@ -22,8 +22,6 @@ defmodule Shuttle.HostCapabilitiesTest do
   test "browser probes cache both answers for 60 seconds and refresh expired login state" do
     # This test's own cache slot, not the one every owner-feed request reads.
     Shuttle.Test.Env.own_scope!()
-    key = Shuttle.Env.scope_key({HostCapabilities, :browser_capable})
-    on_exit(fn -> :persistent_term.erase(key) end)
 
     assert HostCapabilities.cached_browser_capable?(fn -> true end, 100)
 

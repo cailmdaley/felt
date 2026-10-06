@@ -15,14 +15,14 @@ func (options ViewOptions) directory() string {
 	if options.Directory != nil {
 		return options.Directory()
 	}
-	return changeDir
+	return ""
 }
 
 func (options ViewOptions) jsonOutput() bool {
 	if options.IsJSON != nil {
 		return options.IsJSON()
 	}
-	return jsonOutput
+	return false
 }
 
 func (options ViewOptions) commandName(feltCommand string) string {

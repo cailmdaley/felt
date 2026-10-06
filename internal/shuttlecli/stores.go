@@ -30,15 +30,15 @@ import (
 // single store — the explicit scope wins, exactly as the daemon's
 // `-C <store>` invocations expect. Otherwise it is the configured store
 // surface (configuredFeltStores).
-func shuttleStores() ([]string, error) {
-	if changeDir != "" {
-		root, err := felt.ProjectRoot(changeDir)
+func (a *app) shuttleStores() ([]string, error) {
+	if a.dir != "" {
+		root, err := felt.ProjectRoot(a.env, a.dir)
 		if err != nil {
 			return nil, err
 		}
 		return []string{root}, nil
 	}
-	return configuredFeltStores()
+	return a.configuredFeltStores()
 }
 
 // configuredFeltStores returns every felt store the dispatcher considers, mirroring
@@ -50,28 +50,28 @@ func shuttleStores() ([]string, error) {
 //
 // The registry is the source of truth; an empty env and an empty/absent registry
 // resolve to no stores (callers handle the empty case).
-func configuredFeltStores() ([]string, error) {
-	if envStores := feltStoresEnv(); len(envStores) > 0 {
+func (a *app) configuredFeltStores() ([]string, error) {
+	if envStores := a.feltStoresEnv(); len(envStores) > 0 {
 		return envStores, nil
 	}
-	return registeredFeltStores()
+	return a.registeredFeltStores()
 }
 
 // feltStoresEnv parses SHUTTLE_STORES into a normalized store list, matching the
 // Elixir reader's split-and-trim.
-func feltStoresEnv() []string {
-	raw := os.Getenv("SHUTTLE_STORES")
+func (a *app) feltStoresEnv() []string {
+	raw := a.env.Getenv("SHUTTLE_STORES")
 	if raw == "" {
 		return nil
 	}
-	return normalizeFeltStores(strings.Split(raw, ","))
+	return a.normalizeFeltStores(strings.Split(raw, ","))
 }
 
 // registeredFeltStores reads the persisted registry (~/.config/shuttle/stores.json,
 // or $SHUTTLE_STORES_FILE) and returns its normalized store list. A missing file or
 // empty list returns an empty slice with no error.
-func registeredFeltStores() ([]string, error) {
-	path, err := feltStoresRegistryPath()
+func (a *app) registeredFeltStores() ([]string, error) {
+	path, err := a.feltStoresRegistryPath()
 	if err != nil {
 		return nil, err
 	}
@@ -90,28 +90,28 @@ func registeredFeltStores() ([]string, error) {
 		FeltStores []string `json:"felt_stores"`
 	}
 	if err := json.Unmarshal(content, &wrapped); err == nil && wrapped.FeltStores != nil {
-		return normalizeFeltStores(wrapped.FeltStores), nil
+		return a.normalizeFeltStores(wrapped.FeltStores), nil
 	}
 	var bare []string
 	if err := json.Unmarshal(content, &bare); err == nil {
-		return normalizeFeltStores(bare), nil
+		return a.normalizeFeltStores(bare), nil
 	}
 	return nil, fmt.Errorf("parsing %s: unexpected shape", path)
 }
 
 // feltStoresRegistryPath is the canonical registry location for WRITES:
 // $SHUTTLE_STORES_FILE, else ~/.config/shuttle/stores.json.
-func feltStoresRegistryPath() (string, error) {
-	return shuttleConfigPath("SHUTTLE_STORES_FILE", "stores.json")
+func (a *app) feltStoresRegistryPath() (string, error) {
+	return a.shuttleConfigPath("SHUTTLE_STORES_FILE", "stores.json")
 }
 
 // shuttleConfigPath resolves a ~/.config/shuttle/<leaf> file, letting envVar override
 // it outright.
-func shuttleConfigPath(envVar, leaf string) (string, error) {
-	if env := os.Getenv(envVar); env != "" {
-		return expandUserPath(env)
+func (a *app) shuttleConfigPath(envVar, leaf string) (string, error) {
+	if env := a.env.Getenv(envVar); env != "" {
+		return a.expandUserPath(env)
 	}
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
@@ -120,7 +120,7 @@ func shuttleConfigPath(envVar, leaf string) (string, error) {
 
 // normalizeFeltStores trims, drops empty, expands `~`, and deduplicates while
 // preserving first-seen order — matching Shuttle.PathListConfig.normalize.
-func normalizeFeltStores(stores []string) []string {
+func (a *app) normalizeFeltStores(stores []string) []string {
 	seen := make(map[string]bool, len(stores))
 	out := make([]string, 0, len(stores))
 	for _, s := range stores {
@@ -128,7 +128,7 @@ func normalizeFeltStores(stores []string) []string {
 		if s == "" {
 			continue
 		}
-		expanded, err := expandUserPath(s)
+		expanded, err := a.expandUserPath(s)
 		if err != nil {
 			continue
 		}
@@ -155,11 +155,11 @@ func normalizeFeltStores(stores []string) []string {
 // back to felt's native id). felt already carries f.Path symlink-resolved, but
 // EvalSymlinks again here is idempotent and keeps the function correct for any
 // caller.
-func canonicalFiberID(mdPath string) (string, error) {
+func (a *app) canonicalFiberID(mdPath string) (string, error) {
 	if mdPath == "" {
 		return "", fmt.Errorf("empty fiber path")
 	}
-	abs, err := filepath.Abs(mdPath)
+	abs, err := a.env.Abs(mdPath)
 	if err != nil {
 		return "", err
 	}
@@ -219,12 +219,12 @@ func fiberIDFromStorePath(rel string) (string, error) {
 }
 
 // expandUserPath expands a leading ~ and returns a cleaned absolute path.
-func expandUserPath(path string) (string, error) {
+func (a *app) expandUserPath(path string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("empty path")
 	}
 	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
+		home, err := a.env.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolving home directory: %w", err)
 		}
@@ -237,7 +237,7 @@ func expandUserPath(path string) (string, error) {
 	if filepath.IsAbs(path) {
 		return filepath.Clean(path), nil
 	}
-	abs, err := filepath.Abs(path)
+	abs, err := a.env.Abs(path)
 	if err != nil {
 		return "", err
 	}

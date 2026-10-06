@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // AgentRecord holds the configuration for one agent harness.
@@ -74,6 +76,9 @@ type AgentRegistry struct {
 	builtinsMode string
 	builtinCount int
 	warnings     []string
+	// env locates the model catalogs a bare model family resolves against;
+	// nil for the built-in layer alone, which resolves no family.
+	env *sysenv.Env
 }
 
 // LoadAgentRegistry returns the effective agent registry: the built-ins
@@ -81,16 +86,25 @@ type AgentRegistry struct {
 // ~/.config/shuttle/agents.json) folded on top. A missing user file is normal — the
 // built-ins stand alone. A present but unreadable or malformed one is fatal, and
 // the error names the path: a typo must not look like "my agents vanished".
-func LoadAgentRegistry() (*AgentRegistry, error) {
+//
+// The registry keeps env: resolving an agent reads the host CLIs' model
+// catalogs through it (see resolveModelFamily).
+func LoadAgentRegistry(env *sysenv.Env) (*AgentRegistry, error) {
 	builtins, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		return nil, err
 	}
-	return layerUserAgents(builtins)
+	reg, err := layerUserAgents(env, builtins)
+	if err != nil {
+		return nil, err
+	}
+	reg.env = env
+	return reg, nil
 }
 
 // LoadBuiltinAgentRegistry returns only the embedded built-in registry, with no
-// filesystem access. Tests and the `agents init` seed use it to stay hermetic.
+// filesystem access: a bare model family passes through unresolved. Tests and
+// the `agents init` seed use it to stay hermetic.
 func LoadBuiltinAgentRegistry() (*AgentRegistry, error) {
 	agents, err := parseAgentRecords(embeddedAgentJSON, "the embedded agents.builtin.json")
 	if err != nil {

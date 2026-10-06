@@ -8,6 +8,7 @@ defmodule ShuttleWeb.FileControllerTest do
   """
   # group: FileReadTrace sets a VM-wide call-trace pattern on File.read/1 (shared with PollerTest's :dbg).
   use ExUnit.Case, async: true, group: :call_trace
+  use ExUnitProperties
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
   alias Shuttle.Test.StubGetFileClient
@@ -66,32 +67,6 @@ defmodule ShuttleWeb.FileControllerTest do
       end
     end
 
-    # Negative control: omitting the document sandbox policy makes these checks go red.
-    @tag :tmp_dir
-    test "sandboxes local HTML document responses without CORS access", %{tmp_dir: dir} do
-      for {extension, accept} <- [
-            {"html", "text/html"},
-            {"htm", "text/html"},
-            {"HTML", "text/html"},
-            {"xhtml", "application/xhtml+xml"}
-          ] do
-        path = Path.join(dir, "report.#{extension}")
-        body = "<script>window.open('popup.html')</script>"
-        File.write!(path, body)
-
-        conn =
-          local_conn()
-          |> put_req_header("origin", "null")
-          |> put_req_header("accept", accept)
-          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-        assert conn.status == 200
-        assert conn.resp_body == body
-        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
-        assert get_resp_header(conn, "access-control-allow-origin") == []
-      end
-    end
-
     @tag :tmp_dir
     test "sandboxes a sibling HTML asset opened from an opaque report", %{tmp_dir: dir} do
       report_path = Path.join(dir, "report.html")
@@ -114,52 +89,6 @@ defmodule ShuttleWeb.FileControllerTest do
       assert conn.resp_body == body
       assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
       assert get_resp_header(conn, "access-control-allow-origin") == []
-    end
-
-    @tag :tmp_dir
-    test "sandboxes SVG and compressed SVG responses without CORS access", %{tmp_dir: dir} do
-      body = "<svg><script>window.open('popup.html')</script></svg>"
-
-      for extension <- ["svg", "svgz"] do
-        path = Path.join(dir, "report.#{extension}")
-        File.write!(path, body)
-
-        conn =
-          local_conn()
-          |> put_req_header("origin", "null")
-          |> put_req_header("accept", "image/svg+xml")
-          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-        assert conn.status == 200
-        assert conn.resp_body == body
-        assert get_resp_header(conn, "content-type") |> List.first() =~ "image/svg"
-        assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
-        assert get_resp_header(conn, "access-control-allow-origin") == []
-      end
-    end
-
-    @tag :tmp_dir
-    @tag :file_security
-    test "sandboxes PDFs, media and images without changing their content types", %{tmp_dir: dir} do
-      for {extension, accept, content_type} <- [
-            {"pdf", "application/pdf", "application/pdf"},
-            {"mp4", "video/mp4", "video/mp4"},
-            {"png", "image/png", "image/png"}
-          ] do
-        path = Path.join(dir, "asset.#{extension}")
-        File.write!(path, "representation")
-
-        conn =
-          local_conn()
-          |> put_req_header("origin", "null")
-          |> put_req_header("accept", accept)
-          |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-        assert conn.status == 200
-        assert get_resp_header(conn, "content-type") |> List.first() =~ content_type
-        assert_file_security(conn)
-        assert get_resp_header(conn, "access-control-allow-origin") == []
-      end
     end
 
     @tag :tmp_dir
@@ -429,108 +358,64 @@ defmodule ShuttleWeb.FileControllerTest do
       assert second.resp_body == "<p>new</p>"
     end
 
-    test "304 when If-None-Match matches the served ETag" do
+    # Only If-None-Match decides a 304: a list member that weakly matches the
+    # served ETag, or `*`. If-Modified-Since never does, matching or stale, so a
+    # same-second rewrite cannot be answered 304.
+    property "304 exactly when an If-None-Match member matches the served ETag" do
       path = tmp_path("txt")
       File.write!(path, "hello embed")
       on_exit(fn -> File.rm(path) end)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
 
-      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
+      first = get(api_conn(), url)
       [etag] = get_resp_header(first, "etag")
-
-      conn =
-        api_conn()
-        |> put_req_header("if-none-match", etag)
-        |> put_req_header("range", "bytes=0-1")
-        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-      assert conn.status == 304
-      assert conn.resp_body == ""
-      assert get_resp_header(conn, "content-range") == []
-    end
-
-    test "If-Modified-Since alone never returns 304" do
-      path = tmp_path("txt")
-      File.write!(path, "hello embed")
-      on_exit(fn -> File.rm(path) end)
-
-      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
       [last_modified] = get_resp_header(first, "last-modified")
-      [etag] = get_resp_header(first, "etag")
-      assert etag =~ ~r/^W\/"sha256-[0-9a-f]{64}"$/
+      "W/" <> strong_etag = etag
 
-      conn =
-        api_conn()
-        |> put_req_header("if-modified-since", last_modified)
-        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+      stale_tag =
+        string(?0..?9, length: 64)
+        |> bind(fn digits -> member_of([~s(W/"sha256-#{digits}"), ~s("#{digits}")]) end)
 
-      assert conn.status == 200
-      assert conn.resp_body == "hello embed"
-    end
+      member =
+        one_of([
+          member_of([{:match, etag}, {:match, strong_etag}, {:match, "*"}]),
+          map(stale_tag, &{:stale, &1})
+        ])
 
-    test "If-None-Match takes precedence over a matching If-Modified-Since" do
-      path = tmp_path("txt")
-      File.write!(path, "hello embed")
-      on_exit(fn -> File.rm(path) end)
+      check all(
+              members <- list_of(member, max_length: 4),
+              separator <- member_of([",", ", ", " ,  "]),
+              since <- member_of([nil, last_modified, "Thu, 01 Jan 1970 00:00:00 GMT"]),
+              ranged? <- boolean(),
+              max_runs: 100
+            ) do
+        conn =
+          [
+            {"if-none-match", members != [] and Enum.map_join(members, separator, &elem(&1, 1))},
+            {"if-modified-since", since},
+            {"range", ranged? and "bytes=0-1"}
+          ]
+          |> Enum.reject(fn {_name, value} -> value in [nil, false] end)
+          |> Enum.reduce(api_conn(), fn {name, value}, conn ->
+            put_req_header(conn, name, value)
+          end)
+          |> get(url)
 
-      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
-      [last_modified] = get_resp_header(first, "last-modified")
-      stale_etag = ~s(W/"00000000000000000000000000000000")
+        case {Enum.any?(members, &match?({:match, _}, &1)), ranged?} do
+          {true, _} ->
+            assert conn.status == 304
+            assert conn.resp_body == ""
+            assert get_resp_header(conn, "content-range") == []
 
-      conn =
-        api_conn()
-        |> put_req_header("if-none-match", stale_etag)
-        |> put_req_header("if-modified-since", last_modified)
-        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
+          {false, true} ->
+            assert conn.status == 206
+            assert conn.resp_body == "he"
 
-      assert conn.status == 200
-      assert conn.resp_body == "hello embed"
-    end
-
-    test "If-None-Match accepts a matching list member and wildcard" do
-      path = tmp_path("txt")
-      File.write!(path, "hello embed")
-      on_exit(fn -> File.rm(path) end)
-
-      first = get(api_conn(), "/api/v1/file?path=#{URI.encode_www_form(path)}")
-      [etag] = get_resp_header(first, "etag")
-
-      conn =
-        api_conn()
-        |> put_req_header("if-none-match", ~s("other", #{etag}))
-        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-      assert conn.status == 304
-
-      conn =
-        api_conn()
-        |> put_req_header("if-none-match", "*")
-        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-      assert conn.status == 304
-    end
-
-    test "200 (not 304) when the validators are stale — a changed ETag or an earlier If-Modified-Since" do
-      path = tmp_path("txt")
-      File.write!(path, "hello embed")
-      on_exit(fn -> File.rm(path) end)
-
-      stale_etag = ~s(W/"0000000000000000000000000000000")
-
-      conn =
-        api_conn()
-        |> put_req_header("if-none-match", stale_etag)
-        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-      assert conn.status == 200
-      assert conn.resp_body == "hello embed"
-
-      conn =
-        api_conn()
-        |> put_req_header("if-modified-since", "Thu, 01 Jan 1970 00:00:00 GMT")
-        |> get("/api/v1/file?path=#{URI.encode_www_form(path)}")
-
-      assert conn.status == 200
-      assert conn.resp_body == "hello embed"
+          {false, false} ->
+            assert conn.status == 200
+            assert conn.resp_body == "hello embed"
+        end
+      end
     end
 
     test "a strict non-*/* Accept header still reaches the controller (not 406)" do
@@ -549,95 +434,103 @@ defmodule ShuttleWeb.FileControllerTest do
   end
 
   describe "file security boundary" do
-    for extension <- ~w(html xml rss atom svg svgz unknown pdf mp3), route <- [:file, :asset] do
-      @tag :tmp_dir
-      @tag :file_security
-      test "sandboxes local #{extension} bytes on #{route}", %{tmp_dir: dir} do
-        path = Path.join(dir, "document.#{unquote(extension)}")
-        body = "representation"
+    # Scriptable documents (every HTML spelling, XML feeds, SVG), an extension
+    # no table knows, and native media. The sandbox is independent of type, so
+    # each keeps its served content type and gains the policy.
+    @file_types [
+      {"html", "text/html", "text/html"},
+      {"htm", "text/html", "text/html"},
+      {"HTML", "text/html", "text/html"},
+      {"xhtml", "application/xhtml+xml", "application/xhtml+xml"},
+      {"xml", "application/xml", "text/xml"},
+      {"rss", "application/rss+xml", "application/rss+xml"},
+      {"atom", "application/atom+xml", "application/atom+xml"},
+      {"svg", "image/svg+xml", "image/svg+xml"},
+      {"svgz", "image/svg+xml", "image/svg+xml"},
+      {"unknown", "*/*", "application/octet-stream"},
+      {"pdf", "application/pdf", "application/pdf"},
+      {"mp3", "audio/mpeg", "audio/mpeg"},
+      {"mp4", "video/mp4", "video/mp4"},
+      {"png", "image/png", "image/png"}
+    ]
+
+    @tag :tmp_dir
+    @tag :file_security
+    test "sandboxes every local type and status on every byte route, without CORS access", %{
+      tmp_dir: dir
+    } do
+      body = "<script>window.open('popup.html')</script>"
+
+      for {extension, accept, content_type} <- @file_types, route <- byte_routes() do
+        row = "local #{extension} on #{route}"
+        path = Path.join(dir, "document.#{extension}")
         File.write!(path, body)
-        url = file_url(unquote(route), "local", path)
+        url = file_url(route, "local", path)
 
-        conn = local_conn() |> put_req_header("origin", "null") |> get(url)
+        browser =
+          local_conn() |> put_req_header("origin", "null") |> put_req_header("accept", accept)
 
-        assert conn.status == 200
-        assert conn.resp_body == body
-        assert_file_security(conn)
-        assert get_resp_header(conn, "access-control-allow-origin") == []
-      end
+        whole = get(browser, url)
+        assert whole.status == 200, row
+        assert whole.resp_body == body, row
+        assert get_resp_header(whole, "content-type") |> List.first() =~ content_type, row
+        [etag] = get_resp_header(whole, "etag")
 
-      @tag :file_security
-      test "sandboxes relayed #{extension} bytes on #{route} without trusting owner headers" do
-        headers = [
-          {"content-security-policy", "sandbox allow-scripts allow-same-origin"},
-          {"x-content-type-options", "unsafe"},
-          {"access-control-allow-origin", "null"}
-        ]
-
-        stub_forward("file-owner", "http://localhost:4001", {
-          :ok,
-          200,
-          headers,
-          "application/octet-stream",
-          "remote representation"
-        })
-
-        path = "/project/document.#{unquote(extension)}"
-        conn = get(api_conn(), file_url(unquote(route), "file-owner", path))
-
-        assert conn.status == 200
-        assert conn.resp_body == "remote representation"
-        assert_file_security(conn)
-        assert get_resp_header(conn, "access-control-allow-origin") == []
-
-        assert StubGetFileClient.last().url ==
-                 "http://localhost:4001/api/v1/file?path=#{URI.encode_www_form(path)}"
+        for {conn, status} <- [
+              {whole, 200},
+              {head(browser, url), 200},
+              {browser |> put_req_header("range", "bytes=1-3") |> get(url), 206},
+              {browser |> put_req_header("if-none-match", etag) |> get(url), 304},
+              {browser |> put_req_header("range", "bytes=99-") |> get(url), 416}
+            ] do
+          assert conn.status == status, "#{row} #{status}"
+          assert_file_security(conn, "#{row} #{status}")
+          assert get_resp_header(conn, "access-control-allow-origin") == [], "#{row} #{status}"
+        end
       end
     end
 
-    for route <- [:file, :asset] do
-      @tag :tmp_dir
-      @tag :file_security
-      test "retains file security on local HEAD, 206, 304 and 416 on #{route}", %{tmp_dir: dir} do
-        path = Path.join(dir, "data.xml")
-        File.write!(path, "0123456789")
-        url = file_url(unquote(route), "local", path)
-        first = get(api_conn(), url)
-        [etag] = get_resp_header(first, "etag")
+    @tag :file_security
+    test "sandboxes every relayed type and status on every byte route, ignoring owner headers" do
+      body = "<script>window.open('popup.html')</script>"
 
-        responses = [
-          {head(api_conn(), url), 200},
-          {api_conn() |> put_req_header("range", "bytes=1-3") |> get(url), 206},
-          {api_conn() |> put_req_header("if-none-match", etag) |> get(url), 304},
-          {api_conn() |> put_req_header("range", "bytes=99-") |> get(url), 416}
-        ]
+      unsafe_headers = [
+        {"content-security-policy", "sandbox allow-scripts allow-same-origin"},
+        {"x-content-type-options", "unsafe"},
+        {"access-control-allow-origin", "null"}
+      ]
 
-        for {conn, status} <- responses do
-          assert conn.status == status
-          assert_file_security(conn)
+      stub_forward("file-owner", "http://localhost:4001", {:error, :unset})
+
+      for {extension, accept, content_type} <- @file_types, route <- byte_routes() do
+        path = "/project/document.#{extension}"
+        url = file_url(route, "file-owner", path)
+
+        browser =
+          local_conn() |> put_req_header("origin", "null") |> put_req_header("accept", accept)
+
+        for {label, owner_response, status, relayed_body} <- [
+              {"unsafe owner headers", {:ok, 200, unsafe_headers, content_type, body}, 200, body},
+              {"owner omits CSP", {:ok, 200, content_type, body}, 200, body},
+              {"206", {:ok, 206, [], content_type, ""}, 206, ""},
+              {"304", {:ok, 304, [], content_type, ""}, 304, ""},
+              {"404", {:ok, 404, [], content_type, ""}, 404, ""},
+              {"416", {:ok, 416, [], content_type, ""}, 416, ""},
+              {"relay failure", {:error, :econnrefused}, 502, nil}
+            ] do
+          row = "relayed #{extension} on #{route}: #{label}"
+          StubGetFileClient.set_response(owner_response)
+
+          conn = get(browser, url)
+          assert conn.status == status, row
+          if relayed_body, do: assert(conn.resp_body == relayed_body, row)
+          assert_file_security(conn, row)
+          assert get_resp_header(conn, "access-control-allow-origin") == [], row
+
+          assert StubGetFileClient.last().url ==
+                   "http://localhost:4001/api/v1/file?path=#{URI.encode_www_form(path)}",
+                 row
         end
-      end
-
-      @tag :file_security
-      test "retains file security on relayed 206, 304, 404 and 416 on #{route}" do
-        url = file_url(unquote(route), "file-owner", "/remote.xml")
-        stub_forward("file-owner", "http://localhost:4001", {:ok, 200, [], "text/xml", ""})
-
-        for status <- [206, 304, 404, 416] do
-          StubGetFileClient.set_response({:ok, status, [], "text/xml", ""})
-
-          conn = get(api_conn(), url)
-          assert conn.status == status
-          assert_file_security(conn)
-        end
-      end
-
-      @tag :file_security
-      test "retains file security on relay failures on #{route}" do
-        stub_forward("file-owner", "http://localhost:4001", {:error, :econnrefused})
-        conn = get(api_conn(), file_url(unquote(route), "file-owner", "/remote.xml"))
-        assert conn.status == 502
-        assert_file_security(conn)
       end
     end
 
@@ -672,34 +565,25 @@ defmodule ShuttleWeb.FileControllerTest do
       end
     end
 
+    # Phoenix renders these from outside the endpoint pipeline.
     @tag :file_security
-    test "retains file security when endpoint parsing raises" do
-      for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
-        {400, headers, _body} =
-          assert_error_sent(400, fn ->
-            api_conn() |> post(url, "{")
-          end)
+    test "retains file security when the endpoint raises before the controller" do
+      for {label, request} <- [
+            {"unparsable /file body", fn -> api_conn() |> post("/api/v1/file", "{") end},
+            {"unparsable asset body",
+             fn -> api_conn() |> post("/api/v1/file-assets/local/missing.xml", "{") end},
+            {"undecodable query", fn -> get(api_conn(), "/api/v1/file?path=%FF") end}
+          ] do
+        {400, headers, _body} = assert_error_sent(400, request)
 
         assert List.keyfind(headers, "content-security-policy", 0) ==
-                 {"content-security-policy", @sandbox_policy}
+                 {"content-security-policy", @sandbox_policy},
+               label
 
         assert List.keyfind(headers, "x-content-type-options", 0) ==
-                 {"x-content-type-options", "nosniff"}
+                 {"x-content-type-options", "nosniff"},
+               label
       end
-    end
-
-    @tag :file_security
-    test "retains file security when query decoding raises" do
-      {400, headers, _body} =
-        assert_error_sent(400, fn ->
-          get(api_conn(), "/api/v1/file?path=%FF")
-        end)
-
-      assert List.keyfind(headers, "content-security-policy", 0) ==
-               {"content-security-policy", @sandbox_policy}
-
-      assert List.keyfind(headers, "x-content-type-options", 0) ==
-               {"x-content-type-options", "nosniff"}
     end
 
     @tag :file_security
@@ -707,8 +591,6 @@ defmodule ShuttleWeb.FileControllerTest do
       # This test's own boot snapshot, not the one every request reads.
       Shuttle.Test.Env.own_scope!()
       Shuttle.Readiness.begin_boot()
-      key = Shuttle.Env.scope_key({Shuttle.Readiness, :boot_state})
-      on_exit(fn -> :persistent_term.erase(key) end)
 
       for url <- ["/api/v1/file", "/api/v1/file-assets/local/missing.xml"] do
         conn = get(api_conn(), url)
@@ -986,51 +868,6 @@ defmodule ShuttleWeb.FileControllerTest do
                "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport%2Ffoo.css"
     end
 
-    test "sandboxes remote HTML even when the owner omits CSP" do
-      body = "<script>window.open('popup.html')</script>"
-      stub_forward("candide", "http://localhost:4001", {:ok, 200, "text/html", body})
-
-      conn =
-        local_conn()
-        |> put_req_header("origin", "null")
-        |> put_req_header("accept", "text/html")
-        |> get("/api/v1/file?path=%2Fproject%2Freport.html&origin=candide")
-
-      assert conn.status == 200
-      assert conn.resp_body == body
-      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
-      assert get_resp_header(conn, "access-control-allow-origin") == []
-
-      assert StubGetFileClient.last().url ==
-               "http://localhost:4001/api/v1/file?path=%2Fproject%2Freport.html"
-    end
-
-    test "does not relay an unsafe remote CSP or ACAO" do
-      body = "<script>window.open('popup.html')</script>"
-
-      headers = [
-        {"content-security-policy", "sandbox allow-scripts allow-same-origin"},
-        {"access-control-allow-origin", "null"}
-      ]
-
-      stub_forward(
-        "candide",
-        "http://localhost:4001",
-        {:ok, 200, headers, "text/html", body}
-      )
-
-      conn =
-        local_conn()
-        |> put_req_header("origin", "null")
-        |> put_req_header("accept", "text/html")
-        |> get("/api/v1/file?path=%2Fproject%2Freport.html&origin=candide")
-
-      assert conn.status == 200
-      assert conn.resp_body == body
-      assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
-      assert get_resp_header(conn, "access-control-allow-origin") == []
-    end
-
     test "forwards conditional headers and relays a remote 304 with its validators" do
       etag = ~s(W/"remote-file")
 
@@ -1238,12 +1075,21 @@ defmodule ShuttleWeb.FileControllerTest do
     end
   end
 
-  defp assert_file_security(conn) do
-    assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy]
-    assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+  defp assert_file_security(conn, message \\ "file security") do
+    assert get_resp_header(conn, "content-security-policy") == [@sandbox_policy], message
+    assert get_resp_header(conn, "x-content-type-options") == ["nosniff"], message
   end
 
-  defp file_url(:file, origin, path),
+  # The router's byte-serving FileController actions; `file_url/3` names each
+  # one's URL, so a new byte route fails here until it is covered.
+  defp byte_routes do
+    for %{plug: ShuttleWeb.FileController, plug_opts: action} <-
+          Phoenix.Router.routes(ShuttleWeb.Router),
+        action != :info,
+        do: action
+  end
+
+  defp file_url(action, origin, path) when action in [:file, :show],
     do: "/api/v1/file?#{URI.encode_query(%{"path" => path, "origin" => origin})}"
 
   defp file_url(:asset, origin, path), do: file_asset_url(origin, path)

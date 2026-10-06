@@ -283,7 +283,7 @@ describe('Workspace owner integration', () => {
     files = [receipt('alpha')]
     let healthy = false
     reads.mockImplementation(async url => url.includes('/sent-files/all/') ? json({ files }) : healthy ? json(envelope('alpha')) : json({}, 503))
-    reader(); overview!.refresh(); await settle()
+    reader().mountOverview(document.body); await settle()
     overview!.el.querySelector<HTMLButtonElement>('.ws-overview-folio')!.click(); await settle()
     expect(workspace!.isActive).toBe(true)
     expect(overview!.hasMetadata(overview!.orderedCards()[0])).toBe(false)

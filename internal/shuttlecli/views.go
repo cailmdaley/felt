@@ -1,21 +1,18 @@
 package shuttlecli
 
-import "github.com/cailmdaley/felt/internal/feltcli"
+import (
+	"github.com/cailmdaley/felt/internal/feltcli"
+)
 
-func shuttleViewOptions() feltcli.ViewOptions {
+func (a *app) shuttleViewOptions() feltcli.ViewOptions {
 	return feltcli.ViewOptions{
 		Binary: "shuttle",
 		Directory: func() string {
-			return changeDir
+			return a.dir
 		},
 		IsJSON: func() bool {
-			return jsonOutput
+			return a.json
 		},
-		Decorate: resolveShuttleJSON,
+		Decorate: a.resolveShuttleJSON,
 	}
-}
-
-func init() {
-	addShuttleCommand(feltcli.NewLsCmd(shuttleViewOptions()))
-	addShuttleCommand(feltcli.NewShowCmd(shuttleViewOptions()))
 }

@@ -50,6 +50,17 @@ const zipBytes = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...Array<number>(18).fi
 
 const key = (owner: string, path: string): string => `${owner}\u0000${path}`
 
+/** 64 hex digits that change with the identity they are computed from. */
+function fixtureDigest(identity: string): string {
+  let out = ''
+  for (let round = 0; out.length < 64; round++) {
+    let hash = 2166136261 ^ round
+    for (let i = 0; i < identity.length; i++) hash = Math.imul(hash ^ identity.charCodeAt(i), 16777619)
+    out += (hash >>> 0).toString(16).padStart(8, '0')
+  }
+  return out.slice(0, 64)
+}
+
 export interface WorkspaceNativeURLs {
   blobURLs: Record<string, string>
   rewrites: Array<{ owner: string; path: string; blobURL: string }>
@@ -90,7 +101,12 @@ export function installWorkspaceNativeURLs(example: WorkspaceExample): Workspace
   return { blobURLs, rewrites }
 }
 
-export function workspaceExample(now: number): WorkspaceExample {
+export const MUSIC_UID = '01KVBR7N2HK1ASN3AA67W134S4'
+export const MUSIC_NAME = 'Music'
+export const MUSIC_TRACKS = 19
+
+/** `music` adds a listening channel: a report and nineteen recordings, the shape of a real album review. */
+export function workspaceExample(now: number, options: { music?: boolean } = {}): WorkspaceExample {
   const minute = 60_000
   const day = 86_400_000
   const project = '/fixture-store/workspace'
@@ -155,6 +171,15 @@ export function workspaceExample(now: number): WorkspaceExample {
       host: WORKSPACE_HOST,
       inCardIndex: false,
     },
+    ...(options.music ? [{
+      id: 'research/workspace/music',
+      uid: MUSIC_UID,
+      name: MUSIC_NAME,
+      status: 'closed',
+      age: 0.05,
+      outcome: 'Nineteen takes are rendered; the listening notes compare them.',
+      host: WORKSPACE_HOST,
+    }] : []),
   ]
   const previews = new URLSearchParams(location.search).getAll('theme-preview')
   const previewFor = (uid: string): string | undefined => previews.find(value => value.startsWith(`${uid}:`))?.slice(uid.length + 1)
@@ -264,6 +289,12 @@ export function workspaceExample(now: number): WorkspaceExample {
     file(WORKSPACE_REMOTE, '/scratch/fixture-store/covariance/transfer.txt', 'text/plain', 'Remote receipt fixture.\n'),
     file(WORKSPACE_HOST, `${project}/deliverables/mask-validation.md`, 'text/markdown', '# Mask validation\n\nThe input mask was held fixed.\n'),
   ]
+  const musicDir = `${project}/.felt/research/workspace/music`
+  const tracks = options.music ? Array.from({ length: MUSIC_TRACKS }, (_, i) => `${project}/music/take-${String(i + 1).padStart(2, '0')}.${i % 2 ? 'wav' : 'mp3'}`) : []
+  if (options.music) {
+    files.push(file(WORKSPACE_HOST, `${musicDir}/report.html`, 'text/html', `<!doctype html><html><head><meta charset="utf-8"><title>Listening notes</title></head><body><h1>Listening notes</h1>${tracks.map(t => `<p>${t.split('/').at(-1)}: steady.</p>`).join('')}</body></html>`))
+    for (const track of tracks) files.push(file(WORKSPACE_HOST, track, track.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg', track.endsWith('.wav') ? blobFor(wavData, 'audio/wav') : blobFor(mp3Data, 'audio/mpeg')))
+  }
   const receipts: Array<Record<string, unknown>> = []
   const receipt = (fullPath: string, uid: string, offset: number, host: string, sessionId: string): void => {
     receipts.push({ fullPath, basename: fullPath.split('/').at(-1), timestamp: now + offset, sessionId, uid, host })
@@ -279,7 +310,10 @@ export function workspaceExample(now: number): WorkspaceExample {
   receipt(`${project}/deliverables/weekly.txt`, '01KVBR2G7CXDWMG85592QW78M9', -day, WORKSPACE_HOST, 'weekly-delivery')
   receipt('/scratch/fixture-store/covariance/transfer.txt', '01KVBR3H8DYFXNH96683RX89N0', -2 * day, WORKSPACE_REMOTE, 'remote-delivery')
   receipt(`${project}/deliverables/mask-validation.md`, '01KVBR4J9EZGYPJ07734SY90P1', -3 * day, WORKSPACE_HOST, 'mask-delivery')
+  tracks.forEach((track, i) => receipt(track, MUSIC_UID, -(30 - i) * minute, WORKSPACE_HOST, 'music-render'))
+  if (options.music) receipt(`${musicDir}/report.html`, MUSIC_UID, -minute, WORKSPACE_HOST, 'music-notes')
   const bodies: Record<string, string> = {
+    'research/workspace/music': ':::{embed} report.html\n:title: Listening notes\n:::\n\nNineteen takes of the theme.',
     [WORKSPACE_ID]: [
       'The response test keeps the science path and the data products together.',
       '',
@@ -341,10 +375,21 @@ export function workspaceExample(now: number): WorkspaceExample {
         : { exists: false }), { headers: { 'Content-Type': 'application/json' } })
     }
     if (!found) return new Response(null, { status: 404, statusText: 'Not Found' })
-    const etag = `"fixture-${found.body.size}"`
-    if (new Headers(requestHeaders).get('If-None-Match') === etag) return new Response(null, { status: 304, headers: { ETag: etag } })
-    const headers = new Headers({ 'Content-Type': found.mime, 'Content-Length': String(found.body.size), ETag: etag })
-    return new Response(method.toUpperCase() === 'HEAD' ? null : found.body, { status: 200, headers })
+    // Shaped like the daemon's content-digest validator, so conditional reads answer 304.
+    const etag = `W/"sha256-${fixtureDigest(`${owner}:${path}:${found.body.size}`)}"`
+    const request = new Headers(requestHeaders)
+    if (request.get('If-None-Match') === etag) return new Response(null, { status: 304, headers: { ETag: etag } })
+    const headers = new Headers({ 'Content-Type': found.mime, 'Content-Length': String(found.body.size), ETag: etag, 'Accept-Ranges': 'bytes' })
+    if (method.toUpperCase() === 'HEAD') return new Response(null, { status: 200, headers })
+    const range = /^bytes=(\d+)-(\d*)$/.exec(request.get('Range') ?? '')
+    if (range) {
+      const first = Number(range[1])
+      const last = Math.min(found.body.size - 1, range[2] ? Number(range[2]) : found.body.size - 1)
+      headers.set('Content-Range', `bytes ${first}-${last}/${found.body.size}`)
+      headers.set('Content-Length', String(last - first + 1))
+      return new Response(found.body.slice(first, last + 1), { status: 206, headers })
+    }
+    return new Response(found.body, { status: 200, headers })
   }
   return {
     host: WORKSPACE_HOST,

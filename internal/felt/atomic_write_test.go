@@ -12,6 +12,7 @@ import (
 // concurrent reader sees either complete version of a fiber document, never
 // an in-place write's empty or partial file.
 func TestStorageWrite_ConcurrentReaderNeverSeesATruncatedFiber(t *testing.T) {
+	t.Parallel()
 	s := NewStorage(t.TempDir())
 	if err := s.Init(); err != nil {
 		t.Fatal(err)
@@ -66,6 +67,7 @@ func TestStorageWrite_ConcurrentReaderNeverSeesATruncatedFiber(t *testing.T) {
 // TestStorageWrite_KeepsAnExistingFilesMode: an atomic replacement installs a
 // new file, which must not reset the mode the old one had.
 func TestStorageWrite_KeepsAnExistingFilesMode(t *testing.T) {
+	t.Parallel()
 	s := NewStorage(t.TempDir())
 	if err := s.Init(); err != nil {
 		t.Fatal(err)

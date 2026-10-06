@@ -6,33 +6,39 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func TestProjectRootAndRequireStore(t *testing.T) {
+	t.Parallel()
+	env := sysenv.New(t.TempDir(), nil)
 	dir, storage := newStore(t)
 
-	root, err := ProjectRoot(dir)
+	root, err := ProjectRoot(env, dir)
 	if err != nil || root != dir {
-		t.Fatalf("ProjectRoot(%q) = %q, %v; want %q", dir, root, err, dir)
+		t.Fatalf("ProjectRoot(env, %q) = %q, %v; want %q", dir, root, err, dir)
 	}
-	gotStorage, gotRoot, err := RequireStore(dir)
+	gotStorage, gotRoot, err := RequireStore(env, dir)
 	if err != nil {
-		t.Fatalf("RequireStore(%q): %v", dir, err)
+		t.Fatalf("RequireStore(env, %q): %v", dir, err)
 	}
 	if gotRoot != dir || gotStorage.Root() != storage.Root() {
-		t.Fatalf("RequireStore(%q) = (%q, %q), want project %q and store %q", dir, gotRoot, gotStorage.Root(), dir, storage.Root())
+		t.Fatalf("RequireStore(env, %q) = (%q, %q), want project %q and store %q", dir, gotRoot, gotStorage.Root(), dir, storage.Root())
 	}
 
 	missing := filepath.Join(t.TempDir(), "missing")
-	if _, err := ProjectRoot(missing); err == nil {
-		t.Fatalf("ProjectRoot(%q) succeeded without a .felt directory", missing)
+	if _, err := ProjectRoot(env, missing); err == nil {
+		t.Fatalf("ProjectRoot(env, %q) succeeded without a .felt directory", missing)
 	}
-	if _, _, err := RequireStore(missing); err == nil || err.Error() != "not in a felt repository" {
-		t.Fatalf("RequireStore(%q) error = %v, want not-in-repository error", missing, err)
+	if _, _, err := RequireStore(env, missing); err == nil || err.Error() != "not in a felt repository" {
+		t.Fatalf("RequireStore(env, %q) error = %v, want not-in-repository error", missing, err)
 	}
 }
 
 func TestCommandScopeFindsNearestFiberFromExplicitDirectory(t *testing.T) {
+	t.Parallel()
+	env := sysenv.New(t.TempDir(), nil)
 	dir, storage := newStore(t)
 	for _, id := range []string{"analysis", "analysis/jackknife"} {
 		if err := storage.Write(&Felt{ID: id, Name: id, CreatedAt: time.Now()}); err != nil {
@@ -44,15 +50,16 @@ func TestCommandScopeFindsNearestFiberFromExplicitDirectory(t *testing.T) {
 		t.Fatalf("mkdir start directory: %v", err)
 	}
 
-	if got := CommandScope(dir, start); got != "analysis/jackknife" {
-		t.Fatalf("CommandScope(%q, %q) = %q, want nearest fiber", dir, start, got)
+	if got := CommandScope(env, dir, start); got != "analysis/jackknife" {
+		t.Fatalf("CommandScope(env, %q, %q) = %q, want nearest fiber", dir, start, got)
 	}
-	if got := CommandScope(dir, t.TempDir()); got != "" {
+	if got := CommandScope(env, dir, t.TempDir()); got != "" {
 		t.Fatalf("CommandScope outside the store = %q, want empty scope", got)
 	}
 }
 
 func TestResolveRefAcrossView(t *testing.T) {
+	t.Parallel()
 	_, outer := newStore(t)
 	outerRoot, err := filepath.EvalSymlinks(outer.Root())
 	if err != nil {

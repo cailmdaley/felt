@@ -437,8 +437,8 @@ defmodule Shuttle.Remotes do
   @spec config_path() :: String.t()
   def config_path do
     case Shuttle.Env.get(@config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(@default_config_path)
+      v when is_binary(v) and v != "" -> Shuttle.Env.expand(v)
+      _ -> Shuttle.Env.expand(@default_config_path)
     end
   end
 

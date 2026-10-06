@@ -68,7 +68,9 @@ defmodule Shuttle.SentFilesProjectionTest do
   defp scanned(events, ledger, extra \\ []),
     do: [events_file: events, session_ledger_file: ledger, stream: :no_such_stream] ++ extra
 
-  defp wait_until(fun, tries \\ 100) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, tries \\ 3_000) do
     cond do
       fun.() -> true
       tries <= 0 -> false

@@ -3,6 +3,7 @@ package shuttlecli
 import "testing"
 
 func TestIdentityFindingFromRowUsesSlugWhenPresent(t *testing.T) {
+	t.Parallel()
 	row := daemonFiberRow{
 		Path:      "fiber/fiber.md",
 		FeltStore: "/tmp/store",
@@ -34,6 +35,7 @@ func TestIdentityFindingFromRowUsesSlugWhenPresent(t *testing.T) {
 }
 
 func TestIdentityFindingFromRowFallsBackToAddressIDForOldDaemons(t *testing.T) {
+	t.Parallel()
 	row := daemonFiberRow{
 		Fiber: map[string]any{
 			"id":     "ai-futures/portolan/debug",
@@ -49,6 +51,7 @@ func TestIdentityFindingFromRowFallsBackToAddressIDForOldDaemons(t *testing.T) {
 }
 
 func TestDuplicateIdentityRowsIgnoresMultipleViewsOfSameSlug(t *testing.T) {
+	t.Parallel()
 	rows := []identityFiberFinding{
 		{UID: "01KTCA2CWXBSNHETE66MXKPVE7", Slug: "fiber", FeltStore: "/tmp/a"},
 		{UID: "01KTCA2CWXBSNHETE66MXKPVE7", Slug: "fiber", FeltStore: "/tmp/b"},

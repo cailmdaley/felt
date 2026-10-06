@@ -46,6 +46,7 @@ func newMoveFixture(t *testing.T) *Storage {
 }
 
 func TestMoveSubtreeRewritesBodyLinks(t *testing.T) {
+	t.Parallel()
 	s := newMoveFixture(t)
 	writeFiberFile(t, s, "c", fiber("C", strings.Join([]string{
 		"Moved: [[a/x]].",
@@ -91,6 +92,7 @@ func TestMoveSubtreeRewritesBodyLinks(t *testing.T) {
 // frontmatter as written: a hand-made fiber without created-at is never
 // stamped with the zero time.
 func TestMoveSubtreeWritesOnlyChangedFiles(t *testing.T) {
+	t.Parallel()
 	s := newMoveFixture(t)
 	citing := "---\nid: fixture-C\nname: C\n# a comment felt would not round-trip\nextra: [1, 2]\n---\n\nSee [[a/x]].\n"
 	writeFiberFile(t, s, "c", citing)
@@ -119,6 +121,7 @@ func TestMoveSubtreeWritesOnlyChangedFiles(t *testing.T) {
 }
 
 func TestMarshalOmitsUnsetCreatedAt(t *testing.T) {
+	t.Parallel()
 	data, err := (&Felt{ID: "c", Name: "C"}).Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +133,7 @@ func TestMarshalOmitsUnsetCreatedAt(t *testing.T) {
 
 // Unnest runs through the same rewrite: a/x promoted to x.
 func TestMoveSubtreeUnnestRewritesLinks(t *testing.T) {
+	t.Parallel()
 	s := newMoveFixture(t)
 	writeFiberFile(t, s, "c", fiber("C", "See [[a/x]], [[a/x/y#k]] and [[a/xy]]."))
 
@@ -145,6 +149,7 @@ func TestMoveSubtreeUnnestRewritesLinks(t *testing.T) {
 // still resolves after the move is left alone, while one reaching back out
 // through the old parent is rewritten.
 func TestMoveSubtreeRewritesLinksFromInsideTheSubtree(t *testing.T) {
+	t.Parallel()
 	s := newMoveFixture(t)
 	writeFiberFile(t, s, "a/q", fiber("Q", ""))
 	writeFiberFile(t, s, "a/x/y", fiber("Y", "Parent [[a/x]], sibling-of-parent [[a/q]], self [[x/y]]."))
@@ -160,6 +165,7 @@ func TestMoveSubtreeRewritesLinksFromInsideTheSubtree(t *testing.T) {
 // A path written relative to a scope keeps that shape when the destination is
 // still under the same scope.
 func TestMoveSubtreeKeepsScopeRelativeSpelling(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	for _, id := range []string{"p", "p/a", "p/a/x", "p/b", "p/c", "q"} {
 		writeFiberFile(t, s, id, fiber(id, ""))
@@ -178,6 +184,7 @@ func TestMoveSubtreeKeepsScopeRelativeSpelling(t *testing.T) {
 }
 
 func TestExtractBodyRefsAgreesWithRewrite(t *testing.T) {
+	t.Parallel()
 	body := "[[one]] `[[code]]` [t](two#f) ```\n[[fenced]]\n``` [[three#s|label]] [`four`](four) `[x](not)`"
 	var seen []string
 	out, changed := RewriteBodyRefs(body, func(target string) (string, bool) {
@@ -200,6 +207,7 @@ func TestExtractBodyRefsAgreesWithRewrite(t *testing.T) {
 }
 
 func TestCheckWarnsOnStalePathLink(t *testing.T) {
+	t.Parallel()
 	felts := []*Felt{
 		{ID: "b", Name: "B"},
 		{ID: "b/x", Name: "X"},
@@ -217,6 +225,7 @@ func TestCheckWarnsOnStalePathLink(t *testing.T) {
 }
 
 func TestCheckWarnsOnStalePathDataFlowRef(t *testing.T) {
+	t.Parallel()
 	consumer := &Felt{ID: "c", Name: "C"}
 	mustExtra(t, consumer, "inputs", []map[string]any{{"id": "in", "from": "a/x"}})
 	issues := Check([]*Felt{{ID: "b", Name: "B"}, {ID: "b/x", Name: "X"}, consumer}, nil)
@@ -228,6 +237,7 @@ func TestCheckWarnsOnStalePathDataFlowRef(t *testing.T) {
 // A top-level fiber's bare slug is its full path, but nesting it leaves the
 // slug resolving by path (it is still unique), so the link stays as written.
 func TestMoveSubtreeLeavesTopLevelBareSlugThatStillResolves(t *testing.T) {
+	t.Parallel()
 	s := newMoveFixture(t)
 	writeFiberFile(t, s, "solo", fiber("Solo", ""))
 	citing := fiber("C", "See [[solo]] and [[solo#k|it]].")
@@ -246,6 +256,7 @@ func TestMoveSubtreeLeavesTopLevelBareSlugThatStillResolves(t *testing.T) {
 // slug is not unique, so nothing carries it to the new place — is rewritten
 // to the fiber's full new id.
 func TestMoveSubtreeRewritesBareSlugTheMoveBreaks(t *testing.T) {
+	t.Parallel()
 	s := newMoveFixture(t)
 	writeFiberFile(t, s, "q/x", fiber("Another x", ""))
 	writeFiberFile(t, s, "a/c", fiber("C", "See [[x]]."))
@@ -274,6 +285,7 @@ func newCaptureFixture(t *testing.T) (*Storage, string) {
 // A move that brings a fiber named x into a/ would make a/sib's [[x]] name it
 // instead of a/xy; the link is pinned to the fiber it named.
 func TestMoveSubtreePinsLinkTheMoveWouldCapture(t *testing.T) {
+	t.Parallel()
 	s, _ := newCaptureFixture(t)
 
 	result, err := s.MoveSubtree("b/x", "a/x")
@@ -290,6 +302,7 @@ func TestMoveSubtreePinsLinkTheMoveWouldCapture(t *testing.T) {
 
 // A move elsewhere leaves [[x]] naming a/xy, so nothing is written.
 func TestMoveSubtreeLeavesLinkTheMoveDoesNotCapture(t *testing.T) {
+	t.Parallel()
 	s, citing := newCaptureFixture(t)
 
 	result, err := s.MoveSubtree("b/x", "c/x")

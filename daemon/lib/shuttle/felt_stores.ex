@@ -108,7 +108,7 @@ defmodule Shuttle.FeltStores do
     discovered = Enum.flat_map(stores, &symlinked_substore_roots/1)
 
     (stores ++ discovered)
-    |> Enum.map(&Path.expand/1)
+    |> Enum.map(&Shuttle.Env.expand/1)
     # When two stores share a `.felt/` realpath, keep the REAL-directory store:
     # `list_shuttle_fibers/2` returns `{:ok, []}` for a store whose `.felt/` is a
     # symlink, so keeping that one would drop the realpath from dispatch (and the
@@ -128,7 +128,7 @@ defmodule Shuttle.FeltStores do
   """
   @spec store_felt_realpath(String.t()) :: String.t()
   def store_felt_realpath(store) do
-    felt_dir = store |> Path.join(".felt") |> Path.expand()
+    felt_dir = store |> Path.join(".felt") |> Shuttle.Env.expand()
 
     case Shuttle.Realpath.resolve(felt_dir) do
       {:ok, resolved} -> resolved
@@ -140,7 +140,7 @@ defmodule Shuttle.FeltStores do
   # Such a store is skipped by the poller's enumerator, so it must lose a dedup
   # tie to a real-directory store sharing the same `.felt/` realpath.
   defp felt_symlink?(store) do
-    case File.lstat(Path.join(Path.expand(store), ".felt")) do
+    case File.lstat(Path.join(Shuttle.Env.expand(store), ".felt")) do
       {:ok, %File.Stat{type: :symlink}} -> true
       _ -> false
     end

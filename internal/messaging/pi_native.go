@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 const piNativeTransport = "pi-native"
@@ -28,13 +30,13 @@ type piNativeRegistration struct {
 	Inode      uint64 `json:"inode"`
 }
 
-func piNativePath(id string) string {
-	return filepath.Join(mailboxDir("pi", id), "native.json")
+func piNativePath(env *sysenv.Env, id string) string {
+	return filepath.Join(mailboxDir(env, "pi", id), "native.json")
 }
 
-func readPiNative(id string) (piNativeRegistration, error) {
+func readPiNative(env *sysenv.Env, id string) (piNativeRegistration, error) {
 	var registration piNativeRegistration
-	b, err := readBounded(piNativePath(id), 16384)
+	b, err := readBounded(piNativePath(env, id), 16384)
 	if err == nil {
 		err = json.Unmarshal(b, &registration)
 	}
@@ -67,11 +69,11 @@ func piNativeSocket(path string) (os.FileInfo, error) {
 // RegisterPiNative records the endpoint owned by a running Pi extension. The
 // extension owns the socket and calls pi.sendUserMessage after a request is
 // validated; felt only routes bytes and records the registration.
-func RegisterPiNative(id, host, cwd, socket, transcript string, pid int, active bool) error {
+func RegisterPiNative(env *sysenv.Env, id, host, cwd, socket, transcript string, pid int, active bool) error {
 	if _, err := FormatAddress(host, "pi", id); err != nil {
 		return err
 	}
-	path := piNativePath(id)
+	path := piNativePath(env, id)
 	if err := ensureDir(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
@@ -84,7 +86,7 @@ func RegisterPiNative(id, host, cwd, socket, transcript string, pid int, active 
 		return err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	old, oldErr := readPiNative(id)
+	old, oldErr := readPiNative(env, id)
 	if !active {
 		if oldErr != nil || old.Host != host || old.Socket != socket || old.PID != pid {
 			return nil
@@ -106,7 +108,7 @@ func RegisterPiNative(id, host, cwd, socket, transcript string, pid int, active 
 		return errCode("unavailable", "Pi native socket has no filesystem identity")
 	}
 	registration := piNativeRegistration{ID: id, Host: host, CWD: cwd, Socket: socket, Transcript: transcript, PID: pid, Device: uint64(stat.Dev), Inode: uint64(stat.Ino)}
-	if oldErr == nil && old.Host == host && old.ID == id && (old.Socket != socket || old.Device != registration.Device || old.Inode != registration.Inode || old.PID != pid) && piNativeAvailable(id, host) && piNativeListening(old.Socket) {
+	if oldErr == nil && old.Host == host && old.ID == id && (old.Socket != socket || old.Device != registration.Device || old.Inode != registration.Inode || old.PID != pid) && piNativeAvailable(env, id, host) && piNativeListening(old.Socket) {
 		return errCode("unavailable", "another live Pi receiver owns this session")
 	}
 	b, err := json.Marshal(registration)
@@ -125,8 +127,8 @@ func piNativeListening(socket string) bool {
 	return true
 }
 
-func piNativeAvailable(id, host string) bool {
-	r, err := readPiNative(id)
+func piNativeAvailable(env *sysenv.Env, id, host string) bool {
+	r, err := readPiNative(env, id)
 	if err != nil || r.ID != id || r.Host != host || r.PID <= 0 {
 		return false
 	}
@@ -138,8 +140,8 @@ func piNativeAvailable(id, host string) bool {
 	return ok && uint64(stat.Dev) == r.Device && uint64(stat.Ino) == r.Inode
 }
 
-func piNativeSessions(host string) []Session {
-	root := filepath.Join(dataDir(), "mailboxes", "pi")
+func piNativeSessions(env *sysenv.Env, host string) []Session {
+	root := filepath.Join(dataDir(env), "mailboxes", "pi")
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return []Session{}
@@ -154,7 +156,7 @@ func piNativeSessions(host string) []Session {
 			continue
 		}
 		var r piNativeRegistration
-		if json.Unmarshal(b, &r) != nil || r.Host != host || !piNativeAvailable(r.ID, host) || !piNativeListening(r.Socket) {
+		if json.Unmarshal(b, &r) != nil || r.Host != host || !piNativeAvailable(env, r.ID, host) || !piNativeListening(r.Socket) {
 			continue
 		}
 		address, err := FormatAddress(host, "pi", r.ID)
@@ -166,9 +168,9 @@ func piNativeSessions(host string) []Session {
 	return sessions
 }
 
-func sendPiNative(ctx context.Context, a Address, req Request) (Receipt, error) {
-	r, err := readPiNative(a.ID)
-	if err != nil || r.ID != a.ID || r.Host != a.Host || !piNativeAvailable(a.ID, a.Host) {
+func sendPiNative(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error) {
+	r, err := readPiNative(env, a.ID)
+	if err != nil || r.ID != a.ID || r.Host != a.Host || !piNativeAvailable(env, a.ID, a.Host) {
 		return rejected(req, piNativeTransport, "Pi session has not registered a native receiver endpoint"), errCode("preflight_failed", "Pi native receiver endpoint unavailable")
 	}
 	d := net.Dialer{Timeout: 2 * time.Second}

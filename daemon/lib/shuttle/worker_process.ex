@@ -246,7 +246,7 @@ defmodule Shuttle.WorkerProcess do
   defp own_uid do
     case :persistent_term.get({__MODULE__, :uid}, nil) do
       nil ->
-        case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+        case Shuttle.Env.cmd("id", ["-u"], stderr_to_stdout: true) do
           {out, 0} ->
             uid = String.trim(out)
             :persistent_term.put({__MODULE__, :uid}, uid)

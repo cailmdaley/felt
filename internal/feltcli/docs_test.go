@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 var retiredCommandPhrases = []string{
@@ -22,6 +24,7 @@ var retiredCommandPhrases = []string{
 }
 
 func TestGeneratedGuidanceAvoidsRetiredCommands(t *testing.T) {
+	t.Parallel()
 	// Only scan the in-binary string fixtures; the plugin tree (skills,
 	// hooks, manifest) is scanned by TestPluginSkillsAvoidRetiredCommands.
 	for name, text := range map[string]string{
@@ -36,8 +39,9 @@ func TestGeneratedGuidanceAvoidsRetiredCommands(t *testing.T) {
 }
 
 func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
+	t.Parallel()
 	var visible []string
-	for _, cmd := range rootCmd.Commands() {
+	for _, cmd := range NewRootCmd(sysenv.New(t.TempDir(), nil)).Commands() {
 		if cmd.Hidden {
 			continue
 		}
@@ -78,7 +82,8 @@ func TestRootCommandSurfaceIsConsolidated(t *testing.T) {
 }
 
 func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
-	usage := rootCmd.UsageString()
+	t.Parallel()
+	usage := NewRootCmd(sysenv.New(t.TempDir(), nil)).UsageString()
 	for _, leaked := range []string{"Body text", "Outcome: what was decided", "Status (open, active, closed)"} {
 		if strings.Contains(usage, leaked) {
 			t.Fatalf("root usage still leaks add-only flag %q:\n%s", leaked, usage)
@@ -86,25 +91,6 @@ func TestRootUsageAvoidsAddFlagLeakageAndBareAddShorthand(t *testing.T) {
 	}
 	if strings.Contains(usage, "felt <slug> <name>") {
 		t.Fatalf("root usage still advertises bare add shorthand:\n%s", usage)
-	}
-}
-
-// repoRoot walks up from the test's working directory until it finds go.mod.
-func repoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not find repo root (no go.mod)")
-		}
-		dir = parent
 	}
 }
 
@@ -168,10 +154,12 @@ func forbidUnder(t *testing.T, root, ext string, phrases ...string) {
 }
 
 func TestPluginSkillsAvoidRetiredCommands(t *testing.T) {
+	t.Parallel()
 	forbidUnder(t, pluginSkillsRoot(t), "", retiredCommandPhrases...)
 }
 
 func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
+	t.Parallel()
 	skillsRoot := pluginSkillsRoot(t)
 
 	data, err := os.ReadFile(filepath.Join(skillsRoot, "shuttle", "references", "meeting.md"))
@@ -192,6 +180,7 @@ func TestPluginSkillsAvoidLegacyCommentBodyEdits(t *testing.T) {
 }
 
 func TestPluginSkillsAreSortedAndKnown(t *testing.T) {
+	t.Parallel()
 	names := pluginSkillNames(t)
 	sorted := make([]string, len(names))
 	copy(sorted, names)
@@ -209,6 +198,7 @@ func TestPluginSkillsAreSortedAndKnown(t *testing.T) {
 }
 
 func TestReadmeListsPluginSkills(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	data, err := os.ReadFile(filepath.Join(root, "README.md"))
 	if err != nil {
@@ -230,6 +220,7 @@ func TestReadmeListsPluginSkills(t *testing.T) {
 }
 
 func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
+	t.Parallel()
 	docsDir := filepath.Join(repoRoot(t), "docs")
 	if _, err := os.Stat(docsDir); err != nil {
 		t.Fatalf("could not find repository docs/: %v", err)
@@ -238,6 +229,7 @@ func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {
 }
 
 func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
+	t.Parallel()
 	for name, text := range map[string]string{
 		"claudeMDSnippet": claudeMDSnippet(),
 	} {
@@ -253,6 +245,7 @@ func TestGeneratedGuidanceAvoidsLegacyTitleDetailLevel(t *testing.T) {
 // TestPluginAssetsAvoidLegacyTitleDetailLevel walks the plugin tree (skills,
 // hooks, manifest) for legacy detail-level phrasing.
 func TestPluginAssetsAvoidLegacyTitleDetailLevel(t *testing.T) {
+	t.Parallel()
 	pluginRoot := filepath.Join(repoRoot(t), "claude-plugin")
 	if _, err := os.Stat(pluginRoot); err != nil {
 		t.Skipf("no claude-plugin at %s: %v", pluginRoot, err)

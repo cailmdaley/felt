@@ -8,6 +8,7 @@ import (
 // TestBuiltinRegistry_IsComplete pins the maintained default fleet. The point
 // is that a fresh install is useful without copying an operator's agents.json.
 func TestBuiltinRegistry_IsComplete(t *testing.T) {
+	t.Parallel()
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
@@ -58,6 +59,7 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 }
 
 func TestBuiltinRegistry_PiRefreshRoles(t *testing.T) {
+	t.Parallel()
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
@@ -80,6 +82,7 @@ func TestBuiltinRegistry_PiRefreshRoles(t *testing.T) {
 }
 
 func TestBuiltinRegistry_ChromeAxisIsReachable(t *testing.T) {
+	t.Parallel()
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
@@ -97,6 +100,7 @@ func TestBuiltinRegistry_ChromeAxisIsReachable(t *testing.T) {
 // omitted, and the loader fills it from `cli`. The daemon reads wrapper to build
 // the launch command, so an empty one would dispatch nothing.
 func TestBuiltinRegistry_WrapperDefaultsToCLI(t *testing.T) {
+	t.Parallel()
 	reg, err := LoadBuiltinAgentRegistry()
 	if err != nil {
 		t.Fatalf("LoadBuiltinAgentRegistry: %v", err)
@@ -114,6 +118,7 @@ func TestBuiltinRegistry_WrapperDefaultsToCLI(t *testing.T) {
 // TestFleetFixtureParses guards the axis tests' fixture (which retains
 // headless aliases as an internal -p test fixture) against bit-rot.
 func TestFleetFixtureParses(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	if len(reg.Records()) != 18 {
 		t.Fatalf("fleet fixture has %d records, want 18", len(reg.Records()))

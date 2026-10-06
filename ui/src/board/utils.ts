@@ -329,16 +329,6 @@ export function fiberDocUrl(shuttleBase: string, id: string): string {
   return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
 }
 
-/**
- * Build the owner-routed metadata URL used to check an artifact without
- * downloading its bytes. The daemon returns `{exists, modified_at, size}`;
- * `cache: no-store` belongs on the request, not in this URL builder.
- */
-export function fileInfoUrl(base: string, fullPath: string, originId: string): string {
-  const abs = fullPath.startsWith('/') ? fullPath : `/${fullPath}`
-  return withOrigin(`${base}/api/v1/file-info?path=${encodePathParam(abs)}`, originId)
-}
-
 /** File kind vocabulary shared by documents, readers, and thumbnails. */
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
 export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus'])

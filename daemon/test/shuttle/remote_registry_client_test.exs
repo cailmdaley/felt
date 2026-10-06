@@ -153,15 +153,26 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       Shuttle.Test.Env.put_app_env(:https_proxy, "127.0.0.1:#{port}")
       parent = self()
 
+      # Every bound below is reached only on failure: the fake proxy closes the
+      # connection as soon as it has read the CONNECT, which ends the request
+      # at once. They are generous so a loaded scheduler (httpc's handler must
+      # run, dial and write before the request timeout cancels it) cannot fail
+      # a request that is going through the proxy.
       Task.start(fn ->
-        {:ok, conn} = :gen_tcp.accept(listener, 5_000)
-        {:ok, data} = :gen_tcp.recv(conn, 0, 5_000)
-        send(parent, {:proxy_saw, data})
-        :gen_tcp.close(conn)
+        with {:ok, conn} <- :gen_tcp.accept(listener, 30_000),
+             {:ok, data} <- :gen_tcp.recv(conn, 0, 30_000) do
+          send(parent, {:proxy_saw, data})
+          :gen_tcp.close(conn)
+        end
       end)
 
-      assert {:error, _} = Default.get("https://hub.example.invalid/api/v1/state", 2_000)
-      assert_receive {:proxy_saw, data}, 5_000
+      result = Default.get("https://hub.example.invalid/api/v1/state", 30_000)
+
+      assert_receive {:proxy_saw, data},
+                     30_000,
+                     "the proxy saw no request; get returned #{inspect(result)}"
+
+      assert {:error, _} = result
       assert data =~ ~r/\ACONNECT hub\.example\.invalid:443 HTTP\/1\.1\r\n/
       :gen_tcp.close(listener)
     end

@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 
 import {
   ADD_PROJECT_VALUE,
@@ -26,31 +27,24 @@ const projects: PickerProject[] = [
 ]
 
 describe('projectsForHost', () => {
-  it('keeps only the selected host’s projects', () => {
-    expect(projectsForHost(projects, 'local').map((p) => p.id)).toEqual([
-      'local:/dev/felt',
-      'local:/dev/sample',
-    ])
-  })
+  const HOSTS = ['local', 'candide', 'cineca'] as const
+  const generated = fc.uniqueArray(
+    fc.record({ n: fc.nat({ max: 99 }), originId: fc.constantFrom(...HOSTS) }),
+    { selector: (p) => p.n, maxLength: 12 },
+  ).map((rows) => rows.map(({ n, originId }) => ({ id: `${originId}:/p${n}`, originId })))
 
-  it('scopes to a remote host on its bare name', () => {
-    expect(projectsForHost(projects, 'candide').map((p) => p.id)).toEqual(['candide:/home/x/cmbx'])
-  })
-
-  it('answers empty for a host with nothing on it yet — the add row’s case', () => {
-    expect(projectsForHost(projects, 'cineca')).toEqual([])
+  it('is exactly the selected host’s projects, in incoming order', () => {
+    // Order is the form’s recency ranking, so the answer must be the input
+    // with every other host’s rows struck out — nothing reordered, nothing
+    // dropped. `cineca` is often absent from a generated list, which is the
+    // add row’s case: a host with nothing on it yet answers empty.
+    fc.assert(fc.property(generated, fc.constantFrom(...HOSTS), (list, host) => {
+      expect(projectsForHost(list, host).map((p) => p.id)).toEqual(list.flatMap((p) => (p.originId === host ? [p.id] : [])))
+    }), { seed: 0x9e57ed, numRuns: 200 })
   })
 
   it('answers empty rather than everything when no host is selected', () => {
     expect(projectsForHost(projects, null)).toEqual([])
-  })
-
-  it('preserves the incoming order, which is the form’s recency ranking', () => {
-    const reversed = [...projects].reverse()
-    expect(projectsForHost(reversed, 'local').map((p) => p.id)).toEqual([
-      'local:/dev/sample',
-      'local:/dev/felt',
-    ])
   })
 })
 

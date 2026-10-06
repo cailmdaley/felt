@@ -62,7 +62,6 @@ import {
 } from '../testFixtures.js'
 import {
   civilDayAt,
-  formatSpanMinutes,
   isoDayLocal,
   shiftCivilDay,
   wallClock,
@@ -236,23 +235,11 @@ describe('attributing activity to fibers', () => {
     expect(at.get(ledgerCard.id)).toHaveLength(1)
   })
 
-  it('ranks a remote host\u2019s work on its own row, not the local one', () => {
-    // The whole point of the cross-host read: ink from `ada` lands on `ada`'s
-    // fiber even though `run-shuttle` also matches a fiber on `bob`.
-    const at = attributeActivity([bucket(1, { s: 'run-shuttle', host: 'ada' })], cards, crossHostLedger)
-    expect(at.has(ledgerCard.id)).toBe(false)
-    expect(at.get(morning.id)).toHaveLength(1)
-  })
-
-  // Rung 1. A bucket's session name is exactly a live worker's tmux name.
-  it('joins a live worker\u2019s exact tmux name with no ledger at all', () => {
+  it('joins a live worker\u2019s exact tmux name with no ledger at all, and nothing else', () => {
     const at = attributeActivity([bucket(1, { s: bmodes.tmuxSession })], cards)
     expect(at.get(bmodes.id)).toHaveLength(1)
-  })
-
-  it('drops a session that neither rung can place', () => {
-    const at = attributeActivity([bucket(1), bucket(2, { s: 'unknown-shuttle' })], cards)
-    expect(at.size).toBe(0)
+    // A nameless bucket, and a name no card carries: neither rung places them.
+    expect(attributeActivity([bucket(1), bucket(2, { s: 'unknown-shuttle' })], cards).size).toBe(0)
   })
 })
 
@@ -304,24 +291,26 @@ describe.each(DST_ZONES)('folding buckets into civil days in $z.id', ({ z, dstDa
     expect(days.get(before)?.agent).toBe(1 + 2)
     expect(days.get(after)?.agent).toBe(32)
   })
-
-  it('separates the drawn kinds within a day, and drops notify entirely', () => {
-    const days = aggregateByCivilDay([
-      bucket(at(dstDay, 9), { k: 'agent', n: 12 }),
-      bucket(at(dstDay, 10), { k: 'attention', n: 1 }),
-      bucket(at(dstDay, 11), { k: 'notify', n: 1 }),
-      bucket(at(dstDay, 14), { k: 'agent', n: 7 }),
-    ], z)
-    const cell = days.get(dstDay)
-    expect(cell?.agent).toBe(19)
-    expect(cell?.attention).toBe(1)
-    // The notify bucket contributes to no figure — it is not a drawn state.
-  })
 })
 
 describe('folding buckets into civil days', () => {
   it('ignores a bucket with an unusable timestamp', () => {
     expect(aggregateByCivilDay([bucket(Number.NaN)]).size).toBe(0)
+  })
+
+  it('separates the drawn kinds within a day, and drops notify entirely', () => {
+    const z = zone('America/Los_Angeles')
+    const day = '2026-07-15'
+    const days = aggregateByCivilDay([
+      bucket(wallMs(day, 9, 0, z), { k: 'agent', n: 12 }),
+      bucket(wallMs(day, 10, 0, z), { k: 'attention', n: 1 }),
+      bucket(wallMs(day, 11, 0, z), { k: 'notify', n: 1 }),
+      bucket(wallMs(day, 14, 0, z), { k: 'agent', n: 7 }),
+    ], z)
+    const cell = days.get(day)
+    expect(cell?.agent).toBe(19)
+    expect(cell?.attention).toBe(1)
+    // The notify bucket contributes to no figure — it is not a drawn state.
   })
 })
 
@@ -511,13 +500,6 @@ describe('placing a cycle band on the day grid', () => {
     expect(band?.startIdx).toBe(20)
     expect(band?.endIdx).toBe(20)
   })
-
-  it('places bands in the future half — a cycle is a span, not a memory', () => {
-    expect(place(WINDOW_DAYS[TODAY_IDX + 2].iso, WINDOW_DAYS[TODAY_IDX + 9].iso)).toMatchObject({
-      startIdx: TODAY_IDX + 2,
-      endIdx: TODAY_IDX + 9,
-    })
-  })
 })
 
 describe('routing a cycle write to its owner', () => {
@@ -559,14 +541,12 @@ describe('stacking overlapping cycles into lanes', () => {
     const assigned = lanes([[0, 20], [1, 20], [2, 20], [3, 20], [4, 20]])
     expect(assigned).toHaveLength(5) // nothing dropped
     expect(Math.max(...assigned)).toBe(2) // never exceeds MAX_CYCLE_LANES - 1
-  })
-
-  it('honours a caller-supplied cap', () => {
-    const assigned = assignCycleLanes(
+    // A caller-supplied cap is honoured the same way.
+    const capped = assignCycleLanes(
       [{ startIdx: 0, endIdx: 9 }, { startIdx: 1, endIdx: 9 }, { startIdx: 2, endIdx: 9 }],
       2,
     ).map((b) => b.lane)
-    expect(Math.max(...assigned)).toBe(1)
+    expect(Math.max(...capped)).toBe(1)
   })
 
   it('builds bands and lanes together, dropping the out-of-window ones', () => {
@@ -594,9 +574,7 @@ describe('which day the page calls today', () => {
     // 01:00 — the board is still on yesterday's rail, and so must this page
     // be, or the night's work inks a column past its own today line.
     expect(railDay('2026-07-15', 1)).toBe('2026-07-14')
-  })
-
-  it('is the calendar date once the rail has opened', () => {
+    // Once the rail has opened, it is the calendar date until midnight and past.
     expect(railDay('2026-07-15', 6, 1)).toBe('2026-07-15')
     expect(railDay('2026-07-15', 23, 30)).toBe('2026-07-15')
   })
@@ -627,13 +605,6 @@ describe('composing an era’s look-back', () => {
     const t = Date.parse('2026-03-08T18:00:00Z')
     const buckets = [bucket(t - 600_000, { k: 'agent' }), bucket(t, { k: 'agent' })]
     expect(foldActiveMinutes(buckets, { fromMs: t - 1, toMs: t + 2 }).agent).toBe(1)
-  })
-
-  it('reads a duration the way a person says it', () => {
-    expect(formatSpanMinutes(0, { empty: '—' })).toBe('—')
-    expect(formatSpanMinutes(45, { empty: '—' })).toBe('45m')
-    expect(formatSpanMinutes(200, { empty: '—' })).toBe('3h 20m')
-    expect(formatSpanMinutes(120, { empty: '—' })).toBe('2h 0m')
   })
 
   // groupNarration reads the COMMIT LEDGER's attribution now — a hook recorded

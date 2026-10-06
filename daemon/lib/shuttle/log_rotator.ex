@@ -248,8 +248,8 @@ defmodule Shuttle.LogRotator do
 
       _ ->
         case :os.type() do
-          {:unix, :darwin} -> Path.join([System.user_home!(), "Library", "Logs", "shuttle.log"])
-          _ -> Path.join([System.user_home!(), ".shuttle", "shuttle.log"])
+          {:unix, :darwin} -> Path.join([Shuttle.Env.home(), "Library", "Logs", "shuttle.log"])
+          _ -> Path.join([Shuttle.Env.home(), ".shuttle", "shuttle.log"])
         end
     end
   end
@@ -258,7 +258,7 @@ defmodule Shuttle.LogRotator do
   # convention. Mirrored here as a convention, not imported: the daemon never
   # reaches into CLI internals.
   defp default_tunnel_log_dir do
-    Path.join([System.user_home!(), ".local", "state", "shuttle"])
+    Path.join([Shuttle.Env.home(), ".local", "state", "shuttle"])
   end
 
   # ── Reporting ──

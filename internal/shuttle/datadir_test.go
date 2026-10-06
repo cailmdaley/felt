@@ -11,6 +11,8 @@ import (
 // also held to, so a ~-prefixed or padded SHUTTLE_DATA_DIR names one directory
 // for every file either side keeps.
 func TestDataDirFixtureParity(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	data, err := os.ReadFile("../../daemon/test/fixtures/data_dir/cases.json")
 	if err != nil {
 		t.Fatalf("reading fixture: %v", err)
@@ -30,20 +32,19 @@ func TestDataDirFixtureParity(t *testing.T) {
 	}
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	env.Set("HOME", home)
 	for _, c := range fixture.Cases {
 		t.Run(c.Name, func(t *testing.T) {
 			if c.Env == nil {
-				t.Setenv("SHUTTLE_DATA_DIR", "")
-				os.Unsetenv("SHUTTLE_DATA_DIR")
+				env.Unset("SHUTTLE_DATA_DIR")
 			} else {
-				t.Setenv("SHUTTLE_DATA_DIR", *c.Env)
+				env.Set("SHUTTLE_DATA_DIR", *c.Env)
 			}
 			want := c.Expect
 			if want == "~" || strings.HasPrefix(want, "~/") {
 				want = home + want[1:]
 			}
-			got, err := DataDir()
+			got, err := DataDir(env)
 			if err != nil || got != want {
 				t.Fatalf("SHUTTLE_DATA_DIR=%v: got %q err %v, want %q", c.Env, got, err, want)
 			}

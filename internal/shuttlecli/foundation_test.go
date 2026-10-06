@@ -8,49 +8,21 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-// withOwnHost seeds identity via a host file (SHUTTLE_HOST_FILE) so
-// resolveOwnHost (and thus ensureOwnedHere) resolves deterministically to
-// hostID, independent of any real daemon, env var, or OS hostname on the test
-// machine. Shared by the foundation and lifecycle/create verb tests.
-func withOwnHost(t *testing.T, hostID string) {
-	t.Helper()
-	t.Setenv("SHUTTLE_HOST", "") // guard against ambient env leaking into the test
-	dir := t.TempDir()
-	path := filepath.Join(dir, "host")
-	if err := os.WriteFile(path, []byte(hostID+"\n"), 0o644); err != nil {
-		t.Fatalf("writing host file: %v", err)
-	}
-	t.Setenv("SHUTTLE_HOST_FILE", path)
-}
-
-// shuttleFeltWithBlock builds an in-memory fiber carrying a shuttle: block, for
-// unit tests that exercise a helper directly (not through a command).
-func shuttleFeltWithBlock(t *testing.T, block map[string]any) *felt.Felt {
-	t.Helper()
-	f, err := felt.New("test-fiber", "Test Fiber")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if block != nil {
-		if err := f.SetExtraField("shuttle", block); err != nil {
-			t.Fatalf("SetExtraField: %v", err)
-		}
-	}
-	return f
-}
-
 func TestResolveOwnHost_Precedence(t *testing.T) {
-	withOwnHost(t, "filehost")
-	t.Setenv("SHUTTLE_HOST", "envhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "filehost")
+	env.Set("SHUTTLE_HOST", "envhost")
 
 	// Explicit flag wins over everything.
-	if got, err := resolveOwnHost("flaghost"); err != nil || got != "flaghost" {
+	if got, err := newApp(env).resolveOwnHost("flaghost"); err != nil || got != "flaghost" {
 		t.Fatalf("flag should win: got %q err %v", got, err)
 	}
 	// No flag → SHUTTLE_HOST env wins over the host file.
-	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+	if got, err := newApp(env).resolveOwnHost(""); err != nil || got != "envhost" {
 		t.Fatalf("env should win over host file: got %q err %v", got, err)
 	}
 }
@@ -58,10 +30,12 @@ func TestResolveOwnHost_Precedence(t *testing.T) {
 // TestResolveOwnHost_EnvBeatsFile locks in that SHUTTLE_HOST takes precedence
 // over the ~/.shuttle/host file.
 func TestResolveOwnHost_EnvBeatsFile(t *testing.T) {
-	withOwnHost(t, "filehost")
-	t.Setenv("SHUTTLE_HOST", "envhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "filehost")
+	env.Set("SHUTTLE_HOST", "envhost")
 
-	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+	if got, err := newApp(env).resolveOwnHost(""); err != nil || got != "envhost" {
 		t.Fatalf("env should beat file: got %q err %v", got, err)
 	}
 }
@@ -71,9 +45,11 @@ func TestResolveOwnHost_EnvBeatsFile(t *testing.T) {
 // that keeps a machine's friendly alias (e.g. candide) stable regardless of
 // its OS-reported hostname (e.g. c03).
 func TestResolveOwnHost_FileBeatsHostname(t *testing.T) {
-	withOwnHost(t, "candide")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "candide")
 
-	got, err := resolveOwnHost("")
+	got, err := newApp(env).resolveOwnHost("")
 	if err != nil {
 		t.Fatalf("resolveOwnHost: %v", err)
 	}
@@ -92,20 +68,22 @@ func TestResolveOwnHost_FileBeatsHostname(t *testing.T) {
 // ensureOwnedHere end-to-end: a fiber whose shuttle block names this same host
 // as owner is writable with no daemon involved.
 func TestResolveOwnHost_DaemonDown_HostFileOnly(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	// An unroutable/closed local port: nothing is listening, so any accidental
 	// round-trip to the daemon would fail loudly (dial refused) rather than
 	// silently succeeding and masking the bug this test guards against.
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
-	t.Setenv("SHUTTLE_HOST", "")
+	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	env.Set("SHUTTLE_HOST", "")
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "host")
 	if err := os.WriteFile(path, []byte("candide\n"), 0o644); err != nil {
 		t.Fatalf("writing host file: %v", err)
 	}
-	t.Setenv("SHUTTLE_HOST_FILE", path)
+	env.Set("SHUTTLE_HOST_FILE", path)
 
-	got, err := resolveOwnHost("")
+	got, err := newApp(env).resolveOwnHost("")
 	if err != nil {
 		t.Fatalf("resolveOwnHost with daemon down: %v", err)
 	}
@@ -114,7 +92,7 @@ func TestResolveOwnHost_DaemonDown_HostFileOnly(t *testing.T) {
 	}
 
 	fiber := shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "candide"})
-	if err := ensureOwnedHere(fiber, "f"); err != nil {
+	if err := newApp(env).ensureOwnedHere(fiber, "f"); err != nil {
 		t.Fatalf("ownership-guarded local write should succeed with daemon down and host-file identity: %v", err)
 	}
 }
@@ -125,14 +103,15 @@ func TestResolveOwnHost_DaemonDown_HostFileOnly(t *testing.T) {
 // "Studio-Air.home" where the daemon's :inet.gethostname() reported the
 // short name, so the CLI stamped a host the daemon would never match.
 func TestResolveOwnHost_HostnameNormalized(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "")
-	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "host"))
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "")
+	env.Set("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "host"))
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "  Studio-Air.home  ", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := newApp(env)
+	a.osHostname = func() (string, error) { return "  Studio-Air.home  ", nil }
 
-	got, err := resolveOwnHost("")
+	got, err := a.resolveOwnHost("")
 	if err != nil {
 		t.Fatalf("resolveOwnHost: %v", err)
 	}
@@ -146,15 +125,16 @@ func TestResolveOwnHost_HostnameNormalized(t *testing.T) {
 // later resolve — the CLI's and, through it, the daemon's — reads a value that
 // cannot drift with DHCP.
 func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "")
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "")
 	path := filepath.Join(t.TempDir(), "host")
-	t.Setenv("SHUTTLE_HOST_FILE", path)
+	env.Set("SHUTTLE_HOST_FILE", path)
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "Studio-Air.home", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := newApp(env)
+	a.osHostname = func() (string, error) { return "Studio-Air.home", nil }
 
-	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+	if got, err := a.resolveOwnHost(""); err != nil || got != "studio-air" {
 		t.Fatalf("first resolve: got %q err %v", got, err)
 	}
 
@@ -167,8 +147,8 @@ func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
 	}
 
 	// Second resolve must come from the file, not the hostname syscall.
-	osHostname = func() (string, error) { return "renamed-by-dhcp.local", nil }
-	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+	a.osHostname = func() (string, error) { return "renamed-by-dhcp.local", nil }
+	if got, err := a.resolveOwnHost(""); err != nil || got != "studio-air" {
 		t.Fatalf("second resolve should read the seeded file: got %q err %v", got, err)
 	}
 }
@@ -180,15 +160,16 @@ func TestResolveOwnHost_HostnameSeedsFile(t *testing.T) {
 // upstream of that gate — so a mkdir here would enable the event stream on a
 // machine with no Shuttle state directory.
 func TestResolveOwnHost_SeedNeverCreatesDirectory(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "")
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "")
 	dir := filepath.Join(t.TempDir(), "dot-shuttle")
-	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(dir, "host"))
+	env.Set("SHUTTLE_HOST_FILE", filepath.Join(dir, "host"))
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "Studio-Air.home", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := newApp(env)
+	a.osHostname = func() (string, error) { return "Studio-Air.home", nil }
 
-	if got, err := resolveOwnHost(""); err != nil || got != "studio-air" {
+	if got, err := a.resolveOwnHost(""); err != nil || got != "studio-air" {
 		t.Fatalf("resolve must still succeed without seeding: got %q err %v", got, err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
@@ -200,11 +181,13 @@ func TestResolveOwnHost_SeedNeverCreatesDirectory(t *testing.T) {
 // the test seam, not an identity to make durable. Seeding from it would let a
 // one-off `SHUTTLE_HOST=x felt ...` permanently rename the machine.
 func TestResolveOwnHost_EnvDoesNotSeed(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "envhost")
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "envhost")
 	path := filepath.Join(t.TempDir(), "host")
-	t.Setenv("SHUTTLE_HOST_FILE", path)
+	env.Set("SHUTTLE_HOST_FILE", path)
 
-	if got, err := resolveOwnHost(""); err != nil || got != "envhost" {
+	if got, err := newApp(env).resolveOwnHost(""); err != nil || got != "envhost" {
 		t.Fatalf("env tier: got %q err %v", got, err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -216,19 +199,20 @@ func TestResolveOwnHost_EnvDoesNotSeed(t *testing.T) {
 // read-only home (a container, a locked-down machine) must still get a working
 // identity, just an ephemeral one.
 func TestResolveOwnHost_UnwritableSeedStillResolves(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "")
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "")
 	// A path whose parent is a FILE: MkdirAll and WriteFile both fail.
 	blocker := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatalf("writing blocker: %v", err)
 	}
-	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(blocker, "host"))
+	env.Set("SHUTTLE_HOST_FILE", filepath.Join(blocker, "host"))
 
-	prev := osHostname
-	osHostname = func() (string, error) { return "Somewhere.Local", nil }
-	t.Cleanup(func() { osHostname = prev })
+	a := newApp(env)
+	a.osHostname = func() (string, error) { return "Somewhere.Local", nil }
 
-	if got, err := resolveOwnHost(""); err != nil || got != "somewhere" {
+	if got, err := a.resolveOwnHost(""); err != nil || got != "somewhere" {
 		t.Fatalf("unwritable seed must not break resolution: got %q err %v", got, err)
 	}
 }
@@ -237,16 +221,22 @@ func TestResolveOwnHost_UnwritableSeedStillResolves(t *testing.T) {
 // write: it creates the directory, persists $SHUTTLE_HOST (the implicit seed
 // never does), and never replaces an identity the file already holds.
 func TestSeedOwnHost(t *testing.T) {
-	prev := osHostname
-	osHostname = func() (string, error) { return "Studio-Air.home", nil }
-	t.Cleanup(func() { osHostname = prev })
+	t.Parallel()
+	hostname := func() (string, error) { return "Studio-Air.home", nil }
+	seedOwnHost := func(env *sysenv.Env) (string, hostSource, bool, error) {
+		a := newApp(env)
+		a.osHostname = hostname
+		return a.seedOwnHost()
+	}
 
 	t.Run("env value is persisted and the directory created", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
 		path := filepath.Join(t.TempDir(), "dot-shuttle", "host")
-		t.Setenv("SHUTTLE_HOST_FILE", path)
-		t.Setenv("SHUTTLE_HOST", "  alias-host ")
+		env.Set("SHUTTLE_HOST_FILE", path)
+		env.Set("SHUTTLE_HOST", "  alias-host ")
 
-		id, source, seeded, err := seedOwnHost()
+		id, source, seeded, err := seedOwnHost(env)
 		if err != nil || id != "alias-host" || source != hostSourceEnv || !seeded {
 			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
 		}
@@ -256,25 +246,29 @@ func TestSeedOwnHost(t *testing.T) {
 	})
 
 	t.Run("hostname is normalized when nothing else names the machine", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
 		path := filepath.Join(t.TempDir(), "host")
-		t.Setenv("SHUTTLE_HOST_FILE", path)
-		t.Setenv("SHUTTLE_HOST", "")
+		env.Set("SHUTTLE_HOST_FILE", path)
+		env.Set("SHUTTLE_HOST", "")
 
-		id, source, seeded, err := seedOwnHost()
+		id, source, seeded, err := seedOwnHost(env)
 		if err != nil || id != "studio-air" || source != hostSourceHostname || !seeded {
 			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
 		}
 	})
 
 	t.Run("an existing identity wins over the env", func(t *testing.T) {
+		t.Parallel()
+		env := testEnv(t)
 		path := filepath.Join(t.TempDir(), "host")
 		if err := os.WriteFile(path, []byte("chosen-name\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("SHUTTLE_HOST_FILE", path)
-		t.Setenv("SHUTTLE_HOST", "alias-host")
+		env.Set("SHUTTLE_HOST_FILE", path)
+		env.Set("SHUTTLE_HOST", "alias-host")
 
-		id, source, seeded, err := seedOwnHost()
+		id, source, seeded, err := seedOwnHost(env)
 		if err != nil || id != "chosen-name" || source != hostSourceFile || seeded {
 			t.Fatalf("got id=%q source=%q seeded=%v err=%v", id, source, seeded, err)
 		}
@@ -285,17 +279,19 @@ func TestSeedOwnHost(t *testing.T) {
 }
 
 func TestEnsureOwnedHere(t *testing.T) {
-	withOwnHost(t, "macbook")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "macbook")
 
 	mk := func(host string) *felt.Felt {
 		return shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": host})
 	}
 
-	if err := ensureOwnedHere(mk("macbook"), "f"); err != nil {
+	if err := newApp(env).ensureOwnedHere(mk("macbook"), "f"); err != nil {
 		t.Fatalf("fiber owned by this host should pass: %v", err)
 	}
 
-	err := ensureOwnedHere(mk("cineca"), "f")
+	err := newApp(env).ensureOwnedHere(mk("cineca"), "f")
 	if err == nil {
 		t.Fatal("fiber owned by another host should be refused")
 	}
@@ -303,10 +299,10 @@ func TestEnsureOwnedHere(t *testing.T) {
 		t.Fatalf("expected ownerMismatchError, got %T: %v", err, err)
 	}
 
-	if err := ensureOwnedHere(mk(""), "f"); err != nil {
+	if err := newApp(env).ensureOwnedHere(mk(""), "f"); err != nil {
 		t.Fatalf("host-less block should fail open (legacy): %v", err)
 	}
-	if err := ensureOwnedHere(shuttleFeltWithBlock(t, nil), "f"); err != nil {
+	if err := newApp(env).ensureOwnedHere(shuttleFeltWithBlock(t, nil), "f"); err != nil {
 		t.Fatalf("pure note (no block) should pass: %v", err)
 	}
 }
@@ -317,26 +313,31 @@ func TestEnsureOwnedHere(t *testing.T) {
 // answer. Naming the host file while $SHUTTLE_HOST overrides it sends them to
 // change a value nothing reads.
 func TestOwnerMismatchNamesItsSource(t *testing.T) {
+	t.Parallel()
 	fiber := func() *felt.Felt {
 		return shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "cineca"})
 	}
 
 	t.Run("file tier names the file", func(t *testing.T) {
-		withOwnHost(t, "macbook")
-		msg := ensureOwnedHere(fiber(), "f").Error()
-		if !strings.Contains(msg, hostConfigFilePath()) {
+		t.Parallel()
+		env := testEnv(t)
+		ownHost(t, env, "macbook")
+		msg := newApp(env).ensureOwnedHere(fiber(), "f").Error()
+		if !strings.Contains(msg, newApp(env).hostConfigFilePath()) {
 			t.Fatalf("file-sourced identity should name the file: %s", msg)
 		}
 	})
 
 	t.Run("env tier names the env var", func(t *testing.T) {
-		withOwnHost(t, "macbook")
-		t.Setenv("SHUTTLE_HOST", "laptop")
-		msg := ensureOwnedHere(fiber(), "f").Error()
+		t.Parallel()
+		env := testEnv(t)
+		ownHost(t, env, "macbook")
+		env.Set("SHUTTLE_HOST", "laptop")
+		msg := newApp(env).ensureOwnedHere(fiber(), "f").Error()
 		if !strings.Contains(msg, "$SHUTTLE_HOST") {
 			t.Fatalf("env-sourced identity should name the env var: %s", msg)
 		}
-		if strings.Contains(msg, hostConfigFilePath()) {
+		if strings.Contains(msg, newApp(env).hostConfigFilePath()) {
 			t.Fatalf("env-sourced identity must not blame the overridden file: %s", msg)
 		}
 	})
@@ -350,15 +351,16 @@ func TestOwnerMismatchNamesItsSource(t *testing.T) {
 // genuinely broken (not "daemon briefly unreachable", the pre-S1 excuse for
 // fail-open).
 func TestEnsureOwnedHere_UnresolvableIdentityFailsLoud(t *testing.T) {
-	t.Setenv("SHUTTLE_HOST", "")
-	t.Setenv("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "does-not-exist"))
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "")
+	env.Set("SHUTTLE_HOST_FILE", filepath.Join(t.TempDir(), "does-not-exist"))
 
-	prevHostname := osHostname
-	osHostname = func() (string, error) { return "", fmt.Errorf("forced failure: no OS hostname") }
-	t.Cleanup(func() { osHostname = prevHostname })
+	a := newApp(env)
+	a.osHostname = func() (string, error) { return "", fmt.Errorf("forced failure: no OS hostname") }
 
 	fiber := shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot", "host": "candide"})
-	err := ensureOwnedHere(fiber, "f")
+	err := a.ensureOwnedHere(fiber, "f")
 	if err == nil {
 		t.Fatal("unresolvable own-host identity against an owned fiber must refuse the write, not fall through")
 	}
@@ -371,6 +373,7 @@ func TestEnsureOwnedHere_UnresolvableIdentityFailsLoud(t *testing.T) {
 }
 
 func TestShuttleTmuxSessionName(t *testing.T) {
+	t.Parallel()
 	const uid = "01KTHDNZS287ZSSG8X8V59XKWB"
 	name := shuttleTmuxSessionName("a/b/leaf", uid)
 	if name != "leaf-"+uid+"-shuttle" {
@@ -391,6 +394,7 @@ func TestShuttleTmuxSessionName(t *testing.T) {
 }
 
 func TestReadWriteTempered(t *testing.T) {
+	t.Parallel()
 	f := shuttleFeltWithBlock(t, map[string]any{"kind": "oneshot"})
 	if readTempered(f) != nil {
 		t.Fatal("absent tempered must read as nil")
@@ -411,6 +415,7 @@ func TestReadWriteTempered(t *testing.T) {
 }
 
 func TestParseOptionalBool(t *testing.T) {
+	t.Parallel()
 	if v, err := parseOptionalBool(""); err != nil || v != nil {
 		t.Fatalf(`"" → nil/nil, got %v %v`, v, err)
 	}
@@ -426,14 +431,16 @@ func TestParseOptionalBool(t *testing.T) {
 }
 
 func TestResolveProjectDirFlag(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	dir := t.TempDir()
-	if got, err := resolveProjectDirFlag(dir); err != nil || got != dir {
+	if got, err := newApp(env).resolveProjectDirFlag(dir); err != nil || got != dir {
 		t.Fatalf("existing dir should resolve: got %q err %v", got, err)
 	}
-	if _, err := resolveProjectDirFlag(""); err == nil {
+	if _, err := newApp(env).resolveProjectDirFlag(""); err == nil {
 		t.Fatal("empty project-dir must error")
 	}
-	if _, err := resolveProjectDirFlag(dir + "/does-not-exist"); err == nil {
+	if _, err := newApp(env).resolveProjectDirFlag(dir + "/does-not-exist"); err == nil {
 		t.Fatal("nonexistent project-dir must error")
 	}
 	// A regular file is not a directory.
@@ -441,7 +448,7 @@ func TestResolveProjectDirFlag(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := resolveProjectDirFlag(file); err == nil {
+	if _, err := newApp(env).resolveProjectDirFlag(file); err == nil {
 		t.Fatal("a file path must error (not a directory)")
 	}
 }

@@ -50,6 +50,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     def commands, do: Agent.get(__MODULE__, & &1.commands)
     def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
 
+    # The process scan's answers, in order; the last one repeats. Defaults to
+    # no processes.
+    def set_ps_results(results) when is_list(results) and results != [],
+      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
+
     @impl true
     def cmd(command, args, opts) when command in ["felt", "shuttle"] do
       felt_store = Agent.get(__MODULE__, & &1.felt_store)
@@ -65,17 +70,8 @@ defmodule Shuttle.DispatchIntegrationTest do
           do: opts,
           else: Keyword.put_new(opts, :cd, felt_store)
 
-      System.cmd(command, args, with_scoped_env(opts))
-    end
-
-    # The test's scoped env (SHUTTLE_DATA_DIR, SHUTTLE_STORES, …) reaches the
-    # real CLIs the way `Shuttle.Runner.Default` hands it on; the caller's
-    # own `:env` entries win.
-    defp with_scoped_env(opts) do
-      caller = Keyword.get(opts, :env, [])
-      names = MapSet.new(caller, &elem(&1, 0))
-      scoped = Enum.reject(Shuttle.Env.child_env(), &(elem(&1, 0) in names))
-      if scoped ++ caller == [], do: opts, else: Keyword.put(opts, :env, scoped ++ caller)
+      # Run as the test's scope sees it: scoped PATH and env reach the real CLIs.
+      Shuttle.Env.cmd(command, args, opts)
     end
 
     def cmd("tmux", ["has-session", "-t", session], _opts) do
@@ -101,11 +97,6 @@ defmodule Shuttle.DispatchIntegrationTest do
 
       {"", 0}
     end
-
-    # The process scan's answers, in order; the last one repeats. Defaults to
-    # no processes.
-    def set_ps_results(results) when is_list(results) and results != [],
-      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
 
     def cmd("ps", args, _opts) do
       Agent.get_and_update(__MODULE__, fn s ->
@@ -1578,7 +1569,15 @@ defmodule Shuttle.DispatchIntegrationTest do
   # the window) is the sharpest probe; the handed_off_at stamp felt writes with
   # the re-arm keeps it at rest. Also asserts accept keeps the prior run's
   # outcome.
+  #
+  # The schedule is a daily tick at the minute the test starts, not
+  # `* * * * *`: the just-served tick sits inside the due-window exactly as an
+  # every-minute one would, but no further tick can elapse between accept and
+  # the poll — on an every-minute schedule a minute boundary crossed there is a
+  # genuinely new, due occurrence, and the poll rightly fires it.
   test "accept re-arms a standing role without re-firing the just-served tick", %{host: host} do
+    served = DateTime.shift_zone!(DateTime.utc_now(), "Europe/Paris")
+
     write_fiber(host, "tests/standing-temper-rest", """
     ---
     name: Standing temper-and-rest
@@ -1594,13 +1593,13 @@ defmodule Shuttle.DispatchIntegrationTest do
       host: test-host
       project_dir: #{host}
       schedule:
-        expr: "* * * * *"
+        expr: "#{served.minute} #{served.hour} * * *"
         tz: Europe/Paris
     ---
     A standing role awaiting review; the human drags it to tempered (accept).
     """)
 
-    # The run under review was dispatched ten minutes ago, so the current
+    # The run under review was dispatched ten minutes ago, so the served
     # minute's tick is newer than every service marker until accept concludes
     # the run with a fresh handed_off_at.
     write_dispatch_marker(
@@ -2005,7 +2004,9 @@ defmodule Shuttle.DispatchIntegrationTest do
     File.write!(Path.join(session_dir, filename), session_meta <> "\n" <> user_turn <> "\n")
   end
 
-  defp eventually(fun, attempts \\ 40)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 600)
 
   defp eventually(fun, attempts) when attempts > 0 do
     if fun.() do

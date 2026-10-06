@@ -88,8 +88,8 @@ defmodule Shuttle.Host do
   @spec config_path() :: String.t()
   def config_path do
     case Shuttle.Env.get(@config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(@default_config_path)
+      v when is_binary(v) and v != "" -> Shuttle.Env.expand(v)
+      _ -> Shuttle.Env.expand(@default_config_path)
     end
   end
 
@@ -490,7 +490,7 @@ defmodule Shuttle.Host do
   # a real, already-checked directory, so `..` is its physical parent.
   defp secure_ancestors!(path, euid) do
     check_ancestor!("/", euid)
-    walk!("/", tl(Path.split(Path.expand(path))), euid, 0)
+    walk!("/", tl(Path.split(Shuttle.Env.expand(path))), euid, 0)
   end
 
   defp walk!(current, [], _euid, _links), do: current
@@ -780,7 +780,7 @@ defmodule Shuttle.Host do
 
   # The BEAM exposes no geteuid. `id -u` is POSIX and runs once per boot.
   defp effective_uid do
-    case System.cmd("id", ["-u"]) do
+    case Shuttle.Env.cmd("id", ["-u"]) do
       {out, 0} -> parse_uid!(out, "id -u")
       {_out, status} -> raise ArgumentError, "id -u failed with status #{status}"
     end

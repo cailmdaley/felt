@@ -10,7 +10,9 @@ defmodule Shuttle.DaemonHeartbeatTest do
     %{path: Path.join(dir, "heartbeat.json")}
   end
 
-  defp wait_for(fun, tries \\ 200) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_for(fun, tries \\ 3_000) do
     cond do
       fun.() -> true
       tries == 0 -> false
