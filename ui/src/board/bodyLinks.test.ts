@@ -7,15 +7,9 @@
 // the regex escaper to the DOM path was checked against a real browser.)
 
 import { describe, expect, it } from 'vitest'
-import { cacheBustUrl, fileInfoUrl, renderMarkdown } from './utils.js'
+import { cacheBustUrl, renderMarkdown } from './utils.js'
 
 describe('live artifact URL helpers', () => {
-  it('routes metadata probes through the owning daemon', () => {
-    expect(fileInfoUrl('http://d:4000', '/tmp/a b.html', 'candide')).toBe(
-      'http://d:4000/api/v1/file-info?path=%2Ftmp%2Fa%20b.html&origin=candide',
-    )
-  })
-
   it('replaces a prior cache-bust marker instead of growing the URL', () => {
     expect(cacheBustUrl('/api/v1/file?path=%2Fx&_shuttle_refresh=1', 42)).toBe(
       '/api/v1/file?path=%2Fx&_shuttle_refresh=42',

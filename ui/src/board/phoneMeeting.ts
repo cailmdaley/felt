@@ -22,6 +22,7 @@ export class PhoneMeeting implements PhoneCaptureHooks {
   private launch: string | null = null
   private attempt = 0
   private checkTimer: number | null = null
+  private mounted = false
   private readonly changed: () => void
   private readonly visibilityChanged = (): void => {
     if (document.visibilityState === 'visible') this.session.returned()
@@ -58,6 +59,7 @@ export class PhoneMeeting implements PhoneCaptureHooks {
     if (this.session.busy) throw new Error('The microphone is already opening or in use.')
     const attempt = ++this.attempt
     const opening = this.session.begin()
+    this.watch()
     return {
       ready: opening.then((generation) => {
         if (generation === null) throw new Error(this.session.error ?? 'The microphone opening was cancelled.')
@@ -111,14 +113,26 @@ export class PhoneMeeting implements PhoneCaptureHooks {
     document.addEventListener('visibilitychange', this.visibilityChanged)
     window.addEventListener('pagehide', this.pagehide)
     window.addEventListener('pageshow', this.visibilityChanged)
-    this.checkTimer = window.setInterval(() => this.session.check(), 1_000)
+    this.mounted = true
+    this.watch()
+  }
+
+  /** Look at the mic once a second while the tab holds or opens one; an idle board sets no timer. */
+  private watch(): void {
+    if (!this.mounted || this.checkTimer !== null || !this.session.busy) return
+    this.checkTimer = window.setTimeout(() => {
+      this.checkTimer = null
+      this.session.check()
+      this.watch()
+    }, 1_000)
   }
 
   unmount(): void {
     document.removeEventListener('visibilitychange', this.visibilityChanged)
     window.removeEventListener('pagehide', this.pagehide)
     window.removeEventListener('pageshow', this.visibilityChanged)
-    if (this.checkTimer !== null) window.clearInterval(this.checkTimer)
+    this.mounted = false
+    if (this.checkTimer !== null) window.clearTimeout(this.checkTimer)
     this.checkTimer = null
     this.cancel()
   }
