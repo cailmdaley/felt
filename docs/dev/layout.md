@@ -84,16 +84,25 @@ CI runs `npm test`, then type-checks and builds the bundle with
 
 ### Browser checks
 
-The workspace e2e suite, live workspace depth probe, and `themeScope` test use `ui/e2e/browser.mjs` and connect to a healthy shared browser on port 9333 when one is running.
+The workspace e2e suite, live workspace depth probe, and `themeScope` test use `ui/e2e/browser.mjs` and connect to the shared browser on port 9333 when it is running and healthy.
 Set `SHARED_BROWSER=1` to start or reuse it explicitly; without a shared browser, these checks launch their local Chromium as configured.
+Context options, including `colorScheme`, `reducedMotion`, `forcedColors` and `contrast`, behave the same in both modes.
 The one-off scripts under `ui/scripts` retain their own browser launch paths.
 Set `SHARED_BROWSER_PORT` to choose another port, and `CHROME_PATH` to select a fallback executable for checks that accept it.
 
-`bin/shared-browser` supports `start`, `endpoint`, `status`, `stop`, and `reap [minutes]`.
-`endpoint` starts the browser if needed and refreshes its idle clock; `status` reports the PID, CDP endpoint, process count, and process-tree RSS.
+`bin/shared-browser` supports `start`, `endpoint`, `status`, `stop`, and `reap [minutes]`; its logic lives in `ui/e2e/sharedBrowser.mjs`.
+The browser it owns is the one whose processes carry its exact `--user-data-dir`, `$XDG_STATE_HOME/shared-browser/profile-<port>` (by default under `~/.local/state`).
+It never records a PID and never signals a process without that argument, so another browser on a similar port, or with the same port and another profile, is left alone.
+It hands out an endpoint only when the browser answering on the port is the one its own launch logged to `browser-<port>.log`; a port held by another browser is an error.
+
+`start` and `endpoint` launch the browser when it is not running and refresh its idle clock; `status` reports `running`, `unresponsive` (alive but not answering CDP), `orphaned` (helpers whose browser process died) or `stopped`, with the PID, endpoint, process count, and RSS.
+A browser that does not answer is reported, never killed: `stop` is the only way to end it.
 `reap` defaults to 30 idle minutes; `SHARED_BROWSER_IDLE_MINUTES` changes that threshold.
 It treats blank tabs and Chrome's internal New Tab targets as idle; any other page keeps the browser running.
-The shared browser stays headless and muted, uses the mock keychain on macOS or the basic password store on Linux, and does not access the login keychain.
+`reap` also clears orphaned helpers and leaves an unresponsive browser alone.
+`start`, `endpoint`, `stop`, and `reap` serialise on an `flock` taken through `perl`, which the OS releases when its holder dies.
+The browser is found in Puppeteer's Chrome for Testing cache, a Chrome for Testing install, Playwright's cache for the revision `playwright-core` pins (honouring `PLAYWRIGHT_BROWSERS_PATH`, including `0`), `CHROME_PATH`, then system Chrome or Chromium; Playwright's headless-shell builds are not used.
+It stays headless and muted, with `--use-mock-keychain` and `--password-store=basic`, so it never touches the login keychain.
 
 Give every browser lane a unique `LANE` name so it gets a pinned tab in the shared Chrome instead of launching another browser:
 

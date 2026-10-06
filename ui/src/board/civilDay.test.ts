@@ -290,6 +290,18 @@ describe('years Date.UTC would remap', () => {
     expect(civilDayAt('0050-06-01', 0, utc)).toBe(Date.parse('0050-06-01T00:00:00Z'));
     expect(shiftCivilDay('0099-12-31', 1)).toBe('0100-01-01');
   });
+
+  it('reads year zero and the years before it as themselves', () => {
+    const utc = zone('UTC');
+    const leapDay = Date.parse('0000-02-29T00:00:00Z');
+    expect(utc.offsetMs(Date.parse('0000-06-01T00:00:00Z'))).toBe(0);
+    expect(utc.offsetMs(Date.parse('-000100-06-01T00:00:00Z'))).toBe(0);
+    expect(isoDayLocal(leapDay, utc)).toBe('0000-02-29');
+    expect(civilDayAt('0000-02-29', 0, utc)).toBe(leapDay);
+    expect(shiftCivilDay('0000-02-28', 1)).toBe('0000-02-29');
+    // Paris keeps its local mean time across the era boundary.
+    expect(PARIS.offsetMs(leapDay)).toBe(PARIS.offsetMs(Date.parse('0001-06-01T00:00:00Z')));
+  });
 });
 
 describe('formatSpanMinutes', () => {

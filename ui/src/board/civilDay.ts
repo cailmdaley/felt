@@ -71,6 +71,7 @@ class Zone {
     this.#fields = new Intl.DateTimeFormat('en-US', {
       timeZone: id,
       hourCycle: 'h23',
+      era: 'short',
       year: 'numeric',
       month: 'numeric',
       day: 'numeric',
@@ -97,14 +98,18 @@ class Zone {
     return Number.isNaN(offset) ? this.#read(ms) : offset
   }
 
-  /** The offset at an instant, straight from Intl, to the second. */
+  /** The offset at an instant, straight from Intl, to the second. Intl
+   *  counts years by era, so 1 BC is astronomical year 0. */
   #read(ms: number): number {
     const at = Math.floor(ms / 1000) * 1000
     const f: Record<string, number> = {}
+    let bc = false
     for (const part of this.#fields.formatToParts(at)) {
-      if (part.type !== 'literal') f[part.type] = Number(part.value)
+      if (part.type === 'era') bc = part.value === 'BC'
+      else if (part.type !== 'literal') f[part.type] = Number(part.value)
     }
-    return utcFields(f.year, f.month - 1, f.day, f.hour, f.minute, f.second) - at
+    const year = bc ? 1 - f.year : f.year
+    return utcFields(year, f.month - 1, f.day, f.hour, f.minute, f.second) - at
   }
 }
 export type { Zone }
