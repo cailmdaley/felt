@@ -53,13 +53,8 @@ defmodule ShuttleWeb.SpaControllerTest do
       File.write!(Path.join(dist, "fonts/initials.otf"), "font")
       File.write!(Path.join(dist, "fonts/initials.otf.gz"), "gzipped font")
 
-      previous = System.get_env("SHUTTLE_UI_DIST")
-      System.put_env("SHUTTLE_UI_DIST", dist)
-
-      on_exit(fn ->
-        Shuttle.Test.EnvHelpers.restore_env("SHUTTLE_UI_DIST", previous)
-        File.rm_rf(dist)
-      end)
+      Shuttle.Test.Env.put_env("SHUTTLE_UI_DIST", dist)
+      on_exit(fn -> File.rm_rf(dist) end)
     end
 
     test "a hashed asset is served precompressed and cached for good" do

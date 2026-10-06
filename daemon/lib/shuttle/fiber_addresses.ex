@@ -12,7 +12,9 @@ defmodule Shuttle.FiberAddresses do
   Owns two ETS tables, the poller's addresses and the learned ones, so the
   learned cap counts learned rows alone; readers never call the poller.
   Learned addresses are dropped wholesale past `@max_learned`, and a restart
-  clears both tables: each costs one walk per UID read again.
+  clears both tables: each costs one walk per UID read again. Rows are keyed
+  by `Shuttle.Env.scope_key/1`, so concurrent tests' pollers each replace
+  only their own scope's addresses.
   """
 
   use GenServer
@@ -38,7 +40,8 @@ defmodule Shuttle.FiberAddresses do
   @spec lookup(String.t()) :: address() | nil
   def lookup(id) when is_binary(id) do
     with {:ok, uid} <- uid(id) do
-      fetch(@polled, uid) || fetch(@learned, uid)
+      key = Shuttle.Env.scope_key(uid)
+      fetch(@polled, key) || fetch(@learned, key)
     else
       _ -> nil
     end
@@ -51,13 +54,18 @@ defmodule Shuttle.FiberAddresses do
   @spec put_polled(%{String.t() => address()}) :: :ok
   def put_polled(addresses) when is_map(addresses) do
     polled =
-      for {id, address} <- addresses, {:ok, uid} <- [uid(id)], into: %{}, do: {uid, address}
+      for {id, address} <- addresses,
+          {:ok, uid} <- [uid(id)],
+          into: %{},
+          do: {Shuttle.Env.scope_key(uid), address}
 
     :ets.insert(@polled, Map.to_list(polled))
+    scope = scope_of(Shuttle.Env.scope_key(nil))
 
-    for uid <- :ets.select(@polled, [{{:"$1", :_}, [], [:"$1"]}]),
-        not Map.has_key?(polled, uid),
-        do: :ets.delete(@polled, uid)
+    for key <- :ets.select(@polled, [{{:"$1", :_}, [], [:"$1"]}]),
+        scope_of(key) == scope,
+        not Map.has_key?(polled, key),
+        do: :ets.delete(@polled, key)
 
     :ok
   rescue
@@ -70,7 +78,7 @@ defmodule Shuttle.FiberAddresses do
     with {:ok, uid} <- uid(uid), true <- id != "" do
       if :ets.info(@learned, :size) >= @max_learned, do: :ets.delete_all_objects(@learned)
 
-      :ets.insert(@learned, {uid, {store, id}})
+      :ets.insert(@learned, {Shuttle.Env.scope_key(uid), {store, id}})
     end
 
     :ok
@@ -85,9 +93,12 @@ defmodule Shuttle.FiberAddresses do
     if Shuttle.ULID.valid?(uid), do: {:ok, uid}, else: :error
   end
 
-  defp fetch(table, uid) do
-    case :ets.lookup(table, uid) do
-      [{^uid, address}] -> address
+  defp scope_of({_uid, owner}), do: owner
+  defp scope_of(_uid), do: nil
+
+  defp fetch(table, key) do
+    case :ets.lookup(table, key) do
+      [{^key, address}] -> address
       _ -> nil
     end
   rescue
