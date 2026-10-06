@@ -191,6 +191,14 @@ describe('inheritedProjectDir', () => {
     }), { numRuns: 200, seed: 0xd1ec7 })
   })
 
+  it('never lets another host’s fiber of the same slug answer', () => {
+    expect(suggested(
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
+      row('a/b/c', 'here', { host: 'here' }, { status: 'closed' }),
+      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }),
+    )).toEqual({ path: '/srv/b', from: 'a/b' })
+  })
+
   it('reads the reconciled owner row, not whichever copy the feed listed last', () => {
     // The same fiber (one uid) served by its owner and by a stale mirror whose
     // copy (same store path) still carries an old directory; the board keeps
