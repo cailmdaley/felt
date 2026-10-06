@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/clistreams"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
@@ -172,9 +173,6 @@ func (a *app) rootCmd() *cobra.Command {
 			return nil
 		},
 	}
-	root.SetIn(a.env.Stdin)
-	root.SetOut(a.env.Stdout)
-	root.SetErr(a.env.Stderr)
 	root.AddGroup(
 		&cobra.Group{ID: groupFibers, Title: "Fibers:"},
 		&cobra.Group{ID: groupSearch, Title: "Finding:"},
@@ -206,6 +204,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.updateCmd(),
 		a.uninstallCmd(),
 	)
+	clistreams.Bind(root, a.env.Stdin, a.env.Stdout, a.env.Stderr)
 	return root
 }
 

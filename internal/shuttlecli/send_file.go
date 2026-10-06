@@ -33,7 +33,7 @@ acknowledge that a client has downloaded the file.`,
 				return err
 			}
 			for _, path := range files {
-				fmt.Fprintln(cmd.OutOrStdout(), "Recorded file:", path)
+				fmt.Fprintln(a.env.Stdout, "Recorded file:", path)
 			}
 			return nil
 		},

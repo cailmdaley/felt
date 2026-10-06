@@ -25,7 +25,7 @@ with the reason otherwise. Writes nothing.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), dir)
+			fmt.Fprintln(a.env.Stdout, dir)
 			return nil
 		},
 	}

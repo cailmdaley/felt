@@ -45,7 +45,7 @@ tracking branch.`,
 			if err != nil {
 				return fmt.Errorf("resolving felt store path %s: %w", storage.Root(), err)
 			}
-			return a.syncStore(cmd.Context(), storeRoot, syncPush, cmd.OutOrStdout())
+			return a.syncStore(cmd.Context(), storeRoot, syncPush, a.env.Stdout)
 		},
 	}
 	command.GroupID = groupStore

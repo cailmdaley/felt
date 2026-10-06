@@ -60,7 +60,7 @@ shrinks is read again from the start. The file is polled once per second.`,
 			if resolved, err := filepath.EvalSymlinks(path); err == nil {
 				path = resolved
 			}
-			out := cmd.OutOrStdout()
+			out := a.env.Stdout
 			return followTranscript(path, newFollowBatcher(words, time.Duration(seconds*float64(time.Second)), names), followIO{
 				poll:  time.Second,
 				sleep: time.Sleep,

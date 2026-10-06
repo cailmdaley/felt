@@ -43,7 +43,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
+			out := env.Stdout
 
 			detail := showDetail
 			if detail == "" {

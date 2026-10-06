@@ -72,7 +72,7 @@ felt find searches the rest of it.`,
 			if err != nil {
 				return err
 			}
-			out := cmd.OutOrStdout()
+			out := env.Stdout
 			query := ""
 			if len(args) == 1 {
 				query = plainQuery(args[0], lsRegex)

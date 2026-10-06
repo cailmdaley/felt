@@ -23,6 +23,11 @@ var processReads = map[string][]string{
 	"fmt":     {"Print", "Printf", "Println"},
 }
 
+// cobraOutputs are the cobra methods that resolve to a tree's Out writer,
+// which clistreams points at stderr outside help, version and completion:
+// a command's own output goes to the invocation's env.Stdout instead.
+var cobraOutputs = map[string]bool{"OutOrStdout": true, "OutOrStderr": true}
+
 // processReadAllowlist names each production use outside this package that
 // reads the live process on purpose, keyed "file func ident" (file relative to
 // internal/, func the enclosing function or method, "-" at package level).
@@ -89,13 +94,14 @@ func scanProcessReads(t *testing.T, internalDir string) ([]processRead, map[stri
 			}
 			names[name] = set
 		}
-		if len(names) == 0 {
-			return nil
-		}
 		check := func(fn string, node ast.Node) {
 			ast.Inspect(node, func(n ast.Node) bool {
 				sel, ok := n.(*ast.SelectorExpr)
 				if !ok {
+					return true
+				}
+				if cobraOutputs[sel.Sel.Name] && rel != "clistreams/clistreams.go" {
+					violations = append(violations, processRead{pos: fset.Position(sel.Pos()).String(), key: rel + " " + fn + " ." + sel.Sel.Name})
 					return true
 				}
 				pkg, ok := sel.X.(*ast.Ident)

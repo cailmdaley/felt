@@ -230,7 +230,7 @@ exit 1 means rejected, unknown, or another command error.`,
 			}
 			if messageOpts.requestJSON {
 				response := messageRequestReceipt{Receipt: receipt, FeltErrorCode: feltErrorCode, FeltReceiptProduced: receiptProduced}
-				if outputErr := json.NewEncoder(cmd.OutOrStdout()).Encode(response); outputErr != nil {
+				if outputErr := json.NewEncoder(a.env.Stdout).Encode(response); outputErr != nil {
 					return outputErr
 				}
 			} else if a.json {

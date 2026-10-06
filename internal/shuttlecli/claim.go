@@ -131,7 +131,7 @@ If your session cannot be identified, leave the task as an open draft.`,
 				}
 				return a.outputJSON(value)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Claimed %s for the existing conversation. Activate with shuttle resume %s.\n", fiber.ID, fiber.ID)
+			fmt.Fprintf(a.env.Stdout, "Claimed %s for the existing conversation. Activate with shuttle resume %s.\n", fiber.ID, fiber.ID)
 			return nil
 		},
 	}
