@@ -4,7 +4,6 @@ package shuttlecli
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,13 +18,15 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 type bridgeHarness struct {
 	cmd             *exec.Cmd
 	input, output   *os.File
 	socket, envFile string
-	stderr          bytes.Buffer
+	stderr          sysenvtest.Buffer
 	done            chan error
 }
 
@@ -102,6 +103,9 @@ func newBridgeHarness(t *testing.T, extraEnv ...string) *bridgeHarness {
 		}
 	}
 	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("bridge stderr: %s", h.stderr.String())
+		}
 		h.input.Close()
 		h.output.Close()
 		inR.Close()
