@@ -2027,7 +2027,11 @@
    the reader's sidebar card and the reader's head. A dot carries the state's
    pigment (cobalt aloft, gold waiting, cinnabar attention or blocked); the
    state word and its compact age ("11m", "3h", "2d") are mono capitals,
-   set tight, with no plate. Only the pointer or the keyboard draws a plate. */
+   set tight, with no plate. Only the pointer or the keyboard draws a plate.
+   Each word's box is trimmed to its capitals (cap height to baseline), so
+   centring the words centres the capitals in the plate, and the pill's
+   baseline is theirs. The dot sits in the plate's left padding, centred on
+   the plate, outside the flow that sets that baseline. */
 .kbn-card-worker, .kbn-card-phase {
   --worker-size: calc(10.5px * var(--kbn-type-scale, 1));
   --worker-word: 400 var(--worker-size)/1 var(--font-mono, 'JetBrains Mono', monospace);
@@ -2036,11 +2040,13 @@
   --worker-gap: 0.32em;
 }
 .kbn-card-worker {
+  --worker-dot-size: 7px;
+  position: relative;
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--worker-gap);
   margin: 0 -4px;
-  padding: 0 4px;
+  padding: 0 4px 0 calc(4px + var(--worker-dot-size) + var(--worker-gap));
   border: 1px solid transparent;
   border-radius: 3px;
   background: transparent;
@@ -2060,8 +2066,8 @@
 .kbn-card-worker:focus-visible { outline: 1px dashed var(--kbn-you); outline-offset: 2px; }
 .kbn-card-worker .ws-worker-dot {
   --worker-dot: var(--kbn-agent);
-  display: inline-block; vertical-align: middle; position: relative; top: -0.06em; margin-right: var(--worker-gap);
-  width: 7px; height: 7px; border-radius: 50%;
+  position: absolute; left: 4px; top: 50%; translate: 0 -50%;
+  width: var(--worker-dot-size); height: var(--worker-dot-size); border-radius: 50%;
   background: var(--worker-dot);
   box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--worker-dot) 18%, transparent);
 }
@@ -2069,6 +2075,7 @@
 .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--kbn-you); }
 .kbn-card-worker[data-worker-state='no worker'] .ws-worker-dot { --worker-dot: var(--kbn-ink-muted); }
 .kbn-card-worker .ws-worker-state { font: var(--worker-word); }
+.kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { text-box: trim-both cap alphabetic; }
 .kbn-card-worker .ws-worker-elapsed { font: var(--worker-time); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
 .kbn-card-worker .ws-worker-elapsed:empty { display: none; }
 .kbn-card-worker:hover .ws-worker-elapsed { color: inherit; }

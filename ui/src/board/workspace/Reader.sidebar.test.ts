@@ -135,6 +135,11 @@ describe('Reader channel sidebar', () => {
     expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34m')
     control.click()
     expect(open).toHaveBeenCalledOnce()
+    // Where the phone shows the dot alone, the dot is the target's own child: a click on it is a click on the target.
+    const dot = control.querySelector<HTMLElement>('.ws-worker-dot')!
+    expect(dot.parentElement).toBe(control)
+    dot.click()
+    expect(open).toHaveBeenCalledTimes(2)
   })
   it('binds retained sidebar roots only while active and visible, through revisions, filtering and hide/show', () => {
     storage.set('shuttle:workspace:sidebar', 'true')

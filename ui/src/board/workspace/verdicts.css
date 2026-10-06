@@ -38,15 +38,17 @@
 /* The fiber page's status line: the kicker, the worker pill, then Temper and
    Discard at the line's right end. Outside review the pair is two verbs in
    their pigments, plated only under the pointer; awaiting review they are
-   the page's plates, verdigris and the Desk's deletion red. */
-.ws-fiber-prose .ws-prose-header { display: flex; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
+   the page's plates, verdigris and the Desk's deletion red. The line sets
+   on one baseline: the kicker's small capitals, the pill's mono capitals
+   and the verbs' text. */
+.ws-fiber-prose .ws-prose-header { display: flex; align-items: baseline; gap: var(--ws-small-gap) var(--ws-gap); }
 .ws-fiber-prose .ws-fiber-acts {
-  flex: 1; display: flex; align-items: center; gap: var(--ws-gap); min-width: 0;
+  flex: 1; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0;
   font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: normal; letter-spacing: 0; text-transform: none; color: var(--ws-ink);
 }
 .ws-fiber-acts .ws-fiber-worker { display: contents; }
 .ws-fiber-acts .ws-fiber-worker[hidden] { display: none; }
-.ws-fiber-acts .kbn-ctl-verdict { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.ws-fiber-acts .kbn-ctl-verdict { display: flex; align-items: baseline; gap: 2px; margin-left: auto; }
 .ws-fiber-acts .kbn-ctl-verdict[hidden] { display: none; }
 .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
   min-height: var(--ws-control-height); padding: 0 10px; border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius);

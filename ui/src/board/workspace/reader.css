@@ -254,10 +254,10 @@
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
   .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
+  /* The state word stays for assistive technology, unseen. */
+  .ws-head-worker .ws-worker-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .ws-head-worker :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
-  /* The phone's top bar keeps the dot alone: the word's text is set at no size around it. */
-  .ws-reader .ws-navbar .ws-head-worker .ws-worker-state { display: inline-flex; font-size: 0; line-height: 0; }
-  .ws-head-worker .ws-worker-dot { width: 9px; height: 9px; margin: 0; top: 0; }
+  .ws-head-worker .ws-worker-dot { position: static; translate: none; width: 9px; height: 9px; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
   /* One chevron drawing for back and stepping: a drawn stroke in ink, legible at 44 px. */
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }

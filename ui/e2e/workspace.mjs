@@ -2095,7 +2095,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     if (device === 'phone') {
       const headLook = await head.evaluate(el => ({ border: getComputedStyle(el).borderTopWidth, background: getComputedStyle(el).backgroundColor }))
       assert.deepEqual(headLook, { border: '0px', background: 'rgba(0, 0, 0, 0)' }, 'the top bar draws the worker bare')
-      assert.ok(await head.locator('.ws-worker-elapsed').isHidden() && await head.locator('.ws-worker-state').evaluate(el => getComputedStyle(el).fontSize === '0px'), 'the phone top bar shows the dot alone')
+      assert.ok(await head.locator('.ws-worker-elapsed').isHidden() && await head.locator('.ws-worker-state').evaluate(el => el.getBoundingClientRect().width <= 1), 'the phone top bar shows the dot alone')
       assert.ok(headBox.width >= 44 && headBox.height >= 44, `the phone dot is a full target: ${JSON.stringify(headBox)}`)
       assert.ok(headBox.x + headBox.width >= viewport.width - 16, 'the phone dot sits at the right end of the top bar')
     } else {

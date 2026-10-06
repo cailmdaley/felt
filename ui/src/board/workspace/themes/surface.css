@@ -3,6 +3,7 @@
 /* The shared worker control keeps its pigments on the channel's paper. */
 @scope ([data-ws-theme]) to (:scope [data-ws-theme-boundary], :scope [data-ws-theme]) {
   :scope .kbn-card-worker { color: var(--ws-ink-soft); }
+  :scope .kbn-card-worker:hover { color: var(--ws-ink); background: var(--ws-hover); }
   :scope .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-agent); }
   :scope .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
   :scope .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--ws-you); }
