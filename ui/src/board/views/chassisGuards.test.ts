@@ -120,46 +120,35 @@ describe('BLOCKING_DIALOG_SELECTOR', () => {
 })
 
 describe('settingsHotkey', () => {
-  const stroke = (key: string, mods: Omit<HotkeyLike, 'key'> = {}): HotkeyLike => ({ key, ...mods })
+  const MODIFIERS = ['metaKey', 'ctrlKey', 'altKey', 'shiftKey'] as const
+  /** Every one of the 16 modifier combinations, as a stroke's flags. */
+  const chords = Array.from({ length: 1 << MODIFIERS.length }, (_, bits) =>
+    Object.fromEntries(MODIFIERS.map((m, i) => [m, (bits & (1 << i)) !== 0])) as Omit<HotkeyLike, 'key'>)
+  // S2. `1`-`3` are here because the settings dispatch runs first: if this
+  // predicate ever answered for a digit, the view strip would go dead and
+  // nothing would say why. `<` is here because it is what a US layout actually
+  // reports for ⇧, — the modifier check is the second line of defence, not the
+  // only one. `.` is the neighbouring key.
+  const KEYS = [',', '.', '<', ';', '1', '2', '3', 'Escape', 'Tab']
 
-  it('reads a bare comma as the board-native opening', () => {
-    // A phone's keyboard has no ⌘ at all, and every other page on this board
-    // is already a bare key — so the sheet has to be reachable without one.
-    expect(settingsHotkey(stroke(','))).toBe('bare')
-  })
-
-  it('reads ⌘, and Ctrl+, as the application chord', () => {
-    // The two are one gesture, not two: whichever key a platform calls its
-    // own, a user pressing it means "preferences".
-    expect(settingsHotkey(stroke(',', { metaKey: true }))).toBe('chord')
-    expect(settingsHotkey(stroke(',', { ctrlKey: true }))).toBe('chord')
-  })
-
-  it('refuses ⌥, and ⇧, — they are someone else’s keystroke', () => {
-    // ⌥, is a CHARACTER on several layouts, so a layout that types one would
-    // otherwise open settings every time it was typed.
-    expect(settingsHotkey(stroke(',', { altKey: true }))).toBeNull()
-    expect(settingsHotkey(stroke(',', { shiftKey: true }))).toBeNull()
-  })
-
-  it('lets the disqualifiers outrank the chord, not the other way round', () => {
-    // Order inside the predicate, pinned: alt/shift are checked BEFORE
-    // meta/ctrl, so ⌘⌥, and ⌘⇧, are nobody's preferences shortcut. Swap the
-    // two lines in `settingsHotkey` and these become 'chord'.
-    expect(settingsHotkey(stroke(',', { metaKey: true, altKey: true }))).toBeNull()
-    expect(settingsHotkey(stroke(',', { ctrlKey: true, shiftKey: true }))).toBeNull()
-  })
-
-  it('answers for no other key, bare or chorded', () => {
-    // S2. `1`-`3` are here because the settings dispatch runs first: if this
-    // predicate ever answered for a digit, the view strip would go dead and
-    // nothing would say why. `<` is here because it is what a US layout
-    // actually reports for ⇧, — the modifier check above is the second line
-    // of defence, not the only one. `.` is the neighbouring key.
-    for (const key of ['.', '<', ';', '1', '2', '3', 'Escape', 'Tab']) {
-      expect(settingsHotkey(stroke(key))).toBeNull()
-      expect(settingsHotkey(stroke(key, { metaKey: true }))).toBeNull()
+  it('answers for a comma alone: bare with no modifier, chord on ⌘ or Ctrl, nothing with ⌥ or ⇧', () => {
+    // A bare `,` is the board-native opening — a phone's keyboard has no ⌘,
+    // and every other page here is already a bare key. ⌘, and Ctrl+, are one
+    // gesture: whichever key a platform calls its own means "preferences".
+    // ⌥, is a CHARACTER on several layouts, and ⇧, someone else's keystroke,
+    // so either disqualifies — and outranks the chord: ⌘⌥, and ⌘⇧, are
+    // nobody's preferences shortcut.
+    const expected = (key: string, m: Omit<HotkeyLike, 'key'>): ReturnType<typeof settingsHotkey> => {
+      if (key !== ',' || m.altKey || m.shiftKey) return null
+      return m.metaKey || m.ctrlKey ? 'chord' : 'bare'
     }
+    const failures = KEYS.flatMap((key) => chords.flatMap((m) => {
+      const got = settingsHotkey({ key, ...m })
+      const want = expected(key, m)
+      const held = MODIFIERS.filter((name) => m[name]).join('+') || 'none'
+      return got === want ? [] : [`${key} [${held}]: ${got} ≠ ${want}`]
+    }))
+    expect(failures).toEqual([])
   })
 })
 
