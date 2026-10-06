@@ -418,6 +418,39 @@ defmodule ShuttleWeb.FileControllerTest do
       end
     end
 
+    # The property's two sharpest corners, pinned rather than sampled: a stale
+    # If-None-Match outranks an If-Modified-Since that matches, and a matching
+    # one outranks a Range.
+    test "If-None-Match outranks a matching If-Modified-Since and a Range" do
+      path = tmp_path("txt")
+      File.write!(path, "hello embed")
+      on_exit(fn -> File.rm(path) end)
+      url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
+
+      first = get(api_conn(), url)
+      [etag] = get_resp_header(first, "etag")
+      [last_modified] = get_resp_header(first, "last-modified")
+      stale = ~s(W/"sha256-#{String.duplicate("0", 64)}")
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", stale)
+        |> put_req_header("if-modified-since", last_modified)
+        |> get(url)
+
+      assert conn.status == 200
+      assert conn.resp_body == "hello embed"
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", etag)
+        |> put_req_header("range", "bytes=0-1")
+        |> get(url)
+
+      assert conn.status == 304
+      assert get_resp_header(conn, "content-range") == []
+    end
+
     test "a strict non-*/* Accept header still reaches the controller (not 406)" do
       path = tmp_path("pdf")
       File.write!(path, "%PDF-1.4 fake")
