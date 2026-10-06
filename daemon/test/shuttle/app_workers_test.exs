@@ -1,8 +1,13 @@
 defmodule Shuttle.AppWorkersTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
+
+  # The concurrent-claim races are bounded only against a hang: a passing race
+  # never waits this long, and a loaded machine can take seconds per task.
+  @race_timeout 60_000
   import Shuttle.Test.PollerHelpers
   alias Shuttle.{AppWorkers, Dispatcher, Poller, WorkerBackend}
   alias Shuttle.Test.FeltStoreRunner, as: Runner
+  alias Shuttle.Test.{Env, FakeCli}
 
   defmodule App do
     use Agent
@@ -128,23 +133,13 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   setup do
-    start_supervised!(Runner)
+    Runner.start!()
     start_supervised!(App)
     root = Path.join(System.tmp_dir!(), "app-workers-test-#{System.unique_integer([:positive])}")
-    previous_root = Application.get_env(:shuttle, :app_workers_dir)
-    previous_client = Application.get_env(:shuttle, :codex_app_client)
-    Application.put_env(:shuttle, :app_workers_dir, root)
-    Application.put_env(:shuttle, :codex_app_client, App)
+    Env.put_app_env(:app_workers_dir, root)
+    Env.put_app_env(:codex_app_client, App)
 
-    on_exit(fn ->
-      Application.put_env(:shuttle, :app_workers_dir, previous_root)
-
-      if previous_client,
-        do: Application.put_env(:shuttle, :codex_app_client, previous_client),
-        else: Application.delete_env(:shuttle, :codex_app_client)
-
-      File.rm_rf!(root)
-    end)
+    on_exit(fn -> File.rm_rf!(root) end)
 
     :ok
   end
@@ -404,7 +399,7 @@ defmodule Shuttle.AppWorkersTest do
       |> Task.async_stream(
         &AppWorkers.claim_or_adopt("adopt-race", &1, Runner.felt_root()),
         max_concurrency: 30,
-        timeout: 5_000
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -558,7 +553,8 @@ defmodule Shuttle.AppWorkersTest do
             Runner.felt_root()
           )
         end,
-        max_concurrency: 30
+        max_concurrency: 30,
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -649,7 +645,8 @@ defmodule Shuttle.AppWorkersTest do
       1..20
       |> Task.async_stream(
         fn _ -> AppWorkers.recover(id, "tests/race", "race-uid", Runner.felt_root()) end,
-        max_concurrency: 20
+        max_concurrency: 20,
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -1018,9 +1015,7 @@ defmodule Shuttle.AppWorkersTest do
 
   test "app workers can launch without a tmux executable" do
     fiber("tests/app")
-    path = System.get_env("PATH")
-    System.put_env("PATH", "/does-not-exist")
-    on_exit(fn -> System.put_env("PATH", path) end)
+    Env.put_env("PATH", "/does-not-exist")
     assert {:ok, "codex-app:app-session-1"} = dispatch("tests/app", runner: MissingTmuxRunner)
 
     {:ok, poller} =
@@ -1036,13 +1031,7 @@ defmodule Shuttle.AppWorkersTest do
 
   test "an installed but unresponsive tmux still prevents duplicate app dispatch" do
     fiber("tests/app")
-    bin = Path.join(AppWorkers.root(), "bin")
-    File.mkdir_p!(bin)
-    File.write!(Path.join(bin, "tmux"), "#!/bin/sh\nexit 1\n")
-    File.chmod!(Path.join(bin, "tmux"), 0o755)
-    path = System.get_env("PATH")
-    System.put_env("PATH", bin)
-    on_exit(fn -> System.put_env("PATH", path) end)
+    FakeCli.install!(%{"tmux" => "#!/bin/sh\nexit 1\n"})
     assert {:error, :already_running} = dispatch("tests/app", runner: MissingTmuxRunner)
     assert App.calls() == []
   end
@@ -1129,7 +1118,7 @@ defmodule Shuttle.AppWorkersTest do
           {fiber, AppWorkers.claim("race", fiber, Runner.felt_root())}
         end,
         max_concurrency: 12,
-        timeout: 10_000
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -1143,7 +1132,9 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   defp settle(poller), do: eventually(fn -> :sys.get_state(poller).poll_cycles > 0 end)
-  defp eventually(fun, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 1_500)
   defp eventually(fun, 0), do: assert(fun.())
 
   defp eventually(fun, attempts) do

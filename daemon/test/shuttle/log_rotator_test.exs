@@ -1,5 +1,5 @@
 defmodule Shuttle.LogRotatorTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -119,7 +119,8 @@ defmodule Shuttle.LogRotatorTest do
 
       output = capture_log(fn -> assert LogRotator.rotate_now(pid) == [] end)
 
-      assert output == ""
+      # capture_log also sees concurrent tests' logs; only the rotator's count.
+      refute output =~ "LogRotator"
       assert Process.alive?(pid)
     end
   end
@@ -152,7 +153,7 @@ defmodule Shuttle.LogRotatorTest do
       gone = Path.join(tmp, "never-existed.log")
       pid = start_rotator(paths: [gone], tunnel_log_dir: nil, max_bytes: 1_000)
 
-      assert capture_log(fn -> assert LogRotator.rotate_now(pid) == [] end) == ""
+      refute capture_log(fn -> assert LogRotator.rotate_now(pid) == [] end) =~ "LogRotator"
       assert Process.alive?(pid)
     end
 

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { LIVE_FILE_POLL_INTERVAL_MS, LiveFileRefresh } from './LiveFileRefresh.js'
+import { peek, resetDocumentResources } from './documentResources.js'
+import { resetLanes } from './requestLanes.js'
 
 function response(status: number, body = '', headers: Record<string, string> = {}): Response {
   return {
@@ -292,6 +294,31 @@ describe('LiveFileRefresh', () => {
     expect(fetchFile).toHaveBeenCalledTimes(2)
     expect(onContent).toHaveBeenCalledTimes(1)
     expect(onContent).toHaveBeenCalledWith('back online')
+    stop()
+  })
+})
+
+describe('LiveFileRefresh over the document cache', () => {
+  afterEach(() => { resetDocumentResources(); resetLanes(); vi.unstubAllGlobals() })
+
+  it('moves a preview read still waiting in the queue up when its page is selected', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const order: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (src: string) => {
+      order.push(src)
+      if (src.includes('busy')) await gate
+      return new Response(src, { headers: { ETag: 'W/"sha256-' + 'b'.repeat(64) + '"' } })
+    }))
+    const busy = [peek('/api/v1/file?path=/busy-a'), peek('/api/v1/file?path=/busy-b')]
+    const poller = new LiveFileRefresh({ setInterval: (() => 0) as unknown as typeof globalThis.setInterval, clearInterval: () => {}, onVisibilityChange: () => () => {} })
+    const content = vi.fn()
+    const src = '/api/v1/file?path=/next.html'
+    const stop = poller.watch(src, content, vi.fn(), { active: false, loadOnce: true })
+    await stop.resume()
+    expect(content).toHaveBeenCalledWith(src)
+    expect(order).toEqual(['/api/v1/file?path=/busy-a', '/api/v1/file?path=/busy-b', src])
+    release(); await Promise.all(busy)
     stop()
   })
 })

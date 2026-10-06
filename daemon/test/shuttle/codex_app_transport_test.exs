@@ -1,5 +1,5 @@
 defmodule Shuttle.CodexApp.TransportTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Bitwise
 
@@ -10,35 +10,22 @@ defmodule Shuttle.CodexApp.TransportTest do
 
   setup do
     if pid = Process.whereis(@client), do: Transport.close(pid)
-    previous = Application.get_env(:shuttle, :codex_app_transport_opts)
 
     on_exit(fn ->
       if pid = Process.whereis(@client), do: Transport.close(pid)
-
-      if previous,
-        do: Application.put_env(:shuttle, :codex_app_transport_opts, previous),
-        else: Application.delete_env(:shuttle, :codex_app_transport_opts)
     end)
 
     :ok
   end
 
   test "selects an explicit socket or the configured Codex home" do
-    previous = Map.new(["CODEX_HOME", "SHUTTLE_CODEX_SOCKET"], &{&1, System.get_env(&1)})
     # Rooted at /tmp, not System.tmp_dir!(): macOS's per-user TMPDIR pushes the
     # socket path past the 104-byte sun_path limit.
     home = Path.join("/tmp", "felt-endpoint-#{System.unique_integer([:positive])}")
 
-    on_exit(fn ->
-      Enum.each(previous, fn
-        {key, nil} -> System.delete_env(key)
-        {key, value} -> System.put_env(key, value)
-      end)
+    on_exit(fn -> File.rm_rf!(home) end)
 
-      File.rm_rf!(home)
-    end)
-
-    System.put_env("CODEX_HOME", home)
+    Shuttle.Test.Env.put_env("CODEX_HOME", home)
 
     for mode <- [:override, :codex_home, :empty_override] do
       {path, peer} =
@@ -48,7 +35,7 @@ defmodule Shuttle.CodexApp.TransportTest do
         end)
 
       if mode == :override do
-        System.put_env("SHUTTLE_CODEX_SOCKET", path)
+        Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", path)
       else
         directory = Path.join(home, "app-server-control")
         File.mkdir_p!(directory)
@@ -57,8 +44,8 @@ defmodule Shuttle.CodexApp.TransportTest do
         File.ln_s!(path, selected)
 
         if mode == :empty_override,
-          do: System.put_env("SHUTTLE_CODEX_SOCKET", ""),
-          else: System.delete_env("SHUTTLE_CODEX_SOCKET")
+          do: Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", ""),
+          else: Shuttle.Test.Env.delete_env("SHUTTLE_CODEX_SOCKET")
       end
 
       {:ok, client} = Transport.start_link(connect_timeout: 1_000)
@@ -129,7 +116,7 @@ defmodule Shuttle.CodexApp.TransportTest do
         end)
       end
 
-    assert Enum.sort(Enum.map(tasks, &Task.await(&1, 3_000))) ==
+    assert Enum.sort(Enum.map(tasks, &Task.await(&1, 30_000))) ==
              Enum.map(1..24, &{&1, {:ok, &1}})
 
     await_peer(peer)
@@ -248,7 +235,7 @@ defmodule Shuttle.CodexApp.TransportTest do
     tasks =
       for _ <- 1..3, do: Task.async(fn -> Transport.request(client, "pending", %{}, 2_000) end)
 
-    assert Enum.map(tasks, &Task.await(&1, 3_000)) == List.duplicate({:error, :disconnected}, 3)
+    assert Enum.map(tasks, &Task.await(&1, 30_000)) == List.duplicate({:error, :disconnected}, 3)
     await_peer(peer)
   end
 
@@ -329,7 +316,7 @@ defmodule Shuttle.CodexApp.TransportTest do
       for _ <- 1..16,
           do: Task.async(fn -> Transport.start_link(socket_path: path, name: name) end)
 
-    results = Enum.map(tasks, &Task.await(&1, 2_000))
+    results = Enum.map(tasks, &Task.await(&1, 30_000))
     winners = for {:ok, pid} <- results, do: pid
     existing = for {:error, {:already_started, pid}} <- results, do: pid
 
@@ -364,7 +351,7 @@ defmodule Shuttle.CodexApp.TransportTest do
       end
 
     Enum.each(task_pids, &send(&1, :close))
-    assert Enum.map(tasks, &Task.await(&1, 1_000)) == List.duplicate(:ok, 8)
+    assert Enum.map(tasks, &Task.await(&1, 30_000)) == List.duplicate(:ok, 8)
     assert :ok = Transport.close(client)
     await_peer(peer)
   end
@@ -664,7 +651,7 @@ defmodule Shuttle.CodexApp.TransportTest do
   end
 
   defp configure_adapter(path) do
-    Application.put_env(:shuttle, :codex_app_transport_opts,
+    Shuttle.Test.Env.put_app_env(:codex_app_transport_opts,
       socket_path: path,
       connect_timeout: 1_000
     )
@@ -840,7 +827,9 @@ defmodule Shuttle.CodexApp.TransportTest do
     end
   end
 
-  defp wait_until(predicate, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(predicate, attempts \\ 6_000)
   defp wait_until(predicate, 0), do: assert(predicate.())
 
   defp wait_until(predicate, attempts) do

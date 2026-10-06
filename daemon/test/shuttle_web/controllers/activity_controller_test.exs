@@ -11,9 +11,11 @@ defmodule ShuttleWeb.ActivityControllerTest do
   controller's tests point `$SHUTTLE_EVENTS_FILE` at those fixtures and cover
   the 400s.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Phoenix.ConnTest
+
+  alias Shuttle.Test.Env
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -680,19 +682,8 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
-  # Point the reader at a fixture. Clears SHUTTLE_DATA_DIR too, so resolution
-  # can never fall through to the real ~/.shuttle/events.jsonl on a dev machine.
+  # Point the reader at a fixture.
   defp with_events_file(path) do
-    keys = ~w(SHUTTLE_EVENTS_FILE SHUTTLE_DATA_DIR)
-    previous = Map.new(keys, &{&1, System.get_env(&1)})
-
-    Enum.each(keys, &System.delete_env/1)
-    System.put_env("SHUTTLE_EVENTS_FILE", path)
-
-    on_exit(fn ->
-      Enum.each(previous, fn {k, v} ->
-        if v, do: System.put_env(k, v), else: System.delete_env(k)
-      end)
-    end)
+    Env.put_env("SHUTTLE_EVENTS_FILE", path)
   end
 end

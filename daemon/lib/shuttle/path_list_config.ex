@@ -135,15 +135,15 @@ defmodule Shuttle.PathListConfig do
   """
   @spec config_path(spec()) :: String.t()
   def config_path(spec) do
-    case System.get_env(spec.config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(spec.default_path)
+    case Shuttle.Env.get(spec.config_env) do
+      v when is_binary(v) and v != "" -> Shuttle.Env.expand(v)
+      _ -> Shuttle.Env.expand(spec.default_path)
     end
   end
 
   # The compact comma-separated `<ENV>` form, or `[]`.
   defp from_env(spec) do
-    case System.get_env(spec.env) do
+    case Shuttle.Env.get(spec.env) do
       v when is_binary(v) and v != "" -> v |> String.split(",") |> normalize()
       _ -> []
     end
@@ -165,7 +165,7 @@ defmodule Shuttle.PathListConfig do
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&Path.expand/1)
+    |> Enum.map(&Shuttle.Env.expand/1)
     |> Enum.uniq()
   end
 end

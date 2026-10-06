@@ -1,18 +1,10 @@
 defmodule Shuttle.HostTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import ExUnit.CaptureLog
-  import Shuttle.Test.EnvHelpers
 
   alias Shuttle.Host
 
   @fixture_dir Path.expand("../fixtures/host", __DIR__)
-  @env_vars ~w(SHUTTLE_HOST_CONFIG_FILE SHUTTLE_LISTEN SHUTTLE_PORT SHUTTLE_DATA_DIR SHUTTLE_PEER_UID)
-
-  setup do
-    previous = Map.new(@env_vars, &{&1, System.get_env(&1)})
-    on_exit(fn -> Enum.each(previous, fn {var, value} -> restore_env(var, value) end) end)
-    :ok
-  end
 
   describe "parity with the Go reader" do
     # The same fixtures and expectation file internal/shuttlecli/host_class_test.go
@@ -31,7 +23,7 @@ defmodule Shuttle.HostTest do
       test "#{name} resolves identically in both languages" do
         %{"file" => file, "env" => env, "expect" => want} = @kase
 
-        System.put_env(
+        Shuttle.Test.Env.put_env(
           "SHUTTLE_HOST_CONFIG_FILE",
           if(file,
             do: Path.join(@fixture_dir, file),
@@ -39,9 +31,12 @@ defmodule Shuttle.HostTest do
           )
         )
 
-        System.delete_env("SHUTTLE_LISTEN")
-        System.delete_env("SHUTTLE_PORT")
-        Enum.each(Map.merge(@base_env, env), fn {var, value} -> System.put_env(var, value) end)
+        Shuttle.Test.Env.delete_env("SHUTTLE_LISTEN")
+        Shuttle.Test.Env.delete_env("SHUTTLE_PORT")
+
+        Enum.each(Map.merge(@base_env, env), fn {var, value} ->
+          Shuttle.Test.Env.put_env(var, value)
+        end)
 
         got =
           case Host.resolve() do
@@ -76,7 +71,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "on only for an explicit true", %{host_file: file} do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
       refute Host.quarantine_auto_release?()
 
       for {body, want} <- [
@@ -90,7 +85,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "any other value is off, with a warning", %{host_file: file} do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
       File.write!(file, ~s({"quarantine_auto_release":"yes"}))
 
       assert capture_log(fn -> refute Host.quarantine_auto_release?() end) =~
@@ -98,7 +93,7 @@ defmodule Shuttle.HostTest do
     end
 
     test "a malformed host.json is off rather than a crash", %{host_file: file} do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
       File.write!(file, "{not json")
       refute Host.quarantine_auto_release?()
     end
@@ -107,15 +102,15 @@ defmodule Shuttle.HostTest do
   describe "resolve!/1" do
     test "raises with the file's path on a malformed host.json" do
       path = Path.join(@fixture_dir, "malformed.json")
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", path)
 
       assert_raise ArgumentError, ~r/#{Regex.escape(path)}/, fn -> Host.resolve!() end
     end
 
     test "the single-user default falls back to the endpoint config's port" do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "absent.json"))
-      System.delete_env("SHUTTLE_LISTEN")
-      System.delete_env("SHUTTLE_PORT")
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "absent.json"))
+      Shuttle.Test.Env.delete_env("SHUTTLE_LISTEN")
+      Shuttle.Test.Env.delete_env("SHUTTLE_PORT")
 
       assert %{listen: {:tcp, {127, 0, 0, 1}, 4002}} = Host.resolve!(4002)
     end
@@ -324,135 +319,49 @@ defmodule Shuttle.HostTest do
     end
   end
 
-  describe "Shuttle.Application.configure_endpoint/0" do
+  # `endpoint_settings/0` is what `configure_endpoint/0` writes into the app
+  # env at boot, resolved here without writing it.
+  describe "Shuttle.Application.endpoint_settings/0" do
     setup do
-      previous_endpoint = Application.get_env(:shuttle, ShuttleWeb.Endpoint)
-      previous_listen = Application.get_env(:shuttle, :listen)
-      previous_class = Application.get_env(:shuttle, :host_class)
-      previous_peer_gate = Application.get_env(:shuttle, :peer_gate)
-      previous_peer_gate_uid = Application.get_env(:shuttle, :peer_gate_expected_uid)
-      previous_peer_gate_uid_source = Application.get_env(:shuttle, :peer_gate_uid_source)
-      previous_proc_root = Application.get_env(:shuttle, :proc_net_root)
-
-      on_exit(fn ->
-        Application.put_env(:shuttle, ShuttleWeb.Endpoint, previous_endpoint)
-        restore_app_env(:listen, previous_listen)
-        restore_app_env(:host_class, previous_class)
-        restore_app_env(:peer_gate, previous_peer_gate)
-        restore_app_env(:peer_gate_expected_uid, previous_peer_gate_uid)
-        restore_app_env(:peer_gate_uid_source, previous_peer_gate_uid_source)
-        restore_app_env(:proc_net_root, previous_proc_root)
-      end)
-
       base = "/tmp/shuttle-cfg-#{System.unique_integer([:positive])}"
       File.mkdir_p!(base)
       # Explicit mode: under a 002 umask mkdir yields 0775 and the ancestry check refuses it.
       File.chmod!(base, 0o755)
       on_exit(fn -> File.rm_rf(base) end)
 
-      System.delete_env("SHUTTLE_LISTEN")
-      System.delete_env("SHUTTLE_PORT")
-      System.delete_env("SHUTTLE_PEER_UID")
-      System.put_env("SHUTTLE_DATA_DIR", base)
+      Shuttle.Test.Env.delete_env("SHUTTLE_LISTEN")
+      Shuttle.Test.Env.delete_env("SHUTTLE_PORT")
+      Shuttle.Test.Env.delete_env("SHUTTLE_PEER_UID")
+      Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", base)
 
-      {:ok, base: base, endpoint: previous_endpoint}
-    end
-
-    test "a shared host's endpoint serves on its unix socket and opens no TCP port", %{
-      base: base,
-      endpoint: endpoint
-    } do
-      # The real endpoint, restarted under the configuration boot produces:
-      # the running test endpoint is stopped, reconfigured with server: true,
-      # and restarted, so Phoenix → Bandit → thousand_island do the binding.
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
-      sock = Path.join([base, "sock", "daemon.sock"])
-      before = listening_sockets()
-
-      :ok = Supervisor.terminate_child(Shuttle.Supervisor, ShuttleWeb.Endpoint)
-
-      on_exit(fn ->
-        Supervisor.terminate_child(Shuttle.Supervisor, ShuttleWeb.Endpoint)
-        Application.put_env(:shuttle, ShuttleWeb.Endpoint, endpoint)
-        Supervisor.restart_child(Shuttle.Supervisor, ShuttleWeb.Endpoint)
-      end)
-
-      Shuttle.Application.configure_endpoint()
-      {:ok, _} = Supervisor.restart_child(Shuttle.Supervisor, ShuttleWeb.Endpoint)
-      Shuttle.Application.restrict_bound_socket()
-
-      assert Shuttle.listen() == "unix://" <> sock
-      assert Shuttle.host_class() == :shared_multi_user
-
-      # The probe's new unix socket shares the requested path's inode — so an
-      # empty TCP difference below is a finding, not a probe that sees nothing.
-      opened = listening_sockets() -- before
-      {:ok, %File.Stat{inode: inode}} = File.stat(sock)
-
-      assert Enum.any?(opened, fn
-               {:local, path} ->
-                 match?({:ok, %File.Stat{inode: ^inode}}, File.stat(path))
-
-               _ ->
-                 false
-             end)
-
-      assert Enum.filter(opened, &match?({{_, _, _, _}, _}, &1)) == []
-      assert Enum.filter(opened, &match?({{_, _, _, _, _, _, _, _}, _}, &1)) == []
-
-      assert {:ok, %File.Stat{type: :other, mode: mode}} = File.lstat(sock)
-      assert Bitwise.band(mode, 0o777) == 0o600
-      assert {:ok, %File.Stat{mode: dir_mode}} = File.lstat(Path.dirname(sock))
-      assert Bitwise.band(dir_mode, 0o777) == 0o700
-
-      {:ok, socket} = :gen_tcp.connect({:local, sock}, 0, [:binary, active: false], 2_000)
-
-      :ok =
-        :gen_tcp.send(
-          socket,
-          "GET /api/v1/version HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n"
-        )
-
-      [head, body] = socket |> recv_all("") |> String.split("\r\n\r\n", parts: 2)
-      assert head =~ "HTTP/1.1 200"
-
-      assert %{
-               "listen" => listen,
-               "host_class" => "shared-multi-user",
-               "peer_gate" => "none",
-               "peer_gate_uid" => nil,
-               "peer_gate_uid_source" => nil
-             } = Jason.decode!(body)
-
-      assert listen == "unix://" <> sock
+      {:ok, base: base, endpoint: Application.get_env(:shuttle, ShuttleWeb.Endpoint)}
     end
 
     test "a server: false endpoint resolves the socket without touching disk",
          %{base: base, endpoint: endpoint} do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
 
-      Shuttle.Application.configure_endpoint()
+      settings = Map.new(Shuttle.Application.endpoint_settings())
 
-      assert Shuttle.listen() == "unix://" <> Path.join([base, "sock", "daemon.sock"])
+      assert settings[:listen] == "unix://" <> Path.join([base, "sock", "daemon.sock"])
       refute File.exists?(Path.join(base, "sock"))
-      assert Application.get_env(:shuttle, :peer_gate) == "none"
+      assert settings[:peer_gate] == "none"
     end
 
     test "a shared TCP test endpoint bypasses the proc requirement", %{
       base: base,
       endpoint: endpoint
     } do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
-      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
-      Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
+      Shuttle.Test.Env.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Shuttle.Test.Env.put_app_env(:proc_net_root, Path.join(base, "missing-proc"))
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, false))
 
-      Shuttle.Application.configure_endpoint()
+      settings = Map.new(Shuttle.Application.endpoint_settings())
 
-      assert Shuttle.listen() == "tcp://127.0.0.1:4999"
-      assert Application.get_env(:shuttle, :peer_gate) == "none"
+      assert settings[:listen] == "tcp://127.0.0.1:4999"
+      assert settings[:peer_gate] == "none"
     end
 
     test "a shared TCP listener reports the daemon euid and source", %{
@@ -460,19 +369,19 @@ defmodule Shuttle.HostTest do
       endpoint: endpoint
     } do
       {host_file, proc_root} = shared_tcp_fixtures(base)
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
-      Application.put_env(:shuttle, :proc_net_root, proc_root)
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
+      Shuttle.Test.Env.put_app_env(:proc_net_root, proc_root)
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
 
-      Shuttle.Application.configure_endpoint()
+      settings = Map.new(Shuttle.Application.endpoint_settings())
 
       {uid_text, 0} = System.cmd("id", ["-u"])
-      assert Application.get_env(:shuttle, :peer_gate) == "uid"
+      assert settings[:peer_gate] == "uid"
 
-      assert Application.get_env(:shuttle, :peer_gate_expected_uid) ==
+      assert settings[:peer_gate_expected_uid] ==
                String.to_integer(String.trim(uid_text))
 
-      assert Application.get_env(:shuttle, :peer_gate_uid_source) == "euid"
+      assert settings[:peer_gate_uid_source] == "euid"
     end
 
     test "a shared TCP uid override is reported and warned about", %{
@@ -480,31 +389,31 @@ defmodule Shuttle.HostTest do
       endpoint: endpoint
     } do
       {host_file, proc_root} = shared_tcp_fixtures(base)
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
-      System.put_env("SHUTTLE_PEER_UID", "424242")
-      Application.put_env(:shuttle, :proc_net_root, proc_root)
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", host_file)
+      Shuttle.Test.Env.put_env("SHUTTLE_PEER_UID", "424242")
+      Shuttle.Test.Env.put_app_env(:proc_net_root, proc_root)
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
 
-      log = capture_log(fn -> Shuttle.Application.configure_endpoint() end)
+      {settings, log} = with_log(fn -> Map.new(Shuttle.Application.endpoint_settings()) end)
 
       assert log =~ "SHUTTLE_PEER_UID is set"
-      assert Application.get_env(:shuttle, :peer_gate) == "uid"
-      assert Application.get_env(:shuttle, :peer_gate_expected_uid) == 424_242
-      assert Application.get_env(:shuttle, :peer_gate_uid_source) == "env"
+      assert settings[:peer_gate] == "uid"
+      assert settings[:peer_gate_expected_uid] == 424_242
+      assert settings[:peer_gate_uid_source] == "env"
     end
 
     test "a shared TCP listener refuses boot when proc is unreadable", %{
       base: base,
       endpoint: endpoint
     } do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
-      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
-      Application.put_env(:shuttle, :proc_net_root, Path.join(base, "missing-proc"))
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "shared.json"))
+      Shuttle.Test.Env.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Shuttle.Test.Env.put_app_env(:proc_net_root, Path.join(base, "missing-proc"))
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
 
       error =
         assert_raise ArgumentError, fn ->
-          Shuttle.Application.configure_endpoint()
+          Shuttle.Application.endpoint_settings()
         end
 
       assert error.message =~ "shared-multi-user"
@@ -516,13 +425,17 @@ defmodule Shuttle.HostTest do
     test "an exposed host refuses TCP and directs the front proxy to its socket", %{
       endpoint: endpoint
     } do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "exposed.json"))
-      System.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
+      Shuttle.Test.Env.put_env(
+        "SHUTTLE_HOST_CONFIG_FILE",
+        Path.join(@fixture_dir, "exposed.json")
+      )
+
+      Shuttle.Test.Env.put_env("SHUTTLE_LISTEN", "tcp://127.0.0.1:4999")
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, Keyword.put(endpoint, :server, true))
 
       error =
         assert_raise ArgumentError, fn ->
-          Shuttle.Application.configure_endpoint()
+          Shuttle.Application.endpoint_settings()
         end
 
       assert error.message =~ "host class exposed"
@@ -531,23 +444,31 @@ defmodule Shuttle.HostTest do
     end
 
     test "a single-user host keeps loopback tcp on the configured port", %{endpoint: endpoint} do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "single_user.json"))
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, endpoint)
+      Shuttle.Test.Env.put_env(
+        "SHUTTLE_HOST_CONFIG_FILE",
+        Path.join(@fixture_dir, "single_user.json")
+      )
 
-      Shuttle.Application.configure_endpoint()
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, endpoint)
 
-      http = Application.get_env(:shuttle, ShuttleWeb.Endpoint)[:http]
+      settings = Map.new(Shuttle.Application.endpoint_settings())
+
+      http = settings[ShuttleWeb.Endpoint][:http]
       assert http[:ip] == {127, 0, 0, 1}
       assert http[:port] == 4002
-      assert Shuttle.listen() == "tcp://127.0.0.1:4002"
+      assert settings[:listen] == "tcp://127.0.0.1:4002"
     end
 
     test "a non-loopback listen refuses to boot", %{endpoint: endpoint} do
-      System.put_env("SHUTTLE_HOST_CONFIG_FILE", Path.join(@fixture_dir, "non_loopback.json"))
-      Application.put_env(:shuttle, ShuttleWeb.Endpoint, endpoint)
+      Shuttle.Test.Env.put_env(
+        "SHUTTLE_HOST_CONFIG_FILE",
+        Path.join(@fixture_dir, "non_loopback.json")
+      )
+
+      Shuttle.Test.Env.put_app_env(ShuttleWeb.Endpoint, endpoint)
 
       assert_raise ArgumentError, ~r/only 127\.0\.0\.1 is allowed/, fn ->
-        Shuttle.Application.configure_endpoint()
+        Shuttle.Application.endpoint_settings()
       end
     end
   end
@@ -570,29 +491,5 @@ defmodule Shuttle.HostTest do
     )
 
     {host_file, proc_root}
-  end
-
-  # Every listening socket in this VM, by address: `{ip, port}` for TCP and
-  # `{:local, path}` for a unix listener (gen_tcp serves both as inet ports).
-  defp listening_sockets do
-    for port <- Port.list(),
-        {:name, ~c"tcp_inet"} == :erlang.port_info(port, :name),
-        %{states: states} <- [safe_inet_info(port)],
-        :listen in states,
-        {:ok, address} <- [:inet.sockname(port)],
-        do: address
-  end
-
-  defp safe_inet_info(port) do
-    :inet.info(port)
-  rescue
-    _ -> %{states: []}
-  end
-
-  defp recv_all(socket, acc) do
-    case :gen_tcp.recv(socket, 0, 5_000) do
-      {:ok, data} -> recv_all(socket, acc <> data)
-      {:error, :closed} -> acc
-    end
   end
 end

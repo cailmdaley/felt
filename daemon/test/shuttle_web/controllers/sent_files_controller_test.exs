@@ -11,11 +11,10 @@ defmodule ShuttleWeb.SentFilesControllerTest do
   `Shuttle.OriginRouter.forward_get/4` with a stubbed transport, mirroring the
   /file forward tests.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
   alias Shuttle.Test.StubGetFileClient
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -562,31 +561,17 @@ defmodule ShuttleWeb.SentFilesControllerTest do
   end
 
   # Point the reader's primary path (Shuttle owns the stream now) at a fixture for
-  # the controller's local branch. Clear the legacy Portolan vars and
-  # SHUTTLE_DATA_DIR so resolution is unambiguous and never leaks to the real
-  # ~/.shuttle/events.jsonl on the dev machine. Restores prior env on exit.
+  # the controller's local branch. Clear the legacy Portolan vars so resolution
+  # is unambiguous, and give the test its own (absent) session ledger: the
+  # suite-wide one is appended to by concurrent tests, and its change token is
+  # part of the ETag. Scoped to the test.
   defp with_events_file(path) do
-    keys = ~w(SHUTTLE_EVENTS_FILE SHUTTLE_DATA_DIR PORTOLAN_EVENTS_FILE PORTOLAN_DATA_DIR)
-    previous = Map.new(keys, &{&1, System.get_env(&1)})
-
-    Enum.each(keys, &System.delete_env/1)
-    System.put_env("SHUTTLE_EVENTS_FILE", path)
-
-    on_exit(fn ->
-      Enum.each(previous, fn {k, v} ->
-        if v, do: System.put_env(k, v), else: System.delete_env(k)
-      end)
-    end)
+    Enum.each(~w(PORTOLAN_EVENTS_FILE PORTOLAN_DATA_DIR), &Shuttle.Test.Env.delete_env/1)
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", path)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", path <> ".sessions")
   end
 
   defp with_session_ledger(path) do
-    previous = System.get_env("SHUTTLE_SESSIONS_FILE")
-    System.put_env("SHUTTLE_SESSIONS_FILE", path)
-
-    on_exit(fn ->
-      if previous,
-        do: System.put_env("SHUTTLE_SESSIONS_FILE", previous),
-        else: System.delete_env("SHUTTLE_SESSIONS_FILE")
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", path)
   end
 end

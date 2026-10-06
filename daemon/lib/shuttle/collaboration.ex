@@ -142,7 +142,7 @@ defmodule Shuttle.Collaboration do
   defp valid_slug?(_), do: false
 
   defp shared_role_store(store) when is_binary(store) and store != "" do
-    expanded = Path.expand(store)
+    expanded = Shuttle.Env.expand(store)
     host = if Path.basename(expanded) == ".felt", do: Path.dirname(expanded), else: expanded
     felt_path = Shuttle.FeltStores.store_felt_realpath(host)
     enclosing_felt_parent(felt_path, expanded)

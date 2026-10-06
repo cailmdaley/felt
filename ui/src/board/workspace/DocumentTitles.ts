@@ -1,3 +1,4 @@
+import { provesContent } from '../documentResources.js'
 export interface DocumentTitle { title?: string; preview: string; etag?: string }
 const titles = new Map<string, DocumentTitle>()
 const versions = new Map<string, DocumentTitle>()
@@ -53,10 +54,17 @@ export function watchDocumentTitles(listener: (key: string) => void): () => void
   listeners.add(listener)
   return () => listeners.delete(listener)
 }
+/** Titles and previews are read from a document's head, so it is all that is parsed or versioned. */
+const VERSION_HEAD = 65536
 const clean = (text: string): string => text.replace(/\0/g, '').replace(/\s+/g, ' ').trim().slice(0, 240)
 
-/** Cheap declared metadata only; compressed PDF objects and absent media tags fall back to filenames. */
-export function extractDocumentTitle(path: string, source: string | Uint8Array): Omit<DocumentTitle, 'etag'> {
+/**
+ * Cheap declared metadata only; compressed PDF objects and absent media tags
+ * fall back to filenames. Titles and previews live in a document's head, so
+ * only its first 64 KiB is ever parsed, whatever length of source arrives.
+ */
+export function extractDocumentTitle(path: string, whole: string | Uint8Array): Omit<DocumentTitle, 'etag'> {
+  const source = typeof whole === 'string' ? whole.slice(0, VERSION_HEAD) : whole.subarray(0, VERSION_HEAD)
   if (typeof source === 'string') {
     if (/\.html?$/i.test(path)) {
       const parsed = new DOMParser().parseFromString(source, 'text/html')
@@ -109,13 +117,22 @@ export function extractDocumentTitle(path: string, source: string | Uint8Array):
   return { preview: '' }
 }
 
-/** A source arrives from the thumbnail's own read; extraction is once per identity and ETag. */
+/**
+ * A source arrives from the thumbnail's own read; extraction is once per
+ * identity and content version: the digest ETag, else a hash of the source's
+ * first 64 KiB and its length, since a stat validator can stay put while the
+ * bytes change. A whole body is never hashed in full.
+ */
 export function cacheDocumentTitle(key: string, path: string, source: string | Uint8Array, etag?: string): DocumentTitle {
-  let hash = 2166136261
-  if (!etag) {
-    for (let i = 0; i < source.length; i++) hash = Math.imul(hash ^ (typeof source === 'string' ? source.charCodeAt(i) : source[i]), 16777619)
+  let content: string
+  if (provesContent(etag)) content = etag
+  else {
+    let hash = 2166136261
+    const end = Math.min(source.length, VERSION_HEAD)
+    for (let i = 0; i < end; i++) hash = Math.imul(hash ^ (typeof source === 'string' ? source.charCodeAt(i) : source[i]), 16777619)
+    content = `${etag ?? ''}|${source.length}|${hash >>> 0}`
   }
-  const version = JSON.stringify([key, etag ?? hash])
+  const version = JSON.stringify([key, content])
   const next = versions.get(version) ?? { ...extractDocumentTitle(path, source), etag }
   versions.set(version, next)
   if (versions.size > 512) versions.delete(versions.keys().next().value!)

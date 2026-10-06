@@ -88,7 +88,10 @@ defmodule Shuttle.FrontmatterEditTest do
 
     test "key order is preserved (no alphabetical reordering)" do
       out = FrontmatterEdit.apply(@fm, [{:put, "status", "closed"}])
-      keys = for line <- String.split(out, "\n"), m = Regex.run(~r/^(\w[\w\-]*):/, line), do: hd(tl(m))
+
+      keys =
+        for line <- String.split(out, "\n"), m = Regex.run(~r/^(\w[\w\-]*):/, line), do: hd(tl(m))
+
       assert keys == ["name", "status", "outcome", "shuttle"]
     end
   end
@@ -124,7 +127,11 @@ defmodule Shuttle.FrontmatterEditTest do
 
     test "spliced after felt-native frontmatter, the whole document parses" do
       native = "id: 01ABC\nname: Test\nstatus: active\n"
-      extra = %{"shuttle" => %{"kind" => "oneshot", "host" => "dapmcw68"}, "outcome" => "line one\nline two"}
+
+      extra = %{
+        "shuttle" => %{"kind" => "oneshot", "host" => "dapmcw68"},
+        "outcome" => "line one\nline two"
+      }
 
       {:ok, parsed} = YamlElixir.read_from_string(native <> FrontmatterEdit.render(extra))
       assert parsed["shuttle"]["kind"] == "oneshot"

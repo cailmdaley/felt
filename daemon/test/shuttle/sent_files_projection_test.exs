@@ -10,7 +10,7 @@ defmodule Shuttle.SentFilesProjectionTest do
   re-read, truncation, rotation, malformed lines, a partial trailing line, and
   the ledger join that has to stay at read time.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.{EventStream, SentFiles}
 
@@ -56,10 +56,7 @@ defmodule Shuttle.SentFilesProjectionTest do
   defp start_stream(events) do
     name = :"sent_files_stream_#{System.unique_integer([:positive])}"
 
-    {:ok, pid} =
-      EventStream.start_link(events_file: events, poll_interval_ms: 10, name: name)
-
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+    start_supervised!({EventStream, events_file: events, poll_interval_ms: 10, name: name})
     name
   end
 
@@ -71,7 +68,9 @@ defmodule Shuttle.SentFilesProjectionTest do
   defp scanned(events, ledger, extra \\ []),
     do: [events_file: events, session_ledger_file: ledger, stream: :no_such_stream] ++ extra
 
-  defp wait_until(fun, tries \\ 100) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, tries \\ 3_000) do
     cond do
       fun.() -> true
       tries <= 0 -> false

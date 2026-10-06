@@ -41,6 +41,26 @@ func TestShowResolvesIntrinsicUIDFromEnclosingStore(t *testing.T) {
 	}
 }
 
+// TestShowByUIDMatchesShowByID: a UID resolves to the fiber's id once, and the
+// fiber read by that id is the same document `show <id>` prints.
+func TestShowByUIDMatchesShowByID(t *testing.T) {
+	loomProj, _ := newCrossStoreFixture(t)
+	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	seedFiber(t, felt.NewStorage(loomProj), "roles/vizier", uid, "", nil, nil)
+
+	byID, err := runCommand(t, loomProj, "show", "roles/vizier", "-j")
+	if err != nil {
+		t.Fatalf("show by id: %v\n%s", err, byID)
+	}
+	byUID, err := runCommand(t, loomProj, "show", strings.ToLower(uid), "-j")
+	if err != nil {
+		t.Fatalf("show by UID: %v\n%s", err, byUID)
+	}
+	if byUID != byID {
+		t.Fatalf("show by UID = %s\nwant %s", byUID, byID)
+	}
+}
+
 func TestShowRejectsDuplicateIntrinsicUIDAcrossEnclosingStore(t *testing.T) {
 	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)

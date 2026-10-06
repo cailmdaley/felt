@@ -1,4 +1,5 @@
 defmodule Shuttle.DispatchIntegrationTest do
+  # sync: on_exit kills every Shuttle.TaskSupervisor child, other tests' included.
   use ExUnit.Case, async: false
 
   import Shuttle.Test.TranscriptHelpers
@@ -49,6 +50,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     def commands, do: Agent.get(__MODULE__, & &1.commands)
     def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
 
+    # The process scan's answers, in order; the last one repeats. Defaults to
+    # no processes.
+    def set_ps_results(results) when is_list(results) and results != [],
+      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
+
     @impl true
     def cmd(command, args, opts) when command in ["felt", "shuttle"] do
       felt_store = Agent.get(__MODULE__, & &1.felt_store)
@@ -64,7 +70,8 @@ defmodule Shuttle.DispatchIntegrationTest do
           do: opts,
           else: Keyword.put_new(opts, :cd, felt_store)
 
-      System.cmd(command, args, opts)
+      # Run as the test's scope sees it: scoped PATH and env reach the real CLIs.
+      Shuttle.Env.cmd(command, args, opts)
     end
 
     def cmd("tmux", ["has-session", "-t", session], _opts) do
@@ -90,11 +97,6 @@ defmodule Shuttle.DispatchIntegrationTest do
 
       {"", 0}
     end
-
-    # The process scan's answers, in order; the last one repeats. Defaults to
-    # no processes.
-    def set_ps_results(results) when is_list(results) and results != [],
-      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
 
     def cmd("ps", args, _opts) do
       Agent.get_and_update(__MODULE__, fn s ->
@@ -124,20 +126,17 @@ defmodule Shuttle.DispatchIntegrationTest do
     # throwaway SHUTTLE_DATA_DIR — the substrate that replaced felt history. The
     # dispatcher writes the dispatch marker keyed by the fiber's runtime key (its
     # uid); resume reads it back.
-    prev_data_dir = System.get_env("SHUTTLE_DATA_DIR")
-
     data_dir =
       Path.join(System.tmp_dir!(), "shuttle-int-markers-#{System.unique_integer([:positive])}")
 
     File.mkdir_p!(data_dir)
-    System.put_env("SHUTTLE_DATA_DIR", data_dir)
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", data_dir)
 
     # The session ledger lands under the same throwaway data dir, so each test
     # reads only its own pairings. test_helper.exs pins a suite-wide
     # SHUTTLE_SESSIONS_FILE (to keep the suite out of the real ~/.shuttle) and
     # that wins over SHUTTLE_DATA_DIR — drop it here so the per-test dir applies.
-    prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
-    System.delete_env("SHUTTLE_SESSIONS_FILE")
+    Shuttle.Test.Env.delete_env("SHUTTLE_SESSIONS_FILE")
 
     on_exit(fn ->
       # The session-UUID capture runs as a supervised background task and can
@@ -162,13 +161,6 @@ defmodule Shuttle.DispatchIntegrationTest do
       # during a recursive delete raises "file already exists". Retry the
       # sweep — the straggler finishes within milliseconds.
       rm_rf_retry(host)
-
-      if prev_data_dir,
-        do: System.put_env("SHUTTLE_DATA_DIR", prev_data_dir),
-        else: System.delete_env("SHUTTLE_DATA_DIR")
-
-      if prev_sessions_file, do: System.put_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
-
       rm_rf_retry(data_dir)
     end)
 
@@ -1370,8 +1362,7 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     # mark_awaiting resolves the fiber through FeltStores (SHUTTLE_STORES), not the
     # injected runner — point it at the temp store for the duration.
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", host)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, _poller} =
@@ -1397,9 +1388,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       # not regress a role whose run already completed.
       assert read_frontmatter(host, "tests/standing-armed")["status"] == "active"
     after
-      if prev_loom,
-        do: System.put_env("SHUTTLE_STORES", prev_loom),
-        else: System.delete_env("SHUTTLE_STORES")
+      # The scoped SHUTTLE_STORES is cleared when the test exits.
+      :ok
     end
   end
 
@@ -1452,8 +1442,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       if accept?, do: write_handoff_marker(host, "tests/#{slug}")
     end
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", host)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, _poller} =
@@ -1480,9 +1469,8 @@ defmodule Shuttle.DispatchIntegrationTest do
 
       refute Map.has_key?(fm, "closed-at")
     after
-      if prev_loom,
-        do: System.put_env("SHUTTLE_STORES", prev_loom),
-        else: System.delete_env("SHUTTLE_STORES")
+      # The scoped SHUTTLE_STORES is cleared when the test exits.
+      :ok
     end
   end
 
@@ -1512,8 +1500,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     A standing role awaiting review; the human clicks New session.
     """)
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", host)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, poller} =
@@ -1568,9 +1555,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       refute Map.has_key?(entry.fiber, "closed-at")
       refute Map.has_key?(entry.fiber, "tempered")
     after
-      if prev_loom,
-        do: System.put_env("SHUTTLE_STORES", prev_loom),
-        else: System.delete_env("SHUTTLE_STORES")
+      # The scoped SHUTTLE_STORES is cleared when the test exits.
+      :ok
     end
   end
 
@@ -1583,7 +1569,15 @@ defmodule Shuttle.DispatchIntegrationTest do
   # the window) is the sharpest probe; the handed_off_at stamp felt writes with
   # the re-arm keeps it at rest. Also asserts accept keeps the prior run's
   # outcome.
+  #
+  # The schedule is a daily tick at the minute the test starts, not
+  # `* * * * *`: the just-served tick sits inside the due-window exactly as an
+  # every-minute one would, but no further tick can elapse between accept and
+  # the poll — on an every-minute schedule a minute boundary crossed there is a
+  # genuinely new, due occurrence, and the poll rightly fires it.
   test "accept re-arms a standing role without re-firing the just-served tick", %{host: host} do
+    served = DateTime.shift_zone!(DateTime.utc_now(), "Europe/Paris")
+
     write_fiber(host, "tests/standing-temper-rest", """
     ---
     name: Standing temper-and-rest
@@ -1599,13 +1593,13 @@ defmodule Shuttle.DispatchIntegrationTest do
       host: test-host
       project_dir: #{host}
       schedule:
-        expr: "* * * * *"
+        expr: "#{served.minute} #{served.hour} * * *"
         tz: Europe/Paris
     ---
     A standing role awaiting review; the human drags it to tempered (accept).
     """)
 
-    # The run under review was dispatched ten minutes ago, so the current
+    # The run under review was dispatched ten minutes ago, so the served
     # minute's tick is newer than every service marker until accept concludes
     # the run with a fresh handed_off_at.
     write_dispatch_marker(
@@ -1615,8 +1609,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       DateTime.add(DateTime.utc_now(), -600, :second)
     )
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", host)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)
 
     try do
       {:ok, poller} =
@@ -1667,9 +1660,8 @@ defmodule Shuttle.DispatchIntegrationTest do
       # It stays armed-and-resting (active), not re-fired back to awaiting.
       assert read_frontmatter(host, "tests/standing-temper-rest")["status"] == "active"
     after
-      if prev_loom,
-        do: System.put_env("SHUTTLE_STORES", prev_loom),
-        else: System.delete_env("SHUTTLE_STORES")
+      # The scoped SHUTTLE_STORES is cleared when the test exits.
+      :ok
     end
   end
 
@@ -1965,17 +1957,8 @@ defmodule Shuttle.DispatchIntegrationTest do
   # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the sessions ROOT; the YYYY/MM/DD
   # fan-out still applies under it, so tests exercise the real day layout.
   defp put_codex_sessions_root(root) do
-    previous = System.get_env("SHUTTLE_CODEX_SESSIONS_DIR")
     File.mkdir_p!(root)
-    System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", root)
-
-    on_exit(fn ->
-      if previous do
-        System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", previous)
-      else
-        System.delete_env("SHUTTLE_CODEX_SESSIONS_DIR")
-      end
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", root)
 
     root
   end
@@ -2021,7 +2004,9 @@ defmodule Shuttle.DispatchIntegrationTest do
     File.write!(Path.join(session_dir, filename), session_meta <> "\n" <> user_turn <> "\n")
   end
 
-  defp eventually(fun, attempts \\ 40)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 600)
 
   defp eventually(fun, attempts) when attempts > 0 do
     if fun.() do

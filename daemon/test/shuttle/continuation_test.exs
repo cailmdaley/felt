@@ -1,6 +1,5 @@
 defmodule Shuttle.ContinuationTest do
-  # async: false — the writer tests share a named recording Agent.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.Continuation
 

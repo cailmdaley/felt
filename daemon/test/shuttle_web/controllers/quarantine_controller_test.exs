@@ -7,17 +7,16 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   named Poller and flips the snapshot's `boot_quarantine`, and a daemon with
   no Poller answers 503 instead of crashing the request.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
-  import Shuttle.Test.EnvHelpers
 
   @endpoint ShuttleWeb.Endpoint
 
-  alias Shuttle.Test.StubPostClient
+  alias Shuttle.Test.{Env, StubPostClient}
 
-  # The endpoint calls the globally named Shuttle.Poller. Quiet runner: no
+  # The endpoint calls this test's Shuttle.Poller (`Shuttle.Env.server/1`). Quiet runner: no
   # felt stores to poll, and every shell-out reports "nothing" so init's
   # orphan-adoption scan is inert.
   defmodule QuietRunner do
@@ -26,22 +25,12 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   end
 
   test "release flips the named Poller's boot_quarantine and is idempotent" do
-    start_supervised!(%{
-      id: make_ref(),
-      start:
-        {Shuttle.Poller, :start_link,
-         [
-           [
-             name: Shuttle.Poller,
-             runner: QuietRunner,
-             poll_interval_ms: 60_000,
-             felt_stores: [],
-             boot_quarantine: true,
-             daemon_heartbeat_file: Shuttle.Test.PollerHelpers.test_heartbeat_file()
-           ]
-         ]},
-      restart: :temporary
-    })
+    Shuttle.Test.PollerHelpers.start_poller!(
+      runner: QuietRunner,
+      poll_interval_ms: 60_000,
+      felt_stores: [],
+      boot_quarantine: true
+    )
 
     assert Shuttle.Poller.snapshot().boot_quarantine == true
 
@@ -64,21 +53,14 @@ defmodule ShuttleWeb.QuarantineControllerTest do
   # tunnel to the owning daemon's identical endpoint and relays its response.
   # The forwarded body strips `origin` (the owner runs its own local branch).
   test "release forwards to the owning remote when origin names one" do
-    start_supervised!(StubPostClient)
+    StubPostClient.start!()
 
     StubPostClient.set_response(
       {:ok, 200, Jason.encode!(%{"ok" => true, "boot_quarantine" => false})}
     )
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, StubPostClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "candide", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, StubPostClient)
 
     conn = post(api_conn(), "/api/v1/quarantine/release", Jason.encode!(%{origin: "candide"}))
     assert %{"ok" => true, "boot_quarantine" => false} = json_response(conn, 200)

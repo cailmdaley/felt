@@ -70,27 +70,29 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 
 			scopeID := felt.CommandScope(env, root, view.directory())
 
-			// An id that names a fiber in the enclosing store is shown from
-			// there: everything below runs against the store that holds it, with
-			// the fiber addressed by its id in that store's coordinates.
-			target, err := felt.ResolveRef(storage, scopeID, args[0])
-			if err != nil {
-				return err
-			}
-			query := args[0]
-			if target.Elsewhere {
-				storage, scopeID, query = target.Storage, "", target.ID
+			// Everything below runs against the store that holds the fiber, with
+			// the fiber addressed by its resolved id in that store's coordinates:
+			// an id naming a fiber in the enclosing store is shown from there,
+			// and a UID is read directly instead of walked for a second time.
+			read := func(find func(*felt.Storage, string, string) (*felt.Felt, error)) (*felt.Felt, error) {
+				target, f, err := felt.ReadResolved(storage, scopeID, args[0], func(r felt.Ref) (*felt.Felt, error) {
+					return find(r.Storage, "", r.ID)
+				})
+				if err == nil {
+					storage = target.Storage
+				}
+				return f, err
 			}
 
 			if selectorCount == 0 && !view.jsonOutput() && (detail == DepthName || detail == DepthCompact) {
 				// Both levels skip the relationship scan and the body-ref graph.
 				// Compact still reads the body — it reports the body's line count —
 				// but that is one extra file read, not a walk.
-				find := storage.FindMetadataInScope
+				find := (*felt.Storage).FindMetadataInScope
 				if detail == DepthCompact {
-					find = storage.FindInScope
+					find = (*felt.Storage).FindInScope
 				}
-				f, err := find(scopeID, query)
+				f, err := read(find)
 				if err != nil {
 					return err
 				}
@@ -98,13 +100,13 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				return nil
 			}
 
+			f, err := read((*felt.Storage).FindInScope)
+			if err != nil {
+				return err
+			}
+
 			// Targeted views: full single-file read, optionally structured output.
 			if selectorCount > 0 || view.jsonOutput() {
-				f, err := storage.FindInScope(scopeID, query)
-				if err != nil {
-					return err
-				}
-
 				if showBodyOnly {
 					return outputShowBody(out, storage, f, view.jsonOutput())
 				}
@@ -141,11 +143,6 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 					}
 					return writeJSON(out, f)
 				}
-			}
-
-			f, err := storage.FindInScope(scopeID, query)
-			if err != nil {
-				return err
 			}
 
 			graph := graphForBodyRefs(storage, f)

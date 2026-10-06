@@ -1,5 +1,5 @@
 defmodule Shuttle.WaitingTrackerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.EventStream
 
@@ -22,15 +22,10 @@ defmodule Shuttle.WaitingTrackerTest do
   defp start(events) do
     name = :"waiting_tracker_#{System.unique_integer([:positive])}"
 
-    {:ok, pid} =
-      EventStream.start_link(
-        events_file: events,
-        poll_interval_ms: 10,
-        clock: fn -> @base end,
-        name: name
-      )
+    start_supervised!(
+      {EventStream, events_file: events, poll_interval_ms: 10, clock: fn -> @base end, name: name}
+    )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
     name
   end
 
@@ -51,7 +46,9 @@ defmodule Shuttle.WaitingTrackerTest do
   defp last_event_at(name, session), do: (activity(name, session) || %{})[:last_event_at]
   defp ingested?(name, session), do: not is_nil(activity(name, session))
 
-  defp wait_until(fun, tries \\ 50) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, tries \\ 3_000) do
     cond do
       fun.() ->
         true
@@ -444,7 +441,9 @@ defmodule Shuttle.WaitingTrackerTest do
            end)
 
     File.write!(events, "")
-    Process.sleep(40)
+    # The tail must see the shrink before the next append: `bar`'s line is as
+    # long as `foo`'s, so a truncate-and-rewrite it missed is invisible to it.
+    assert wait_until(fn -> :sys.get_state(name).offset == 0 end)
     append(events, "notification", "bar-01J00000000000000000000000-shuttle")
 
     assert wait_until(fn ->

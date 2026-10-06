@@ -1,3 +1,13 @@
+# One temp root per test VM. Fixture names under System.tmp_dir!() carry
+# System.unique_integer/1, which restarts in every VM, so two `mix test` runs on
+# one machine would otherwise share (and rm_rf) each other's fixtures. Short on
+# purpose: unix socket paths under it must fit sun_path.
+test_tmp = Path.join(System.tmp_dir!(), "st-#{System.pid()}")
+File.rm_rf!(test_tmp)
+File.mkdir_p!(test_tmp)
+System.put_env("TMPDIR", test_tmp)
+System.at_exit(fn _ -> File.rm_rf(test_tmp) end)
+
 # Pin the agent registry for the whole suite: keep it off whatever
 # ~/.config/shuttle/agents.json the developer has. The fixture carries the same
 # records as the built-in layer, so the effective registry is the shipped one.
@@ -9,6 +19,33 @@ System.put_env("SHUTTLE_AGENTS_FILE", Path.expand("fixtures/agents.json", __DIR_
 # assertions in RemoteRegistryTest. Tests that want a fleet write their own
 # file and set SHUTTLE_REMOTES_FILE themselves.
 System.put_env("SHUTTLE_REMOTES_FILE", Path.expand("fixtures/remotes/absent.json", __DIR__))
+
+# Pin the store registry away from the developer's real one: a fresh tmp
+# path and no SHUTTLE_STORES mean no configured stores. Without this pin, a
+# dispatch that names no store resolves the developer's real
+# ~/.config/shuttle/stores.json and walks that tree for symlinked substores,
+# which takes seconds on a large store, on the caller's process. Tests that
+# want configured stores set SHUTTLE_STORES or SHUTTLE_STORES_FILE.
+System.delete_env("SHUTTLE_STORES")
+
+stores_file =
+  Path.join(System.tmp_dir!(), "shuttle-test-stores-#{System.system_time(:nanosecond)}.json")
+
+System.put_env("SHUTTLE_STORES_FILE", stores_file)
+
+# The same for the project picker's registry, and for the daemon's host-local
+# state root (the default home of the event stream, ledgers, heartbeat and
+# remote caches, ~/.shuttle): an empty per-VM dir, so no default resolution
+# reaches the developer's real files. OperatorFilesGuardTest holds this.
+System.put_env(
+  "SHUTTLE_PROJECTS_FILE",
+  Path.join(System.tmp_dir!(), "shuttle-test-projects.json")
+)
+
+System.delete_env("SHUTTLE_PROJECTS")
+data_dir = Path.join(System.tmp_dir!(), "shuttle-test-data")
+File.mkdir_p!(data_dir)
+System.put_env("SHUTTLE_DATA_DIR", data_dir)
 
 # Pin the session ledger away from the developer's real ~/.shuttle. The
 # dispatch and claim paths append to it unconditionally, so without this the
@@ -36,5 +73,16 @@ Application.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
 )
 
+# Per-test scoped env overrides (Shuttle.Env / Shuttle.Test.Env).
+Shuttle.Test.Env.start!()
+
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
-ExUnit.start(exclude: exclude)
+# A bare `assert_receive` waits this long for its message. It is reached only
+# when the message never comes, so it costs a passing test nothing, and it is
+# set for a machine whose cores the concurrently running suite already fills.
+# `refute_receive` keeps ExUnit's short default: that window is a real wait.
+ExUnit.start(exclude: exclude, assert_receive_timeout: 10_000)
+
+# A test that saves stores without its own SHUTTLE_STORES_FILE writes the
+# suite-wide registry; remove it with the run.
+ExUnit.after_suite(fn _ -> File.rm(stores_file) end)

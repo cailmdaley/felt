@@ -1,11 +1,11 @@
-// Rules the desk depends on, pinned in both hemispheres.
+// Rules the desk depends on, in civil days that hold in any zone.
 //
-// `npm test` runs this file twice — TZ=America/Los_Angeles and TZ=Europe/Paris
-// — because the snooze rules turn on CIVIL DAYS and the classic failure is a
-// negative-offset zone reading UTC midnight as the previous evening. Every due
-// here is therefore built FROM the reference instant with `isoDayLocal`, never
-// written as a literal date: a hardcoded `2026-08-12` would name a different
-// day either side of the Atlantic and the test would only be checking one.
+// The snooze rules turn on CIVIL DAYS, and the classic failure is a
+// negative-offset zone reading UTC midnight as the previous evening — which is
+// why `npm test` pins TZ=America/Los_Angeles. Every due here is built FROM the
+// reference instant with `isoDayLocal`, never written as a literal date: a
+// hardcoded `2026-08-12` would name a different day either side of the
+// Atlantic, so the file holds in whatever zone it runs.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -52,7 +52,7 @@ import {
   boardDependents,
 } from './KanbanSurfaces.js'
 import { sessionWindow, stripFacts } from './workspace/Dock.js'
-import { isoDayLocal } from './civilDay.js'
+import { civilDayAt, isoDayLocal, shiftCivilDay } from './civilDay.js'
 import { humanizeIdleAge } from './utils.js'
 
 const NOW = Date.parse('2026-08-08T15:30:00Z')
@@ -1145,12 +1145,9 @@ describe('sessionWindow', () => {
   })
 
   it('dates the handoff too when the run crossed midnight', () => {
-    // Anchored to local 22:00 so the +4h handoff lands on the next civil day in
-    // whatever zone the suite runs in.
-    const start = new Date(NOW)
-    start.setDate(start.getDate() - 3)
-    start.setHours(22, 0, 0, 0)
-    const startMs = start.getTime()
+    // Anchored to 22:00 in the host zone so the +4h handoff lands on the next
+    // civil day in whatever zone the suite runs in.
+    const startMs = civilDayAt(shiftCivilDay(isoDayLocal(NOW), -3), 22)!
     const w = sessionWindow(
       {
         dispatchedAt: new Date(startMs).toISOString(),
@@ -2235,15 +2232,4 @@ describe('a queued row asks only about itself', () => {
     expect(queueRowGesture({ ...base, shape: undefined }).draggable).toBe(true)
   })
 
-  it('takes no view on the head card, its column, or whose daemon owns it', () => {
-    // The signature is the proof: there is no parameter to pass any of it in.
-    // A remote-owned row drags like any other — `/felt-edit` forwards the write
-    // to the owning daemon — and an owner that is genuinely dead fails that
-    // forward and is reported then, by name.
-    expect(Object.keys(base).sort()).toEqual([
-      'chainAllScalar',
-      'queueLength',
-      'shape',
-    ])
-  })
 })

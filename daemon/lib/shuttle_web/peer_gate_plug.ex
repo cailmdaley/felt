@@ -73,7 +73,7 @@ defmodule ShuttleWeb.PeerGatePlug do
     do: "peer uid unresolved: no matching /proc TCP row"
 
   defp expected_uid do
-    Application.get_env(:shuttle, :peer_gate_expected_uid)
+    Shuttle.Env.app(:peer_gate_expected_uid)
   end
 
   defp blank_to_nil(""), do: nil

@@ -7,7 +7,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   Driven against a scripted HTTP stub that records every URL it is asked for,
   so each test can say exactly which fetches a request caused.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Shuttle.Remote
   alias Shuttle.RemoteTemporalRegistry
@@ -127,6 +127,16 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   end
 
   defp candide(name, feed), do: RemoteTemporalRegistry.entries(name, feed)["candide"]
+
+  # A clock the test owns: `clock` reads it, `advance.(ms)` moves it forward.
+  # Staleness and the freshness gate are then decided by explicit time, not by
+  # how long the scheduler took to run the test.
+  defp fake_clock do
+    agent = start_supervised!({Agent, fn -> DateTime.utc_now() end}, id: make_ref())
+    clock = fn -> Agent.get(agent, & &1) end
+    advance = fn ms -> Agent.update(agent, &DateTime.add(&1, ms, :millisecond)) end
+    {clock, advance}
+  end
 
   describe "demand-driven fetching" do
     test "nothing is fetched until a composite asks", %{dir: dir} do
@@ -255,11 +265,12 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
 
   describe "failure semantics" do
     test "a failing fetch keeps last-good data and records the error", %{dir: dir} do
-      {_pid, name} = start_registry(dir, freshness_ms: 50)
+      {clock, advance} = fake_clock()
+      {_pid, name} = start_registry(dir, freshness_ms: 50, clock: clock)
       assert candide(name, :sessions).items == [@record]
 
       MockClient.reset()
-      Process.sleep(60)
+      advance.(60)
       view = candide(name, :sessions)
       assert MockClient.calls("/api/v1/sessions") == 2
 
@@ -287,11 +298,12 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     end
 
     test "stale means no success within ten freshness gates", %{dir: dir} do
-      {_pid, name} = start_registry(dir, freshness_ms: 10)
+      {clock, advance} = fake_clock()
+      {_pid, name} = start_registry(dir, freshness_ms: 10, clock: clock)
       refute candide(name, :sessions).stale
 
       MockClient.reset()
-      Process.sleep(150)
+      advance.(150)
 
       view = candide(name, :sessions)
       assert view.stale

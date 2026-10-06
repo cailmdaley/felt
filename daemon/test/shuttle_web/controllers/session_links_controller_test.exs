@@ -5,12 +5,11 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
   session, an unbridged one, a Codex rollout, a pi session, and a UUID with no
   transcript at all. Plus remote forwarding and the parameter guard.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
 
-  alias Shuttle.Test.StubGetFileClient
+  alias Shuttle.Test.{Env, StubGetFileClient}
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -51,17 +50,8 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
       "SHUTTLE_PI_SESSIONS_DIR" => Path.join(root, "pi")
     }
 
-    prior = Map.new(env, fn {key, _} -> {key, System.get_env(key)} end)
-    Enum.each(env, fn {key, value} -> System.put_env(key, value) end)
-
-    on_exit(fn ->
-      File.rm_rf(root)
-
-      Enum.each(prior, fn
-        {key, nil} -> System.delete_env(key)
-        {key, value} -> System.put_env(key, value)
-      end)
-    end)
+    Enum.each(env, fn {key, value} -> Env.put_env(key, value) end)
+    on_exit(fn -> File.rm_rf(root) end)
 
     :ok
   end
@@ -122,16 +112,9 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
 
   describe "remote host routing" do
     setup do
-      start_supervised!(StubGetFileClient)
-      prior_client = Application.get_env(:shuttle, :write_forward_client)
-      prior_remotes = Application.get_env(:shuttle, :remotes)
-      Application.put_env(:shuttle, :write_forward_client, StubGetFileClient)
-      Application.put_env(:shuttle, :remotes, [%{name: "hub-a", url: "http://127.0.0.1:19999"}])
-
-      on_exit(fn ->
-        restore_app_env(:write_forward_client, prior_client)
-        restore_app_env(:remotes, prior_remotes)
-      end)
+      StubGetFileClient.start!()
+      Env.put_app_env(:write_forward_client, StubGetFileClient)
+      Env.put_app_env(:remotes, [%{name: "hub-a", url: "http://127.0.0.1:19999"}])
 
       :ok
     end

@@ -34,7 +34,7 @@ defmodule ShuttleWeb.MeetingAudioController do
         |> WebSockAdapter.upgrade(
           ShuttleWeb.MeetingAudioSocket,
           Keyword.put(
-            Application.get_env(:shuttle, :meeting_audio_socket, []),
+            Shuttle.Env.app(:meeting_audio_socket, []),
             :launch,
             params["launch"]
           ),

@@ -58,8 +58,8 @@ make test                  # go test ./... + mix test + the board suite + the pl
 go test ./...              # Go (felt and shuttle CLIs)
 make mix-test              # full Elixir suite; shells both CLIs on PATH, so `make cli-install` first
 (cd daemon && mix test --only focus)  # tagged subset
-(cd ui && npm test)        # the board suite; runs vitest TWICE, under two
-                           # pinned TZs (America/Los_Angeles, Europe/Paris)
+(cd ui && npm test)        # the board suite; vitest, once, under
+                           # TZ=America/Los_Angeles
 (cd ui && npm run e2e)     # builds the file:// harness and tests the workspace in system Chrome
 make plugin-hooks-test     # shell shims, Pi adapter, handoff policy and transcript pipe tests
 bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandboxed
@@ -71,15 +71,42 @@ bash scripts/test-bootstrap.sh     # bootstrap.sh's login PATH and fail-fast che
 (cd daemon && SHUTTLE_REAL_HARNESS_SMOKE=1 mix test --only integration test/shuttle/real_harness_smoke_test.exs)
 ```
 
-**The board suite runs twice on purpose, in both local tests and CI.** The
-second pinned offset is where the civil-day logic breaks, so a hand-run `npx
-vitest run` can go green on a change `make test` would fail. CI runs `npm test`
-under America/Los_Angeles and Europe/Paris, then type-checks and builds the
-bundle with `npm run build`.
+**The board suite runs once, under one pinned zone.** `npm test` pins
+TZ=America/Los_Angeles, a negative-offset DST zone, so view code that defaults
+to the host zone renders deterministically and away from UTC. Zone coverage
+does not come from the pin: every zone-dependent computation lives in
+`ui/src/board/civilDay.ts` and takes its zone as a parameter,
+`civilDay.properties.test.ts` checks its laws across the IANA zone database,
+and `ui/test/zoneReads.test.ts` fails on a local-zone `Date` read anywhere
+else (`src/board/workspace/` excepted, whose suite still guards on the pin).
+CI runs `npm test`, then type-checks and builds the bundle with
+`npm run build`.
 
-The browser suite uses `playwright-core`, a fixed clock, and Europe/Paris time.
-Set `CHROME_PATH` to override the system Chrome executable.
-It tests a mocked daemon and never operates real fibers.
+### Browser checks
+
+The workspace e2e suite, live workspace depth probe, and `themeScope` test use `ui/e2e/browser.mjs` and connect to a healthy shared browser on port 9333 when one is running.
+Set `SHARED_BROWSER=1` to start or reuse it explicitly; without a shared browser, these checks launch their local Chromium as configured.
+The one-off scripts under `ui/scripts` retain their own browser launch paths.
+Set `SHARED_BROWSER_PORT` to choose another port, and `CHROME_PATH` to select a fallback executable for checks that accept it.
+
+`bin/shared-browser` supports `start`, `endpoint`, `status`, `stop`, and `reap [minutes]`.
+`endpoint` starts the browser if needed and refreshes its idle clock; `status` reports the PID, CDP endpoint, process count, and process-tree RSS.
+`reap` defaults to 30 idle minutes; `SHARED_BROWSER_IDLE_MINUTES` changes that threshold.
+It treats blank tabs and Chrome's internal New Tab targets as idle; any other page keeps the browser running.
+The shared browser stays headless and muted, uses the mock keychain on macOS or the basic password store on Linux, and does not access the login keychain.
+
+Give every browser lane a unique `LANE` name so it gets a pinned tab in the shared Chrome instead of launching another browser:
+
+```bash
+LANE=tests-browser-1
+agent-browser --session "$LANE" connect "$(bin/shared-browser endpoint)"
+agent-browser --session "$LANE" --pin-tab tab new
+agent-browser --session "$LANE" open http://127.0.0.1:4000/
+agent-browser --session "$LANE" tab close
+agent-browser --session "$LANE" close
+```
+
+The board e2e suite uses a fixed clock, Europe/Paris time, and a mocked daemon; it never operates real fibers.
 
 ### The stranger test: bootstrap in a clean container
 

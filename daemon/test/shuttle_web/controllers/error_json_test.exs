@@ -7,7 +7,7 @@ defmodule ShuttleWeb.ErrorJSONTest do
   route) surfaced as an opaque 500 with no body. This pins the JSON shape.
   """
 
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Phoenix.ConnTest
 

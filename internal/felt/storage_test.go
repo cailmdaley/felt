@@ -712,6 +712,63 @@ func TestStorageFindByUID(t *testing.T) {
 	}
 }
 
+// TestListMetadataByUIDMatchesFrontmatterOnly: the byte prefilter that keeps
+// a UID walk from parsing every fiber still answers exactly — a body that
+// mentions the UID is not a match, and the case of the query does not matter.
+func TestListMetadataByUIDMatchesFrontmatterOnly(t *testing.T) {
+	s := NewStorage(t.TempDir())
+	s.Init()
+
+	target, _ := New("nested/target", "Target")
+	mention, _ := New("mention", "Mention")
+	mention.Body = "Follows up on " + target.UID + ".\n"
+	s.Write(target)
+	s.Write(mention)
+
+	for _, query := range []string{target.UID, strings.ToLower(target.UID)} {
+		matches, err := s.ListMetadataByUID(query)
+		if err != nil {
+			t.Fatalf("ListMetadataByUID(%q): %v", query, err)
+		}
+		if len(matches) != 1 || matches[0].ID != target.ID {
+			t.Fatalf("ListMetadataByUID(%q) = %v, want only %q", query, matches, target.ID)
+		}
+	}
+	if matches, err := s.ListMetadataByUID(NewULID()); err != nil || len(matches) != 0 {
+		t.Fatalf("ListMetadataByUID(unknown) = %v, %v; want none", matches, err)
+	}
+}
+
+// TestReadResolvedRescansAMovedUID: a fiber that moves between resolving its
+// UID and reading it is found again by one more resolution.
+func TestReadResolvedRescansAMovedUID(t *testing.T) {
+	s := NewStorage(t.TempDir())
+	s.Init()
+	f, _ := New("before", "Moving")
+	s.Write(f)
+
+	reads := 0
+	ref, got, err := ReadResolved(s, "", f.UID, func(r Ref) (*Felt, error) {
+		reads++
+		if reads == 1 {
+			moved := s.Path("after")
+			if err := os.MkdirAll(filepath.Dir(moved), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(s.Path("before"), moved); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return r.Storage.FindInScope("", r.ID)
+	})
+	if err != nil {
+		t.Fatalf("ReadResolved: %v", err)
+	}
+	if reads != 2 || ref.ID != "after" || got.UID != f.UID {
+		t.Fatalf("ReadResolved = %q (%d reads), want %q after 2 reads", ref.ID, reads, "after")
+	}
+}
+
 func TestLooksLikeUID(t *testing.T) {
 	t.Parallel()
 	if !LooksLikeUID(NewULID()) {

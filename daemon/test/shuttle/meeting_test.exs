@@ -41,31 +41,20 @@ defmodule Shuttle.Test.MeetingCaptureForwardClient do
 end
 
 defmodule Shuttle.MeetingTest do
-  use ExUnit.Case, async: false
+  # group: Shuttle.Meeting.Control is one app-started claim every meeting route reconciles.
+  use ExUnit.Case, async: true, group: :meeting
 
   import Phoenix.ConnTest
   import Shuttle.Test.ApiConn
 
   alias Shuttle.Meeting
+  alias Shuttle.Test.Env
 
   @endpoint ShuttleWeb.Endpoint
   @moduletag :tmp_dir
-  @config_keys [
-    :meeting_runner,
-    :hark_dir,
-    :hark_path,
-    :remotes,
-    :own_host_id,
-    :write_forward_client,
-    :meeting_now,
-    :meeting_launch_wait_ms,
-    :meeting_fibers,
-    :host_capabilities_os_type
-  ]
   @tmux_format "\#{pane_dead}|\#{pane_dead_status}|\#{session_created}|\#{@hark_launch}|\#{@hark_fiber}"
 
   setup %{tmp_dir: tmp_dir} do
-    previous = Map.new(@config_keys, &{&1, Application.fetch_env(:shuttle, &1)})
     hark_dir = Path.join(tmp_dir, "hark")
     hark_path = Path.join(tmp_dir, "hark-bin")
     File.mkdir_p!(hark_dir)
@@ -73,23 +62,16 @@ defmodule Shuttle.MeetingTest do
     File.chmod!(hark_path, 0o755)
 
     start_supervised!(Shuttle.Test.MeetingRunner)
-    Application.put_env(:shuttle, :meeting_runner, Shuttle.Test.MeetingRunner)
-    Application.put_env(:shuttle, :hark_dir, hark_dir)
-    Application.put_env(:shuttle, :hark_path, hark_path)
-    Application.put_env(:shuttle, :remotes, [])
-    Application.put_env(:shuttle, :own_host_id, "local-host")
-    Application.put_env(:shuttle, :meeting_now, ~N[2026-09-25 14:03:12])
-    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :darwin})
+    Env.put_app_env(:meeting_runner, Shuttle.Test.MeetingRunner)
+    Env.put_app_env(:hark_dir, hark_dir)
+    Env.put_app_env(:hark_path, hark_path)
+    Env.put_app_env(:remotes, [])
+    Env.put_app_env(:own_host_id, "local-host")
+    Env.put_app_env(:meeting_now, ~N[2026-09-25 14:03:12])
+    Env.put_app_env(:host_capabilities_os_type, {:unix, :darwin})
     Meeting.Control.reconcile(nil)
 
-    on_exit(fn ->
-      Meeting.Control.reconcile(nil)
-
-      Enum.each(previous, fn
-        {key, {:ok, value}} -> Application.put_env(:shuttle, key, value)
-        {key, :error} -> Application.delete_env(:shuttle, key)
-      end)
-    end)
+    on_exit(fn -> Meeting.Control.reconcile(nil) end)
 
     %{tmp_dir: tmp_dir, hark_dir: hark_dir, hark_path: hark_path}
   end
@@ -97,7 +79,7 @@ defmodule Shuttle.MeetingTest do
   # Mutation control: omit modes from inspect_current/1 or ignore executable permission.
   test "GET reports platform-supported modes only when hark is executable", %{hark_path: path} do
     for {os, modes} <- [{:darwin, ~w(call room phone)}, {:linux, ~w(phone)}] do
-      Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, os})
+      Env.put_app_env(:host_capabilities_os_type, {:unix, os})
 
       body =
         api_conn()
@@ -110,7 +92,7 @@ defmodule Shuttle.MeetingTest do
 
     for unavailable <- [false, path <> "-missing", path] do
       File.chmod!(path, 0o644)
-      Application.put_env(:shuttle, :hark_path, unavailable)
+      Env.put_app_env(:hark_path, unavailable)
       body = api_conn() |> get("/api/v1/meeting") |> Map.get(:resp_body) |> Jason.decode!()
       assert body == %{"available" => false, "meeting" => nil, "modes" => []}
     end
@@ -118,7 +100,7 @@ defmodule Shuttle.MeetingTest do
 
   # Mutation control: remove validate_supported_mode/2 from do_start/5.
   test "Linux rejects device capture before inspecting or launching hark", %{hark_dir: dir} do
-    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :linux})
+    Env.put_app_env(:host_capabilities_os_type, {:unix, :linux})
 
     for mode <- ~w(call room), route <- ["/api/v1/capture", "/api/v1/meeting/join"] do
       conn =
@@ -153,7 +135,7 @@ defmodule Shuttle.MeetingTest do
       {:ok, 200, "application/json", body}
     )
 
-    Application.put_env(:shuttle, :hark_path, false)
+    Env.put_app_env(:hark_path, false)
 
     conn = get(api_conn(), "/api/v1/meeting?origin=audio-host&extra=kept")
     assert conn.status == 200
@@ -251,7 +233,7 @@ defmodule Shuttle.MeetingTest do
   test "phone mode launches hark with --phone and its row says it takes phone audio", %{
     hark_dir: hark_dir
   } do
-    Application.put_env(:shuttle, :host_capabilities_os_type, {:unix, :linux})
+    Env.put_app_env(:host_capabilities_os_type, {:unix, :linux})
 
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["display-message" | _], _opts, nil ->
@@ -354,7 +336,7 @@ defmodule Shuttle.MeetingTest do
   test "joining a constitution records locally, names the fiber, and delivers to its owner", %{
     hark_dir: hark_dir
   } do
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -363,7 +345,7 @@ defmodule Shuttle.MeetingTest do
        {:ok, 200, Jason.encode!(%{"delivered" => true, "delivery" => "message"})}}
     )
 
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_joined_meeting_handler(hark_dir)
 
     conn =
@@ -415,7 +397,7 @@ defmodule Shuttle.MeetingTest do
   test "a joined meeting whose note is only images is named after the fiber", %{
     hark_dir: hark_dir
   } do
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -424,7 +406,7 @@ defmodule Shuttle.MeetingTest do
        {:ok, 200, Jason.encode!(%{"delivered" => true, "delivery" => "message"})}}
     )
 
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_joined_meeting_handler(hark_dir)
     image = "[Image: /remote/.shuttle/attachments/u/0123456789abcdef.png]"
 
@@ -454,7 +436,7 @@ defmodule Shuttle.MeetingTest do
   end
 
   test "a delivery failure after hark starts keeps the recording row", %{hark_dir: hark_dir} do
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -468,7 +450,7 @@ defmodule Shuttle.MeetingTest do
         })}}
     )
 
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_joined_meeting_handler(hark_dir)
 
     conn =
@@ -495,7 +477,7 @@ defmodule Shuttle.MeetingTest do
   test "an unconfirmed delivery joins the meeting without claiming a failure", %{
     hark_dir: hark_dir
   } do
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -514,7 +496,7 @@ defmodule Shuttle.MeetingTest do
         })}}
     )
 
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_joined_meeting_handler(hark_dir)
 
     conn =
@@ -563,7 +545,7 @@ defmodule Shuttle.MeetingTest do
 
   test "local and remote origins select the transcript path and mirror alias" do
     remotes = [%{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}]
-    Application.put_env(:shuttle, :remotes, remotes)
+    Env.put_app_env(:remotes, remotes)
     opts = [hark_dir: "/tmp/hark-root", own_host_id: "local-host", remotes: remotes]
 
     assert {:ok,
@@ -633,7 +615,7 @@ defmodule Shuttle.MeetingTest do
       "mirror" => "remote-alias:~/.hark/meetings/current.txt"
     }
 
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -775,7 +757,7 @@ defmodule Shuttle.MeetingTest do
       "mirror" => "remote-alias:~/.hark/meetings/current.txt"
     })
 
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -817,7 +799,7 @@ defmodule Shuttle.MeetingTest do
          hark_dir: hark_dir,
          tmp_dir: tmp_dir
        } do
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -826,7 +808,7 @@ defmodule Shuttle.MeetingTest do
        {:ok, 200, Jason.encode!(%{"spawned" => true, "tmux_session" => "capture-session"})}}
     )
 
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_starting_meeting_handler(hark_dir)
 
     conn =
@@ -860,7 +842,7 @@ defmodule Shuttle.MeetingTest do
     hark_dir: hark_dir,
     tmp_dir: tmp_dir
   } do
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
@@ -874,7 +856,7 @@ defmodule Shuttle.MeetingTest do
         })}}
     )
 
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_starting_meeting_handler(hark_dir)
 
     conn =
@@ -954,14 +936,14 @@ defmodule Shuttle.MeetingTest do
     hark_dir: hark_dir
   } do
     set_starting_meeting_handler(hark_dir)
-    Application.put_env(:shuttle, :meeting_fibers, fn -> [] end)
+    Env.put_app_env(:meeting_fibers, fn -> [] end)
 
     {:ok, %{launch: launch}} =
       Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", nil)
 
     assert {:ok, %{meeting: %{fiber: nil, joined: false}}} = Meeting.show()
 
-    Application.put_env(:shuttle, :meeting_fibers, fn ->
+    Env.put_app_env(:meeting_fibers, fn ->
       [
         %{
           "id" => "01OTHER",
@@ -1019,7 +1001,7 @@ defmodule Shuttle.MeetingTest do
   test "meeting capture reports hark availability before attempting to start", %{
     hark_path: hark_path
   } do
-    Application.put_env(:shuttle, :hark_path, false)
+    Env.put_app_env(:hark_path, false)
 
     conn =
       api_conn()
@@ -1029,7 +1011,7 @@ defmodule Shuttle.MeetingTest do
     assert Jason.decode!(conn.resp_body)["error"] =~ "hark is not available"
     assert Shuttle.Test.MeetingRunner.calls() == []
 
-    Application.put_env(:shuttle, :hark_path, hark_path)
+    Env.put_app_env(:hark_path, hark_path)
 
     conn =
       api_conn()
@@ -1081,7 +1063,7 @@ defmodule Shuttle.MeetingTest do
       1..2
       |> Task.async_stream(
         fn _ -> Meeting.start(request, {:capture, "cli"}, "", "local") end,
-        timeout: 5_000
+        timeout: 60_000
       )
       |> Enum.to_list()
 
@@ -1106,7 +1088,7 @@ defmodule Shuttle.MeetingTest do
 
     results =
       1..2
-      |> Task.async_stream(fn _ -> Meeting.stop() end, timeout: 5_000)
+      |> Task.async_stream(fn _ -> Meeting.stop() end, timeout: 60_000)
       |> Enum.to_list()
 
     assert Enum.all?(results, &match?({:ok, {:ok, %{meeting: %{state: "live"}}}}, &1))
@@ -1173,7 +1155,7 @@ defmodule Shuttle.MeetingTest do
   end
 
   test "stop dismisses a fresh failed pane and keeps its error instead of signalling" do
-    hark_dir = Application.fetch_env!(:shuttle, :hark_dir)
+    hark_dir = Shuttle.Env.app(:hark_dir)
 
     write_meeting(hark_dir, %{
       "launch" => "launch-failed",
@@ -1251,12 +1233,12 @@ defmodule Shuttle.MeetingTest do
   end
 
   test "a hark that exits at launch starts no scribe and says why", %{tmp_dir: tmp_dir} do
-    Application.put_env(:shuttle, :remotes, [
+    Env.put_app_env(:remotes, [
       %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
     ])
 
     start_supervised!({Shuttle.Test.MeetingCaptureForwardClient, {:ok, 200, "{}"}})
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
 
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["has-session" | _], _opts, nil ->
@@ -1301,7 +1283,7 @@ defmodule Shuttle.MeetingTest do
   end
 
   test "an unreadable tmux after creation still reports recording as starting" do
-    Application.put_env(:shuttle, :meeting_launch_wait_ms, 300)
+    Env.put_app_env(:meeting_launch_wait_ms, 300)
 
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["has-session" | _], _opts, nil ->
@@ -1327,7 +1309,7 @@ defmodule Shuttle.MeetingTest do
   test "an unmatched observation after creation is uncertain, not a failed launch", %{
     hark_dir: hark_dir
   } do
-    Application.put_env(:shuttle, :meeting_launch_wait_ms, 300)
+    Env.put_app_env(:meeting_launch_wait_ms, 300)
 
     write_meeting(hark_dir, %{"launch" => "old", "phase" => "ended", "pid" => 1, "title" => "old"})
 

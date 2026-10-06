@@ -214,7 +214,7 @@ defmodule Shuttle.TailnetPeers do
     doc = Remotes.document()
 
     cond do
-      not is_nil(Application.get_env(:shuttle, :remotes)) ->
+      not is_nil(Shuttle.Env.app(:remotes)) ->
         %{base | state: "disabled", error: "application config sets the fleet"}
 
       not Remotes.discover?(doc) ->
@@ -499,7 +499,7 @@ defmodule Shuttle.TailnetPeers do
         {:error, "cli", "no executable tailscale CLI found"}
 
       path ->
-        run = fn -> System.cmd(path, ["status", "--json"], stderr_to_stdout: true) end
+        run = fn -> Shuttle.Env.cmd(path, ["status", "--json"], stderr_to_stdout: true) end
 
         case isolated(run, @status_timeout_ms) do
           # `tailscale status` exits non-zero when stopped but still prints the
@@ -526,8 +526,8 @@ defmodule Shuttle.TailnetPeers do
   # The first executable tailscale CLI: PATH, then the standard locations.
   # `:tailscale_cli_locations` application config replaces the whole search.
   def tailscale_cli do
-    case Application.get_env(:shuttle, :tailscale_cli_locations) do
-      nil -> System.find_executable("tailscale") || Enum.find(@cli_locations, &executable?/1)
+    case Shuttle.Env.app(:tailscale_cli_locations) do
+      nil -> Shuttle.Env.find_executable("tailscale") || Enum.find(@cli_locations, &executable?/1)
       locations -> Enum.find(locations, &executable?/1)
     end
   end

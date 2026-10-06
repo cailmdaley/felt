@@ -1,6 +1,5 @@
 defmodule Shuttle.DataDirTest do
-  # Mutates SHUTTLE_DATA_DIR, which every host-local path reads.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   @fixture Path.expand("../fixtures/data_dir/cases.json", __DIR__)
 
@@ -11,28 +10,19 @@ defmodule Shuttle.DataDirTest do
     %{"cases" => cases} = @fixture |> File.read!() |> Jason.decode!()
     assert cases != []
 
-    previous = System.get_env("SHUTTLE_DATA_DIR")
     home = System.user_home!()
 
-    try do
-      for %{"name" => name, "env" => env, "expect" => expect} <- cases do
-        if env,
-          do: System.put_env("SHUTTLE_DATA_DIR", env),
-          else: System.delete_env("SHUTTLE_DATA_DIR")
+    for %{"name" => name, "env" => env, "expect" => expect} <- cases do
+      Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", env)
 
-        want =
-          case expect do
-            "~" -> home
-            "~/" <> rest -> home <> "/" <> rest
-            literal -> literal
-          end
+      want =
+        case expect do
+          "~" -> home
+          "~/" <> rest -> home <> "/" <> rest
+          literal -> literal
+        end
 
-        assert {name, Shuttle.data_dir()} == {name, want}
-      end
-    after
-      if previous,
-        do: System.put_env("SHUTTLE_DATA_DIR", previous),
-        else: System.delete_env("SHUTTLE_DATA_DIR")
+      assert {name, Shuttle.data_dir()} == {name, want}
     end
   end
 
@@ -44,28 +34,18 @@ defmodule Shuttle.DataDirTest do
       @fixture |> File.read!() |> Jason.decode!()
 
     assert files != [] and cases != []
-    vars = ["SHUTTLE_DATA_DIR" | Enum.map(files, & &1["env_var"])]
-    previous = Map.new(vars, &{&1, System.get_env(&1)})
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", data_dir)
 
-    try do
-      System.put_env("SHUTTLE_DATA_DIR", data_dir)
+    for %{"env_var" => var, "leaf" => leaf} <- files,
+        %{"name" => name, "env" => env, "expect" => expect} <- cases do
+      Shuttle.Test.Env.put_env(var, env)
 
-      for %{"env_var" => var, "leaf" => leaf} <- files,
-          %{"name" => name, "env" => env, "expect" => expect} <- cases do
-        if env, do: System.put_env(var, env), else: System.delete_env(var)
+      want =
+        expect
+        |> String.replace("<data_dir>", data_dir)
+        |> String.replace("<leaf>", leaf)
 
-        want =
-          expect
-          |> String.replace("<data_dir>", data_dir)
-          |> String.replace("<leaf>", leaf)
-
-        assert {var, name, Shuttle.state_path(var, leaf)} == {var, name, want}
-      end
-    after
-      Enum.each(previous, fn
-        {var, nil} -> System.delete_env(var)
-        {var, value} -> System.put_env(var, value)
-      end)
+      assert {var, name, Shuttle.state_path(var, leaf)} == {var, name, want}
     end
   end
 end

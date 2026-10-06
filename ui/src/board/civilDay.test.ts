@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   ascByKey,
-  civilDayToLocalDate,
+  civilDayAt,
+  civilDaySpan,
   descByKey,
   dueCivilDay,
   formatSpanMinutes,
   instantMs,
   isoDayLocal,
   sameCivilDue,
+  shiftCivilDay,
+  wallClock,
+  zone,
 } from './civilDay.js';
 import { effectiveHorizon } from './KanbanRules.js';
 import { buildTimelineDays, clusterStashCards, formatDue } from './KanbanSurfaces.js';
@@ -17,64 +21,58 @@ import {
   byDueAtAsc,
 } from './KanbanReadModel.js';
 import type { KanbanCard } from './KanbanTypes.js';
-import { expectPinnedZone } from './testFixtures.js';
 
-// The timezone is the experiment. `npm test` runs this file twice — once under
-// TZ=America/Los_Angeles (negative offset, where the original bug bit) and once
-// under TZ=Europe/Paris (positive offset) — because a UTC-only run passes
-// against the broken code. Fail loudly rather than pass vacuously if neither
-// zone is pinned.
-// The zone actually in effect for `Date` — set by the `TZ=` prefix in the
-// `npm test` script, read back here rather than trusted from the env.
-const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
-// Where `2026-07-30T22:00:00Z` actually falls, per zone.
-const LOCAL_DAY_OF_22Z = TZ === 'America/Los_Angeles' ? '2026-07-30' : '2026-07-31';
+// The named regressions. The laws they are points of — every spelling of a
+// declared midnight, in every viewing zone; round trips; rails; offset-free
+// instant order — are properties in civilDay.properties.test.ts. Each test
+// here names its zone explicitly, so none depends on the zone `npm test` runs
+// in.
+const LA = zone('America/Los_Angeles');
+const PARIS = zone('Europe/Paris');
 
 describe('civil-day handling of a `due:` value', () => {
-  it('runs under a pinned, non-UTC timezone', () => {
-    expectPinnedZone();
+  it('reads felt’s storage of a civil day as that day west of Greenwich', () => {
+    // The original bug: felt serializes `2026-07-31` as UTC midnight, which is
+    // the previous evening in Los Angeles — a card due Friday rendered on
+    // Thursday. New Year's Eve is where the slip also slips the year.
+    expect(dueCivilDay('2026-07-31T00:00:00Z', LA)).toBe('2026-07-31');
+    expect(dueCivilDay('2027-01-01T00:00:00Z', LA)).toBe('2027-01-01');
   });
 
-  // [value, expected civil day]
-  const cases: Array<[string, string]> = [
-    // A bare civil day, as authored.
-    ['2026-07-30', '2026-07-30'],
-    // felt's storage of that same civil day (UTC midnight) and its variants.
-    ['2026-07-30T00:00:00Z', '2026-07-30'],
-    ['2026-07-30T00:00:00.000Z', '2026-07-30'],
-    ['2026-07-30T00:00:00+00:00', '2026-07-30'],
-    // New Year's Eve — the case where a one-day slip also slips the year.
-    ['2027-01-01T00:00:00Z', '2027-01-01'],
-  ];
-
-  for (const [value, expected] of cases) {
-    it(`reads ${value} as the civil day ${expected}`, () => {
-      expect(dueCivilDay(value)).toBe(expected);
-    });
-  }
-
-  it('resolves a real timestamp by local day, not verbatim', () => {
-    // 2026-07-30 22:00 UTC carries a real time-of-day, so it belongs to
-    // whichever local day it lands on: Jul 30 15:00 in LA, Jul 31 00:00 in
-    // Paris (UTC+2 in July). Verbatim would be wrong in both.
-    const stamp = '2026-07-30T22:00:00Z';
-    expect(dueCivilDay(stamp)).toBe(isoDayLocal(Date.parse(stamp)));
-    expect(dueCivilDay(stamp)).toBe(LOCAL_DAY_OF_22Z);
+  it('reads the real Paris-authored row as the day it names, not the 14th', () => {
+    // ai-futures/…/pre-interview-outreach carries this: a due authored in
+    // Paris comes back as `+02:00`, and the human still meant the 15th.
+    expect(dueCivilDay('2026-06-15T00:00:00+02:00', LA)).toBe('2026-06-15');
   });
 
-  it('is undefined for absent or unparseable values', () => {
+  it('resolves a real time-of-day by its day in the viewing zone, not verbatim', () => {
+    // 22:00Z on the 30th carries a real time-of-day, so it belongs to whichever
+    // day it lands on: Jul 30 15:00 in LA, Jul 31 00:00 in Paris (UTC+2 in
+    // July). 00:30+02:00 is that same instant — not midnight, so the
+    // offset-midnight rule must not swallow it.
+    for (const stamp of ['2026-07-30T22:00:00Z', '2026-07-31T00:30:00+02:00']) {
+      expect(dueCivilDay(stamp, LA)).toBe('2026-07-30');
+      expect(dueCivilDay(stamp, PARIS)).toBe('2026-07-31');
+    }
+  });
+
+  it('is undefined for absent, unparseable or impossible values', () => {
     expect(dueCivilDay(undefined)).toBeUndefined();
     expect(dueCivilDay('')).toBeUndefined();
     expect(dueCivilDay('   ')).toBeUndefined();
     expect(dueCivilDay('not a date')).toBeUndefined();
     expect(dueCivilDay(20260730)).toBeUndefined();
+    // Date.parse would normalize February 30 to March 2.
+    expect(dueCivilDay('2026-02-30')).toBeUndefined();
+    expect(dueCivilDay('2026-02-30T00:00:00Z')).toBeUndefined();
+    expect(instantMs('2026-02-30T12:00:00Z')).toBeUndefined();
   });
 });
 
 describe('duePromotesToNow at the day boundary', () => {
-  // Local noon on 2026-07-30 — well away from any midnight, so "today" is
-  // unambiguously Jul 30 in both zones.
-  const now = new Date(2026, 6, 30, 12, 0, 0).getTime();
+  // Noon on 2026-07-30 in the host zone — well away from any midnight, so
+  // "today" is unambiguously Jul 30 wherever this runs.
+  const now = civilDayAt('2026-07-30', 12)!;
   const horizon = (due: string) => effectiveHorizon({ due }, now).effectiveHorizon;
 
   it('promotes a card due today, in either spelling', () => {
@@ -99,67 +97,22 @@ describe('duePromotesToNow at the day boundary', () => {
   });
 });
 
-describe('a civil day stored with a non-UTC offset', () => {
-  // The rule is about KIND, not encoding: exactly midnight in the offset the
-  // value itself declares is a civil day, whatever that offset is. felt writes
-  // a `due:` in the offset of the machine that touched it, so a due authored in
-  // Paris comes back as `+02:00` — and the human still meant that date.
-  // [value, expected civil day]
-  const cases: Array<[string, string]> = [
-    // The real row: ai-futures/…/pre-interview-outreach carries this.
-    ['2026-06-15T00:00:00+02:00', '2026-06-15'],
-    // Same date written from Berkeley, and from Tokyo. Neither is the 14th or
-    // the 16th; all three name the 15th.
-    ['2026-06-15T00:00:00-07:00', '2026-06-15'],
-    ['2026-06-15T00:00:00+09:00', '2026-06-15'],
-    // Half-hour and no-colon offsets are still RFC3339-ish in the wild.
-    ['2026-06-15T00:00:00+05:30', '2026-06-15'],
-    ['2026-06-15T00:00:00+0200', '2026-06-15'],
-    ['2026-06-15T00:00:00.000+02:00', '2026-06-15'],
-  ];
-
-  for (const [value, expected] of cases) {
-    it(`reads ${value} as the civil day ${expected}`, () => {
-      expect(dueCivilDay(value)).toBe(expected);
-    });
-  }
-
-  it('still resolves an offset value with a REAL time-of-day by local day', () => {
-    // 00:30 is not midnight, so this one is a genuine instant: 22:30Z on the
-    // 30th → Jul 30 in LA, Jul 31 in Paris. Verbatim ("Jul 31") would be wrong
-    // in LA; the offset-midnight rule must not swallow it.
-    const stamp = '2026-07-31T00:30:00+02:00';
-    expect(dueCivilDay(stamp)).toBe(isoDayLocal(Date.parse(stamp)));
-    expect(dueCivilDay(stamp)).toBe(LOCAL_DAY_OF_22Z);
-  });
-});
-
 describe('one value, one day: the chip, the column and the drop guard agree', () => {
-  // Every spelling of "the 30th of July 2026" the board can meet.
-  const spellings = [
-    '2026-07-30',
-    '2026-07-30T00:00:00Z',
-    '2026-07-30T00:00:00.000Z',
-    '2026-07-30T00:00:00+02:00',
-    '2026-07-30T00:00:00-07:00',
-  ];
-  // Built from local date parts, independently of anything under test — the
-  // label a human in this zone would read for July 30.
-  const JUL_30_LABEL = new Date(2026, 6, 30).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
+  it('says July 30 on the chip for every spelling the column files under July 30', () => {
+    // The bug this pins: the card was PLACED on the Jul 30 column while its
+    // own chip read Jul 29 — one card, one render pass, two days.
+    const label = formatDue('2026-07-30');
+    expect(label).toMatch(/30/);
+    for (const value of [
+      '2026-07-30T00:00:00Z',
+      '2026-07-30T00:00:00.000Z',
+      '2026-07-30T00:00:00+02:00',
+      '2026-07-30T00:00:00-07:00',
+    ]) {
+      expect(formatDue(value)).toBe(label);
+      expect(sameCivilDue(value, '2026-07-30', LA)).toBe(true);
+    }
   });
-
-  for (const value of spellings) {
-    it(`${value}: chip, column and guard all say July 30`, () => {
-      // The bug this pins: the card was PLACED on the Jul 30 column while its
-      // own chip read Jul 29 — one card, one render pass, two days.
-      expect(formatDue(value)).toBe(JUL_30_LABEL);
-      expect(dueCivilDay(value)).toBe('2026-07-30');
-      expect(sameCivilDue(value, '2026-07-30')).toBe(true);
-      expect(sameCivilDue(value, '2026-07-31')).toBe(false);
-    });
-  }
 
   it('leaves an unparseable due visible rather than blank', () => {
     expect(formatDue('not a date')).toBe('not a date');
@@ -254,11 +207,11 @@ describe('the board comparators, over cards from two continents', () => {
 
 describe('the timeline strip across a DST transition', () => {
   // Autumn 2026: Europe/Paris falls back on Oct 25, America/Los_Angeles on
-  // Nov 1. A fixed 86_400_000 ms stride drifts an hour at the transition and
-  // then repeats a civil day while skipping another — and a skipped column is
-  // a card that VANISHES, because its due day finds nothing to land on.
-  const anchor = new Date(2026, 9, 15, 12, 0, 0); // Oct 15 2026, local noon
-  const days = buildTimelineDays(30, 30, anchor);
+  // Nov 1. A fixed 86_400_000 ms stride over instants drifts an hour at the
+  // transition and then repeats a civil day while skipping another — and a
+  // skipped column is a card that VANISHES, because its due day finds nothing
+  // to land on. The strip strides civil days, so no zone enters it.
+  const days = buildTimelineDays(30, 30, '2026-10-15');
 
   /** The expected civil days, generated in UTC where no DST exists. */
   const expected = (() => {
@@ -280,38 +233,78 @@ describe('the timeline strip across a DST transition', () => {
     expect(days[30].iso).toBe('2026-10-15');
     expect(days[30].isToday).toBe(true);
     expect(days.filter((d) => d.isPast)).toHaveLength(30);
-  });
-
-  it('lands a due date on the far side of the transition on its own column', () => {
-    // Nov 3 — past both transitions. A millisecond stride drifts this column
-    // off the strip entirely in one zone or the other.
-    expect(dueCivilDay('2026-11-03T00:00:00+01:00')).toBe('2026-11-03');
-    expect(days.some((d) => d.iso === '2026-11-03')).toBe(true);
+    // Oct 18 2026 is a Sunday: the weekend and the week boundary.
+    const sunday = days.find((d) => d.iso === '2026-10-18')!;
+    expect([sunday.isWeekend, sunday.weekBoundary, sunday.label]).toEqual([true, true, '18']);
   });
 });
 
-describe('civilDayToLocalDate', () => {
-  it('materializes a civil day as local midnight, never UTC midnight', () => {
-    const d = civilDayToLocalDate('2026-07-30');
-    expect(d?.getFullYear()).toBe(2026);
-    expect(d?.getMonth()).toBe(6);
-    expect(d?.getDate()).toBe(30);
-    expect(d?.getHours()).toBe(0);
+describe('civilDayAt', () => {
+  it('materializes a civil day as the zone’s midnight, never UTC midnight', () => {
+    expect(civilDayAt('2026-07-30', 0, LA)).toBe(Date.parse('2026-07-30T07:00:00Z'));
+    expect(civilDayAt('2026-07-30', 12, PARIS)).toBe(Date.parse('2026-07-30T10:00:00Z'));
+  });
+
+  it('starts a spring-forward day whose midnight does not exist at its first instant', () => {
+    // Santiago moves 00:00 → 01:00 on 2026-09-06.
+    expect(civilDayAt('2026-09-06', 0, zone('America/Santiago'))).toBe(Date.parse('2026-09-06T04:00:00Z'));
+  });
+
+  it('spans a DST day by its real length', () => {
+    // 2026-03-08 is 23 hours in Los Angeles, 2026-11-01 is 25.
+    for (const [day, hours] of [['2026-03-08', 23], ['2026-11-01', 25], ['2026-07-30', 24]] as const) {
+      const [from, to] = civilDaySpan(day, day, LA);
+      expect(to + 1000 - from, day).toBe(hours * 3_600_000);
+    }
   });
 
   it('is undefined for anything that is not a bare civil day', () => {
-    expect(civilDayToLocalDate(undefined)).toBeUndefined();
-    expect(civilDayToLocalDate('2026-07-30T00:00:00Z')).toBeUndefined();
+    expect(civilDayAt(undefined)).toBeUndefined();
+    expect(civilDayAt('2026-07-30T00:00:00Z')).toBeUndefined();
+    expect(civilDayAt('2026-02-30')).toBeUndefined();
+  });
+});
+
+describe('the offset cache at a transition inside a quarter hour', () => {
+  // Liberia moved from UTC−0:44:30 to UTC at 1972-01-07T00:44:30Z — mid-way
+  // through a quarter hour of UTC. Checked against Intl directly, to the second.
+  const monrovia = zone('Africa/Monrovia');
+  const intl = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Monrovia', hourCycle: 'h23',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  it('reads each side of the jump with its own offset', () => {
+    for (const iso of ['1972-01-07T00:44:29Z', '1972-01-07T00:44:30Z', '1972-01-07T00:30:00Z', '1972-01-07T00:59:59Z']) {
+      const ms = Date.parse(iso);
+      const { hour, minute, second } = wallClock(ms, monrovia);
+      const said = [hour, minute, second].map((n) => String(n).padStart(2, '0')).join(':');
+      expect(said, iso).toBe(intl.format(ms));
+    }
+  });
+});
+
+describe('years Date.UTC would remap', () => {
+  it('keeps years 0–99 as themselves', () => {
+    const utc = zone('UTC');
+    expect(isoDayLocal(Date.parse('0001-01-01T00:00:00Z'), utc)).toBe('0001-01-01');
+    expect(civilDayAt('0050-06-01', 0, utc)).toBe(Date.parse('0050-06-01T00:00:00Z'));
+    expect(shiftCivilDay('0099-12-31', 1)).toBe('0100-01-01');
   });
 });
 
 describe('formatSpanMinutes', () => {
   // The bare form — no `pad`, no `empty` — is what the fiber controls' session
-  // summary renders. The padded and em-dash variants the views use are
-  // pinned in chronicleJoin.test.ts.
+  // summary renders; the em-dash variant is what the Chronicle's look-back reads.
   it('renders a whole hour with an unpadded zero, not a bare hour', () => {
     expect(formatSpanMinutes(120)).toBe('2h 0m');
     expect(formatSpanMinutes(216)).toBe('3h 36m');
+  });
+
+  it('reads a duration the way a person says it, and an empty one as its placeholder', () => {
+    expect(formatSpanMinutes(0, { empty: '—' })).toBe('—');
+    expect(formatSpanMinutes(45, { empty: '—' })).toBe('45m');
+    expect(formatSpanMinutes(200, { empty: '—' })).toBe('3h 20m');
+    expect(formatSpanMinutes(120, { empty: '—' })).toBe('2h 0m');
   });
 
   it('renders a sub-hour span as minutes alone, and zero as 0m', () => {

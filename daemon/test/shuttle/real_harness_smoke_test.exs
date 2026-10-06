@@ -1,4 +1,6 @@
 defmodule Shuttle.RealHarnessSmokeTest do
+  # sync: drives the real tmux server and diffs the harnesses' real session
+  # directories before and after each launch.
   use ExUnit.Case, async: false
 
   @moduletag :integration

@@ -29,8 +29,8 @@ defmodule Shuttle.HostCapabilities do
   def browser_capable?(opts \\ []) do
     probe = fn -> os_type(opts) == {:unix, :darwin} and gui_session?(opts) end
 
-    if opts != [] or Application.get_env(:shuttle, :host_capabilities_os_type) != nil or
-         Application.get_env(:shuttle, :host_capabilities_runner) != nil do
+    if opts != [] or Shuttle.Env.app(:host_capabilities_os_type) != nil or
+         Shuttle.Env.app(:host_capabilities_runner) != nil do
       probe.()
     else
       cached_browser_capable?(probe, System.monotonic_time(:millisecond))
@@ -39,14 +39,14 @@ defmodule Shuttle.HostCapabilities do
 
   @doc false
   def cached_browser_capable?(probe, now_ms) do
-    case :persistent_term.get(@browser_cache_key, nil) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@browser_cache_key), nil) do
       {checked_at, capable}
       when now_ms >= checked_at and now_ms - checked_at < @browser_cache_ttl_ms ->
         capable
 
       _ ->
         capable = probe.()
-        :persistent_term.put(@browser_cache_key, {now_ms, capable})
+        :persistent_term.put(Shuttle.Env.scope_key(@browser_cache_key), {now_ms, capable})
         capable
     end
   end
@@ -67,7 +67,7 @@ defmodule Shuttle.HostCapabilities do
     Keyword.get(
       opts,
       :os_type,
-      Application.get_env(:shuttle, :host_capabilities_os_type, :os.type())
+      Shuttle.Env.app(:host_capabilities_os_type, :os.type())
     )
   end
 
@@ -76,7 +76,7 @@ defmodule Shuttle.HostCapabilities do
       Keyword.get(
         opts,
         :runner,
-        Application.get_env(:shuttle, :host_capabilities_runner, Shuttle.Runner.Default)
+        Shuttle.Env.app(:host_capabilities_runner, Shuttle.Runner.Default)
       )
 
     runner.cmd(command, args, stderr_to_stdout: true, timeout_ms: @probe_timeout_ms)

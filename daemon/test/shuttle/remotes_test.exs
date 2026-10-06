@@ -1,6 +1,6 @@
 defmodule Shuttle.RemotesTest do
-  use ExUnit.Case, async: false
-  import Shuttle.Test.EnvHelpers
+  # group: Shuttle.TailnetPeers keeps its peers in an ETS table named after the module, which Remotes.configured/0 reads when :remotes is unset
+  use ExUnit.Case, async: true, group: :tailnet_peers
 
   alias Shuttle.Remote
   alias Shuttle.Remotes
@@ -8,26 +8,12 @@ defmodule Shuttle.RemotesTest do
   @fixture_dir Path.expand("../fixtures/remotes", __DIR__)
 
   setup do
-    prev_file = System.get_env("SHUTTLE_REMOTES_FILE")
-    prev_env = Application.get_env(:shuttle, :remotes)
-    prev_prefix = Application.get_env(:shuttle, :launchd_label_prefix)
-    prev_proxy = Application.get_env(:shuttle, :https_proxy)
-    prev_tailscale_socket = Application.get_env(:shuttle, :tailscale_socket)
-
     # The whole suite runs with `remotes: []` from config/test.exs — that `[]` is
     # the shield that stops a developer's real fleet file from leaking into the
-    # tests. These cases are about the FILE, so they clear it and restore it.
-    Application.delete_env(:shuttle, :remotes)
-    Application.delete_env(:shuttle, :https_proxy)
-    Application.delete_env(:shuttle, :tailscale_socket)
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_REMOTES_FILE", prev_file)
-      restore_app_env(:remotes, prev_env)
-      restore_app_env(:launchd_label_prefix, prev_prefix)
-      restore_app_env(:https_proxy, prev_proxy)
-      restore_app_env(:tailscale_socket, prev_tailscale_socket)
-    end)
+    # tests. These cases are about the FILE, so they clear it in their own scope.
+    Shuttle.Test.Env.delete_app_env(:remotes)
+    Shuttle.Test.Env.delete_app_env(:https_proxy)
+    Shuttle.Test.Env.delete_app_env(:tailscale_socket)
 
     :ok
   end
@@ -47,7 +33,7 @@ defmodule Shuttle.RemotesTest do
       @want want
 
       test "#{fixture} reads identically in both languages" do
-        System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
+        Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
 
         assert Remotes.launchd_label_prefix() == @want["launchd_label_prefix"]
 
@@ -100,7 +86,7 @@ defmodule Shuttle.RemotesTest do
       @remote remote
 
       test "#{fixture}: the daemon rejects #{field}" do
-        System.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
+        Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(@fixture_dir, @fixture))
         names = Enum.map(Remotes.registered(), & &1.name)
 
         if @remote == "" do
@@ -133,7 +119,7 @@ defmodule Shuttle.RemotesTest do
           })
           |> write_remotes()
 
-        System.put_env("SHUTTLE_REMOTES_FILE", file)
+        Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", file)
         assert Remotes.tailscale_socket() == nil
         assert Remotes.registered() == []
       end
@@ -158,7 +144,7 @@ defmodule Shuttle.RemotesTest do
            "tunnel": {"manager": "systemd"}}
         ]}))
 
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
 
       for %Remote{name: name, tunnel: %{manager: manager}} <- Remotes.registered() do
         assert manager == :none, "#{name} has no port, so it has no tunnel to bounce"
@@ -171,7 +157,7 @@ defmodule Shuttle.RemotesTest do
           {"name": "tunnelled", "port": 4001, "tunnel": {"multiplex": true, "label": "custom"}}
         ]}))
 
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
 
       assert [%Remote{tunnel: tunnel}] = Remotes.registered()
       assert tunnel.multiplex
@@ -222,7 +208,7 @@ defmodule Shuttle.RemotesTest do
     test "reads exactly the grammar the Go reader reads" do
       for {written, want} <- @proxy_grammar do
         path = write_remotes(~s({"defaults": {"https_proxy": #{written}}, "remotes": []}))
-        System.put_env("SHUTTLE_REMOTES_FILE", path)
+        Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
 
         assert Remotes.https_proxy() == want,
                "#{written} should read as #{inspect(want)}"
@@ -231,31 +217,31 @@ defmodule Shuttle.RemotesTest do
 
     test "absent defaults, an absent file, and a malformed one all mean no proxy" do
       path = write_remotes(~s({"remotes": [{"name": "a", "port": 4001}]}))
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
       assert Remotes.https_proxy() == nil
 
-      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
       assert Remotes.https_proxy() == nil
 
-      System.put_env("SHUTTLE_REMOTES_FILE", write_remotes("{\"defaults\": {"))
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", write_remotes("{\"defaults\": {"))
       assert Remotes.https_proxy() == nil
     end
 
     test "application config wins, and false means explicitly none" do
       path = write_remotes(~s({"defaults": {"https_proxy": "localhost:1055"}, "remotes": []}))
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
 
-      Application.put_env(:shuttle, :https_proxy, "proxy.example:8080")
+      Shuttle.Test.Env.put_app_env(:https_proxy, "proxy.example:8080")
       assert Remotes.https_proxy() == {"proxy.example", 8080}
 
-      Application.put_env(:shuttle, :https_proxy, false)
+      Shuttle.Test.Env.put_app_env(:https_proxy, false)
       assert Remotes.https_proxy() == nil
     end
   end
 
   describe "file resolution" do
     test "an absent file is a valid local-only host, not an error" do
-      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(tmp_dir(), "absent.json"))
       assert Remotes.registered() == []
       assert Remotes.configured() == []
     end
@@ -265,7 +251,7 @@ defmodule Shuttle.RemotesTest do
       # daemon that refuses to serve its OWN board over a bad operator file is
       # worse than one that serves it without the fleet.
       path = write_remotes("{\"remotes\": [")
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
       assert Remotes.registered() == []
     end
 
@@ -273,7 +259,7 @@ defmodule Shuttle.RemotesTest do
       path = write_remotes(~s({"remotes": [{"name": "a", "port": 4001}]}))
       File.chmod!(path, 0o000)
       on_exit(fn -> File.chmod(path, 0o644) end)
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
       assert Remotes.registered() == []
     end
 
@@ -284,7 +270,7 @@ defmodule Shuttle.RemotesTest do
           {"name": "off", "port": 4002, "enabled": false}
         ]}))
 
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
       assert [%Remote{name: "on"}] = Remotes.registered()
     end
   end
@@ -292,19 +278,19 @@ defmodule Shuttle.RemotesTest do
   describe "precedence" do
     test "application config wins over the file — including an explicit []" do
       path = write_remotes(~s({"remotes": [{"name": "from-file", "port": 4001}]}))
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
 
-      Application.put_env(:shuttle, :remotes, [])
+      Shuttle.Test.Env.put_app_env(:remotes, [])
       assert Remotes.configured() == []
 
-      Application.put_env(:shuttle, :remotes, [%{name: "from-config", url: "http://x"}])
+      Shuttle.Test.Env.put_app_env(:remotes, [%{name: "from-config", url: "http://x"}])
       assert [%Remote{name: "from-config"}] = Remotes.configured()
     end
 
     test "unset application config falls through to the file" do
       path = write_remotes(~s({"remotes": [{"name": "from-file", "port": 4001}]}))
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
-      Application.delete_env(:shuttle, :remotes)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.delete_app_env(:remotes)
 
       assert [%Remote{name: "from-file", url: "http://127.0.0.1:4001"}] = Remotes.configured()
     end
@@ -317,8 +303,8 @@ defmodule Shuttle.RemotesTest do
           ~s({"launchd_label_prefix": "com.file", "remotes": [{"name": "a", "port": 4001}]})
         )
 
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
-      Application.put_env(:shuttle, :launchd_label_prefix, "com.override")
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_app_env(:launchd_label_prefix, "com.override")
 
       assert Remotes.label_for("a") == "com.override.shuttle-tunnel-a"
     end
@@ -329,7 +315,7 @@ defmodule Shuttle.RemotesTest do
           ~s({"remotes": [{"name": "a", "port": 4001, "tunnel": {"label": "legacy.job"}}]})
         )
 
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
       assert [remote] = Remotes.registered()
       assert Remotes.label_for(remote) == "legacy.job"
     end
@@ -338,7 +324,7 @@ defmodule Shuttle.RemotesTest do
   describe "config_token/0" do
     test "names an absent file, and changes when the file changes" do
       path = Path.join(tmp_dir(), "token.json")
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
       assert {nil, 0, nil} = Remotes.config_token()
 
       File.write!(path, ~s({"remotes": [{"name": "a", "port": 4001}]}))
@@ -356,16 +342,8 @@ defmodule Shuttle.RemotesTest do
 
   describe "the default LocalAPI socket" do
     setup do
-      prev_home = Application.get_env(:shuttle, :tailscale_home)
-      prev_os = Application.get_env(:shuttle, :os_type)
-
-      on_exit(fn ->
-        restore_app_env(:tailscale_home, prev_home)
-        restore_app_env(:os_type, prev_os)
-      end)
-
       # The default is Linux-only; these cases run as Linux on any host.
-      Application.put_env(:shuttle, :os_type, {:unix, :linux})
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :linux})
 
       # A unix socket path must fit sun_path, so this stays under /tmp.
       home = "/tmp/rt-#{System.unique_integer([:positive])}"
@@ -381,8 +359,8 @@ defmodule Shuttle.RemotesTest do
       {:ok, listener} = :gen_tcp.listen(0, [:binary, ifaddr: {:local, socket}])
       on_exit(fn -> :gen_tcp.close(listener) end)
 
-      Application.put_env(:shuttle, :tailscale_home, home)
-      System.put_env("SHUTTLE_REMOTES_FILE", Path.join(home, "absent.json"))
+      Shuttle.Test.Env.put_app_env(:tailscale_home, home)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", Path.join(home, "absent.json"))
       {:ok, socket: socket, home: home, state: state}
     end
 
@@ -396,7 +374,7 @@ defmodule Shuttle.RemotesTest do
     test "an explicit defaults.tailscale_socket wins", %{home: home} do
       explicit = Path.join(home, "explicit.sock")
 
-      System.put_env(
+      Shuttle.Test.Env.put_env(
         "SHUTTLE_REMOTES_FILE",
         write_remotes(Jason.encode!(%{"defaults" => %{"tailscale_socket" => explicit}}))
       )
@@ -406,7 +384,7 @@ defmodule Shuttle.RemotesTest do
     end
 
     test "\"system\" names the system tailscaled and keeps the fleet readable" do
-      System.put_env(
+      Shuttle.Test.Env.put_env(
         "SHUTTLE_REMOTES_FILE",
         write_remotes(
           Jason.encode!(%{
@@ -423,7 +401,7 @@ defmodule Shuttle.RemotesTest do
     end
 
     test "a configured https_proxy suppresses it" do
-      System.put_env(
+      Shuttle.Test.Env.put_env(
         "SHUTTLE_REMOTES_FILE",
         write_remotes(Jason.encode!(%{"defaults" => %{"https_proxy" => "localhost:1055"}}))
       )
@@ -502,7 +480,7 @@ defmodule Shuttle.RemotesTest do
     end
 
     test "is Linux-only", %{socket: socket} do
-      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :darwin})
 
       assert {:refused, ^socket, "default socket is Linux-only"} =
                Remotes.default_tailscale_socket_check()
@@ -518,20 +496,20 @@ defmodule Shuttle.RemotesTest do
     end
 
     test "with the default in effect, a duplicate https authority is dropped" do
-      System.put_env(
+      Shuttle.Test.Env.put_env(
         "SHUTTLE_REMOTES_FILE",
         Path.join(@fixture_dir, "duplicate_https_authority_default_socket.json")
       )
 
       assert ["hub-a"] = Enum.map(Remotes.registered(), & &1.name)
 
-      Application.put_env(:shuttle, :tailscale_home, false)
+      Shuttle.Test.Env.put_app_env(:tailscale_home, false)
       assert ["hub-a", "hub-a-alias"] = Enum.map(Remotes.registered(), & &1.name)
     end
 
     test "joins the change token, so a tailscaled started later is noticed", %{socket: socket} do
       assert {_file, _generation, ^socket} = Remotes.config_token()
-      Application.put_env(:shuttle, :tailscale_home, false)
+      Shuttle.Test.Env.put_app_env(:tailscale_home, false)
       assert {_file, _generation, nil} = Remotes.config_token()
     end
   end

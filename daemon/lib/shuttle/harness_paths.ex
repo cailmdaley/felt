@@ -12,7 +12,7 @@ defmodule Shuttle.HarnessPaths do
   @spec claude_projects_root(keyword()) :: String.t()
   def claude_projects_root(opts \\ []) do
     configured_path(opts, [:claude_root, :root], "SHUTTLE_CLAUDE_PROJECTS_DIR", fn ->
-      Path.join([System.user_home!(), ".claude", "projects"])
+      Path.join([Shuttle.Env.home(), ".claude", "projects"])
     end)
   end
 
@@ -20,7 +20,7 @@ defmodule Shuttle.HarnessPaths do
   @spec pi_sessions_root(keyword()) :: String.t()
   def pi_sessions_root(opts \\ []) do
     configured_path(opts, [:pi_root], "SHUTTLE_PI_SESSIONS_DIR", fn ->
-      Path.join([System.user_home!(), ".pi", "agent", "sessions"])
+      Path.join([Shuttle.Env.home(), ".pi", "agent", "sessions"])
     end)
   end
 
@@ -28,7 +28,7 @@ defmodule Shuttle.HarnessPaths do
   @spec codex_sessions_root(keyword()) :: String.t()
   def codex_sessions_root(opts \\ []) do
     configured_path(opts, [:codex_root], "SHUTTLE_CODEX_SESSIONS_DIR", fn ->
-      Path.join([System.user_home!(), ".codex", "sessions"])
+      Path.join([Shuttle.Env.home(), ".codex", "sessions"])
     end)
   end
 
@@ -91,7 +91,7 @@ defmodule Shuttle.HarnessPaths do
 
   defp configured_path(opts, option_keys, env_key, fallback) do
     Enum.find_value(option_keys, fn key -> non_empty(Keyword.get(opts, key)) end) ||
-      non_empty(System.get_env(env_key)) || fallback.()
+      non_empty(Shuttle.Env.get(env_key)) || fallback.()
   end
 
   defp non_empty(value) when is_binary(value) and value != "", do: value

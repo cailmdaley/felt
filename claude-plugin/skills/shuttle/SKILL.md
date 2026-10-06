@@ -93,7 +93,7 @@ First commit, run `felt -C <store> sync --push`, and resolve any conflicts. Then
 
 If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation, include the store selector on the exit verb: `shuttle -C <store> close <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
 
-**When the human names the exit, take it literally.** "Hand off" means hand off. "Close out", "wrap it up" or "I'm done for now" means close, even when you can see more to do — unfinished is often exactly why they want it back on their desk.
+**When the human names the exit, take it literally: it means the command.** "Hand off" means sweep, commit, sync, then run `shuttle handoff <id>`. "Close out", "wrap it up" or "I'm done for now" means the same sequence ending in `shuttle close <id>`, even when you can see more to do — unfinished is often exactly why they want it back on their desk. Neither is a request for a summary in chat.
 
 **Stay interactive** instead, still `active`, when the direction isn't settled: the directive or constitution says a human will attach (a "stay interactive", a 2FA step, a message to send in their voice), or open taste calls make their input the clear next move. In a **headless** run (`headless: true` in the launch metadata) nobody can attach, so record the question and take case 2.
 

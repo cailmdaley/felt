@@ -1,5 +1,5 @@
 defmodule Shuttle.HostPeerUidTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.Host
 
@@ -12,23 +12,15 @@ defmodule Shuttle.HostPeerUidTest do
   end
 
   test "the peer uid is `id -u` by default and SHUTTLE_PEER_UID when set" do
-    previous = System.get_env("SHUTTLE_PEER_UID")
-
-    on_exit(fn ->
-      if previous,
-        do: System.put_env("SHUTTLE_PEER_UID", previous),
-        else: System.delete_env("SHUTTLE_PEER_UID")
-    end)
-
-    System.delete_env("SHUTTLE_PEER_UID")
+    Shuttle.Test.Env.delete_env("SHUTTLE_PEER_UID")
     {out, 0} = System.cmd("id", ["-u"])
     expected_uid = String.to_integer(String.trim(out))
     assert Host.expected_peer_uid_config!() == {expected_uid, :euid}
 
-    System.put_env("SHUTTLE_PEER_UID", "424242")
+    Shuttle.Test.Env.put_env("SHUTTLE_PEER_UID", "424242")
     assert Host.expected_peer_uid_config!() == {424_242, :env}
 
-    System.put_env("SHUTTLE_PEER_UID", "root")
+    Shuttle.Test.Env.put_env("SHUTTLE_PEER_UID", "root")
 
     assert_raise ArgumentError, ~r/SHUTTLE_PEER_UID must be a non-negative integer/, fn ->
       Host.expected_peer_uid_config!()
