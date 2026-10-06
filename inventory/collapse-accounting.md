@@ -346,9 +346,9 @@ Observables: 9.
 | **31424a79 project_dir inheritance (`startPrompt.test.ts`)** | nearest same-host, same-store ancestor; another store; own dir; no host | property over generated trees |
 | | another host's same slug, through `suggested()` | **restored** `19640bd3` |
 
-The restored same-slug example's far row also differs in store, so it catches
-a key that drops both host and store, not host alone; the property covers the
-host-only case at the function level.
+The restored same-slug example keeps all three rows in one store, so only the
+host tells the two `a/b` rows apart (`326bf183`): a project-dir key that drops
+the host alone fails it.
 
 ## Gates
 
