@@ -121,3 +121,42 @@ defmodule Shuttle.EnvIsolationBTest do
     Shuttle.EnvIsolationTest.Shared.run("b")
   end
 end
+
+defmodule Shuttle.EnvOwnerByPidTest do
+  use ExUnit.Case, async: true
+
+  # A child records its parent's registered name in `$ancestors`; once the
+  # child has resolved its owner, a later holder of that name changes nothing.
+  test "an owner reached through a registered name stays that pid" do
+    name = :"shuttle_env_owner_probe_#{System.unique_integer([:positive])}"
+    Process.register(self(), name)
+    Shuttle.Test.Env.put_env("SHUTTLE_ENV_OWNER_PROBE", "mine")
+    parent = self()
+
+    child =
+      :proc_lib.spawn(fn ->
+        loop = fn loop ->
+          receive do
+            :read ->
+              send(parent, {:read, Shuttle.Env.get("SHUTTLE_ENV_OWNER_PROBE")})
+              loop.(loop)
+          end
+        end
+
+        loop.(loop)
+      end)
+
+    send(child, :read)
+    assert_receive {:read, "mine"}
+
+    Process.unregister(name)
+    impostor = spawn(fn -> Process.sleep(:infinity) end)
+    Process.register(impostor, name)
+
+    send(child, :read)
+    assert_receive {:read, "mine"}
+
+    Process.exit(child, :kill)
+    Process.exit(impostor, :kill)
+  end
+end

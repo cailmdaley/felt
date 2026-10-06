@@ -38,6 +38,7 @@ defmodule Shuttle.Env do
 
   if @scoped do
     @max_walk 64
+    @owner_key :"$shuttle_env_owner"
 
     @doc "`System.get_env/2`, through the caller's scope."
     @spec get(String.t(), String.t() | nil) :: String.t() | nil
@@ -108,12 +109,23 @@ defmodule Shuttle.Env do
     """
     @spec owner() :: pid() | nil
     def owner do
-      if :ets.whereis(@table) == :undefined do
-        nil
-      else
-        callers = Process.get(:"$callers", [])
-        ancestors = Process.get(:"$ancestors", [])
-        walk([self() | callers ++ ancestors], MapSet.new(), 0)
+      cond do
+        :ets.whereis(@table) == :undefined ->
+          nil
+
+        # Resolved once, then held by pid: a name in `$ancestors` may later
+        # be registered by another process.
+        is_pid(cached = Process.get(@owner_key)) ->
+          if :ets.member(@table, {:owner, cached}), do: cached
+
+        true ->
+          callers = Process.get(:"$callers", [])
+          ancestors = Process.get(:"$ancestors", [])
+
+          with owner when is_pid(owner) <- walk([self() | callers ++ ancestors], MapSet.new(), 0) do
+            Process.put(@owner_key, owner)
+            owner
+          end
       end
     end
 
