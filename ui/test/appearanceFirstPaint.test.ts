@@ -9,9 +9,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
  * stored choice and system scheme, or the page flashes one way and settles
  * the other.
  */
-const html = readFileSync(resolve(__dirname, '../../index.html'), 'utf8')
+const html = readFileSync(resolve(__dirname, '../index.html'), 'utf8')
 const inline = html.match(/<script>([\s\S]*?)<\/script>/)![1]
-const palette = readFileSync(resolve(__dirname, 'palette.css'), 'utf8')
+const palette = readFileSync(resolve(__dirname, '../src/board/palette.css'), 'utf8')
 
 let store = new Map<string, string>()
 function stubSystem(dark: boolean): void {
@@ -36,7 +36,7 @@ describe('first paint', () => {
     new Function(inline)()
     const early = { ...document.documentElement.dataset }
     vi.resetModules()
-    const { currentScheme, appearance } = await import('./appearance.js')
+    const { currentScheme, appearance } = await import('../src/board/appearance.js')
     expect(early).toEqual({ wsAppearance: currentScheme(), wsDarkTheme: appearance().dark })
   })
 
