@@ -88,6 +88,27 @@ defmodule Shuttle.Test.PollerHelpers do
     {:ok, pid}
   end
 
+  @doc """
+  Wait until `poller` has applied the poll cycle it runs just after boot and
+  has none in flight, so a test's scenario starts after that cycle instead of
+  racing it. The ~30 s ceiling is reached only when the cycle never lands.
+  """
+  def await_boot_cycle!(poller, attempts \\ 3_000) do
+    state = :sys.get_state(poller)
+
+    cond do
+      state.poll_cycles > 0 and not state.poll_check_in_progress ->
+        :ok
+
+      attempts == 0 ->
+        raise ExUnit.AssertionError, message: "the Poller's boot cycle never applied"
+
+      true ->
+        Process.sleep(10)
+        await_boot_cycle!(poller, attempts - 1)
+    end
+  end
+
   defp stop_watchers_of(poller_refs) do
     for {_, watcher, _, _} <- DynamicSupervisor.which_children(Shuttle.WatcherSupervisor),
         is_pid(watcher),
