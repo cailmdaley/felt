@@ -10,7 +10,7 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: color-mix(in srgb, var(--kbn-ink) 20%, transparent);
+  background: color-mix(in srgb, var(--kbn-shade) 20%, transparent);
   color: var(--kbn-ink);
   font-family: var(--ws-serif);
 }

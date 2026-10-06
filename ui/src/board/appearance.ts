@@ -1,7 +1,8 @@
 /**
  * Appearance belongs to this browser. It resolves to a light or dark scheme
- * that constitution pages and embedded documents follow; the board chrome
- * keeps its own paper.
+ * that the whole board follows: the chrome's palette (`palette.css`), the
+ * constitution pages, and embedded documents. In dark, the chosen dark theme
+ * also inks the chrome, so the bar and Desk are the room its pages are read in.
  */
 export type AppearanceMode = 'light' | 'dark' | 'system'
 export type Scheme = 'light' | 'dark'
@@ -61,10 +62,22 @@ export function appearanceTheme(declared: string, scheme: Scheme, dark: DarkThem
   return scheme === 'dark' ? dark : LIGHT_THEME
 }
 
+/** Marks <html> for the palette and gives the phone's browser chrome the Desk's ground. */
+function mark(): void {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  root.dataset.wsAppearance = currentScheme()
+  root.dataset.wsDarkTheme = appearance().dark
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+  if (!meta) return
+  const ground = getComputedStyle(root).getPropertyValue('--kbn-parchment').trim()
+  if (ground) meta.content = ground
+}
+
 let last = ''
 function announce(): void {
-  const scheme = currentScheme(), state = `${scheme}:${appearance().dark}`
-  if (typeof document !== 'undefined') document.documentElement.dataset.wsAppearance = scheme
+  const state = `${currentScheme()}:${appearance().dark}`
+  mark()
   if (state === last) return
   last = state
   globalThis.dispatchEvent?.(new Event(APPEARANCE_CHANGED))
@@ -76,7 +89,7 @@ export function watchAppearance(): void {
   if (watching || typeof window === 'undefined') return
   watching = true
   last = `${currentScheme()}:${appearance().dark}`
-  document.documentElement.dataset.wsAppearance = currentScheme()
+  mark()
   try { window.matchMedia?.(SYSTEM_DARK).addEventListener('change', announce) } catch { /* No media queries, no system scheme. */ }
   window.addEventListener('storage', event => {
     if (event.key !== APPEARANCE_KEY && event.key !== null) return

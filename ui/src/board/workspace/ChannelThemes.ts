@@ -35,11 +35,11 @@ export class ChannelThemes {
   private readonly changes = new Set<HTMLElement>()
   private changeQueued = false
   private readonly base: string
+  /** The board's palette re-inks with the scheme, so the snapshot and every compiled theme follow it. */
   private readonly reappear = (): void => {
+    this.writeDefaults()
     for (const entry of this.entries.values()) {
-      const base = this.baseName(entry.card)
-      if (entry.base === base) continue
-      entry.base = base
+      entry.base = this.baseName(entry.card)
       this.compile(entry); this.paint(entry)
     }
   }
@@ -47,44 +47,48 @@ export class ChannelThemes {
     this.base = base
     watchAppearance()
     window.addEventListener(APPEARANCE_CHANGED, this.reappear)
-    // Snapshot the unthemed root, not the reader. Custom variables at a channel
-    // root cannot bleed through the CSS scope limit by ordinary inheritance.
     this.actDefaults = document.createElement('style')
     this.actDefaults.dataset.wsActDefaults = ''
-    const defaults = getComputedStyle(document.documentElement)
-    for (let i = 0; i < defaults.length; i++) {
-      const name = defaults.item(i)
-      if (name.startsWith('--')) this.defaults.set(name, defaults.getPropertyValue(name).trim())
-    }
-    const declarations = (entries: Iterable<[string, string]>): string => [...entries].map(([name, value]) => `${name}: ${value || 'initial'};`).join('\n')
-    this.actDefaults.textContent = `@layer shuttle-theme-defaults {
-    :where([data-ws-theme-boundary]:not(.ws-reader)) {
-      all: initial; display: revert; direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
-      ${declarations(this.defaults)}
-      color: var(--ws-ink); font-family: var(--ws-serif); line-height: 1.4; box-sizing: border-box;
-    }
-    }
-    :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) {
-      ${declarations([...this.defaults].filter(([name]) => name !== '--ws-paper' && name !== '--ws-ink'))}
-      --ws-ink-soft: var(--ws-ink); --ws-ink-muted: var(--ws-ink); --ws-ink-faint: var(--ws-ink);
-      --ws-hairline: color-mix(in srgb, var(--ws-ink) 35%, transparent);
-      --ws-hairline-soft: color-mix(in srgb, var(--ws-ink) 20%, transparent);
-      --ws-fill: color-mix(in srgb, var(--ws-ink) 10%, var(--ws-paper));
-      --ws-hover: color-mix(in srgb, var(--ws-ink) 8%, transparent);
-      --ws-agent: color-mix(in srgb, var(--kbn-agent) 50%, var(--ws-ink));
-      --ws-you: color-mix(in srgb, var(--kbn-you) 55%, var(--ws-ink));
-      --ws-owed: color-mix(in srgb, var(--kbn-owed) 40%, var(--ws-ink));
-      --ws-verdict: color-mix(in srgb, var(--kbn-tempered-ink) 40%, var(--ws-ink));
-      --ws-red: var(--ws-owed); --ws-machine: var(--ws-agent);
-      --ws-machine-halo: color-mix(in srgb, var(--ws-agent) 20%, transparent);
-      color: var(--ws-ink); font-style: normal; font-weight: normal; text-shadow: none;
-      direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
-    }`
+    this.writeDefaults()
     document.head.append(this.actDefaults)
     try {
       const stored: unknown = JSON.parse(localStorage.getItem(PLAIN_STORAGE) ?? '[]')
       if (Array.isArray(stored)) for (const key of stored) if (typeof key === 'string') this.plain.add(key)
     } catch { /* Storage is optional. */ }
+  }
+  /** Snapshot the unthemed root, not the reader. Custom variables at a channel
+   *  root cannot bleed through the CSS scope limit by ordinary inheritance. */
+  private writeDefaults(): void {
+    this.defaults.clear()
+      const defaults = getComputedStyle(document.documentElement)
+      for (let i = 0; i < defaults.length; i++) {
+        const name = defaults.item(i)
+        if (name.startsWith('--')) this.defaults.set(name, defaults.getPropertyValue(name).trim())
+      }
+      const declarations = (entries: Iterable<[string, string]>): string => [...entries].map(([name, value]) => `${name}: ${value || 'initial'};`).join('\n')
+      this.actDefaults.textContent = `@layer shuttle-theme-defaults {
+      :where([data-ws-theme-boundary]:not(.ws-reader)) {
+        all: initial; display: revert; direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
+        ${declarations(this.defaults)}
+        color: var(--ws-ink); font-family: var(--ws-serif); line-height: 1.4; box-sizing: border-box;
+      }
+      }
+      :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) {
+        ${declarations([...this.defaults].filter(([name]) => name !== '--ws-paper' && name !== '--ws-ink'))}
+        --ws-ink-soft: var(--ws-ink); --ws-ink-muted: var(--ws-ink); --ws-ink-faint: var(--ws-ink);
+        --ws-hairline: color-mix(in srgb, var(--ws-ink) 35%, transparent);
+        --ws-hairline-soft: color-mix(in srgb, var(--ws-ink) 20%, transparent);
+        --ws-fill: color-mix(in srgb, var(--ws-ink) 10%, var(--ws-paper));
+        --ws-hover: color-mix(in srgb, var(--ws-ink) 8%, transparent);
+        --ws-agent: color-mix(in srgb, var(--kbn-agent) 50%, var(--ws-ink));
+        --ws-you: color-mix(in srgb, var(--kbn-you) 55%, var(--ws-ink));
+        --ws-owed: color-mix(in srgb, var(--kbn-owed) 40%, var(--ws-ink));
+        --ws-verdict: color-mix(in srgb, var(--kbn-tempered-ink) 40%, var(--ws-ink));
+        --ws-red: var(--ws-owed); --ws-machine: var(--ws-agent);
+        --ws-machine-halo: color-mix(in srgb, var(--ws-agent) 20%, transparent);
+        color: var(--ws-ink); font-style: normal; font-weight: normal; text-shadow: none;
+        direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
+      }`
   }
   isPlain(card: KanbanCard): boolean { return this.plain.has(this.key(card)) }
   hasTheme(card: KanbanCard): boolean {

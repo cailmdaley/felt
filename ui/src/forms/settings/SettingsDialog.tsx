@@ -26,7 +26,7 @@ const BROWSER_SECTIONS: ReadonlySet<SectionId> = new Set(['conversations', 'appe
 
 const SECTIONS: Array<{ id: SectionId; label: string; description: string }> = [
   { id: 'conversations', label: 'Conversations', description: 'Where Aloft and History take you' },
-  { id: 'appearance', label: 'Appearance', description: 'Light or dark pages and reports' },
+  { id: 'appearance', label: 'Appearance', description: 'Light or dark board and pages' },
   { id: 'stores', label: 'Notes & tasks', description: 'Folders containing the notes and tasks this host reads' },
   { id: 'projects', label: 'Project folders', description: 'Where you can create and capture work' },
   { id: 'agents', label: 'Worker agents', description: 'Models and their default effort' },

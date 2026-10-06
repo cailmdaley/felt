@@ -5,8 +5,8 @@ import {
 } from '../../board/appearance'
 
 const MODES: Array<{ id: AppearanceMode; label: string; note: (system: string) => string }> = [
-  { id: 'light', label: 'Light', note: () => 'Pages read on light paper' },
-  { id: 'dark', label: 'Dark', note: () => 'Pages read on your dark theme' },
+  { id: 'light', label: 'Light', note: () => 'The board and its pages on light paper' },
+  { id: 'dark', label: 'Dark', note: () => 'The board and its pages in your dark theme' },
   { id: 'system', label: 'Match system', note: system => `Follows this device, ${system} now` },
 ]
 const DARK_NOTES: Record<DarkTheme, { note: string; paper: string; ornament: string }> = {
@@ -34,10 +34,10 @@ export function AppearanceSection(): JSX.Element {
     <>
       <header className="set-pane-heading">
         <h2>Appearance</h2>
-        <p>Constitutions keep their theme when it matches; otherwise they read as Portolan in light or your dark theme in dark. Reports follow; the board stays as it is.</p>
+        <p>The board, its menus and its pages follow this choice. Constitutions keep their theme when it matches; otherwise they read as Portolan in light or your dark theme in dark.</p>
       </header>
       <fieldset className="set-opening-options">
-        <legend className="set-section-label">Pages and reports</legend>
+        <legend className="set-section-label">Board and pages</legend>
         {MODES.map(({ id, label, note }) => (
           <label key={id} className={`set-opening-choice${choice.mode === id ? ' set-opening-selected' : ''}`}>
             <input type="radio" name="appearance-mode" value={id} checked={choice.mode === id}

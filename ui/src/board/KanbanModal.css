@@ -85,6 +85,9 @@
   top: 0;
   pointer-events: none;
 }
+/* On dark stock iron gall is the light ink, so the ornament is gilt instead:
+   the dark themes' gold, laid thinly over the coloured letter. */
+:root[data-ws-appearance='dark'] .kbn-cap::before { color: var(--kbn-owed); opacity: 0.3; }
 /* Per-column F2 body tinting. The three live columns each get a
    distinct hue against the parchment, with cinnabar pulled OUT of
    the column row (it already carries the masthead K, the cinnabar

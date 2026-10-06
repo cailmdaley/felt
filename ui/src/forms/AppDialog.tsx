@@ -123,7 +123,7 @@ function injectAppDialogStyles(): void {
 const appDialogOverlayStyles: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'color-mix(in srgb, var(--kbn-graphite) 45%, transparent)',
+  background: 'color-mix(in srgb, var(--kbn-shade) 45%, transparent)',
   backdropFilter: 'blur(2px)',
   zIndex: 10000,
   animation: 'app-dialog-scrim-in 120ms ease-out',

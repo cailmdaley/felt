@@ -37,6 +37,7 @@
  */
 
 import './palette.css'
+import { watchAppearance } from './appearance.js'
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
@@ -496,6 +497,7 @@ export class KanbanModal {
       void this.fetchAndRender()
       return
     }
+    watchAppearance()
     this.assembleChrome()
     this.phoneAudio.mount()
     host.append(this.container!)

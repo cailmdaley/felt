@@ -135,3 +135,96 @@
   --kbn-slate: #4A606E;
   --kbn-held: #5A698C;
 }
+
+/* ── DARK: the shared derivations ──────────────────────────────────────
+   Each derived token becomes a mix of the dark bases, so a ramp that deepens
+   toward ink on paper brightens toward ink on the dark stock, and both dark
+   themes share one set of rules. */
+:root[data-ws-appearance='dark'] {
+  color-scheme: dark;
+  --kbn-rag: color-mix(in srgb, var(--kbn-paper) 50%, var(--kbn-paper-bright));
+  --kbn-form-paper: var(--kbn-paper);
+  --kbn-form-well: var(--kbn-sheet);
+  --kbn-form-band: var(--kbn-plate);
+  --kbn-graphite: var(--kbn-ink);
+  --kbn-graphite-deep: var(--kbn-ink-soft);
+  --kbn-graphite-soft: color-mix(in srgb, var(--kbn-ink-soft) 50%, var(--kbn-ink-muted));
+  --kbn-graphite-muted: var(--kbn-ink-muted);
+  --kbn-graphite-faint: color-mix(in srgb, var(--kbn-ink-muted) 50%, var(--kbn-ink-faint));
+  --kbn-graphite-pale: var(--kbn-ink-faint);
+  --kbn-ink-sepia: var(--kbn-ink);
+  --kbn-ink-umber: var(--kbn-ink-soft);
+  --kbn-ink-dun: color-mix(in srgb, var(--kbn-ink-muted) 70%, var(--kbn-ink-faint));
+  --kbn-owed-deep: color-mix(in srgb, var(--kbn-owed) 85%, var(--kbn-ink));
+  --kbn-owed-dark: color-mix(in srgb, var(--kbn-owed) 75%, var(--kbn-ink));
+  --kbn-owed-umber: color-mix(in srgb, var(--kbn-owed) 65%, var(--kbn-ink));
+  --kbn-owed-sepia: color-mix(in srgb, var(--kbn-owed) 50%, var(--kbn-ink));
+  --kbn-gilt: var(--kbn-owed);
+  --kbn-ochre: color-mix(in srgb, var(--kbn-owed-bright) 70%, var(--kbn-you));
+  --kbn-error: color-mix(in srgb, var(--kbn-you) 80%, var(--kbn-ink));
+  --kbn-alarm: var(--kbn-you);
+  --kbn-agent-deep: color-mix(in srgb, var(--kbn-agent) 80%, var(--kbn-ink));
+  --kbn-on-pigment: var(--kbn-parchment);
+  --kbn-shade: #000000;
+}
+
+/* NIGHT CHART — navy-black stock, parchment ink, gold ornament. The desk is
+   the chart's ground, so the bar above an open page is the page's own room;
+   a card is a sheet lifted a little off it, lighter as it rises. Also the
+   dark default before a theme is named. */
+:root[data-ws-appearance='dark'] {
+  --kbn-parchment: #0A1019;
+  --kbn-sheet: #0D141D;
+  --kbn-paper: #16202B;
+  --kbn-paper-bright: #1A2430;
+  --kbn-blank: #1E2935;
+  --kbn-plate: #1D2733;
+  --kbn-hairline: #363C43;
+  --kbn-ink: #F4EBDD;
+  --kbn-ink-soft: #E5DAC7;
+  --kbn-ink-muted: #A69C8A;
+  --kbn-ink-faint: #938A7A;
+  --kbn-you: #F08A78;
+  --kbn-agent: #9EB5F4;
+  --kbn-owed: #E0C081;
+  --kbn-owed-bright: #F3CC74;
+  --kbn-tempered: #82C6A7;
+  --kbn-tempered-ink: #A4D8BF;
+  --kbn-discarded: #E58A7C;
+  --kbn-discarded-ink: #F2A99D;
+  --kbn-diff-add: #9CCB8C;
+  --kbn-diff-del: #E58A7C;
+  --kbn-queue: #C7A6CF;
+  --kbn-slate: #9DB6C4;
+  --kbn-held: #A9B6DC;
+}
+
+/* LAMPLIGHT — aubergine-charcoal stock, cream ink, candle amber. */
+:root[data-ws-appearance='dark'][data-ws-dark-theme='lamplight'] {
+  --kbn-parchment: #0F0B0F;
+  --kbn-sheet: #130F13;
+  --kbn-paper: #1C171C;
+  --kbn-paper-bright: #201A20;
+  --kbn-blank: #241D23;
+  --kbn-plate: #272026;
+  --kbn-hairline: #33292F;
+  --kbn-ink: #F3E9D8;
+  --kbn-ink-soft: #E0D2BC;
+  --kbn-ink-muted: #A89A86;
+  --kbn-ink-faint: #94877A;
+  --kbn-you: #F19B92;
+  --kbn-agent: #AEBCF0;
+  --kbn-owed: #ECBD76;
+  --kbn-owed-bright: #F6CA6E;
+  --kbn-tempered: #9FCCA9;
+  --kbn-tempered-ink: #B8DCC0;
+  --kbn-discarded: #E8978C;
+  --kbn-discarded-ink: #F4B2A8;
+  --kbn-diff-add: #A9D098;
+  --kbn-diff-del: #E8978C;
+  --kbn-queue: #D0AFD2;
+  --kbn-slate: #ACBCC6;
+  --kbn-held: #B4BDE0;
+}
+
+html[data-ws-appearance='dark'], html[data-ws-appearance='dark'] body { background-color: var(--kbn-parchment); }

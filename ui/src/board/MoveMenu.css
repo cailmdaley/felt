@@ -151,7 +151,7 @@
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The move menu rises from the bottom edge. Same list, different arrival. */
   .kbn-move-scrim {
-    background: color-mix(in srgb, var(--kbn-ink) 34%, transparent);
+    background: color-mix(in srgb, var(--kbn-shade) 34%, transparent);
   }
   .kbn-move-menu.kbn-move-sheet {
     top: auto;
