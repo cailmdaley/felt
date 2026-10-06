@@ -154,7 +154,7 @@ defmodule Shuttle.Kitty do
   defp launch_kitty_app(runner) do
     case runner.cmd("open", ["-n", "-g", "-a", "kitty"], stderr_to_stdout: true) do
       {_out, 0} ->
-        budget = Application.get_env(:shuttle, :kitty_launch_budget_ms, @launch_budget_ms)
+        budget = Shuttle.Env.app(:kitty_launch_budget_ms, @launch_budget_ms)
         await_kitty_rooted_socket(runner, System.monotonic_time(:millisecond) + budget)
 
       {out, code} ->
@@ -263,7 +263,7 @@ defmodule Shuttle.Kitty do
   @spec kitty_rooted?(String.t()) :: boolean()
   def kitty_rooted?(coalition), do: String.starts_with?(coalition, @kitty_coalition_prefix)
 
-  defp socket_dir, do: Application.get_env(:shuttle, :kitty_socket_dir, "/tmp")
+  defp socket_dir, do: Shuttle.Env.app(:kitty_socket_dir, "/tmp")
 
   # ── kitty remote-control plumbing ──────────────────────────────────────────
 
@@ -287,7 +287,7 @@ defmodule Shuttle.Kitty do
 
     env =
       if remote? do
-        case System.get_env("SSH_AUTH_SOCK") do
+        case Shuttle.Env.get("SSH_AUTH_SOCK") do
           s when is_binary(s) and s != "" -> ["--env", "SSH_AUTH_SOCK=" <> s]
           _ -> []
         end
@@ -447,7 +447,7 @@ defmodule Shuttle.Kitty do
   # value is dropped and the live Quick-Access panel still wins.
   defp kitty_socket do
     env_candidate =
-      case System.get_env("KITTY_LISTEN_ON") do
+      case Shuttle.Env.get("KITTY_LISTEN_ON") do
         s when is_binary(s) and s != "" -> [String.replace_prefix(s, "unix:", "")]
         _ -> []
       end
@@ -507,7 +507,7 @@ defmodule Shuttle.Kitty do
   end
 
   defp kitty_bin do
-    case Application.get_env(:shuttle, :kitty_bin) do
+    case Shuttle.Env.app(:kitty_bin) do
       path when is_binary(path) -> {:ok, path}
       nil -> find_kitty_bin()
     end
@@ -522,7 +522,7 @@ defmodule Shuttle.Kitty do
       )
 
   defp find_bin(name, candidates, error_message) do
-    case System.find_executable(name) || Enum.find(candidates, &File.exists?/1) do
+    case Shuttle.Env.find_executable(name) || Enum.find(candidates, &File.exists?/1) do
       nil -> {:error, error_message}
       path -> {:ok, path}
     end

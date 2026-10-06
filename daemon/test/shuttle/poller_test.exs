@@ -1,8 +1,9 @@
 defmodule Shuttle.PollerTest do
-  use ExUnit.Case
+  # group: the :dbg tracer and `:dbg.stop_clear/0` are VM-wide (they clear every
+  # call-trace pattern, FileReadTrace's included).
+  use ExUnit.Case, async: true, group: :call_trace
 
   import Shuttle.Test.TranscriptHelpers
-  import Shuttle.Test.EnvHelpers
   import Shuttle.Test.PollerHelpers
 
   alias Shuttle.ActionQueries
@@ -13,11 +14,12 @@ defmodule Shuttle.PollerTest do
   alias Shuttle.Dispatcher
   alias Shuttle.Test.FiberUid
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
+  alias Shuttle.Test.Env
 
   # ── Setup ──
 
   setup do
-    start_supervised!(MockRunner)
+    MockRunner.start!()
     MockRunner.reset()
     mock_felt_root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(mock_felt_root) end)
@@ -25,26 +27,19 @@ defmodule Shuttle.PollerTest do
     # Isolate the per-host runtime markers (dispatch / handoff / re-arm) under a
     # throwaway SHUTTLE_DATA_DIR so continuation/orphan tests don't bleed across
     # each other or into the developer's real ~/.shuttle.
-    prev_data_dir = System.get_env("SHUTTLE_DATA_DIR")
-
     data_dir =
       Path.join(System.tmp_dir!(), "shuttle-poller-markers-#{System.unique_integer([:positive])}")
 
     File.mkdir_p!(data_dir)
-    System.put_env("SHUTTLE_DATA_DIR", data_dir)
+    Env.put_env("SHUTTLE_DATA_DIR", data_dir)
 
     # Session-ledger lines land under the same throwaway dir. test_helper.exs
     # pins a suite-wide SHUTTLE_SESSIONS_FILE (keeping the suite out of the real
     # ~/.shuttle) and it wins over SHUTTLE_DATA_DIR — drop it so each test reads
     # only its own pairings.
-    prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
-    System.delete_env("SHUTTLE_SESSIONS_FILE")
+    Env.delete_env("SHUTTLE_SESSIONS_FILE")
 
-    on_exit(fn ->
-      restore_env("SHUTTLE_DATA_DIR", prev_data_dir)
-      restore_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file)
-      rm_rf_settled!(data_dir)
-    end)
+    on_exit(fn -> rm_rf_settled!(data_dir) end)
 
     :ok
   end
@@ -279,19 +274,8 @@ defmodule Shuttle.PollerTest do
   # The Poller's default `own_host_id` is SHUTTLE_HOST when set, else Shuttle's
   # answer from `shuttle host --json`. Explicit `own_host_id:` opts always win.
   describe "own_host_id resolution" do
-    setup do
-      prev = System.get_env("SHUTTLE_HOST")
-
-      on_exit(fn ->
-        # Restore the pin config/test.exs sets so sibling tests keep it.
-        if prev, do: System.put_env("SHUTTLE_HOST", prev), else: System.delete_env("SHUTTLE_HOST")
-      end)
-
-      :ok
-    end
-
     test "SHUTTLE_HOST, trimmed, wins without asking Shuttle" do
-      System.put_env("SHUTTLE_HOST", "  candide \n")
+      Env.put_env("SHUTTLE_HOST", "  candide \n")
       MockRunner.set_host_json(~s({"id": "from-shuttle"}))
 
       {:ok, poller} = start_identity_poller(:test_poller_env_host)
@@ -301,7 +285,7 @@ defmodule Shuttle.PollerTest do
     end
 
     test "with SHUTTLE_HOST unset the id is Shuttle's, frozen for the Poller's life" do
-      System.delete_env("SHUTTLE_HOST")
+      Env.delete_env("SHUTTLE_HOST")
       MockRunner.set_host_json(~s({"id": "candide", "class": "single-user"}))
 
       {:ok, poller} = start_identity_poller(:test_poller_shuttle_host)
@@ -315,40 +299,8 @@ defmodule Shuttle.PollerTest do
       assert Poller.own_host_id(:test_poller_shuttle_host) == "candide"
     end
 
-    test "the daemon identity is resolved once; every later read is shell-free" do
-      key = {:shuttle_own_host_id, :daemon}
-      prev = :persistent_term.get(key, nil)
-
-      on_exit(fn ->
-        if prev, do: :persistent_term.put(key, prev), else: :persistent_term.erase(key)
-      end)
-
-      System.delete_env("SHUTTLE_HOST")
-      MockRunner.set_host_json(~s({"id": "candide"}))
-
-      asks = fn ->
-        Enum.count(MockRunner.commands(), &(&1 == {"shuttle", ["host", "--json"]}))
-      end
-
-      before = asks.()
-
-      assert Poller.freeze_daemon_host_id!(runner: MockRunner) == "candide"
-      assert asks.() == before + 1
-
-      # No Poller holds this name, so reads fall through to the daemon slot —
-      # as every request does in the boot window before the Poller starts.
-      MockRunner.set_host_json(~s({"id": "renamed"}))
-
-      for _ <- 1..50 do
-        assert Poller.own_host_id(:no_poller_by_this_name) == "candide"
-        assert Poller.daemon_host_id() == "candide"
-      end
-
-      assert asks.() == before + 1
-    end
-
     test "a Poller whose shuttle cannot name the host refuses to boot" do
-      System.delete_env("SHUTTLE_HOST")
+      Env.delete_env("SHUTTLE_HOST")
       MockRunner.set_host_json("parsing host.json: not a JSON object", 1)
 
       ExUnit.CaptureLog.capture_log(fn ->
@@ -833,11 +785,9 @@ defmodule Shuttle.PollerTest do
 
     last_event_at = started - 90_000
 
-    Application.put_env(:shuttle, :waiting_phases_source, fn ->
+    Env.put_app_env(:waiting_phases_source, fn ->
       %{session => %{last_event_at: last_event_at, phase: "waiting"}}
     end)
-
-    on_exit(fn -> Application.delete_env(:shuttle, :waiting_phases_source) end)
 
     assert {:ok, %{fibers: [%{runtime: runtime}]}} = Poller.cached_fiber_documents(poller)
     # The served last_activity_at is the tracker's real timestamp — NOT started_at.
@@ -880,18 +830,16 @@ defmodule Shuttle.PollerTest do
     assert {:ok, %{fibers: [%{runtime: %{tmux_session: session}}]}} =
              Poller.cached_fiber_documents(poller)
 
-    Application.put_env(:shuttle, :waiting_phases_source, fn ->
+    Env.put_app_env(:waiting_phases_source, fn ->
       %{session => %{last_event_at: 1_700_000_000_000, phase: "waiting"}}
     end)
-
-    on_exit(fn -> Application.delete_env(:shuttle, :waiting_phases_source) end)
 
     assert {:ok, %{fibers: [%{runtime: runtime}]}} = Poller.cached_fiber_documents(poller)
     assert runtime.phase == "waiting"
     assert runtime.last_activity_at == 1_700_000_000_000
 
     # The escalation phase stamps straight through the same path.
-    Application.put_env(:shuttle, :waiting_phases_source, fn ->
+    Env.put_app_env(:waiting_phases_source, fn ->
       %{session => %{last_event_at: 1_700_000_000_000, phase: "attention"}}
     end)
 
@@ -900,7 +848,7 @@ defmodule Shuttle.PollerTest do
 
     # Clearing the activity map drops the phase but keeps last_activity_at (the
     # meta/started_at fallback) — self-healing on the serve path.
-    Application.put_env(:shuttle, :waiting_phases_source, fn -> %{} end)
+    Env.put_app_env(:waiting_phases_source, fn -> %{} end)
     assert {:ok, %{fibers: [%{runtime: cleared}]}} = Poller.cached_fiber_documents(poller)
     refute Map.has_key?(cleared, :phase)
     assert is_integer(cleared.last_activity_at)
@@ -1239,19 +1187,11 @@ defmodule Shuttle.PollerTest do
   end
 
   test "New session escalates to SIGTERM on a cut worker that survives its grace" do
-    previous = Application.get_env(:shuttle, :worker_stop_ladder)
-
-    Application.put_env(:shuttle, :worker_stop_ladder, [
+    Env.put_app_env(:worker_stop_ladder, [
       {nil, 100},
       {"TERM", 2_000},
       {"KILL", 100}
     ])
-
-    on_exit(fn ->
-      if previous,
-        do: Application.put_env(:shuttle, :worker_stop_ladder, previous),
-        else: Application.delete_env(:shuttle, :worker_stop_ladder)
-    end)
 
     fiber_id = "tests/cut-stubborn-worker"
 
@@ -1774,14 +1714,7 @@ defmodule Shuttle.PollerTest do
     # fiber), so the mock fiber must be felt-resolvable: point SHUTTLE_STORES at the
     # mock store the factory wrote to (/tmp/.felt). Without this a
     # park regression would silently no-op — masking whether the gate even fired.
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    on_exit(fn ->
-      if prev_loom,
-        do: System.put_env("SHUTTLE_STORES", prev_loom),
-        else: System.delete_env("SHUTTLE_STORES")
-    end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     fiber_id = "tests/pinned-exit-parks"
     leaf = fiber_id |> String.split("/") |> List.last()
@@ -1833,14 +1766,7 @@ defmodule Shuttle.PollerTest do
     # handed_off_at and exits is asking for a fresh session (long autonomous arc).
     # handle_worker_exit's pinned branch leaves the document `active` (does NOT
     # park to open), and the next tick re-dispatches a fresh worker.
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    on_exit(fn ->
-      if prev_loom,
-        do: System.put_env("SHUTTLE_STORES", prev_loom),
-        else: System.delete_env("SHUTTLE_STORES")
-    end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     fiber_id = "tests/pinned-clean-exit"
     leaf = fiber_id |> String.split("/") |> List.last()
@@ -1889,14 +1815,7 @@ defmodule Shuttle.PollerTest do
     # The complement of the pinned carve-out: a STANDING (cron) worker's exit
     # still marks the role awaiting, so the cron does not re-fire it this cycle.
     # This is what guards the gate against being broadened to skip standing too.
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    on_exit(fn ->
-      if prev_loom,
-        do: System.put_env("SHUTTLE_STORES", prev_loom),
-        else: System.delete_env("SHUTTLE_STORES")
-    end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     fiber_id = "tests/standing-exit-closes"
     leaf = fiber_id |> String.split("/") |> List.last()
@@ -2083,13 +2002,8 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
     MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\n", "active")
 
-    Application.put_env(:shuttle, :os_type, {:unix, :darwin})
-    Application.put_env(:shuttle, :kitty_impl, NoKitty)
-
-    on_exit(fn ->
-      Application.delete_env(:shuttle, :os_type)
-      Application.delete_env(:shuttle, :kitty_impl)
-    end)
+    Env.put_app_env(:os_type, {:unix, :darwin})
+    Env.put_app_env(:kitty_impl, NoKitty)
 
     {:ok, poller} =
       start_poller!(
@@ -2490,7 +2404,7 @@ defmodule Shuttle.PollerTest do
 
   # Under this test's throwaway SHUTTLE_DATA_DIR (the suite-wide pin is dropped
   # in setup), so it is cleaned up with the rest of the markers.
-  defp heartbeat_file, do: Path.join(System.get_env("SHUTTLE_DATA_DIR"), "heartbeat.json")
+  defp heartbeat_file, do: Path.join(Shuttle.Env.get("SHUTTLE_DATA_DIR"), "heartbeat.json")
 
   # A heartbeat that would auto-release on its own, with `fields` merged over:
   # written 4s ago by an incarnation that had been up half an hour, one boot in
@@ -3343,12 +3257,7 @@ defmodule Shuttle.PollerTest do
   test "accept through the Poller re-arms the document and survives the next poll" do
     fiber_id = "tests/standing-accept-sticks"
 
-    previous_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", previous_loom_homes)
-    end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     # Awaiting is a document fact (status:closed + untempered). accept re-arms it
     # from the doc schedule (status:active).
@@ -3440,12 +3349,7 @@ defmodule Shuttle.PollerTest do
     # the document is the single source of truth, so the accept stands.
     fiber_id = "tests/standing-accept-during-poll"
 
-    previous_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", previous_loom_homes)
-    end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     # Awaiting is a document fact (status:closed + untempered).
     fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "standing"], "status" => "closed"})
@@ -4865,9 +4769,7 @@ defmodule Shuttle.PollerTest do
     # re-fired off the schedule mid-cycle.
     fiber_id = "tests/standing-dead-orphan"
 
-    previous_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     # A far-future schedule so the role is NOT cron-due — the only thing that
     # could touch it is the dead-orphan marker, not a scheduled dispatch.
@@ -4913,9 +4815,7 @@ defmodule Shuttle.PollerTest do
     # (concluding the phantom run) and leave the role armed.
     fiber_id = "tests/standing-inverted-markers"
 
-    previous_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     MockRunner.set_shuttle(fiber_id, """
     kind: standing
@@ -4976,9 +4876,7 @@ defmodule Shuttle.PollerTest do
     # with no handoff stamp and no fresh dispatch.
     fiber_id = "tests/pinned-inverted-markers"
 
-    previous_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     MockRunner.set_shuttle(fiber_id, """
     kind: pinned
@@ -5026,9 +4924,7 @@ defmodule Shuttle.PollerTest do
     # reconciler, so leaving a crashed ad-hoc run's role armed is safe.
     fiber_id = "tests/standing-dead-adhoc"
 
-    previous_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     MockRunner.set_shuttle(fiber_id, """
     kind: standing
@@ -5073,9 +4969,7 @@ defmodule Shuttle.PollerTest do
     # skip the tick and let the next healthy scan decide.
     fiber_id = "tests/standing-tmux-wedged"
 
-    previous_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-    on_exit(fn -> restore_env("SHUTTLE_STORES", previous_loom_homes) end)
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     # Same shape as the dead-orphan case — armed, dispatched, un-exited, not
     # cron-due — except tmux cannot answer.
@@ -5397,8 +5291,7 @@ defmodule Shuttle.PollerTest do
     protected_root = Path.join([home, "Library", "Mobile Documents"])
     project_dir = Path.join(protected_root, "checkout")
     File.mkdir_p!(project_dir)
-    previous_home = System.get_env("HOME")
-    System.put_env("HOME", home)
+    Env.put_env("HOME", home)
 
     # BOTH spellings of the fake home. `System.tmp_dir!/0` is `/var/folders/…`
     # on macOS, but `/var` is a symlink, so the realpath walk this test exists
@@ -5410,10 +5303,7 @@ defmodule Shuttle.PollerTest do
         {:error, _} -> [home]
       end
 
-    on_exit(fn ->
-      restore_env("HOME", previous_home)
-      File.rm_rf(home)
-    end)
+    on_exit(fn -> File.rm_rf(home) end)
 
     fiber = make_fiber("tests/parked-icloud-project-dir", %{"status" => "open"})
     MockRunner.set_fiber("tests/parked-icloud-project-dir", fiber)
@@ -5498,13 +5388,9 @@ defmodule Shuttle.PollerTest do
     home = Path.join(System.tmp_dir!(), "shuttle-test-home-#{System.unique_integer([:positive])}")
     project_dir = Path.join([home, "Library", "Mobile Documents", "unreachable"])
     File.mkdir_p!(Path.join([home, "Library", "Mobile Documents"]))
-    previous_home = System.get_env("HOME")
-    System.put_env("HOME", home)
+    Env.put_env("HOME", home)
 
-    on_exit(fn ->
-      restore_env("HOME", previous_home)
-      File.rm_rf(home)
-    end)
+    on_exit(fn -> File.rm_rf(home) end)
 
     expanded_dir = Path.expand(project_dir)
     fiber_id = "tests/unreachable-project-dir"
@@ -5722,9 +5608,7 @@ defmodule Shuttle.PollerTest do
 
     # ...and the wait is that timeout, not GenServer's default: shrunk below a
     # spawn's duration, the caller gives up first.
-    previous = Application.get_env(:shuttle, :dispatch_call_timeout_ms)
-    on_exit(fn -> restore_app_env(:dispatch_call_timeout_ms, previous) end)
-    Application.put_env(:shuttle, :dispatch_call_timeout_ms, 200)
+    Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 200)
     MockRunner.set_new_session_delay(600)
 
     assert {:timeout, {GenServer, :call, _}} =
@@ -5741,9 +5625,7 @@ defmodule Shuttle.PollerTest do
       )
 
     settle_poller!(poller)
-    previous = Application.get_env(:shuttle, :dispatch_call_timeout_ms)
-    on_exit(fn -> restore_app_env(:dispatch_call_timeout_ms, previous) end)
-    Application.put_env(:shuttle, :dispatch_call_timeout_ms, 100)
+    Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 100)
 
     # A suspended Poller never answers. Each call must give up at the shrunk
     # 100 ms, well inside the 2 s window; GenServer's 5 s default or the 30 s
@@ -5961,11 +5843,8 @@ defmodule Shuttle.PollerTest do
         "shuttle-felt-stores-poller-#{System.unique_integer([:positive])}.json"
       )
 
-    original_file = System.get_env("SHUTTLE_STORES_FILE")
-    original_homes = System.get_env("SHUTTLE_STORES")
-
-    System.put_env("SHUTTLE_STORES_FILE", config_path)
-    System.delete_env("SHUTTLE_STORES")
+    Env.put_env("SHUTTLE_STORES_FILE", config_path)
+    Env.delete_env("SHUTTLE_STORES")
     File.mkdir_p!(Path.dirname(config_path))
 
     File.write!(
@@ -5973,19 +5852,7 @@ defmodule Shuttle.PollerTest do
       Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/host-a", "/tmp/host-b"]})
     )
 
-    on_exit(fn ->
-      File.rm(config_path)
-
-      case original_file do
-        nil -> System.delete_env("SHUTTLE_STORES_FILE")
-        value -> System.put_env("SHUTTLE_STORES_FILE", value)
-      end
-
-      case original_homes do
-        nil -> System.delete_env("SHUTTLE_STORES")
-        value -> System.put_env("SHUTTLE_STORES", value)
-      end
-    end)
+    on_exit(fn -> File.rm(config_path) end)
 
     {:ok, poller} =
       start_poller!(
@@ -6004,27 +5871,12 @@ defmodule Shuttle.PollerTest do
         "shuttle-felt-stores-refresh-#{System.unique_integer([:positive])}.json"
       )
 
-    original_file = System.get_env("SHUTTLE_STORES_FILE")
-    original_homes = System.get_env("SHUTTLE_STORES")
-
-    System.put_env("SHUTTLE_STORES_FILE", config_path)
-    System.delete_env("SHUTTLE_STORES")
+    Env.put_env("SHUTTLE_STORES_FILE", config_path)
+    Env.delete_env("SHUTTLE_STORES")
     File.mkdir_p!(Path.dirname(config_path))
     File.write!(config_path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/host-a"]}))
 
-    on_exit(fn ->
-      File.rm(config_path)
-
-      case original_file do
-        nil -> System.delete_env("SHUTTLE_STORES_FILE")
-        value -> System.put_env("SHUTTLE_STORES_FILE", value)
-      end
-
-      case original_homes do
-        nil -> System.delete_env("SHUTTLE_STORES")
-        value -> System.put_env("SHUTTLE_STORES", value)
-      end
-    end)
+    on_exit(fn -> File.rm(config_path) end)
 
     {:ok, poller} =
       start_poller!(

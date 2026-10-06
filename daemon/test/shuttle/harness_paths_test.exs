@@ -1,5 +1,5 @@
 defmodule Shuttle.HarnessPathsTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.HarnessPaths
 
@@ -10,22 +10,15 @@ defmodule Shuttle.HarnessPathsTest do
   )
 
   setup do
-    previous = Map.new(@env_keys, &{&1, System.get_env(&1)})
-    Enum.each(@env_keys, &System.delete_env/1)
-
-    on_exit(fn ->
-      Enum.each(previous, fn {key, value} ->
-        if value, do: System.put_env(key, value), else: System.delete_env(key)
-      end)
-    end)
+    Enum.each(@env_keys, &Shuttle.Test.Env.delete_env/1)
 
     :ok
   end
 
   test "empty environment values do not erase the harness defaults" do
-    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", "")
-    System.put_env("SHUTTLE_PI_SESSIONS_DIR", "")
-    System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", "")
+    Shuttle.Test.Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", "")
+    Shuttle.Test.Env.put_env("SHUTTLE_PI_SESSIONS_DIR", "")
+    Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", "")
 
     assert HarnessPaths.claude_projects_root() ==
              Path.join([System.user_home!(), ".claude", "projects"])
@@ -38,9 +31,9 @@ defmodule Shuttle.HarnessPathsTest do
   end
 
   test "non-empty environment and options override the defaults" do
-    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", "/env/claude")
-    System.put_env("SHUTTLE_PI_SESSIONS_DIR", "/env/pi")
-    System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", "/env/codex")
+    Shuttle.Test.Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", "/env/claude")
+    Shuttle.Test.Env.put_env("SHUTTLE_PI_SESSIONS_DIR", "/env/pi")
+    Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", "/env/codex")
 
     assert HarnessPaths.claude_projects_root() == "/env/claude"
     assert HarnessPaths.pi_sessions_root() == "/env/pi"
@@ -52,9 +45,9 @@ defmodule Shuttle.HarnessPathsTest do
   end
 
   test "an explicitly empty option falls through to the environment" do
-    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", "/env/claude")
-    System.put_env("SHUTTLE_PI_SESSIONS_DIR", "/env/pi")
-    System.put_env("SHUTTLE_CODEX_SESSIONS_DIR", "/env/codex")
+    Shuttle.Test.Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", "/env/claude")
+    Shuttle.Test.Env.put_env("SHUTTLE_PI_SESSIONS_DIR", "/env/pi")
+    Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", "/env/codex")
 
     assert HarnessPaths.claude_projects_root(root: "") == "/env/claude"
     assert HarnessPaths.pi_sessions_root(pi_root: "") == "/env/pi"

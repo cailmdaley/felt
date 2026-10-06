@@ -83,7 +83,7 @@ defmodule ShuttleWeb.PeerPlug do
       nil ->
         if Keyword.get(opts, :host_class, Shuttle.host_class()) in @gated_classes do
           proc_root =
-            Keyword.get(opts, :proc_root, Application.get_env(:shuttle, :proc_net_root, "/proc"))
+            Keyword.get(opts, :proc_root, Shuttle.Env.app(:proc_net_root, "/proc"))
 
           connection_uid(peer_data, listen, proc_root)
         end

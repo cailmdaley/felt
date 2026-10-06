@@ -120,7 +120,7 @@ defmodule Shuttle.CodexApp do
   defp client do
     case Process.whereis(@client) do
       nil ->
-        opts = Application.get_env(:shuttle, :codex_app_transport_opts, [])
+        opts = Shuttle.Env.app(:codex_app_transport_opts, [])
 
         case Transport.start_link(Keyword.put(opts, :name, @client)) do
           {:ok, pid} -> {:ok, pid}

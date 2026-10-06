@@ -63,7 +63,7 @@ defmodule Shuttle.FeltStores do
     now = System.monotonic_time(:millisecond)
 
     case {PathListConfig.read_configured(@spec_),
-          :persistent_term.get(@expanded_cache_key, :none)} do
+          :persistent_term.get(Shuttle.Env.scope_key(@expanded_cache_key), :none)} do
       {{:ok, base}, {base, expanded, walked_at}} when now - walked_at < max_age_ms ->
         expanded
 
@@ -75,7 +75,7 @@ defmodule Shuttle.FeltStores do
 
       {{:ok, base}, _cached} ->
         expanded = expand_with_symlinked_substores(base)
-        :persistent_term.put(@expanded_cache_key, {base, expanded, now})
+        :persistent_term.put(Shuttle.Env.scope_key(@expanded_cache_key), {base, expanded, now})
         expanded
     end
   end
@@ -425,7 +425,7 @@ defmodule Shuttle.FeltStores do
   # injection is by config rather than a threaded opt. Tests set
   # `:shuttle, :felt_stores_runner` to a mock; production defaults to the
   # bounded runner.
-  defp runner, do: Application.get_env(:shuttle, :felt_stores_runner, Shuttle.Runner.Default)
+  defp runner, do: Shuttle.Env.app(:felt_stores_runner, Shuttle.Runner.Default)
 
   defp resolved(path, store, fiber_id, uid) do
     %{store: store, fiber_id: fiber_id, path: path, uid: uid}

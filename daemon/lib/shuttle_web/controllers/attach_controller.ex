@@ -115,5 +115,5 @@ defmodule ShuttleWeb.AttachController do
     end
   end
 
-  defp kitty, do: Application.get_env(:shuttle, :kitty_impl, Shuttle.Kitty)
+  defp kitty, do: Shuttle.Env.app(:kitty_impl, Shuttle.Kitty)
 end

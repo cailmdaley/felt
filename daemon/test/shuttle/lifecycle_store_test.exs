@@ -1,6 +1,5 @@
 defmodule Shuttle.LifecycleStoreTest do
-  use ExUnit.Case
-  import Shuttle.Test.EnvHelpers
+  use ExUnit.Case, async: true
 
   alias Shuttle.LifecycleStore
 
@@ -220,13 +219,11 @@ defmodule Shuttle.LifecycleStoreTest do
 
     File.write!(path, original)
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", loom)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("science/cmbx", path, original)
     after
-      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end
@@ -329,13 +326,11 @@ defmodule Shuttle.LifecycleStoreTest do
     Body.
     """)
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", loom)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("life/french/practice", path)
     after
-      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end
@@ -372,13 +367,11 @@ defmodule Shuttle.LifecycleStoreTest do
     Body.
     """)
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", loom)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("ai-futures/tokenmaxxing/operator", path)
     after
-      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end

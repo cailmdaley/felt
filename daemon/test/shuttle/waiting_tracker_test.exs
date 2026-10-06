@@ -1,5 +1,5 @@
 defmodule Shuttle.WaitingTrackerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.EventStream
 
@@ -22,15 +22,10 @@ defmodule Shuttle.WaitingTrackerTest do
   defp start(events) do
     name = :"waiting_tracker_#{System.unique_integer([:positive])}"
 
-    {:ok, pid} =
-      EventStream.start_link(
-        events_file: events,
-        poll_interval_ms: 10,
-        clock: fn -> @base end,
-        name: name
-      )
+    start_supervised!(
+      {EventStream, events_file: events, poll_interval_ms: 10, clock: fn -> @base end, name: name}
+    )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
     name
   end
 

@@ -1,16 +1,15 @@
 defmodule ShuttleWeb.DeliverControllerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Phoenix.ConnTest
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.PollerHelpers
   import Shuttle.Test.TranscriptHelpers
 
   alias Shuttle.Poller
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
-  alias Shuttle.Test.StubPostClient
+  alias Shuttle.Test.{Env, StubPostClient}
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -22,10 +21,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     def cmd("shuttle", ["message", "--local", "--json", "--request-json"], opts) do
       request = opts[:input] |> String.trim() |> Jason.decode!()
-      send(Application.fetch_env!(:shuttle, :deliver_test_pid), {:message, request})
+      send(Shuttle.Env.app(:deliver_test_pid), {:message, request})
 
       {status, detail, exit_code} =
-        Application.get_env(:shuttle, :deliver_test_receipt, {"accepted", nil, 0})
+        Shuttle.Env.app(:deliver_test_receipt, {"accepted", nil, 0})
 
       {Jason.encode!(%{
          message_id: request["message_id"],
@@ -40,14 +39,12 @@ defmodule ShuttleWeb.DeliverControllerTest do
   end
 
   setup do
-    start_supervised!(MockRunner)
+    MockRunner.start!()
     MockRunner.reset()
     root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(root) end)
 
-    start_supervised!(
-      {Poller, runner: MockRunner, poll_interval_ms: 600_000, felt_stores: [root]}
-    )
+    start_poller!(runner: MockRunner, poll_interval_ms: 600_000, felt_stores: [root])
 
     Process.sleep(50)
     :ok
@@ -202,15 +199,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
     MockRunner.put_shuttle_fields(fiber_id, %{"session_uuid" => "live-session-9"})
     Poller.refresh_document(fiber_id)
 
-    previous_runner = Application.get_env(:shuttle, :felt_runner)
-    Application.put_env(:shuttle, :felt_runner, MessageRunner)
-    Application.put_env(:shuttle, :deliver_test_pid, self())
-
-    on_exit(fn ->
-      restore_app_env(:felt_runner, previous_runner)
-      Application.delete_env(:shuttle, :deliver_test_pid)
-      Application.delete_env(:shuttle, :deliver_test_receipt)
-    end)
+    Env.put_app_env(:felt_runner, MessageRunner)
+    Env.put_app_env(:deliver_test_pid, self())
   end
 
   test "a sent message whose receipt is unconfirmed is neither delivered nor failed" do
@@ -219,7 +209,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     detail =
       "native message queued behind the receiver's current turn; no model response to it observed yet"
 
-    Application.put_env(:shuttle, :deliver_test_receipt, {"unknown", detail, 1})
+    Env.put_app_env(:deliver_test_receipt, {"unknown", detail, 1})
 
     body =
       api_conn()
@@ -237,8 +227,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
   test "a refused message is not delivered" do
     message_live_worker("tests/deliver-refused")
 
-    Application.put_env(
-      :shuttle,
+    Env.put_app_env(
       :deliver_test_receipt,
       {"rejected", "receiver native inbox denied this message; no turn started", 1}
     )

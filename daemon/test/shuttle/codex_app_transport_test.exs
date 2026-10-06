@@ -1,5 +1,5 @@
 defmodule Shuttle.CodexApp.TransportTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import Bitwise
 
@@ -10,35 +10,22 @@ defmodule Shuttle.CodexApp.TransportTest do
 
   setup do
     if pid = Process.whereis(@client), do: Transport.close(pid)
-    previous = Application.get_env(:shuttle, :codex_app_transport_opts)
 
     on_exit(fn ->
       if pid = Process.whereis(@client), do: Transport.close(pid)
-
-      if previous,
-        do: Application.put_env(:shuttle, :codex_app_transport_opts, previous),
-        else: Application.delete_env(:shuttle, :codex_app_transport_opts)
     end)
 
     :ok
   end
 
   test "selects an explicit socket or the configured Codex home" do
-    previous = Map.new(["CODEX_HOME", "SHUTTLE_CODEX_SOCKET"], &{&1, System.get_env(&1)})
     # Rooted at /tmp, not System.tmp_dir!(): macOS's per-user TMPDIR pushes the
     # socket path past the 104-byte sun_path limit.
     home = Path.join("/tmp", "felt-endpoint-#{System.unique_integer([:positive])}")
 
-    on_exit(fn ->
-      Enum.each(previous, fn
-        {key, nil} -> System.delete_env(key)
-        {key, value} -> System.put_env(key, value)
-      end)
+    on_exit(fn -> File.rm_rf!(home) end)
 
-      File.rm_rf!(home)
-    end)
-
-    System.put_env("CODEX_HOME", home)
+    Shuttle.Test.Env.put_env("CODEX_HOME", home)
 
     for mode <- [:override, :codex_home, :empty_override] do
       {path, peer} =
@@ -48,7 +35,7 @@ defmodule Shuttle.CodexApp.TransportTest do
         end)
 
       if mode == :override do
-        System.put_env("SHUTTLE_CODEX_SOCKET", path)
+        Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", path)
       else
         directory = Path.join(home, "app-server-control")
         File.mkdir_p!(directory)
@@ -57,8 +44,8 @@ defmodule Shuttle.CodexApp.TransportTest do
         File.ln_s!(path, selected)
 
         if mode == :empty_override,
-          do: System.put_env("SHUTTLE_CODEX_SOCKET", ""),
-          else: System.delete_env("SHUTTLE_CODEX_SOCKET")
+          do: Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", ""),
+          else: Shuttle.Test.Env.delete_env("SHUTTLE_CODEX_SOCKET")
       end
 
       {:ok, client} = Transport.start_link(connect_timeout: 1_000)
@@ -664,7 +651,7 @@ defmodule Shuttle.CodexApp.TransportTest do
   end
 
   defp configure_adapter(path) do
-    Application.put_env(:shuttle, :codex_app_transport_opts,
+    Shuttle.Test.Env.put_app_env(:codex_app_transport_opts,
       socket_path: path,
       connect_timeout: 1_000
     )

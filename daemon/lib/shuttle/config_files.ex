@@ -112,7 +112,7 @@ defmodule Shuttle.ConfigFiles do
   def path(:projects), do: Projects.config_path()
 
   def path(:agents) do
-    case System.get_env("SHUTTLE_AGENTS_FILE") do
+    case Shuttle.Env.get("SHUTTLE_AGENTS_FILE") do
       value when is_binary(value) and value != "" -> Path.expand(value)
       _ -> Path.expand("~/.config/shuttle/agents.json")
     end
@@ -227,7 +227,7 @@ defmodule Shuttle.ConfigFiles do
   defp env_override(id) when id in [:stores, :projects] do
     var = if id == :stores, do: "SHUTTLE_STORES", else: "SHUTTLE_PROJECTS"
 
-    case System.get_env(var) do
+    case Shuttle.Env.get(var) do
       value when is_binary(value) and value != "" -> %{var: var, value: value}
       _ -> nil
     end

@@ -1,5 +1,5 @@
 defmodule Shuttle.RecordingRunnerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.Test.RecordingRunner
 

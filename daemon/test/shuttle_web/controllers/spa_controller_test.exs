@@ -4,7 +4,7 @@ defmodule ShuttleWeb.SpaControllerTest do
   environment override, then the bundled release UI, then the source checkout.
   These tests verify the exact default path and the endpoint's response.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
@@ -12,9 +12,7 @@ defmodule ShuttleWeb.SpaControllerTest do
   @endpoint ShuttleWeb.Endpoint
 
   test "Assets.dist/0 resolves the bundled UI or the repository's sibling UI" do
-    previous = System.get_env("SHUTTLE_UI_DIST")
-    on_exit(fn -> Shuttle.Test.EnvHelpers.restore_env("SHUTTLE_UI_DIST", previous) end)
-    System.delete_env("SHUTTLE_UI_DIST")
+    Shuttle.Test.Env.delete_env("SHUTTLE_UI_DIST")
 
     bundled_dist = Application.app_dir(:shuttle, "priv/ui/dist")
     checkout_dist = Path.expand("../../../../ui/dist", __DIR__)

@@ -178,10 +178,9 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
 
   describe "through the endpoint" do
     setup %{path: path} do
-      previous = Application.fetch_env(:shuttle, :meeting_audio_socket)
       {:ok, phase} = Agent.start_link(fn -> {:ok, %{path: path, launch: "L1"}} end)
 
-      Application.put_env(:shuttle, :meeting_audio_socket,
+      Shuttle.Test.Env.put_app_env(:meeting_audio_socket,
         resolve: fn -> Agent.get(phase, & &1) end,
         retry_ms: 10
       )
@@ -195,13 +194,6 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
         )
 
       {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
-
-      on_exit(fn ->
-        case previous do
-          {:ok, value} -> Application.put_env(:shuttle, :meeting_audio_socket, value)
-          :error -> Application.delete_env(:shuttle, :meeting_audio_socket)
-        end
-      end)
 
       %{port: port, phase: phase}
     end

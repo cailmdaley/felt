@@ -1,5 +1,5 @@
 defmodule Shuttle.KittyBackgroundTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.Kitty
 
@@ -71,16 +71,11 @@ defmodule Shuttle.KittyBackgroundTest do
   setup do
     dir = Path.join(System.tmp_dir!(), "kitty-sockets-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
-    Application.put_env(:shuttle, :kitty_socket_dir, dir)
-    Application.put_env(:shuttle, :kitty_bin, "/stub/kitty")
-    Application.put_env(:shuttle, :kitty_launch_budget_ms, 300)
+    Shuttle.Test.Env.put_app_env(:kitty_socket_dir, dir)
+    Shuttle.Test.Env.put_app_env(:kitty_bin, "/stub/kitty")
+    Shuttle.Test.Env.put_app_env(:kitty_launch_budget_ms, 300)
 
-    on_exit(fn ->
-      File.rm_rf(dir)
-      Application.delete_env(:shuttle, :kitty_socket_dir)
-      Application.delete_env(:shuttle, :kitty_bin)
-      Application.delete_env(:shuttle, :kitty_launch_budget_ms)
-    end)
+    on_exit(fn -> File.rm_rf(dir) end)
 
     %{dir: dir}
   end

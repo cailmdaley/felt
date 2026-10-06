@@ -1,4 +1,6 @@
 defmodule ShuttleWeb.ReadinessTest do
+  # sync: Shuttle.Readiness keeps boot state in :persistent_term, which gates
+  # every state-dependent route for every ConnTest module.
   use ExUnit.Case, async: false
 
   import Phoenix.ConnTest

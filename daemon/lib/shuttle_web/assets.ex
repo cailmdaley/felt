@@ -22,7 +22,7 @@ defmodule ShuttleWeb.Assets do
   @doc "Absolute path to the built UI bundle directory."
   @spec dist() :: String.t()
   def dist do
-    System.get_env("SHUTTLE_UI_DIST") || priv_dist() || @src_dist
+    Shuttle.Env.get("SHUTTLE_UI_DIST") || priv_dist() || @src_dist
   end
 
   defp priv_dist do

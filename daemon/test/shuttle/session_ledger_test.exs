@@ -7,9 +7,7 @@ defmodule Shuttle.SessionLedgerTest do
   real code paths in `Shuttle.DispatchIntegrationTest` and `Shuttle.PollerTest`;
   this file pins the record shape and the read path.
   """
-  # Sync: `default_path/0`'s test mutates SHUTTLE_SESSIONS_FILE / SHUTTLE_DATA_DIR,
-  # which every other test's ledger resolution reads.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.SessionLedger
 
@@ -456,22 +454,14 @@ defmodule Shuttle.SessionLedgerTest do
 
   describe "default_path/0" do
     test "honors SHUTTLE_SESSIONS_FILE, then SHUTTLE_DATA_DIR, then ~/.shuttle" do
-      previous = Map.new(~w(SHUTTLE_SESSIONS_FILE SHUTTLE_DATA_DIR), &{&1, System.get_env(&1)})
-
-      on_exit(fn ->
-        Enum.each(previous, fn {k, v} ->
-          if v, do: System.put_env(k, v), else: System.delete_env(k)
-        end)
-      end)
-
-      System.put_env("SHUTTLE_SESSIONS_FILE", "/explicit/sessions.jsonl")
+      Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", "/explicit/sessions.jsonl")
       assert SessionLedger.default_path() == "/explicit/sessions.jsonl"
 
-      System.delete_env("SHUTTLE_SESSIONS_FILE")
-      System.put_env("SHUTTLE_DATA_DIR", "/data")
+      Shuttle.Test.Env.delete_env("SHUTTLE_SESSIONS_FILE")
+      Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", "/data")
       assert SessionLedger.default_path() == "/data/sessions.jsonl"
 
-      System.delete_env("SHUTTLE_DATA_DIR")
+      Shuttle.Test.Env.delete_env("SHUTTLE_DATA_DIR")
       assert SessionLedger.default_path() =~ ~r{/\.shuttle/sessions\.jsonl$}
     end
   end

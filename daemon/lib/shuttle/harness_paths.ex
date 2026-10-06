@@ -91,7 +91,7 @@ defmodule Shuttle.HarnessPaths do
 
   defp configured_path(opts, option_keys, env_key, fallback) do
     Enum.find_value(option_keys, fn key -> non_empty(Keyword.get(opts, key)) end) ||
-      non_empty(System.get_env(env_key)) || fallback.()
+      non_empty(Shuttle.Env.get(env_key)) || fallback.()
   end
 
   defp non_empty(value) when is_binary(value) and value != "", do: value

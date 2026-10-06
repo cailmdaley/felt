@@ -8,9 +8,7 @@ defmodule Shuttle.CommitLedgerTest do
   assert what the reader makes of it, including the shapes a hook mid-rotation
   or mid-line can leave behind.
   """
-  # Sync: `default_path/0`'s test mutates SHUTTLE_COMMITS_FILE / SHUTTLE_DATA_DIR,
-  # which every other test's ledger resolution reads.
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.CommitLedger
   import Shuttle.Test.Ledgers
@@ -142,22 +140,14 @@ defmodule Shuttle.CommitLedgerTest do
 
   describe "default_path/0" do
     test "honors SHUTTLE_COMMITS_FILE, then SHUTTLE_DATA_DIR, then ~/.shuttle" do
-      previous = Map.new(~w(SHUTTLE_COMMITS_FILE SHUTTLE_DATA_DIR), &{&1, System.get_env(&1)})
-
-      on_exit(fn ->
-        Enum.each(previous, fn {k, v} ->
-          if v, do: System.put_env(k, v), else: System.delete_env(k)
-        end)
-      end)
-
-      System.put_env("SHUTTLE_COMMITS_FILE", "/explicit/commits.jsonl")
+      Shuttle.Test.Env.put_env("SHUTTLE_COMMITS_FILE", "/explicit/commits.jsonl")
       assert CommitLedger.default_path() == "/explicit/commits.jsonl"
 
-      System.delete_env("SHUTTLE_COMMITS_FILE")
-      System.put_env("SHUTTLE_DATA_DIR", "/data")
+      Shuttle.Test.Env.delete_env("SHUTTLE_COMMITS_FILE")
+      Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", "/data")
       assert CommitLedger.default_path() == "/data/commits.jsonl"
 
-      System.delete_env("SHUTTLE_DATA_DIR")
+      Shuttle.Test.Env.delete_env("SHUTTLE_DATA_DIR")
       assert CommitLedger.default_path() =~ ~r{/\.shuttle/commits\.jsonl$}
     end
   end

@@ -34,7 +34,11 @@ defmodule Shuttle.SingleFlight do
         fun.()
 
       server ->
-        case GenServer.call(server, {:run, key, fun}, :infinity) do
+        # A test's flight is its own (`scope_key/1`), and runs with the
+        # caller's `$callers` so `fun` reads the caller's scope.
+        flight = {:run, Shuttle.Env.scope_key(key), fun, Shuttle.Env.callers()}
+
+        case GenServer.call(server, flight, :infinity) do
           {:ok, result} -> result
           {:exit, reason} -> exit(reason)
         end
@@ -45,14 +49,19 @@ defmodule Shuttle.SingleFlight do
   def init(:ok), do: {:ok, %{flights: %{}, keys: %{}}}
 
   @impl true
-  def handle_call({:run, key, fun}, from, state) do
+  def handle_call({:run, key, fun, callers}, from, state) do
     case state.flights do
       %{^key => {worker, waiters}} ->
         {:noreply, put_in(state.flights[key], {worker, [from | waiters]})}
 
       _ ->
         server = self()
-        {worker, ref} = spawn_monitor(fn -> fly(server, key, fun) end)
+
+        {worker, ref} =
+          spawn_monitor(fn ->
+            Shuttle.Env.adopt_callers(callers)
+            fly(server, key, fun)
+          end)
 
         {:noreply,
          %{

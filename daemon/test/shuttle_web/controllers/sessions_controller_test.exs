@@ -5,7 +5,7 @@ defmodule ShuttleWeb.SessionsControllerTest do
   `Shuttle.SessionLedgerTest` covers the reader; this covers the envelope, the
   `since_ms` bound, and the degradations.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest

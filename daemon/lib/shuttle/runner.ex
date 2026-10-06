@@ -39,13 +39,14 @@ defmodule Shuttle.Runner do
     # defending against.
     def cmd(command, args, opts) do
       {timeout_ms, opts} = Keyword.pop(opts, :timeout_ms, default_timeout_ms())
-      opts = maybe_clear_inherited_tmux(command, opts)
+      opts = opts |> with_scoped_env() |> then(&maybe_clear_inherited_tmux(command, &1))
 
       # `System.cmd/3` resolves the executable the same way and raises
       # `ErlangError :enoent` when it's missing; map that documented failure
       # mode to exit 127 (the shell's "command not found") so PATH problems
       # degrade like any other failed command instead of crashing the caller.
-      case System.find_executable(command) do
+      # The lookup reads the caller's `PATH` (`Shuttle.Env.find_executable/1`).
+      case Shuttle.Env.find_executable(command) do
         nil -> {"#{command}: command not found", 127}
         executable -> run_bounded(executable, command, args, opts, timeout_ms)
       end
@@ -144,7 +145,21 @@ defmodule Shuttle.Runner do
     end
 
     defp default_timeout_ms,
-      do: Application.get_env(:shuttle, :cmd_timeout_ms, @default_timeout_ms)
+      do: Shuttle.Env.app(:cmd_timeout_ms, @default_timeout_ms)
+
+    # The child inherits the caller's scoped env overrides (`Shuttle.Env`);
+    # an `env:` entry the caller passes wins over a scoped one.
+    defp with_scoped_env(opts) do
+      case Shuttle.Env.child_env() do
+        [] ->
+          opts
+
+        scoped ->
+          caller = Keyword.get(opts, :env, [])
+          names = MapSet.new(caller, &elem(&1, 0))
+          Keyword.put(opts, :env, caller ++ Enum.reject(scoped, &(elem(&1, 0) in names)))
+      end
+    end
 
     defp maybe_clear_inherited_tmux("tmux", opts) do
       Keyword.update(opts, :env, [{"TMUX", ""}], fn env ->

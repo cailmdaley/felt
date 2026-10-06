@@ -1,5 +1,5 @@
 defmodule ShuttleWeb.PeerPlugTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Plug.Test
 
   alias ShuttleWeb.PeerPlug
@@ -61,15 +61,7 @@ defmodule ShuttleWeb.PeerPlugTest do
           "  0: #{address}:D431 #{address}:#{listen_port_hex} 01 00000000:00000000 00:00000000 00000000 4321 0 10001 1\n"
       )
 
-      previous = Application.fetch_env(:shuttle, :proc_net_root)
-      Application.put_env(:shuttle, :proc_net_root, root)
-
-      on_exit(fn ->
-        case previous do
-          {:ok, value} -> Application.put_env(:shuttle, :proc_net_root, value)
-          :error -> Application.delete_env(:shuttle, :proc_net_root)
-        end
-      end)
+      Shuttle.Test.Env.put_app_env(:proc_net_root, root)
 
       conn =
         conn(:get, "/") |> put_peer_data(%{address: @loopback, port: peer_port, ssl_cert: nil})

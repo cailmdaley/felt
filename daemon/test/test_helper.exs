@@ -1,3 +1,13 @@
+# One temp root per test VM. Fixture names under System.tmp_dir!() carry
+# System.unique_integer/1, which restarts in every VM, so two `mix test` runs on
+# one machine would otherwise share (and rm_rf) each other's fixtures. Short on
+# purpose: unix socket paths under it must fit sun_path.
+test_tmp = Path.join(System.tmp_dir!(), "st-#{System.pid()}")
+File.rm_rf!(test_tmp)
+File.mkdir_p!(test_tmp)
+System.put_env("TMPDIR", test_tmp)
+System.at_exit(fn _ -> File.rm_rf(test_tmp) end)
+
 # Pin the agent registry for the whole suite: keep it off whatever
 # ~/.config/shuttle/agents.json the developer has. The fixture carries the same
 # records as the built-in layer, so the effective registry is the shipped one.
@@ -22,6 +32,20 @@ stores_file =
   Path.join(System.tmp_dir!(), "shuttle-test-stores-#{System.system_time(:nanosecond)}.json")
 
 System.put_env("SHUTTLE_STORES_FILE", stores_file)
+
+# The same for the project picker's registry, and for the daemon's host-local
+# state root (the default home of the event stream, ledgers, heartbeat and
+# remote caches, ~/.shuttle): an empty per-VM dir, so no default resolution
+# reaches the developer's real files. OperatorFilesGuardTest holds this.
+System.put_env(
+  "SHUTTLE_PROJECTS_FILE",
+  Path.join(System.tmp_dir!(), "shuttle-test-projects.json")
+)
+
+System.delete_env("SHUTTLE_PROJECTS")
+data_dir = Path.join(System.tmp_dir!(), "shuttle-test-data")
+File.mkdir_p!(data_dir)
+System.put_env("SHUTTLE_DATA_DIR", data_dir)
 
 # Pin the session ledger away from the developer's real ~/.shuttle. The
 # dispatch and claim paths append to it unconditionally, so without this the
@@ -48,6 +72,9 @@ Application.put_env(
   :app_workers_dir,
   Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
 )
+
+# Per-test scoped env overrides (Shuttle.Env / Shuttle.Test.Env).
+Shuttle.Test.Env.start!()
 
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
 ExUnit.start(exclude: exclude)

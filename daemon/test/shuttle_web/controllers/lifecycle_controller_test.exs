@@ -1,7 +1,6 @@
 defmodule ShuttleWeb.LifecycleControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -165,13 +164,8 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.ln_s!(nested, Path.join(project, ".felt"))
 
     args_file = install_fake_cli!()
-    old_felt_stores = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", "#{loom},#{project}")
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_felt_stores)
-      File.rm_rf(root)
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", "#{loom},#{project}")
+    on_exit(fn -> File.rm_rf(root) end)
 
     conn =
       post(
@@ -487,16 +481,13 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # shuttle for the lifecycle write. This fixture provides both binaries so
   # tests exercise the executable boundary as well as the argv ordering.
   defp install_fake_cli!(shuttle_body \\ nil) do
-    dir =
-      System.tmp_dir!()
-      |> Path.join("shuttle-lifecycle-controller-#{System.unique_integer([:positive])}")
+    args_file =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-lifecycle-args-#{System.unique_integer([:positive])}"
+      )
 
-    File.mkdir_p!(dir)
-
-    felt_bin = Path.join(dir, "felt")
-    shuttle_bin = Path.join(dir, "shuttle")
-    args_file = Path.join(dir, "args")
-    real_felt = System.find_executable("felt") || "felt"
+    real_felt = Shuttle.Test.FakeCli.real!("felt")
 
     shuttle_body =
       shuttle_body ||
@@ -505,30 +496,19 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         printf 'ok\\n'
         """
 
-    File.write!(felt_bin, """
-    #!/bin/sh
-    exec "#{real_felt}" "$@"
-    """)
+    Shuttle.Test.FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      exec "#{real_felt}" "$@"
+      """,
+      "shuttle" => """
+      #!/bin/sh
+      #{shuttle_body}
+      """
+    })
 
-    File.write!(shuttle_bin, """
-    #!/bin/sh
-    #{shuttle_body}
-    """)
-
-    File.chmod!(felt_bin, 0o755)
-    File.chmod!(shuttle_bin, 0o755)
-
-    old_path = System.get_env("PATH")
-    old_args_file = System.get_env("SHUTTLE_ARGS_FILE")
-
-    System.put_env("PATH", dir <> ":" <> (old_path || ""))
-    System.put_env("SHUTTLE_ARGS_FILE", args_file)
-
-    on_exit(fn ->
-      restore_env("PATH", old_path)
-      restore_env("SHUTTLE_ARGS_FILE", old_args_file)
-      File.rm_rf(dir)
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_ARGS_FILE", args_file)
+    on_exit(fn -> File.rm(args_file) end)
 
     args_file
   end
@@ -548,13 +528,8 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.mkdir_p!(fiber_dir)
     File.write!(Path.join(fiber_dir, "#{Path.basename(slug)}.md"), "---\nname: #{name}\n---\n\n")
 
-    old_felt_stores = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_felt_stores)
-      File.rm_rf(root)
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+    on_exit(fn -> File.rm_rf(root) end)
 
     store
   end

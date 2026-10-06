@@ -333,9 +333,9 @@ defmodule Shuttle.TailnetDial.Bridge do
     idle = 2 * Keyword.fetch!(opts, :request_timeout_ms)
 
     in_flight =
-      Application.get_env(:shuttle, :tailnet_dial_in_flight_timeout_ms, @in_flight_timeout_ms)
+      Shuttle.Env.app(:tailnet_dial_in_flight_timeout_ms, @in_flight_timeout_ms)
 
-    drain = Application.get_env(:shuttle, :tailnet_dial_drain_timeout_ms, @drain_timeout_ms)
+    drain = Shuttle.Env.app(:tailnet_dial_drain_timeout_ms, @drain_timeout_ms)
 
     %{idle: idle, in_flight: max(in_flight, idle), drain: drain}
   end
