@@ -193,9 +193,10 @@ describe('inheritedProjectDir', () => {
 
   it('never lets another host’s fiber of the same slug answer', () => {
     expect(suggested(
-      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
-      row('a/b/c', 'here', { host: 'here' }, { status: 'closed' }),
-      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }),
+      // One store, so only the host tells the two a/b rows apart.
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }, { store: '/stores/shared' }),
+      row('a/b/c', 'here', { host: 'here' }, { status: 'closed', store: '/stores/shared' }),
+      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }, { store: '/stores/shared' }),
     )).toEqual({ path: '/srv/b', from: 'a/b' })
   })
 
