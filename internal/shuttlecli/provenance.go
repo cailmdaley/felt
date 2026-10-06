@@ -657,7 +657,7 @@ and availability.`,
 			})
 			manifestPath := ""
 			if sessionsMaterialize {
-				manifestPath, err = a.materializeFiberTranscripts(query, uid, rows, sessionsDir)
+				manifestPath, err = a.materializeFiberTranscripts(query, uid, rows, a.env.Resolve(sessionsDir))
 				if err != nil {
 					return err
 				}

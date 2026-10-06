@@ -515,7 +515,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			if err != nil {
 				return err
 			}
-			message, messageSet, err := readLaunchMessage(cmd, reopenMessage, reopenMessageFile)
+			message, messageSet, err := a.readLaunchMessage(cmd, reopenMessage, reopenMessageFile)
 			if err != nil {
 				return err
 			}

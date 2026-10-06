@@ -48,7 +48,7 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			adHoc, _ := cmd.Flags().GetBool("ad-hoc")
-			message, messageSet, err := readLaunchMessage(cmd, dispatchMessage, dispatchMessageFile)
+			message, messageSet, err := a.readLaunchMessage(cmd, dispatchMessage, dispatchMessageFile)
 			if err != nil {
 				return err
 			}
