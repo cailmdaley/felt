@@ -50,6 +50,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     def commands, do: Agent.get(__MODULE__, & &1.commands)
     def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
 
+    # The process scan's answers, in order; the last one repeats. Defaults to
+    # no processes.
+    def set_ps_results(results) when is_list(results) and results != [],
+      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
+
     @impl true
     def cmd(command, args, opts) when command in ["felt", "shuttle"] do
       felt_store = Agent.get(__MODULE__, & &1.felt_store)
@@ -65,17 +70,8 @@ defmodule Shuttle.DispatchIntegrationTest do
           do: opts,
           else: Keyword.put_new(opts, :cd, felt_store)
 
-      System.cmd(command, args, with_scoped_env(opts))
-    end
-
-    # The test's scoped env (SHUTTLE_DATA_DIR, SHUTTLE_STORES, …) reaches the
-    # real CLIs the way `Shuttle.Runner.Default` hands it on; the caller's
-    # own `:env` entries win.
-    defp with_scoped_env(opts) do
-      caller = Keyword.get(opts, :env, [])
-      names = MapSet.new(caller, &elem(&1, 0))
-      scoped = Enum.reject(Shuttle.Env.child_env(), &(elem(&1, 0) in names))
-      if scoped ++ caller == [], do: opts, else: Keyword.put(opts, :env, scoped ++ caller)
+      # Run as the test's scope sees it: scoped PATH and env reach the real CLIs.
+      Shuttle.Env.cmd(command, args, opts)
     end
 
     def cmd("tmux", ["has-session", "-t", session], _opts) do
@@ -101,11 +97,6 @@ defmodule Shuttle.DispatchIntegrationTest do
 
       {"", 0}
     end
-
-    # The process scan's answers, in order; the last one repeats. Defaults to
-    # no processes.
-    def set_ps_results(results) when is_list(results) and results != [],
-      do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
 
     def cmd("ps", args, _opts) do
       Agent.get_and_update(__MODULE__, fn s ->
