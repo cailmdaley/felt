@@ -1,6 +1,7 @@
 /* On the desktop the reader starts beneath the board's bar, which carries its
    map of pages; the map overhangs the bar, and the pages start clear of it. */
 .ws-reader {
+  --ws-corner-inset: 8px;
   --ws-stage-top: calc(var(--kbn-bar-overhang, 0px) + var(--ws-stage-gap));
   position: fixed; inset: 0; top: var(--kbn-bar-bottom, 0px); z-index: var(--ws-reader-layer);
   display: flex; flex-direction: column; min-width: 0;
@@ -51,10 +52,10 @@
 .ws-head-worker[hidden] { display: none; }
 /* The top bar's worker dot is the card's own pill, bare. */
 .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { border: 0; background: transparent; }
-/* The constitutions glyph tops the sidebar, under the bar at the left; with
-   the sidebar hidden it floats there alone. */
+/* The constitutions glyph sits snug in the corner beneath the bar, inset as
+   the bar insets its own controls; with the sidebar hidden it sits there alone. */
 .ws-sidebar-toggle {
-  position: absolute; z-index: 4; left: calc(var(--ws-inset) - (var(--ws-control-height) - 16px) / 2); top: var(--ws-stage-top);
+  position: absolute; z-index: 4; left: var(--ws-corner-inset); top: var(--ws-corner-inset);
   display: grid; place-items: center; width: var(--ws-control-height); height: var(--ws-control-height); padding: 0;
   border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important;
 }
@@ -137,13 +138,13 @@
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-channel-row[aria-current='true'] { background: var(--ws-paper); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent), 0 6px 12px color-mix(in srgb, var(--ws-ink) 12%, transparent); }
 /* The column travels as cards; the current slip reaches toward the reading stage. */
-.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-stage-top) var(--ws-inset) 0; position: relative; z-index: 2; }
+.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-corner-inset) var(--ws-inset) 0; position: relative; z-index: 2; }
 .ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
 /* The column starts on the toggle's row: its first heading sits beside the
    toggle on its centre line; a field or card that leads starts below it. */
 .ws-sidebar:not(.ws-sidebar-flight) {
   --ws-toggle-row: calc(var(--ws-control-height) + var(--ws-small-gap));
-  --ws-toggle-clear: calc((var(--ws-control-height) + 16px) / 2 + var(--ws-small-gap));
+  --ws-toggle-clear: calc(var(--ws-corner-inset) + var(--ws-control-height) + var(--ws-small-gap) - var(--ws-inset));
 }
 .ws-sidebar:not(.ws-sidebar-flight) .ws-channel-find { margin-top: var(--ws-toggle-row); }
 .ws-sidebar:not(.ws-sidebar-flight) .ws-channel-list:first-child > .kbn-flight-caption:first-child {
