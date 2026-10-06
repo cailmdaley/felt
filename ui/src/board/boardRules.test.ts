@@ -511,12 +511,6 @@ describe('Resting clusters split when they overflow', () => {
   const keysOf = (cards: KanbanCard[]): Array<[string, number]> =>
     clusterStashCards(cards).map((c) => [c.key, c.cards.length])
 
-  it('leaves a cluster of four alone', () => {
-    const cards = ['science/unions/a', 'science/unions/b', 'science/spt3g/c', 'science/spt3g/d']
-      .map((id) => restingCard(id))
-    expect(keysOf(cards)).toEqual([['science', 4]])
-  })
-
   it('splits six across two subdirectories into two clusters', () => {
     // The case the operator named: "science 6" → "science/unions 3" + "science/spt3g 3".
     const cards = [
@@ -528,19 +522,39 @@ describe('Resting clusters split when they overflow', () => {
     expect(new Map(keys)).toEqual(new Map([['science/unions', 3], ['science/spt3g', 3]]))
   })
 
-  it('keeps descending until nothing exceeds four', () => {
-    // science/unions still holds 5 after one split, so it splits again.
-    const cards = [
-      'science/unions/sp/a', 'science/unions/sp/b', 'science/unions/sp/c',
-      'science/unions/shear/d', 'science/unions/shear/e',
-      'science/spt3g/f',
-    ].map((id) => restingCard(id))
-    const keys = new Map(keysOf(cards))
-    expect(keys).toEqual(new Map([
-      ['science/unions/sp', 3],
-      ['science/unions/shear', 2],
-      ['science/spt3g', 1],
-    ]))
+  // Paths over a small vocabulary, two to four segments deep, so groups
+  // collide, overflow, run out of path, and share every next segment.
+  const restingIds = fc.uniqueArray(
+    fc.array(fc.constantFrom('science', 'unions', 'sp', 'shear'), { minLength: 1, maxLength: 3 }),
+    { maxLength: 14, selector: (path) => path.join('/') },
+  ).chain((folders) => fc.array(fc.constantFrom(...(folders.length ? folders : [['science']])), { minLength: 1, maxLength: 14 }))
+    .map((folders) => folders.map((folder, i) => `${folder.join('/')}/c${i}`))
+  const folderOf = (id: string): string[] => id.split('/').slice(0, -1)
+  const prefix = (id: string, depth: number): string => folderOf(id).slice(0, depth).join('/')
+
+  // A cluster splits on its next folder only while it holds more than four
+  // cards and that folder tells its cards apart; a card with no deeper folder
+  // stays at its level. So clusters partition the cards, each cluster's key is
+  // a folder every member sits in, an overfull cluster's members all share (or
+  // all lack) the next folder, and a cluster below the top level exists only
+  // because its parent group overflowed.
+  it('splits overfull groups on the folder that tells them apart, and only those', () => {
+    fc.assert(fc.property(restingIds, (ids) => {
+      const cards = ids.map((id) => restingCard(id))
+      const clusters = clusterStashCards(cards)
+      expect(clusters.flatMap((c) => c.cards.map((card) => card.id)).sort()).toEqual([...ids].sort())
+      for (const { key, cards: members } of clusters) {
+        const depth = key.split('/').length
+        for (const card of members) expect(prefix(card.id, depth), `${card.id} under ${key}`).toBe(key)
+        if (members.length > 4) {
+          expect(new Set(members.map((card) => prefix(card.id, depth + 1))).size, `overfull ${key} could split`).toBe(1)
+        }
+        if (depth > 1) {
+          const parent = key.split('/').slice(0, -1).join('/')
+          expect(ids.filter((id) => prefix(id, depth - 1) === parent).length, `${key} split from a parent of four or fewer`).toBeGreaterThan(4)
+        }
+      }
+    }), { numRuns: 200, seed: 0xc1057e5 })
   })
 
   it('DEGENERATE CASE: six leaves in one folder stay one cluster', () => {
@@ -549,18 +563,6 @@ describe('Resting clusters split when they overflow', () => {
     // and the renderer caps it; this is the case the leaf-slug rule exists for.
     const cards = ['a/x1', 'a/x2', 'a/x3', 'a/x4', 'a/x5', 'a/x6'].map((id) => restingCard(id))
     expect(keysOf(cards)).toEqual([['a', 6]])
-  })
-
-  it('does not strand a card that has no deeper segment', () => {
-    const cards = [
-      'science/loose',
-      'science/unions/a', 'science/unions/b', 'science/unions/c',
-      'science/unions/d', 'science/unions/e',
-    ].map((id) => restingCard(id))
-    const keys = new Map(keysOf(cards))
-    expect(keys).toEqual(new Map([['science', 1], ['science/unions', 5]]))
-    // Every card still appears exactly once, wherever it landed.
-    expect(clusterStashCards(cards).flatMap((c) => c.cards)).toHaveLength(6)
   })
 
   it('never mixes warm and cold in one cluster, and sorts cold last', () => {
