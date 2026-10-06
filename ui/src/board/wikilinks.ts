@@ -17,7 +17,7 @@
  *   the literal `[[…]]` text it was written as. So an unresolvable reference
  *   reads exactly as it always did, and no click ever opens a broken card.
  *
- * The index is `GET /api/v1/fibers` (ids + names, a few hundred rows), fetched
+ * The index is `GET /api/v1/fibers?fields=index` (ids, slugs and names), fetched
  * once per daemon base and shared — the parent picker already pays for it.
  */
 

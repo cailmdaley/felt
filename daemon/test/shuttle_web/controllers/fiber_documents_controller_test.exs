@@ -103,6 +103,31 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     refute Map.has_key?(hd(body["fibers"])["fiber"], "body")
   end
 
+  test "GET /api/v1/fibers?fields=index keeps only each fiber's id, slug and name", %{
+    store: store
+  } do
+    write_fiber!(store, "tests/indexed", """
+    ---
+    name: Indexed fiber
+    status: active
+    outcome: A long outcome the index never needs.
+    ---
+
+    Body.
+    """)
+
+    conn = get(api_conn(), "/api/v1/fibers?fields=index")
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert body["host"] == "test-host"
+    assert [%{"fiber" => fiber} = row] = body["fibers"]
+    assert Map.keys(row) == ["fiber"]
+    assert fiber["name"] == "Indexed fiber"
+    assert fiber["id"] == "tests/indexed"
+    assert Map.keys(fiber) -- ["id", "slug", "name"] == []
+  end
+
   test "GET /api/v1/fibers?body=true still finds each fiber's report", %{store: store} do
     # `felt ls --body` omits the native `report_path` that the metadata listing
     # carries, so the body listing must find the report itself.
