@@ -1719,11 +1719,6 @@ describe('chains, tails and the drop that authors them', () => {
     expect(stackDropVerdict(card('d', { dependsOnShape: 'scalar' }), card('a'), chain).ok).toBe(true)
   })
 
-  it('queues any kind of source — the edge is ordering for the eye', () => {
-    expect(stackDropVerdict(card('d', { shuttleKind: 'standing' }), card('a'), chain).ok).toBe(true)
-    expect(stackDropVerdict(card('d', { shuttleKind: 'pinned' }), card('a'), chain).ok).toBe(true)
-  })
-
   it('refuses a cycle on either end — a span of time is not a step in a queue', () => {
     expect(stackDropVerdict(card('d', { isCycle: true }), card('a'), chain).ok).toBe(false)
     expect(stackDropVerdict(card('d'), card('a', { isCycle: true }), chain).ok).toBe(false)
@@ -1792,45 +1787,27 @@ describe('who may be stacked, and behind what', () => {
   const c = (id: string, over: Partial<StackCandidate> = {}): StackCandidate =>
     ({ id, status: 'open', ...over })
   const awaiting = (id: string): StackCandidate => c(id, { status: 'closed' })
-  const temperedCard = (id: string): StackCandidate =>
-    c(id, { status: 'closed', tempered: true })
-  const compostedCard = (id: string): StackCandidate =>
-    c(id, { status: 'closed', tempered: false })
   const none = new Map<string, string[]>()
 
-  it('stacks a draft behind an AWAITING-REVIEW card', () => {
-    expect(stackDropVerdict(c('d'), awaiting('a'), none)).toEqual({ ok: true, tail: 'a' })
+  // Lifecycle and kind on either end are ordering for the eye: a draft may
+  // queue behind finished work, an awaiting-review source queues for when it
+  // reopens, a tempered tail is ordering rather than a promise to wait, and a
+  // pinned hub is the canonical thing to file work under. Only the graph
+  // decides, so a fresh source lands on the target's chain tail whatever
+  // either card's status, verdict or kind.
+  const lifecycle = fc.record({
+    status: fc.constantFrom('open', 'active', 'closed'),
+    tempered: fc.constantFrom(undefined, true, false),
+    shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing', 'pinned'),
   })
-
-  it('does not care what the TARGET lifecycle is either', () => {
-    // "This comes after that" holds whatever verdict that one carries.
-    expect(stackDropVerdict(c('d'), temperedCard('a'), none)).toEqual({ ok: true, tail: 'a' })
-    expect(stackDropVerdict(c('d'), compostedCard('a'), none)).toEqual({ ok: true, tail: 'a' })
-  })
-
-  it('lets an AWAITING-REVIEW card be the source — it queues for when it reopens', () => {
-    expect(stackDropVerdict(awaiting('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
-  })
-
-  it('does not care what the SOURCE lifecycle is — any card may be queued', () => {
-    expect(stackDropVerdict(temperedCard('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
-    expect(stackDropVerdict(compostedCard('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
-  })
-
-  it('appends BEHIND an awaiting-review tail rather than skipping it', () => {
-    // a ← b, and b is awaiting review. Dropping d onto a must land behind b.
-    const chain = edges(['a', []], ['b', ['a']])
-    expect(stackDropVerdict(c('d'), c('a'), chain)).toEqual({ ok: true, tail: 'b' })
-  })
-
-  it('ACCEPTS a tempered tail — a queue is ordering, not a promise to wait', () => {
-    const chain = edges(['a', []], ['b', ['a']])
-    expect(stackDropVerdict(c('d'), temperedCard('a'), chain)).toEqual({ ok: true, tail: 'b' })
-  })
-
-  it('ACCEPTS a pinned card as the TARGET — filing work under a hub is the point', () => {
-    expect(stackDropVerdict(c('d'), { ...c('a'), shuttleKind: 'pinned' }, none))
-      .toEqual({ ok: true, tail: 'a' })
+  it('stacks any lifecycle or kind onto the chain tail', () => {
+    const graphs: [string, Map<string, string[]>, string][] = [
+      ['a lone target', none, 'a'],
+      ['a target with a follower', edges(['a', []], ['b', ['a']]), 'b'],
+    ]
+    fc.assert(fc.property(lifecycle, lifecycle, fc.constantFrom(...graphs), (source, target, [, graph, tail]) => {
+      expect(stackDropVerdict({ id: 'd', ...source }, { id: 'a', ...target }, graph)).toEqual({ ok: true, tail })
+    }), { numRuns: 200, seed: 0x0de1a7ed })
   })
 
   it('still refuses a source already queued behind, through an awaiting-review member', () => {
