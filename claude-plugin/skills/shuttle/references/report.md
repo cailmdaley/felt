@@ -82,7 +82,7 @@ You may give the report's channel a bundled theme with `theme: blueprint` (or `p
 A sibling `theme.css` layers scoped variables, fonts and flourishes over that base; it styles Shuttle's reader and overview folio, while `report.html` keeps its own CSS.
 The [constitution theme contract](https://cailmdaley.github.io/felt/concepts/themes/) documents the `--ws-*` tokens, stable parts and pigment meanings.
 
-Start from [report-template.html](../assets/report-template.html) — a battle-tested palette and set of classes, not a content model to fill in. Render the report with an explicit `:::{embed} report.html` line in the fiber body, placed where the reader should meet it (usually the top).
+Start from [report-template.html](../assets/report-template.html) — a battle-tested palette and set of classes, not a content model to fill in. It follows the viewer's light or dark appearance automatically. Render the report with an explicit `:::{embed} report.html` line in the fiber body, placed where the reader should meet it (usually the top).
 
 Reference a sibling page with `href="./name.mp3"` or its unique basename in `<code>`; the reader makes it a page link with inline play for audio ([companion references](https://cailmdaley.github.io/felt/concepts/companions/#references-between-pages)).
 
