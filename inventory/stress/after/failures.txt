@@ -1,0 +1,12 @@
+=== run-5 (seed: 236695)
+  1) test the fleet proxy clearing it switches profiles instead of stopping one (Shuttle.RemoteRegistry.ClientTest)
+     test/shuttle/remote_registry_client_test.exs:82
+     match (=) failed
+     code:  assert {:ok, _} = Default.get(url, 2000)
+     left:  {:ok, _}
+     right: {:error, :timeout}
+     stacktrace:
+       test/shuttle/remote_registry_client_test.exs:89: (test)
+............15:23:37.393 [info] Running Shuttle.RemoteRegistry.ClientTest.EchoPlug with Bandit 1.12.5 at 127.0.0.1:64322 (http)
+15:23:37.410 request_id=GNvzgjHXvHqZ5MYAAGBC [debug] Sent 200 in 93ms
+.15:23:37.421 [debug] Heartbeat: session absent 2/3 for tests/inconclusive — will retry
