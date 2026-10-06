@@ -62,29 +62,8 @@ function parseEmbedTitle(block: string): string | undefined {
   return undefined
 }
 
-/** The lowercased extension shown on a document card, or `file` when absent. */
-export function attachmentGlyph(path: string): string {
-  const base = path.split('/').filter(Boolean).pop() ?? path
-  const dot = base.lastIndexOf('.')
-  if (dot <= 0) return 'file'
-  return base.slice(dot + 1).split(/[?#]/)[0].toLowerCase() || 'file'
-}
-
-/** A byte count in the fewest characters that stay true. `undefined` when the
- *  daemon didn't tell us — a card simply shows no size rather than a zero. */
-export function formatBytes(size: number | undefined): string {
-  if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) return ''
-  if (size < 1024) return `${size} B`
-  const kb = size / 1024
-  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`
-  const mb = kb / 1024
-  if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`
-  return `${(mb / 1024).toFixed(1)} GB`
-}
-
 /**
- * What KIND a file is, for the two decisions that turn on it: what a tap does,
- * and what face its card wears. One classifier so those two can't drift.
+ * Classify a file by the content its extension identifies.
  *
  * `other` is the honest bucket — a `.docx`, a `.zip`, a suffixless name. The
  * browser has nothing to show for it, which is precisely why it behaves
@@ -102,37 +81,4 @@ export function fileKind(path: string): FileKind {
   if (MARKDOWN_EXTS.has(ext)) return 'markdown'
   if (TEXT_EXTS.has(ext)) return 'text'
   return 'other'
-}
-
-/**
- * Choose whether a file opens in the Board reader or downloads.
- * Fine pointers open every kind in the reader. Coarse pointers download PDFs
- * and unsupported formats; other documents remain readable in the reader.
- */
-export function fileTapAction(coarse: boolean, path: string): 'read' | 'download' {
-  if (!coarse) return 'read'
-  const kind = fileKind(path)
-  return kind === 'pdf' || kind === 'other' ? 'download' : 'read'
-}
-
-/** Text preview budget: enough for six opening lines on a card face. */
-export const PREVIEW_BYTES = 2048
-
-/**
- * The first few lines of a text file, trimmed for a card face.
- *
- * Leading blank lines are dropped (a file that opens with them would otherwise
- * show an empty face), each line is capped so one very long line can't push
- * the others out of view, and a truncated line says so with an ellipsis. A
- * trailing partial line — the near-certain result of slicing at a byte count —
- * is dropped only when there's enough above it to be worth reading.
- */
-export function previewText(raw: string, maxLines = 6, maxCols = 90): string {
-  const lines = raw.replace(/\r\n?/g, '\n').split('\n')
-  while (lines.length && lines[0].trim() === '') lines.shift()
-  const kept = lines.slice(0, maxLines)
-  return kept
-    .map((line) => (line.length > maxCols ? `${line.slice(0, maxCols - 1)}…` : line))
-    .join('\n')
-    .trimEnd()
 }

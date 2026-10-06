@@ -224,8 +224,8 @@ func assertFenced(t *testing.T, env *sysenv.Env, root string) {
 			t.Fatalf("%s path %q is outside the test fence %q", name, path, root)
 		}
 	}
-	remotes, err := a.configuredRemotes()
-	if err != nil || len(remotes) != 0 {
-		t.Fatalf("configured remotes = %v, %v; want none", remotes, err)
+	remotes, err := a.loadRemotesFile()
+	if err != nil || len(remotes.Remotes) != 0 {
+		t.Fatalf("remotes file = %v, %v; want none", remotes.Remotes, err)
 	}
 }

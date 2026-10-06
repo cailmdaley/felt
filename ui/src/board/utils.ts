@@ -329,19 +329,6 @@ export function fiberDocUrl(shuttleBase: string, id: string): string {
   return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
 }
 
-/**
- * Make a fresh browser navigation for an artifact while preserving its source
- * path and owner query. Replacing the prior marker keeps repeated refreshes
- * from growing the URL forever.
- */
-const CACHE_BUST_BASE = 'http://_cachebust.invalid'
-
-export function cacheBustUrl(url: string, nonce: number = Date.now()): string {
-  const u = new URL(url, CACHE_BUST_BASE)
-  u.searchParams.set('_shuttle_refresh', String(nonce))
-  return u.origin === CACHE_BUST_BASE ? u.pathname + u.search + u.hash : u.href
-}
-
 /** File kind vocabulary shared by documents, readers, and thumbnails. */
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
 export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus'])
