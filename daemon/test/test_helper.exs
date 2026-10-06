@@ -77,7 +77,11 @@ Application.put_env(
 Shuttle.Test.Env.start!()
 
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
-ExUnit.start(exclude: exclude)
+# A bare `assert_receive` waits this long for its message. It is reached only
+# when the message never comes, so it costs a passing test nothing, and it is
+# set for a machine whose cores the concurrently running suite already fills.
+# `refute_receive` keeps ExUnit's short default: that window is a real wait.
+ExUnit.start(exclude: exclude, assert_receive_timeout: 5_000)
 
 # A test that saves stores without its own SHUTTLE_STORES_FILE writes the
 # suite-wide registry; remove it with the run.

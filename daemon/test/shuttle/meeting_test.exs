@@ -1063,7 +1063,7 @@ defmodule Shuttle.MeetingTest do
       1..2
       |> Task.async_stream(
         fn _ -> Meeting.start(request, {:capture, "cli"}, "", "local") end,
-        timeout: 5_000
+        timeout: 60_000
       )
       |> Enum.to_list()
 
@@ -1088,7 +1088,7 @@ defmodule Shuttle.MeetingTest do
 
     results =
       1..2
-      |> Task.async_stream(fn _ -> Meeting.stop() end, timeout: 5_000)
+      |> Task.async_stream(fn _ -> Meeting.stop() end, timeout: 60_000)
       |> Enum.to_list()
 
     assert Enum.all?(results, &match?({:ok, {:ok, %{meeting: %{state: "live"}}}}, &1))
