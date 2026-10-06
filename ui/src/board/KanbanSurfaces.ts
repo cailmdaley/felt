@@ -1,4 +1,5 @@
 import { appWorkerLink, terminalWorkerPill, workerVariant } from './appConversation.js'
+import { workerPlate } from './workspace/workerPlate.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -137,7 +138,7 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
   starting: { label: '▸ starting', title: 'The app conversation is starting.' },
   running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
-  blocked: { label: 'Blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
+  blocked: { label: 'blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
 }
 
 /** Below this, an attention chip carries no clock: a worker that just raised
@@ -1887,7 +1888,7 @@ export class KanbanSurfaceRenderer {
         const classes = card.launchError || phaseName === 'blocked'
           ? 'kbn-card-phase-blocked'
           : `kbn-card-worker-${variant}`
-        rightChip = appWorkerLink(card, classes)
+        rightChip = workerPlate(card, appWorkerLink(card, classes))
         rightChip.title = `${phasePillLabel(phaseName, card.lastActivityAt)} — ${rightChip.title}`
       } else {
         const phase = document.createElement('span')
@@ -1938,7 +1939,7 @@ export class KanbanSurfaceRenderer {
       rightChip = heldEl
     }
     if (card.tmuxSession) {
-      rightChip = terminalWorkerPill(card, { phase: kind === 'inFlight', openWorker: this.o.openWorker })
+      rightChip = workerPlate(card, terminalWorkerPill(card, { phase: kind === 'inFlight', openWorker: this.o.openWorker }), kind === 'inFlight')
     }
 
     // Place the CENTER (Temper/Compost) and RIGHT (phase/held/worker) regions

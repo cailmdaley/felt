@@ -69,27 +69,26 @@
   --ws-neighbour-fade-end: var(--ws-neighbour-fade);
   --ws-gap: 24px;
   --ws-inset: 12px;
-  /* The map: tiles of one size beneath the stage, the selected one lifted. */
-  --ws-tile-width: 80px;
-  --ws-tile-height: 56px;
+  /* The map: tiles of one size at the centre of the board's bar, the selected one
+     lifted, level with the bar's tabs and overhanging into the reader below. */
+  --ws-tile-width: 64px;
+  --ws-tile-height: 44px;
   --ws-tile-gap: 8px;
-  --ws-tile-pad: 6px;
+  --ws-tile-pad: 5px;
   --ws-tile-radius: 3px;
   --ws-tile-lift: -3px;
   --ws-tile-receded-opacity: 0.62;
   --ws-tile-hover-opacity: 0.92;
   --ws-tile-title-size: 11px;
+  --ws-tile-title-lines: 2;
   --ws-tile-glyph-size: 9px;
   --ws-tile-anchor-size: 26px;
   --ws-tile-caption-size: 10px;
   --ws-tile-caption-height: 15px;
   /* Room above and below a tile inside the strip, for its lift, fresh mark and focus rule. */
-  --ws-tile-air: 6px;
-  --ws-band-foot: 10px;
-  --ws-band-height: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air) + var(--ws-band-foot));
-  --ws-band-side: 64px;
-  --ws-band-fade: 40px;
-  --ws-tip-height: 24px;
+  --ws-tile-air: 4px;
+  --ws-index-fade: 40px;
+  --ws-tip-height: 28px;
   --ws-drag-latch: 4px;
 
   --ws-reader-layer: 9000;
@@ -99,14 +98,10 @@
   --ws-radius: 10px;
   --ws-control-radius: 7px;
   --ws-control-height: 32px;
-  /* The running head: its top margin, its ends, and the space between its lead controls.
-     Its start is the sidebar's inset, so the head's first control sits on the sidebar's edge. */
-  --ws-head-top: 10px;
-  --ws-head-start: var(--ws-inset);
-  --ws-head-end: var(--ws-stage-inset);
-  --ws-head-gap: 10px;
-  --ws-head-span: 32px;
   --ws-stage-inset: 28px;
+  /* Between the bar's map and the page's top edge; the page's sides and foot keep the stage inset. */
+  --ws-stage-gap: 12px;
+  --ws-stage-top: var(--ws-stage-gap);
   --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
   --ws-label-height: 40px;
@@ -121,7 +116,9 @@
   --ws-chrome-size: 15px;
   --ws-prose-size: 18px;
   --ws-section-size: 21px;
-  --ws-lede-size: 24px;
+  /* The outcome under a fiber's title: 1.2 times the prose it introduces, on every screen. */
+  --ws-lede-size: 21.6px;
+  --ws-lede-leading: 1.4;
   --ws-heading-size: 34px;
   --ws-prose-width: 760px;
   --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
@@ -129,7 +126,12 @@
   --ws-phone-target: 44px;
   --ws-menu-width: 220px;
   --ws-menu-ceiling: 360px;
-  --ws-sidebar-width: 320px;
+  /* The sidebar: a default the viewer can drag between its floor and a share of the viewport. */
+  --ws-sidebar-default: 384px;
+  --ws-sidebar-min: 320px;
+  --ws-sidebar-max-share: 0.4;
+  --ws-sidebar-width: var(--ws-sidebar-default);
+  --ws-sidebar-handle: 9px;
   /* The sidebar's open and close: one slide, on the standard curve. */
   --ws-sidebar-time: 220ms;
   --ws-sidebar-ease: cubic-bezier(0.2, 0, 0, 1);
@@ -138,6 +140,8 @@
   --ws-sidebar-lift: -2px;
   --ws-sidebar-bottom: 40px;
   --ws-sidebar-card-gap: 12px;
+  /* A sidebar card's meta row: host mark and worker pill on one 19 px line, the Desk's chip height. */
+  --ws-meta-row: 19px;
   --ws-sidebar-outcome-lines: 2;
   --ws-sidebar-outcome-size: 14px;
   --ws-row-size: 16px;

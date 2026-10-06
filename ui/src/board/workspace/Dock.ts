@@ -15,7 +15,8 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { fiberPageColumn } from './fiberPageState.js'
+import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
+import { workerPlate } from './workerPlate.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import './tokens.css'
@@ -398,6 +399,8 @@ export interface DockOptions {
 export class Dock {
   private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
+  private headRoot: HTMLElement | null = null
+  private headWorkerKey: string | null = null
   private card: KanbanCard | null = null
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
@@ -461,6 +464,22 @@ export class Dock {
       this.root.addEventListener('click', event => event.stopPropagation())
     }
     return this.root
+  }
+
+  /**
+   * The acts the fiber page's status line carries: the worker pill, then
+   * Temper and Discard. Built once per band, so a prose repaint re-seats the
+   * same controls under the pointer and the focus.
+   */
+  get head(): HTMLElement {
+    if (!this.headRoot) {
+      this.headRoot = document.createElement('div')
+      this.headRoot.className = 'ws-fiber-acts'
+      this.headRoot.dataset.part = 'act'
+      this.headRoot.dataset.act = 'verdict'
+      this.headRoot.addEventListener('click', event => event.stopPropagation())
+    }
+    return this.headRoot
   }
 
   private later(fn: () => void, ms: number): number {
@@ -557,6 +576,8 @@ export class Dock {
     this.savesPending = 0
     this.blockedDispatches.clear()
     this.root?.replaceChildren()
+    this.headRoot?.replaceChildren()
+    this.headWorkerKey = null
   }
 
   /**
@@ -656,6 +677,19 @@ export class Dock {
     }) : null
   }
 
+  /** The status line's pill, rebuilt only when what it says or opens changes, keeping its focus. */
+  private paintHeadWorker(card: KanbanCard, slot: HTMLElement): void {
+    const pill = this.workerPillFor(card)
+    const plate = pill ? workerPlate(card, pill, this.workerPhase(card)) : null
+    const key = plate ? JSON.stringify([plate.outerHTML, card.tmuxSession, card.sessionLink, card.sessionUuid]) : null
+    if (key === this.headWorkerKey) return
+    this.headWorkerKey = key
+    const focused = slot.contains(document.activeElement)
+    slot.replaceChildren(...(plate ? [plate] : []))
+    slot.hidden = !plate
+    if (focused) plate?.focus({ preventScroll: true })
+  }
+
   /** Keyboard opening activates the exact destination used by the worker pill. */
   openConversation(card: KanbanCard): boolean {
     const pill = this.workerPillFor(card)
@@ -692,18 +726,6 @@ export class Dock {
       row.append(control)
     }
     return row
-  }
-
-  /** The compact verdict pair the navbar and the phone's page sheet carry
-   *  for every fiber still without a verdict, reachable from any page. */
-  verdictPlateFor(card: KanbanCard): HTMLElement {
-    const plate = document.createElement('div')
-    plate.className = 'ws-review-plate'
-    plate.dataset.part = 'act'; plate.dataset.act = 'verdict'
-    plate.setAttribute('role', 'group')
-    plate.setAttribute('aria-label', 'Verdict')
-    plate.append(this.verdictControlsFor(card))
-    return plate
   }
 
   /** Refresh controls without replacing drafts or folded fields. */
@@ -760,7 +782,8 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    if (shuttleManaged) body.append(this.buildComposer(card))
+    const compose = shuttleManaged ? this.buildComposer(card) : null
+    if (compose) body.append(compose)
     body.append(this.buildTranscriptPane(card))
 
     const settings = document.createElement('div')
@@ -844,15 +867,22 @@ export class Dock {
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
     const verdict = this.verdictControlsFor(card)
+    verdict.setAttribute('role', 'group')
+    verdict.setAttribute('aria-label', 'Verdict')
+    const worker = document.createElement('span')
+    worker.className = 'ws-fiber-worker'
+    this.head.replaceChildren(worker, verdict)
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
-    // The verdict leads the act zone while the fiber awaits review; in every
-    // other column the reader's head carries it.
+    // The status line carries the worker and, for every fiber without a
+    // verdict, Temper and Discard: plates while it awaits review, quiet
+    // verbs otherwise. The act zone below is the composer alone.
     this.actPaint = () => {
       const column = fiberPageColumn(card)
       this.el.dataset.column = column
-      if (column === 'awaitingReview') { if (verdict.parentElement !== body) body.prepend(verdict) }
-      else verdict.remove()
+      this.head.dataset.column = column
+      verdict.hidden = !verdictReachable(card)
+      this.paintHeadWorker(card, worker)
     }
     this.actPaint()
   }
@@ -870,11 +900,31 @@ export class Dock {
     message.placeholder = 'What should the worker do next?'
     message.setAttribute('aria-label', 'Message for the next worker')
     // The field is one line, focused or not; only text that wraps grows it.
+    // The text always has the field's whole width: while it fits beside the
+    // verbs they ride its line, and once it would reach them (or holds a line
+    // break) they drop to a row of their own inside the field's foot. The
+    // decision measures the text against the room beside the verbs, so it is
+    // the same on either side of the switch and never flickers.
+    let ruler: CanvasRenderingContext2D | null = null
+    const stack = (): void => {
+      if (!box.isConnected || !box.clientWidth) return
+      ruler ??= document.createElement('canvas').getContext?.('2d') ?? null
+      if (!ruler) return
+      const text = getComputedStyle(message), field = getComputedStyle(box)
+      ruler.font = `${text.fontStyle} ${text.fontWeight} ${text.fontSize} ${text.fontFamily}`
+      const room = box.clientWidth - parseFloat(field.paddingLeft) - parseFloat(field.paddingRight)
+        - foot.offsetWidth - (parseFloat(field.columnGap) || 0) - parseFloat(text.paddingLeft) - parseFloat(text.paddingRight)
+      const longest = Math.max(0, ...message.value.split('\n').map(line => ruler!.measureText(line).width))
+      box.classList.toggle('kbn-ctl-composer-stacked', message.value.includes('\n') || longest > room)
+    }
     const fit = (): void => {
+      stack()
       message.style.height = ''
       if (message.value && message.scrollHeight > message.clientHeight) message.style.height = `${message.scrollHeight}px`
     }
     message.addEventListener('input', fit)
+    window.addEventListener('resize', fit)
+    this.composerDisposers.push(() => window.removeEventListener('resize', fit))
 
     // Two lines under the box: a send's outcome (and the project-directory
     // prompt a refused start raises), and the images turned away. Neither
@@ -988,6 +1038,7 @@ export class Dock {
     const meeting = this.meeting ? this.buildMeeting(card, err, send, armed => {
       sends.hidden = armed
       this.composerPaint?.()
+      fit()
     }) : null
     sends.append(fresh, resume)
     foot.append(...(meeting ? [meeting] : []), sends)

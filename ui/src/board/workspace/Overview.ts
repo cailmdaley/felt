@@ -22,6 +22,8 @@ export interface OverviewOptions {
   onOpen(card: KanbanCard, doc?: DocKey): void
   /** Full lens order, independent of Find; suitable for reader channel stepping. */
   onOrder?(cards: KanbanCard[]): void
+  /** Summon the board bar's Find, which filters the sheet on the desktop; false leaves `/` to the sheet's own field. */
+  focusFind?(): boolean
 }
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
@@ -719,6 +721,12 @@ export class Overview {
       ? DAY_GROUPS.indexOf(ak as typeof DAY_GROUPS[number]) - DAY_GROUPS.indexOf(bk as typeof DAY_GROUPS[number])
       : cmp(a[0], b[0]) || compare(ak, bk))
   }
+  /** Filter the sheet from the board bar's Find. */
+  setQuery(query: string): void {
+    if (this.find.value === query) return
+    this.find.value = query
+    this.render()
+  }
   private render(): void {
     const grouped = this.grouped()
     this.order = grouped.flatMap(([, rows]) => rows.map(f => f.card))
@@ -885,7 +893,7 @@ export class Overview {
     const intent = keyIntent(event, 'overview')
     if (!intent || intent === 'help') return
     event.preventDefault()
-    if (intent === 'find') this.find.focus({ preventScroll: true })
+    if (intent === 'find') { if (!this.opts.focusFind?.()) this.find.focus({ preventScroll: true }) }
     else this.moveSelection(intent)
   }
   private renderRibbon(): void {

@@ -40,17 +40,16 @@ beforeEach(async () => {
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('shared verdict controls', () => {
-  it('uses the same lifecycle callback from the fiber band and floating plate', async () => {
+  it('uses the same lifecycle callback from both verdict buttons of the act zone', async () => {
     const transition = vi.fn()
     const review = task({ status: 'closed' })
     const controls = new Dock('', saved, transition)
     const band = controls.bandFor(review)
-    const plate = controls.verdictPlateFor(review)
-    document.body.append(band.el, plate)
+    document.body.append(band.head, band.el)
     expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('composer')
-    expect(plate.dataset.part).toBe('act'); expect(plate.dataset.act).toBe('verdict')
-    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
-    plate.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
+    expect(band.head.dataset.part).toBe('act'); expect(band.head.dataset.act).toBe('verdict')
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
     ])
@@ -213,22 +212,28 @@ describe('state-shaped act zone', () => {
     expect(message.placeholder).toBe('What should the worker do next?')
   })
 
-  it('puts review verdicts first, retains a draft across runtime changes, and leaves verdicts outside review to the head', () => {
+  it('seats the verdicts on the status line in every unverdicted column, retaining a draft across runtime changes', () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
-    expect(band.el.querySelector('.ws-dock-body')?.firstElementChild?.className).toBe('kbn-ctl-verdict')
-    expect(band.el.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
+    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
+    expect(band.head.dataset.column).toBe('awaitingReview')
+    expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
     expect(message.placeholder).toBe('Reply and resume…')
     dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
-    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
-    expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard,.kbn-ctl-verdict-menu')).toBeNull()
-    dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
+    // In flight the pair stays on the status line beside the worker; the act zone is the composer alone.
+    expect(band.head.dataset.column).toBe('inFlight')
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
     expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
+    dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
+    dock.syncRuntime({ ...review, status: 'closed', tempered: true })
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
+    dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
   })
   it.each([

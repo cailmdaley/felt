@@ -1,11 +1,12 @@
 # Constitution themes
 
 A constitution can give its Shuttle channel a visual identity without changing its documents or the Desk.
-Its theme reaches the reader's veil, its running head and map of pages, thumbnail paper, page frames, label bars, fiber header and prose, Markdown or text pages, and audio waveform ink.
+Its theme reaches the reader's veil, thumbnail paper, page frames, label bars, fiber header and prose, Markdown or text pages, and audio waveform ink.
 On the Board overview, its changed-work rows and every folio density wear the same paper and accents.
 Its sidebar card has its own channel boundary, even inside another constitution's reader.
 Phone top and bottom bars and the page sheet use the channel's materials without adding a card frame around the edge-to-edge page.
 HTML reports, PDFs, images and other documents keep their own styling.
+The board's bar, with the reader's map of pages, stays the Desk's on every view.
 
 ## Declaration
 
@@ -106,11 +107,6 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | Selector | Part |
 |---|---|
 | `[data-part='veil']` | Still backdrop beneath the reader |
-| `[data-part='page-band']` | The map beneath the stage: the tiles and the page count |
-| `[data-part='tab-strip']` | The row of tiles, one per page |
-| `[data-part='tab']` | One page's tile; its face is a `[data-part='thumbnail']` |
-| `[data-part='tab'][aria-selected='true']` | Selected tile, lifted with an ink hairline |
-| `[data-part='tab-tip']` | Caption naming a hovered tile, above the band |
 | `[data-part='label-bar']` | Bottom document label and its controls |
 | `[data-part='page-frame']` | Paper sheet enclosing content and label |
 | `[data-part='fiber-header']` | Fiber status header |
@@ -118,7 +114,7 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts, workers and undo toast |
 | `[data-part='prose']` | Fiber article or text/Markdown pane |
 | `[data-part='prose'] h1`, `h2`, `h3`, `p`, `blockquote`, `code`, `table`, `hr` | Prose elements; prefix each with the prose selector |
-| `[data-part='thumbnail']` | Shared preview's UI paper in the map's tiles, folios, changed-work rows and page sheet |
+| `[data-part='thumbnail']` | Shared preview's UI paper in folios, changed-work rows and the page sheet |
 | `[data-part='thumbnail-face']` | Designed text face beneath a loaded preview |
 | `:scope[data-part='sidebar-card']` | Channel's Desk-card face in the reader sidebar |
 | `:scope[data-part='since-row']` | Channel's since-you-were-here row |

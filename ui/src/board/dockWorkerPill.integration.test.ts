@@ -64,11 +64,11 @@ describe('the worker control lives in the reader head; the fiber page draws none
     const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     const pill = show(worker({ tmuxSession: undefined, workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route,
       runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 })) as HTMLAnchorElement
-    expect(pill.textContent).toBe('waiting'); expect(pill.href).toBe(route)
+    expect(pill.querySelector('.ws-worker-state')?.textContent).toBe('waiting'); expect(pill.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m'); expect(pill.href).toBe(route)
   })
   it('follows owner-observed runtime, ignoring stale phase without a worker', () => {
-    expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('waiting')
-    expect(show(worker({ runtimePhase: 'working', lastActivityAt: Date.now() }))?.textContent).toBe('aloft')
+    expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.querySelector('.ws-worker-state')?.textContent).toBe('waiting')
+    expect(show(worker({ runtimePhase: 'working', lastActivityAt: Date.now() }))?.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
     expect(show(worker({ workerState: undefined, status: 'closed', runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('no worker')
   })
 })
