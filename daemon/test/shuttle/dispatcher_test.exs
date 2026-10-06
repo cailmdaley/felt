@@ -558,6 +558,21 @@ defmodule Shuttle.DispatcherTest do
     refute Dispatcher.render_prompt("tests/a") =~ "Collaboration:"
     refute Dispatcher.render_resume_prompt("tests/a") =~ "Collaboration:"
     refute Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~ "Collaboration:"
+
+    for prompt <- [
+          Dispatcher.render_prompt("tests/a", collaboration: {:ok, nil}, felt_store: "/tmp/loom"),
+          Dispatcher.render_resume_prompt("tests/a",
+            collaboration: {:ok, nil},
+            felt_store: "/tmp/loom"
+          ),
+          Dispatcher.render_standing_run_prompt("tests/a", "run-1",
+            collaboration: {:ok, nil},
+            felt_store: "/tmp/loom"
+          )
+        ] do
+      assert prompt =~
+               ~r"Collaboration: no roster — .*\(shuttle assign\); role store: (/private)?/tmp/loom"
+    end
   end
 
   test "readable collaboration prompts name a singleton actor and hide multi-role rosters" do
@@ -2155,6 +2170,7 @@ defmodule Shuttle.DispatcherTest do
         :spawned ->
           # The worker's session comes back, never the anchor kitty forked.
           assert {:ok, spawned} = result, row
+
           case path do
             "dispatch" -> assert spawned == FiberUid.session("tests/haiku"), row
             "capture" -> assert spawned.session =~ ~r/\Acapture-/, row

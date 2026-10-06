@@ -215,8 +215,9 @@ shuttle skills.` and otherwise carry only this dispatch's facts:
   one. When the previous session ended without a handoff and is not resumed,
   the line says so and gives its transcript path.
 - `Collaboration:` — the assigned role and collaborator (named when the
-  roster has exactly one of each) and the shared role store, when the fiber
-  carries a roster.
+  roster has exactly one of each) and the shared role store. A fiber with no
+  roster gets `Collaboration: no roster — …` instead, telling the worker to
+  take up (or create) the fitting role and assign it, with the same role store.
 - `From User:` followed by the exact user message, when nonblank.
 
 Syncing the store, reading the fiber and its `## Status`, what to do with a

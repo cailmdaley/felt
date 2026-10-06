@@ -34,15 +34,20 @@ defmodule Shuttle.Collaboration do
 
   @doc """
   The collaboration facts for a dispatch prompt: the assigned role and
-  collaborator and the shared store their fibers live in, or a visible
-  malformed-data error. How to read them is the shuttle skill's
-  (`references/collaboration.md`).
+  collaborator and the shared store their fibers live in, a prompt to take up
+  and assign a role when the fiber carries no roster, or a visible
+  malformed-data error. A missing snapshot (no fiber context) renders nothing.
+  How to read them is the shuttle skill's (`references/collaboration.md`).
   """
   @spec prompt_section({:ok, snapshot() | nil} | {:error, String.t()} | term(), String.t() | nil) ::
           String.t()
   def prompt_section(result, store \\ nil)
 
-  def prompt_section({:ok, nil}, _store), do: ""
+  def prompt_section({:ok, nil}, store) do
+    "Collaboration: no roster — before substantive work, take up the role that fits " <>
+      "(felt find -t role) or create one, and assign it (shuttle assign)" <>
+      store_suffix(shared_role_store(store))
+  end
 
   def prompt_section({:ok, assignments}, store) when is_map(assignments) do
     if legacy_shape?(assignments) do
