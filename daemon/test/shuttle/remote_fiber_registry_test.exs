@@ -112,6 +112,14 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     end
   end
 
+  # A clock the test owns: `clock` reads it, `advance.(ms)` moves it forward.
+  defp fake_clock do
+    agent = start_supervised!({Agent, fn -> DateTime.utc_now() end}, id: make_ref())
+    clock = fn -> Agent.get(agent, & &1) end
+    advance = fn ms -> Agent.update(agent, &DateTime.add(&1, ms, :millisecond)) end
+    {clock, advance}
+  end
+
   defp sample_fiber(id) do
     %{
       "felt_store" => "/loom",
@@ -535,13 +543,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
     end
 
     test "a fresh success clears staleness immediately (fast recovery)", %{dir: dir} do
-      # 50ms, not 1ms. The freshness window here is
-      # `poll_interval_ms × stale_multiplier`, and the assertion below must land
-      # INSIDE it — with a 1ms window the `feeds/1` round trip after the
-      # recovery poll routinely spent longer than the window it was checking, so
-      # the entry aged back to stale before it could be read and the test failed
-      # about five runs in six. 50ms is still far below any human-visible
-      # staleness and comfortably above a GenServer call.
+      # The registry reads a clock the test owns, so "stale" and "fresh" are
+      # decided by explicit time: the feed ages only when the test advances it.
+      {clock, advance} = fake_clock()
       remote = candide(poll_interval_ms: 50, stale_multiplier: 1)
       url = Remote.fibers_url(remote)
       MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
@@ -553,12 +557,14 @@ defmodule Shuttle.RemoteFiberRegistryTest do
            remotes: [remote],
            client: MockClient,
            auto_poll: false,
-           store_dir: dir}
+           store_dir: dir,
+           clock: clock}
         )
 
       :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert %{"candide" => %{stale: false}} = RemoteFiberRegistry.feeds(pid)
       # Age past the threshold so the feed reads stale.
-      Process.sleep(80)
+      advance.(80)
       assert %{"candide" => %{stale: true}} = RemoteFiberRegistry.feeds(pid)
 
       # A single fresh success flips stale → false instantly (no grace to re-earn).
