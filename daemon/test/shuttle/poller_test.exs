@@ -2435,8 +2435,8 @@ defmodule Shuttle.PollerTest do
     path
   end
 
-  defp start_quarantined_poller!(name) do
-    start_poller!(
+  defp start_quarantined_poller!(name, opts \\ []) do
+    [
       name: name,
       runner: MockRunner,
       poll_interval_ms: 60_000,
@@ -2444,7 +2444,9 @@ defmodule Shuttle.PollerTest do
       boot_quarantine: true,
       quarantine_auto_release: true,
       daemon_heartbeat_file: heartbeat_file()
-    )
+    ]
+    |> Keyword.merge(opts)
+    |> start_poller!()
   end
 
   # The fresh candidate every test below watches: parked while the hold stands,
@@ -2496,6 +2498,24 @@ defmodule Shuttle.PollerTest do
            end)
 
     snap
+  end
+
+  # Kill `poller` hard, then stand its last heartbeat in for a long,
+  # healthy-looking uptime that ended seconds ago, with `fields` merged over.
+  defp hard_kill_after_long_run!(poller, fields \\ %{}) do
+    ref = Process.monitor(poller)
+    Process.exit(poller, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^poller, :killed}
+
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    record =
+      hb
+      |> Map.merge(%{"at" => now - 4_000, "booted_at" => now - 1_800_000})
+      |> Map.merge(fields)
+
+    File.write!(heartbeat_file(), Jason.encode!(record))
   end
 
   test "a fast bounce with its workers still alive auto-releases the boot quarantine" do
@@ -2551,24 +2571,8 @@ defmodule Shuttle.PollerTest do
       assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
     end)
 
-    ref = Process.monitor(first)
-    Process.exit(first, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
-
-    # Stand in for a long, healthy-looking uptime right up to the kill.
-    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
-    now = System.system_time(:millisecond)
-
-    File.write!(
-      heartbeat_file(),
-      Jason.encode!(%{
-        hb
-        | "at" => now - 4_000,
-          "booted_at" => now - 1_800_000,
-          # A different VM, so the pid check is not what holds here.
-          "os_pid" => "0"
-      })
-    )
+    # A different VM, so the pid check is not what holds here.
+    hard_kill_after_long_run!(first, %{"os_pid" => "0"})
 
     {:ok, second} = start_quarantined_poller!(:test_poller_hb_launder_2)
     send(second, :run_poll_cycle)
@@ -2589,22 +2593,7 @@ defmodule Shuttle.PollerTest do
       assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
     end)
 
-    ref = Process.monitor(first)
-    Process.exit(first, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
-
-    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
-    now = System.system_time(:millisecond)
-
-    File.write!(
-      heartbeat_file(),
-      Jason.encode!(%{
-        hb
-        | "at" => now - 4_000,
-          "booted_at" => now - 1_800_000,
-          "os_pid" => "0"
-      })
-    )
+    hard_kill_after_long_run!(first, %{"os_pid" => "0"})
 
     MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
     {:ok, second} = start_quarantined_poller!(:test_poller_hb_skew_release_2)
@@ -2624,17 +2613,7 @@ defmodule Shuttle.PollerTest do
       assert {:ok, %{"held" => false}} = DaemonHeartbeat.read(heartbeat_file())
     end)
 
-    ref = Process.monitor(first)
-    Process.exit(first, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
-
-    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
-    now = System.system_time(:millisecond)
-
-    File.write!(
-      heartbeat_file(),
-      Jason.encode!(%{hb | "at" => now - 4_000, "booted_at" => now - 1_800_000})
-    )
+    hard_kill_after_long_run!(first)
 
     MockRunner.reset()
     fresh_candidate!(fiber_id)
@@ -2669,141 +2648,71 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  test "a gracefully stopped previous incarnation (stop marker) still quarantines" do
+  # Every way the evidence can fall short of a fast bounce, one row each, all
+  # judged by the same act and the same two observables (`assert_held!/2`). A
+  # row arranges only what differs from a releasable boot: the `heartbeat` on
+  # disk (fields merged over `write_heartbeat!/1`'s, with times given as ms
+  # before now; `:missing`; or a raw `{:body, _}`), a stop marker beside it,
+  # the Poller's own options, and what the runner reports.
+  @unreleasable_boots [
     # A deploy or operator restart: fresh, released, long-run — everything a
     # hard kill would look like, except the stop marker its SIGTERM left.
-    fiber_id = fresh_candidate!("tests/hb-stopped")
-    path = write_heartbeat!()
-    :ok = DaemonHeartbeat.mark_stopped(path)
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stopped)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a host that has not opted in holds even a provable hard-kill bounce" do
-    fiber_id = fresh_candidate!("tests/hb-opt-out")
-    write_heartbeat!()
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_hb_opt_out,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()],
-        boot_quarantine: true,
-        quarantine_auto_release: false,
-        daemon_heartbeat_file: heartbeat_file()
-      )
-
-    send(poller, :run_poll_cycle)
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a stale heartbeat (a real outage) still quarantines" do
-    fiber_id = fresh_candidate!("tests/hb-stale")
-    now = System.system_time(:millisecond)
+    {"a gracefully stopped previous incarnation (stop marker)", stop_marker: true},
+    {"a host that has not opted in, even on a provable hard-kill bounce",
+     poller: [quarantine_auto_release: false]},
     # Five minutes of silence: far past the 60s grace, so the daemon has no
     # evidence the gap was short.
-    write_heartbeat!(%{"at" => now - 300_000})
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stale)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a crash loop (fresh heartbeat, short-lived previous incarnation) still quarantines" do
+    {"a stale heartbeat (a real outage)", heartbeat: %{"at" => 300_000}},
     # The case freshness CANNOT catch: a daemon dying every few seconds has a
     # heartbeat that is always fresh. The recorded boot time is what exposes it.
-    fiber_id = fresh_candidate!("tests/hb-crash-loop")
-    now = System.system_time(:millisecond)
-    at = now - 2_000
-    write_heartbeat!(%{"at" => at, "booted_at" => at - 10_000, "boots" => [at - 10_000]})
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_crash_loop)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "too many recent boots still quarantines even when each incarnation looked healthy" do
+    {"a crash loop (fresh heartbeat, short-lived previous incarnation)",
+     heartbeat: %{"at" => 2_000, "booted_at" => 12_000, "boots" => [12_000]}},
     # The coarse brake: every incarnation lived just past the healthy-run
     # threshold, so the per-incarnation check passes — but the daemon has come
-    # back five times in ten minutes (this boot included), which is a human's problem, not new work's.
-    fiber_id = fresh_candidate!("tests/hb-churn")
-    now = System.system_time(:millisecond)
-    at = now - 3_000
-
-    write_heartbeat!(%{
-      "at" => at,
-      "booted_at" => at - 100_000,
-      "boots" => [at - 400_000, at - 300_000, at - 200_000, at - 100_000]
-    })
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_churn)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a heartbeat whose recorded workers are gone still quarantines" do
+    # back five times in ten minutes (this boot included), which is a human's
+    # problem, not new work's.
+    {"too many recent boots, even when each incarnation looked healthy",
+     heartbeat: %{
+       "at" => 3_000,
+       "booted_at" => 103_000,
+       "boots" => [403_000, 303_000, 203_000, 103_000]
+     }},
     # Fresh and loop-free, but the workers it vouched for are not in tmux — so
     # something ended them too, and this is not the fast bounce it looks like.
     # Continuity is established by adoption, never by trusting the file.
-    fiber_id = fresh_candidate!("tests/hb-ghost-workers")
-    write_heartbeat!(%{"workers" => ["tests/hb-ghost"]})
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_ghost)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a missing heartbeat file still quarantines (fail closed)" do
-    fiber_id = fresh_candidate!("tests/hb-missing")
-    refute File.exists?(heartbeat_file())
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_missing)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a boot whose tmux scan is unknown holds even with a releasable heartbeat" do
+    {"a heartbeat whose recorded workers are gone",
+     heartbeat: %{"workers" => ["tests/hb-ghost"]}},
+    {"a missing heartbeat file (fail closed)", heartbeat: :missing},
+    # A kill mid-write is exactly what this daemon is exposed to, so the parse
+    # has to survive garbage — and a file that says the right keys with the
+    # wrong types is no better evidence than one that says nothing.
+    {"a truncated heartbeat file", heartbeat: {:body, ~s({"v":1,"at":17)}},
+    {"a heartbeat that is not an object", heartbeat: {:body, ~s(["at", 17])}},
+    {"a heartbeat with the right keys of the wrong types",
+     heartbeat: {:body, ~s({"v":1,"at":"soon","booted_at":null,"workers":"nope"})}},
+    {"an empty heartbeat file", heartbeat: {:body, ""}},
     # An empty recorded set is vacuously continuous, so the verdict alone would
     # release. It must not: without a completed adoption scan the daemon has not
     # observed what is live, and the `adopted?` guard fails the release closed.
-    MockRunner.set_tmux_server_missing(true)
-    MockRunner.set_ps_result({"ps: boom", 1})
-    fiber_id = fresh_candidate!("tests/hb-scan-unknown")
-    write_heartbeat!()
+    {"a boot whose tmux scan is unknown", runner: [tmux_server_missing: true, ps_fails: true]},
+    # Skew has no release endpoint by design: every shelled write is suspect, so
+    # the auto-release must not become a back door into dispatching under one.
+    {"a contract skew", runner: [contract_skew: true]}
+  ]
 
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_scan_unknown)
-    refute :sys.get_state(poller).adopted?
+  for {{label, row}, index} <- Enum.with_index(@unreleasable_boots) do
+    @row row
+    @index index
+    test "the boot quarantine holds on #{label}" do
+      fiber_id = fresh_candidate!("tests/hb-hold-#{@index}")
+      arrange_unreleasable_boot!(@row)
 
-    # Force a cycle and wait for it to park the candidate: the hold is observed
-    # doing its job, not merely set.
-    send(poller, :run_poll_cycle)
-    assert_held!(poller, fiber_id)
-  end
+      {:ok, poller} =
+        start_quarantined_poller!(
+          :"test_poller_hb_hold_#{@index}",
+          Keyword.get(@row, :poller, [])
+        )
 
-  test "a truncated or malformed heartbeat file still quarantines without crashing the poller" do
-    # A kill mid-write is exactly what this daemon is exposed to, so the parse
-    # has to survive garbage — and a file that says the right keys with the wrong
-    # types is no better evidence than one that says nothing.
-    for {label, body} <- [
-          {:truncated, ~s({"v":1,"at":17)},
-          {:not_an_object, ~s(["at", 17])},
-          {:wrong_types, ~s({"v":1,"at":"soon","booted_at":null,"workers":"nope"})},
-          {:empty, ""}
-        ] do
-      MockRunner.reset()
-      fiber_id = fresh_candidate!("tests/hb-malformed-#{label}")
-      File.write!(heartbeat_file(), body)
-
-      {:ok, poller} = start_quarantined_poller!(:"test_poller_hb_malformed_#{label}")
       send(poller, :run_poll_cycle)
 
       assert_held!(poller, fiber_id)
@@ -2811,24 +2720,34 @@ defmodule Shuttle.PollerTest do
     end
   end
 
-  test "a contract skew holds even with an otherwise-auto-releasable heartbeat" do
-    # Skew has no release endpoint by design: every shelled write is suspect, so
-    # the auto-release must not become a back door into dispatching under one.
-    MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
-    fiber_id = fresh_candidate!("tests/hb-skew")
-    write_heartbeat!()
+  defp arrange_unreleasable_boot!(row) do
+    runner = Keyword.get(row, :runner, [])
+    if runner[:tmux_server_missing], do: MockRunner.set_tmux_server_missing(true)
+    if runner[:ps_fails], do: MockRunner.set_ps_result({"ps: boom", 1})
 
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_skew)
-    send(poller, :run_poll_cycle)
+    if runner[:contract_skew],
+      do: MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
 
-    assert_eventually(fn ->
-      assert [%{fiber_id: ^fiber_id, reason: reason}] = hb_snapshot(poller).pending_launch
-      assert reason =~ "contract skew"
-    end)
+    case Keyword.get(row, :heartbeat, %{}) do
+      :missing ->
+        refute File.exists?(heartbeat_file())
 
-    snap = hb_snapshot(poller)
-    assert snap.contract.ok == false
-    assert snap.boot_quarantine == true
+      {:body, body} ->
+        File.write!(heartbeat_file(), body)
+
+      %{} = ago ->
+        now = System.system_time(:millisecond)
+
+        ago
+        |> Map.new(fn
+          {key, ms} when key in ["at", "booted_at"] -> {key, now - ms}
+          {"boots", boots} -> {"boots", Enum.map(boots, &(now - &1))}
+          other -> other
+        end)
+        |> write_heartbeat!()
+    end
+
+    if row[:stop_marker], do: :ok = DaemonHeartbeat.mark_stopped(heartbeat_file())
   end
 
   test "the daemon writes its own heartbeat while healthy" do
@@ -4460,67 +4379,58 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "poller adopts orphan tmux sessions on startup" do
-    MockRunner.set_shuttle("tests/orphan", oneshot_shuttle())
-    MockRunner.add_tmux_session(FiberUid.session("tests/orphan"))
+  # Startup adoption recognizes every live worker session by the
+  # `<leaf>-<uid>-shuttle` name its fiber resolves to, whatever the fiber id
+  # looks like and whatever else the listing prints. The boot quarantine is on,
+  # so a fresh launch cannot stand in for adoption: the only way a row's fiber
+  # shows running in its live session is the boot scan having recognized it.
+  @adoptable_orphans [
+    {"a fiber's worker", "tests/orphan", []},
+    {"a uid-carrying fiber's worker under the uid-keyed session", "tests/orphan-uid",
+     uid: "01KTHDNZS287ZSSG8X8V59XKWB"},
+    {"uid workers when Shuttle listing warnings go to stderr", "life/french/daily-practice",
+     uid: "01KTHDNZS287ZSSG8X8V59XKWB",
+     shuttle: "kind: pinned\nagent: claude-opus\n",
+     ls_stderr_warning: true},
+    {"a literal hyphenated fiber id", "ai-futures/shuttle/constitution-shuttle-standalone",
+     shuttle: "enabled: true\nkind: oneshot\nagent: claude-sonnet\n"}
+  ]
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_9,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
+  for {{label, fiber_id, row}, index} <- Enum.with_index(@adoptable_orphans) do
+    @fiber_id fiber_id
+    @row row
+    @index index
+    test "poller adopts on startup #{label}" do
+      fiber_id = @fiber_id
+      uid = Keyword.get(@row, :uid, FiberUid.for(fiber_id))
+      session = Dispatcher.session_name(fiber_id, uid)
+      MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid}))
+      MockRunner.set_shuttle(fiber_id, Keyword.get(@row, :shuttle, oneshot_shuttle()))
+      MockRunner.set_ls_stderr_warning(Keyword.get(@row, :ls_stderr_warning, false))
+      MockRunner.add_tmux_session(session)
 
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-      assert length(snap.eligible) == 1
-      assert hd(snap.eligible).fiber_id == "tests/orphan"
-    end)
-  end
+      {:ok, poller} =
+        start_poller!(
+          name: :"test_poller_adopt_orphan_#{@index}",
+          runner: MockRunner,
+          poll_interval_ms: 60_000,
+          felt_stores: [MockRunner.felt_root()],
+          boot_quarantine: true
+        )
 
-  test "poller adopts a uid-carrying fiber's worker under the new uid-keyed session" do
-    fiber_id = "tests/orphan-uid"
-    uid = "01KTHDNZS287ZSSG8X8V59XKWB"
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid}))
-    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
+      assert_eventually(fn ->
+        snap = Poller.snapshot(poller)
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_orphan_uid,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
+        assert [%{fiber_id: ^fiber_id, state: "running", tmux_session: ^session}] =
+                 snap.eligible
 
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-      assert Enum.any?(snap.eligible, &(&1.fiber_id == fiber_id and &1.state == "running"))
-    end)
-  end
+        assert snap.pending_launch == []
+      end)
 
-  test "poller adopts uid workers when Shuttle listing warnings go to stderr" do
-    fiber_id = "life/french/daily-practice"
-    uid = "01KTHDNZS287ZSSG8X8V59XKWB"
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
-    MockRunner.set_shuttle(fiber_id, "kind: pinned\nagent: claude-opus\n", "active")
-    MockRunner.set_ls_stderr_warning(true)
-    MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_orphan_stderr_warning,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-
-      assert Enum.any?(snap.eligible, &(&1.fiber_id == fiber_id and &1.state == "running"))
-    end)
+      refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end
   end
 
   test "a fiber without an intrinsic id is refused and shown blocked, naming the fix" do
@@ -5115,12 +5025,14 @@ defmodule Shuttle.PollerTest do
 
     # The tmux session is still alive (the MockRunner tracks it across the
     # GenServer restart) — the restarted poller re-adopts it from the tmux scan.
+    # Its boot quarantine keeps a fresh dispatch from standing in for that.
     {:ok, restarted} =
       start_poller!(
         name: :test_poller_runtime_rehydrate_live_2,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true
       )
 
     assert wait_until(fn ->
@@ -5514,38 +5426,6 @@ defmodule Shuttle.PollerTest do
     sync_poll_cycle!(poller)
 
     assert drain.() == [], "a stable fleet must touch no project_dir at all"
-  end
-
-  test "poller adopts orphan sessions with literal hyphenated fiber ids" do
-    fiber_id = "ai-futures/shuttle/constitution-shuttle-standalone"
-    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "codex"]})
-
-    MockRunner.set_fiber(
-      fiber_id,
-      Map.put(fiber, "shuttle", %{
-        "enabled" => true,
-        "kind" => "oneshot",
-        "agent" => "claude-sonnet",
-        "host" => "test-host"
-      })
-    )
-
-    MockRunner.add_tmux_session(FiberUid.session(fiber_id))
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_10,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-      assert [%{fiber_id: ^fiber_id, tmux_session: session}] = snap.eligible
-      assert session == FiberUid.session(fiber_id)
-    end)
   end
 
   # Regression: a fiber with a shuttle: block but *no* constitution tag must be
