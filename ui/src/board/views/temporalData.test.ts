@@ -152,6 +152,24 @@ describe('sessions fetcher', () => {
     expect(a).toBe(b)
   })
 
+  it('keeps concurrent asks for different ranges apart, on every feed', async () => {
+    // Catches: a dedupe key that ignores the range, which hands one window's
+    // answer to a concurrent ask for another.
+    const calls = captureFetch(ok({ host: 'ada', records: [], buckets: [] }))
+    const f = createTemporalFetchers('')
+    await Promise.all([f.activity(0, 10), f.activity(10, 20)])
+    await Promise.all([f.sessions(0), f.sessions(5)])
+    await Promise.all([f.commits(0, 10), f.commits(0, 20)])
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/v1/activity/composite?from_ms=0&to_ms=10',
+      '/api/v1/activity/composite?from_ms=10&to_ms=20',
+      '/api/v1/sessions/composite?since_ms=0',
+      '/api/v1/sessions/composite?since_ms=5',
+      '/api/v1/commits/composite?since_ms=0&until_ms=10',
+      '/api/v1/commits/composite?since_ms=0&until_ms=20',
+    ])
+  })
+
   it('holds nothing once settled — the caller owns the cadence', async () => {
     const calls = captureFetch(ok({ host: 'ada', records: [] }))
     const f = createTemporalFetchers('')
