@@ -8,6 +8,8 @@ export type Provenance =
   | { kind: 'embed'; title?: string }
   | { kind: 'sent'; session?: string; time: number; worker?: string }
   | { kind: 'link'; title?: string }
+  /** A page opened by its address before the channel's own reads list it. */
+  | { kind: 'routed' }
 
 export interface WorkspaceDocument {
   key: DocKey
@@ -46,6 +48,8 @@ export interface ChannelInput {
   embeds?: { path: string; title?: string }[]
   sent?: { path: string; owner?: string; session?: string; time: number; worker?: string }[]
   links?: { path: string; owner?: string; title?: string }[]
+  /** Pages opened by address that no read has listed yet. */
+  routed?: { path: string; owner?: string }[]
   previous?: Channel
   /** Owner-routed file mtimes indexed by normalized document identity. */
   fileModifiedAt?: ReadonlyMap<DocKey, string>
@@ -101,6 +105,7 @@ function provenanceKey(p: Provenance): string {
   switch (p.kind) {
     case 'fiber': return 'fiber'
     case 'embed': case 'link': return JSON.stringify([p.kind, p.title ?? ''])
+    case 'routed': return 'routed'
     case 'sent': return JSON.stringify([p.kind, p.session ?? '', p.time, p.worker ?? ''])
   }
 }
@@ -141,17 +146,30 @@ export function isDeclared(document: WorkspaceDocument): boolean {
   return document.provenance.some(p => p.kind === 'embed' || p.kind === 'link')
 }
 
+function isReport(document: WorkspaceDocument): boolean {
+  return document.name.toLowerCase() === 'report.html'
+}
+
 /**
- * Each side's order outward from the fiber page. Declared documents (left
- * of it) run in body order, the declared report.html first; documents only
- * sent (right of it) run by their latest receipt, newest first, then sends
- * whose time is unknown, so a re-send moves its document beside the fiber
- * page. Identity breaks every tie. `declared` maps a document to its
- * position among the body's declarations.
+ * True when the document runs left of the fiber page: the body declares it,
+ * or it is a report.html. A report stands with the declarations whether or
+ * not the body has loaded, so it never crosses the fiber page as reads land.
+ */
+export function runsLeft(document: WorkspaceDocument): boolean {
+  return isReport(document) || isDeclared(document)
+}
+
+/**
+ * Each side's order outward from the fiber page. On the left, declared
+ * reports come first, then reports only sent, then declarations in body order; on the right, documents run by
+ * their latest receipt, newest first, then sends whose time is unknown, so a
+ * re-send moves its document beside the fiber page. Identity breaks every
+ * tie. `declared` maps a document to its position among the body's
+ * declarations.
  */
 export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map()) {
   const rank = (doc: WorkspaceDocument): [number, number] => {
-    if (isDeclared(doc)) return [0, doc.name.toLowerCase() === 'report.html' ? -1 : declared.get(doc.key) ?? Infinity]
+    if (runsLeft(doc)) return [0, isReport(doc) ? (isDeclared(doc) ? -2 : -1) : declared.get(doc.key) ?? Infinity]
     const sent = lastSent(doc)
     if (sent !== undefined) return [1, -sent]
     return doc.provenance.some(p => p.kind === 'sent') ? [2, 0] : [3, 0]
@@ -163,13 +181,13 @@ export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map
 }
 
 /**
- * A channel's run of pages with the fiber page at its centre: declared
- * documents to its left and sent ones to its right, each side ordered
- * outward from it by `compareDocuments`.
+ * A channel's run of pages with the fiber page at its centre: reports and
+ * declared documents to its left, sent and routed ones to its right, each
+ * side ordered outward from it by `compareDocuments`.
  */
 export function arrangeDocuments(prose: WorkspaceDocument, others: Iterable<WorkspaceDocument>, declared: ReadonlyMap<DocKey, number> = new Map()): WorkspaceDocument[] {
   const outward = [...others].sort(compareDocuments(declared))
-  return [...outward.filter(isDeclared).reverse(), prose, ...outward.filter(d => !isDeclared(d))]
+  return [...outward.filter(runsLeft).reverse(), prose, ...outward.filter(d => !runsLeft(d))]
 }
 
 /** The fiber's own page in a channel's run. */
@@ -237,6 +255,7 @@ export function buildChannel(input: ChannelInput): Channel {
     declare(link.path, link.owner)
     add(link.path, link.owner, { kind: 'link', ...(link.title ? { title: link.title } : {}) })
   }
+  for (const page of input.routed ?? []) add(page.path, page.owner, { kind: 'routed' })
 
   const previous = input.previous?.uid === input.uid && input.previous.owner === input.owner
     ? input.previous : undefined
@@ -248,7 +267,7 @@ export function buildChannel(input: ChannelInput): Channel {
     document.provenance = [
       ...currentNonReceipts.filter((item) => item.kind === 'embed'),
       ...sentProvenance(document, old),
-      ...currentNonReceipts.filter((item) => item.kind === 'link'),
+      ...currentNonReceipts.filter((item) => item.kind === 'link' || item.kind === 'routed'),
     ]
   }
 
@@ -276,7 +295,8 @@ export function documentLabelMetadata(doc: WorkspaceDocument, label: string, cha
   const sent = doc.provenance.filter(p => p.kind === 'sent')
   const latest = sent.filter(p => Number.isFinite(p.time)).sort((a, b) => b.time - a.time)[0]
   const embed = doc.provenance.find(p => p.kind === 'embed')
-  const segments = [sent.length ? latest ? `sent ${age(latest.time)}` : 'sent · time unknown' : embed ? 'embedded' : 'linked from body']
+  const linked = doc.provenance.some(p => p.kind === 'link')
+  const segments = [sent.length ? latest ? `sent ${age(latest.time)}` : 'sent · time unknown' : embed ? 'embedded' : linked ? 'linked from body' : 'opened by address']
   if (sent.length > 1) segments.push(`${sent.length} receipts`)
   if (doc.owner !== channelOwner) segments.push(doc.owner)
   return { title: declaredTitle(doc.key)?.title ?? (embed?.kind === 'embed' && embed.title ? embed.title : label), summary: segments.join(' · ') }
@@ -292,13 +312,21 @@ export function defaultSelection(channel: Channel): DocKey {
   return first.key
 }
 
-/** Keep selection if it survives; otherwise take its old position, then the prior page. */
+/**
+ * Keep selection if it survives; otherwise walk the old run from it toward
+ * the fiber page and take the first page that survives, else the fiber page.
+ */
 export function fallbackSelection(previousKeys: DocKey[], nextKeys: DocKey[], selected: DocKey): DocKey | undefined {
   if (!nextKeys.length) return undefined
   if (nextKeys.includes(selected)) return selected
-  const oldIndex = previousKeys.indexOf(selected)
-  const index = Math.min(Math.max(0, oldIndex), nextKeys.length - 1)
-  return nextKeys[index]
+  const survives = new Set(nextKeys)
+  const from = previousKeys.indexOf(selected)
+  const anchor = previousKeys.findIndex(key => key.startsWith('fiber:'))
+  if (from >= 0 && anchor >= 0) {
+    const step = anchor > from ? 1 : -1
+    for (let i = from + step; i !== anchor + step; i += step) if (survives.has(previousKeys[i])) return previousKeys[i]
+  }
+  return nextKeys.find(key => key.startsWith('fiber:')) ?? nextKeys[0]
 }
 
 /** Use the shortest unique path suffix, with report pages named for their folder. */

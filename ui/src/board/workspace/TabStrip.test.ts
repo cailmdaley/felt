@@ -177,15 +177,16 @@ describe('TabStrip', () => {
     expect(face(0).querySelectorAll('.ws-tile-sketch i')).toHaveLength(2)
   })
 
-  describe('hover caption', () => {
+  for (const side of ['sent', 'declared'] as const) describe(`hover caption (${side} tiles)`, () => {
     const pointer = (type: string, target: Element, pointerType = 'mouse'): void => {
       const event = new MouseEvent(type, { bubbles: true })
       Object.defineProperty(event, 'pointerType', { value: pointerType })
       target.dispatchEvent(event)
     }
-    const setup = (): TabStrip => {
+    const setup = (): { strip: TabStrip; at: (page: number) => HTMLButtonElement } => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
-      const channel = buildChannel({ uid: 'peek', owner: 'peek-host', name: 'Peek', path: '/fiber.md', fiberDir: '/', body: 'Body prose', sent: [{ path: '/one.html', time: 20 }, { path: '/two.png', time: 10 }] })
+      const channel = buildChannel({ uid: 'peek', owner: 'peek-host', name: 'Peek', path: '/fiber.md', fiberDir: '/', body: 'Body prose',
+        ...(side === 'sent' ? { sent: [{ path: '/one.html', time: 20 }, { path: '/two.png', time: 10 }] } : { embeds: [{ path: '/one.html' }, { path: '/two.png' }] }) })
       const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
       strips.push(strip)
       const band = document.createElement('div')
@@ -193,42 +194,45 @@ describe('TabStrip', () => {
       band.append(strip.el, strip.tip)
       document.body.append(band)
       strip.render(channel.labels, channel.documents.map(d => d.key), channel)
-      strip.mark(0, false)
-      return strip
+      // Pages by distance from the § (0): sent tiles run right of it, declared ones left.
+      const anchor = channel.documents.findIndex(d => d.kind === 'fiber')
+      const at = (page: number): HTMLButtonElement => strip.buttons[anchor + (side === 'sent' ? page : -page)]
+      strip.mark(anchor, false)
+      return { strip, at }
     }
     afterEach(() => { vi.useRealTimers() })
 
     it('waits before a first caption, then follows the pointer across tiles at once', () => {
-      const strip = setup()
-      pointer('pointerover', strip.buttons[1])
+      const { strip, at } = setup()
+      pointer('pointerover', at(1))
       vi.advanceTimersByTime(TIP_DELAY_MS - 1)
       expect(strip.tip.hidden).toBe(true)
       vi.advanceTimersByTime(1)
       expect(strip.tip.hidden).toBe(false)
       expect(strip.tip.getAttribute('aria-hidden')).toBe('true')
       expect(strip.tip.textContent).toBe('one.html')
-      pointer('pointerover', strip.buttons[2])
+      pointer('pointerover', at(2))
       expect(strip.tip.textContent).toBe('two.png')
     })
 
     it('names no selected tile, gives way to a press or a key, leaves with the pointer and ignores touch', () => {
-      const strip = setup()
-      pointer('pointerover', strip.buttons[0])
+      const { strip, at } = setup()
+      pointer('pointerover', at(0))
       vi.advanceTimersByTime(1000)
       expect(strip.tip.hidden).toBe(true)
-      pointer('pointerover', strip.buttons[1], 'touch')
+      pointer('pointerover', at(1), 'touch')
       vi.advanceTimersByTime(1000)
       expect(strip.tip.hidden).toBe(true)
-      pointer('pointerover', strip.buttons[1])
+      pointer('pointerover', at(1))
       vi.advanceTimersByTime(TIP_DELAY_MS)
       expect(strip.tip.hidden).toBe(false)
-      pointer('pointerdown', strip.buttons[1])
+      pointer('pointerdown', at(1))
       expect(strip.tip.hidden).toBe(true)
-      pointer('pointerover', strip.buttons[2])
+      pointer('pointerover', at(2))
       vi.advanceTimersByTime(TIP_DELAY_MS)
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
       expect(strip.tip.hidden).toBe(true)
-      pointer('pointerover', strip.buttons[1])
+      pointer('pointerover', at(1))
       vi.advanceTimersByTime(TIP_DELAY_MS)
       strip.el.dispatchEvent(new MouseEvent('pointerleave'))
       expect(strip.tip.hidden).toBe(true)

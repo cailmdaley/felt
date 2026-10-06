@@ -109,15 +109,15 @@ describe('buildChannel', () => {
       links: [{ path: 'report.html', title: 'linked report' }],
     })
     expect(channel.documents).toHaveLength(3)
-    expect(channel.documents[0]).toMatchObject({ owner: 'host-a', path: '/store/project/task/report.html' })
-    expect(channel.documents[0].provenance).toEqual([
+    expect(channel.documents[1]).toMatchObject({ owner: 'host-a', path: '/store/project/task/report.html' })
+    expect(channel.documents[1].provenance).toEqual([
       { kind: 'embed', title: 'Results' },
       { kind: 'sent', time: 10, session: 'session-1' },
       { kind: 'sent', time: 20, session: 'session-2', worker: 'sol' },
       { kind: 'link', title: 'linked report' },
     ])
-    expect(channel.documents[2]).toMatchObject({ owner: 'host-b', path: '/store/project/task/report.html' })
-    expect(channel.documents[2].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
+    expect(channel.documents[0]).toMatchObject({ owner: 'host-b', path: '/store/project/task/report.html' })
+    expect(channel.documents[0].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
   })
 
   it('runs declarations leftward from the fiber page in body order and deliveries rightward, newest first, retaining receipt history', () => {
@@ -175,10 +175,19 @@ describe('selection and labels', () => {
     expect(defaultSelection(withoutReport)).toBe(proseDocument(withoutReport)?.key)
   })
 
-  it('falls back to the page at the old position, then the prior page', () => {
-    expect(fallbackSelection(['a', 'b', 'c'], ['a', 'b', 'c'], 'b')).toBe('b')
-    expect(fallbackSelection(['a', 'b', 'c'], ['a', 'c'], 'b')).toBe('c')
-    expect(fallbackSelection(['a', 'b', 'c'], ['a'], 'c')).toBe('a')
+  it('falls back toward the fiber page from either side, then to the fiber page', () => {
+    const prose = 'fiber:host:u'
+    const run = ['l2', 'l1', prose, 'r1', 'r2']
+    expect(fallbackSelection(run, run, 'r1')).toBe('r1')
+    // Right of the fiber page: the neighbour nearer it, never the far one.
+    expect(fallbackSelection(run, ['l2', 'l1', prose, 'r2'], 'r1')).toBe(prose)
+    expect(fallbackSelection(run, ['l2', 'l1', prose, 'r1'], 'r2')).toBe('r1')
+    expect(fallbackSelection(run, ['l2', 'new', 'l1', prose, 'r1'], 'r2')).toBe('r1')
+    // Left of it, the same walk rightward.
+    expect(fallbackSelection(run, ['l1', prose, 'r1', 'r2'], 'l2')).toBe('l1')
+    expect(fallbackSelection(run, ['l2', prose, 'r1', 'r2'], 'l1')).toBe(prose)
+    // Nothing between survives: the fiber page.
+    expect(fallbackSelection(run, [prose, 'l2'], 'r2')).toBe(prose)
     expect(fallbackSelection(['a'], [], 'a')).toBeUndefined()
   })
 

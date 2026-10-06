@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildChannel, compareDocuments, documentActivity, docKey, lastSent } from './documents.js'
+import { buildChannel, compareDocuments, documentActivity, documentLabelMetadata, docKey, lastSent } from './documents.js'
 
 function shuffled<T>(items: readonly T[], seed: number): T[] {
   const out = [...items]
@@ -27,6 +27,24 @@ describe('channel order properties', () => {
   it('sets the declared report beside the fiber page wherever the body declares it', () => {
     const channel = buildChannel({ ...input, embeds: [{ path: 'notes.md' }, { path: 'out/report.html' }, { path: 'plot.png' }], sent: [{ path: 'log.txt', time: 5 }] })
     expect(channel.documents.map(d => d.name)).toEqual(['plot.png', 'notes.md', 'report.html', 'Note', 'log.txt'])
+  })
+  it('keeps every page on its side when the body lands after the receipts', () => {
+    const sent = [{ path: 'out/report.html', time: 30 }, { path: 'plot.png', time: 20 }, { path: 'log.txt', time: 10 }]
+    const side = (channel: ReturnType<typeof buildChannel>): Map<string, number> => {
+      const anchor = channel.documents.findIndex(d => d.kind === 'fiber')
+      return new Map(channel.documents.map((d, i) => [d.name, Math.sign(i - anchor)]))
+    }
+    const early = buildChannel({ ...input, sent, routed: [{ path: 'opened.csv' }] })
+    expect(early.documents.map(d => d.name)).toEqual(['report.html', 'Note', 'plot.png', 'log.txt', 'opened.csv'])
+    expect(documentLabelMetadata(early.documents[4], 'opened.csv', 'host').summary).toBe('opened by address')
+    const loaded = buildChannel({ ...input, sent, previous: early, embeds: [{ path: 'out/report.html' }, { path: 'notes.md' }] })
+    expect(loaded.documents.map(d => d.name)).toEqual(['notes.md', 'report.html', 'Note', 'plot.png', 'log.txt'])
+    const before = side(early), after = side(loaded)
+    for (const [name, at] of before) if (after.has(name)) expect(after.get(name), name).toBe(at)
+  })
+  it('runs a report left of the fiber page even when only sent, after any declared report', () => {
+    const channel = buildChannel({ ...input, embeds: [{ path: 'a/report.html' }], sent: [{ path: 'b/report.html', time: 9 }, { path: 'x.txt', time: 1 }] })
+    expect(channel.documents.map(d => d.path)).toEqual(['/fiber/b/report.html', '/fiber/a/report.html', '/fiber/note.md', '/fiber/x.txt'])
   })
   it('a re-send moves its document beside the fiber page', () => {
     const before = buildChannel({ ...input, sent: [{ path: 'old.html', time: 10 }, { path: 'new.html', time: 20 }] })

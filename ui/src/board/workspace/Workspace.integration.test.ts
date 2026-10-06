@@ -261,6 +261,36 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
+  for (const [routed, landing] of [['the report the Board feed names', 'report.html'], ['a sent file opened by address', 'table.html']] as const) {
+    it(`keeps every page on its side of the fiber page while the body lands after ${routed}, and holds the selection`, async () => {
+      if (landing === 'report.html') await feedNamesReport()
+      const original = vi.mocked(fetch).getMockImplementation()!
+      let release!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).includes('/api/v1/fibers/')) await gate
+        return original(input, init)
+      })
+      const key = docKey('host-a', `/notes/alpha/${landing}`, 'host-a')
+      workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await flush()
+      const sides = (): Map<string, number> => {
+        const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')]
+        const anchor = tabs.findIndex(tab => tab.classList.contains('ws-tab-anchor'))
+        return new Map(tabs.map((tab, index) => [tab.dataset.tabKey!, Math.sign(index - anchor)]))
+      }
+      const selected = (): string | undefined => document.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey
+      const before = sides()
+      // Before the body, the report already stands left of the fiber page and a sent file right of it.
+      expect(before.get(key)).toBe(landing === 'report.html' ? -1 : 1)
+      expect(selected()).toBe(key)
+      release(); await flush(); await flush()
+      const after = sides()
+      // The body's own declarations join the left; nothing already shown crosses the fiber page.
+      expect(after.size).toBeGreaterThanOrEqual(before.size)
+      for (const [doc, side] of before) expect(after.get(doc), doc).toBe(side)
+      expect(selected()).toBe(key)
+    })
+  }
   it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {

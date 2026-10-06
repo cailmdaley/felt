@@ -625,13 +625,12 @@ export class Workspace {
       state.routedFile = undefined
     }
     const provisional = state.routedFile ? parseDocKey(state.routedFile) : null
-    const links = provisional ? [...state.links, { path: provisional.path, owner: provisional.owner }] : state.links
     const receipts = state.channel.uid.startsWith('other:') ? this.overview.unfiledReceipts(state.channel.uid)
       : this.receipts.get(channelId(state.channel.uid, state.channel.owner))?.files ?? []
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
-      sent, links, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
+      sent, links: state.links, routed: provisional ? [provisional] : undefined, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {
       // A routed page the loaded channel does not hold goes to the report, else the fiber's page.

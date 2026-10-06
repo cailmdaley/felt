@@ -4,7 +4,7 @@ import type { FileViewerOptions } from '../FileViewerPanel.js'
 import type { Channel, WorkspaceDocument } from './documents.js'
 import { DocumentHost, withWorkspaceKeyBridge } from './DocumentHost.js'
 import { Reader } from './Reader.js'
-import { buildChannel } from './documents.js'
+import { buildChannel, proseDocument } from './documents.js'
 import { connectDocumentFrame, envelope } from './DocumentBridge.js'
 import { resetDocumentResources } from '../documentResources.js'
 
@@ -65,10 +65,10 @@ describe('say it once label bars', () => {
     }
     try {
       const first = buildChannel(input)
-      reader.show(first, first.documents[0].key, 'Board')
-      const fiber = reader.host.get(first.documents[0].key)!
+      reader.show(first, proseDocument(first)!.key, 'Board')
+      const fiber = reader.host.get(proseDocument(first)!.key)!
       const page = fiber.viewer
-      const report = reader.host.get(first.documents[1].key)!
+      const report = reader.host.get(first.documents.find(d => d.name === 'report.html')!.key)!
       const reportViewer = report.viewer
       const calls = render.calls.length
       expect(fiber.label.querySelector('.ws-label-title')?.textContent).toBe('')
@@ -76,11 +76,11 @@ describe('say it once label bars', () => {
       expect(fiber.label.textContent).toContain('Last changed 1h ago')
       expect(fiber.label.textContent).not.toMatch(/Constitution|fiber page|Task name|host-a/)
       expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago')
-      expect(reader.host.get(first.documents[2].key)!.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago · host-b')
+      expect(reader.host.get(first.documents.find(d => d.name === 'foreign.pdf')!.key)!.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago · host-b')
       expect(reader.el.querySelector('.ws-labelbar .ws-agent')).toBeNull()
       const next = buildChannel({ ...input, modifiedAt: new Date(now - 120000).toISOString(),
         sent: [...input.sent, { path: '/report.html', time: now - 60000, worker: 'sol' }], previous: first })
-      reader.show(next, next.documents[0].key, 'Board')
+      reader.show(next, proseDocument(next)!.key, 'Board')
       expect(fiber.label.textContent).toContain('Last changed 2m ago')
       expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1m ago · 2 receipts')
       expect(fiber.viewer).toBe(page)
@@ -88,7 +88,7 @@ describe('say it once label bars', () => {
       expect(prose).toHaveBeenCalledTimes(1)
       expect(render.calls).toHaveLength(calls)
       const unknown = buildChannel({ ...input, modifiedAt: undefined, previous: next })
-      reader.show(unknown, unknown.documents[0].key, 'Board')
+      reader.show(unknown, proseDocument(unknown)!.key, 'Board')
       expect(fiber.label.textContent).toContain('Last changed unknown')
       expect(fiber.viewer).toBe(page)
     } finally { reader.dispose() }
