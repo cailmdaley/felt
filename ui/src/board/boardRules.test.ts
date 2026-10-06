@@ -8,6 +8,7 @@
 // Atlantic, so the file holds in whatever zone it runs.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import {
   buildDependents,
   cardDragArms,
@@ -857,25 +858,20 @@ describe('cycles — a named span of time, not work', () => {
     // The load-bearing claim: no combination of status, verdict, liveness or a
     // stray shuttle block can put a cycle on the desk. One "Autumn 2026" in
     // Drafts teaches the human to distrust the column.
-    const lifecycleShapes: Array<[string, Fiber]> = [
-      ['open, no block', cycle({ status: 'open' })],
-      ['active, no block', cycle({ status: 'active' })],
-      ['closed, no verdict', cycle({ status: 'closed' })],
-      ['closed and tempered', cycle({ status: 'closed', tempered: true })],
-      ['closed and composted', cycle({ status: 'closed', tempered: false })],
-      ['carrying a shuttle block', cycle({ status: 'active', hasShuttleBlock: true, shuttleKind: 'oneshot' })],
-      ['a pinned-kind block', cycle({ status: 'active', hasShuttleBlock: true, shuttleKind: 'pinned' })],
-      ['a standing block', cycle({ status: 'active', hasShuttleBlock: true, shuttleKind: 'standing' })],
-      ['with a past due', cycle({ due: asFeltWrites(dayFromNow(-30)) })],
-    ]
-    for (const [label, fiber] of lifecycleShapes) {
-      it(`routes to cycles: ${label}`, () => {
-        expect(classifyFiber(fiber)).toBe('cycles')
-      })
-    }
-
-    it('routes to cycles even with a live worker — liveness overrides everything ELSE', () => {
-      expect(classifyFiber(cycle({ hasShuttleBlock: true }), { liveWorker: true })).toBe('cycles')
+    it('routes every lifecycle shape to cycles, a live worker included', () => {
+      fc.assert(fc.property(
+        fc.record({
+          status: fc.constantFrom('open', 'active', 'closed'),
+          tempered: fc.constantFrom(undefined, true, false),
+          hasShuttleBlock: fc.boolean(),
+          shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing', 'pinned'),
+          due: fc.constantFrom(undefined, -30, 0, 30).map(days => days === undefined ? undefined : asFeltWrites(dayFromNow(days))),
+        }, { requiredKeys: ['status'] }),
+        fc.boolean(),
+        (shape, liveWorker) => {
+          expect(classifyFiber(cycle(shape as Partial<Fiber>), { liveWorker })).toBe('cycles')
+        },
+      ), { numRuns: 200, seed: 0x5eed })
     })
 
     it('leaves ordinary work exactly where it was', () => {
