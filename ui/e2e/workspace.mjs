@@ -1414,6 +1414,23 @@ test('Overview lenses, declared-title Find, exact receipt ribbon route and scrol
     const radio = p.getByRole('radio', { name: lens, exact: true }); await radio.click()
     assert.equal(await radio.getAttribute('aria-checked'), 'true')
   }
+  {
+    const find = barFind(p)
+    await find.fill('Calibrate')
+    assert.equal(await p.locator('.ws-overview-folio:visible').count(), 1)
+    // The field and the sheet's filter stay in step across views: leaving the Board empties both.
+    await barTab(p, 'desk').click(); await barTab(p, 'shelf').click()
+    await p.locator('.ws-overview-folio').first().waitFor()
+    assert.equal(await find.inputValue(), '', 'switching views empties Find')
+    assert.ok(await p.locator('.ws-overview-folio:visible').count() > 1, 'and lifts the sheet\'s filter')
+    // So does opening a folio from a filtered sheet and coming back.
+    await find.fill('Mask validation')
+    await p.locator('.ws-overview-folio:visible').first().click()
+    await poll(p, () => !!document.querySelector('.kbn-reader-open'))
+    await leave(p)
+    assert.equal(await find.inputValue(), '', 'the reader empties Find')
+    assert.ok(await p.locator('.ws-overview-folio:visible').count() > 1, 'and the sheet is unfiltered on return')
+  }
   const ribbon = await revealLatestFiles(p)
   // On the desktop the bar's Find filters the sheet; the sheet's own field is the phone's.
   assert.equal(await p.getByRole('searchbox', { name: 'Find work or files', exact: true }).isVisible(), false)

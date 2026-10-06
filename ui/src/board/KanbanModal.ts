@@ -683,9 +683,11 @@ export class KanbanModal {
   }
 
   private showWorkspace(active: boolean): void {
+    const was = this.container?.classList.contains('kbn-reader-open') ?? false
     this.container?.classList.toggle('kbn-reader-open', active)
     if (active) this.placeReader()
-    else if (this.findEl) { this.findEl.value = ''; this.workspace?.closeFind() }
+    // Find serves one view at a time: entering or leaving the reader empties it and lifts its filter.
+    if (was !== active) this.workspace?.clearFind()
     if (this.body) {
       this.body.inert = active
       if (active) this.body.setAttribute('aria-hidden', 'true')
@@ -853,6 +855,7 @@ export class KanbanModal {
       else this.workspace.suspend(id)
     }
     if (id === this.activeViewId) return
+    this.workspace?.clearFind()
     this.activeView?.unmount()
     this.activeView = null
     if (this.viewHostEl) this.viewHostEl.innerHTML = ''

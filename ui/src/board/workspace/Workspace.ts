@@ -111,7 +111,7 @@ export class Workspace {
       },
       files: (card: KanbanCard) => this.overview.fileNames(card),
       onOpen: (card: KanbanCard) => {
-        if (opts.find) opts.find.value = ''
+        this.clearFind()
         this.open(card, this.isActive ? this.origin : opts.origin(), undefined, this.overview.hasMetadata(card), false)
       },
     }
