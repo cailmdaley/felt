@@ -793,6 +793,8 @@
 }
 .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; }
 
+/* The tabs keep the bar's spacing inside their own tablist. */
+.kbn-viewtabs-views { flex: none; display: flex; align-items: center; gap: 6px; }
 /* Find follows the tabs: a field in the tabs' hairline, its key set as a keycap. */
 .kbn-viewtabs-find {
   flex: 0 1 220px; min-width: 120px; position: relative; display: flex; align-items: center; box-sizing: border-box; height: 26px;
@@ -2361,6 +2363,7 @@
     font-size: calc(11.5px * var(--kbn-type-scale, 1));
   }
   .kbn-viewtab-hotkey { display: none; }
+  .kbn-viewtabs-views { gap: 4px; }
   /* The phone's bar is its bottom nav; the reader covers it and keeps its own bars. */
   .kbn-viewtabs-find, .kbn-viewtabs-reader, .kbn-viewtabs-position { display: none !important; }
   .kbn-reader-open .kbn-viewtabs { z-index: 20; }

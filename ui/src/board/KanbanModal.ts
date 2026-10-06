@@ -683,9 +683,18 @@ export class KanbanModal {
     this.container.style.setProperty('--kbn-bar-overhang', `${map?.height ? Math.max(0, Math.ceil(map.bottom - bar.bottom)) : 0}px`)
   }
 
+  /** While the reader is open its origin's tab closes it, and says so. */
+  private labelOriginTab(tab: HTMLElement, selected: boolean): void {
+    const label = tab.querySelector('.kbn-viewtab-label')?.textContent ?? ''
+    if (selected && this.container?.classList.contains('kbn-reader-open')) {
+      tab.setAttribute('aria-label', `Close reader, back to ${label.charAt(0).toUpperCase()}${label.slice(1)}`)
+    } else tab.removeAttribute('aria-label')
+  }
+
   private showWorkspace(active: boolean): void {
     const was = this.container?.classList.contains('kbn-reader-open') ?? false
     this.container?.classList.toggle('kbn-reader-open', active)
+    for (const tab of this.tabsEl?.querySelectorAll<HTMLElement>('.kbn-viewtab') ?? []) this.labelOriginTab(tab, tab.classList.contains('kbn-viewtab-active'))
     if (active) this.placeReader()
     // Find serves one view at a time: entering or leaving the reader empties it and lifts its filter.
     if (was !== active) this.workspace?.clearFind()
@@ -749,8 +758,12 @@ export class KanbanModal {
   private buildViewTabs(): HTMLDivElement {
     const strip = document.createElement('div')
     strip.className = 'kbn-viewtabs'
-    strip.setAttribute('role', 'tablist')
-    strip.setAttribute('aria-label', 'Board views')
+    // The tabs alone are the tablist; Find, the view's centre and Settings ride the same bar beside it.
+    const views = document.createElement('div')
+    views.className = 'kbn-viewtabs-views'
+    views.setAttribute('role', 'tablist')
+    views.setAttribute('aria-label', 'Board views')
+    strip.append(views)
 
     const specs: Array<{ id: BoardViewId; label: string; hotkey: string }> = [
       { id: 'desk', label: 'desk', hotkey: DESK_HOTKEY },
@@ -778,7 +791,7 @@ export class KanbanModal {
       hotkeyEl.setAttribute('aria-hidden', 'true')
       tab.append(hotkeyEl, labelEl)
       tab.addEventListener('click', () => this.setView(spec.id))
-      strip.append(tab)
+      views.append(tab)
     }
 
     // Find follows the tabs: one field every view shares.
@@ -931,6 +944,7 @@ export class KanbanModal {
       const selected = tab.dataset.view === this.activeViewId
       tab.classList.toggle('kbn-viewtab-active', selected)
       tab.setAttribute('aria-selected', String(selected))
+      this.labelOriginTab(tab, selected)
       // On a phone the strip scrolls, so the tab you just chose can be off
       // screen the moment it becomes current — a hotkey lands there. Bring it
       // back into the run.
