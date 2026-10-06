@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "vitest": { "configFile": "vitest.stryker.config.ts", "related": false },
+  "mutate": [
+    "src/board/views/chronicleFeeds.ts",
+    "src/board/views/TemporalData.ts",
+    "src/board/views/vocabulary.ts",
+    "src/board/views/join.ts",
+    "src/board/views/ChronicleView.ts"
+  ],
+  "coverageAnalysis": "perTest",
+  "disableBail": true,
+  "concurrency": 4,
+  "timeoutMS": 10000,
+  "reporters": ["json", "html", "clear-text"],
+  "jsonReporter": { "fileName": "reports/mutation/chronicle.json" },
+  "htmlReporter": { "fileName": "reports/mutation/chronicle.html" }
+}
