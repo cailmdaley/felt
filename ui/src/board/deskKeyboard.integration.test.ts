@@ -13,6 +13,7 @@ interface BoardInternals {
   fetchAndRender(): Promise<void>
   workspace: Workspace
   deskEl: HTMLElement
+  lensCycleId: string | null
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
 }
 let board: KanbanModal
@@ -64,6 +65,15 @@ beforeEach(() => {
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Desk keyboard selection', () => {
+  it('gives Escape in the bar\'s Find to the field before releasing an engaged lens', () => {
+    inside.lensCycleId = 'season'
+    const find = document.querySelector<HTMLInputElement>('.kbn-viewtabs-find input')!
+    find.focus(); find.value = 'mask'
+    press('Escape', {}, find)
+    expect(inside.lensCycleId).toBe('season')
+    expect(find.value).toBe('')
+    expect(document.activeElement).not.toBe(find)
+  })
   it('leaves initial focus alone and selects the top review card with the first j or k', () => {
     expect(document.activeElement).not.toBe(document.querySelector('.kbn-col-head'))
     expect(selected()).toBeUndefined()

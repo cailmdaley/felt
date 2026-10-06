@@ -87,6 +87,7 @@ import {
   type ViewContext,
   viewFallbackKind,
 } from './views/index.js'
+import { isTypingTarget } from './views/ViewRegistry.js'
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
@@ -2673,7 +2674,8 @@ export class KanbanModal {
     if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
     // Escape releases an engaged lens and goes no further — "back out of what
     // I'm looking at", and the lens is the nearest thing being looked through.
-    if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk') {
+    // A field takes its own Escape (the bar's Find puts itself away) before the lens is released.
+    if (e.key === 'Escape' && this.lensCycleId !== null && this.activeViewId === 'desk' && !isTypingTarget(e.target as HTMLElement | null)) {
       e.preventDefault()
       e.stopPropagation()
       this.setLensCycle(null)
