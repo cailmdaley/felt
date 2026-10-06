@@ -923,6 +923,14 @@ export class Dock {
       if (message.value && message.scrollHeight > message.clientHeight) message.style.height = `${message.scrollHeight}px`
     }
     message.addEventListener('input', fit)
+    // The draft belongs to its constitution and outlives a reload in this
+    // browser; a send that lands empties the field and so drops it.
+    const draftStore = `shuttle:composer-draft:${JSON.stringify([card.originId, card.uid ?? card.id])}`
+    try { message.value = localStorage.getItem(draftStore) ?? '' } catch { /* storage unavailable */ }
+    if (message.value) requestAnimationFrame(fit)
+    message.addEventListener('input', () => {
+      try { if (message.value) localStorage.setItem(draftStore, message.value); else localStorage.removeItem(draftStore) } catch { /* storage unavailable */ }
+    })
     window.addEventListener('resize', fit)
     this.composerDisposers.push(() => window.removeEventListener('resize', fit))
 
@@ -1060,6 +1068,13 @@ export class Dock {
     })
 
     message.addEventListener('keydown', event => {
+      // Escape steps out of the field and hands the keys back to the reader;
+      // the draft stays.
+      if (event.key === 'Escape' && !event.isComposing && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault(); event.stopPropagation()
+        message.blur()
+        return
+      }
       if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return

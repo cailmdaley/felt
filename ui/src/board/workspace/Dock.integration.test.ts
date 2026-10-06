@@ -250,6 +250,39 @@ describe('state-shaped act zone', () => {
     expect(shown[0].classList.contains('kbn-ctl-secondary')).toBe(false)
     expect(shown[1]?.classList.contains('kbn-ctl-secondary') ?? false).toBe(verbs.length > 1)
   })
+  it('keeps a constitution\'s draft across a rebuilt composer and drops it once sent', async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v), removeItem: (k: string) => void stored.delete(k) })
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'come back to this'
+    message.dispatchEvent(new Event('input'))
+    dock.reset(); dock = new Dock('', saved)
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    const again = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    expect(again.value).toBe('come back to this')
+    again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(again.value).toBe('')
+    dock.reset(); dock = new Dock('', saved)
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    expect(band.el.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('')
+  })
+  it('Escape leaves the composer, keeping its draft, and closes nothing', () => {
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    document.body.append(band.el)
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.focus(); message.value = 'half a thought'
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    const outer = vi.fn(); document.addEventListener('keydown', outer)
+    message.dispatchEvent(event)
+    document.removeEventListener('keydown', outer)
+    expect(document.activeElement).not.toBe(message)
+    expect(message.value).toBe('half a thought')
+    expect(event.defaultPrevented).toBe(true)
+    expect(outer).not.toHaveBeenCalled()
+    band.el.remove()
+  })
   it('Enter starts a new session and Alt-Enter resumes the named one', async () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
