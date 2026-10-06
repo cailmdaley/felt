@@ -22,6 +22,19 @@ const withForms = (open: (forms: Forms) => unknown): void => {
   import('./forms/mountForms.js').then(open, () => showToast('Couldn’t load the form; reload the board', 'error'))
 }
 
+// A tab left open across a deploy asks for chunks the new build no longer
+// has; reloading picks up the current build. One reload per 30 s keeps a
+// daemon that is really down from looping the page.
+window.addEventListener('vite:preloadError', event => {
+  const key = 'shuttle:chunk-reload'
+  let last = 0
+  try { last = Number(sessionStorage.getItem(key) ?? 0) } catch { /* storage unavailable */ }
+  if (Date.now() - last < 30_000) return
+  try { sessionStorage.setItem(key, String(Date.now())) } catch { /* storage unavailable */ }
+  event.preventDefault()
+  window.location.reload()
+})
+
 // index.html preloads the webfonts' stylesheet so nothing waits on it; apply it.
 const webfonts = document.getElementById('webfonts')
 if (webfonts instanceof HTMLLinkElement) webfonts.rel = 'stylesheet'

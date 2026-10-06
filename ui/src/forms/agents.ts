@@ -38,7 +38,7 @@ export function agentGroups<T extends GroupableAgent>(agents: readonly T[]): { l
 }
 
 /**
- * The registry's base agents, fetched on for `agent`: the chosen level when the
+ * The effort a picker shows and submits for `agent`: the chosen level when the
  * agent accepts it, else the agent's own default, else none (`''`).
  */
 export function resolveEffort(agent: AgentEntry | undefined, effort: string): string {
