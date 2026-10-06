@@ -98,7 +98,8 @@ defmodule Shuttle.MixProject do
       {:bandit, "~> 1.0"},
       # The phone page's audio relay is a WebSock handler upgraded on Bandit.
       {:websock_adapter, "~> 0.5"},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:stream_data, "~> 1.1", only: :test}
     ]
   end
 end
