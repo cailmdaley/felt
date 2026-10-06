@@ -57,6 +57,7 @@ defmodule Shuttle.Test.Env do
   @doc """
   Make the calling test a scope owner with no overrides yet, so
   `Shuttle.Env.scope_key/1` qualifies process-global caches by this test.
+  Its slots are erased when the test exits.
   """
   def own_scope!, do: ensure_owner(self())
 
@@ -110,9 +111,12 @@ defmodule Shuttle.Test.Env do
     :ok
   end
 
+  # The cleanup is registered before the owner row exists, so a call from
+  # outside a test process raises without leaving an owner behind.
   defp ensure_owner(owner) do
-    if :ets.insert_new(@table, {{:owner, owner}, true}) do
+    unless :ets.member(@table, {:owner, owner}) do
       ExUnit.Callbacks.on_exit({__MODULE__, owner}, fn -> clear(owner) end)
+      :ets.insert(@table, {{:owner, owner}, true})
     end
 
     :ok
@@ -122,6 +126,9 @@ defmodule Shuttle.Test.Env do
   def clear(owner) do
     :ets.match_delete(@table, {{owner, :_, :_}, :_})
     :ets.delete(@table, {:owner, owner})
+
+    # The scope's own `:persistent_term` slots (`Shuttle.Env.scope_key/1`).
+    for {{_key, ^owner} = key, _value} <- :persistent_term.get(), do: :persistent_term.erase(key)
     :ok
   end
 end

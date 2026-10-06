@@ -3,7 +3,7 @@ defmodule Shuttle.Env do
   The daemon's one reader of process-global configuration: the OS environment,
   the `:shuttle` application env, and executable lookup on `PATH`.
 
-  Production code calls `get/2`, `app/2`, `fetch_app/1`, `find_executable/1`,
+  Production code calls `get/2`, `app/2`, `find_executable/1`,
   `home/0`, `expand/1` and `cmd/3` instead of `System.get_env/2`,
   `Application.get_env(:shuttle, …)`, `System.find_executable/1`,
   `System.user_home!/0`, `Path.expand/1` and `System.cmd/3`. In `:dev` and `:prod` each is a straight
@@ -58,16 +58,6 @@ defmodule Shuttle.Env do
         {:ok, {:set, value}} -> value
         {:ok, :delete} -> default
         :error -> Application.get_env(:shuttle, key, default)
-      end
-    end
-
-    @doc "`Application.fetch_env(:shuttle, key)`, through the caller's scope."
-    @spec fetch_app(atom()) :: {:ok, term()} | :error
-    def fetch_app(key) do
-      case lookup(:app, key) do
-        {:ok, {:set, value}} -> {:ok, value}
-        {:ok, :delete} -> :error
-        :error -> Application.fetch_env(:shuttle, key)
       end
     end
 
@@ -280,10 +270,6 @@ defmodule Shuttle.Env do
     @doc "`Application.get_env(:shuttle, key, default)`."
     @spec app(atom(), term()) :: term()
     def app(key, default \\ nil), do: Application.get_env(:shuttle, key, default)
-
-    @doc "`Application.fetch_env(:shuttle, key)`."
-    @spec fetch_app(atom()) :: {:ok, term()} | :error
-    def fetch_app(key), do: Application.fetch_env(:shuttle, key)
 
     @doc "`System.find_executable/1`."
     @spec find_executable(String.t()) :: String.t() | nil

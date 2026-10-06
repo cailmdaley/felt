@@ -160,3 +160,35 @@ defmodule Shuttle.EnvOwnerByPidTest do
     Process.exit(impostor, :kill)
   end
 end
+
+defmodule Shuttle.EnvScopeHygieneTest do
+  use ExUnit.Case, async: true
+
+  test "a write from outside a test process raises and registers no owner" do
+    parent = self()
+
+    spawn(fn ->
+      result =
+        try do
+          Shuttle.Test.Env.put_env("SHUTTLE_ENV_HYGIENE_PROBE", "x")
+        rescue
+          e -> {:raised, e}
+        end
+
+      send(parent, {:done, self(), result})
+    end)
+
+    assert_receive {:done, pid, {:raised, _}}
+    refute :ets.member(Shuttle.Env.table(), {:owner, pid})
+  end
+
+  test "clearing a scope erases its persistent_term slots" do
+    Shuttle.Test.Env.own_scope!()
+    key = Shuttle.Env.scope_key({__MODULE__, :slot})
+    assert key == {{__MODULE__, :slot}, self()}
+    :persistent_term.put(key, :value)
+
+    Shuttle.Test.Env.clear(self())
+    assert :persistent_term.get(key, :gone) == :gone
+  end
+end
