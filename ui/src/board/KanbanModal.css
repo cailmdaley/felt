@@ -85,22 +85,35 @@
   top: 0;
   pointer-events: none;
 }
-/* On dark stock iron gall is the light ink, so the ornament is gilt instead:
-   the dark themes' gold, laid thinly over the coloured letter. */
-:root[data-ws-appearance='dark'] .kbn-cap::before { color: var(--kbn-owed); opacity: 0.3; }
-/* Per-column F2 body tinting. The three live columns each get a
-   distinct hue against the parchment, with cinnabar pulled OUT of
-   the column row (it already carries the masthead K, the cinnabar
-   fleuron, and the section-strip dropcaps — the page had too much
-   red when In Flight also wore it):
+/* On dark stock the initial is chrysography: the vine is laid in gilt BEHIND
+   the letter, burnished from bright gold at the upper left down to a rosy
+   gold, and the pigment letter sits on it inside a hairline of the stock so
+   the two never muddy into one block. The ::before box is padded out past the
+   glyph's overhang so the gradient clipped to its text covers every tendril. */
+:root[data-ws-appearance='dark'] .kbn-cap {
+  isolation: isolate;
+  text-shadow: 0 0 .025em var(--kbn-parchment), 0 0 .05em var(--kbn-parchment), 0 0 .08em var(--kbn-parchment);
+}
+:root[data-ws-appearance='dark'] .kbn-cap::before {
+  z-index: -1;
+  left: -.2em; top: -.2em; padding: .2em;
+  color: transparent;
+  text-shadow: none;
+  background: linear-gradient(160deg, var(--kbn-owed-bright) 25%, var(--kbn-owed) 50%, color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-you)) 75%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  opacity: 0.66;
+}
+/* Per-column F2 body tinting. Each live column's initial wears its own
+   pigment, and cinnabar stays out of the row (it carries the masthead K, the
+   fleuron and the section-strip dropcaps):
 
-     Drafts          dark warm slate  not-yet-illuminated, neutral
-                                       but strong against parchment
-     In Flight       cobalt            the active rubric, now in blue
-     Awaiting        teal              verdigris, ripening
+     Drafts          ochre      what is owed: a draft waits on you
+     In Flight       cobalt     the machine at work
+     Awaiting        verdigris  the verdict axis
 
-   F1 flourish (.kbn-cap::before, ochre) stays consistent across all
-   columns — the gilt language ties the row together.
+   The F1 vine (.kbn-cap::before) is the same across all three — iron gall on
+   paper, gilt on dark stock — so the row reads as one hand.
 
    There is no Tempered or Discarded column styling: those buckets exist in
    classifyFiber (ui/src/board/KanbanRules.ts) and feed the timeline, but
