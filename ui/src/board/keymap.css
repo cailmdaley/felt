@@ -23,7 +23,7 @@
   background: var(--ws-paper);
   border: 1px solid var(--ws-hairline);
   border-radius: var(--ws-radius);
-  box-shadow: 0 12px 48px color-mix(in srgb, var(--kbn-ink) 15%, transparent);
+  box-shadow: 0 12px 48px color-mix(in srgb, var(--kbn-shade) 15%, transparent);
 }
 .kbn-keymap-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .kbn-keymap-dialog h2 { margin: 0; font: 500 var(--ws-heading-size)/1.1 var(--ws-serif); }

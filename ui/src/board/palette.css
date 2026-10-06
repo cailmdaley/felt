@@ -129,6 +129,14 @@
   /* The machine's cobalt deepened, for a border or a pressed control. */
   --kbn-agent-deep: #2C4378;
 
+  /* Grounds that stay dark in either appearance: the board's toast, and a
+     code block set in the prose. Each carries its own ink. */
+  --kbn-toast: var(--kbn-ink);
+  --kbn-toast-ink: var(--kbn-form-paper);
+  --kbn-toast-edge: transparent;
+  --kbn-code-ground: var(--kbn-graphite);
+  --kbn-code-ink: var(--kbn-hairline);
+
   /* MACHINERY HUES. A queued card waits behind another (violet); a standing
      role sleeps on its cron (slate); a launch is held by the daemon (steel). */
   --kbn-queue: #6B4E71;
@@ -166,6 +174,13 @@
   --kbn-agent-deep: color-mix(in srgb, var(--kbn-agent) 80%, var(--kbn-ink));
   --kbn-on-pigment: var(--kbn-parchment);
   --kbn-shade: #000000;
+  /* The toast is the brightest sheet in the room; a code block is a well
+     sunk a step below the page it sits on. */
+  --kbn-toast: var(--kbn-blank);
+  --kbn-toast-ink: var(--kbn-ink);
+  --kbn-toast-edge: var(--kbn-hairline);
+  --kbn-code-ground: color-mix(in srgb, var(--kbn-paper) 55%, var(--kbn-parchment));
+  --kbn-code-ink: var(--kbn-ink-soft);
 }
 
 /* NIGHT CHART — navy-black stock, parchment ink, gold ornament. The desk is

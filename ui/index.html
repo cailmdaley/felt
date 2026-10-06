@@ -4,6 +4,21 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#EDE2CE" />
+    <!-- Appearance before first paint: the same choice appearance.ts reads
+         (key, modes, dark themes and defaults), so a dark reader never sees
+         the parchment flash before the bundle runs. -->
+    <script>
+      (function () {
+        var root = document.documentElement, choice = {}, dark = false
+        try { choice = JSON.parse(localStorage.getItem('shuttle.appearance') || 'null') || {} } catch (e) { choice = {} }
+        if (choice.mode === 'dark') dark = true
+        else if (choice.mode !== 'light') { try { dark = matchMedia('(prefers-color-scheme: dark)').matches } catch (e) { dark = false } }
+        var theme = choice.dark === 'lamplight' ? 'lamplight' : 'night-chart'
+        root.dataset.wsAppearance = dark ? 'dark' : 'light'
+        root.dataset.wsDarkTheme = theme
+        if (dark) document.querySelector('meta[name="theme-color"]').content = theme === 'lamplight' ? '#0F0B0F' : '#0A1019'
+      })()
+    </script>
     <title>Shuttle</title>
     <link rel="icon" href="/favicon.ico" sizes="32x32 16x16" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

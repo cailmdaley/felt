@@ -140,8 +140,8 @@
 .kbn-detail-prose pre.md-code-block {
   margin: 0 0 0.95em;
   padding: 0.9em 1.05em;
-  background: var(--kbn-graphite);
-  color: var(--kbn-hairline);
+  background: var(--kbn-code-ground);
+  color: var(--kbn-code-ink);
   border-radius: 6px;
   overflow-x: auto;
   font-size: 0.82em;
