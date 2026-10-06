@@ -22,7 +22,9 @@ const (
 	MaxRequestFrame    = 32 << 20
 )
 
-func ReadAttachments(paths []string) ([]Attachment, error) {
+// ReadAttachments reads the files at paths, resolving a relative one against
+// env's working directory.
+func ReadAttachments(env *sysenv.Env, paths []string) ([]Attachment, error) {
 	if len(paths) > MaxAttachments {
 		return nil, errCode("invalid_request", "at most %d attachments are allowed", MaxAttachments)
 	}
@@ -33,14 +35,15 @@ func ReadAttachments(paths []string) ([]Attachment, error) {
 		if err := validateAttachmentName(name); err != nil {
 			return nil, err
 		}
-		info, err := os.Stat(path)
+		local := env.Resolve(path)
+		info, err := os.Stat(local)
 		if err != nil {
 			return nil, fmt.Errorf("inspect attachment %q: %w", path, err)
 		}
 		if !info.Mode().IsRegular() {
 			return nil, errCode("invalid_request", "attachment %q is not a regular file", path)
 		}
-		fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+		fd, err := syscall.Open(local, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 		if err != nil {
 			return nil, fmt.Errorf("read attachment %q: %w", path, err)
 		}

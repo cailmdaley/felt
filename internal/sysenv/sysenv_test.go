@@ -126,3 +126,44 @@ func TestCommandRunsInsideTheEnv(t *testing.T) {
 		t.Fatal("a command missing from the injected PATH ran")
 	}
 }
+
+func TestRelativeLookupsUseTheInjectedDirectory(t *testing.T) {
+	t.Parallel()
+	work := t.TempDir()
+	if err := os.Mkdir(filepath.Join(work, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(work, "bin"), "sysenv-relative-tool", "#!/bin/sh\necho relative\n")
+	if _, err := os.Stat(filepath.Join("bin", "sysenv-relative-tool")); err == nil {
+		t.Fatal("the process working directory already holds the tool")
+	}
+	env := New(work, []string{"PATH=bin"})
+
+	if got, err := env.LookPath("./bin/sysenv-relative-tool"); err != nil || got != "./bin/sysenv-relative-tool" {
+		t.Fatalf("LookPath(./bin/...) = %q, %v", got, err)
+	}
+	out, err := env.Command("./bin/sysenv-relative-tool").Output()
+	if err != nil || string(out) != "relative\n" {
+		t.Fatalf("Command(./bin/...) = %q, %v", out, err)
+	}
+
+	// A relative PATH entry finds the tool from the env's directory and, as
+	// exec.LookPath does, refuses it with ErrDot.
+	got, err := env.LookPath("sysenv-relative-tool")
+	if got != filepath.Join("bin", "sysenv-relative-tool") || !errors.Is(err, exec.ErrDot) {
+		t.Fatalf("LookPath via relative PATH = %q, %v; want bin/sysenv-relative-tool, ErrDot", got, err)
+	}
+	if err := env.Command("sysenv-relative-tool").Run(); !errors.Is(err, exec.ErrDot) {
+		t.Fatalf("Command via relative PATH ran: %v", err)
+	}
+
+	if got := env.Resolve("bin/x"); got != filepath.Join(work, "bin", "x") {
+		t.Fatalf("Resolve(relative) = %q", got)
+	}
+	if got := env.Resolve("/abs/x"); got != "/abs/x" {
+		t.Fatalf("Resolve(absolute) = %q", got)
+	}
+	if got := OS().Resolve("bin/x"); got != "bin/x" {
+		t.Fatalf("live Resolve = %q, want the path unchanged", got)
+	}
+}

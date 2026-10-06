@@ -95,13 +95,15 @@ defmodule Shuttle.Env do
 
     @doc """
     `System.cmd/3` as the caller's scope sees it: the executable resolved on
-    the scoped `PATH`, the scoped env handed to the child (an `env:` entry the
-    caller passes wins).
+    the scoped `PATH` (a miss raises `System.cmd/3`'s `:enoent`), the scoped env
+    handed to the child (an `env:` entry the caller passes wins).
     """
     @spec cmd(String.t(), [String.t()], keyword()) :: {Collectable.t(), non_neg_integer()}
     def cmd(command, args, opts \\ []) do
       executable =
-        if Path.type(command) == :absolute, do: command, else: find_executable(command) || command
+        if Path.type(command) == :absolute,
+          do: command,
+          else: find_executable(command) || :erlang.error(:enoent, [command, args, opts])
 
       opts =
         case child_env() do

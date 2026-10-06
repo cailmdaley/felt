@@ -107,6 +107,7 @@ defmodule Shuttle.RemoteRegistry do
       :trip_cooldown_schedule_ms,
       :user_uid,
       :remotes_token,
+      clock: &DateTime.utc_now/0,
       reload_from_file?: false,
       snapshots: %{}
     ]
@@ -160,6 +161,9 @@ defmodule Shuttle.RemoteRegistry do
       never abandons a remote.
     * `:user_uid` — override the local GUI UID used for `launchctl`
       labels (tests). Defaults to `$UID` / `id -u`.
+    * `:clock` — zero-arity fun returning the current `DateTime`, read for
+      every poll, recovery deadline and staleness view. Defaults to
+      `&DateTime.utc_now/0`; tests pass a fake clock they advance.
     * `:auto_poll` — whether to schedule the registry's background
       polling tick. Defaults to `true`; tests can set `false` and drive
       the registry deterministically with `poll_now/1`.
@@ -294,7 +298,8 @@ defmodule Shuttle.RemoteRegistry do
       user_uid: user_uid,
       snapshots: snapshots,
       reload_from_file?: reload_from_file?,
-      remotes_token: Shuttle.Remotes.config_token()
+      remotes_token: Shuttle.Remotes.config_token(),
+      clock: Keyword.get(opts, :clock, &DateTime.utc_now/0)
     }
 
     state =
@@ -329,7 +334,7 @@ defmodule Shuttle.RemoteRegistry do
             recovery
             | state: :degraded,
               step: :bounce_tunnel,
-              action_due_at: DateTime.utc_now(),
+              action_due_at: state.clock.(),
               next_retry_at: nil,
               last_action: "circuit breaker manually reset; re-running recovery cascade"
           })
@@ -388,7 +393,7 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   defp poll_configured(%State{remotes: remotes} = state) do
-    now = DateTime.utc_now()
+    now = state.clock.()
     now_ms = DateTime.to_unix(now, :millisecond)
 
     new_snapshots =
@@ -1093,7 +1098,7 @@ defmodule Shuttle.RemoteRegistry do
   # ── Views ──
 
   defp build_snapshots_view(%State{} = state) do
-    now = DateTime.utc_now()
+    now = state.clock.()
 
     Map.new(state.snapshots, fn {name, entry} ->
       {name, view_entry(entry, now)}
@@ -1103,7 +1108,7 @@ defmodule Shuttle.RemoteRegistry do
   defp build_one_view(%State{} = state, name) do
     case Map.get(state.snapshots, name) do
       nil -> nil
-      entry -> view_entry(entry, DateTime.utc_now())
+      entry -> view_entry(entry, state.clock.())
     end
   end
 

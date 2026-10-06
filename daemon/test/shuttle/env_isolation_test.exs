@@ -28,6 +28,13 @@ defmodule Shuttle.EnvIsolationTest.Shared do
 
   @key "SHUTTLE_ENV_ISOLATION_PROBE"
 
+  # How long one module waits for the other at each rendezvous. The two are
+  # scheduled independently among every async module in the suite, so on a
+  # loaded machine the peer can start long after this one; the bound is
+  # failure-only, and the modules' test timeout sits above two of them.
+  @rendezvous_ms 100_000
+  def rendezvous_ms, do: @rendezvous_ms
+
   def run(label) do
     other = if label == "a", do: "b", else: "a"
     rendezvous = :"shuttle_env_isolation_#{label}"
@@ -81,12 +88,12 @@ defmodule Shuttle.EnvIsolationTest.Shared do
     assert_receive {:outside, {nil, nil}}
 
     send_peer_done(other)
-    assert_receive {:peer_done, ^other}, 30_000
+    assert_receive {:peer_done, ^other}, @rendezvous_ms
   end
 
   defp wait_for_peer(other) do
     send_when_registered(:"shuttle_env_isolation_#{other}", {:peer_ready, self()})
-    assert_receive {:peer_ready, _}, 30_000
+    assert_receive {:peer_ready, _}, @rendezvous_ms
   end
 
   defp send_peer_done(other) do
@@ -94,20 +101,30 @@ defmodule Shuttle.EnvIsolationTest.Shared do
     send_when_registered(:"shuttle_env_isolation_#{other}", {:peer_done, label})
   end
 
-  defp send_when_registered(name, msg, tries \\ 500) do
-    case Process.whereis(name) do
-      nil when tries > 0 ->
-        Process.sleep(10)
-        send_when_registered(name, msg, tries - 1)
+  defp send_when_registered(name, msg) do
+    deadline = System.monotonic_time(:millisecond) + @rendezvous_ms
+    send_when_registered(name, msg, deadline)
+  end
 
+  defp send_when_registered(name, msg, deadline) do
+    case Process.whereis(name) do
       pid when is_pid(pid) ->
         send(pid, msg)
+
+      nil ->
+        if System.monotonic_time(:millisecond) > deadline,
+          do: flunk("#{inspect(name)} never registered")
+
+        Process.sleep(10)
+        send_when_registered(name, msg, deadline)
     end
   end
 end
 
 defmodule Shuttle.EnvIsolationATest do
   use ExUnit.Case, async: true
+
+  @moduletag timeout: 3 * Shuttle.EnvIsolationTest.Shared.rendezvous_ms()
 
   test "scope a sees only its own overrides" do
     Shuttle.EnvIsolationTest.Shared.run("a")
@@ -116,6 +133,8 @@ end
 
 defmodule Shuttle.EnvIsolationBTest do
   use ExUnit.Case, async: true
+
+  @moduletag timeout: 3 * Shuttle.EnvIsolationTest.Shared.rendezvous_ms()
 
   test "scope b sees only its own overrides" do
     Shuttle.EnvIsolationTest.Shared.run("b")

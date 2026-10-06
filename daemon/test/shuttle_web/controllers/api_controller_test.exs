@@ -27,13 +27,14 @@ defmodule ShuttleWeb.APIControllerTest do
     mock_felt_root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(mock_felt_root) end)
 
-    start_poller!(
-      runner: MockRunner,
-      poll_interval_ms: 600_000,
-      felt_stores: [MockRunner.felt_root()]
-    )
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        poll_interval_ms: 600_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
 
-    Process.sleep(50)
+    await_boot_cycle!(poller)
     :ok
   end
 

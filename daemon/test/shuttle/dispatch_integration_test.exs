@@ -1649,8 +1649,11 @@ defmodule Shuttle.DispatchIntegrationTest do
       # so the assertion isolates this poll cycle's dispatch behavior.
       IntegrationRunner.reset(host)
       session = FiberUid.session("tests/standing-temper-rest")
+      # Wait for a whole cycle to apply, so the refute speaks for one.
+      assert eventually(fn -> not :sys.get_state(poller).poll_check_in_progress end)
+      cycles = :sys.get_state(poller).poll_cycles
       send(poller, :run_poll_cycle)
-      Process.sleep(150)
+      assert eventually(fn -> :sys.get_state(poller).poll_cycles > cycles end)
 
       refute Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
                cmd == "tmux" and Enum.any?(args, &(&1 == session))

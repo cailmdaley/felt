@@ -138,17 +138,26 @@ describe('settingsHotkey', () => {
     // ⌥, is a CHARACTER on several layouts, and ⇧, someone else's keystroke,
     // so either disqualifies — and outranks the chord: ⌘⌥, and ⌘⇧, are
     // nobody's preferences shortcut.
-    const expected = (key: string, m: Omit<HotkeyLike, 'key'>): ReturnType<typeof settingsHotkey> => {
-      if (key !== ',' || m.altKey || m.shiftKey) return null
-      return m.metaKey || m.ctrlKey ? 'chord' : 'bare'
+    // The only strokes that answer, by the modifiers held; every other key and
+    // every other combination — anything holding ⌥ or ⇧ — answers null.
+    const ANSWERS: Record<string, ReturnType<typeof settingsHotkey>> = {
+      ', [none]': 'bare',
+      ', [metaKey]': 'chord',
+      ', [ctrlKey]': 'chord',
+      ', [metaKey+ctrlKey]': 'chord',
     }
     const failures = KEYS.flatMap((key) => chords.flatMap((m) => {
+      const as = `${key} [${MODIFIERS.filter((name) => m[name]).join('+') || 'none'}]`
       const got = settingsHotkey({ key, ...m })
-      const want = expected(key, m)
-      const held = MODIFIERS.filter((name) => m[name]).join('+') || 'none'
-      return got === want ? [] : [`${key} [${held}]: ${got} ≠ ${want}`]
+      const want = ANSWERS[as] ?? null
+      return got === want ? [] : [`${as}: ${got} ≠ ${want}`]
     }))
     expect(failures).toEqual([])
+  })
+
+  it('reads a stroke that carries no modifier fields at all as bare', () => {
+    expect(settingsHotkey({ key: ',' })).toBe('bare')
+    expect(settingsHotkey({ key: '.' })).toBeNull()
   })
 })
 

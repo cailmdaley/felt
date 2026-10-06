@@ -73,9 +73,25 @@ Application.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
 )
 
+# A marker executable on the VM's real PATH and on no scoped one:
+# `Shuttle.EnvPathMissTest` asserts a scoped PATH that omits it never runs it.
+# It only prints its name; run once here so macOS assesses it before any test.
+marker_dir = Path.join(test_tmp, "real-path-marker")
+File.mkdir_p!(marker_dir)
+marker = Path.join(marker_dir, "shuttle-real-path-marker")
+File.write!(marker, "#!/bin/sh\nprintf shuttle-real-path-marker\n")
+File.chmod!(marker, 0o755)
+System.put_env("PATH", marker_dir <> ":" <> System.get_env("PATH", ""))
+{"shuttle-real-path-marker", 0} = System.cmd(marker, [])
+
 # Per-test scoped env overrides (Shuttle.Env / Shuttle.Test.Env).
 Shuttle.Test.Env.start!()
 
+# `@tag :timing` marks the tests whose subject is a wall-clock deadline the
+# code under test reads itself, with no injectable clock. Each is arranged so
+# load can only hide a regression, not fail a correct implementation, but it
+# is still the tier to suspect first on a loaded machine. It runs by default;
+# `mix test --only timing` or `--exclude timing` selects it.
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
 # A bare `assert_receive` waits this long for its message. It is reached only
 # when the message never comes, so it costs a passing test nothing, and it is

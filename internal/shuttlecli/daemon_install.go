@@ -174,6 +174,7 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 	if options.Log == "" {
 		options.Log = a.defaultDaemonLog(options.OS)
 	}
+	options.Log = a.env.Resolve(options.Log)
 	if options.Path == "" || !options.TmuxTmpdirSet {
 		login := a.loginEnvCapture()
 		if options.Path == "" {

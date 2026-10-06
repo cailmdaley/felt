@@ -54,6 +54,7 @@ func (a *app) setupCmd() *cobra.Command {
 	command.AddCommand(a.setupClaudeCmd())
 	command.AddCommand(a.setupCodexCmd())
 	command.AddCommand(a.setupPiCmd())
+	command.AddCommand(a.setupReceiptCmd())
 	command.AddCommand(a.setupSkillsCmd())
 	command.AddCommand(a.setupValidateCmd())
 	return command
@@ -191,6 +192,7 @@ $FELT_PLUGIN_DIR, then a directory marketplace registered with Claude Code,
 then Claude Code's clone at ~/.claude/plugins/marketplaces/` + marketplaceName + `.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, _ := cmd.Flags().GetString("target")
+			target = a.env.Resolve(target)
 			source, _ := cmd.Flags().GetString("source")
 
 			if target == "" {
@@ -231,6 +233,7 @@ nothing installed, so release and CI gates can run it.`,
 				return err
 			}
 			executable, _ := cmd.Flags().GetString("executable")
+			executable = a.env.Resolve(executable)
 			if executable == "" {
 				executable, err = a.currentFeltExecutable()
 				if err != nil {
