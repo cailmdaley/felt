@@ -511,6 +511,12 @@ describe('Resting clusters split when they overflow', () => {
   const keysOf = (cards: KanbanCard[]): Array<[string, number]> =>
     clusterStashCards(cards).map((c) => [c.key, c.cards.length])
 
+  it('leaves a cluster of four alone', () => {
+    const cards = ['science/unions/a', 'science/unions/b', 'science/spt3g/c', 'science/spt3g/d']
+      .map((id) => restingCard(id))
+    expect(keysOf(cards)).toEqual([['science', 4]])
+  })
+
   it('splits six across two subdirectories into two clusters', () => {
     // The case the operator named: "science 6" → "science/unions 3" + "science/spt3g 3".
     const cards = [
@@ -534,15 +540,16 @@ describe('Resting clusters split when they overflow', () => {
 
   // A cluster splits on its next folder only while it holds more than four
   // cards and that folder tells its cards apart; a card with no deeper folder
-  // stays at its level. So clusters partition the cards, each cluster's key is
-  // a folder every member sits in, an overfull cluster's members all share (or
-  // all lack) the next folder, and a cluster below the top level exists only
-  // because its parent group overflowed.
+  // stays at its level. So clusters partition the cards, no two share a key,
+  // each cluster's key is a folder every member sits in, an overfull cluster's
+  // members all share (or all lack) the next folder, and a cluster below the
+  // top level exists only because its parent group overflowed.
   it('splits overfull groups on the folder that tells them apart, and only those', () => {
     fc.assert(fc.property(restingIds, (ids) => {
       const cards = ids.map((id) => restingCard(id))
       const clusters = clusterStashCards(cards)
       expect(clusters.flatMap((c) => c.cards.map((card) => card.id)).sort()).toEqual([...ids].sort())
+      expect(new Set(clusters.map((c) => c.key)).size, 'one cluster per key').toBe(clusters.length)
       for (const { key, cards: members } of clusters) {
         const depth = key.split('/').length
         for (const card of members) expect(prefix(card.id, depth), `${card.id} under ${key}`).toBe(key)
