@@ -1447,16 +1447,15 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
   defp start_or_reuse_poller(store) do
     case GenServer.whereis(Shuttle.Env.server(Shuttle.Poller)) do
       nil ->
+        # Supervised, so it is stopped before on_exit runs rather than racing
+        # the test's own exit.
         {:ok, pid} =
-          Shuttle.Poller.start_link(
-            name: nil,
+          Shuttle.Test.PollerHelpers.start_poller!(
             poll_interval_ms: 600_000,
             max_concurrent_workers: 0,
-            felt_stores: [store],
-            daemon_heartbeat_file: Shuttle.Test.PollerHelpers.test_heartbeat_file()
+            felt_stores: [store]
           )
 
-        Shuttle.Test.Env.put_server(Shuttle.Poller, pid)
         {pid, nil}
 
       pid ->
