@@ -94,7 +94,7 @@ defmodule Shuttle.Test.PollerHelpers do
   racing it. The ~30 s ceiling is reached only when the cycle never lands.
   """
   def await_boot_cycle!(poller, attempts \\ 3_000) do
-    state = :sys.get_state(poller)
+    state = :sys.get_state(poller, 30_000)
 
     cond do
       state.poll_cycles > 0 and not state.poll_check_in_progress ->

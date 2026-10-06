@@ -16,6 +16,11 @@ defmodule Shuttle.PollerTest do
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
   alias Shuttle.Test.Env
 
+  # Every `:sys.get_state/2` on a Poller waits this long: on a loaded machine
+  # a Poller applying a cycle can take longer than the 5 s default to answer,
+  # and that is "not yet", not a failure.
+  @state_timeout 30_000
+
   # ── Setup ──
 
   setup do
@@ -102,7 +107,7 @@ defmodule Shuttle.PollerTest do
   # test, so no further cycle can start behind the assertions.
   defp settle_poller!(poller) do
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
              state.poll_cycles > 0 and not state.poll_check_in_progress
            end)
 
@@ -111,11 +116,11 @@ defmodule Shuttle.PollerTest do
 
   defp sync_poll_cycle!(poller) do
     settle_poller!(poller)
-    before = :sys.get_state(poller).poll_cycles
+    before = :sys.get_state(poller, @state_timeout).poll_cycles
 
     send(poller, :run_poll_cycle)
 
-    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > before end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > before end)
     :ok
   end
 
@@ -401,7 +406,10 @@ defmodule Shuttle.PollerTest do
            end)
 
     assert {:ok, fiber} =
-             Poller.fetch_fiber_full("tests/projected-discovery", :sys.get_state(poller))
+             Poller.fetch_fiber_full(
+               "tests/projected-discovery",
+               :sys.get_state(poller, @state_timeout)
+             )
 
     assert get_in(fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-sonnet"
 
@@ -706,7 +714,7 @@ defmodule Shuttle.PollerTest do
       )
 
     # Let the boot poll warm the cache, then force it cold and re-arm the guard.
-    assert wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).document_cache_ready end)
 
     :sys.replace_state(poller, fn state ->
       %{state | document_cache_ready: false, cold_feed_logged: false, document_cache: %{}}
@@ -718,7 +726,7 @@ defmodule Shuttle.PollerTest do
         {:ok, _} = Poller.cached_fiber_documents(poller)
         {:ok, _} = Poller.cached_fiber_documents(poller)
         # Flush the GenServer so its logging is done before capture_log returns.
-        _ = :sys.get_state(poller)
+        _ = :sys.get_state(poller, @state_timeout)
       end)
 
     occurrences =
@@ -728,7 +736,7 @@ defmodule Shuttle.PollerTest do
       |> Kernel.-(1)
 
     assert occurrences == 1
-    assert :sys.get_state(poller).cold_feed_logged == true
+    assert :sys.get_state(poller, @state_timeout).cold_feed_logged == true
   end
 
   test "owner feed stamps serve-time runtime onto an owned fiber with a live worker" do
@@ -1062,7 +1070,7 @@ defmodule Shuttle.PollerTest do
              end
            end)
 
-    state_before = :sys.get_state(poller)
+    state_before = :sys.get_state(poller, @state_timeout)
     [{runtime_key, meta_before}] = Map.to_list(state_before.running)
     original_watcher_pid = meta_before.pid
     assert is_pid(original_watcher_pid) and Process.alive?(original_watcher_pid)
@@ -1081,7 +1089,7 @@ defmodule Shuttle.PollerTest do
     # failed kill must re-arm a fresh watcher against the still-live
     # session — otherwise nobody observes its eventual exit until this
     # daemon restarts, a second flavor of ghost worker.
-    state_after = :sys.get_state(poller)
+    state_after = :sys.get_state(poller, @state_timeout)
     meta_after = Map.get(state_after.running, runtime_key)
     assert is_pid(meta_after.pid) and Process.alive?(meta_after.pid)
     refute meta_after.pid == original_watcher_pid
@@ -1310,16 +1318,16 @@ defmodule Shuttle.PollerTest do
     send(poller, :run_poll_cycle)
     assert_receive {:ls_held, reader}
 
-    %{poll_token: token, poll_cycles: cycles} = :sys.get_state(poller)
+    %{poll_token: token, poll_cycles: cycles} = :sys.get_state(poller, @state_timeout)
     assert is_map(Poller.snapshot(poller, 30_000))
 
-    state = :sys.get_state(poller)
+    state = :sys.get_state(poller, @state_timeout)
     assert state.poll_check_in_progress
     assert state.poll_token == token
     assert state.poll_cycles == cycles
 
     send(reader, :release_ls)
-    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > cycles end)
   end
 
   test "a completed poll cycle cancels its stall watchdog" do
@@ -1341,18 +1349,18 @@ defmodule Shuttle.PollerTest do
       )
 
     settle_poller!(poller)
-    cycles = :sys.get_state(poller).poll_cycles
+    cycles = :sys.get_state(poller, @state_timeout).poll_cycles
     MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
     assert_receive {:ls_held, reader}
 
-    watchdog = :sys.get_state(poller).poll_stall_timer_ref
+    watchdog = :sys.get_state(poller, @state_timeout).poll_stall_timer_ref
     assert is_integer(Process.read_timer(watchdog))
 
     send(reader, :release_ls)
-    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > cycles end)
     assert Process.read_timer(watchdog) == false
-    state = :sys.get_state(poller)
+    state = :sys.get_state(poller, @state_timeout)
     assert state.poll_check_in_progress == false
     assert state.poll_token == nil
     assert state.poll_task_pid == nil
@@ -1381,12 +1389,13 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
+    assert wait_until(fn -> is_pid(:sys.get_state(poller, @state_timeout).poll_task_pid) end)
 
-    %{poll_task_pid: first_task, poll_token: abandoned_token} = :sys.get_state(poller)
+    %{poll_task_pid: first_task, poll_token: abandoned_token} =
+      :sys.get_state(poller, @state_timeout)
 
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
 
              state.poll_stalls >= 1 and is_pid(state.poll_task_pid) and
                state.poll_task_pid != first_task
@@ -1394,10 +1403,10 @@ defmodule Shuttle.PollerTest do
 
     assert wait_until(fn -> not Process.alive?(first_task) end)
 
-    second_task = :sys.get_state(poller).poll_task_pid
+    second_task = :sys.get_state(poller, @state_timeout).poll_task_pid
 
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
 
              state.poll_stalls >= 2 and is_pid(state.poll_task_pid) and
                state.poll_task_pid != second_task
@@ -1416,19 +1425,19 @@ defmodule Shuttle.PollerTest do
     # such a cycle.
     MockRunner.set_ls_delay(60_000)
     :sys.replace_state(poller, &%{&1 | stall_timeout_ms: 600_000})
-    token_at_swap = :sys.get_state(poller).poll_token
+    token_at_swap = :sys.get_state(poller, @state_timeout).poll_token
 
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
              is_pid(state.poll_task_pid) and state.poll_token not in [nil, token_at_swap]
            end)
 
     # Inject the first, abandoned cycle's reply. The current cycle remains
     # authoritative: its token stands and no cycle is counted as applied.
-    %{poll_token: current_token, poll_cycles: cycles} = :sys.get_state(poller)
+    %{poll_token: current_token, poll_cycles: cycles} = :sys.get_state(poller, @state_timeout)
     send(poller, {:poll_world, abandoned_token, {:error, :late_abandoned_cycle}})
     _ = Poller.snapshot(poller)
-    state = :sys.get_state(poller)
+    state = :sys.get_state(poller, @state_timeout)
     assert state.poll_token == current_token
     assert state.poll_cycles == cycles
   end
@@ -1448,9 +1457,9 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
+    assert wait_until(fn -> is_pid(:sys.get_state(poller, @state_timeout).poll_task_pid) end)
 
-    task_pid = :sys.get_state(poller).poll_task_pid
+    task_pid = :sys.get_state(poller, @state_timeout).poll_task_pid
     monitor = Process.monitor(poller)
     Process.exit(poller, :shutdown)
 
@@ -2209,7 +2218,7 @@ defmodule Shuttle.PollerTest do
     # Adopted as running while quarantined (not parked): observed-running now
     # carries this fiber's key, and nothing is in pending_launch.
     assert_eventually(fn ->
-      state = :sys.get_state(poller)
+      state = :sys.get_state(poller, @state_timeout)
       assert MapSet.member?(state.was_running, FiberUid.for(fiber_id))
       assert Enum.any?(state.running, fn {_k, m} -> Map.get(m, :fiber_id) == fiber_id end)
     end)
@@ -2797,7 +2806,7 @@ defmodule Shuttle.PollerTest do
     write_heartbeat!()
 
     {:ok, poller} = start_quarantined_poller!(:test_poller_hb_scan_unknown)
-    refute :sys.get_state(poller).adopted?
+    refute :sys.get_state(poller, @state_timeout).adopted?
 
     # Force a cycle and wait for it to park the candidate: the hold is observed
     # doing its job, not merely set.
@@ -2873,11 +2882,15 @@ defmodule Shuttle.PollerTest do
     assert_eventually(fn ->
       assert {:ok, hb} = Shuttle.DaemonHeartbeat.read(heartbeat_file())
       # This incarnation's own boot time, appended to the inherited ring.
-      assert hb["boots"] == [previous_boot, :sys.get_state(poller).daemon_booted_at]
-      assert hb["booted_at"] == :sys.get_state(poller).daemon_booted_at
+      assert hb["boots"] == [
+               previous_boot,
+               :sys.get_state(poller, @state_timeout).daemon_booted_at
+             ]
+
+      assert hb["booted_at"] == :sys.get_state(poller, @state_timeout).daemon_booted_at
       assert FiberUid.for(live_id) in hb["workers"]
       # Stamped with this daemon's fleet identity and this machine's node name.
-      assert hb["host"] == :sys.get_state(poller).own_host_id
+      assert hb["host"] == :sys.get_state(poller, @state_timeout).own_host_id
       assert hb["node"] == Shuttle.DaemonHeartbeat.node_name()
       assert hb["os_pid"] == System.pid()
       # And it keeps writing: `at` advances past the boot write.
@@ -3021,7 +3034,7 @@ defmodule Shuttle.PollerTest do
       )
 
     assert_eventually(fn ->
-      state = :sys.get_state(poller)
+      state = :sys.get_state(poller, @state_timeout)
       assert MapSet.member?(state.was_running, FiberUid.for(fiber_id))
       assert Enum.any?(state.running, fn {_k, m} -> Map.get(m, :fiber_id) == fiber_id end)
     end)
@@ -3342,7 +3355,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [store]
       )
 
-    assert wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).document_cache_ready end)
 
     assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
 
@@ -3392,7 +3405,7 @@ defmodule Shuttle.PollerTest do
     # Hold the next poll inside its read-only felt walk; its snapshot still sees
     # the role as the closed (awaiting) document.
     settle_poller!(poller)
-    cycles = :sys.get_state(poller).poll_cycles
+    cycles = :sys.get_state(poller, @state_timeout).poll_cycles
     MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
     assert_receive {:ls_held, reader}
@@ -3403,7 +3416,7 @@ defmodule Shuttle.PollerTest do
 
     # The held poll completes and applies against current state.
     send(reader, :release_ls)
-    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > cycles end)
 
     assert File.read!(doc_path) =~ "status: active",
            "a poll completing after the accept reverted the acceptance to awaiting"
@@ -4218,7 +4231,7 @@ defmodule Shuttle.PollerTest do
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, [])
 
     # The in-memory running registry is keyed by uid.
-    state = :sys.get_state(poller)
+    state = :sys.get_state(poller, @state_timeout)
     assert Map.has_key?(state.running, uid)
     refute Map.has_key?(state.running, fiber_id)
 
@@ -5472,7 +5485,7 @@ defmodule Shuttle.PollerTest do
              sync_poll_cycle!(poller)
 
              running =
-               :sys.get_state(poller).running
+               :sys.get_state(poller, @state_timeout).running
                |> Enum.map(fn {_k, meta} -> meta.fiber_id end)
                |> MapSet.new()
 
