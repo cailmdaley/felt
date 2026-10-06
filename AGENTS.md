@@ -43,6 +43,7 @@ lives in the docs site (`docs/`, published to
 | Event stream + ledger writer/reader contract | [`docs/dev/event-stream.md`](docs/dev/event-stream.md) |
 | Plugin integration, `scripts/release.sh`, release candidates | [`docs/dev/releasing.md`](docs/dev/releasing.md) |
 | Codebase layout, test suites | [`docs/dev/layout.md`](docs/dev/layout.md) |
+| Writing a test: where it goes, tiers, fixtures, properties | [`docs/dev/testing.md`](docs/dev/testing.md) |
 | Installing a daemon, keep-alive, macOS TCC, sharp edges | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |
 | Fiber model, frontmatter, cross-project stores | [`docs/concepts/`](docs/concepts/) |
 | CLI verbs, daemon HTTP API | [`docs/reference/cli.md`](docs/reference/cli.md), [`docs/reference/api.md`](docs/reference/api.md) |
