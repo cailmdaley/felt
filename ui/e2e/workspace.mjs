@@ -686,6 +686,20 @@ test('A click on the bare stage closes the reader to its origin; a press on a ne
   // A drag across the bare stage is not a click.
   await p.mouse.move(size.width / 2, size.height - 8); await p.mouse.down(); await p.mouse.move(size.width / 2 + 60, size.height - 8, { steps: 4 }); await p.mouse.up()
   assert.ok(await p.locator('.kbn-reader-open').count(), 'a drag on the stage leaves the reader open')
+  // A click that dismisses a popover does only that: the composer's model list closes, the reader stays.
+  await choose(p, 'Constitution')
+  await selected(p).locator('.kbn-detail-controls-toggle').click()
+  await selected(p).locator('select[aria-label="Agent"]').click()
+  await p.locator('.ws-select-picker').waitFor()
+  await p.mouse.click(size.width / 2, size.height - 8)
+  await poll(p, () => !document.querySelector('.ws-select-picker'))
+  assert.ok(await p.locator('.kbn-reader-open').count(), 'dismissing the model list leaves the reader open')
+  // So does the bar's Find list, with the sidebar hidden.
+  await barFind(p).click(); await p.keyboard.type('mask')
+  await p.locator('.ws-switcher').waitFor()
+  await p.mouse.click(size.width / 2, size.height - 8)
+  await poll(p, () => !document.querySelector('.ws-switcher'))
+  assert.ok(await p.locator('.kbn-reader-open').count(), 'dismissing the Find list leaves the reader open')
   // The bare stage beneath the page closes the reader back to the Desk, as Escape does.
   await p.mouse.click(size.width / 2, size.height - 8)
   await poll(p, () => !document.querySelector('.kbn-reader-open'))

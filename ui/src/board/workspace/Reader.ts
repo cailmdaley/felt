@@ -74,6 +74,8 @@ const SIDEBAR_WIDTH_STORAGE = 'shuttle:workspace:sidebar-width'
 const SIDEBAR_STEP = 16
 /** A latched swipe that neither moves nor releases for this long has lost its release. */
 const SWIPE_QUIET = 500
+/** Anything a click outside dismisses: anchored lists and menus, the switcher, the conversation menu. */
+const POPOVERS = '[data-anchored], .ws-menu, .ws-switcher, .kbn-conversation-menu'
 
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
@@ -117,6 +119,8 @@ export class Reader {
   private swiping = false
   /** A press that began on the bare stage, which closes the reader if it ends there too. */
   private stagePress: { id: number; x: number; y: number } | null = null
+  /** Whether a popover was open when the current press began, before any outside-click handler closed it. */
+  private pressDismisses = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
@@ -261,6 +265,8 @@ export class Reader {
       onScroll: (key, y) => this.topbar.scroll(key, y),
       onSwipe: signal => this.swipe(signal),
     })
+    // Registered first on the window's capture phase, so it reads the page before any popover's own outside-click handler closes it.
+    window.addEventListener('pointerdown', this.notePopovers, true)
     this.stage.addEventListener('pointerdown', this.stageDown)
     this.stage.addEventListener('pointerup', this.stageUp)
     this.stage.addEventListener('pointercancel', () => { this.stagePress = null })
@@ -748,9 +754,12 @@ export class Reader {
   private bareStage(target: EventTarget | null): boolean {
     return target === this.stage || target === this.parallax || target === this.track
   }
+  private readonly notePopovers = (): void => {
+    this.pressDismisses = !!document.querySelector(POPOVERS)
+  }
   private readonly stageDown = (e: PointerEvent): void => {
-    // A press that dismisses an open menu does only that.
-    this.stagePress = e.button === 0 && e.isPrimary && !this.phone.matches && !this.expanded && !this.menu && !this.picker.isOpen && this.bareStage(e.target)
+    // A press that dismisses an open popover or picker does only that.
+    this.stagePress = e.button === 0 && e.isPrimary && !this.phone.matches && !this.expanded && !this.pressDismisses && this.bareStage(e.target)
       ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null
   }
   /**
@@ -1068,6 +1077,7 @@ export class Reader {
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
+    window.removeEventListener('pointerdown', this.notePopovers, true)
     document.removeEventListener('pointerdown', this.pointerInput, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)
