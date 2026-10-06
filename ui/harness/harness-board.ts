@@ -1295,7 +1295,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   // The parent picker's index: the feed's rows plus a sibling of the null-test
   // run, so its picker offers a parent before anything is typed.
-  if (url.endsWith('/api/v1/fibers')) {
+  if (url.endsWith('/api/v1/fibers?fields=index')) {
     if (workspaceFixture) return json({ fibers: [...workspaceFixture.feed.fibers, { fiber: { id: 'research/workspace/method-note', name: 'Method note' } }] })
     if (docsExample) return json({ fibers: docsExample.feed.fibers })
     return json({ fibers: [...MOCK_FEED.fibers, { fiber: { id: 'work/spt3g_papers/bmodes-2d/null-suite', name: 'Null-test suite' } }] })

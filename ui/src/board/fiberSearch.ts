@@ -1,7 +1,7 @@
 // Client-side parent-picker search over the Shuttle daemon's fiber index.
 //
-// The caller fetches `GET :4000/api/v1/fibers` once (ids + names, a few
-// hundred rows) and filters per keystroke with `filterParentCandidates`, so
+// The caller fetches `GET :4000/api/v1/fibers?fields=index` once (ids, slugs
+// and names only) and filters per keystroke with `filterParentCandidates`, so
 // there's no per-keystroke round trip to the daemon.
 
 export interface FiberSearchResult {
@@ -12,12 +12,13 @@ export interface FiberSearchResult {
 
 /**
  * Fetch the daemon's fiber index, reduced to `{id, name}` rows. The response
- * envelope is `{host, fibers: [{fiber: {...felt JSON...}, ...}]}`.
+ * envelope is `{host, fibers: [{fiber: {id, slug, name}}]}`; a daemon without
+ * the `fields=index` projection answers full felt JSON rows, read the same way.
  */
 export async function fetchFiberIndex(
   shuttleBase: string,
 ): Promise<Array<{ id: string; name: string }>> {
-  const res = await fetch(`${shuttleBase}/api/v1/fibers`)
+  const res = await fetch(`${shuttleBase}/api/v1/fibers?fields=index`)
   if (!res.ok) throw new Error(`${res.status}`)
   const body = (await res.json()) as {
     fibers?: Array<{ fiber?: { id?: unknown; slug?: unknown; name?: unknown } }>
