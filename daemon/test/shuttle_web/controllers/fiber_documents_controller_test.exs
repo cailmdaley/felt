@@ -95,6 +95,31 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     refute Map.has_key?(hd(body["fibers"])["fiber"], "body")
   end
 
+  test "GET /api/v1/fibers?fields=index keeps only each fiber's id, slug and name", %{
+    store: store
+  } do
+    write_fiber!(store, "tests/indexed", """
+    ---
+    name: Indexed fiber
+    status: active
+    outcome: A long outcome the index never needs.
+    ---
+
+    Body.
+    """)
+
+    conn = get(api_conn(), "/api/v1/fibers?fields=index")
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert body["host"] == "test-host"
+    assert [%{"fiber" => fiber} = row] = body["fibers"]
+    assert Map.keys(row) == ["fiber"]
+    assert fiber["name"] == "Indexed fiber"
+    assert fiber["id"] == "tests/indexed"
+    assert Map.keys(fiber) -- ["id", "slug", "name"] == []
+  end
+
   test "GET /api/v1/fibers?body=true still finds each fiber's report", %{store: store} do
     # `felt ls --body` omits the native `report_path` that the metadata listing
     # carries, so the body listing must find the report itself.
@@ -763,6 +788,107 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = Jason.decode!(by_slug.resp_body)["fibers"]
   end
 
+  test "GET /api/v1/fibers/:id reads a polled ULID through its slug, and checks the answer",
+       %{store: store} do
+    polled = "01JZ0000000000000000000002"
+    other = "01JZ0000000000000000000003"
+    stale = "01JZ0000000000000000000004"
+
+    for {slug, uid} <- [{"tests/by-slug", polled}, {"tests/other", other}, {"tests/stale", stale}] do
+      write_fiber!(store, slug, """
+      ---
+      id: #{uid}
+      name: #{slug}
+      status: active
+      shuttle:
+        enabled: true
+        host: test-host
+      ---
+
+      Body of #{slug}.
+      """)
+    end
+
+    warm_poller!(store)
+    assert {_store, "tests/by-slug"} = Shuttle.FiberAddresses.lookup(polled)
+    log = install_logging_felt!(store)
+
+    conn = get(api_conn(), "/api/v1/fibers/#{polled}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^polled, "body" => "Body of tests/by-slug."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/by-slug -j\n"
+
+    # A stale slug answers with another fiber's UID; the read falls through to
+    # the UID itself rather than serving the wrong document.
+    Shuttle.FiberAddresses.put_polled(%{stale => {store, "tests/other"}})
+
+    File.write!(log, "")
+    conn = get(api_conn(), "/api/v1/fibers/#{stale}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^stale, "body" => "Body of tests/stale."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/other -j\nshow #{stale} -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id reads an unpolled ULID through the slug its first read found",
+       %{store: store} do
+    uid = "01JZ0000000000000000000005"
+
+    write_fiber!(store, "tests/unpolled", """
+    ---
+    id: #{uid}
+    name: Unpolled
+    status: open
+    ---
+
+    Unpolled body.
+    """)
+
+    log = install_logging_felt!(store)
+
+    # The second request is lowercase and still finds the learned address.
+    for requested <- [uid, String.downcase(uid)] do
+      conn = get(api_conn(), "/api/v1/fibers/#{requested}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "body" => "Unpolled body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow tests/unpolled -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id learns a symlinked fiber's traversal id, not its canonical slug",
+       %{store: store} do
+    uid = "01JZ0000000000000000000006"
+    project = Path.join(Path.dirname(store), "shapepipe")
+
+    write_fiber!(project, "review-ngmix", """
+    ---
+    id: #{uid}
+    name: Ngmix review
+    status: open
+    ---
+
+    Ngmix body.
+    """)
+
+    File.mkdir_p!(Path.join(store, ".felt"))
+    File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "shapepipe"]))
+    log = install_logging_felt!(store)
+
+    for _ <- 1..2 do
+      conn = get(api_conn(), "/api/v1/fibers/#{uid}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "slug" => "review-ngmix", "body" => "Ngmix body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow shapepipe/review-ngmix -j\n"
+  end
+
   test "GET /api/v1/fibers/:id?body=true includes the felt body alongside full metadata",
        %{store: store} do
     write_fiber!(store, "tests/single-body", """
@@ -1142,6 +1268,23 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
                }
              }
            ] = Jason.decode!(conn.resp_body)["fibers"]
+  end
+
+  # A felt that records each invocation's arguments, then runs the real felt.
+  defp install_logging_felt!(store) do
+    real = Shuttle.Test.FakeCli.real!("felt")
+    log = Path.join(Path.dirname(store), "felt-calls.log")
+    File.write!(log, "")
+
+    Shuttle.Test.FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      printf '%s\\n' "$*" >> '#{log}'
+      exec '#{real}' "$@"
+      """
+    })
+
+    log
   end
 
   # A fake `felt` on PATH that mimics the felt JSON shapes the body-read path can

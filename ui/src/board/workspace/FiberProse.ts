@@ -2,7 +2,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { extractEmbeds } from '../attachments.js'
 import { basename, renderMarkdown } from '../utils.js'
 import { installWikilinks } from '../wikilinks.js'
-import { inLane } from '../requestLanes.js'
+import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import '../prose.css'
 import './fiber-prose.css'
 import type { Channel } from './documents.js'
@@ -29,17 +29,15 @@ export function renderFiberMarkdown(body: string, outcome: string, card: KanbanC
   }
 }
 
-/** Prefer the fiber directory; use the project directory only after a failed HEAD, asked in the quiet lane. */
+/** Prefer the fiber directory; use the project directory only when the cache finds no file there. */
 export async function settleBodyFileLink(link: HTMLAnchorElement): Promise<void> {
   const altUrl = link.dataset.fileUrlAlt
   const altPath = link.dataset.filePathAlt
   const primary = link.getAttribute('href')
   if (!altUrl || !altPath || !primary) return
-  try {
-    if ((await inLane('quiet', () => fetch(primary, { method: 'HEAD' }), { rank: 2 })).ok) return
-  } catch {
-    return
-  }
+  const info = await head(primary, RESOURCE_PRIORITY.title)
+  // An owner that cannot answer leaves the link where it points.
+  if (!info || info.exists) return
   link.href = altUrl
   link.dataset.filePath = altPath
   link.title = `Open ${basename(altPath)} in the viewer`
@@ -70,6 +68,8 @@ export function buildFiberProse(
   opts: {
     shuttleBase: string
     controls?: HTMLElement
+    /** The status line's acts (worker pill, Temper, Discard), owned by the control band. */
+    acts?: HTMLElement
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
   },
@@ -88,6 +88,7 @@ export function buildFiberProse(
     status.textContent = fiberPageKicker(card)
     header.append(status)
   }
+  if (opts.acts) header.append(opts.acts)
   const title = document.createElement('h1')
   title.textContent = channel.name
   title.dataset.part = 'fiber-title'

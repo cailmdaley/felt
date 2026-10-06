@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
-const renderer = vi.hoisted(() => ({ finishes: [] as Array<() => void> }))
+const renderer = vi.hoisted(() => ({ finishes: [] as Array<() => void>, fails: [] as Array<() => void> }))
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
   buildFileViewer: vi.fn((_base, _path, _owner, _frame, _scroll, options) => {
     const body = document.createElement('div'); body.append(document.createElement('iframe'))
     renderer.finishes.push(() => options.onState({ status: 'ready' }))
+    renderer.fails.push(() => options.onState({ status: 'error', error: new Error('Thumbnail unavailable'), hasContent: false }))
     return body
   }),
   disposeFileViewer: vi.fn(),
@@ -13,8 +14,9 @@ vi.mock('../FileViewerPanel.js', () => ({
 import { cacheDocumentTitle } from './DocumentTitles.js'
 import { docKey } from './documents.js'
 import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
+import { RESOURCE_FRESH_MS } from '../documentResources.js'
 let thumbs: Thumbnail[] = []
-afterEach(() => { for (const thumb of thumbs) thumb.dispose(); thumbs = []; renderer.finishes = []; vi.unstubAllGlobals() })
+afterEach(() => { for (const thumb of thumbs) thumb.dispose(); thumbs = []; renderer.finishes = []; renderer.fails = []; vi.unstubAllGlobals(); vi.useRealTimers() })
 it.each(['report.html', 'index.html'])('omits the generic %s fallback title from its face', basename => {
   const path = `/reports/${basename}`
   const thumb = new Thumbnail({ key: path, shuttleBase: '', file: { fullPath: path, owner: 'host', basename }, fallback: '', priority: () => 0, distance: () => 0 })
@@ -61,4 +63,22 @@ it('shares four loading and sixteen live slots across overview and tab previews,
   pumpThumbnails()
   expect(tab.state).toBe('loading')
   expect(thumbs.filter(t => t.body)).toHaveLength(16)
+})
+
+it('tries a failed thumbnail again once the miss it saw has expired, so a report written later appears', () => {
+  vi.useFakeTimers()
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  const thumb = new Thumbnail({ key: 'late', shuttleBase: '', file: { fullPath: '/late/report.html', owner: 'host', basename: 'report.html' }, fallback: '', priority: () => 2, distance: () => 0 })
+  thumbs.push(thumb); document.body.append(thumb.el)
+  pumpThumbnails()
+  renderer.fails.splice(0).forEach(fail => fail())
+  expect(thumb.state).toBe('failed')
+  vi.advanceTimersByTime(RESOURCE_FRESH_MS - 1)
+  pumpThumbnails()
+  expect(thumb.state).toBe('failed')
+  vi.advanceTimersByTime(1)
+  pumpThumbnails()
+  expect(thumb.state).toBe('loading')
+  renderer.finishes.at(-1)!()
+  expect(thumb.state).toBe('live')
 })

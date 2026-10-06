@@ -7,7 +7,7 @@ const now = Date.parse('2026-10-04T14:00:00Z')
 describe('owner-observed worker plate', () => {
   it('uses live launch time, not stale dispatch metadata', () => {
     const task = card({ id: 'task', workerState: 'running', runtimePhase: 'working', workerStartedAt: now - 12 * 60000, dispatchedAt: '2025-01-01T00:00:00Z' })
-    expect(workerPlateFacts(task, now)).toEqual({ state: 'aloft', elapsed: '12 m', working: true })
+    expect(workerPlateFacts(task, now)).toEqual({ state: 'aloft', elapsed: '12m', working: true })
   })
   it('shows no invented age without a valid launch time', () => {
     expect(workerPlateFacts(card({ id: 'task', workerState: 'running' }), now)).toEqual({ state: 'aloft', working: false })

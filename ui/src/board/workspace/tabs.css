@@ -1,14 +1,12 @@
-/* The reader's map: a band of tiles beneath the stage, a scale model of the run.
-   Its strip holds the selected tile under the selected page (inline padding up to
-   that point lets the first and last tiles sit there too) and fades where tiles
-   run past. */
-.ws-band {
-  position: relative; z-index: 2; flex: none; display: grid; align-items: center;
-  grid-template-columns: var(--ws-band-side) minmax(0, 1fr) var(--ws-band-side);
-  height: var(--ws-band-height); padding: 0 var(--ws-stage-inset) var(--ws-band-foot);
-}
-.ws-band-position {
-  justify-self: end; color: var(--ws-ink-muted); font: var(--ws-small-size)/1 var(--ws-mono);
+/* The reader's map: a row of tiles at the centre of the board's bar, a scale model
+   of the run. Its strip holds the selected tile over the selected page (inline
+   padding up to that point lets the first and last tiles sit there too), scrolls
+   sideways inside its slot when the run is longer than the room, and fades where
+   tiles run past. It never wraps. */
+.ws-head-index { position: relative; min-width: 0; display: flex; }
+.ws-head-index > .ws-tabs { flex: 1; }
+.ws-head-position {
+  flex: none; text-align: right; color: var(--ws-ink-muted); font: var(--ws-small-size)/1 var(--ws-mono);
   letter-spacing: var(--ws-mono-tracking); font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .ws-tabs {
@@ -19,8 +17,8 @@
   mask-image: linear-gradient(90deg, transparent, var(--ws-mask) var(--ws-fade-left), var(--ws-mask) calc(100% - var(--ws-fade-right)), transparent);
 }
 .ws-tabs::-webkit-scrollbar { display: none; }
-.ws-tabs.ws-fade-l { --ws-fade-left: var(--ws-band-fade); }
-.ws-tabs.ws-fade-r { --ws-fade-right: var(--ws-band-fade); }
+.ws-tabs.ws-fade-l { --ws-fade-left: var(--ws-index-fade); }
+.ws-tabs.ws-fade-r { --ws-fade-right: var(--ws-index-fade); }
 
 /* A tile is a small sheet of the page's paper, opaque so the veil's drawing stays
    beneath it. Unselected tiles recede a little (their faces dim on the paper);
@@ -48,7 +46,7 @@
 .ws-tab .ws-tab-thumb .ws-thumbnail-face { padding: var(--ws-tile-pad); }
 .ws-tab .ws-tab-thumb .ws-thumbnail-title {
   font: 500 var(--ws-tile-title-size)/1.14 var(--ws-serif); color: var(--ws-ink-soft); letter-spacing: 0;
-  -webkit-line-clamp: 3; overflow-wrap: break-word; hyphens: auto;
+  -webkit-line-clamp: var(--ws-tile-title-lines); overflow-wrap: break-word; hyphens: auto;
 }
 .ws-tab[aria-selected='true'] .ws-tab-thumb .ws-thumbnail-title { color: var(--ws-ink); }
 .ws-tab .ws-tab-thumb .ws-thumbnail-preview { display: none; }
@@ -84,10 +82,13 @@
   background: var(--kbn-owed); box-shadow: 0 0 0 2px var(--ws-paper);
 }
 
-/* The hovered tile's title: a caption in the serif, set in the gap between the page and the band. */
+/* The hovered tile's title: a caption in the serif on a slip of paper, hung beneath
+   its tile over the page's top edge. */
 .ws-tab-tip {
-  position: absolute; left: 0; bottom: calc(100% - var(--ws-tile-air)); z-index: 4; transform: translateX(-50%);
-  max-width: min(420px, 70%); display: flex; align-items: center; height: var(--ws-tip-height);
+  position: absolute; left: 0; top: calc(100% - var(--ws-tile-air) + var(--ws-small-gap)); z-index: 4; transform: translateX(-50%);
+  max-width: min(420px, 70%); display: flex; align-items: center; height: var(--ws-tip-height); padding: 0 var(--ws-inset);
+  border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius);
+  background: var(--ws-paper); box-shadow: var(--ws-shadow-low);
   color: var(--ws-ink); font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; pointer-events: none;
 }
 .ws-tab-tip[hidden] { display: none; }

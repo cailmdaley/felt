@@ -23,13 +23,29 @@ defmodule ShuttleWeb.Endpoint do
   # and the bare `/` fall through to the router (which serves
   # `index.html` via SpaController). A missing bundle just 404s the asset — the
   # API stays fully usable.
+  #
+  # The build writes `.br` and `.gz` beside each compressible file, served to
+  # clients that accept them. Every name under `assets/` carries its content
+  # hash, so a browser keeps those for a year without asking again; the
+  # unhashed files keep the default etag revalidation.
   plug(Plug.Static,
     at: "/",
     # MFA form: resolved per request, so the bundle location is a RUNTIME
     # decision (env override / release priv / checkout — see ShuttleWeb.Assets)
     # rather than a path baked at compile time on the build machine.
     from: {ShuttleWeb.Assets, :dist, []},
-    only: ~w(assets fonts index.html favicon.ico apple-touch-icon.png manifest.webmanifest)
+    only: ~w(assets),
+    brotli: true,
+    gzip: true,
+    cache_control_for_etags: "public, max-age=31536000, immutable"
+  )
+
+  plug(Plug.Static,
+    at: "/",
+    from: {ShuttleWeb.Assets, :dist, []},
+    only: ~w(fonts index.html favicon.ico apple-touch-icon.png manifest.webmanifest),
+    brotli: true,
+    gzip: true
   )
 
   # CORS must run before readiness can send a booting 503, so cross-origin

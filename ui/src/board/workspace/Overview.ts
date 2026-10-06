@@ -22,6 +22,8 @@ export interface OverviewOptions {
   onOpen(card: KanbanCard, doc?: DocKey): void
   /** Full lens order, independent of Find; suitable for reader channel stepping. */
   onOrder?(cards: KanbanCard[]): void
+  /** Summon the board bar's Find, which filters the sheet on the desktop; false leaves `/` to the sheet's own field. */
+  focusFind?(): boolean
 }
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
@@ -120,13 +122,15 @@ function place(parent: HTMLElement, children: HTMLElement[]): void {
   const keep = new Set(children)
   for (const child of [...parent.children]) if (!keep.has(child as HTMLElement)) child.remove()
 }
+let dayMonth: Intl.DateTimeFormat | undefined
 function age(timestamp: number): string {
   if (!timestamp) return 'Opened this session'
   const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000))
   if (minutes < 1) return 'just now'
   if (minutes < 60) return `${minutes}m ago`
   if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`
-  return new Date(timestamp).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  dayMonth ??= new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' })
+  return dayMonth.format(timestamp)
 }
 interface Receipt extends ShelfFile { key: DocKey; uid: string; owner: string }
 interface Folio {
@@ -216,6 +220,7 @@ export class Overview {
   private readonly lensGroup = node('div', 'ws-overview-lens')
   private readonly lensButtons = new Map<OverviewLens, HTMLButtonElement>()
   private readonly folios = new Map<string, Folio>()
+  private readonly fallbacks = new Map<string, KanbanCard>()
   private readonly ribbonItems = new Map<DocKey, RibbonItem>()
   private readonly groups = new Map<string, Group>()
   private readonly thumbnails = new Map<string, Thumbnail>()
@@ -243,6 +248,8 @@ export class Overview {
   private order: KanbanCard[] = []
   private request?: AbortController
   private visible = true
+  /** Model changes reached while the sheet was off screen, waiting to be drawn. */
+  private stale = false
   private disposed = false
   private scroll = 0
   /** The prior visit is fixed for this sheet, so reloads inside thirty seconds keep the news. */
@@ -428,12 +435,17 @@ export class Overview {
 
   setVisible(visible: boolean): void {
     if (this.disposed) return
-    if (visible === this.visible) { if (visible) this.startVisit(); return }
+    if (visible === this.visible) {
+      if (visible && this.stale) this.render()
+      if (visible) this.startVisit()
+      return
+    }
     if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; this.leaveVisit() }
     else for (const retry of this.cardRetries.values()) retry.at = 0
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
+    if (visible && this.stale) this.render()
     for (const folio of this.folios.values()) {
       if (visible) this.opts.themes?.bind(folio.el, folio.card)
       else this.opts.themes?.unbind(folio.el)
@@ -525,9 +537,16 @@ export class Overview {
     for (const card of this.opts.cards()) known.set(uidOf(card), card)
     return known
   }
+  /** One stand-in per fiber and owner, so an unchanged sheet keeps its channel order. */
   private fallback(uid: string, owner: string): KanbanCard {
-    return { id: uid, uid, name: uid.startsWith('other:') ? `Unfiled · ${owner}` : `Resolving fiber · ${owner}`, path: '', originId: owner, status: '', createdAt: '',
-      effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
+    const key = `${uid}\n${owner}`
+    let card = this.fallbacks.get(key)
+    if (!card) {
+      card = { id: uid, uid, name: uid.startsWith('other:') ? `Unfiled · ${owner}` : `Resolving fiber · ${owner}`, path: '', originId: owner, status: '', createdAt: '',
+        effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
+      this.fallbacks.set(key, card)
+    }
+    return card
   }
   private reconcile(): void {
     const arrived: Folio[] = []
@@ -572,7 +591,7 @@ export class Overview {
       if (priorReceipts && JSON.stringify(priorReceipts) !== JSON.stringify(receipts.map(r => [r.key, r.timestamp, r.sessionId]))) arrived.push(folio)
       folio.provisional = !known.has(uid)
       folio.card = card; folio.receipts = receipts
-      this.updateFolio(folio)
+      if (this.shown) this.updateFolio(folio)
     }
     for (const [uid, folio] of this.folios) if (!byUid.has(uid)) {
       if (folio.thumb) this.removeThumbnail(folio.thumb)
@@ -719,10 +738,24 @@ export class Overview {
       ? DAY_GROUPS.indexOf(ak as typeof DAY_GROUPS[number]) - DAY_GROUPS.indexOf(bk as typeof DAY_GROUPS[number])
       : cmp(a[0], b[0]) || compare(ak, bk))
   }
+  /** Filter the sheet from the board bar's Find. */
+  setQuery(query: string): void {
+    if (this.find.value === query) return
+    this.find.value = query
+    this.render()
+  }
+  /** The sheet draws only while it is on screen; channel order stays current regardless. */
+  private get shown(): boolean { return this.visible && this.el.isConnected }
   private render(): void {
     const grouped = this.grouped()
-    this.order = grouped.flatMap(([, rows]) => rows.map(f => f.card))
-    this.opts.onOrder?.([...this.order])
+    const order = grouped.flatMap(([, rows]) => rows.map(f => f.card))
+    if (order.length !== this.order.length || order.some((card, i) => card !== this.order[i])) {
+      this.order = order
+      this.opts.onOrder?.([...order])
+    }
+    if (!this.shown) { this.stale = true; return }
+    if (this.stale) for (const folio of this.folios.values()) this.updateFolio(folio)
+    this.stale = false
     const query = this.find.value.trim().toLowerCase()
     const matches = (f: { card: KanbanCard; receipts: Receipt[] }): boolean => !query || [f.card.name, f.card.path, ...f.receipts.flatMap(r => [r.basename, r.fullPath, declaredTitle(r.key)?.title ?? ''])].some(v => v.toLowerCase().includes(query))
     const changes = this.changes()
@@ -885,7 +918,7 @@ export class Overview {
     const intent = keyIntent(event, 'overview')
     if (!intent || intent === 'help') return
     event.preventDefault()
-    if (intent === 'find') this.find.focus({ preventScroll: true })
+    if (intent === 'find') { if (!this.opts.focusFind?.()) this.find.focus({ preventScroll: true }) }
     else this.moveSelection(intent)
   }
   private renderRibbon(): void {

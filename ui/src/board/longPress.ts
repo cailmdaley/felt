@@ -122,6 +122,8 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
     ...opts,
     onPressChange: (pressing) => {
       el.classList.toggle('kbn-longpress-held', pressing)
+      if (pressing) listenToWindow()
+      else stopListeningToWindow()
       opts.onPressChange?.(pressing)
     },
     onFire: () => {
@@ -146,27 +148,35 @@ export function attachLongPress(el: HTMLElement, opts: LongPressOptions): () => 
     if (tracker.pressing) e.preventDefault()
   }
 
-  el.addEventListener('pointerdown', onDown)
-  el.addEventListener('pointermove', onMove)
-  el.addEventListener('contextmenu', onContextMenu)
+  // The window listens only while a press is armed. A card re-rendered away
+  // then holds no window listener, so nothing outside it keeps it alive.
   // A drag that gets going is the other reading of the same press — desktop
   // keeps its drag, and the timer must not fire mid-flight.
   // Capture at the window: nested draggable rows deliberately stop their
   // `dragstart` from bubbling through the card, but their drag still ends the
   // card's long-press candidate.
-  window.addEventListener('dragstart', onEnd, true)
-  window.addEventListener('pointerup', onEnd)
-  window.addEventListener('pointercancel', onEnd)
-  window.addEventListener('scroll', onEnd, true)
+  function listenToWindow(): void {
+    window.addEventListener('dragstart', onEnd, true)
+    window.addEventListener('pointerup', onEnd)
+    window.addEventListener('pointercancel', onEnd)
+    window.addEventListener('scroll', onEnd, true)
+  }
+  function stopListeningToWindow(): void {
+    window.removeEventListener('dragstart', onEnd, true)
+    window.removeEventListener('pointerup', onEnd)
+    window.removeEventListener('pointercancel', onEnd)
+    window.removeEventListener('scroll', onEnd, true)
+  }
+
+  el.addEventListener('pointerdown', onDown)
+  el.addEventListener('pointermove', onMove)
+  el.addEventListener('contextmenu', onContextMenu)
 
   return () => {
     tracker.cancel()
     el.removeEventListener('pointerdown', onDown)
     el.removeEventListener('pointermove', onMove)
     el.removeEventListener('contextmenu', onContextMenu)
-    window.removeEventListener('dragstart', onEnd, true)
-    window.removeEventListener('pointerup', onEnd)
-    window.removeEventListener('pointercancel', onEnd)
-    window.removeEventListener('scroll', onEnd, true)
+    stopListeningToWindow()
   }
 }

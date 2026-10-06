@@ -1269,6 +1269,16 @@ defmodule Shuttle.Poller do
     end)
   end
 
+  # Where felt reads each polled UID: its listing store and traversal id.
+  defp polled_addresses(candidates, store_map) do
+    for %{"uid" => uid, "id" => id} <- candidates,
+        is_binary(uid) and uid != "" and is_binary(id),
+        store = Map.get(store_map, id),
+        is_binary(store),
+        into: %{},
+        do: {uid, {store, id}}
+  end
+
   @doc false
   def fiber_address(metadata) when is_map(metadata) do
     case Map.get(metadata, :fiber_id) || Map.get(metadata, "fiber_id") ||
@@ -1403,6 +1413,7 @@ defmodule Shuttle.Poller do
     state = reconcile(%{state | felt_stores: felt_stores}, sessions)
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
+    Shuttle.FiberAddresses.put_polled(polled_addresses(candidates, new_store_map))
 
     # Merge newly resolved store entries into the cache. Existing entries
     # are not evicted — earlier-configured stores win for ID collisions,
