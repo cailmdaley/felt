@@ -827,7 +827,9 @@ defmodule Shuttle.CodexApp.TransportTest do
     end
   end
 
-  defp wait_until(predicate, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(predicate, attempts \\ 6_000)
   defp wait_until(predicate, 0), do: assert(predicate.())
 
   defp wait_until(predicate, attempts) do

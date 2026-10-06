@@ -2004,7 +2004,9 @@ defmodule Shuttle.DispatchIntegrationTest do
     File.write!(Path.join(session_dir, filename), session_meta <> "\n" <> user_turn <> "\n")
   end
 
-  defp eventually(fun, attempts \\ 40)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 600)
 
   defp eventually(fun, attempts) when attempts > 0 do
     if fun.() do

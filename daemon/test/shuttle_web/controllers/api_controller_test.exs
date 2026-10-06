@@ -1142,7 +1142,9 @@ defmodule ShuttleWeb.APIControllerTest do
 
   # Poll to a deadline instead of sleeping a guess. Returns false on timeout so
   # the caller's `assert` names the test that timed out.
-  defp wait_until(fun, remaining_ms \\ 3_000) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, remaining_ms \\ 30_000) do
     cond do
       fun.() ->
         true

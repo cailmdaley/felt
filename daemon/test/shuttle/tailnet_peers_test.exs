@@ -341,7 +341,9 @@ defmodule Shuttle.TailnetPeersTest do
     end
   end
 
-  defp wait_until(fun, attempts \\ 100) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, attempts \\ 3_000) do
     cond do
       fun.() -> :ok
       attempts == 0 -> flunk("condition never held")

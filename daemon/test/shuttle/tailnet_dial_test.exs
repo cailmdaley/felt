@@ -480,7 +480,7 @@ defmodule Shuttle.TailnetDialTest do
     assert_receive {:dial_request, _request}
     assert_receive {:https_request, [host_header]}
     assert host_header == "#{@host}:#{tls_port}"
-    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) != baseline end, 200)
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) != baseline end)
 
     assert eventually(
              fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end,
@@ -629,7 +629,7 @@ defmodule Shuttle.TailnetDialTest do
     assert_receive {:localapi_relay_held, ^relay_pid}
     :gen_tcp.close(client)
 
-    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 600)
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end)
     assert TailnetDial.last_error(remote.name) == nil
   end
 
@@ -654,7 +654,7 @@ defmodule Shuttle.TailnetDialTest do
     assert_receive {:silent_tls_handshake, _peer_pid}
     assert_receive {:silent_tls_write_closed, _peer_pid}
 
-    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 600)
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end)
     assert TailnetDial.last_error(remote.name) == {:tailnet_dial, :relay, :drain_timeout}
     :gen_tcp.close(client)
   end
@@ -1199,7 +1199,9 @@ defmodule Shuttle.TailnetDialTest do
   defp restore_cacerts(value),
     do: Application.put_env(:shuttle, :tailnet_dial_test_cacerts, value)
 
-  defp eventually(fun, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 3_000)
   defp eventually(_fun, 0), do: false
 
   defp eventually(fun, attempts) do

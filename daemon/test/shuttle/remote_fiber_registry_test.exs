@@ -96,7 +96,9 @@ defmodule Shuttle.RemoteFiberRegistryTest do
   # Poll feeds until the named origin has fibers (or give up). The stub returns
   # instantly, so a populated feed arrives within a few ticks; this just avoids
   # racing the async Task without a fixed sleep.
-  defp wait_for_feed(pid, name, attempts \\ 100) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_for_feed(pid, name, attempts \\ 6_000) do
     entry = Map.get(RemoteFiberRegistry.feeds(pid), name, %{fibers: []})
 
     cond do

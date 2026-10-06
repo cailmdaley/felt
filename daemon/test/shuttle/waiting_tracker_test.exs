@@ -46,7 +46,9 @@ defmodule Shuttle.WaitingTrackerTest do
   defp last_event_at(name, session), do: (activity(name, session) || %{})[:last_event_at]
   defp ingested?(name, session), do: not is_nil(activity(name, session))
 
-  defp wait_until(fun, tries \\ 500) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, tries \\ 3_000) do
     cond do
       fun.() ->
         true

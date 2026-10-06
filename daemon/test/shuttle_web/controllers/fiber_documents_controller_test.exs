@@ -1501,7 +1501,9 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
   # Block until `fun` returns truthy, polling briefly (default ≤2s). Used to let
   # a freshly started Poller's boot poll settle before injecting state.
-  defp wait_until(fun, tries \\ 200) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, tries \\ 3_000) do
     cond do
       fun.() ->
         :ok

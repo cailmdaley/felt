@@ -109,7 +109,9 @@ defmodule Shuttle.WorkerWatcherTest do
   # heartbeat detection takes — which, under any scheduler jitter, overran the
   # old fixed margins. ~2s ceiling; returns as soon as the condition is true, so
   # passing tests pay nothing.
-  defp wait_until(fun, attempts \\ 80)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, attempts \\ 1_200)
   defp wait_until(fun, 0), do: fun.()
 
   defp wait_until(fun, attempts) do

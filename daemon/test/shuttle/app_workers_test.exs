@@ -1132,7 +1132,9 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   defp settle(poller), do: eventually(fn -> :sys.get_state(poller).poll_cycles > 0 end)
-  defp eventually(fun, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 1_500)
   defp eventually(fun, 0), do: assert(fun.())
 
   defp eventually(fun, attempts) do
