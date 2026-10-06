@@ -42,23 +42,21 @@
 /* Expand takes the whole window: no bar above, no sidebar beside. */
 .ws-reader.ws-expand-mode { top: 0; --ws-stage-top: var(--ws-stage-gap); }
 /* The phone's top bar (back, name, worker dot); the desktop has no head of its own. */
-.ws-navbar { display: none; background: transparent; position: relative; z-index: 3; flex: none; }
-.ws-nav-lead { display: flex; align-items: baseline; min-width: 0; gap: var(--ws-head-gap); }
-.ws-return, .ws-channel-title, .ws-sidebar-toggle {
-  height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border-radius: var(--ws-control-radius);
-  font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0; white-space: nowrap;
-}
-.ws-return { flex: none; color: var(--ws-ink-muted) !important; }
-.ws-channel-title {
-  color: var(--ws-ink); flex: 0 1 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; text-align: left; min-width: 0;
-}
-.ws-return:hover, .ws-channel-title:hover { color: var(--ws-ink) !important; background: var(--ws-hover); }
-.ws-channel-title::after { content: ' ▾'; font-size: var(--ws-small-size); color: var(--ws-ink-muted); }
+.ws-navbar { display: none; position: relative; z-index: 3; flex: none; }
+.ws-nav-lead { display: flex; min-width: 0; }
+.ws-return, .ws-channel-title { font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0; white-space: nowrap; }
+.ws-channel-title { color: var(--ws-ink); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ws-nav-trail { display: flex; min-width: 0; }
+.ws-head-worker { flex: none; display: flex; }
+.ws-head-worker[hidden] { display: none; }
+/* The top bar's worker dot is the card's own pill, bare. */
+.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { border: 0; background: transparent; }
 /* The constitutions glyph tops the sidebar, under the bar at the left; with
    the sidebar hidden it floats there alone. */
 .ws-sidebar-toggle {
   position: absolute; z-index: 4; left: calc(var(--ws-inset) - (var(--ws-control-height) - 16px) / 2); top: var(--ws-stage-top);
-  display: grid; place-items: center; width: var(--ws-control-height); padding: 0; color: var(--ws-ink-muted) !important;
+  display: grid; place-items: center; width: var(--ws-control-height); height: var(--ws-control-height); padding: 0;
+  border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important;
 }
 .ws-expand-mode .ws-sidebar-toggle { display: none; }
 .ws-sidebar-toggle svg { fill: none; stroke: currentColor; stroke-width: var(--ws-line-width); }
@@ -66,23 +64,6 @@
 .ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
-/* The right end: the worker control, then the position. */
-.ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0; }
-.ws-head-worker { flex: none; display: flex; align-items: baseline; }
-/* The worker's room is held while no worker runs, so one starting never moves the index. */
-.ws-head-worker[hidden] { display: flex; visibility: hidden; }
-/* The head's worker control is the card's own pill (KanbanModal.css, "THE
-   WORKER PILL") at the head's scale, on the head's row and in the room's
-   pigments. Widths are held for the longest state and a three-figure age, so
-   a state change never moves the index beside it. */
-.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker {
-  --worker-size: var(--ws-label-size);
-  height: var(--ws-control-height); margin: 0 calc(-1 * var(--ws-small-gap)); padding: 0 var(--ws-small-gap);
-  border: 0; border-radius: var(--ws-control-radius); color: var(--ws-ink-soft); line-height: var(--ws-control-height);
-}
-.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker > * { line-height: var(--ws-control-height); }
-.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker:hover { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-head-worker { min-width: 8.5em; justify-content: flex-end; }
 /* In the reader the dot takes the room's own pigments. */
 .ws-reader .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-machine); }
 .ws-reader .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
@@ -276,15 +257,12 @@
   .ws-head-worker :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
   /* The phone's top bar keeps the dot alone: the word's text is set at no size around it. */
   .ws-reader .ws-navbar .ws-head-worker .ws-worker-state { display: inline-flex; font-size: 0; line-height: 0; }
-  .ws-head-worker { min-width: 0; }
-  .ws-head-worker[hidden] { display: none; }
   .ws-head-worker .ws-worker-dot { width: 9px; height: 9px; margin: 0; top: 0; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
   /* One chevron drawing for back and stepping: a drawn stroke in ink, legible at 44 px. */
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
   .ws-return::before { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
   .ws-channel-title { text-align: center; flex: 1; height: var(--ws-phone-target); line-height: var(--ws-phone-target); padding: 0; }
-  .ws-channel-title::after { display: none; }
   .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) minmax(0, 1fr) var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); height: calc(var(--ws-thumb-height) + env(safe-area-inset-bottom)); flex: none; border-top: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); touch-action: pan-y; user-select: none; }
   /* Two lines: the page's title, then where it sits and how it arrived. */
   .ws-page-choice { min-width: 0; height: 55px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 3px; padding: 0 4px; }

@@ -98,8 +98,6 @@
   --ws-radius: 10px;
   --ws-control-radius: 7px;
   --ws-control-height: 32px;
-  /* The phone's top bar: the space between its back control and the fiber's name. */
-  --ws-head-gap: 10px;
   --ws-stage-inset: 28px;
   /* Between the bar's map and the page's top edge; the page's sides and foot keep the stage inset. */
   --ws-stage-gap: 12px;
