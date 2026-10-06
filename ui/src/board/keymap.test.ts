@@ -9,15 +9,19 @@ function event(key: string, init: KeyboardEventInit = {}, target?: HTMLElement):
 }
 
 describe('shared keyboard table', () => {
-  for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
-    for (const binding of surfaceBindings[surface]) {
-      for (const key of binding.keys) {
-        it(`${surface}: ${binding.command ? 'Cmd+' : ''}${binding.alt ? 'Alt+' : ''}${key} → ${binding.intent}`, () => {
-          expect(keyIntent(event(key === 'Shift+ ' ? ' ' : key, { altKey: binding.alt, metaKey: binding.command, shiftKey: key === 'Shift+ ' || /^[GJK?]$/.test(key) }), surface)).toBe(binding.intent)
-        })
+  it('every declared binding yields its intent on its surface, unshadowed by an earlier binding', () => {
+    const misses: string[] = []
+    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
+      for (const binding of surfaceBindings[surface]) {
+        for (const key of binding.keys) {
+          const label = `${surface}: ${binding.command ? 'Cmd+' : ''}${binding.alt ? 'Alt+' : ''}${key} → ${binding.intent}`
+          const got = keyIntent(event(key === 'Shift+ ' ? ' ' : key, { altKey: binding.alt, metaKey: binding.command, shiftKey: key === 'Shift+ ' || /^[GJK?]$/.test(key) }), surface)
+          if (got !== binding.intent) misses.push(`${label} (got ${got})`)
+        }
       }
     }
-  }
+    expect(misses).toEqual([])
+  })
   it.each(['1', '2', '3', 'Tab'])('leaves chassis key %s alone', key => {
     for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event(key), surface)).toBeNull()
   })
