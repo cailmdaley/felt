@@ -4,17 +4,19 @@ import { ChannelThemes } from '../src/board/workspace/ChannelThemes.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
-import { chromium, type Browser, type Page } from 'playwright-core'
+import { type Page } from 'playwright-core'
+import { getBrowser, sharedBrowserAvailable } from '../e2e/browser.mjs'
 
 // Native @scope, layers, nesting and computed custom properties require CSSOM.
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-let browser: Browser
+const canUseBrowser = existsSync(chrome) || sharedBrowserAvailable()
+let browser: Awaited<ReturnType<typeof getBrowser>> | undefined
 let page: Page
 let sharedDefaults: string
-const native = it.skipIf(!existsSync(chrome))
+const native = it.skipIf(!canUseBrowser)
 beforeAll(async () => {
-  if (!existsSync(chrome)) return
-  browser = await chromium.launch({ executablePath: chrome, headless: true })
+  if (!canUseBrowser) return
+  browser = await getBrowser({ executablePath: chrome })
   page = await browser.newPage()
   const defaults = { '--ws-paper': 'white', '--ws-ink': 'black', '--known': '12px', '--ws-stage-inset': '28px', '--ws-strip-h': '32px',
     '--ws-serif': 'Georgia, serif', '--ws-focus': '#BC4538', '--kbn-agent': '#3D5BA0', '--kbn-you': '#BC4538', '--kbn-owed': '#9A7B35', '--kbn-tempered-ink': '#2E6862' }
@@ -26,7 +28,7 @@ beforeAll(async () => {
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
   await page.addScriptTag({ type: 'module', content: code + '\nglobalThis.compileTheme = scopeTheme;' })
 })
-afterAll(async () => { await browser?.close() })
+afterAll(async () => { await browser?.close() }, 30_000)
 
 native('isolates nested themed, Plain and same-channel boundaries with own layered variables winning', async () => {
   const facts = await page.evaluate(sharedDefaults => {

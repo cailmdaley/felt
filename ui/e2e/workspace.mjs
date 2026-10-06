@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, writeFile, readFile } from 'node:fs/promises'
+import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright-core'
+import { getBrowser } from './browser.mjs'
 import { frames, layoutShift, unexpected } from './layoutShift.mjs'
 
-const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-await access(chrome)
-const browser = await chromium.launch({ executablePath: chrome, headless: true,
+const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=workspace`
 const name = 'Calibrate the shear response'
@@ -40,7 +38,12 @@ async function choose(p, label) {
   } else await tab(p, label).or(p.getByRole('tab', { name: label, exact: true })).click()
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
-async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 2500, polling: 40 }) }
+async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 15000, polling: 40 }) }
+async function waitOpacity(p, locator, value) {
+  const element = await locator.elementHandle()
+  await p.waitForFunction(({ element, value }) => getComputedStyle(element).opacity === value,
+    { element, value }, { timeout: 15000, polling: 40 })
+}
 async function chooseDeskColumn(p, index) {
   const segment = p.locator(`.kbn-folio-seg[data-folio="${index}"]`)
   if (!await segment.isVisible()) return
@@ -130,10 +133,12 @@ test('Awaiting-review actions reveal without shifting and remain thumb-sized on 
   const flightActions = flight.locator('.kbn-card-review-meta-actions').first()
   assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '0')
   await flight.locator('.kbn-card').first().hover()
+  await waitOpacity(p, flightActions, '1')
   assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '1')
   assert.deepEqual(await flightActions.locator('button').allTextContents(), ['Temper', 'Discard'])
   await p.mouse.move(0, 0)
   assert.equal(await actions.locator('button').count(), 2)
+  await waitOpacity(p, actions, '0')
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
   const before = await actions.evaluate(el => {
     const { width, height } = el.getBoundingClientRect()
@@ -141,22 +146,28 @@ test('Awaiting-review actions reveal without shifting and remain thumb-sized on 
   })
   const box = await review.boundingBox()
   await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await waitOpacity(p, actions, '1')
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
   assert.deepEqual(await actions.evaluate(el => {
     const { width, height } = el.getBoundingClientRect()
     return { width, height }
   }), before)
   await p.mouse.move(0, 0)
+  await waitOpacity(p, actions, '0')
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
   await actions.locator('button').first().focus()
+  await waitOpacity(p, actions, '1')
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
   await p.evaluate(() => document.activeElement?.blur())
+  await waitOpacity(p, actions, '0')
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
   await p.keyboard.press('j')
   assert.ok(await review.evaluate(el => el.classList.contains('kbn-key-selected')))
+  await waitOpacity(p, actions, '1')
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
   await p.keyboard.press('Escape')
   await p.evaluate(() => document.activeElement?.blur())
+  await waitOpacity(p, actions, '0')
   assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
 }, undefined, undefined, 'reduce')
 
@@ -592,6 +603,7 @@ test('Desk-opened channel reload and Back restore its Desk return control', asyn
   await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Calibrate the shear response')
   await p.getByRole('button', { name: 'Return to Desk', exact: true }).waitFor()
   await p.getByRole('button', { name: 'Return to Desk', exact: true }).click()
+  await poll(p, () => document.querySelectorAll('.ws-page.ws-selected').length === 0)
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
 })
 
@@ -634,7 +646,7 @@ test('The map beneath the stage indexes pages as legible tiles, captions a hover
     assert.equal(await frame.getAttribute('tabindex'), '-1')
   }
   const caption = p.locator('.ws-tab-tip')
-  await p.mouse.move(700, 400)
+  await p.mouse.move(1, 1)
   await tab(p, 'response.pdf').hover()
   await caption.waitFor({ state: 'visible' })
   assert.equal(await caption.textContent(), 'response.pdf')
@@ -649,7 +661,7 @@ test('The map beneath the stage indexes pages as legible tiles, captions a hover
     await tab(p, 'figure.png').hover(); await caption.waitFor({ state: 'visible' })
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-map-desktop.png` })
   }
-  await p.mouse.move(700, 400)
+  await p.mouse.move(1, 1)
   await poll(p, () => document.querySelector('.ws-tab-tip').hidden)
   await report(p).evaluate(f => { window.__filmReport = f.contentWindow })
   const before = await film.boundingBox()
@@ -797,6 +809,7 @@ test('Wide reader takes the Desk column as cards, steps visibly, and returns sel
   assert.equal(await current.locator('.ws-channel-name').innerText(), names[1])
   assert.ok(await current.evaluate(e => e.getBoundingClientRect().right > e.closest('.ws-sidebar').getBoundingClientRect().right), 'selected card reaches beyond the column')
   await p.keyboard.press('Escape')
+  await poll(p, () => document.querySelectorAll('.ws-sidebar-source').length === 0)
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), names[1])
 }, undefined, null)
@@ -966,6 +979,8 @@ for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is
       requestAnimationFrame(tick)
     })
     await p.locator('.ws-sidebar-toggle').click()
+    if (reducedMotion !== 'reduce') await poll(p, () => document.getAnimations()
+      .filter(a => !window.__before.has(a) && a.effect?.target?.closest?.('.ws-reader') && a.constructor.name === 'Animation').length >= 2)
     const all = await p.evaluate(() => document.getAnimations().filter(a => !window.__before.has(a) && a.effect?.target?.closest?.('.ws-reader')).map(a => ({
       target: String(a.effect.target.className), kind: a.constructor.name, duration: a.effect.getTiming().duration, properties: [...new Set(a.effect.getKeyframes().flatMap(k => Object.keys(k).filter(key => !['offset', 'easing', 'composite', 'computedOffset'].includes(key))))],
     })))
@@ -1070,9 +1085,19 @@ test('Temper reaches drafts and work in flight from the head and t, through the 
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
   // A live worker asks once at the gesture; declining queues nothing.
-  const asked = []
-  p.once('dialog', dialog => { asked.push(dialog.message()); void dialog.dismiss() })
+  const asked = [], dialogErrors = []
+  let finishDialog
+  const dialogHandled = new Promise(resolve => { finishDialog = resolve })
+  p.once('dialog', async dialog => {
+    asked.push(dialog.message())
+    try { await dialog.dismiss() } catch (error) {
+      // Another CDP client may dismiss this browser-level dialog first.
+      if (!error.message.includes('No dialog is showing')) dialogErrors.push(error)
+    } finally { finishDialog() }
+  })
   await p.locator('.ws-nav-verdicts .kbn-ctl-temper').click()
+  await Promise.race([dialogHandled, p.waitForTimeout(50)])
+  assert.deepEqual(dialogErrors, [])
   assert.equal(asked.length, 1, 'tempering a live worker asks first')
   assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
@@ -2444,7 +2469,8 @@ try {
       hasTouch: !!touch || (!!viewport && viewport.width <= 700), isMobile: !!touch || (!!viewport && viewport.width <= 700),
       reducedMotion, locale: 'en-GB', timezoneId: 'Europe/Paris' })
     const page = await context.newPage()
-    page.setDefaultTimeout(2000)
+    page.setDefaultTimeout(10000)
+    page.setDefaultNavigationTimeout(30000)
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     let failure
@@ -2454,7 +2480,7 @@ try {
         if (window === window.top) localStorage.setItem('shuttle:workspace:sidebar', choice)
       }, sidebarChoice)
       await page.goto(url)
-      await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor()
+      await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor()
       await run(page)
     } catch (error) { failure = error }
     finally {
