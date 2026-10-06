@@ -54,6 +54,7 @@ func (a *app) setupCmd() *cobra.Command {
 	command.AddCommand(a.setupClaudeCmd())
 	command.AddCommand(a.setupCodexCmd())
 	command.AddCommand(a.setupPiCmd())
+	command.AddCommand(a.setupReceiptCmd())
 	command.AddCommand(a.setupSkillsCmd())
 	command.AddCommand(a.setupValidateCmd())
 	return command
