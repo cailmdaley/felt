@@ -233,8 +233,12 @@ defmodule ShuttleWeb.ActivityControllerTest do
     # same unanswered ask.
     property "a spell has one onset, and only session activity closes it" do
       check all(
+              # Short gaps are weighted up so a spell often opens, closes
+              # and reopens inside one minute.
               steps <-
-                list_of({integer(0..(2 * @minute)), spell_event()},
+                list_of(
+                  {frequency([{1, integer(0..2_000)}, {2, integer(0..(2 * @minute))}]),
+                   spell_event()},
                   min_length: 1,
                   max_length: 15
                 ),
@@ -253,6 +257,21 @@ defmodule ShuttleWeb.ActivityControllerTest do
 
         assert buckets!(path, @t0, @t0 + 30 * @minute) == spell_model(events)
       end
+    end
+
+    test "two onsets inside one minute count twice in the same bucket" do
+      path =
+        write_fixture([
+          event(%{"type" => "notification"}),
+          event(%{"timestamp" => @t0 + 1_000, "type" => "stop"}),
+          event(%{"timestamp" => @t0 + 2_000, "type" => "notification"})
+        ])
+
+      assert %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 2} in buckets!(
+               path,
+               @t0,
+               @t0 + @minute
+             )
     end
 
     test "each identity holds its own spell, and an unattributed event holds a third" do
