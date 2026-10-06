@@ -44,9 +44,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
     root = MockRunner.felt_root()
     on_exit(fn -> File.rm_rf(root) end)
 
-    start_poller!(runner: MockRunner, poll_interval_ms: 600_000, felt_stores: [root])
+    {:ok, poller} =
+      start_poller!(runner: MockRunner, poll_interval_ms: 600_000, felt_stores: [root])
 
-    Process.sleep(50)
+    await_boot_cycle!(poller)
     :ok
   end
 

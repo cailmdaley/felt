@@ -12,6 +12,13 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
 
   alias Shuttle.RemoteRegistry.Client.Default
 
+  # Every request here is expected to finish (or to be refused before any
+  # I/O), so its timeout is reached only when the test is already failing. A
+  # loaded machine can keep httpc and the local Bandit server from answering
+  # within a couple of seconds; 15 s keeps such a request off the timeout
+  # path, under ExUnit's 60 s test timeout.
+  @http_timeout_ms 15_000
+
   defp applied_https_proxy(profile) do
     case :httpc.get_options([:https_proxy], profile) do
       {:ok, [https_proxy: proxy]} -> proxy
@@ -55,7 +62,7 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
   end
 
   test "get/2 returns the response body byte-for-byte (no double-encoding)", %{url: url} do
-    assert {:ok, body} = Default.get(url, 5_000)
+    assert {:ok, body} = Default.get(url, @http_timeout_ms)
     # Byte-identical to what the server sent: the em-dash stays \xe2\x80\x94,
     # not the double-encoded \xc3\xa2\xc2\x80\xc2\x94.
     assert body == @utf8_body
@@ -70,7 +77,7 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       # the profile is that this setting never reaches `:default` and never
       # leaks onto another httpc user in the VM.
       Shuttle.Test.Env.put_app_env(:https_proxy, "127.0.0.1:1055")
-      assert {:ok, _} = Default.get(url, 2_000)
+      assert {:ok, _} = Default.get(url, @http_timeout_ms)
 
       assert {{~c"127.0.0.1", 1055}, [~c"localhost", ~c"127.0.0.1", ~c"::1"]} =
                applied_https_proxy(:shuttle_fleet)
@@ -86,10 +93,10 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       # every request in flight on it with an exit — which would take down the
       # registry that polls inline in its own GenServer.
       Shuttle.Test.Env.put_app_env(:https_proxy, "127.0.0.1:1055")
-      assert {:ok, _} = Default.get(url, 2_000)
+      assert {:ok, _} = Default.get(url, @http_timeout_ms)
 
       Shuttle.Test.Env.put_app_env(:https_proxy, false)
-      assert {:ok, body} = Default.get(url, 2_000)
+      assert {:ok, body} = Default.get(url, @http_timeout_ms)
       assert body == @utf8_body
 
       assert {:undefined, []} = applied_https_proxy(:shuttle_fleet_direct)
@@ -104,7 +111,7 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       # remote at http://127.0.0.1:<port> keeps working even when the proxy
       # address points at nothing.
       Shuttle.Test.Env.put_app_env(:https_proxy, "127.0.0.1:9")
-      assert {:ok, body} = Default.get(url, 2_000)
+      assert {:ok, body} = Default.get(url, @http_timeout_ms)
       assert body == @utf8_body
     end
   end
@@ -125,22 +132,31 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
         Shuttle.Test.Env.put_app_env(:host_class, @class)
         reason = "https_proxy refused: host class #{@name}"
 
-        assert Default.get("https://hub.example.invalid/api/v1/state", 1_000) == {:error, reason}
-
-        assert Default.get("https://hub.example.invalid/x", [], 1_000) == {:error, reason}
-
-        assert Default.post("https://hub.example.invalid/x", "{}", "application/json", 1_000) ==
+        assert Default.get("https://hub.example.invalid/api/v1/state", @http_timeout_ms) ==
                  {:error, reason}
 
-        assert Default.get_file("https://hub.example.invalid/x", 1_000) == {:error, reason}
+        assert Default.get("https://hub.example.invalid/x", [], @http_timeout_ms) ==
+                 {:error, reason}
 
-        assert Default.head_file("https://hub.example.invalid/x", [], 1_000) == {:error, reason}
+        assert Default.post(
+                 "https://hub.example.invalid/x",
+                 "{}",
+                 "application/json",
+                 @http_timeout_ms
+               ) ==
+                 {:error, reason}
+
+        assert Default.get_file("https://hub.example.invalid/x", @http_timeout_ms) ==
+                 {:error, reason}
+
+        assert Default.head_file("https://hub.example.invalid/x", [], @http_timeout_ms) ==
+                 {:error, reason}
       end
     end
 
     test "an http:// remote still goes direct", %{url: url} do
       Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
-      assert {:ok, body} = Default.get(url, 2_000)
+      assert {:ok, body} = Default.get(url, @http_timeout_ms)
       assert body == @utf8_body
     end
 
@@ -180,7 +196,7 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     test "an upper-case HTTPS:// scheme is refused like a lower-case one" do
       Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
 
-      assert Default.get("HTTPS://hub.example.invalid/api/v1/state", 1_000) ==
+      assert Default.get("HTTPS://hub.example.invalid/api/v1/state", @http_timeout_ms) ==
                {:error, "https_proxy refused: host class shared-multi-user"}
     end
 

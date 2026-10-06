@@ -254,6 +254,15 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_ls_delay(ms),
     do: Agent.update(server(), &Map.put(&1, :ls_delay_ms, ms))
 
+  # Hold the next `felt`/`shuttle ls` until the caller releases it: the
+  # listing process sends `{:ls_held, reader}` to the caller of `hold_ls/0`
+  # and waits for `:release_ls`. One-shot; later listings run as usual. A
+  # test that holds a poll read this way knows exactly when it is in flight.
+  def hold_ls do
+    holder = self()
+    Agent.update(server(), &Map.put(&1, :ls_hold, holder))
+  end
+
   # Simulate a wedged tmux: `tmux ls` returns the bounded runner's timeout
   # shape. The session list is then UNKNOWN — the poller must skip its
   # destructive/reconciling scans, never read it as "no sessions".
@@ -483,8 +492,15 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {"#{command} #{full_args} timed out after 60000ms", :timeout}
 
       command in ["felt", "shuttle"] and String.contains?(full_args, "ls") ->
-        delay_ms = Agent.get(server(), &Map.get(&1, :ls_delay_ms, 0))
-        if delay_ms > 0, do: Process.sleep(delay_ms)
+        case Agent.get_and_update(server(), &Map.pop(&1, :ls_hold)) do
+          holder when is_pid(holder) ->
+            send(holder, {:ls_held, self()})
+            receive do: (:release_ls -> :ok)
+
+          nil ->
+            delay_ms = Agent.get(server(), &Map.get(&1, :ls_delay_ms, 0))
+            if delay_ms > 0, do: Process.sleep(delay_ms)
+        end
 
         show_all =
           case Enum.find_index(args, &(&1 in ["-s", "--status"])) do

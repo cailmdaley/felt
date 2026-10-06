@@ -9,7 +9,7 @@ import { getBrowser, sharedBrowserAvailable } from '../e2e/browser.mjs'
 
 // Native @scope, layers, nesting and computed custom properties require CSSOM.
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-const canUseBrowser = existsSync(chrome) || sharedBrowserAvailable()
+const canUseBrowser = existsSync(chrome) || await sharedBrowserAvailable()
 let browser: Awaited<ReturnType<typeof getBrowser>> | undefined
 let page: Page
 let sharedDefaults: string
