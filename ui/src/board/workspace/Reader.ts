@@ -253,6 +253,11 @@ export class Reader {
     this.sidebarHandle.addEventListener('keydown', e => this.sidebarResizeKey(e))
     this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
     this.sidebar.append(this.sidebarPicker.el, this.sidebarHandle)
+    // The list's scroll offset sets how far its top fades under the toggle.
+    this.sidebar.addEventListener('scroll', event => {
+      const list = event.target
+      if (list instanceof HTMLElement && list.classList.contains('ws-channel-list')) list.style.setProperty('--ws-list-scroll', `${list.scrollTop}px`)
+    }, { capture: true, passive: true })
     const column = element('div', 'ws-stage-column')
     column.append(this.stage)
     const main = element('div', 'ws-stage-row')

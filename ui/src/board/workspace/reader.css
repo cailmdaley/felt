@@ -137,8 +137,19 @@
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-channel-row[aria-current='true'] { background: var(--ws-paper); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent), 0 6px 12px color-mix(in srgb, var(--ws-ink) 12%, transparent); }
 /* The column travels as cards; the current slip reaches toward the reading stage. */
-.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: calc(var(--ws-stage-top) + var(--ws-control-height) + var(--ws-small-gap)) var(--ws-inset) 0; position: relative; z-index: 2; }
+.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-stage-top) var(--ws-inset) 0; position: relative; z-index: 2; }
 .ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
+/* The column starts on the toggle's row: its first heading sits beside the
+   toggle on its centre line; a field or card that leads starts below it. */
+.ws-sidebar:not(.ws-sidebar-flight) {
+  --ws-toggle-row: calc(var(--ws-control-height) + var(--ws-small-gap));
+  --ws-toggle-clear: calc((var(--ws-control-height) + 16px) / 2 + var(--ws-small-gap));
+}
+.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-find { margin-top: var(--ws-toggle-row); }
+.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-list:first-child > .kbn-flight-caption:first-child {
+  display: flex; align-items: center; height: var(--ws-control-height); margin-top: 0; padding-left: var(--ws-toggle-clear);
+}
+.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-list:first-child > :first-child:not(.kbn-flight-caption) { margin-top: var(--ws-toggle-row); }
 /* The sidebar's edge resizes it: a hairline that darkens under the pointer, the keyboard or a drag. */
 .ws-sidebar-handle {
   position: absolute; top: 0; bottom: 0; right: calc(var(--ws-sidebar-handle) / -2); z-index: 3; width: var(--ws-sidebar-handle);
@@ -155,8 +166,14 @@
 .ws-sidebar-resizing iframe { pointer-events: none; }
 .ws-sidebar .ws-channel-list {
   flex: 1; min-height: 0; width: calc(100% + var(--ws-sidebar-overflow)); margin-right: calc(-1 * var(--ws-sidebar-overflow));
-  padding: var(--ws-small-gap) var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;
+  padding: 0 var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;
   scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent;
+}
+/* Scrolled, the list fades out across the toggle's row, so the cards pass
+   beneath the toggle instead of colliding with it. */
+.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-list:first-child {
+  --ws-list-scroll: 0px;
+  mask-image: linear-gradient(to bottom, transparent, var(--ws-mask) min(var(--ws-list-scroll), var(--ws-toggle-row)));
 }
 .ws-sidebar .ws-constitution-card {
   width: 100%; margin-bottom: var(--ws-sidebar-card-gap); padding: var(--ws-inset); gap: var(--ws-small-gap);
