@@ -469,21 +469,21 @@ export function injectCaptureFormStyles(): void {
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 17px;
       line-height: 1.5;
-      color: #2E2A26;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      color: var(--kbn-graphite);
+      background: var(--kbn-blank);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       border-radius: 3px;
       padding: 10px 12px;
       transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
     }
     .capture-yap::placeholder {
-      color: #9A8E80;
+      color: var(--kbn-graphite-faint);
       font-style: italic;
     }
     .capture-yap:focus {
       outline: none;
-      border-color: #7C93C8;
-      box-shadow: 0 0 0 2px rgba(61, 91, 160, 0.16);
+      border-color: color-mix(in srgb, var(--kbn-agent) 70%, var(--kbn-blank));
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-agent) 16%, transparent);
     }
     /* Keep the toggle and optional mode segments on one control row. */
     .capture-meeting-control {
@@ -495,7 +495,7 @@ export function injectCaptureFormStyles(): void {
     }
     .capture-meeting-host-label {
       max-width: 100%;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
       font-size: 12px;
       line-height: 1.25;
       overflow-wrap: anywhere;
@@ -515,9 +515,9 @@ export function injectCaptureFormStyles(): void {
       padding: 0 14px 0 12px;
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 15px;
-      color: #5C544D;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      color: var(--kbn-graphite-soft);
+      background: var(--kbn-blank);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       border-radius: 3px;
       cursor: pointer;
       user-select: none;
@@ -533,17 +533,17 @@ export function injectCaptureFormStyles(): void {
       border-radius: 50%;
     }
     .capture-meeting-toggle:hover:not(:disabled) {
-      color: #2E2A26;
-      background: rgba(46, 42, 38, 0.04);
+      color: var(--kbn-graphite);
+      background: color-mix(in srgb, var(--kbn-graphite) 4%, transparent);
     }
     .capture-meeting-toggle[aria-pressed="true"] {
-      color: #2F665E;
-      background: rgba(63, 130, 120, 0.10);
-      border-color: rgba(63, 130, 120, 0.55);
+      color: var(--kbn-tempered-ink);
+      background: color-mix(in srgb, var(--kbn-tempered) 10%, transparent);
+      border-color: color-mix(in srgb, var(--kbn-tempered) 55%, transparent);
     }
     .capture-meeting-toggle[aria-pressed="true"]::before {
-      background: #3F8278;
-      border-color: #3F8278;
+      background: var(--kbn-tempered);
+      border-color: var(--kbn-tempered);
     }
     .capture-meeting-modes {
       box-sizing: border-box;
@@ -551,8 +551,8 @@ export function injectCaptureFormStyles(): void {
       display: inline-flex;
       gap: 2px;
       padding: 2px;
-      background: rgba(46, 42, 38, 0.035);
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      background: color-mix(in srgb, var(--kbn-graphite) 3.5%, transparent);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       border-radius: 3px;
     }
     /* Keep the box, drop the paint, the tab stops and the a11y node. */
@@ -565,24 +565,24 @@ export function injectCaptureFormStyles(): void {
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 15px;
       line-height: 1;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
       background: transparent;
       border: none;
       border-radius: 2px;
       cursor: pointer;
     }
     .capture-meeting-mode:hover:not([aria-checked="true"]):not(:disabled) {
-      color: #2E2A26;
+      color: var(--kbn-graphite);
     }
     .capture-meeting-mode[aria-checked="true"] {
-      color: #2E2A26;
-      background: #FFFFFF;
-      box-shadow: 0 0 0 1px rgba(46, 42, 38, 0.12), 0 1px 2px rgba(46, 42, 38, 0.10);
+      color: var(--kbn-graphite);
+      background: var(--kbn-blank);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbn-graphite) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--kbn-shade) 10%, transparent);
       cursor: default;
     }
     .capture-meeting-toggle:focus-visible,
     .capture-meeting-mode:focus-visible {
-      outline: 2px solid rgba(154, 123, 53, 0.45);
+      outline: 2px solid color-mix(in srgb, var(--kbn-owed) 45%, transparent);
       outline-offset: 1px;
     }
     .capture-meeting-toggle:disabled,

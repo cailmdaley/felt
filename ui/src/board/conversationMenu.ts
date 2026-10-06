@@ -32,9 +32,9 @@ export function addConversationMenu(pill: HTMLElement, actions: ConversationActi
     menu.setAttribute('role', 'menu')
     menu.setAttribute('aria-label', 'Open conversation in')
     Object.assign(menu.style, {
-      position: 'fixed', zIndex: '10000', background: '#F4F0E8', color: '#2E2A26',
-      border: '1px solid #BDB3A5', borderRadius: '4px', padding: '5px',
-      boxShadow: '0 6px 20px #0002', minWidth: '220px', fontFamily: 'var(--font-main, serif)',
+      position: 'fixed', zIndex: '10000', background: 'var(--kbn-form-paper)', color: 'var(--kbn-graphite)',
+      border: '1px solid color-mix(in srgb, var(--kbn-ink) 23%, var(--kbn-parchment))', borderRadius: '4px', padding: '5px',
+      boxShadow: '0 6px 20px color-mix(in srgb, var(--kbn-shade) 13.33%, transparent)', minWidth: '220px', fontFamily: 'var(--font-main, serif)',
     })
     const items: HTMLElement[] = []
     const dismiss = (restore = false): void => {
@@ -74,7 +74,7 @@ export function addConversationMenu(pill: HTMLElement, actions: ConversationActi
       item.setAttribute('role', 'menuitem')
       item.tabIndex = -1
       Object.assign(item.style, { display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: '16px', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
-      item.addEventListener('focus', () => { item.style.background = '#E5DED2' })
+      item.addEventListener('focus', () => { item.style.background = 'var(--kbn-form-band)' })
       item.addEventListener('blur', () => { item.style.background = 'transparent' })
       item.addEventListener('click', e => { e.stopPropagation(); action.run?.(); dismiss() })
       menu.append(item)

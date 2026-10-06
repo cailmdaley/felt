@@ -30,7 +30,7 @@
   --ws-shadow-contact: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent);
   --ws-shadow-mid: 0 12px 24px -8px color-mix(in srgb, var(--ws-ink) 22%, transparent);
   --ws-shadow-ambient: 0 36px 72px -16px color-mix(in srgb, var(--ws-ink) 32%, transparent);
-  --ws-paper-light: inset 0 1px 0 color-mix(in srgb, var(--ws-paper) 85%, white);
+  --ws-paper-light: inset 0 1px 0 color-mix(in srgb, var(--ws-paper) 85%, var(--kbn-blank));
   --ws-float: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-shadow-ambient);
   --ws-shadow-low: 0 2px 5px color-mix(in srgb, var(--ws-ink) 10%, transparent);
   --ws-chrome-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 8%, transparent),

@@ -171,7 +171,7 @@ export function FileEditor({
     >
       <summary>
         {filename}
-        {dirty && <span style={{ color: '#9A7B35' }}>· unsaved</span>}
+        {dirty && <span style={{ color: 'var(--kbn-owed)' }}>· unsaved</span>}
       </summary>
 
       {open && (

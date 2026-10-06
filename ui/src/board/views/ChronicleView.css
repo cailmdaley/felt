@@ -15,7 +15,7 @@
    (cobalt, the work spells — the board's blue for work being done; the spell
    sums agent and human minutes into one "work happened" claim). Copying the
    hexes is how this page drifted before. Structural inks stay literal:
-   iron-gall #1B1611, muted #7A6F5C, faded #A89B83, parchment #EDE2CE. */
+   iron-gall var(--kbn-ink), muted var(--kbn-ink-muted), faded var(--kbn-ink-faint), parchment var(--kbn-parchment). */
 
 .chr-scroll {
   /* Fallback only — ChronicleView sizes the day column at render so that
@@ -33,7 +33,7 @@
   /* A reading measure, not a packing measure. At 20px the gutter was a list of
      names with no air between them and the lifelines fused into a hatch; at 32
      each row is a line of a page — the name has room to be read, and the ink
-     lane (the marks, which stay small on purpose) floats in white space
+     lane (the marks, which stay small on purpose) floats in var(--kbn-blank) space
      instead of filling the row. Fewer fibers fit on screen. The scroll exists,
      and the record is long anyway. */
   --chr-row-h: 32px;
@@ -51,7 +51,7 @@
   -webkit-overflow-scrolling: touch;
   /* The sheet's own tint, opaque — the sticky gutter and head are cut from
      this same color so content passes cleanly under them. */
-  background: #EDE2CE;
+  background: var(--kbn-parchment);
   border-radius: 2px;
 }
 
@@ -79,9 +79,9 @@
   justify-content: flex-end;
   gap: 1px;
   padding: 0 10px 4px 0;
-  background: #EDE2CE;
-  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
+  background: var(--kbn-parchment);
+  border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
 }
 /* The bearing. The largest quiet thing in the head, because it answers the
    question a long scroll creates — not "which day" (the numerals say that) but
@@ -94,7 +94,7 @@
   font-size: calc(13px * var(--kbn-type-scale, 1));
   letter-spacing: 0.07em;
   line-height: 1.1;
-  color: #4A4033;
+  color: var(--kbn-ink-umber);
   white-space: nowrap;
 }
 .chr-corner-count {
@@ -103,7 +103,7 @@
   font-feature-settings: "smcp", "c2sc";
   font-size: calc(11px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 
 /* Weekday small-caps over an oldstyle numeral — the drag horizon's day
@@ -120,30 +120,30 @@
   gap: 0;
   padding: 0 0 3px;
   line-height: 1;
-  background: #EDE2CE;
-  border-right: 0.5px solid rgba(122, 111, 92, 0.16);
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.30);
+  background: var(--kbn-parchment);
+  border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 16%, transparent);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
 }
-.chr-head-past { background: #EAE0CB; }
+.chr-head-past { background: var(--kbn-parchment); }
 /* A month opens with a rule of its own — heavier than the week's, on the LEFT
    edge, so the boundary reads as the month starting rather than the previous
    one trailing off. */
-.chr-head-monthstart { border-left: 0.5px solid rgba(122, 111, 92, 0.55); }
+.chr-head-monthstart { border-left: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 55%, transparent); }
 /* The month's name stands where its first day's weekday would be. Ochre and
    small-caps: the only text in the almanac that names something larger than a
    day, so it is allowed one step of colour. */
 .chr-head-month {
-  color: #9A7B35;
+  color: var(--kbn-owed);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
-.chr-head-weekend { background: #E6DCC5; }
-.chr-head-week { border-right-color: rgba(122, 111, 92, 0.42); }
+.chr-head-weekend { background: var(--kbn-plate); }
+.chr-head-week { border-right-color: color-mix(in srgb, var(--kbn-ink-muted) 42%, transparent); }
 /* Today is bracketed by a gold seam on both edges, the way the drag horizon
    brackets its today cell — so "now" reads as a column, not as a boundary. */
 .chr-head-today {
-  background: rgba(154, 123, 53, 0.16);
-  box-shadow: inset 1.5px 0 0 #9A7B35, inset -1.5px 0 0 #9A7B35;
+  background: color-mix(in srgb, var(--kbn-owed) 16%, transparent);
+  box-shadow: inset 1.5px 0 0 var(--kbn-owed), inset -1.5px 0 0 var(--kbn-owed);
 }
 .chr-head-dow {
   font-size: calc(9px * var(--kbn-type-scale, 1));
@@ -151,18 +151,18 @@
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.05em;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 .chr-head-num {
   font-size: calc(12px * var(--kbn-type-scale, 1));
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-weight: 500;
   font-feature-settings: "onum";
-  color: #2A231A;
+  color: var(--kbn-ink-sepia);
 }
 .chr-head-today .chr-head-dow,
 .chr-head-today .chr-head-num {
-  color: #9A7B35;
+  color: var(--kbn-owed);
   font-weight: 600;
 }
 
@@ -171,24 +171,24 @@
 .chr-wash {
   z-index: 0;
   pointer-events: none;
-  border-right: 0.5px solid rgba(122, 111, 92, 0.13);
+  border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 13%, transparent);
 }
-.chr-wash-past { background: rgba(27, 22, 17, 0.018); }
-.chr-wash-weekend { background: rgba(27, 22, 17, 0.045); }
-.chr-wash-week { border-right-color: rgba(122, 111, 92, 0.34); }
+.chr-wash-past { background: color-mix(in srgb, var(--kbn-ink) 1.8%, transparent); }
+.chr-wash-weekend { background: color-mix(in srgb, var(--kbn-ink) 4.5%, transparent); }
+.chr-wash-week { border-right-color: color-mix(in srgb, var(--kbn-ink-muted) 34%, transparent); }
 /* The month rule, run the height of the page. Same weight as the week's so the
    two do not compete; it is the almanac's ochre month-name above it that tells
    you which kind of boundary you crossed. */
-.chr-wash-month { border-left: 0.5px solid rgba(122, 111, 92, 0.42); }
+.chr-wash-month { border-left: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 42%, transparent); }
 /* The tint only — the gold edges are drawn by `.chr-seam`, which is appended
    after everything else so no band or lifeline can break the line. */
 .chr-wash-today {
-  background: linear-gradient(rgba(154, 123, 53, 0.12), rgba(154, 123, 53, 0.05));
+  background: linear-gradient(color-mix(in srgb, var(--kbn-owed) 12%, transparent), color-mix(in srgb, var(--kbn-owed) 5%, transparent));
 }
 .chr-seam {
   z-index: 2;
   pointer-events: none;
-  box-shadow: inset 1.5px 0 0 #9A7B35, inset -1.5px 0 0 #9A7B35;
+  box-shadow: inset 1.5px 0 0 var(--kbn-owed), inset -1.5px 0 0 var(--kbn-owed);
 }
 
 /* ── The face: one era, read closely ────────────────────────────────────── */
@@ -200,11 +200,11 @@
   flex: 0 0 auto;
   margin: 0 0 10px;
   padding: 9px 14px 11px;
-  border: 0.5px solid rgba(154, 123, 53, 0.34);
-  border-left: 2px solid #9A7B35;
+  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 34%, transparent);
+  border-left: 2px solid var(--kbn-owed);
   border-radius: 3px;
-  background: rgba(255, 251, 237, 0.72);
-  box-shadow: 0 1px 2px rgba(27, 22, 17, 0.05);
+  background: color-mix(in srgb, var(--kbn-paper-bright) 72%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kbn-shade) 5%, transparent);
 }
 .chr-face-head {
   display: flex;
@@ -220,11 +220,11 @@
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.045em;
-  color: #1B1611;
+  color: var(--kbn-ink);
   cursor: pointer;
 }
 .chr-face-title:hover {
-  color: #3D5BA0;
+  color: var(--kbn-agent);
   text-decoration: underline;
   text-decoration-thickness: 0.5px;
   text-underline-offset: 3px;
@@ -236,14 +236,14 @@
   min-width: 12ch;
   padding: 0 2px;
   border: 0;
-  border-bottom: 1px solid rgba(154, 123, 53, 0.7);
+  border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed) 70%, transparent);
   background: none;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(19px * var(--kbn-type-scale, 1));
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.045em;
-  color: #1B1611;
+  color: var(--kbn-ink);
   outline: none;
 }
 
@@ -257,14 +257,14 @@
   padding: 5px 7px;
   border: 0;
   border-radius: 4px;
-  background: #FBF6E9;
-  outline: 1px solid rgba(154, 123, 53, 0.5);
+  background: var(--kbn-paper);
+  outline: 1px solid color-mix(in srgb, var(--kbn-owed) 50%, transparent);
   resize: vertical;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(14px * var(--kbn-type-scale, 1));
   line-height: 1.34;
-  color: #2A231A;
+  color: var(--kbn-ink-sepia);
 }
 
 .chr-face-span {
@@ -272,7 +272,7 @@
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.02em;
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
 }
 .chr-face-close {
   flex: 0 0 auto;
@@ -281,10 +281,10 @@
   background: none;
   font-size: calc(12px * var(--kbn-type-scale, 1));
   line-height: 1;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   cursor: pointer;
 }
-.chr-face-close:hover { color: #BC4538; }
+.chr-face-close:hover { color: var(--kbn-you); }
 
 .chr-face-intent {
   margin: 5px 0 0;
@@ -292,7 +292,7 @@
   font-style: italic;
   font-size: calc(14px * var(--kbn-type-scale, 1));
   line-height: 1.34;
-  color: #2A231A;
+  color: var(--kbn-ink-sepia);
   max-width: 74ch;
 }
 
@@ -304,10 +304,10 @@
   border: 0;
   background: none;
   text-align: left;
-  color: #8A7C64;
+  color: var(--kbn-ink-dun);
   cursor: pointer;
 }
-.chr-face-intent-empty:hover { color: #6E5A2E; }
+.chr-face-intent-empty:hover { color: var(--kbn-owed-umber); }
 
 /* Figures read as a line of marginalia, not as tiles. */
 .chr-face-stats {
@@ -317,7 +317,7 @@
   gap: 4px 16px;
   margin: 8px 0 0;
   padding: 6px 0 0;
-  border-top: 0.5px solid rgba(122, 111, 92, 0.20);
+  border-top: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 20%, transparent);
 }
 .chr-face-stats dt {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
@@ -325,20 +325,20 @@
   font-feature-settings: "smcp", "c2sc";
   font-size: calc(10.5px * var(--kbn-type-scale, 1));
   letter-spacing: 0.06em;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 .chr-face-stats dd {
   margin: 0 6px 0 0;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-feature-settings: "onum";
   font-size: calc(14px * var(--kbn-type-scale, 1));
-  color: #1B1611;
+  color: var(--kbn-ink);
 }
 
 .chr-face-memoir {
   margin-top: 9px;
   padding-top: 7px;
-  border-top: 0.5px solid rgba(122, 111, 92, 0.20);
+  border-top: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 20%, transparent);
 }
 .chr-face-memoir-head {
   margin: 0 0 4px;
@@ -348,14 +348,14 @@
   font-size: calc(11px * var(--kbn-type-scale, 1));
   font-weight: 500;
   letter-spacing: 0.09em;
-  color: #BC4538;
+  color: var(--kbn-you);
 }
 .chr-face-line {
   margin: 0 0 2px;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1.36;
-  color: #2A231A;
+  color: var(--kbn-ink-sepia);
   max-width: 92ch;
 }
 /* The fiber a group of commits belongs to. It used to be a `slug:` prefix — a
@@ -363,13 +363,13 @@
    is prose: it keeps the line's serif and is distinguished by weight and hue. */
 .chr-face-fiber {
   font-weight: 600;
-  color: #3D5BA0;
+  color: var(--kbn-agent);
   margin-right: 4px;
 }
 .chr-face-count {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(9px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 /* A fiber named in the look-back opens it. Same blue-and-hairline register the
    face's own title uses — a name you can reach, said the one way this page
@@ -384,7 +384,7 @@
   cursor: pointer;
 }
 .chr-face-open:hover {
-  color: #3D5BA0;
+  color: var(--kbn-agent);
   text-decoration: underline;
   text-decoration-thickness: 0.5px;
   text-underline-offset: 2px;
@@ -394,44 +394,44 @@
    take the weight off it. */
 .chr-face-fiber.chr-face-open {
   font-weight: 600;
-  color: #3D5BA0;
+  color: var(--kbn-agent);
 }
 
-.chr-face-closed { color: #4A4033; }
-.chr-face-mark-ok { color: var(--kbn-tempered, #3F8278); }
-.chr-face-mark-x { color: #A89B83; }
+.chr-face-closed { color: var(--kbn-ink-umber); }
+.chr-face-mark-ok { color: var(--kbn-tempered, var(--kbn-tempered)); }
+.chr-face-mark-x { color: var(--kbn-ink-faint); }
 .chr-face-quiet {
   margin: 0;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(13px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 
 .chr-face-inscribe {
   margin-top: 9px;
   padding: 2px 12px;
-  border: 0.5px solid rgba(154, 123, 53, 0.5);
+  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 50%, transparent);
   border-radius: 2px;
-  background: rgba(196, 147, 51, 0.13);
+  background: color-mix(in srgb, var(--kbn-owed-bright) 13%, transparent);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(12.5px * var(--kbn-type-scale, 1));
-  color: #6E5A2E;
+  color: var(--kbn-owed-umber);
   cursor: pointer;
 }
 .chr-face-inscribe:hover:not(:disabled) {
-  background: rgba(196, 147, 51, 0.24);
-  color: #4A3C1C;
+  background: color-mix(in srgb, var(--kbn-owed-bright) 24%, transparent);
+  color: var(--kbn-owed-sepia);
 }
 .chr-face-inscribe:disabled { opacity: 0.6; cursor: default; }
 
 /* Outside the era: present, but not what you are reading. */
 .chr-outside { opacity: 0.28; }
 .chr-band-scoped {
-  background: rgba(196, 147, 51, 0.34);
-  border-color: #9A7B35;
-  color: #4A3C1C;
+  background: color-mix(in srgb, var(--kbn-owed-bright) 34%, transparent);
+  border-color: var(--kbn-owed);
+  color: var(--kbn-owed-sepia);
 }
 
 /* ── The cycle strip ────────────────────────────────────────────────────── */
@@ -449,8 +449,8 @@
   align-items: center;
   justify-content: flex-end;
   padding: 0 10px 0 2px;
-  background: #EDE2CE;
-  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
+  background: var(--kbn-parchment);
+  border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
 }
 .chr-cycle-tag {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
@@ -458,7 +458,7 @@
   font-feature-settings: "smcp", "c2sc";
   font-size: calc(10px * var(--kbn-type-scale, 1));
   letter-spacing: 0.07em;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 
 .chr-cycle-lane {
@@ -471,7 +471,7 @@
    band rather than as two more rows. */
 .chr-cycle-lane.chr-cycle-last,
 .chr-cycle-gutter.chr-cycle-last {
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 22%, transparent);
 }
 
 .chr-band {
@@ -482,14 +482,14 @@
   align-items: center;
   padding: 0 6px;
   margin: 0;
-  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 42%, transparent);
   border-radius: 7px;
-  background: rgba(196, 147, 51, 0.16);
+  background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(11.5px * var(--kbn-type-scale, 1));
   line-height: 1;
-  color: #6E5A2E;
+  color: var(--kbn-owed-umber);
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -499,11 +499,11 @@
   appearance: none;
 }
 .chr-band:hover {
-  background: rgba(196, 147, 51, 0.26);
-  color: #4A3C1C;
+  background: color-mix(in srgb, var(--kbn-owed-bright) 26%, transparent);
+  color: var(--kbn-owed-sepia);
 }
 .chr-band:focus-visible {
-  outline: 1.5px solid #9A7B35;
+  outline: 1.5px solid var(--kbn-owed);
   outline-offset: -2px;
 }
 /* An edge the span runs past is squared off and faded — the capsule is cut by
@@ -549,12 +549,12 @@
   left: 2.5px;
   width: 2px;
   border-radius: 1px;
-  background: #9A7B35;
+  background: var(--kbn-owed);
 }
 .chr-band:hover .chr-grip { opacity: 0.9; }
 .chr-band-resizing {
-  background: rgba(196, 147, 51, 0.3);
-  border-color: #9A7B35;
+  background: color-mix(in srgb, var(--kbn-owed-bright) 30%, transparent);
+  border-color: var(--kbn-owed);
 }
 .chr-band-resizing .chr-grip { opacity: 1; }
 
@@ -567,12 +567,12 @@
   padding: 0 4px;
   border: 0;
   border-radius: 5px;
-  background: #FBF6E9;
-  outline: 1px solid rgba(154, 123, 53, 0.7);
+  background: var(--kbn-paper);
+  outline: 1px solid color-mix(in srgb, var(--kbn-owed) 70%, transparent);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(11.5px * var(--kbn-type-scale, 1));
-  color: #2A231A;
+  color: var(--kbn-ink-sepia);
 }
 
 /* Saved-but-unconfirmed: present, not yet a fact. */
@@ -583,7 +583,7 @@
 }
 /* The span under the cursor mid-drag. */
 .chr-band-ghost {
-  background: rgba(196, 147, 51, 0.22);
+  background: color-mix(in srgb, var(--kbn-owed-bright) 22%, transparent);
   border-style: dashed;
   pointer-events: none;
 }
@@ -596,18 +596,18 @@
   bottom: 1px;
   z-index: 6;
   padding: 0 6px;
-  border: 0.5px solid #9A7B35;
+  border: 0.5px solid var(--kbn-owed);
   border-radius: 7px;
-  background: rgba(255, 251, 237, 0.98);
+  background: color-mix(in srgb, var(--kbn-paper-bright) 98%, transparent);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(11.5px * var(--kbn-type-scale, 1));
-  color: #1B1611;
+  color: var(--kbn-ink);
   outline: none;
-  box-shadow: 0 1px 3px rgba(27, 22, 17, 0.12);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--kbn-shade) 12%, transparent);
 }
 .chr-cycle-name::placeholder {
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 
 /* The invitation. Always present on the last lane, right-aligned so it keeps
@@ -624,7 +624,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(11px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   opacity: 0;
   transition: opacity 140ms ease-out;
   pointer-events: none;
@@ -646,7 +646,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: 1;
-  color: #9A7B35;
+  color: var(--kbn-owed);
   opacity: 0.7;
   cursor: pointer;
 }
@@ -663,10 +663,10 @@
   flex: 0 0 auto;
   margin: 0 0 8px;
   padding: 8px 10px 7px;
-  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 42%, transparent);
   border-radius: 3px;
-  background: rgba(255, 251, 237, 0.96);
-  box-shadow: 0 1px 4px rgba(27, 22, 17, 0.10);
+  background: color-mix(in srgb, var(--kbn-paper-bright) 96%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--kbn-shade) 10%, transparent);
 }
 .chr-era-title {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
@@ -674,7 +674,7 @@
   font-feature-settings: "smcp", "c2sc";
   font-size: calc(11px * var(--kbn-type-scale, 1));
   letter-spacing: 0.07em;
-  color: #9A7B35;
+  color: var(--kbn-owed);
 }
 .chr-era-text {
   display: block;
@@ -683,19 +683,19 @@
   padding: 6px 8px;
   box-sizing: border-box;
   resize: vertical;
-  border: 0.5px solid rgba(122, 111, 92, 0.30);
+  border: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
   border-radius: 2px;
-  background: #FFFBED;
+  background: var(--kbn-paper-bright);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1.45;
-  color: #1B1611;
+  color: var(--kbn-ink);
   outline: none;
 }
-.chr-era-text:focus { border-color: #9A7B35; }
+.chr-era-text:focus { border-color: var(--kbn-owed); }
 .chr-era-text::placeholder {
   font-style: italic;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 .chr-era-foot {
   display: flex;
@@ -709,7 +709,7 @@
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(11px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 .chr-era-cancel,
 .chr-era-begin {
@@ -726,15 +726,15 @@
 .chr-era-cancel {
   border: 0;
   background: transparent;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
-.chr-era-cancel:hover { color: #7A6F5C; }
+.chr-era-cancel:hover { color: var(--kbn-ink-muted); }
 .chr-era-begin {
-  border: 0.5px solid rgba(154, 123, 53, 0.42);
-  background: rgba(196, 147, 51, 0.16);
-  color: #1B1611;
+  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 42%, transparent);
+  background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent);
+  color: var(--kbn-ink);
 }
-.chr-era-begin:hover { background: rgba(196, 147, 51, 0.26); }
+.chr-era-begin:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 26%, transparent); }
 
 /* ── The row gutter ─────────────────────────────────────────────────────── */
 
@@ -754,9 +754,9 @@
   gap: 9px;
   min-width: 0;
   padding: 0 13px 0 4px;
-  background: #EDE2CE;
-  border-right: 0.5px solid rgba(122, 111, 92, 0.30);
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.09);
+  background: var(--kbn-parchment);
+  border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 9%, transparent);
 }
 /* The lifecycle glyph, before the name. Marginalia: a size below the name and
    a pigment already on the page, so it reads as a mark in the margin rather
@@ -768,12 +768,12 @@
   font-size: calc(10px * var(--kbn-type-scale, 1));
   line-height: 1;
 }
-.chr-state-draft { color: #7A6F5C; opacity: 0.75; }
-.chr-state-inFlight { color: #3D5BA0; }
-.chr-state-resting { color: #7A6F5C; }
-.chr-state-awaitingReview { color: #C49333; }
-.chr-state-tempered { color: var(--kbn-tempered, #3F8278); }
-.chr-state-discarded { color: #7A6F5C; opacity: 0.6; }
+.chr-state-draft { color: var(--kbn-ink-muted); opacity: 0.75; }
+.chr-state-inFlight { color: var(--kbn-agent); }
+.chr-state-resting { color: var(--kbn-ink-muted); }
+.chr-state-awaitingReview { color: var(--kbn-owed-bright); }
+.chr-state-tempered { color: var(--kbn-tempered, var(--kbn-tempered)); }
+.chr-state-discarded { color: var(--kbn-ink-muted); opacity: 0.6; }
 
 .chr-name {
   flex: 1 1 auto;
@@ -786,7 +786,7 @@
   font-size: calc(15px * var(--kbn-type-scale, 1));
   letter-spacing: 0.006em;
   line-height: var(--chr-row-h);
-  color: #1B1611;
+  color: var(--kbn-ink);
   background: none;
   border: 0;
   padding: 0;
@@ -794,20 +794,20 @@
   cursor: pointer;
 }
 button.chr-name:hover {
-  color: #3D5BA0;
+  color: var(--kbn-agent);
   text-decoration: underline;
   text-decoration-thickness: 0.5px;
   text-underline-offset: 2px;
 }
 /* A live worker is the one thing on this page allowed to assert itself: the
    name goes cobalt and a small mark sits in the margin. */
-.chr-label-live .chr-name { color: #3D5BA0; font-weight: 500; }
+.chr-label-live .chr-name { color: var(--kbn-agent); font-weight: 500; }
 .chr-label-live::before {
   content: '▸';
   flex: 0 0 auto;
   margin-right: -4px;
   font-size: calc(9px * var(--kbn-type-scale, 1));
-  color: #3D5BA0;
+  color: var(--kbn-agent);
   line-height: var(--chr-row-h);
 }
 /* Marginalia: which host, in the smallest mono on the page. It hangs off the
@@ -818,7 +818,7 @@ button.chr-name:hover {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(9px * var(--kbn-type-scale, 1));
   letter-spacing: 0.015em;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -830,14 +830,14 @@ button.chr-name:hover {
    a chronicle row has no border to dash and no ground to fill, so importing it
    only ever meant subtracting it again (and, since `border-style: solid` with
    no width or colour of its own resolves to a 3px currentColor rule, it drew a
-   black box around every waiting row). One line tall, so the register is what a
+   var(--kbn-shade) box around every waiting row). One line tall, so the register is what a
    row can carry: dimming, plus the ⌛ badge in the note slot. */
 .chr-label-waiting,
 .chr-track-waiting {
   opacity: 0.62;
 }
 .chr-label-waiting .chr-name,
-.chr-label-waiting button.chr-name:hover { color: #5A4F3A; }
+.chr-label-waiting button.chr-name:hover { color: color-mix(in srgb, var(--kbn-ink) 34%, var(--kbn-ink-muted)); }
 .chr-note.kbn-card-waiting {
   font-size: calc(8.5px * var(--kbn-type-scale, 1));
   padding: 0 3px;
@@ -857,10 +857,10 @@ button.chr-name:hover {
   font-size: calc(9px * var(--kbn-type-scale, 1));
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
-  color: #8A7C64;
+  color: var(--kbn-ink-dun);
 }
 /* The line count, at the gutter's outer edge — the same ledger column one step
-   quieter. `#A89B83` is the note's pigment, not the span's: the day count is
+   quieter. `var(--kbn-ink-faint)` is the note's pigment, not the span's: the day count is
    the row's own shape and reads with the lifeline, while `+A −D` is evidence
    from the commit trail — marginalia, the second thing the eye is allowed to
    skip. It never shrinks (`flex: 0 0 auto`), so a wide figure stays exact and
@@ -873,12 +873,12 @@ button.chr-name:hover {
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   white-space: nowrap;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 .chr-diff .kbn-diffclause-ins,
-.chr-face-diff .kbn-diffclause-ins { color: var(--kbn-diff-add, #4B7A3E); }
+.chr-face-diff .kbn-diffclause-ins { color: var(--kbn-diff-add, var(--kbn-diff-add)); }
 .chr-diff .kbn-diffclause-del,
-.chr-face-diff .kbn-diffclause-del { color: var(--kbn-diff-del, #A84A3E); }
+.chr-face-diff .kbn-diffclause-del { color: var(--kbn-diff-del, var(--kbn-discarded)); }
 
 /* ── Following one row across a wide sheet ──────────────────────────────── */
 
@@ -892,26 +892,26 @@ button.chr-name:hover {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(196, 147, 51, 0.10);
+  background: color-mix(in srgb, var(--kbn-owed-bright) 10%, transparent);
   pointer-events: none;
 }
 /* The gutter is opaque parchment, so its wash is a layer on the ground rather
    than an overlay — same colour, same weight, no stacking to reason about. */
 .chr-label-hot {
   background:
-    linear-gradient(rgba(196, 147, 51, 0.10), rgba(196, 147, 51, 0.10)),
-    #EDE2CE;
+    linear-gradient(color-mix(in srgb, var(--kbn-owed-bright) 10%, transparent), color-mix(in srgb, var(--kbn-owed-bright) 10%, transparent)),
+    var(--kbn-parchment);
 }
-.chr-label-hot .chr-name { color: #1B1611; }
+.chr-label-hot .chr-name { color: var(--kbn-ink); }
 .chr-label-hot .chr-note,
-.chr-label-hot .chr-span { color: #7A6F5C; }
+.chr-label-hot .chr-span { color: var(--kbn-ink-muted); }
 /* ── The lifeline ───────────────────────────────────────────────────────── */
 
 .chr-track {
   position: relative;
   z-index: 2;
   min-width: 0;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.09);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 9%, transparent);
 }
 /* 2px of iron-gall from birth to close. Everything else on the row is drawn
    over this line, centered on it. */
@@ -920,7 +920,7 @@ button.chr-name:hover {
   top: 50%;
   height: 2px;
   margin-top: -1px;
-  background: rgba(27, 22, 17, 0.26);
+  background: color-mix(in srgb, var(--kbn-ink) 26%, transparent);
   border-radius: 1px;
 }
 /* A SPELL of work — a contiguous period of use, drawn where inside the day it
@@ -933,7 +933,7 @@ button.chr-name:hover {
 .chr-seg {
   position: absolute;
   top: 50%;
-  background: var(--kbn-agent, #3D5BA0);
+  background: var(--kbn-agent, var(--kbn-agent));
   opacity: 0.55;
   border-radius: 1px;
 }
@@ -957,21 +957,21 @@ button.chr-name:hover {
   line-height: 1;
   pointer-events: none;
 }
-.chr-end { color: var(--kbn-tempered, #3F8278); }
-.chr-end-discard { color: #A89B83; }
+.chr-end { color: var(--kbn-tempered, var(--kbn-tempered)); }
+.chr-end-discard { color: var(--kbn-ink-faint); }
 /* The one mark that writes back: a fiber's due date is a plain frontmatter
  * field, so unlike every other mark on the row it opts back into pointer
  * events and offers a grab cursor. `.chr-launch` stays inert — it draws a
  * DERIVED value (the daemon's own next-run computation), and there is
  * nothing a drag could write. */
 .chr-due {
-  color: #C49333;
+  color: var(--kbn-owed-bright);
   font-size: calc(12.5px * var(--kbn-type-scale, 1));
   pointer-events: auto;
   cursor: grab;
 }
 .chr-mark-dragging { cursor: grabbing; opacity: 0.85; }
-.chr-launch { color: #3D5BA0; font-size: calc(12.5px * var(--kbn-type-scale, 1)); opacity: 0.75; }
+.chr-launch { color: var(--kbn-agent); font-size: calc(12.5px * var(--kbn-type-scale, 1)); opacity: 0.75; }
 
 /* ── The key ────────────────────────────────────────────────────────────── */
 
@@ -990,7 +990,7 @@ button.chr-name:hover {
   font-style: italic;
   font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: 1.2;
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
 }
 .chr-key-item {
   display: inline-flex;
@@ -1007,7 +1007,7 @@ button.chr-name:hover {
   width: 22px;
   height: 2px;
   border-radius: 1px;
-  background: rgba(27, 22, 17, 0.26);
+  background: color-mix(in srgb, var(--kbn-ink) 26%, transparent);
 }
 .chr-key-ramp {
   display: inline-flex;
@@ -1018,7 +1018,7 @@ button.chr-name:hover {
 }
 .chr-key-seg {
   display: inline-block;
-  background: var(--kbn-agent, #3D5BA0);
+  background: var(--kbn-agent, var(--kbn-agent));
   opacity: 0.55;
   border-radius: 1px;
 }
@@ -1033,8 +1033,8 @@ button.chr-name:hover {
   font-size: calc(11px * var(--kbn-type-scale, 1));
   line-height: 1;
 }
-.chr-key-due { color: var(--kbn-owed-bright, #C49333); }
-.chr-key-launch { color: #3D5BA0; opacity: 0.75; }
+.chr-key-due { color: var(--kbn-owed-bright, var(--kbn-owed-bright)); }
+.chr-key-launch { color: var(--kbn-agent); opacity: 0.75; }
 /* The state group: glyph and word in pairs, one line, hanging together as a
    single key item so a narrow key wraps between groups and never inside one. */
 .chr-key-states {
@@ -1049,9 +1049,9 @@ button.chr-name:hover {
   display: inline-block;
   width: 20px;
   height: 9px;
-  border: 0.5px solid rgba(154, 123, 53, 0.42);
+  border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 42%, transparent);
   border-radius: 5px;
-  background: rgba(196, 147, 51, 0.16);
+  background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent);
 }
 /* A chatty era must not push the grid off the page: the memoir scrolls inside
    the face rather than growing it without limit. The grid is still the page. */
@@ -1082,12 +1082,12 @@ button.chr-name:hover {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(15px * var(--kbn-type-scale, 1));
   line-height: 1;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   transition: color 90ms ease-out;
 }
-.chr-refresh:hover { color: #1B1611; }
+.chr-refresh:hover { color: var(--kbn-ink); }
 .chr-refresh:focus-visible {
-  outline: 1px dashed rgba(27, 22, 17, 0.45);
+  outline: 1px dashed color-mix(in srgb, var(--kbn-ink) 45%, transparent);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -1112,12 +1112,12 @@ button.chr-name:hover {
   width: 190px;
   padding: 2px 4px;
   border: 0;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.42);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 42%, transparent);
   background: transparent;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(13px * var(--kbn-type-scale, 1));
-  color: #1B1611;
+  color: var(--kbn-ink);
   outline: none;
   /* Wider once you are in it — the query gets room without the head ever
      changing height. */
@@ -1125,9 +1125,9 @@ button.chr-name:hover {
 }
 .chr-search-input:focus {
   width: 260px;
-  border-bottom-color: #9A7B35;
+  border-bottom-color: var(--kbn-owed);
 }
-.chr-search-input::placeholder { color: #A89B83; }
+.chr-search-input::placeholder { color: var(--kbn-ink-faint); }
 /* WebKit's own clear affordance is a grey circle in a parchment margin. */
 .chr-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 
@@ -1142,10 +1142,10 @@ button.chr-name:hover {
   width: 380px;
   max-height: 46vh;
   overflow-y: auto;
-  background: rgba(255, 251, 237, 0.99);
-  border: 0.5px solid rgba(122, 111, 92, 0.34);
+  background: color-mix(in srgb, var(--kbn-paper-bright) 99%, transparent);
+  border: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 34%, transparent);
   border-radius: 3px;
-  box-shadow: 0 3px 10px rgba(27, 22, 17, 0.14);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--kbn-shade) 14%, transparent);
 }
 /* Nothing typed, nothing found, nothing focused: no panel at all. `:empty`
    carries the first two; the focus rule carries the third, so a list left open
@@ -1158,7 +1158,7 @@ button.chr-name:hover {
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
 }
 
 /* One hit is three lines at most: the name, its address, and — when the words
@@ -1168,19 +1168,19 @@ button.chr-name:hover {
   width: 100%;
   padding: 6px 10px;
   border: 0;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.16);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 16%, transparent);
   background: transparent;
   text-align: left;
   cursor: pointer;
 }
 .chr-hit:last-child { border-bottom: 0; }
-.chr-hit:hover { background: rgba(196, 147, 51, 0.12); }
+.chr-hit:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent); }
 
 .chr-hit-name {
   display: block;
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-size: calc(13px * var(--kbn-type-scale, 1));
-  color: #1B1611;
+  color: var(--kbn-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1189,7 +1189,7 @@ button.chr-name:hover {
   display: block;
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1206,13 +1206,13 @@ button.chr-name:hover {
   font-style: italic;
   font-size: calc(11.5px * var(--kbn-type-scale, 1));
   line-height: 1.35;
-  color: #7A6F5C;
+  color: var(--kbn-ink-muted);
 }
 
 /* IN THE RECORD, NOT ON THIS BOARD. Still listed — it is an honest answer to
    the question asked — but quieter, because the click cannot take you to a
    lifeline that is not drawn. */
-.chr-hit-off .chr-hit-name { color: #7A6F5C; }
+.chr-hit-off .chr-hit-name { color: var(--kbn-ink-muted); }
 .chr-hit-off { cursor: default; }
 
 /* THE JUMP LANDS HERE. Gold, the page's own "this is the one" pigment (it is
@@ -1221,11 +1221,11 @@ button.chr-name:hover {
    where they were before they searched. Cleared by the next jump, or by
    clearing the search. */
 .chr-found.chr-label {
-  background: rgba(196, 147, 51, 0.20);
-  box-shadow: inset 2px 0 0 #C49333;
+  background: color-mix(in srgb, var(--kbn-owed-bright) 20%, transparent);
+  box-shadow: inset 2px 0 0 var(--kbn-owed-bright);
 }
 .chr-found.chr-track {
-  background: rgba(196, 147, 51, 0.10);
+  background: color-mix(in srgb, var(--kbn-owed-bright) 10%, transparent);
 }
 
 /* ── The record on a phone ───────────────────────────────────────────────────

@@ -7,6 +7,7 @@ const css = strip(read('workspace/overview.css'))
 const reader = strip(read('workspace/reader.css'))
 const tokens = strip(read('workspace/tokens.css'))
 const desk = strip(read('KanbanModal.css'))
+const palette = strip(read('palette.css'))
 
 describe('Overview style contracts', () => {
   it('uses workspace tokens and scopes its rules away from the reader', () => {
@@ -48,7 +49,7 @@ describe('workspace palette follows the Desk', () => {
   })
   it('declares the shared materials beside the pigments, and the Desk uses them', () => {
     for (const name of ['parchment', 'sheet', 'plate', 'paper', 'hairline', 'rule', 'ink', 'ink-muted']) {
-      expect(desk, name).toMatch(new RegExp(`--kbn-${name}:`))
+      expect(palette, name).toMatch(new RegExp(`--kbn-${name}:`))
     }
     expect(desk).toMatch(/\.kbn-modal\s*\{[^}]*background-color: var\(--kbn-parchment\)/)
   })

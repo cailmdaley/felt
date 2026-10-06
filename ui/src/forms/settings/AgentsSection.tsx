@@ -134,10 +134,10 @@ export function AgentsSection({
                   <span className="set-row-path">
                     {agent.id}
                     {agent.default && (
-                      <span style={{ color: '#9A7B35' }}> · default</span>
+                      <span style={{ color: 'var(--kbn-owed)' }}> · default</span>
                     )}
                     {agent.source === 'user' && (
-                      <span style={{ color: '#7A7068' }}> · from file</span>
+                      <span style={{ color: 'var(--kbn-graphite-muted)' }}> · from file</span>
                     )}
                   </span>
                   <span className="set-row-note">

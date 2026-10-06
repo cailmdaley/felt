@@ -710,25 +710,25 @@ export function injectStashFormStyles(): void {
       gap: 6px;
       align-self: flex-start;
       padding: 2px 8px;
-      background: rgba(255, 252, 245, 0.7);
-      border: 1px dashed rgba(154, 123, 53, 0.42);
+      background: color-mix(in srgb, var(--kbn-rag) 70%, transparent);
+      border: 1px dashed color-mix(in srgb, var(--kbn-owed) 42%, transparent);
       border-radius: 2px;
       font-family: var(--font-mono, 'JetBrains Mono', monospace);
       font-size: 11px;
-      color: #5C544D;
+      color: var(--kbn-graphite-soft);
     }
     .stash-receipt-key {
       text-transform: uppercase;
       letter-spacing: 0.12em;
-      color: #C49333;
+      color: var(--kbn-owed-bright);
       font-size: 9.5px;
     }
     .stash-receipt-sep {
-      color: #B5A998;
+      color: var(--kbn-graphite-pale);
     }
     .stash-receipt-val {
       font-family: inherit;
-      color: #2E2A26;
+      color: var(--kbn-graphite);
     }
     .stash-chips {
       display: flex;
@@ -737,30 +737,30 @@ export function injectStashFormStyles(): void {
       align-items: center;
       box-sizing: border-box;
       padding: 5px 8px;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      background: var(--kbn-blank);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       border-radius: 3px;
       min-height: 36px;
     }
     .stash-chips:focus-within {
-      border-color: #C49333;
-      box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.18);
+      border-color: var(--kbn-owed-bright);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed) 18%, transparent);
     }
     .stash-chip {
       display: inline-flex;
       align-items: center;
       gap: 3px;
       padding: 2px 4px 2px 8px;
-      background: rgba(154, 123, 53, 0.14);
-      border: 1px solid rgba(154, 123, 53, 0.32);
+      background: color-mix(in srgb, var(--kbn-owed) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--kbn-owed) 32%, transparent);
       border-radius: 12px;
       font-size: 12px;
-      color: #5A4520;
+      color: color-mix(in srgb, var(--kbn-owed-bright) 37%, var(--kbn-ink));
     }
     .stash-chip-x {
       background: transparent;
       border: 0;
-      color: #5A4520;
+      color: color-mix(in srgb, var(--kbn-owed-bright) 37%, var(--kbn-ink));
       cursor: pointer;
       font-size: 14px;
       padding: 0 4px;
@@ -768,8 +768,8 @@ export function injectStashFormStyles(): void {
       border-radius: 50%;
     }
     .stash-chip-x:hover {
-      background: rgba(178, 78, 60, 0.18);
-      color: #8B3A28;
+      background: color-mix(in srgb, var(--kbn-alarm) 18%, transparent);
+      color: var(--kbn-error);
     }
     .stash-tag-input {
       flex: 1;
@@ -780,10 +780,10 @@ export function injectStashFormStyles(): void {
       background: transparent;
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 15px;
-      color: #2E2A26;
+      color: var(--kbn-graphite);
     }
     .stash-tag-input::placeholder {
-      color: #9A8E80;
+      color: var(--kbn-graphite-faint);
       font-style: italic;
     }
     .stash-suggestions {
@@ -792,9 +792,9 @@ export function injectStashFormStyles(): void {
       gap: 4px;
     }
     .stash-suggestion {
-      background: rgba(46, 42, 38, 0.05);
-      border: 1px solid rgba(46, 42, 38, 0.14);
-      color: #2E2A26;
+      background: color-mix(in srgb, var(--kbn-graphite) 5%, transparent);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 14%, transparent);
+      color: var(--kbn-graphite);
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 12px;
       padding: 2px 8px;
@@ -803,8 +803,8 @@ export function injectStashFormStyles(): void {
       transition: background 100ms ease-out;
     }
     .stash-suggestion:hover {
-      background: rgba(154, 123, 53, 0.18);
-      border-color: rgba(154, 123, 53, 0.42);
+      background: color-mix(in srgb, var(--kbn-owed) 18%, transparent);
+      border-color: color-mix(in srgb, var(--kbn-owed) 42%, transparent);
     }
     .stash-parent-picker {
       position: relative;
@@ -817,10 +817,10 @@ export function injectStashFormStyles(): void {
       z-index: 10;
       max-height: 240px;
       overflow-y: auto;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.18);
+      background: var(--kbn-blank);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 18%, transparent);
       border-radius: 3px;
-      box-shadow: 0 8px 18px rgba(46, 42, 38, 0.18);
+      box-shadow: 0 8px 18px color-mix(in srgb, var(--kbn-shade) 18%, transparent);
       padding: 4px;
       display: flex;
       flex-direction: column;
@@ -837,25 +837,25 @@ export function injectStashFormStyles(): void {
       border-radius: 2px;
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 14px;
-      color: #2E2A26;
+      color: var(--kbn-graphite);
       text-align: left;
       cursor: pointer;
       transition: background 100ms ease-out;
     }
     .stash-parent-option:hover,
     .stash-parent-option-active {
-      background: rgba(154, 123, 53, 0.18);
-      border-color: rgba(154, 123, 53, 0.40);
+      background: color-mix(in srgb, var(--kbn-owed) 18%, transparent);
+      border-color: color-mix(in srgb, var(--kbn-owed) 40%, transparent);
     }
     .stash-parent-option-name {
       font-weight: 500;
-      color: #2E2A26;
+      color: var(--kbn-graphite);
     }
     .stash-parent-option-id {
       font-family: var(--font-mono, 'JetBrains Mono', monospace);
       font-size: 10.5px;
       letter-spacing: 0.02em;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
     }
     .stash-parent-option[data-depth="1"] .stash-parent-option-name {
       font-weight: 600;
@@ -863,7 +863,7 @@ export function injectStashFormStyles(): void {
     .stash-parent-empty {
       padding: 8px 10px;
       font-size: 12px;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
       font-style: italic;
       cursor: default;
     }
@@ -876,13 +876,13 @@ export function injectStashFormStyles(): void {
       gap: 2px;
       height: 36px;
       padding: 2px;
-      background: rgba(46, 42, 38, 0.035);
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      background: color-mix(in srgb, var(--kbn-graphite) 3.5%, transparent);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       border-radius: 3px;
     }
     .stash-segmented:focus-within {
-      border-color: #C49333;
-      box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.18);
+      border-color: var(--kbn-owed-bright);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed) 18%, transparent);
     }
     .stash-segment {
       display: flex;
@@ -892,7 +892,7 @@ export function injectStashFormStyles(): void {
       line-height: 30px;
       border-radius: 2px;
       cursor: pointer;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
       min-width: 0;
       overflow: hidden;
       transition: background 120ms ease-out, color 120ms ease-out;
@@ -911,19 +911,19 @@ export function injectStashFormStyles(): void {
     .stash-segment-hint {
       font-size: 12px;
       font-style: italic;
-      color: #9A8E80;
+      color: var(--kbn-graphite-faint);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       min-width: 0;
     }
     .stash-segment:hover:not(.stash-segment-active) {
-      color: #2E2A26;
+      color: var(--kbn-graphite);
     }
     .stash-segment-active {
-      color: #2E2A26;
-      background: #FFFFFF;
-      box-shadow: 0 0 0 1px rgba(46, 42, 38, 0.12), 0 1px 2px rgba(46, 42, 38, 0.10);
+      color: var(--kbn-graphite);
+      background: var(--kbn-blank);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbn-graphite) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--kbn-shade) 10%, transparent);
       cursor: default;
     }
   `)

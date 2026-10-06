@@ -20,7 +20,7 @@ button.ws-reference-play::after {
 }
 button.ws-reference-play:hover { background: var(--ws-hover, color-mix(in srgb, currentColor 12%, transparent)); }
 a.ws-channel-reference:focus-visible, button.ws-reference-play:focus-visible {
-  outline: 1px solid var(--ws-focus, #ac3b2a); outline-offset: 2px;
+  outline: 1px solid var(--ws-focus, var(--kbn-you)); outline-offset: 2px;
 }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-reader button.ws-reference-play, button.ws-reference-play { width: 44px; height: 44px; }

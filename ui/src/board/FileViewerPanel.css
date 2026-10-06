@@ -31,7 +31,7 @@
   min-width: 100%;
   height: 100%;
   border: none;
-  background: var(--porch-rag, #FFFDF6);
+  background: var(--kbn-rag);
 }
 
 /* Loading veil over the iframe while a (possibly large, possibly remote)
@@ -42,8 +42,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--porch-rag, #FFFDF6);
-  color: #7A7368;
+  background: var(--kbn-rag);
+  color: var(--kbn-graphite-muted);
   font-family: var(--font-main, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(1.05rem * var(--kbn-type-scale, 1));
@@ -55,7 +55,7 @@
 }
 
 .kbn-fileview-loading-error {
-  color: #9A4A35;
+  color: color-mix(in srgb, var(--kbn-discarded) 87%, var(--kbn-ink-soft));
   font-style: normal;
   animation: none;
 }
@@ -76,17 +76,17 @@
   min-height: 0;
   padding: 16px;
   background:
-    radial-gradient(ellipse 80% 70% at 50% 35%, rgba(255, 251, 237, 0.6), transparent 75%),
-    var(--porch-panel, #EDE8E0);
+    radial-gradient(ellipse 80% 70% at 50% 35%, color-mix(in srgb, var(--kbn-paper-bright) 60%, transparent), transparent 75%),
+    var(--kbn-form-well);
 }
 .kbn-fileview-image {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   border-radius: 3px;
-  background: #FFFFFF;
-  border: 1px solid rgba(27, 22, 17, 0.1);
-  box-shadow: 0 4px 14px -6px rgba(27, 22, 17, 0.28);
+  background: var(--kbn-blank);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
+  box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--kbn-shade) 28%, transparent);
 }
 
 /* Native transports sit on the same paper and type as the document frame. */
@@ -99,19 +99,19 @@
   justify-content: center;
   overflow: auto;
   padding: clamp(20px, 5vw, 56px);
-  color: var(--ws-ink, #342c20);
-  background: var(--ws-paper, #FBF6E9);
+  color: var(--ws-ink, var(--kbn-ink-soft));
+  background: var(--ws-paper, var(--kbn-paper));
 }
 .kbn-media-page { width: 100%; max-width: 620px; min-width: 0; }
 .kbn-fileview-audio audio {
   display: block;
   width: 100%;
-  border: 1px solid var(--ws-hairline, #c6b38d);
+  border: 1px solid var(--ws-hairline, var(--kbn-hairline));
   border-radius: 28px;
-  background: var(--ws-fill, #f0e6d0);
+  background: var(--ws-fill, var(--kbn-sheet));
   color-scheme: light;
 }
-.kbn-fileview-audio audio::-webkit-media-controls-panel { background-color: var(--ws-fill, #f0e6d0); }
+.kbn-fileview-audio audio::-webkit-media-controls-panel { background-color: var(--ws-fill, var(--kbn-sheet)); }
 .kbn-fileview-video { padding: 20px; }
 .kbn-fileview-video .kbn-media-page { max-width: none; height: 100%; display: flex; flex-direction: column; justify-content: center; }
 .kbn-fileview-video video {
@@ -121,11 +121,11 @@
   max-height: 100%;
   object-fit: contain;
   border-radius: 3px;
-  background: #211e18;
+  background: var(--kbn-shade);
 }
 
 /* Preview cells are inert and contain no transport or script-capable HTML. */
-.kbn-fileview-thumbnail { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--ws-paper, #FBF6E9); }
+.kbn-fileview-thumbnail { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--ws-paper, var(--kbn-paper)); }
 .kbn-thumbnail-glyph {
   position: absolute;
   inset: 0;
@@ -136,10 +136,10 @@
   text-align: center;
   overflow-wrap: anywhere;
   font: 10px/1.8 var(--ws-mono, 'IBM Plex Mono', monospace);
-  color: var(--ws-ink-muted, #786b54);
+  color: var(--ws-ink-muted, var(--kbn-ink-muted));
 }
 .kbn-fileview-thumbnail iframe, .kbn-fileview-thumbnail pre { position: absolute; inset: 0; transform-origin: top left; border: 0; margin: 0; }
-.kbn-fileview-thumbnail pre { padding: 24px; white-space: pre-wrap; font: 14px/1.5 var(--font-mono, monospace); background: var(--ws-paper, #FBF6E9); }
+.kbn-fileview-thumbnail pre { padding: 24px; white-space: pre-wrap; font: 14px/1.5 var(--font-mono, monospace); background: var(--ws-paper, var(--kbn-paper)); }
 .kbn-fileview-thumbnail img, .kbn-fileview-thumbnail video { position: absolute; width: 100%; height: 100%; object-fit: contain; inset: 0; }
 .kbn-fileview-thumbnail audio { display: none; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
@@ -161,7 +161,7 @@
   min-width: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
-  background: var(--porch-rag, #FFFDF6);
+  background: var(--kbn-rag);
 }
 
 .kbn-fileview-text {

@@ -36,6 +36,7 @@
  * only knob is which surface command plus due/cold tuple to POST.
  */
 
+import './palette.css'
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'

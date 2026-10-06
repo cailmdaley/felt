@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const css = ['KanbanModal.css', 'workspace/tokens.css'].map(path =>
+const css = ['palette.css', 'workspace/tokens.css'].map(path =>
   readFileSync(new URL(`../src/board/${path}`, import.meta.url), 'utf8')).join('\n')
 const tokens = new Map([...css.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(match => [match[1], match[2].trim()]))
 type RGB = [number, number, number]

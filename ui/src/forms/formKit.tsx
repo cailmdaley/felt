@@ -223,7 +223,7 @@ export function injectFormKitStyles(): void {
       flex-direction: column;
       gap: 14px;
       font-family: var(--font-main, 'EB Garamond', serif);
-      color: #2E2A26;
+      color: var(--kbn-graphite);
     }
     .form-sheet > * {
       box-sizing: border-box;
@@ -257,7 +257,7 @@ export function injectFormKitStyles(): void {
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #5C544D;
+      color: var(--kbn-graphite-soft);
       line-height: 1;
     }
     .form-optional {
@@ -265,12 +265,12 @@ export function injectFormKitStyles(): void {
       font-size: 9.5px;
       font-weight: 400;
       letter-spacing: 0.12em;
-      color: #B5A998;
+      color: var(--kbn-graphite-pale);
       padding: 1px 4px;
-      border: 1px solid rgba(46, 42, 38, 0.10);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
       border-radius: 2px;
     }
-    .form-help { font-size: 12px; line-height: 1.4; color: #756B60; }
+    .form-help { font-size: 12px; line-height: 1.4; color: var(--kbn-graphite-muted); }
     /* One rule for every select. Custom chevron, so the boxes are identical
        rather than at the mercy of native select metrics, and border-box
        sizing, so each control fills its track exactly. */
@@ -282,9 +282,9 @@ export function injectFormKitStyles(): void {
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 15px;
       line-height: 1.3;
-      color: #2E2A26;
-      background-color: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      color: var(--kbn-graphite);
+      background-color: var(--kbn-blank);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       border-radius: 3px;
       padding: 7px 9px;
       transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
@@ -304,15 +304,15 @@ export function injectFormKitStyles(): void {
     }
     .form-input::placeholder,
     .form-textarea::placeholder {
-      color: #9A8E80;
+      color: var(--kbn-graphite-faint);
       font-style: italic;
     }
     .form-select:focus,
     .form-input:focus,
     .form-textarea:focus {
       outline: none;
-      border-color: #C49333;
-      box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.18);
+      border-color: var(--kbn-owed-bright);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed) 18%, transparent);
     }
     .form-select:disabled {
       opacity: 0.5;
@@ -325,19 +325,19 @@ export function injectFormKitStyles(): void {
     }
     .form-hint {
       font-size: 12px;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
       font-style: italic;
     }
     .form-hint code {
       font-family: var(--font-mono, 'JetBrains Mono', monospace);
       font-size: 11px;
       font-style: normal;
-      background: rgba(46, 42, 38, 0.06);
+      background: color-mix(in srgb, var(--kbn-graphite) 6%, transparent);
       padding: 1px 5px;
       border-radius: 2px;
     }
     .form-hint-warn {
-      color: #8C5A1A;
+      color: color-mix(in srgb, var(--kbn-ochre) 85%, var(--kbn-ink));
       font-style: normal;
     }
     .form-chrome {
@@ -346,7 +346,7 @@ export function injectFormKitStyles(): void {
       align-self: flex-start;
       gap: 8px;
       font-size: 13px;
-      color: #2E2A26;
+      color: var(--kbn-graphite);
       cursor: pointer;
       user-select: none;
     }
@@ -354,27 +354,27 @@ export function injectFormKitStyles(): void {
       width: 14px;
       height: 14px;
       margin: 0;
-      accent-color: #3D5BA0;
+      accent-color: var(--kbn-agent);
       cursor: inherit;
     }
     .form-chrome code {
       font-family: var(--font-mono, 'JetBrains Mono', monospace);
       font-size: 12px;
-      background: rgba(46, 42, 38, 0.06);
+      background: color-mix(in srgb, var(--kbn-graphite) 6%, transparent);
       padding: 1px 5px;
       border-radius: 2px;
-      color: #2C4378;
+      color: var(--kbn-agent-deep);
     }
     .form-chrome-hint {
       font-style: italic;
       font-size: 12px;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
     }
     .form-error {
       padding: 8px 10px;
-      background: rgba(178, 78, 60, 0.12);
-      border: 1px solid rgba(178, 78, 60, 0.5);
-      color: #8B3A28;
+      background: color-mix(in srgb, var(--kbn-alarm) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--kbn-alarm) 50%, transparent);
+      color: var(--kbn-error);
       font-size: 13px;
       border-radius: 2px;
     }
@@ -385,26 +385,26 @@ export function injectFormKitStyles(): void {
       gap: 10px;
       margin-top: 2px;
       padding-top: 13px;
-      border-top: 1px solid rgba(46, 42, 38, 0.10);
+      border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
     }
     .form-foot-hint {
       display: inline-flex;
       align-items: center;
       gap: 5px;
       font-size: 11px;
-      color: #7A7068;
+      color: var(--kbn-graphite-muted);
     }
     .form-foot-dot {
-      color: #B5A998;
+      color: var(--kbn-graphite-pale);
     }
     .form-foot-hint kbd {
       font-family: var(--font-mono, 'JetBrains Mono', monospace);
       font-size: 10px;
-      background: rgba(46, 42, 38, 0.10);
+      background: color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
       padding: 1px 5px;
       border-radius: 2px;
-      border: 1px solid rgba(46, 42, 38, 0.16);
-      color: #4C453F;
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 16%, transparent);
+      color: var(--kbn-graphite-deep);
     }
     .form-buttons {
       display: flex;
@@ -426,36 +426,36 @@ export function injectFormKitStyles(): void {
     }
     .form-cancel {
       background: transparent;
-      color: #7A7068;
-      border-color: rgba(46, 42, 38, 0.20);
+      color: var(--kbn-graphite-muted);
+      border-color: color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
     }
     .form-cancel:hover:not(:disabled) {
-      background: rgba(46, 42, 38, 0.06);
-      color: #2E2A26;
+      background: color-mix(in srgb, var(--kbn-graphite) 6%, transparent);
+      color: var(--kbn-graphite);
     }
     /* Wide enough for "Start meeting", so a longer label leaves Cancel where
        it was. */
     .form-submit {
       min-width: 8em;
-      color: #FFFFFF;
+      color: var(--kbn-on-pigment);
     }
     /* Cobalt matches the ✶ trigger and the In Flight lane; brass matches the
        + trigger and Drafts. */
     .form-submit-cobalt {
-      background: #3D5BA0;
-      border-color: #2C4378;
-      box-shadow: 0 1px 0 rgba(255, 252, 245, 0.22) inset;
+      background: var(--kbn-agent);
+      border-color: var(--kbn-agent-deep);
+      box-shadow: 0 1px 0 color-mix(in srgb, var(--kbn-rag) 22%, transparent) inset;
     }
     .form-submit-cobalt:hover:not(:disabled) {
-      background: #35508F;
+      background: color-mix(in srgb, var(--kbn-agent) 90%, var(--kbn-ink));
     }
     .form-submit-brass {
-      background: #C49333;
-      border-color: #7A6028;
-      box-shadow: 0 1px 0 rgba(255, 252, 245, 0.25) inset;
+      background: var(--kbn-owed-bright);
+      border-color: var(--kbn-owed-dark);
+      box-shadow: 0 1px 0 color-mix(in srgb, var(--kbn-rag) 25%, transparent) inset;
     }
     .form-submit-brass:hover:not(:disabled) {
-      background: #B08D3D;
+      background: color-mix(in srgb, var(--kbn-owed-bright) 77%, var(--kbn-ink-muted));
     }
   `)
   injectProjectPickerStyles()
