@@ -231,8 +231,8 @@ export class Reader {
     this.sidebarPicker = new ConstitutionPicker({
       ...pickerOptions, cards: sidebarCards, revealCurrent: true,
       find: opts.find, active: () => this.active && this.sidebarShown,
-      // Escape on a card returns to the filter that lists them, the bar's Find.
-      onEscape: () => { this.opts.onFind?.() },
+      // Escape on a card leaves the reader, as it does anywhere else in it.
+      onEscape: () => { this.handleIntent('back') },
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
       onRow: (el, card) => {
         this.sidebarRows.set(el, card)
