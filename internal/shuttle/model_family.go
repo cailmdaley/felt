@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // A registry model written as a bare family ("gpt-sol") names the newest
@@ -19,17 +21,18 @@ import (
 var bareFamily = regexp.MustCompile(`^gpt-([a-z]+)$`)
 var familyRelease = regexp.MustCompile(`^gpt-(\d+(?:\.\d+)*)-([a-z]+)$`)
 
-func resolveModelFamily(rec AgentRecord) string {
+// env locates the catalogs; a nil env reads none.
+func resolveModelFamily(env *sysenv.Env, rec AgentRecord) string {
 	m := bareFamily.FindStringSubmatch(rec.Model)
-	if m == nil {
+	if m == nil || env == nil {
 		return rec.Model
 	}
 	var slugs []string
 	switch rec.CLI {
 	case "codex":
-		slugs = codexCatalog()
+		slugs = codexCatalog(env)
 	case "pi":
-		slugs = piCatalog(rec.Provider)
+		slugs = piCatalog(env, rec.Provider)
 	}
 	if best := newestRelease(m[1], slugs); best != "" {
 		return best
@@ -37,19 +40,19 @@ func resolveModelFamily(rec AgentRecord) string {
 	return rec.Model
 }
 
-func homeDir(env, rel string) string {
-	if d := os.Getenv(env); d != "" {
+func homeDir(env *sysenv.Env, key, rel string) string {
+	if d := env.Getenv(key); d != "" {
 		return d
 	}
-	h, err := os.UserHomeDir()
+	h, err := env.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	return filepath.Join(h, rel)
 }
 
-func codexCatalog() []string {
-	data, err := os.ReadFile(filepath.Join(homeDir("CODEX_HOME", ".codex"), "models_cache.json"))
+func codexCatalog(env *sysenv.Env) []string {
+	data, err := os.ReadFile(filepath.Join(homeDir(env, "CODEX_HOME", ".codex"), "models_cache.json"))
 	if err != nil {
 		return nil
 	}
@@ -71,8 +74,8 @@ func codexCatalog() []string {
 	return out
 }
 
-func piCatalog(provider string) []string {
-	data, err := os.ReadFile(filepath.Join(homeDir("PI_CODING_AGENT_DIR", ".pi/agent"), "models-store.json"))
+func piCatalog(env *sysenv.Env, provider string) []string {
+	data, err := os.ReadFile(filepath.Join(homeDir(env, "PI_CODING_AGENT_DIR", ".pi/agent"), "models-store.json"))
 	if err != nil {
 		return nil
 	}

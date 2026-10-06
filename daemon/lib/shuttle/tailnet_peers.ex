@@ -259,7 +259,7 @@ defmodule Shuttle.TailnetPeers do
     # rejection rather than a signal to this process.
     Shuttle.TaskSupervisor
     |> Task.Supervisor.async_stream_nolink(urls, probe,
-      timeout: @probe_timeout_ms + 1_000,
+      timeout: probe_timeout_ms() + 1_000,
       on_timeout: :kill_task,
       max_concurrency: 32
     )
@@ -560,7 +560,7 @@ defmodule Shuttle.TailnetPeers do
           localapi_get(socket, host, path)
 
         nil ->
-          Shuttle.RemoteRegistry.Client.Default.get(version_url, @probe_timeout_ms)
+          Shuttle.RemoteRegistry.Client.Default.get(version_url, probe_timeout_ms())
       end
 
     case result do
@@ -575,8 +575,13 @@ defmodule Shuttle.TailnetPeers do
     end
   end
 
+  # One probe's whole budget: dial, TLS and the HTTP exchange. The app env
+  # `:tailnet_probe_timeout_ms` overrides it (tests on a loaded machine).
+  defp probe_timeout_ms,
+    do: Shuttle.Env.app(:tailnet_probe_timeout_ms, @probe_timeout_ms)
+
   defp localapi_get(socket, host, path) do
-    deadline = deadline(@probe_timeout_ms)
+    deadline = deadline(probe_timeout_ms())
 
     case Shuttle.TailnetDial.Bridge.open_tls(socket, host, 443) do
       {:ok, tls} ->

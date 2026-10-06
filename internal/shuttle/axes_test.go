@@ -21,6 +21,7 @@ func loadReg(t *testing.T) *AgentRegistry {
 }
 
 func TestResolve_BareClaudeUsesRegistryDefaultEffort(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	base, eff, err := reg.Resolve("claude-opus", "", false)
 	if err != nil {
@@ -36,6 +37,7 @@ func TestResolve_BareClaudeUsesRegistryDefaultEffort(t *testing.T) {
 }
 
 func TestResolve_ClaudeEffortValid(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	_, eff, err := reg.Resolve("claude-opus", "xhigh", false)
 	if err != nil {
@@ -47,6 +49,7 @@ func TestResolve_ClaudeEffortValid(t *testing.T) {
 }
 
 func TestResolve_EffortOutOfRange(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	// Copilot Grok caps at high; xhigh must be rejected.
 	_, _, err := reg.Resolve("pi-grok", "xhigh", false)
@@ -56,6 +59,7 @@ func TestResolve_EffortOutOfRange(t *testing.T) {
 }
 
 func TestResolve_PiDefaultEffort(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	_, eff, err := reg.Resolve("pi-luna", "", false)
 	if err != nil {
@@ -67,6 +71,7 @@ func TestResolve_PiDefaultEffort(t *testing.T) {
 }
 
 func TestResolve_EffortUnsupported(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	// openrouter pi agents have no effort axis.
 	_, _, err := reg.Resolve("pi-kimi", "high", false)
@@ -76,6 +81,7 @@ func TestResolve_EffortUnsupported(t *testing.T) {
 }
 
 func TestResolve_ChromeOnNonClaudeRejected(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	_, _, err := reg.Resolve("codex-sol", "", true)
 	if err == nil || !strings.Contains(err.Error(), "chrome not supported") {
@@ -84,6 +90,7 @@ func TestResolve_ChromeOnNonClaudeRejected(t *testing.T) {
 }
 
 func TestResolve_ChromeAxisExpands(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	base, eff, err := reg.Resolve("claude-opus", "", true)
 	if err != nil {
@@ -98,6 +105,7 @@ func TestResolve_ChromeAxisExpands(t *testing.T) {
 }
 
 func TestResolve_HeadlessAliasExpands(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	base, eff, err := reg.Resolve("claude-haiku-headless", "", false)
 	if err != nil {
@@ -126,6 +134,7 @@ func TestResolve_HeadlessAliasExpands(t *testing.T) {
 // non-claude `*-headless` alias slipped into the registry.
 
 func TestResolve_UnknownAgent(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	_, _, err := reg.Resolve("nope", "", false)
 	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
@@ -134,6 +143,7 @@ func TestResolve_UnknownAgent(t *testing.T) {
 }
 
 func TestValidate_AxesIntegration(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	// chrome on codex via the full Block validation path.
 	b := &Block{Kind: "oneshot", ProjectDir: "/tmp/p", Host: "h", Agent: "codex-sol", Chrome: true}
@@ -149,6 +159,7 @@ func TestValidate_AxesIntegration(t *testing.T) {
 }
 
 func TestValidate_AppSurfaceRequiresCodex(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	if errs := Validate(&Block{Kind: "oneshot", ProjectDir: "/tmp/p", Host: "h", Agent: "codex-sol", Surface: "app"}, reg); len(errs) != 0 {
 		t.Fatalf("Codex app surface should validate, got: %v", errs)
@@ -159,6 +170,7 @@ func TestValidate_AppSurfaceRequiresCodex(t *testing.T) {
 }
 
 func TestChromeCapableAgentIsABase(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	for _, rec := range reg.Records() {
 		if !rec.IsAlias() && rec.ID == "claude-opus" {

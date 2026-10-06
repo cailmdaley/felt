@@ -1,5 +1,9 @@
 defmodule Shuttle.AppWorkersTest do
   use ExUnit.Case, async: true
+
+  # The concurrent-claim races are bounded only against a hang: a passing race
+  # never waits this long, and a loaded machine can take seconds per task.
+  @race_timeout 60_000
   import Shuttle.Test.PollerHelpers
   alias Shuttle.{AppWorkers, Dispatcher, Poller, WorkerBackend}
   alias Shuttle.Test.FeltStoreRunner, as: Runner
@@ -355,34 +359,34 @@ defmodule Shuttle.AppWorkersTest do
     assert get_in(Runner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == nil
   end
 
-  test "adoption rejects non-live native states without recording ownership" do
-    fiber = %{"id" => "tests/adopt-state", "uid" => "state-uid"}
+  test "adoption records ownership only for the requested thread confirmed live" do
+    # Adoption only reads: a native answer that is not the requested thread in
+    # an active or idle state — absent, unreachable, malformed, another
+    # thread's, or non-live — refuses without recording an owner.
+    id = "claimed-thread"
+    fiber = %{"id" => "tests/adopt", "uid" => "adopt-uid"}
 
-    for state <- ["missing", "notLoaded", "unknown"] do
-      id = "thread-#{state}"
+    reads =
+      [
+        {:error, :not_found},
+        {:error, :disconnected},
+        {:ok, %{"id" => id}},
+        {:ok, %{"id" => "other-thread", "status" => %{"type" => "active"}}}
+      ] ++
+        for state <- ["missing", "notLoaded", "unknown"],
+            do: {:ok, %{"id" => id, "status" => %{"type" => state}}}
+
+    for read <- reads do
       App.set(:calls, [])
-      App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => state}}})
+      App.set(:read_result, read)
 
       assert {:error, :native_thread_unverified} =
-               AppWorkers.claim_or_adopt(id, fiber, Runner.felt_root())
+               AppWorkers.claim_or_adopt(id, fiber, Runner.felt_root()),
+             "read #{inspect(read)}"
 
-      assert {:error, :not_found} = AppWorkers.get(id)
-      assert [{:read, ^id}] = App.calls()
+      assert {:error, :not_found} = AppWorkers.get(id), "read #{inspect(read)}"
+      assert App.calls() == [{:read, id}], "read #{inspect(read)}"
     end
-  end
-
-  test "adoption rejects a native response for a different thread" do
-    App.set(:read_result, {:ok, %{"id" => "other-thread", "status" => %{"type" => "active"}}})
-
-    assert {:error, :native_thread_unverified} =
-             AppWorkers.claim_or_adopt(
-               "claimed-thread",
-               %{"id" => "tests/adopt-identity", "uid" => "identity-uid"},
-               Runner.felt_root()
-             )
-
-    assert {:error, :not_found} = AppWorkers.get("claimed-thread")
-    assert [{:read, "claimed-thread"}] = App.calls()
   end
 
   test "concurrent external claims leave one fiber as a native thread's owner" do
@@ -395,7 +399,7 @@ defmodule Shuttle.AppWorkersTest do
       |> Task.async_stream(
         &AppWorkers.claim_or_adopt("adopt-race", &1, Runner.felt_root()),
         max_concurrency: 30,
-        timeout: 5_000
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -549,7 +553,8 @@ defmodule Shuttle.AppWorkersTest do
             Runner.felt_root()
           )
         end,
-        max_concurrency: 30
+        max_concurrency: 30,
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -640,7 +645,8 @@ defmodule Shuttle.AppWorkersTest do
       1..20
       |> Task.async_stream(
         fn _ -> AppWorkers.recover(id, "tests/race", "race-uid", Runner.felt_root()) end,
-        max_concurrency: 20
+        max_concurrency: 20,
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -679,7 +685,11 @@ defmodule Shuttle.AppWorkersTest do
     assert App.calls() == []
   end
 
-  test "watcher recovery validates native identity and retains ownership on disconnect" do
+  test "watcher recovery reloads only its own thread, confirmed, and keeps ownership when it cannot" do
+    # Recovery resumes a durably owned thread only when the native server
+    # answers for exactly that thread, and accepts the resume only when it
+    # comes back as that thread, live. Any other answer fails closed; a
+    # transport error surfaces as itself. Neither releases ownership.
     id = "recover-verify"
 
     :ok =
@@ -692,53 +702,35 @@ defmodule Shuttle.AppWorkersTest do
         "active" => true
       })
 
-    App.set(
-      :read_result,
-      {:ok, %{"id" => "another-thread", "status" => %{"type" => "notLoaded"}}}
-    )
+    not_loaded = {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}}
 
-    assert {:error, :native_thread_unverified} =
-             AppWorkers.recover(id, "tests/verify", "verify-uid", Runner.felt_root())
+    # {read_thread answer, resume_thread answer (nil: never asked), recover/4 result}
+    rows = [
+      {{:ok, %{"id" => "another-thread", "status" => %{"type" => "notLoaded"}}}, nil,
+       {:error, :native_thread_unverified}},
+      {{:ok, %{"id" => id}}, nil, {:error, :native_thread_unverified}},
+      {{:ok, %{"id" => id, "status" => %{"type" => "missing"}}}, nil,
+       {:error, :native_thread_unverified}},
+      {{:error, :disconnected}, nil, {:error, :disconnected}},
+      {not_loaded, {:ok, %{"id" => "wrong-thread", "status" => %{"type" => "active"}}},
+       {:error, :native_thread_unverified}},
+      {not_loaded, {:error, :disconnected}, {:error, :disconnected}},
+      {not_loaded, {:ok, %{"id" => id, "status" => %{"type" => "active"}}}, :ok}
+    ]
 
-    assert App.calls() == [{:read, id}]
+    for {read, resume, expected} <- rows do
+      row = "read #{inspect(read)}, resume #{inspect(resume)}"
+      App.set(:calls, [])
+      App.set(:read_result, read)
+      if resume, do: App.set(:resume_result, resume)
 
-    App.set(:read_result, {:error, :disconnected})
+      assert AppWorkers.recover(id, "tests/verify", "verify-uid", Runner.felt_root()) ==
+               expected,
+             row
 
-    assert {:error, :disconnected} =
-             AppWorkers.recover(id, "tests/verify", "verify-uid", Runner.felt_root())
-
-    assert {:ok, %{"active" => true}} = AppWorkers.get(id)
-
-    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
-    assert :ok = AppWorkers.recover(id, "tests/verify", "verify-uid", Runner.felt_root())
-    assert Enum.count(App.calls(), &match?({:resume, ^id, []}, &1)) == 1
-  end
-
-  test "watcher recovery rejects malformed reads and an unexpected resumed identity" do
-    id = "recover-malformed"
-
-    :ok =
-      AppWorkers.put(%{
-        "session_uuid" => id,
-        "thread_id" => id,
-        "fiber_id" => "tests/malformed",
-        "uid" => "malformed-uid",
-        "felt_store" => Runner.felt_root(),
-        "active" => true
-      })
-
-    App.set(:read_result, {:ok, %{"id" => id}})
-
-    assert {:error, :native_thread_unverified} =
-             AppWorkers.recover(id, "tests/malformed", "malformed-uid", Runner.felt_root())
-
-    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
-    App.set(:resume_result, {:ok, %{"id" => "wrong-thread", "status" => %{"type" => "active"}}})
-
-    assert {:error, :native_thread_unverified} =
-             AppWorkers.recover(id, "tests/malformed", "malformed-uid", Runner.felt_root())
-
-    assert {:ok, %{"active" => true}} = AppWorkers.get(id)
+      assert App.calls() == [{:read, id} | if(resume, do: [{:resume, id, []}], else: [])], row
+      assert {:ok, %{"active" => true}} = AppWorkers.get(id), row
+    end
   end
 
   test "watcher recovery fails closed on valid JSON without an ownership record" do
@@ -1112,7 +1104,7 @@ defmodule Shuttle.AppWorkersTest do
           {fiber, AppWorkers.claim("race", fiber, Runner.felt_root())}
         end,
         max_concurrency: 12,
-        timeout: 10_000
+        timeout: @race_timeout
       )
       |> Enum.map(fn {:ok, result} -> result end)
 
@@ -1126,7 +1118,9 @@ defmodule Shuttle.AppWorkersTest do
   end
 
   defp settle(poller), do: eventually(fn -> :sys.get_state(poller).poll_cycles > 0 end)
-  defp eventually(fun, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 1_500)
   defp eventually(fun, 0), do: assert(fun.())
 
   defp eventually(fun, attempts) do

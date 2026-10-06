@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,10 +12,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var shuttleHandoffCmd = &cobra.Command{
-	Use:   "handoff <fiber>",
-	Short: "Stamp the clean-exit handoff signal for a worker",
-	Long: `Stamps shuttle.runtime.handed_off_at = now into the fiber's frontmatter — the
+func (a *app) shuttleHandoffCmd() *cobra.Command {
+	shuttleHandoffCmd := &cobra.Command{
+		Use:   "handoff <fiber>",
+		Short: "Stamp the clean-exit handoff signal for a worker",
+		Long: `Stamps shuttle.runtime.handed_off_at = now into the fiber's frontmatter — the
 signal that tells the daemon this worker exited CLEANLY, so the next dispatch
 starts fresh (and reads the rewritten '## Status' block) instead of resuming a
 dead transcript.
@@ -29,30 +29,28 @@ already resolved); outside a daemon-launched worker the <fiber> argument is
 resolved instead, and the current tmux session (if any) still ends. An exact id
 or UID naming a different fiber stamps that fiber and leaves the caller's
 session running.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path, self, err := resolveHandoffPath(args[0])
-		if err != nil {
-			return err
-		}
-		at, err := stampHandedOff(path)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("handed off: %s (handed_off_at=%s)\n", path, at)
-		// Final act — but ONLY when handing off our own fiber: end our own tmux
-		// session (no-op outside tmux). The field is already durably on disk, so
-		// the kill loses nothing. A worker stamping a DIFFERENT fiber (e.g. a
-		// dead sibling worker's) stays alive.
-		if self {
-			endOwnTmuxSession()
-		}
-		return nil
-	},
-}
-
-func init() {
-	addShuttleCommand(shuttleHandoffCmd)
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, self, err := a.resolveHandoffPath(args[0])
+			if err != nil {
+				return err
+			}
+			at, err := stampHandedOff(path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(a.env.Stdout, "handed off: %s (handed_off_at=%s)\n", path, at)
+			// Final act — but ONLY when handing off our own fiber: end our own tmux
+			// session (no-op outside tmux). The field is already durably on disk, so
+			// the kill loses nothing. A worker stamping a DIFFERENT fiber (e.g. a
+			// dead sibling worker's) stays alive.
+			if self {
+				a.endOwnTmuxSession()
+			}
+			return nil
+		},
+	}
+	return shuttleHandoffCmd
 }
 
 // resolveHandoffPath returns the fiber `.md` the worker should stamp, plus
@@ -76,9 +74,9 @@ func init() {
 // honored only when the argument names it exactly (id or UID); a fuzzy match
 // that disagrees with the env is treated as ambiguity and the env wins, which
 // at worst stamps the caller's own fiber.
-func resolveHandoffPath(fiber string) (string, bool, error) {
-	envPath := os.Getenv("SHUTTLE_FIBER_PATH")
-	f, _, err := shuttleResolveFiber(fiber, false)
+func (a *app) resolveHandoffPath(fiber string) (string, bool, error) {
+	envPath := a.env.Getenv("SHUTTLE_FIBER_PATH")
+	f, _, err := a.shuttleResolveFiber(fiber, false)
 	if err != nil {
 		if envPath != "" {
 			return envPath, true, nil
@@ -88,7 +86,7 @@ func resolveHandoffPath(fiber string) (string, bool, error) {
 	if envPath == "" {
 		return f.Path, true, nil
 	}
-	if samePath(envPath, f.Path) {
+	if a.samePath(envPath, f.Path) {
 		return envPath, true, nil
 	}
 	if fiber == f.ID || fiber == f.UID {
@@ -103,17 +101,17 @@ func resolveHandoffPath(fiber string) (string, bool, error) {
 // not-yet-existing path) — a bias toward "different", which errs on the safe
 // side: stamping the named file without the self-kill, never a false
 // clean-exit.
-func samePath(a, b string) bool {
-	ra, errA := canonicalPath(a)
-	rb, errB := canonicalPath(b)
+func (a *app) samePath(left, right string) bool {
+	ra, errA := a.canonicalPath(left)
+	rb, errB := a.canonicalPath(right)
 	if errA != nil || errB != nil {
-		return a == b
+		return left == right
 	}
 	return ra == rb
 }
 
-func canonicalPath(p string) (string, error) {
-	abs, err := filepath.Abs(p)
+func (a *app) canonicalPath(p string) (string, error) {
+	abs, err := a.env.Abs(p)
 	if err != nil {
 		return "", err
 	}
@@ -173,11 +171,11 @@ func stampHandedOff(path string) (string, error) {
 // followed by a separate `kill $PPID`. Best-effort and a no-op outside tmux (e.g.
 // a manual/test invocation), so it never kills a stray shell: it asks tmux for the
 // *current* session name and kills exactly that.
-func endOwnTmuxSession() {
-	if os.Getenv("TMUX") == "" {
+func (a *app) endOwnTmuxSession() {
+	if a.env.Getenv("TMUX") == "" {
 		return
 	}
-	name, err := exec.Command("tmux", "display-message", "-p", "#S").Output()
+	name, err := a.env.Command("tmux", "display-message", "-p", "#S").Output()
 	if err != nil {
 		return
 	}
@@ -187,7 +185,7 @@ func endOwnTmuxSession() {
 	}
 	// This kills our own pane mid-call; the field is already durably on disk (the
 	// rename completed before we got here), so nothing is lost.
-	_ = exec.Command("tmux", "kill-session", "-t", session).Run()
+	_ = a.env.Command("tmux", "kill-session", "-t", session).Run()
 }
 
 // idFromPath derives a cosmetic fiber id from a .md path (the leaf stem). The id

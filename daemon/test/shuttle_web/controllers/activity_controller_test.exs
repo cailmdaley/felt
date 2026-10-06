@@ -12,6 +12,7 @@ defmodule ShuttleWeb.ActivityControllerTest do
   the 400s.
   """
   use ExUnit.Case, async: true
+  use ExUnitProperties
   import Shuttle.Test.ApiConn
   import Phoenix.ConnTest
 
@@ -154,25 +155,6 @@ defmodule ShuttleWeb.ActivityControllerTest do
       assert by_kind == %{"attention" => 1, "agent" => 1}
     end
 
-    test "a machine-flagged prompt still closes an open waiting spell" do
-      # It is not attention, but it IS the session moving again: whatever the
-      # agent was blocked on, it is no longer sitting there. A later
-      # notification therefore opens a fresh spell rather than being swallowed.
-      path =
-        write_fixture([
-          event(%{"type" => "notification"}),
-          event(%{
-            "timestamp" => @t0 + @minute,
-            "type" => "user_prompt_submit",
-            "machine" => true
-          }),
-          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
-        ])
-
-      buckets = buckets!(path, @t0, @t0 + 3 * @minute)
-      assert Enum.count(buckets, &(&1.k == "notify")) == 2
-    end
-
     test "stop emits reply ALONGSIDE agent, leaving the agent stream untouched" do
       # The whole safety argument for adding a kind to a wire format several
       # views read: a consumer that never heard of "reply" sees exactly the
@@ -199,80 +181,82 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
+  # One identity's events, each a person's or the harness's.
+  @spell_events [
+    {"notification", %{}},
+    {"file_sent", %{"files" => ["/tmp/report.html"]}},
+    {"user_prompt_submit", %{}},
+    {"user_prompt_submit", %{"machine" => true}},
+    {"post_tool_use", %{}},
+    {"subagent_stop", %{}},
+    {"stop", %{}},
+    {"session_end", %{}}
+  ]
+
+  # Notifications are weighted up so spells open often enough to be closed.
+  defp spell_event,
+    do: frequency([{3, constant(hd(@spell_events))}, {4, member_of(tl(@spell_events))}])
+
+  # The waiting-spell rule for one identity, stated apart from the fold. A
+  # notification is an onset only while no spell is open, and repeats inside
+  # the spell are the same ask. A file delivery is no activity at all and leaves
+  # the spell as it is. Every other event closes the spell: a person's prompt;
+  # a machine-flagged prompt, which is not attention but is the session moving
+  # again; a tool return, such as a permission granted elsewhere; a completed
+  # reply. The next notification is then a fresh onset, in the same minute or
+  # a later one.
+  defp spell_model(events) do
+    {tally, _open?} =
+      Enum.reduce(events, {%{}, false}, fn {ts, type, extra}, {tally, open?} ->
+        {kinds, open?} =
+          case {type, extra} do
+            {"notification", _} -> {if(open?, do: [], else: ["notify"]), true}
+            {"file_sent", _} -> {[], open?}
+            {"user_prompt_submit", %{"machine" => true}} -> {["agent"], false}
+            {"user_prompt_submit", _} -> {["attention"], false}
+            {"stop", _} -> {["agent", "reply"], false}
+            _ -> {["agent"], false}
+          end
+
+        {Enum.reduce(kinds, tally, &Map.update(&2, {minute(ts), &1}, 1, fn n -> n + 1 end)),
+         open?}
+      end)
+
+    for {{m, k}, n} <- Enum.sort(tally), do: %{m: m, s: @session, cwd: @cwd, k: k, n: n}
+  end
+
+  defp minute(ts), do: Integer.floor_div(ts, @minute) * @minute
+
   describe "Shuttle.Activity.window/3 — waiting spells" do
     # A notify mark is the ONSET of a waiting spell, not a notification. Claude
     # Code re-fires the idle notification every minute; those repeats are the
     # same unanswered ask.
-    test "file delivery leaves a notification spell intact and adds no activity" do
-      path =
-        write_fixture([
-          event(%{"type" => "notification"}),
-          event(%{
-            "type" => "file_sent",
-            "timestamp" => @t0 + @minute,
-            "files" => ["/tmp/report.html"]
-          }),
-          event(%{"type" => "notification", "timestamp" => @t0 + 2 * @minute})
-        ])
+    property "a spell has one onset, and only session activity closes it" do
+      check all(
+              # Short gaps are weighted up so a spell often opens, closes
+              # and reopens inside one minute.
+              steps <-
+                list_of(
+                  {frequency([{1, integer(0..2_000)}, {2, integer(0..(2 * @minute))}]),
+                   spell_event()},
+                  min_length: 1,
+                  max_length: 15
+                ),
+              max_runs: 100
+            ) do
+        {events, _} =
+          Enum.map_reduce(steps, @t0, fn {gap, {type, extra}}, ts ->
+            {{ts + gap, type, extra}, ts + gap}
+          end)
 
-      assert buckets!(path, @t0, @t0 + 3 * @minute) == [
-               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1}
-             ]
-    end
+        path =
+          write_fixture(
+            for {ts, type, extra} <- events,
+                do: event(Map.merge(extra, %{"timestamp" => ts, "type" => type}))
+          )
 
-    test "repeat notifications inside one spell collapse to a single onset" do
-      path =
-        write_fixture(
-          for i <- 0..9, do: event(%{"timestamp" => @t0 + i * @minute, "type" => "notification"})
-        )
-
-      assert buckets!(path, @t0, @t0 + 10 * @minute) == [
-               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1}
-             ]
-    end
-
-    test "a user prompt closes the spell, so the next notification is a new onset" do
-      path =
-        write_fixture([
-          event(%{"timestamp" => @t0, "type" => "notification"}),
-          event(%{"timestamp" => @t0 + @minute, "type" => "notification"}),
-          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "user_prompt_submit"}),
-          event(%{"timestamp" => @t0 + 3 * @minute, "type" => "notification"})
-        ])
-
-      assert buckets!(path, @t0, @t0 + 4 * @minute) == [
-               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1},
-               %{m: @t0 + 2 * @minute, s: @session, cwd: @cwd, k: "attention", n: 1},
-               %{m: @t0 + 3 * @minute, s: @session, cwd: @cwd, k: "notify", n: 1}
-             ]
-    end
-
-    test "agent activity closes the spell too — a permission granted elsewhere" do
-      path =
-        write_fixture([
-          event(%{"timestamp" => @t0, "type" => "notification"}),
-          event(%{"timestamp" => @t0 + @minute, "type" => "post_tool_use"}),
-          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
-        ])
-
-      assert Enum.filter(buckets!(path, @t0, @t0 + 3 * @minute), &(&1.k == "notify")) == [
-               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1},
-               %{m: @t0 + 2 * @minute, s: @session, cwd: @cwd, k: "notify", n: 1}
-             ]
-    end
-
-    test "a completed reply closes the spell like any other agent event" do
-      path =
-        write_fixture([
-          event(%{"timestamp" => @t0, "type" => "notification"}),
-          event(%{"timestamp" => @t0 + @minute, "type" => "stop"}),
-          event(%{"timestamp" => @t0 + 2 * @minute, "type" => "notification"})
-        ])
-
-      assert Enum.filter(buckets!(path, @t0, @t0 + 3 * @minute), &(&1.k == "notify")) == [
-               %{m: @t0, s: @session, cwd: @cwd, k: "notify", n: 1},
-               %{m: @t0 + 2 * @minute, s: @session, cwd: @cwd, k: "notify", n: 1}
-             ]
+        assert buckets!(path, @t0, @t0 + 30 * @minute) == spell_model(events)
+      end
     end
 
     test "two onsets inside one minute count twice in the same bucket" do
@@ -469,28 +453,89 @@ defmodule ShuttleWeb.ActivityControllerTest do
     end
   end
 
+  # The tool-span rule, stated apart from the fold. Pairing is by `sessionId`,
+  # and each session holds at most one pending pre, which a later pre replaces
+  # and a session_start discards. A post pairs only with its own session's pre,
+  # and not with one stamped after it. It fills the minutes strictly between
+  # the two stamped ones, under the identity of the pre, but no further than
+  # the first 30 after the pre, however late the post arrives. A filled minute
+  # is a statement that the minute was busy and a real event is a count, so a
+  # real event in a filled minute replaces the fill, in either file order. The
+  # window then selects whole minutes, so a call that began before it fills
+  # only inside it.
+  defp span_model(events, from_ms, to_ms) do
+    {tally, _pending} =
+      Enum.reduce(events, {%{}, %{}}, fn {ts, s, sid, type}, {tally, pending} ->
+        {tally, pending} =
+          case {type, pending[sid]} do
+            {"pre_tool_use", _} ->
+              {tally, Map.put(pending, sid, {ts, s})}
+
+            {"session_start", _} ->
+              {tally, Map.delete(pending, sid)}
+
+            {"post_tool_use", {pre, pre_s}} when pre <= ts ->
+              {fill(tally, pre_s, pre, ts), Map.delete(pending, sid)}
+
+            _ ->
+              {tally, pending}
+          end
+
+        {Map.update(tally, {minute(ts), s}, 1, &if(&1 == :fill, do: 1, else: &1 + 1)), pending}
+      end)
+
+    for {{m, s}, n} <- Enum.sort(tally), m >= from_ms and m <= to_ms do
+      %{m: m, s: s, cwd: @cwd, k: "agent", n: if(n == :fill, do: 1, else: n)}
+    end
+  end
+
+  defp fill(tally, s, pre, post) do
+    interior = (minute(pre) + @minute)..(minute(post) - @minute)//@minute
+
+    for m <- interior, m < minute(pre) + 30 * @minute, reduce: tally do
+      tally -> Map.put_new(tally, {m, s}, :fill)
+    end
+  end
+
   describe "Shuttle.Activity.window/3 — tool spans" do
     # The whole point of the fill: a long tool call is one continuous stretch of
     # work, and the minutes between its two stamped events belong to it.
-    test "a seven-minute tool call yields seven continuous minutes" do
-      path =
-        write_fixture([
-          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
-          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 6 * @minute + 30_000})
-        ])
+    #
+    # Events crowd the first few minutes, so real events land inside calls, or
+    # come past the cap, so calls outrun it. The fold runs in file order, so
+    # stamps need not ascend.
+    property "matched calls fill their interior minutes, capped, inside the window" do
+      check all(
+              events <-
+                list_of(
+                  {frequency([{3, integer(0..4)}, {1, integer(28..40)}]),
+                   integer(0..(@minute - 1)), member_of([@session, @other_session]),
+                   member_of(["sess-a", "sess-b"]),
+                   frequency([
+                     {3, constant("pre_tool_use")},
+                     {3, constant("post_tool_use")},
+                     {1, constant("session_start")},
+                     {2, constant("subagent_stop")}
+                   ])},
+                  min_length: 1,
+                  max_length: 20
+                ),
+              from <- integer(0..5),
+              width <- integer(0..40),
+              max_runs: 100
+            ) do
+        events = for {m, ms, s, sid, type} <- events, do: {@t0 + m * @minute + ms, s, sid, type}
 
-      buckets = buckets!(path, @t0, @t0 + 10 * @minute)
+        path =
+          write_fixture(
+            for {ts, s, sid, type} <- events do
+              event(%{"timestamp" => ts, "type" => type, "tmuxSession" => s, "sessionId" => sid})
+            end
+          )
 
-      assert Enum.map(buckets, & &1.m) == Enum.map(0..6, &(@t0 + &1 * @minute))
-      assert Enum.all?(buckets, &(&1 == %{m: &1.m, s: @session, cwd: @cwd, k: "agent", n: 1}))
-    end
-
-    test "an unmatched pre fills nothing at all" do
-      path = write_fixture([event(%{"type" => "pre_tool_use", "timestamp" => @t0})])
-
-      assert buckets!(path, @t0, @t0 + 10 * @minute) == [
-               %{m: @t0, s: @session, cwd: @cwd, k: "agent", n: 1}
-             ]
+        {from_ms, to_ms} = {@t0 + from * @minute, @t0 + (from + width) * @minute}
+        assert buckets!(path, from_ms, to_ms) == span_model(events, from_ms, to_ms)
+      end
     end
 
     test "the fill stops at the cap, however late the post arrives" do
@@ -517,86 +562,6 @@ defmodule ShuttleWeb.ActivityControllerTest do
 
       assert buckets!(path, @t0, @t0 + 10 * @minute) |> Enum.map(& &1.m) ==
                [@t0, @t0 + 2 * @minute, @t0 + 5 * @minute]
-    end
-
-    test "interleaved sessions do not cross-fill" do
-      path =
-        write_fixture([
-          event(%{"type" => "pre_tool_use", "timestamp" => @t0, "sessionId" => "sess-a"}),
-          event(%{
-            "type" => "pre_tool_use",
-            "timestamp" => @t0 + @minute,
-            "sessionId" => "sess-b",
-            "tmuxSession" => @other_session
-          }),
-          # B's tool returns first, and must fill nothing — its own pre is one
-          # minute back, and A's is not its business.
-          event(%{
-            "type" => "post_tool_use",
-            "timestamp" => @t0 + 2 * @minute,
-            "sessionId" => "sess-b",
-            "tmuxSession" => @other_session
-          }),
-          event(%{
-            "type" => "post_tool_use",
-            "timestamp" => @t0 + 4 * @minute,
-            "sessionId" => "sess-a"
-          })
-        ])
-
-      buckets = buckets!(path, @t0, @t0 + 10 * @minute)
-      by_session = Enum.group_by(buckets, & &1.s, & &1.m)
-
-      assert by_session[@session] == Enum.map(0..4, &(@t0 + &1 * @minute))
-      assert by_session[@other_session] == [@t0 + @minute, @t0 + 2 * @minute]
-    end
-
-    # A filled minute is a statement that the minute was busy. A real event in
-    # it is a count of something. The real event wins, in either order.
-    test "a real event in a filled minute replaces the fill rather than adding to it" do
-      before_post =
-        write_fixture([
-          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
-          event(%{"type" => "notification", "timestamp" => @t0 + @minute}),
-          event(%{"type" => "subagent_stop", "timestamp" => @t0 + @minute + 1_000}),
-          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 3 * @minute})
-        ])
-
-      # …and the same minute reached by a real event only after the fill landed.
-      after_post =
-        write_fixture([
-          event(%{"type" => "pre_tool_use", "timestamp" => @t0, "sessionId" => "sess-a"}),
-          event(%{
-            "type" => "post_tool_use",
-            "timestamp" => @t0 + 3 * @minute,
-            "sessionId" => "sess-a"
-          }),
-          event(%{
-            "type" => "subagent_stop",
-            "timestamp" => @t0 + @minute,
-            "sessionId" => "sess-b"
-          })
-        ])
-
-      for path <- [before_post, after_post] do
-        agent =
-          path
-          |> buckets!(@t0, @t0 + 10 * @minute)
-          |> Enum.filter(&(&1.k == "agent" and &1.m == @t0 + @minute))
-
-        assert agent == [%{m: @t0 + @minute, s: @session, cwd: @cwd, k: "agent", n: 1}]
-      end
-    end
-
-    test "a call that began before the window fills only inside it" do
-      path =
-        write_fixture([
-          event(%{"type" => "pre_tool_use", "timestamp" => @t0}),
-          event(%{"type" => "post_tool_use", "timestamp" => @t0 + 5 * @minute})
-        ])
-
-      assert buckets!(path, @t0 + 2 * @minute, @t0 + 3 * @minute) |> Enum.map(& &1.m) ==
-               [@t0 + 2 * @minute, @t0 + 3 * @minute]
     end
   end
 

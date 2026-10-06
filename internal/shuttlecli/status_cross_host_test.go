@@ -2,15 +2,14 @@ package shuttlecli
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"sort"
 	"testing"
 	"time"
 )
 
-// Exercises composite-snapshot rendering. The integration test uses
-// httptest.NewServer to stand in for the daemon's /api/v1/state/composite endpoint,
+// Exercises composite-snapshot rendering. The integration test uses a fake
+// daemon to stand in for the daemon's /api/v1/state/composite endpoint,
 // so the same code path (fetchCompositeFrom -> compositeRows) runs end-to-end
 // without a live daemon. Pure rendering logic gets covered by compositeRows unit
 // tests against fixture structs. Ported from shuttle-ctl's status_cross_host_test.go.
@@ -69,6 +68,7 @@ const sampleCompositeJSON = `{
 }`
 
 func TestCompositeRows_All(t *testing.T) {
+	t.Parallel()
 	c := &CompositeState{
 		Local: &Snapshot{
 			Eligible: []SnapshotEntry{{FiberID: "local/a", Agent: "claude-opus", State: "running", TmuxSession: "a-01KTHDNZS287ZSSG8X8V59XKWB-shuttle"}},
@@ -124,6 +124,7 @@ func TestCompositeRows_All(t *testing.T) {
 }
 
 func TestCompositeRows_FilterRemote(t *testing.T) {
+	t.Parallel()
 	c := &CompositeState{
 		Local: &Snapshot{
 			Eligible: []SnapshotEntry{{FiberID: "local/a", State: "running"}},
@@ -145,6 +146,7 @@ func TestCompositeRows_FilterRemote(t *testing.T) {
 }
 
 func TestCompositeRows_FilterUnknownRemote(t *testing.T) {
+	t.Parallel()
 	c := &CompositeState{
 		Local:   &Snapshot{Eligible: []SnapshotEntry{{FiberID: "local/a", State: "running"}}},
 		Remotes: map[string]*RemoteSnapshot{"candide": {Snapshot: &Snapshot{}}},
@@ -158,6 +160,7 @@ func TestCompositeRows_FilterUnknownRemote(t *testing.T) {
 }
 
 func TestCompositeRows_StalePropagatesToRows(t *testing.T) {
+	t.Parallel()
 	c := &CompositeState{
 		Remotes: map[string]*RemoteSnapshot{
 			"candide": {
@@ -182,6 +185,7 @@ func TestCompositeRows_StalePropagatesToRows(t *testing.T) {
 }
 
 func TestCompositeRows_RecoveryPlaceholderUsesRecoveryState(t *testing.T) {
+	t.Parallel()
 	c := &CompositeState{
 		Remotes: map[string]*RemoteSnapshot{
 			"candide": {
@@ -208,6 +212,7 @@ func TestCompositeRows_RecoveryPlaceholderUsesRecoveryState(t *testing.T) {
 }
 
 func TestCompositeRows_RecoveryAddsOriginSummaryAlongsideSnapshotRows(t *testing.T) {
+	t.Parallel()
 	c := &CompositeState{
 		Remotes: map[string]*RemoteSnapshot{
 			"candide": {
@@ -235,6 +240,7 @@ func TestCompositeRows_RecoveryAddsOriginSummaryAlongsideSnapshotRows(t *testing
 }
 
 func TestCompositeRows_StandingRoleNextDueRendered(t *testing.T) {
+	t.Parallel()
 	due := int64(4071283200000)
 	c := &CompositeState{
 		Local: &Snapshot{
@@ -258,17 +264,16 @@ func TestCompositeRows_StandingRoleNextDueRendered(t *testing.T) {
 }
 
 func TestFetchComposite_ParsesSampleResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/state/composite" {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(sampleCompositeJSON))
-	}))
-	defer srv.Close()
+	t.Parallel()
+	env := testEnv(t)
+	srv := daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/state/composite": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(sampleCompositeJSON))
+		},
+	})
 
-	c, err := fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
+	c, err := newApp(env).fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
 	if err != nil {
 		t.Fatalf("fetchCompositeFrom: %v", err)
 	}
@@ -294,12 +299,13 @@ func TestFetchComposite_ParsesSampleResponse(t *testing.T) {
 }
 
 func TestFetchComposite_ErrorOnNon200(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+	env := testEnv(t)
+	srv := serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
-	defer srv.Close()
 
-	_, err := fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
+	_, err := newApp(env).fetchCompositeFrom(srv.URL + "/api/v1/state/composite")
 	if err == nil {
 		t.Fatal("expected error on 500, got nil")
 	}

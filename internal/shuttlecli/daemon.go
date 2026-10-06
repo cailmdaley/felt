@@ -36,11 +36,11 @@ import (
 // A host file or listener setting that does not resolve is an error naming
 // its source, never a URL: a malformed operator file must not read as "daemon
 // unreachable", which callers answer with a local fallback.
-func daemonURL() (string, error) {
-	if v := os.Getenv("SHUTTLE_DAEMON_URL"); v != "" {
+func (a *app) daemonURL() (string, error) {
+	if v := a.env.Getenv("SHUTTLE_DAEMON_URL"); v != "" {
 		return v, nil
 	}
-	s, err := resolveHostSettings()
+	s, err := a.resolveHostSettings()
 	if err != nil {
 		return "", fmt.Errorf("resolving the daemon listener: %w", err)
 	}
@@ -51,8 +51,8 @@ func daemonURL() (string, error) {
 }
 
 // daemonEndpoint is daemonURL() plus a path.
-func daemonEndpoint(path string) (string, error) {
-	base, err := daemonURL()
+func (a *app) daemonEndpoint(path string) (string, error) {
+	base, err := a.daemonURL()
 	if err != nil {
 		return "", err
 	}
@@ -63,10 +63,10 @@ func daemonEndpoint(path string) (string, error) {
 // shuttle daemon. A request to the synthetic host dials the local daemon's
 // unix socket; every other host (a remote daemon over its tunnel port) dials
 // normally, so one client serves getDaemon's local and remote callers alike.
-func daemonHTTPClient(timeout time.Duration) *http.Client {
+func (a *app) daemonHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// The socket is local; an $HTTP_PROXY must never capture it.
-	proxy := transport.Proxy
+	proxy := a.httpProxy
 	transport.Proxy = func(req *http.Request) (*url.URL, error) {
 		if req.URL.Host == daemonSocketHost || proxy == nil {
 			return nil, nil
@@ -76,7 +76,7 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 	base := transport.DialContext
 	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if addr == daemonSocketHost+":80" {
-			s, err := resolveHostSettings()
+			s, err := a.resolveHostSettings()
 			if err != nil {
 				return nil, err
 			}
@@ -86,7 +86,7 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 			var d net.Dialer
 			return d.DialContext(ctx, "unix", s.listen.Address)
 		}
-		checkOwner, err := isSocketClassDaemonTCP(network, addr)
+		checkOwner, err := a.isSocketClassDaemonTCP(network, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +108,7 @@ func daemonHTTPClient(timeout time.Duration) *http.Client {
 	}
 }
 
-func isSocketClassDaemonTCP(network, address string) (bool, error) {
+func (a *app) isSocketClassDaemonTCP(network, address string) (bool, error) {
 	if runtime.GOOS != "linux" || !strings.HasPrefix(network, "tcp") {
 		return false, nil
 	}
@@ -120,7 +120,7 @@ func isSocketClassDaemonTCP(network, address string) (bool, error) {
 	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
 		return false, nil
 	}
-	settings, err := resolveHostSettings()
+	settings, err := a.resolveHostSettings()
 	if err != nil {
 		return false, err
 	}
@@ -151,13 +151,11 @@ func (t socketHostTransport) RoundTrip(req *http.Request) (*http.Response, error
 // different things: a read may cross an SSH tunnel to another machine's daemon
 // (validate-identity fans out over every configured remote), a dispatch POST
 // waits on the daemon's own work, and the lifecycle POST bounds how long
-// `resume`/`accept` hang interactively. A var so tests can shorten it.
+// `resume`/`accept` hang interactively (app.daemonLifecycleTimeout).
 const (
 	daemonReadTimeout = 15 * time.Second
 	daemonPostTimeout = 10 * time.Second
 )
-
-var daemonLifecycleTimeout = 5 * time.Second
 
 // daemonStatusError is a non-2xx response — the daemon was reached but rejected
 // the request (a logic error, NOT a transport failure). A distinct type so
@@ -178,8 +176,8 @@ func (e daemonStatusError) Error() string {
 // through them, so "reaching daemon at %s" reads the same everywhere and
 // isLifecycleTransportError has one error shape to recognize. Callers that want
 // JSON unmarshal the returned bytes themselves.
-func getDaemon(url string, timeout time.Duration) ([]byte, error) {
-	client := daemonHTTPClient(timeout)
+func (a *app) getDaemon(url string, timeout time.Duration) ([]byte, error) {
+	client := a.daemonHTTPClient(timeout)
 	resp, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("reaching daemon at %s: %w", url, err)
@@ -188,14 +186,14 @@ func getDaemon(url string, timeout time.Duration) ([]byte, error) {
 	return readDaemonResponse(url, resp)
 }
 
-func postDaemon(url string, payload []byte, timeout time.Duration) ([]byte, error) {
-	return postDaemonContext(context.Background(), url, payload, timeout)
+func (a *app) postDaemon(url string, payload []byte, timeout time.Duration) ([]byte, error) {
+	return a.postDaemonContext(context.Background(), url, payload, timeout)
 }
 
 // postDaemonContext is postDaemon under ctx, for a caller that traces the
 // request (postLifecycle).
-func postDaemonContext(ctx context.Context, url string, payload []byte, timeout time.Duration) ([]byte, error) {
-	client := daemonHTTPClient(timeout)
+func (a *app) postDaemonContext(ctx context.Context, url string, payload []byte, timeout time.Duration) ([]byte, error) {
+	client := a.daemonHTTPClient(timeout)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("building daemon request to %s: %w", url, err)
@@ -212,9 +210,9 @@ func postDaemonContext(ctx context.Context, url string, payload []byte, timeout 
 // getDaemonJSON is getDaemon plus a decode into T; label names the decode
 // failure for the caller's verb. The transport error is returned unwrapped so
 // isLifecycleTransportError still recognizes it.
-func getDaemonJSON[T any](url, label string) (T, error) {
+func getDaemonJSON[T any](a *app, url, label string) (T, error) {
 	var out T
-	body, err := getDaemon(url, daemonReadTimeout)
+	body, err := a.getDaemon(url, daemonReadTimeout)
 	if err != nil {
 		return out, err
 	}
@@ -269,13 +267,13 @@ func (e *daemonUnansweredError) Unwrap() error { return e.err }
 // Poller's state changes. The daemon's plain-text response is returned on
 // success. A transport failure after the connection was made is a
 // *daemonUnansweredError, not a transport error.
-func postLifecycle(action, fiberID string) (string, error) {
+func (a *app) postLifecycle(action, fiberID string) (string, error) {
 	body, err := json.Marshal(map[string]string{"action": action, "fiber": fiberID})
 	if err != nil {
 		return "", fmt.Errorf("encoding lifecycle request: %w", err)
 	}
 
-	endpoint, err := daemonEndpoint("/api/v1/lifecycle")
+	endpoint, err := a.daemonEndpoint("/api/v1/lifecycle")
 	if err != nil {
 		return "", err
 	}
@@ -283,7 +281,7 @@ func postLifecycle(action, fiberID string) (string, error) {
 	ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
 		GotConn: func(httptrace.GotConnInfo) { connected.Store(true) },
 	})
-	respBody, err := postDaemonContext(ctx, endpoint, body, daemonLifecycleTimeout)
+	respBody, err := a.postDaemonContext(ctx, endpoint, body, a.daemonLifecycleTimeout)
 	if err != nil {
 		if connected.Load() && isLifecycleTransportError(err) {
 			return "", &daemonUnansweredError{url: endpoint, err: err}

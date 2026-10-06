@@ -82,9 +82,40 @@ else (`src/board/workspace/` excepted, whose suite still guards on the pin).
 CI runs `npm test`, then type-checks and builds the bundle with
 `npm run build`.
 
-The browser suite uses `playwright-core`, a fixed clock, and Europe/Paris time.
-Set `CHROME_PATH` to override the system Chrome executable.
-It tests a mocked daemon and never operates real fibers.
+### Browser checks
+
+The workspace e2e suite, live workspace depth probe, and `themeScope` test use `ui/e2e/browser.mjs` and connect to the shared browser on port 9333 when it is running and healthy.
+Set `SHARED_BROWSER=1` to start or reuse it explicitly; without a shared browser, these checks launch their local Chromium as configured.
+Context options, including `colorScheme`, `reducedMotion`, `forcedColors` and `contrast`, behave the same in both modes.
+The one-off scripts under `ui/scripts` retain their own browser launch paths.
+Set `SHARED_BROWSER_PORT` to choose another port, and `CHROME_PATH` to select a fallback executable for checks that accept it.
+
+`bin/shared-browser` supports `start`, `endpoint`, `status`, `stop`, and `reap [minutes]`; its logic lives in `ui/e2e/sharedBrowser.mjs`.
+The browser it owns is the one whose processes carry its exact `--user-data-dir`, `$XDG_STATE_HOME/shared-browser/profile-<port>` (by default under `~/.local/state`).
+It never records a PID and never signals a process without that argument, so another browser on a similar port, or with the same port and another profile, is left alone.
+It hands out an endpoint only when the browser answering on the port is the one its own launch logged to `browser-<port>.log`; a port held by another browser is an error.
+
+`start` and `endpoint` launch the browser when it is not running and refresh its idle clock; `status` reports `running`, `unresponsive` (alive but not answering CDP), `orphaned` (helpers whose browser process died) or `stopped`, with the PID, endpoint, process count, and RSS.
+A browser that does not answer is reported, never killed: `stop` is the only way to end it.
+`reap` defaults to 30 idle minutes; `SHARED_BROWSER_IDLE_MINUTES` changes that threshold.
+It treats blank tabs and Chrome's internal New Tab targets as idle; any other page keeps the browser running.
+`reap` also clears orphaned helpers and leaves an unresponsive browser alone.
+`start`, `endpoint`, `stop`, and `reap` serialise on an `flock` taken through `perl`, which the OS releases when its holder dies.
+The browser is found in Puppeteer's Chrome for Testing cache, a Chrome for Testing install, Playwright's cache for the revision `playwright-core` pins (honouring `PLAYWRIGHT_BROWSERS_PATH`, including `0`), `CHROME_PATH`, then system Chrome or Chromium; Playwright's headless-shell builds are not used.
+It stays headless and muted, with `--use-mock-keychain` and `--password-store=basic`, so it never touches the login keychain.
+
+Give every browser lane a unique `LANE` name so it gets a pinned tab in the shared Chrome instead of launching another browser:
+
+```bash
+LANE=tests-browser-1
+agent-browser --session "$LANE" connect "$(bin/shared-browser endpoint)"
+agent-browser --session "$LANE" --pin-tab tab new
+agent-browser --session "$LANE" open http://127.0.0.1:4000/
+agent-browser --session "$LANE" tab close
+agent-browser --session "$LANE" close
+```
+
+The board e2e suite uses a fixed clock, Europe/Paris time, and a mocked daemon; it never operates real fibers.
 
 ### The stranger test: bootstrap in a clean container
 
@@ -130,13 +161,25 @@ account configuration, MCP credentials, or credential backups either. Fixtures
 use a fresh home and config with synthetic data and a controlled environment;
 they must not fall back to installed harness executables.
 
+Production code under `internal/` reads the process — environment variables,
+home and working directory, executable lookup, child processes, standard
+streams — only through a `*sysenv.Env` (`internal/sysenv`) handed down from
+the command's entry point; `cmd/felt` and `cmd/shuttle` build it from the live
+process, and each invocation gets a fresh command tree. A test builds an
+isolated env instead (`sysenv.New`, or `sysenvtest.FromProcess` plus
+`sysenvtest.FakeCommand` for fake executables on its own PATH), so tests run
+with `t.Parallel()` and none mutates process state. `internal/sysenv`'s
+`TestProductionReadsTheProcessOnlyThroughEnv` fails on a direct read outside
+the seam; its allowlist names each deliberate exception and why.
+
 The felt CLI and shuttle CLI unit-test binaries each run behind a `TestMain`
 fence (`internal/feltcli/testmain_test.go` and
-`internal/shuttlecli/testmain_test.go`). The felt CLI fences its home, cache,
+`internal/shuttlecli/testmain_test.go`), and each package's `testEnv(t)`
+carries the same fence as a per-test env. The felt CLI fences its home, cache,
 and config paths; the shuttle CLI fences its home, Shuttle config files, host
 identity, and daemon URL. A test never reaches the machine's live daemon or its
-fleet; one that needs a daemon starts an `httptest` server and sets
-`SHUTTLE_DAEMON_URL` itself.
+fleet; one that needs a daemon starts an `httptest` server and points its
+env's `SHUTTLE_DAEMON_URL` at it.
 
 Real harness smoke is an explicit integration operation against the operator's
 runtime. Even starting an idle CLI or running plugin setup can initialize or

@@ -6,6 +6,8 @@ import (
 )
 
 func TestShuttleRootSurfaceIsTopLevel(t *testing.T) {
+	t.Parallel()
+	rootCmd := NewRootCmd(testEnv(t))
 	if rootCmd.Use != "shuttle" {
 		t.Fatalf("root Use = %q, want shuttle", rootCmd.Use)
 	}
@@ -32,7 +34,8 @@ func TestShuttleRootSurfaceIsTopLevel(t *testing.T) {
 }
 
 func TestShuttleRootHelpNamesItsStoreFlag(t *testing.T) {
-	help := rootCmd.UsageString()
+	t.Parallel()
+	help := NewRootCmd(testEnv(t)).UsageString()
 	if !strings.Contains(help, "--store") || !strings.Contains(help, "--json") {
 		t.Fatalf("Shuttle help omits shared root flags:\n%s", help)
 	}

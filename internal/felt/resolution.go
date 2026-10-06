@@ -7,17 +7,19 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // ProjectRoot resolves a project root from an explicit directory. An empty
-// directory searches upward from the current working directory; a non-empty
-// directory must contain .felt directly.
-func ProjectRoot(dir string) (string, error) {
+// directory searches upward from env's working directory; a non-empty
+// directory (relative to that working directory) must contain .felt directly.
+func ProjectRoot(env *sysenv.Env, dir string) (string, error) {
 	if dir == "" {
-		return FindProjectRoot()
+		return FindProjectRoot(env)
 	}
 
-	abs, err := filepath.Abs(dir)
+	abs, err := env.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolving -C path: %w", err)
 	}
@@ -28,10 +30,10 @@ func ProjectRoot(dir string) (string, error) {
 	return abs, nil
 }
 
-// RequireStore opens the store rooted at dir, or at the project containing the
-// current working directory when dir is empty.
-func RequireStore(dir string) (*Storage, string, error) {
-	root, err := ProjectRoot(dir)
+// RequireStore opens the store rooted at dir, or at the project containing
+// env's working directory when dir is empty.
+func RequireStore(env *sysenv.Env, dir string) (*Storage, string, error) {
+	root, err := ProjectRoot(env, dir)
 	if err != nil {
 		return nil, "", fmt.Errorf("not in a felt repository")
 	}
@@ -39,16 +41,16 @@ func RequireStore(dir string) (*Storage, string, error) {
 }
 
 // CommandScope returns the nearest fiber containing startDir, relative to
-// root's .felt directory. An empty startDir uses the current working directory.
-func CommandScope(root, startDir string) string {
+// root's .felt directory. An empty startDir uses env's working directory.
+func CommandScope(env *sysenv.Env, root, startDir string) string {
 	cwd := startDir
 	if cwd == "" {
 		var err error
-		cwd, err = os.Getwd()
+		cwd, err = env.Getwd()
 		if err != nil {
 			return ""
 		}
-	} else if abs, err := filepath.Abs(startDir); err == nil {
+	} else if abs, err := env.Abs(startDir); err == nil {
 		cwd = abs
 	}
 

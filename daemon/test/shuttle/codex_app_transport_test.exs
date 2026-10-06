@@ -8,6 +8,13 @@ defmodule Shuttle.CodexApp.TransportTest do
 
   @client Shuttle.CodexApp.Client
 
+  # Every connect, RPC and fake-peer read that a test expects to succeed gets
+  # this deadline: reached only when the test is already failing, so a loaded
+  # machine cannot expire it first. It sits under the 30 s outer awaits, which
+  # sit under ExUnit's 60 s test timeout. Deadlines that are the behaviour
+  # under test stay short and are named where they are used.
+  @ample 15_000
+
   setup do
     if pid = Process.whereis(@client), do: Transport.close(pid)
 
@@ -48,10 +55,10 @@ defmodule Shuttle.CodexApp.TransportTest do
           else: Shuttle.Test.Env.delete_env("SHUTTLE_CODEX_SOCKET")
       end
 
-      {:ok, client} = Transport.start_link(connect_timeout: 1_000)
+      {:ok, client} = Transport.start_link(connect_timeout: @ample)
 
       assert {:ok, %{"selected" => true}} =
-               Transport.request(client, "endpoint/probe", %{}, 1_000)
+               Transport.request(client, "endpoint/probe", %{}, @ample)
 
       Transport.close(client)
       await_peer(peer)
@@ -88,8 +95,8 @@ defmodule Shuttle.CodexApp.TransportTest do
           :gen_tcp.send(socket, frame(Jason.encode!(%{"id" => id, "result" => %{"ok" => true}})))
       end)
 
-    {:ok, client} = Transport.start_link(socket_path: path, connect_timeout: 1_000)
-    assert {:ok, %{"ok" => true}} = Transport.request(client, "works", %{}, 1_000)
+    {:ok, client} = Transport.start_link(socket_path: path, connect_timeout: @ample)
+    assert {:ok, %{"ok" => true}} = Transport.request(client, "works", %{}, @ample)
     if Process.alive?(client), do: Transport.close(client)
     await_peer(peer)
   end
@@ -112,11 +119,11 @@ defmodule Shuttle.CodexApp.TransportTest do
     tasks =
       for value <- 1..24 do
         Task.async(fn ->
-          {value, Transport.request(client, "echo", %{"value" => value}, 2_000)}
+          {value, Transport.request(client, "echo", %{"value" => value}, @ample)}
         end)
       end
 
-    assert Enum.sort(Enum.map(tasks, &Task.await(&1, 3_000))) ==
+    assert Enum.sort(Enum.map(tasks, &Task.await(&1, 30_000))) ==
              Enum.map(1..24, &{&1, {:ok, &1}})
 
     await_peer(peer)
@@ -147,7 +154,7 @@ defmodule Shuttle.CodexApp.TransportTest do
     Enum.each([126, 65_536], fn size ->
       id = if size == 126, do: 1, else: 2
       params = params_for_json_size(id, size)
-      assert {:ok, %{"pad" => pad}} = Transport.request(client, "boundary", params, 2_000)
+      assert {:ok, %{"pad" => pad}} = Transport.request(client, "boundary", params, @ample)
       assert byte_size(Jason.encode!(%{"id" => id, "result" => %{"pad" => pad}})) == size
     end)
 
@@ -177,18 +184,27 @@ defmodule Shuttle.CodexApp.TransportTest do
         end)
 
       assert {:error, {:transport, :websocket_upgrade_rejected}} =
-               Transport.start_link(socket_path: path, connect_timeout: 500)
+               Transport.start_link(socket_path: path, connect_timeout: @ample)
 
       await_peer(peer)
     end)
   end
 
+  # The connect deadline is the subject, and the Transport reads the wall
+  # clock, so this test is timing-sensitive by design. The peer trickles a
+  # byte every 10 ms for far longer than the deadline: a per-read deadline
+  # would be renewed by every byte and outlast the trickle, while an absolute
+  # one fires. Load can only stretch the gaps between bytes, which lets a
+  # per-read deadline fire too (a missed regression), never fail a correct
+  # Transport. The elapsed bound sits between the 200 ms deadline and both the
+  # 5 s default deadline and the trickle's ten-odd seconds.
+  @tag :timing
   test "handshake timeout is an absolute deadline despite trickled bytes" do
     {path, peer} =
       start_peer(fn socket ->
         {:ok, _headers} = recv_until(socket, <<>>, "\r\n\r\n")
 
-        Enum.reduce_while(1..20, :ok, fn _, _ ->
+        Enum.reduce_while(1..1_000, :ok, fn _, _ ->
           Process.sleep(10)
 
           case :gen_tcp.send(socket, "x") do
@@ -201,9 +217,9 @@ defmodule Shuttle.CodexApp.TransportTest do
     started = System.monotonic_time(:millisecond)
 
     assert {:error, {:transport, :timeout}} =
-             Transport.start_link(socket_path: path, connect_timeout: 50)
+             Transport.start_link(socket_path: path, connect_timeout: 200)
 
-    assert System.monotonic_time(:millisecond) - started < 180
+    assert System.monotonic_time(:millisecond) - started < 3_000
     await_peer(peer)
   end
 
@@ -211,15 +227,18 @@ defmodule Shuttle.CodexApp.TransportTest do
     {path, peer} =
       initialized_peer(fn socket ->
         %{"id" => late_id} = assert_request(socket, "late")
-        Process.sleep(50)
+        receive do: (:reply_late -> :ok)
         :ok = :gen_tcp.send(socket, frame(Jason.encode!(%{"id" => late_id, "result" => "late"})))
         %{"id" => next_id} = assert_request(socket, "after")
         :ok = :gen_tcp.send(socket, frame(Jason.encode!(%{"id" => next_id, "result" => "after"})))
       end)
 
     {:ok, client} = Transport.start_link(socket_path: path)
+    # The 20 ms deadline is the subject; the reply goes out only once the
+    # caller has seen it expire.
     assert {:error, :timeout} = Transport.request(client, "late", %{}, 20)
-    assert {:ok, "after"} = Transport.request(client, "after", %{}, 1_000)
+    send(peer.pid, :reply_late)
+    assert {:ok, "after"} = Transport.request(client, "after", %{}, @ample)
     await_peer(peer)
   end
 
@@ -233,9 +252,9 @@ defmodule Shuttle.CodexApp.TransportTest do
     {:ok, client} = Transport.start_link(socket_path: path)
 
     tasks =
-      for _ <- 1..3, do: Task.async(fn -> Transport.request(client, "pending", %{}, 2_000) end)
+      for _ <- 1..3, do: Task.async(fn -> Transport.request(client, "pending", %{}, @ample) end)
 
-    assert Enum.map(tasks, &Task.await(&1, 3_000)) == List.duplicate({:error, :disconnected}, 3)
+    assert Enum.map(tasks, &Task.await(&1, 30_000)) == List.duplicate({:error, :disconnected}, 3)
     await_peer(peer)
   end
 
@@ -256,7 +275,7 @@ defmodule Shuttle.CodexApp.TransportTest do
             )
           )
 
-        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 1_000)
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, @ample)
       end)
 
     {:ok, client} = Transport.start_link(socket_path: path)
@@ -264,7 +283,7 @@ defmodule Shuttle.CodexApp.TransportTest do
     assert {:error,
             {:transport,
              {:unsupported_server_request, "item/commandExecution/requestApproval", 1}}} =
-             Transport.request(client, "pending", %{}, 1_000)
+             Transport.request(client, "pending", %{}, @ample)
 
     await_peer(peer)
   end
@@ -285,7 +304,7 @@ defmodule Shuttle.CodexApp.TransportTest do
         end)
 
       {:ok, client} = Transport.start_link(socket_path: path)
-      assert {:error, {:transport, _}} = Transport.request(client, "pending", %{}, 1_000)
+      assert {:error, {:transport, _}} = Transport.request(client, "pending", %{}, @ample)
       await_peer(peer)
     end)
   end
@@ -299,7 +318,7 @@ defmodule Shuttle.CodexApp.TransportTest do
         end)
 
       {:ok, client} = Transport.start_link(socket_path: path)
-      assert {:error, {:transport, _}} = Transport.request(client, "pending", %{}, 1_000)
+      assert {:error, {:transport, _}} = Transport.request(client, "pending", %{}, @ample)
       await_peer(peer)
     end)
   end
@@ -309,14 +328,14 @@ defmodule Shuttle.CodexApp.TransportTest do
 
     {path, peer} =
       initialized_peer(fn socket ->
-        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, @ample)
       end)
 
     tasks =
       for _ <- 1..16,
           do: Task.async(fn -> Transport.start_link(socket_path: path, name: name) end)
 
-    results = Enum.map(tasks, &Task.await(&1, 2_000))
+    results = Enum.map(tasks, &Task.await(&1, 30_000))
     winners = for {:ok, pid} <- results, do: pid
     existing = for {:error, {:already_started, pid}} <- results, do: pid
 
@@ -330,7 +349,7 @@ defmodule Shuttle.CodexApp.TransportTest do
   test "close is idempotent when normal concurrent callers race" do
     {path, peer} =
       initialized_peer(fn socket ->
-        assert {:error, :closed} = :gen_tcp.recv(socket, 0, 2_000)
+        assert {:error, :closed} = :gen_tcp.recv(socket, 0, @ample)
       end)
 
     {:ok, client} = Transport.start_link(socket_path: path)
@@ -351,7 +370,7 @@ defmodule Shuttle.CodexApp.TransportTest do
       end
 
     Enum.each(task_pids, &send(&1, :close))
-    assert Enum.map(tasks, &Task.await(&1, 1_000)) == List.duplicate(:ok, 8)
+    assert Enum.map(tasks, &Task.await(&1, 30_000)) == List.duplicate(:ok, 8)
     assert :ok = Transport.close(client)
     await_peer(peer)
   end
@@ -653,7 +672,7 @@ defmodule Shuttle.CodexApp.TransportTest do
   defp configure_adapter(path) do
     Shuttle.Test.Env.put_app_env(:codex_app_transport_opts,
       socket_path: path,
-      connect_timeout: 1_000
+      connect_timeout: @ample
     )
   end
 
@@ -711,7 +730,7 @@ defmodule Shuttle.CodexApp.TransportTest do
     if :binary.match(acc, needle) != :nomatch do
       {:ok, acc}
     else
-      with {:ok, data} <- :gen_tcp.recv(socket, 0, 1_000),
+      with {:ok, data} <- :gen_tcp.recv(socket, 0, @ample),
            do: recv_until(socket, acc <> data, needle)
     end
   end
@@ -751,7 +770,7 @@ defmodule Shuttle.CodexApp.TransportTest do
   defp recv_exact(_socket, 0), do: <<>>
 
   defp recv_exact(socket, count) do
-    {:ok, data} = :gen_tcp.recv(socket, count, 1_000)
+    {:ok, data} = :gen_tcp.recv(socket, count, @ample)
     data
   end
 
@@ -821,13 +840,15 @@ defmodule Shuttle.CodexApp.TransportTest do
   end
 
   defp await_peer(task) do
-    case Task.yield(task, 2_000) || Task.shutdown(task) do
+    case Task.yield(task, @ample) || Task.shutdown(task) do
       {:ok, result} -> result
       nil -> flunk("fake Codex peer did not finish")
     end
   end
 
-  defp wait_until(predicate, attempts \\ 100)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(predicate, attempts \\ 6_000)
   defp wait_until(predicate, 0), do: assert(predicate.())
 
   defp wait_until(predicate, attempts) do

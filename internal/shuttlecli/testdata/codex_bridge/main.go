@@ -71,14 +71,26 @@ func main() {
 		os.Exit(2)
 	}
 	_ = os.MkdirAll(filepath.Dir(path), 0700)
-	ln, err := net.Listen("unix", path)
+	// The endpoint appears already private and already listening, as a
+	// bridge polling for it needs: listen at a private umask under a
+	// temporary name, then link it into place (failing, as binding in place
+	// would, when the path is taken). A socket bound in place is
+	// briefly connectable-but-refusing (between bind and listen) and, at the
+	// default umask, briefly 0755 — windows a loaded host widens.
+	syscall.Umask(0o077)
+	staging := filepath.Join(filepath.Dir(path), ".staging-"+strconv.Itoa(os.Getpid())+".sock")
+	ln, err := net.Listen("unix", staging)
+	if err == nil {
+		ln.(*net.UnixListener).SetUnlinkOnClose(false)
+		err = os.Link(staging, path)
+		_ = os.Remove(staging)
+	}
 	if err != nil {
 		if errorPath := os.Getenv("SHUTTLE_BRIDGE_ERROR_FILE"); errorPath != "" {
 			_ = os.WriteFile(errorPath, []byte(err.Error()), 0600)
 		}
 		os.Exit(3)
 	}
-	_ = os.Chmod(path, 0600)
 
 	closed := make(chan struct{})
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

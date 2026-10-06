@@ -35,54 +35,56 @@ defmodule Shuttle.TmuxTest do
 
   @absent {"no server running on /tmp/tmux-501/default", 1}
 
-  test "exit 0 is :alive" do
-    assert Tmux.session_status(stub({"", 0}), "leaf-shuttle") == :alive
-    refute_received {:ps_args, _}
-  end
+  # tmux's output and exit, the process scan's, the session asked about, the
+  # status, and whether the process table was consulted. Only tmux's own
+  # absence messages consult it; any other failure (tmux not found, a fork
+  # failure under load, a permissions error) is not a death signal.
+  @run_script_ps """
+    700     1 tmux new-session -d -s shuttle-anchor
+    812   700 bash -l /tmp/shuttle-run-leaf-01ABC-shuttle.42.sh
+    813   812 claude --resume 11111111-2222-3333-4444-555555555555
+  """
 
-  test "tmux's absence messages with no live worker process classify as :gone" do
-    for msg <- [
-          "can't find session: leaf-shuttle",
-          "no server running on /tmp/tmux-501/default",
-          "no such session: leaf-shuttle",
-          "error connecting to /tmp/tmux-501/default (No such file or directory)"
-        ] do
-      assert Tmux.session_status(stub({msg, 1}), "leaf-shuttle") == :gone,
-             "expected :gone for #{inspect(msg)}"
+  @session_statuses [
+    {{"", 0}, {"", 0}, "leaf-shuttle", :alive, false},
+    {{"can't find session: leaf-shuttle", 1}, {"", 0}, "leaf-shuttle", :gone, true},
+    {@absent, {"", 0}, "leaf-shuttle", :gone, true},
+    {{"no such session: leaf-shuttle", 1}, {"", 0}, "leaf-shuttle", :gone, true},
+    {{"error connecting to /tmp/tmux-501/default (No such file or directory)", 1}, {"", 0},
+     "leaf-shuttle", :gone, true},
+    # The socket is lost but the session's run script still runs; another
+    # session's run script, or a live name that merely ends with this one,
+    # does not vouch for it.
+    {@absent, {@run_script_ps, 0}, "leaf-01ABC-shuttle", :unknown, true},
+    {@absent, {@run_script_ps, 0}, "other-shuttle", :gone, true},
+    {@absent, {@run_script_ps, 0}, "01ABC-shuttle", :gone, true},
+    # Absence the process scan cannot check.
+    {@absent, {"ps: boom", 1}, "leaf-shuttle", :unknown, true},
+    {@absent, {"", :timeout}, "leaf-shuttle", :unknown, true},
+    {{"command not found: tmux", 127}, {"", 0}, "leaf", :unknown, false},
+    {{"", 1}, {"", 0}, "leaf", :unknown, false},
+    {{"fork: Resource temporarily unavailable", 1}, {"", 0}, "leaf", :unknown, false}
+  ]
+
+  test "session_status is :alive on success, :gone only for absence with no worker, else :unknown" do
+    for {tmux, ps, session, expected, scans?} = row <- @session_statuses do
+      assert Tmux.session_status(stub(tmux, ps), session) == expected, inspect(row)
+
+      if scans?,
+        do: assert_received({:ps_args, ["-ww", "-o", "pid=,ppid=,args=", "-U", _uid]}),
+        else: refute_received({:ps_args, _})
+
+      assert Tmux.present?(stub(tmux, ps), session) == (expected != :gone), inspect(row)
+      flush_ps_args()
     end
-
-    assert_received {:ps_args, ["-ww", "-o", "pid=,ppid=,args=", "-U", _uid]}
   end
 
-  test "absence while the session's run script still runs is :unknown (socket lost, worker alive)" do
-    ps = """
-      700     1 tmux new-session -d -s shuttle-anchor
-      812   700 bash -l /tmp/shuttle-run-leaf-01ABC-shuttle.42.sh
-      813   812 claude --resume 11111111-2222-3333-4444-555555555555
-    """
-
-    assert Tmux.session_status(stub(@absent, {ps, 0}), "leaf-01ABC-shuttle") == :unknown
-    assert Tmux.present?(stub(@absent, {ps, 0}), "leaf-01ABC-shuttle")
-
-    # Another session's run script does not vouch for this one.
-    assert Tmux.session_status(stub(@absent, {ps, 0}), "other-shuttle") == :gone
-    # Nor does a name that is merely a suffix of a live one.
-    assert Tmux.session_status(stub(@absent, {ps, 0}), "01ABC-shuttle") == :gone
-  end
-
-  test "absence the process scan cannot check is :unknown" do
-    assert Tmux.session_status(stub(@absent, {"ps: boom", 1}), "leaf-shuttle") == :unknown
-    assert Tmux.session_status(stub(@absent, {"", :timeout}), "leaf-shuttle") == :unknown
-  end
-
-  test "a non-absence error classifies as :unknown (not a death signal)" do
-    # tmux binary not found, a fork failure under load, a permissions error — any
-    # non-zero whose output is NOT tmux's own absence message.
-    assert Tmux.session_status(stub({"command not found: tmux", 127}), "leaf") == :unknown
-    assert Tmux.session_status(stub({"", 1}), "leaf") == :unknown
-
-    assert Tmux.session_status(stub({"fork: Resource temporarily unavailable", 1}), "leaf") ==
-             :unknown
+  defp flush_ps_args do
+    receive do
+      {:ps_args, _} -> flush_ps_args()
+    after
+      0 -> :ok
+    end
   end
 
   test "present? treats :alive and :unknown as present, only :gone as absent" do

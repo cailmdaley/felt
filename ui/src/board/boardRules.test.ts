@@ -8,6 +8,7 @@
 // Atlantic, so the file holds in whatever zone it runs.
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import {
   buildDependents,
   cardDragArms,
@@ -527,19 +528,40 @@ describe('Resting clusters split when they overflow', () => {
     expect(new Map(keys)).toEqual(new Map([['science/unions', 3], ['science/spt3g', 3]]))
   })
 
-  it('keeps descending until nothing exceeds four', () => {
-    // science/unions still holds 5 after one split, so it splits again.
-    const cards = [
-      'science/unions/sp/a', 'science/unions/sp/b', 'science/unions/sp/c',
-      'science/unions/shear/d', 'science/unions/shear/e',
-      'science/spt3g/f',
-    ].map((id) => restingCard(id))
-    const keys = new Map(keysOf(cards))
-    expect(keys).toEqual(new Map([
-      ['science/unions/sp', 3],
-      ['science/unions/shear', 2],
-      ['science/spt3g', 1],
-    ]))
+  // Paths over a small vocabulary, two to four segments deep, so groups
+  // collide, overflow, run out of path, and share every next segment.
+  const restingIds = fc.uniqueArray(
+    fc.array(fc.constantFrom('science', 'unions', 'sp', 'shear'), { minLength: 1, maxLength: 3 }),
+    { maxLength: 14, selector: (path) => path.join('/') },
+  ).chain((folders) => fc.array(fc.constantFrom(...(folders.length ? folders : [['science']])), { minLength: 1, maxLength: 14 }))
+    .map((folders) => folders.map((folder, i) => `${folder.join('/')}/c${i}`))
+  const folderOf = (id: string): string[] => id.split('/').slice(0, -1)
+  const prefix = (id: string, depth: number): string => folderOf(id).slice(0, depth).join('/')
+
+  // A cluster splits on its next folder only while it holds more than four
+  // cards and that folder tells its cards apart; a card with no deeper folder
+  // stays at its level. So clusters partition the cards, no two share a key,
+  // each cluster's key is a folder every member sits in, an overfull cluster's
+  // members all share (or all lack) the next folder, and a cluster below the
+  // top level exists only because its parent group overflowed.
+  it('splits overfull groups on the folder that tells them apart, and only those', () => {
+    fc.assert(fc.property(restingIds, (ids) => {
+      const cards = ids.map((id) => restingCard(id))
+      const clusters = clusterStashCards(cards)
+      expect(clusters.flatMap((c) => c.cards.map((card) => card.id)).sort()).toEqual([...ids].sort())
+      expect(new Set(clusters.map((c) => c.key)).size, 'one cluster per key').toBe(clusters.length)
+      for (const { key, cards: members } of clusters) {
+        const depth = key.split('/').length
+        for (const card of members) expect(prefix(card.id, depth), `${card.id} under ${key}`).toBe(key)
+        if (members.length > 4) {
+          expect(new Set(members.map((card) => prefix(card.id, depth + 1))).size, `overfull ${key} could split`).toBe(1)
+        }
+        if (depth > 1) {
+          const parent = key.split('/').slice(0, -1).join('/')
+          expect(ids.filter((id) => prefix(id, depth - 1) === parent).length, `${key} split from a parent of four or fewer`).toBeGreaterThan(4)
+        }
+      }
+    }), { numRuns: 200, seed: 0xc1057e5 })
   })
 
   it('DEGENERATE CASE: six leaves in one folder stay one cluster', () => {
@@ -548,18 +570,6 @@ describe('Resting clusters split when they overflow', () => {
     // and the renderer caps it; this is the case the leaf-slug rule exists for.
     const cards = ['a/x1', 'a/x2', 'a/x3', 'a/x4', 'a/x5', 'a/x6'].map((id) => restingCard(id))
     expect(keysOf(cards)).toEqual([['a', 6]])
-  })
-
-  it('does not strand a card that has no deeper segment', () => {
-    const cards = [
-      'science/loose',
-      'science/unions/a', 'science/unions/b', 'science/unions/c',
-      'science/unions/d', 'science/unions/e',
-    ].map((id) => restingCard(id))
-    const keys = new Map(keysOf(cards))
-    expect(keys).toEqual(new Map([['science', 1], ['science/unions', 5]]))
-    // Every card still appears exactly once, wherever it landed.
-    expect(clusterStashCards(cards).flatMap((c) => c.cards)).toHaveLength(6)
   })
 
   it('never mixes warm and cold in one cluster, and sorts cold last', () => {
@@ -857,25 +867,20 @@ describe('cycles — a named span of time, not work', () => {
     // The load-bearing claim: no combination of status, verdict, liveness or a
     // stray shuttle block can put a cycle on the desk. One "Autumn 2026" in
     // Drafts teaches the human to distrust the column.
-    const lifecycleShapes: Array<[string, Fiber]> = [
-      ['open, no block', cycle({ status: 'open' })],
-      ['active, no block', cycle({ status: 'active' })],
-      ['closed, no verdict', cycle({ status: 'closed' })],
-      ['closed and tempered', cycle({ status: 'closed', tempered: true })],
-      ['closed and composted', cycle({ status: 'closed', tempered: false })],
-      ['carrying a shuttle block', cycle({ status: 'active', hasShuttleBlock: true, shuttleKind: 'oneshot' })],
-      ['a pinned-kind block', cycle({ status: 'active', hasShuttleBlock: true, shuttleKind: 'pinned' })],
-      ['a standing block', cycle({ status: 'active', hasShuttleBlock: true, shuttleKind: 'standing' })],
-      ['with a past due', cycle({ due: asFeltWrites(dayFromNow(-30)) })],
-    ]
-    for (const [label, fiber] of lifecycleShapes) {
-      it(`routes to cycles: ${label}`, () => {
-        expect(classifyFiber(fiber)).toBe('cycles')
-      })
-    }
-
-    it('routes to cycles even with a live worker — liveness overrides everything ELSE', () => {
-      expect(classifyFiber(cycle({ hasShuttleBlock: true }), { liveWorker: true })).toBe('cycles')
+    it('routes every lifecycle shape to cycles, a live worker included', () => {
+      fc.assert(fc.property(
+        fc.record({
+          status: fc.constantFrom('open', 'active', 'closed'),
+          tempered: fc.constantFrom(undefined, true, false),
+          hasShuttleBlock: fc.boolean(),
+          shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing', 'pinned'),
+          due: fc.constantFrom(undefined, -30, 0, 30).map(days => days === undefined ? undefined : asFeltWrites(dayFromNow(days))),
+        }, { requiredKeys: ['status'] }),
+        fc.boolean(),
+        (shape, liveWorker) => {
+          expect(classifyFiber(cycle(shape as Partial<Fiber>), { liveWorker })).toBe('cycles')
+        },
+      ), { numRuns: 200, seed: 0x5eed })
     })
 
     it('leaves ordinary work exactly where it was', () => {
@@ -1723,11 +1728,6 @@ describe('chains, tails and the drop that authors them', () => {
     expect(stackDropVerdict(card('d', { dependsOnShape: 'scalar' }), card('a'), chain).ok).toBe(true)
   })
 
-  it('queues any kind of source — the edge is ordering for the eye', () => {
-    expect(stackDropVerdict(card('d', { shuttleKind: 'standing' }), card('a'), chain).ok).toBe(true)
-    expect(stackDropVerdict(card('d', { shuttleKind: 'pinned' }), card('a'), chain).ok).toBe(true)
-  })
-
   it('refuses a cycle on either end — a span of time is not a step in a queue', () => {
     expect(stackDropVerdict(card('d', { isCycle: true }), card('a'), chain).ok).toBe(false)
     expect(stackDropVerdict(card('d'), card('a', { isCycle: true }), chain).ok).toBe(false)
@@ -1796,45 +1796,27 @@ describe('who may be stacked, and behind what', () => {
   const c = (id: string, over: Partial<StackCandidate> = {}): StackCandidate =>
     ({ id, status: 'open', ...over })
   const awaiting = (id: string): StackCandidate => c(id, { status: 'closed' })
-  const temperedCard = (id: string): StackCandidate =>
-    c(id, { status: 'closed', tempered: true })
-  const compostedCard = (id: string): StackCandidate =>
-    c(id, { status: 'closed', tempered: false })
   const none = new Map<string, string[]>()
 
-  it('stacks a draft behind an AWAITING-REVIEW card', () => {
-    expect(stackDropVerdict(c('d'), awaiting('a'), none)).toEqual({ ok: true, tail: 'a' })
+  // Lifecycle and kind on either end are ordering for the eye: a draft may
+  // queue behind finished work, an awaiting-review source queues for when it
+  // reopens, a tempered tail is ordering rather than a promise to wait, and a
+  // pinned hub is the canonical thing to file work under. Only the graph
+  // decides, so a fresh source lands on the target's chain tail whatever
+  // either card's status, verdict or kind.
+  const lifecycle = fc.record({
+    status: fc.constantFrom('open', 'active', 'closed'),
+    tempered: fc.constantFrom(undefined, true, false),
+    shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing', 'pinned'),
   })
-
-  it('does not care what the TARGET lifecycle is either', () => {
-    // "This comes after that" holds whatever verdict that one carries.
-    expect(stackDropVerdict(c('d'), temperedCard('a'), none)).toEqual({ ok: true, tail: 'a' })
-    expect(stackDropVerdict(c('d'), compostedCard('a'), none)).toEqual({ ok: true, tail: 'a' })
-  })
-
-  it('lets an AWAITING-REVIEW card be the source — it queues for when it reopens', () => {
-    expect(stackDropVerdict(awaiting('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
-  })
-
-  it('does not care what the SOURCE lifecycle is — any card may be queued', () => {
-    expect(stackDropVerdict(temperedCard('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
-    expect(stackDropVerdict(compostedCard('d'), c('a'), none)).toEqual({ ok: true, tail: 'a' })
-  })
-
-  it('appends BEHIND an awaiting-review tail rather than skipping it', () => {
-    // a ← b, and b is awaiting review. Dropping d onto a must land behind b.
-    const chain = edges(['a', []], ['b', ['a']])
-    expect(stackDropVerdict(c('d'), c('a'), chain)).toEqual({ ok: true, tail: 'b' })
-  })
-
-  it('ACCEPTS a tempered tail — a queue is ordering, not a promise to wait', () => {
-    const chain = edges(['a', []], ['b', ['a']])
-    expect(stackDropVerdict(c('d'), temperedCard('a'), chain)).toEqual({ ok: true, tail: 'b' })
-  })
-
-  it('ACCEPTS a pinned card as the TARGET — filing work under a hub is the point', () => {
-    expect(stackDropVerdict(c('d'), { ...c('a'), shuttleKind: 'pinned' }, none))
-      .toEqual({ ok: true, tail: 'a' })
+  it('stacks any lifecycle or kind onto the chain tail', () => {
+    const graphs: [string, Map<string, string[]>, string][] = [
+      ['a lone target', none, 'a'],
+      ['a target with a follower', edges(['a', []], ['b', ['a']]), 'b'],
+    ]
+    fc.assert(fc.property(lifecycle, lifecycle, fc.constantFrom(...graphs), (source, target, [, graph, tail]) => {
+      expect(stackDropVerdict({ id: 'd', ...source }, { id: 'a', ...target }, graph)).toEqual({ ok: true, tail })
+    }), { numRuns: 200, seed: 0x0de1a7ed })
   })
 
   it('still refuses a source already queued behind, through an awaiting-review member', () => {
@@ -2024,21 +2006,22 @@ describe('a card claims a drop only when it really is a stack', () => {
     expect(inStackHotZone({ left: 0, top: 0, width: 0, height: 0 }, { x: 0, y: 0 })).toBe(false)
   })
 
-  it('claims a legal stack released in the hot zone', () => {
-    expect(stackClaimsDrop(ok, true)).toBe(true)
-  })
-
-  it('lets a legal stack released on the OUTER band fall through to the column', () => {
-    expect(stackClaimsDrop(ok, false)).toBe(false)
-  })
-
-  it('NEVER claims a refused stack — the column keeps the gesture it always had', () => {
-    expect(stackClaimsDrop(no, true)).toBe(false)
-    expect(stackClaimsDrop(no, false)).toBe(false)
-  })
-
-  it('claims nothing when there is no verdict to make', () => {
-    expect(stackClaimsDrop(null, true)).toBe(false)
+  // A legal stack claims the drop when released in the hot zone or after a
+  // dwell; a refused or absent verdict never does. Dwell exists because the
+  // board shifts ~60px the moment a card is picked up (the drag horizon
+  // materializes), so the middle you aimed at is not the middle any more, and
+  // resting on the card says what aiming could not.
+  it('claims exactly the legal stacks that are in the zone or dwell-armed', () => {
+    const wrong: string[] = []
+    for (const [name, verdict] of [['legal', ok], ['refused', no], ['absent', null]] as const) {
+      for (const inZone of [false, true]) {
+        for (const dwelled of [undefined, false, true]) {
+          const expected = name === 'legal' && (inZone || dwelled === true)
+          if (stackClaimsDrop(verdict, inZone, dwelled) !== expected) wrong.push(`${name} verdict, inZone=${inZone}, dwelled=${dwelled}: expected ${expected}`)
+        }
+      }
+    }
+    expect(wrong).toEqual([])
   })
 })
 
@@ -2105,32 +2088,6 @@ describe('a card must be substantially on screen to be aimed at', () => {
   it('offers nothing for a card with no visible height at all', () => {
     expect(stackZoneOffered(186, 0)).toBe(false)
     expect(stackZoneOffered(0, 0)).toBe(false)
-  })
-})
-
-describe('dwell arms a card the zone cannot', () => {
-  const ok = { ok: true, tail: 'a' } as const
-  const no = { ok: false, reason: 'nope' } as const
-
-  it('arms on dwell even when the pointer is nowhere near the zone', () => {
-    // The board shifts ~60px the moment a card is picked up (the drag horizon
-    // materializes), so the middle you aimed at is not the middle any more.
-    // Resting on the card says what aiming could not.
-    expect(stackClaimsDrop(ok, false, true)).toBe(true)
-  })
-
-  it('still arms immediately in the zone, without waiting', () => {
-    expect(stackClaimsDrop(ok, true, false)).toBe(true)
-  })
-
-  it('never arms a refused stack, dwell or no dwell', () => {
-    expect(stackClaimsDrop(no, false, true)).toBe(false)
-    expect(stackClaimsDrop(no, true, true)).toBe(false)
-    expect(stackClaimsDrop(null, false, true)).toBe(false)
-  })
-
-  it('does not arm a card merely passed over', () => {
-    expect(stackClaimsDrop(ok, false, false)).toBe(false)
   })
 })
 

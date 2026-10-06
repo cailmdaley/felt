@@ -5,15 +5,13 @@
 //   node e2e/requestBudget.mjs           measure and assert
 //   node e2e/requestBudget.mjs --report  measure and print, without asserting
 import assert from 'node:assert/strict'
-import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium } from 'playwright-core'
+import { getBrowser } from './browser.mjs'
 
-const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-await access(chrome)
 const reportOnly = process.argv.includes('--report')
-const browser = await chromium.launch({ executablePath: chrome, headless: true, args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
+const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=music`
 
 /** Requests for document routes, grouped by the document they read. */

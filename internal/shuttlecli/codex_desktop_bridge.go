@@ -38,32 +38,36 @@ const (
 	bridgeReadLimit      = 64 << 20
 )
 
-var (
-	desktopBridgeCodex  string
-	desktopBridgeSocket string
-	desktopBridgeRelay  bool
-)
-
-var codexDesktopBridgeCmd = &cobra.Command{
-	Use:   "codex-desktop-bridge --codex /absolute/path/to/codex -- [codex args...]",
-	Short: "Bridge Codex desktop JSONL to a private native app-server websocket",
-	Args:  cobra.ArbitraryArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		o := bridgeOptions{
-			codex:  desktopBridgeCodex,
-			socket: desktopBridgeSocket,
-			stdin:  os.Stdin,
-			stdout: os.Stdout,
-			stderr: os.Stderr,
-			args:   args,
-		}
-		if desktopBridgeRelay {
-			return runCodexDesktopRelay(ctx, o)
-		}
-		return runCodexDesktopBridgeProcess(ctx, o)
-	},
+func (a *app) codexDesktopBridgeCmd() *cobra.Command {
+	var desktopBridgeCodex string
+	var desktopBridgeSocket string
+	var desktopBridgeRelay bool
+	codexDesktopBridgeCmd := &cobra.Command{
+		Use:   "codex-desktop-bridge --codex /absolute/path/to/codex -- [codex args...]",
+		Short: "Bridge Codex desktop JSONL to a private native app-server websocket",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			o := bridgeOptions{
+				codex:  desktopBridgeCodex,
+				socket: desktopBridgeSocket,
+				stdin:  a.env.Stdin,
+				stdout: a.env.Stdout,
+				stderr: a.env.Stderr,
+				args:   args,
+			}
+			if desktopBridgeRelay {
+				return a.runCodexDesktopRelay(ctx, o)
+			}
+			return a.runCodexDesktopBridgeProcess(ctx, o)
+		},
+	}
+	codexDesktopBridgeCmd.Flags().StringVar(&desktopBridgeCodex, "codex", "", "Absolute path to the native Codex executable")
+	codexDesktopBridgeCmd.Flags().StringVar(&desktopBridgeSocket, "socket", "", "Private Unix socket path (default: $CODEX_HOME/shuttle-desktop/app-server.sock)")
+	codexDesktopBridgeCmd.Flags().BoolVar(&desktopBridgeRelay, "relay", false, "Internal relay process (used by the desktop bridge)")
+	_ = codexDesktopBridgeCmd.Flags().MarkHidden("relay")
+	return codexDesktopBridgeCmd
 }
 
 type bridgeOptions struct {
@@ -72,14 +76,6 @@ type bridgeOptions struct {
 	stdout        io.Writer
 	stderr        io.Writer
 	args          []string
-}
-
-func init() {
-	codexDesktopBridgeCmd.Flags().StringVar(&desktopBridgeCodex, "codex", "", "Absolute path to the native Codex executable")
-	codexDesktopBridgeCmd.Flags().StringVar(&desktopBridgeSocket, "socket", "", "Private Unix socket path (default: $CODEX_HOME/shuttle-desktop/app-server.sock)")
-	codexDesktopBridgeCmd.Flags().BoolVar(&desktopBridgeRelay, "relay", false, "Internal relay process (used by the desktop bridge)")
-	_ = codexDesktopBridgeCmd.Flags().MarkHidden("relay")
-	addShuttleCommand(codexDesktopBridgeCmd)
 }
 
 func validateBridgeCodex(codex string) error {
@@ -101,7 +97,7 @@ func validateBridgeCodex(codex string) error {
 // original process slot. A child relay owns the socket and the desktop
 // JSONL pipes; this preserves the signed Desktop -> Codex -> app-tools parent
 // chain required by macOS peer authorization.
-func runCodexDesktopBridgeProcess(ctx context.Context, o bridgeOptions) error {
+func (a *app) runCodexDesktopBridgeProcess(ctx context.Context, o bridgeOptions) error {
 	if err := validateBridgeCodex(o.codex); err != nil {
 		return err
 	}
@@ -110,12 +106,12 @@ func runCodexDesktopBridgeProcess(ctx context.Context, o bridgeOptions) error {
 		return err
 	}
 	if mode == bridgePassthrough {
-		return execNativePassthroughInPlace(o)
+		return a.execNativePassthroughInPlace(o)
 	}
 	if err := configureCurrentBridgeProcess(); err != nil {
 		return fmt.Errorf("isolate native Codex process group: %w", err)
 	}
-	socket, err := bridgeSocketPath(o.socket)
+	socket, err := a.bridgeSocketPath(o.socket)
 	if err != nil {
 		return err
 	}
@@ -131,10 +127,10 @@ func runCodexDesktopBridgeProcess(ctx context.Context, o bridgeOptions) error {
 	}
 	relayArgs := []string{"codex-desktop-bridge", "--relay", "--codex", o.codex, "--socket", socket, "--"}
 	relayArgs = append(relayArgs, o.args...)
-	relay := exec.Command(self, relayArgs...)
+	relay := a.env.Command(self, relayArgs...)
 	relay.Stdin, relay.Stdout, relay.Stderr = o.stdin, o.stdout, o.stderr
 	relay.ExtraFiles = []*os.File{readyW}
-	relay.Env = append(os.Environ(), "SHUTTLE_BRIDGE_READY_FD=3", fmt.Sprintf("SHUTTLE_BRIDGE_PARENT_PID=%d", os.Getpid()))
+	relay.Env = append(a.env.Environ(), "SHUTTLE_BRIDGE_READY_FD=3", fmt.Sprintf("SHUTTLE_BRIDGE_PARENT_PID=%d", os.Getpid()))
 	if err := relay.Start(); err != nil {
 		readyR.Close()
 		readyW.Close()
@@ -175,14 +171,14 @@ func runCodexDesktopBridgeProcess(ctx context.Context, o bridgeOptions) error {
 	case <-relayDone:
 		return fmt.Errorf("bridge relay exited before startup: %w", relayErr)
 	}
-	if err := execNativeInPlace(o, socket); err != nil {
+	if err := a.execNativeInPlace(o, socket); err != nil {
 		killUnstartedBridgeRelay(relay, relayDone)
 		return err
 	}
 	return nil
 }
 
-func execNativeInPlace(o bridgeOptions, socket string) error {
+func (a *app) execNativeInPlace(o bridgeOptions, socket string) error {
 	args := append(append([]string(nil), o.args...), "--listen", "unix://"+socket)
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
@@ -197,34 +193,34 @@ func execNativeInPlace(o bridgeOptions, socket string) error {
 		return fmt.Errorf("redirect native stdout: %w", err)
 	}
 	devNull.Close()
-	if err := syscall.Exec(o.codex, append([]string{o.codex}, args...), bridgeChildEnvironment(o.codex)); err != nil {
+	if err := syscall.Exec(o.codex, append([]string{o.codex}, args...), a.bridgeChildEnvironment(o.codex)); err != nil {
 		return fmt.Errorf("exec native Codex: %w", err)
 	}
 	return nil
 }
 
-func execNativePassthroughInPlace(o bridgeOptions) error {
-	if err := syscall.Exec(o.codex, append([]string{o.codex}, o.args...), bridgeChildEnvironment(o.codex)); err != nil {
+func (a *app) execNativePassthroughInPlace(o bridgeOptions) error {
+	if err := syscall.Exec(o.codex, append([]string{o.codex}, o.args...), a.bridgeChildEnvironment(o.codex)); err != nil {
 		return fmt.Errorf("exec native Codex: %w", err)
 	}
 	return nil
 }
 
-func runCodexDesktopRelay(ctx context.Context, o bridgeOptions) error {
+func (a *app) runCodexDesktopRelay(ctx context.Context, o bridgeOptions) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if err := validateBridgeCodex(o.codex); err != nil {
 		return err
 	}
-	readyFD, err := strconv.Atoi(os.Getenv("SHUTTLE_BRIDGE_READY_FD"))
+	readyFD, err := strconv.Atoi(a.env.Getenv("SHUTTLE_BRIDGE_READY_FD"))
 	if err != nil || readyFD != 3 {
 		return errors.New("relay readiness fd must be 3")
 	}
-	parentPID, err := strconv.Atoi(os.Getenv("SHUTTLE_BRIDGE_PARENT_PID"))
+	parentPID, err := strconv.Atoi(a.env.Getenv("SHUTTLE_BRIDGE_PARENT_PID"))
 	if err != nil || parentPID <= 1 || os.Getppid() != parentPID || syscall.Getpgrp() != parentPID {
-		return fmt.Errorf("relay parent pid: %q", os.Getenv("SHUTTLE_BRIDGE_PARENT_PID"))
+		return fmt.Errorf("relay parent pid: %q", a.env.Getenv("SHUTTLE_BRIDGE_PARENT_PID"))
 	}
-	socket, err := bridgeSocketPath(o.socket)
+	socket, err := a.bridgeSocketPath(o.socket)
 	if err != nil {
 		return err
 	}
@@ -325,8 +321,8 @@ func classifyCodexInvocation(args []string) (codexInvocationMode, error) {
 	return bridgeAppServer, nil
 }
 
-func bridgeChildEnvironment(codex string) []string {
-	env := os.Environ()
+func (a *app) bridgeChildEnvironment(codex string) []string {
+	env := a.env.Environ()
 	filtered := make([]string, 0, len(env)+1)
 	for _, entry := range env {
 		if !strings.HasPrefix(entry, "CODEX_CLI_PATH=") {
@@ -339,23 +335,23 @@ func bridgeChildEnvironment(codex string) []string {
 	return append(filtered, "CODEX_CLI_PATH="+codex)
 }
 
-func bridgeSocketPath(explicit string) (string, error) {
+func (a *app) bridgeSocketPath(explicit string) (string, error) {
 	if explicit != "" {
 		if !filepath.IsAbs(explicit) {
 			return "", fmt.Errorf("--socket must be an absolute path: %q", explicit)
 		}
 		return filepath.Clean(explicit), nil
 	}
-	if configured := os.Getenv("SHUTTLE_CODEX_SOCKET"); configured != "" {
+	if configured := a.env.Getenv("SHUTTLE_CODEX_SOCKET"); configured != "" {
 		if !filepath.IsAbs(configured) {
 			return "", fmt.Errorf("SHUTTLE_CODEX_SOCKET must be an absolute path: %q", configured)
 		}
 		return filepath.Clean(configured), nil
 	}
-	home := os.Getenv("CODEX_HOME")
+	home := a.env.Getenv("CODEX_HOME")
 	if home == "" {
 		var err error
-		home, err = os.UserHomeDir()
+		home, err = a.env.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolving CODEX_HOME: %w", err)
 		}

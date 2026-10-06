@@ -1,6 +1,12 @@
 defmodule ShuttleWeb.MeetingAudioSocketTest do
   use ExUnit.Case, async: true
 
+  # Socket connect/recv bounds are reached only when the peer never answers, so
+  # they are generous: a passing test never waits on them, and a loaded machine
+  # can take seconds to schedule the handler. Deliberate "nothing arrives"
+  # waits stay short and literal.
+  @io_timeout 30_000
+
   alias ShuttleWeb.MeetingAudioSocket, as: Relay
 
   # macOS caps a Unix socket path at 104 bytes, so the socket lives in a short
@@ -22,12 +28,12 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
   end
 
   defp accept(listener) do
-    {:ok, peer} = :gen_tcp.accept(listener, 1_000)
+    {:ok, peer} = :gen_tcp.accept(listener, @io_timeout)
     peer
   end
 
   defp received(peer, bytes) do
-    {:ok, data} = :gen_tcp.recv(peer, bytes, 1_000)
+    {:ok, data} = :gen_tcp.recv(peer, bytes, @io_timeout)
     data
   end
 
@@ -50,21 +56,21 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
 
     assert {:ok, ^state} = Relay.handle_in({"hello", opcode: :text}, state)
     assert :ok = Relay.terminate(:normal, state)
-    assert {:error, :closed} = :gen_tcp.recv(peer, 0, 1_000)
+    assert {:error, :closed} = :gen_tcp.recv(peer, 0, @io_timeout)
   end
 
   test "drops audio while hark loads: nothing said before it listens reaches it", %{path: path} do
     assert {:push, [status], state} = Relay.init(resolve_to(live(path)))
     assert %{"state" => "waiting", "reason" => reason} = json(status)
     assert reason =~ "loading"
-    assert_receive :retry, 200
+    assert_receive :retry
 
     {:ok, state} = Relay.handle_in({"early-", opcode: :binary}, state)
     {:ok, state} = Relay.handle_in({"speech", opcode: :binary}, state)
 
     # Still not listening: the retry stays quiet rather than repeating "waiting".
     assert {:ok, state} = Relay.handle_info(:retry, state)
-    assert_receive :retry, 200
+    assert_receive :retry
 
     listener = listen(path)
     assert {:push, [status], state} = Relay.handle_info(:retry, state)
@@ -138,7 +144,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     Agent.update(phase, fn _ -> {:error, :ended} end)
     :gen_tcp.close(peer)
 
-    assert_receive {:tcp_closed, socket} = closed, 1_000
+    assert_receive {:tcp_closed, socket} = closed, @io_timeout
     assert socket == state.socket
     assert {:stop, :normal, {4410, reason}, [status], state} = Relay.handle_info(closed, state)
     assert reason =~ "ended"
@@ -158,7 +164,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     Agent.update(phase, fn _ -> live(path, "L2") end)
     :gen_tcp.close(peer)
 
-    assert_receive {:tcp_closed, _socket} = closed, 1_000
+    assert_receive {:tcp_closed, _socket} = closed, @io_timeout
     assert {:stop, :normal, {4410, _reason}, [status], _state} = Relay.handle_info(closed, state)
     assert json(status)["state"] == "ended"
   end
@@ -170,7 +176,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     peer = accept(listener)
     :gen_tcp.close(peer)
 
-    assert_receive {:tcp_closed, _socket} = closed, 1_000
+    assert_receive {:tcp_closed, _socket} = closed, @io_timeout
     assert {:stop, :normal, {4409, reason}, [status], _state} = Relay.handle_info(closed, state)
     assert reason =~ "another device"
     assert json(status)["state"] == "replaced"
@@ -232,7 +238,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     end
 
     test "a plain GET is told the route takes a WebSocket", %{port: port} do
-      {:ok, http} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 1_000)
+      {:ok, http} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], @io_timeout)
 
       :ok =
         :gen_tcp.send(
@@ -250,7 +256,7 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
   end
 
   defp handshake(port, origin, launch \\ "L1") do
-    {:ok, ws} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], 1_000)
+    {:ok, ws} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false], @io_timeout)
     key = Base.encode64(:crypto.strong_rand_bytes(16))
 
     request =
@@ -274,24 +280,24 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
   end
 
   defp read_lines(ws, acc) do
-    {:ok, line} = :gen_tcp.recv(ws, 0, 2_000)
+    {:ok, line} = :gen_tcp.recv(ws, 0, @io_timeout)
     acc = acc <> line
     if line == "\r\n", do: acc, else: read_lines(ws, acc)
   end
 
   # A server frame: unmasked, payloads here under 64 KiB.
   defp read_frame(ws) do
-    {:ok, <<_fin::1, _rsv::3, opcode::4, 0::1, len::7>>} = :gen_tcp.recv(ws, 2, 2_000)
+    {:ok, <<_fin::1, _rsv::3, opcode::4, 0::1, len::7>>} = :gen_tcp.recv(ws, 2, @io_timeout)
 
     len =
       if len == 126 do
-        {:ok, <<extended::16>>} = :gen_tcp.recv(ws, 2, 2_000)
+        {:ok, <<extended::16>>} = :gen_tcp.recv(ws, 2, @io_timeout)
         extended
       else
         len
       end
 
-    {:ok, payload} = if len == 0, do: {:ok, ""}, else: :gen_tcp.recv(ws, len, 2_000)
+    {:ok, payload} = if len == 0, do: {:ok, ""}, else: :gen_tcp.recv(ws, len, @io_timeout)
     {%{0x1 => :text, 0x2 => :binary, 0x8 => :close}[opcode], payload}
   end
 

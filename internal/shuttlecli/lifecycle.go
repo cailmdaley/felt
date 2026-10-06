@@ -55,8 +55,8 @@ import (
 // The returned ref carries where the fiber turned out to live: a shuttle verb
 // crosses the view boundary like rm and edit do, and every verb appends
 // ref.Location() to its headline so a cross-store write is never silent.
-func resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt.Storage, *shuttle.Block, felt.Ref, func() error, error) {
-	f, st, ref, err := shuttleResolveFiberRef(query, true)
+func (a *app) resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Felt, *felt.Storage, *shuttle.Block, felt.Ref, func() error, error) {
+	f, st, ref, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return nil, nil, nil, felt.Ref{}, nil, err
 	}
@@ -100,81 +100,83 @@ func lockAndReloadFiber(st *felt.Storage, f *felt.Felt) (*felt.Felt, func() erro
 
 // ---- pause -----------------------------------------------------------------
 
-var pauseNoKill bool
-
-var pauseCmd = &cobra.Command{
-	Use:   "pause <fiber>",
-	Short: "Pause dispatch, kill any live worker, and park a fiber in drafts",
-	Long: `Sets the felt-native status to "open" (the draft / paused state — the daemon
+func (a *app) pauseCmd() *cobra.Command {
+	var pauseNoKill bool
+	pauseCmd := &cobra.Command{
+		Use:   "pause <fiber>",
+		Short: "Pause dispatch, kill any live worker, and park a fiber in drafts",
+		Long: `Sets the felt-native status to "open" (the draft / paused state — the daemon
 never dispatches an open fiber) while preserving the schedule, then kills the
 worker tmux session if one is running. Clears tempered / closed-at so the card
 lands in Drafts rather than Awaiting review.
 
 Use --no-kill to stop scheduling only and let a live worker finish naturally.
 status is the fiber's only dispatch switch; there is no enabled flag.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
-		if err != nil {
-			return err
-		}
-		defer unlock()
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
+			if err != nil {
+				return err
+			}
+			defer unlock()
 
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		fields := map[string]any{}
-		if pauseNoKill {
-			fields["no_kill"] = true
-		}
-		if routed, err := forwardLifecycleAction(cmd, args, owner, "pause", f, fields); routed || err != nil {
-			return err
-		}
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			fields := map[string]any{}
+			if pauseNoKill {
+				fields["no_kill"] = true
+			}
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "pause", f, fields); routed || err != nil {
+				return err
+			}
 
-		statusBefore := f.Status
-		if err := unclose(f, felt.StatusOpen); err != nil {
-			return err
-		}
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
-		fmt.Printf("paused %s%s (status: open; schedule preserved)\n", args[0], ref.Location())
-		if statusBefore != felt.StatusOpen {
-			fmt.Printf("  status: %s → open\n", shuttleNonEmpty(statusBefore, "(missing)"))
-		}
-		if statusBefore == felt.StatusClosed {
-			fmt.Println("  cleared: tempered, closed-at")
-		}
-		if pauseNoKill {
-			fmt.Println("  worker: left running (--no-kill)")
+			statusBefore := f.Status
+			if err := unclose(f, felt.StatusOpen); err != nil {
+				return err
+			}
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+			fmt.Fprintf(a.env.Stdout, "paused %s%s (status: open; schedule preserved)\n", args[0], ref.Location())
+			if statusBefore != felt.StatusOpen {
+				fmt.Fprintf(a.env.Stdout, "  status: %s → open\n", shuttleNonEmpty(statusBefore, "(missing)"))
+			}
+			if statusBefore == felt.StatusClosed {
+				fmt.Fprintln(a.env.Stdout, "  cleared: tempered, closed-at")
+			}
+			if pauseNoKill {
+				fmt.Fprintln(a.env.Stdout, "  worker: left running (--no-kill)")
+				return nil
+			}
+
+			session, _ := a.liveWorkerSession(f)
+			if session == "" {
+				fmt.Fprintf(a.env.Stdout, "  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
+				return nil
+			}
+			if err := a.killTmuxSession(session); err != nil {
+				return fmt.Errorf("killing tmux session %q: %w", session, err)
+			}
+			fmt.Fprintf(a.env.Stdout, "  worker: killed %s\n", session)
 			return nil
-		}
-
-		session, _ := liveWorkerSession(f)
-		if session == "" {
-			fmt.Printf("  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
-			return nil
-		}
-		if err := killTmuxSession(session); err != nil {
-			return fmt.Errorf("killing tmux session %q: %w", session, err)
-		}
-		fmt.Printf("  worker: killed %s\n", session)
-		return nil
-	},
+		},
+	}
+	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
+	pauseCmd.Flags().Bool("local", false, localFlagUsage)
+	return pauseCmd
 }
 
 // ---- resume ----------------------------------------------------------------
 
-var (
-	resumeProjectDir string
-	resumeLocal      bool
-)
-
-var resumeCmd = &cobra.Command{
-	Use:   "resume <fiber>",
-	Short: "Arm a paused fiber (status: active)",
-	Long: `Sets the felt-native status to "active" — the fiber's dispatch switch — so
+func (a *app) resumeCmd() *cobra.Command {
+	var resumeProjectDir string
+	var resumeLocal bool
+	resumeCmd := &cobra.Command{
+		Use:   "resume <fiber>",
+		Short: "Arm a paused fiber (status: active)",
+		Long: `Sets the felt-native status to "active" — the fiber's dispatch switch — so
 the owning daemon dispatches it on its next poll (after a daemon restart, once
 the boot quarantine is released).
 
@@ -196,85 +198,89 @@ oneshot or pinned role, or any accepted or discarded close — is refused; use
 Arming needs what an armed install needs: an agent the registry resolves and a
 project_dir. A draft installed without one is refused; --project-dir sets it
 (an existing directory on this machine, stored absolute) and arms in one step.`,
-	Example: `  shuttle resume analysis/scratch
+		Example: `  shuttle resume analysis/scratch
   shuttle resume analysis/scratch --project-dir "$PWD"   # a draft installed without one`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if !resumeLocal && !cmd.Flags().Changed("project-dir") {
-			if routed, err := routeLifecycle("resume", args[0], standingAwaiting); routed {
-				return err
-			}
-		}
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
-		if err != nil {
-			return err
-		}
-		defer unlock()
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		var projectDirErr error
-		if owner != "" {
-			projectDirErr = setRemoteProjectDirFlag(cmd, resumeProjectDir, f, block)
-		} else {
-			projectDirErr = setProjectDirFlag(cmd, resumeProjectDir, f, block)
-		}
-		if projectDirErr != nil {
-			return projectDirErr
-		}
-		if err := checkArmable(args[0], "resume", block); err != nil {
-			return err
-		}
-		if owner != "" {
-			if f.Status == felt.StatusClosed && !standingAwaiting(f, block) {
-				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
-			}
-			if cmd.Flags().Changed("project-dir") {
-				if _, err := postOwnerLifecycle("set-agent", owner, f, map[string]any{"project_dir": block.ProjectDir}); err != nil {
-					return remoteRouteError(cmd, args, owner, err)
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !resumeLocal && !cmd.Flags().Changed("project-dir") {
+				if routed, err := a.routeLifecycle("resume", args[0], standingAwaiting); routed {
+					return err
 				}
 			}
-			output, err := postOwnerLifecycle("resume", owner, f, nil)
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
 			if err != nil {
-				return remoteRouteError(cmd, args, owner, err)
-			}
-			printDaemonBody([]byte(output))
-			if ownerBootQuarantine(owner) {
-				fmt.Printf("  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on %q.\n", owner)
-			}
-			return nil
-		}
-
-		if standingAwaiting(f, block) {
-			if err := rearmStanding(f); err != nil {
 				return err
 			}
+			defer unlock()
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			var projectDirErr error
+			if owner != "" {
+				projectDirErr = setRemoteProjectDirFlag(cmd, resumeProjectDir, f, block)
+			} else {
+				projectDirErr = a.setProjectDirFlag(cmd, resumeProjectDir, f, block)
+			}
+			if projectDirErr != nil {
+				return projectDirErr
+			}
+			if err := a.checkArmable(args[0], "resume", block); err != nil {
+				return err
+			}
+			if owner != "" {
+				if f.Status == felt.StatusClosed && !standingAwaiting(f, block) {
+					return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
+				}
+				if cmd.Flags().Changed("project-dir") {
+					if _, err := a.postOwnerLifecycle("set-agent", owner, f, map[string]any{"project_dir": block.ProjectDir}); err != nil {
+						return remoteRouteError(cmd, args, owner, err)
+					}
+				}
+				output, err := a.postOwnerLifecycle("resume", owner, f, nil)
+				if err != nil {
+					return remoteRouteError(cmd, args, owner, err)
+				}
+				a.printDaemonBody([]byte(output))
+				if a.ownerBootQuarantine(owner) {
+					fmt.Fprintf(a.env.Stdout, "  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on %q.\n", owner)
+				}
+				return nil
+			}
+
+			if standingAwaiting(f, block) {
+				if err := rearmStanding(f); err != nil {
+					return err
+				}
+				if err := st.Write(f); err != nil {
+					return fmt.Errorf("writing fiber: %w", err)
+				}
+				fmt.Fprintf(a.env.Stdout, "resumed %s%s (standing role re-armed; next run on the schedule's next tick)\n", args[0], ref.Location())
+				return nil
+			}
+
+			statusBefore := f.Status
+			if statusBefore == felt.StatusClosed {
+				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
+			}
+			f.Status = felt.StatusActive
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			fmt.Printf("resumed %s%s (standing role re-armed; next run on the schedule's next tick)\n", args[0], ref.Location())
-			return nil
-		}
-
-		statusBefore := f.Status
-		if statusBefore == felt.StatusClosed {
-			return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
-		}
-		f.Status = felt.StatusActive
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
-		fmt.Printf("resumed %s%s (status: active)\n", args[0], ref.Location())
-		if statusBefore != felt.StatusActive {
-			if statusBefore == "" {
-				fmt.Println("  status: active (set; was missing)")
-			} else {
-				fmt.Printf("  status: %s → active\n", statusBefore)
+			fmt.Fprintf(a.env.Stdout, "resumed %s%s (status: active)\n", args[0], ref.Location())
+			if statusBefore != felt.StatusActive {
+				if statusBefore == "" {
+					fmt.Fprintln(a.env.Stdout, "  status: active (set; was missing)")
+				} else {
+					fmt.Fprintf(a.env.Stdout, "  status: %s → active\n", statusBefore)
+				}
 			}
-		}
-		return nil
-	},
+			return nil
+		},
+	}
+	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); writes here, without the daemon hop")
+	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, localFlagUsage)
+	return resumeCmd
 }
 
 // standingAwaiting reports whether f is a standing role awaiting review:
@@ -311,18 +317,18 @@ func rearmStanding(f *felt.Felt) error {
 // locally, where every refusal is reported. A daemon refusal, an owner-check
 // failure, or a request the daemon received but did not answer is routed, with
 // its error — the last because the transition may still apply there.
-func routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool) (routed bool, err error) {
-	f, _, _, err := shuttleResolveFiberRef(query, true)
+func (a *app) routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool) (routed bool, err error) {
+	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
 	}
 	block, ok, err := shuttle.BlockOf(f)
-	if err != nil || !ok || !qualifies(f, block) || ensureOwnedHere(f, query) != nil {
+	if err != nil || !ok || !qualifies(f, block) || a.ensureOwnedHere(f, query) != nil {
 		return false, nil
 	}
-	output, err := postLifecycle(verb, f.ID)
+	output, err := a.postLifecycle(verb, f.ID)
 	if err == nil {
-		fmt.Print(output)
+		fmt.Fprint(a.env.Stdout, output)
 		return true, nil
 	}
 	if isLifecycleTransportError(err) {
@@ -345,11 +351,11 @@ func routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Bloc
 // list rather than failing later inside the daemon. verb is the lifecycle
 // verb that arms this fiber from where it stands, which the refusal names with
 // the --project-dir that satisfies it.
-func checkArmable(fiberID, verb string, block *shuttle.Block) error {
+func (a *app) checkArmable(fiberID, verb string, block *shuttle.Block) error {
 	if strings.TrimSpace(block.ProjectDir) == "" {
 		return fmt.Errorf("cannot arm %s: its shuttle: block has no project_dir (set it as you arm it: shuttle %s %s --project-dir <dir>)", fiberID, verb, fiberID)
 	}
-	reg, err := shuttle.LoadAgentRegistry()
+	reg, err := shuttle.LoadAgentRegistry(a.env)
 	if err != nil {
 		return err
 	}
@@ -369,11 +375,11 @@ func checkArmable(fiberID, verb string, block *shuttle.Block) error {
 // setProjectDirFlag applies an arming verb's --project-dir, when given, to
 // f's shuttle: block and to block, so the arming gate reads the block as it
 // will be written.
-func setProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block *shuttle.Block) error {
+func (a *app) setProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block *shuttle.Block) error {
 	if !cmd.Flags().Changed("project-dir") {
 		return nil
 	}
-	projectDir, err := resolveProjectDirFlag(raw)
+	projectDir, err := a.resolveProjectDirFlag(raw)
 	if err != nil {
 		return err
 	}
@@ -404,12 +410,12 @@ func setRemoteProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block
 
 // ---- close -----------------------------------------------------------------
 
-var closeTempered string
-
-var closeCmd = &cobra.Command{
-	Use:   "close <fiber>",
-	Short: "Close a shuttle-managed fiber and optionally set the human verdict",
-	Long: `Sets status: closed, sets/clears tempered, and stamps closed-at when the
+func (a *app) closeCmd() *cobra.Command {
+	var closeTempered string
+	closeCmd := &cobra.Command{
+		Use:   "close <fiber>",
+		Short: "Close a shuttle-managed fiber and optionally set the human verdict",
+		Long: `Sets status: closed, sets/clears tempered, and stamps closed-at when the
 field is missing. Use:
 
   shuttle close <fiber>                   # awaiting review (tempered cleared)
@@ -419,68 +425,70 @@ field is missing. Use:
 The shuttle block stays installed; closed fibers are ignored by the daemon
 until reopen or accept moves them (resume also re-arms a standing role
 awaiting review).`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
-		if err != nil {
-			return err
-		}
-		defer unlock()
-
-		tempered, err := parseOptionalBool(closeTempered)
-		if err != nil {
-			return fmt.Errorf("parsing --tempered: %w", err)
-		}
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		if owner != "" {
-			fields := map[string]any{}
-			if tempered != nil {
-				fields["tempered"] = *tempered
-			}
-			if routed, err := forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
+			if err != nil {
 				return err
 			}
-		}
+			defer unlock()
 
-		f.Status = felt.StatusClosed
-		if err := setTempered(f, tempered); err != nil {
-			return err
-		}
-		setClosedAtIfMissing(f)
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
+			tempered, err := parseOptionalBool(closeTempered)
+			if err != nil {
+				return fmt.Errorf("parsing --tempered: %w", err)
+			}
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if owner != "" {
+				fields := map[string]any{}
+				if tempered != nil {
+					fields["tempered"] = *tempered
+				}
+				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
+					return err
+				}
+			}
 
-		fmt.Printf("closed %s%s\n", args[0], ref.Location())
-		switch {
-		case tempered == nil:
-			fmt.Println("  tempered: cleared (awaiting review)")
-		case *tempered:
-			fmt.Println("  tempered: true")
-		default:
-			fmt.Println("  tempered: false")
-		}
-		return nil
-	},
+			f.Status = felt.StatusClosed
+			if err := setTempered(f, tempered); err != nil {
+				return err
+			}
+			setClosedAtIfMissing(f)
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+
+			fmt.Fprintf(a.env.Stdout, "closed %s%s\n", args[0], ref.Location())
+			switch {
+			case tempered == nil:
+				fmt.Fprintln(a.env.Stdout, "  tempered: cleared (awaiting review)")
+			case *tempered:
+				fmt.Fprintln(a.env.Stdout, "  tempered: true")
+			default:
+				fmt.Fprintln(a.env.Stdout, "  tempered: false")
+			}
+			return nil
+		},
+	}
+	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
+	closeCmd.Flags().Bool("local", false, localFlagUsage)
+	return closeCmd
 }
 
 // ---- reopen ----------------------------------------------------------------
 
-var (
-	reopenAsDraft     bool
-	reopenConcludeRun bool
-	reopenProjectDir  string
-	reopenMessage     string
-	reopenMessageFile string
-)
-
-var reopenCmd = &cobra.Command{
-	Use:   "reopen <fiber>",
-	Short: "Requeue a closed or reviewed fiber back into active work",
-	Long: `Sets status = active and clears tempered / closed-at so a closed card
+func (a *app) reopenCmd() *cobra.Command {
+	var reopenAsDraft bool
+	var reopenConcludeRun bool
+	var reopenProjectDir string
+	var reopenMessage string
+	var reopenMessageFile string
+	reopenCmd := &cobra.Command{
+		Use:   "reopen <fiber>",
+		Short: "Requeue a closed or reviewed fiber back into active work",
+		Long: `Sets status = active and clears tempered / closed-at so a closed card
 re-enters the in-flight loop. status is the fiber's only dispatch switch.
 
 From a host whose fleet holds the owner (remotes.json or a discovered tailnet
@@ -495,140 +503,153 @@ directory on the owning host for remote fibers) in the same step.
 
 With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
-		if err != nil {
-			return err
-		}
-		defer unlock()
-
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		message, messageSet, err := readLaunchMessage(cmd, reopenMessage, reopenMessageFile)
-		if err != nil {
-			return err
-		}
-		if owner == "" && messageSet {
-			return fmt.Errorf("--message is only supported when `reopen` routes a launch; local reopen only requeues the fiber. Use `shuttle dispatch %s --message <text>` to start it with a directive", args[0])
-		}
-		if owner != "" && reopenAsDraft && messageSet {
-			return fmt.Errorf("--message cannot be used with --as-draft because that route does not launch a worker")
-		}
-		var projectDirErr error
-		if owner != "" {
-			projectDirErr = setRemoteProjectDirFlag(cmd, reopenProjectDir, f, block)
-		} else {
-			projectDirErr = setProjectDirFlag(cmd, reopenProjectDir, f, block)
-		}
-		if projectDirErr != nil {
-			return projectDirErr
-		}
-		status := felt.StatusActive
-		if reopenAsDraft {
-			status = felt.StatusOpen
-		} else if owner == "" {
-			if err := checkArmable(args[0], "reopen", block); err != nil {
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
+			if err != nil {
 				return err
 			}
-		}
-		if owner != "" {
-			if !reopenAsDraft && cmd.Flags().Changed("project-dir") {
-				if _, err := postOwnerLifecycle("set-agent", owner, f, map[string]any{"project_dir": block.ProjectDir}); err != nil {
-					return remoteRouteError(cmd, args, owner, err)
-				}
-			}
-			if reopenAsDraft {
-				fields := map[string]any{"as_draft": true}
-				if cmd.Flags().Changed("project-dir") {
-					fields["project_dir"] = block.ProjectDir
-				}
-				routed, err := forwardLifecycleAction(cmd, args, owner, "reopen", f, fields)
-				if routed || err != nil {
-					return err
-				}
-			} else {
-				fields := map[string]any{"force": true, "ad_hoc": true, "resume_mode": "fresh"}
-				if messageSet {
-					fields["user_message"] = message
-				}
-				routed, err := forwardDispatch(cmd, args, owner, f, fields)
-				if routed || err != nil {
-					return err
-				}
-			}
-		}
-		statusBefore := f.Status
-		// --conclude-run is the daemon's forced start: a standing role it
-		// re-arms concludes the run it stood on in the same write, as the
-		// daemon's own re-arm does, so a start refused after this write leaves
-		// the role armed rather than looking like a dirty exit.
-		arm := unclose
-		if reopenConcludeRun && block.Kind == "standing" && status == felt.StatusActive {
-			arm = func(f *felt.Felt, _ string) error { return rearmStanding(f) }
-		}
-		if err := arm(f, status); err != nil {
-			return err
-		}
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
+			defer unlock()
 
-		fmt.Printf("reopened %s%s (status: %s)\n", args[0], ref.Location(), status)
-		if statusBefore == "" {
-			fmt.Printf("  status: %s (set; was missing)\n", status)
-		} else if statusBefore != status {
-			fmt.Printf("  status: %s → %s\n", statusBefore, status)
-		}
-		fmt.Println("  cleared: tempered, closed-at")
-		return nil
-	},
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			message, messageSet, err := a.readLaunchMessage(cmd, reopenMessage, reopenMessageFile)
+			if err != nil {
+				return err
+			}
+			if owner == "" && messageSet {
+				return fmt.Errorf("--message is only supported when `reopen` routes a launch; local reopen only requeues the fiber. Use `shuttle dispatch %s --message <text>` to start it with a directive", args[0])
+			}
+			if owner != "" && reopenAsDraft && messageSet {
+				return fmt.Errorf("--message cannot be used with --as-draft because that route does not launch a worker")
+			}
+			var projectDirErr error
+			if owner != "" {
+				projectDirErr = setRemoteProjectDirFlag(cmd, reopenProjectDir, f, block)
+			} else {
+				projectDirErr = a.setProjectDirFlag(cmd, reopenProjectDir, f, block)
+			}
+			if projectDirErr != nil {
+				return projectDirErr
+			}
+			status := felt.StatusActive
+			if reopenAsDraft {
+				status = felt.StatusOpen
+			} else if owner == "" {
+				if err := a.checkArmable(args[0], "reopen", block); err != nil {
+					return err
+				}
+			}
+			if owner != "" {
+				if !reopenAsDraft && cmd.Flags().Changed("project-dir") {
+					if _, err := a.postOwnerLifecycle("set-agent", owner, f, map[string]any{"project_dir": block.ProjectDir}); err != nil {
+						return remoteRouteError(cmd, args, owner, err)
+					}
+				}
+				if reopenAsDraft {
+					fields := map[string]any{"as_draft": true}
+					if cmd.Flags().Changed("project-dir") {
+						fields["project_dir"] = block.ProjectDir
+					}
+					routed, err := a.forwardLifecycleAction(cmd, args, owner, "reopen", f, fields)
+					if routed || err != nil {
+						return err
+					}
+				} else {
+					fields := map[string]any{"force": true, "ad_hoc": true, "resume_mode": "fresh"}
+					if messageSet {
+						fields["user_message"] = message
+					}
+					routed, err := a.forwardDispatch(cmd, args, owner, f, fields)
+					if routed || err != nil {
+						return err
+					}
+				}
+			}
+			statusBefore := f.Status
+			// --conclude-run is the daemon's forced start: a standing role it
+			// re-arms concludes the run it stood on in the same write, as the
+			// daemon's own re-arm does, so a start refused after this write leaves
+			// the role armed rather than looking like a dirty exit.
+			arm := unclose
+			if reopenConcludeRun && block.Kind == "standing" && status == felt.StatusActive {
+				arm = func(f *felt.Felt, _ string) error { return rearmStanding(f) }
+			}
+			if err := arm(f, status); err != nil {
+				return err
+			}
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+
+			fmt.Fprintf(a.env.Stdout, "reopened %s%s (status: %s)\n", args[0], ref.Location(), status)
+			if statusBefore == "" {
+				fmt.Fprintf(a.env.Stdout, "  status: %s (set; was missing)\n", status)
+			} else if statusBefore != status {
+				fmt.Fprintf(a.env.Stdout, "  status: %s → %s\n", statusBefore, status)
+			}
+			fmt.Fprintln(a.env.Stdout, "  cleared: tempered, closed-at")
+			return nil
+		},
+	}
+	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
+	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
+	reopenCmd.Flags().BoolVar(&reopenConcludeRun, "conclude-run", false, "Conclude a standing role's run (shuttle.runtime.handed_off_at = now) in the same write")
+	_ = reopenCmd.Flags().MarkHidden("conclude-run")
+	reopenCmd.Flags().StringVar(&reopenMessage, "message", "", "Launch directive for a remote worker (the From User prompt block)")
+	reopenCmd.Flags().StringVar(&reopenMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
+	reopenCmd.Flags().Bool("local", false, localFlagUsage)
+	return reopenCmd
 }
 
 // ---- set-outcome -----------------------------------------------------------
 
-var setOutcomeValue string
-
-var setOutcomeCmd = &cobra.Command{
-	Use:   "set-outcome <fiber>",
-	Short: "Set the outcome field on a shuttle-managed fiber",
-	Long: `Updates the felt-native outcome: field while preserving the existing
+func (a *app) setOutcomeCmd() *cobra.Command {
+	var setOutcomeValue string
+	setOutcomeCmd := &cobra.Command{
+		Use:   "set-outcome <fiber>",
+		Short: "Set the outcome field on a shuttle-managed fiber",
+		Long: `Updates the felt-native outcome: field while preserving the existing
 shuttle: block. Use --outcome for single-line values, or pipe multi-line text
 on stdin to preserve block-scalar output.
 
 Examples:
   shuttle set-outcome <fiber> --outcome "Blocked: waiting on ADS token"
   printf 'First line\nSecond line\n' | shuttle set-outcome <fiber>`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
-		if err != nil {
-			return err
-		}
-		defer unlock()
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
+			if err != nil {
+				return err
+			}
+			defer unlock()
 
-		outcome, err := resolveOutcomeValue(cmd, setOutcomeValue)
-		if err != nil {
-			return err
-		}
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		if routed, err := forwardLifecycleAction(cmd, args, owner, "set-outcome", f, map[string]any{"outcome": outcome}); routed || err != nil {
-			return err
-		}
+			outcome, err := resolveOutcomeValue(cmd, setOutcomeValue)
+			if err != nil {
+				return err
+			}
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-outcome", f, map[string]any{"outcome": outcome}); routed || err != nil {
+				return err
+			}
 
-		f.Outcome = outcome
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
+			f.Outcome = outcome
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
 
-		fmt.Printf("set outcome for %s%s\n", args[0], ref.Location())
-		return nil
-	},
+			fmt.Fprintf(a.env.Stdout, "set outcome for %s%s\n", args[0], ref.Location())
+			return nil
+		},
+	}
+	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
+	setOutcomeCmd.Flags().Bool("local", false, localFlagUsage)
+	return setOutcomeCmd
 }
 
 // resolveOutcomeValue returns the --outcome flag when set, else reads the outcome
@@ -654,12 +675,12 @@ func resolveOutcomeValue(cmd *cobra.Command, flagValue string) (string, error) {
 
 // ---- accept ----------------------------------------------------------------
 
-var acceptLocal bool
-
-var acceptCmd = &cobra.Command{
-	Use:   "accept <fiber>",
-	Short: "Accept a completed standing or pinned run (re-arm / re-park)",
-	Long: `Resolves the human verdict on an untempered role (status: closed, or
+func (a *app) acceptCmd() *cobra.Command {
+	var acceptLocal bool
+	acceptCmd := &cobra.Command{
+		Use:   "accept <fiber>",
+		Short: "Accept a completed standing or pinned run (re-arm / re-park)",
+		Long: `Resolves the human verdict on an untempered role (status: closed, or
 status: active while its run is still in flight), kind-aware:
 
   standing → re-arms it (status: active), clearing closed-at / tempered, and
@@ -680,75 +701,78 @@ old document or the new one, written in one atomic step. --local, or a daemon
 that cannot be reached, writes the document here.
 A daemon that takes the request but does not answer in time is reported, not
 bypassed: the accept may still apply there.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if !acceptLocal {
-			if routed, err := routeLifecycle("accept", args[0], perennialRole); routed {
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !acceptLocal {
+				if routed, err := a.routeLifecycle("accept", args[0], perennialRole); routed {
+					return err
+				}
+			}
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
+			if err != nil {
 				return err
 			}
-		}
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "")
-		if err != nil {
-			return err
-		}
-		defer unlock()
-		if !perennialRole(f, block) {
-			return fmt.Errorf("accept only applies to standing or pinned roles (fiber has kind=%s)", block.Kind)
-		}
-		// Acceptable: untempered, and closed (awaiting review) or still active —
-		// the board's Temper gesture can land while the run is in flight, before
-		// the exit writer closes it. Drafts and verdicts are refused.
-		if readTempered(f) != nil || (f.Status != felt.StatusClosed && f.Status != felt.StatusActive) {
-			return fmt.Errorf(
-				"fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%v)",
-				args[0], f.Status, readTempered(f))
-		}
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		if routed, err := forwardLifecycleAction(cmd, args, owner, "accept", f, nil); routed || err != nil {
-			return err
-		}
+			defer unlock()
+			if !perennialRole(f, block) {
+				return fmt.Errorf("accept only applies to standing or pinned roles (fiber has kind=%s)", block.Kind)
+			}
+			// Acceptable: untempered, and closed (awaiting review) or still active —
+			// the board's Temper gesture can land while the run is in flight, before
+			// the exit writer closes it. Drafts and verdicts are refused.
+			if readTempered(f) != nil || (f.Status != felt.StatusClosed && f.Status != felt.StatusActive) {
+				return fmt.Errorf(
+					"fiber %s is not acceptable (accept requires status active|closed + untempered; status=%q tempered=%v)",
+					args[0], f.Status, readTempered(f))
+			}
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "accept", f, nil); routed || err != nil {
+				return err
+			}
 
-		// PINNED accept RE-PARKS the finished arc back to the strip (status: open,
-		// verdict cleared) — the kind-aware other half of accept (standing re-arms
-		// active, pinned re-parks open). No schedule, no recurrence to advance.
-		if block.Kind == "pinned" {
-			if err := unclose(f, felt.StatusOpen); err != nil {
+			// PINNED accept RE-PARKS the finished arc back to the strip (status: open,
+			// verdict cleared) — the kind-aware other half of accept (standing re-arms
+			// active, pinned re-parks open). No schedule, no recurrence to advance.
+			if block.Kind == "pinned" {
+				if err := unclose(f, felt.StatusOpen); err != nil {
+					return err
+				}
+				if err := st.Write(f); err != nil {
+					return fmt.Errorf("writing fiber: %w", err)
+				}
+				fmt.Fprintf(a.env.Stdout, "accepted pinned role %s%s (re-parked to the strip: status: open)\n", args[0], ref.Location())
+				return nil
+			}
+
+			if block.Schedule == nil {
+				return fmt.Errorf("fiber %s has no schedule", args[0])
+			}
+			// Arming a closed role holds it to the armed-install gate; accepting a
+			// role that is already active arms nothing.
+			if f.Status != felt.StatusActive {
+				if err := a.checkArmable(args[0], "resume", block); err != nil {
+					return err
+				}
+			}
+			computedNext, err := shuttle.NextOccurrence(block.Schedule, time.Now())
+			if err != nil {
+				return fmt.Errorf("computing next occurrence: %w", err)
+			}
+			if err := rearmStanding(f); err != nil {
 				return err
 			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			fmt.Printf("accepted pinned role %s%s (re-parked to the strip: status: open)\n", args[0], ref.Location())
+			fmt.Fprintf(a.env.Stdout, "accepted run for %s%s (re-armed; next run on the schedule's next tick)\n  next due: %s\n",
+				args[0], ref.Location(), computedNext.Format(time.RFC3339))
 			return nil
-		}
-
-		if block.Schedule == nil {
-			return fmt.Errorf("fiber %s has no schedule", args[0])
-		}
-		// Arming a closed role holds it to the armed-install gate; accepting a
-		// role that is already active arms nothing.
-		if f.Status != felt.StatusActive {
-			if err := checkArmable(args[0], "resume", block); err != nil {
-				return err
-			}
-		}
-		computedNext, err := shuttle.NextOccurrence(block.Schedule, time.Now())
-		if err != nil {
-			return fmt.Errorf("computing next occurrence: %w", err)
-		}
-		if err := rearmStanding(f); err != nil {
-			return err
-		}
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
-		fmt.Printf("accepted run for %s%s (re-armed; next run on the schedule's next tick)\n  next due: %s\n",
-			args[0], ref.Location(), computedNext.Format(time.RFC3339))
-		return nil
-	},
+		},
+	}
+	acceptCmd.Flags().BoolVar(&acceptLocal, "local", false, localFlagUsage)
+	return acceptCmd
 }
 
 // perennialRole reports whether block is a standing or pinned role — the kinds
@@ -759,64 +783,66 @@ func perennialRole(_ *felt.Felt, block *shuttle.Block) bool {
 
 // ---- set-model -------------------------------------------------------------
 
-var setModelCmd = &cobra.Command{
-	Use:   "set-model <fiber> <agent>",
-	Short: "Change only the dispatch agent for a fiber",
-	Long: `Updates shuttle.agent to the given agent ID, validated against the agent
+func (a *app) setModelCmd() *cobra.Command {
+	setModelCmd := &cobra.Command{
+		Use:   "set-model <fiber> <agent>",
+		Short: "Change only the dispatch agent for a fiber",
+		Long: `Updates shuttle.agent to the given agent ID, validated against the agent
 registry (together with the block's existing effort/chrome axes) before writing.
 Effort, chrome and surface stay as they are — use set-agent to change them
 with the agent; a block on surface: app can only move to another Codex agent
 here. Daemon-owned runtime keys are preserved. This saves the next-launch
 agent without starting or replacing a worker.`,
-	Args: cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'shuttle repeat' to install first")
-		if err != nil {
-			return err
-		}
-		defer unlock()
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		if routed, err := forwardLifecycleAction(cmd, args, owner, "set-model", f, map[string]any{"agent": args[1]}); routed || err != nil {
-			return err
-		}
-		reg, err := shuttle.LoadAgentRegistry()
-		if err != nil {
-			return fmt.Errorf("loading agent registry: %w", err)
-		}
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "use 'shuttle repeat' to install first")
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-model", f, map[string]any{"agent": args[1]}); routed || err != nil {
+				return err
+			}
+			reg, err := shuttle.LoadAgentRegistry(a.env)
+			if err != nil {
+				return fmt.Errorf("loading agent registry: %w", err)
+			}
 
-		axes := agentAxes{agent: args[1], effort: block.Effort, chrome: block.Chrome, surface: block.Surface}
-		if err := axes.write(f, reg); err != nil {
-			return err
-		}
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
+			axes := agentAxes{agent: args[1], effort: block.Effort, chrome: block.Chrome, surface: block.Surface}
+			if err := axes.write(f, reg); err != nil {
+				return err
+			}
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
 
-		fmt.Printf("set agent for %s%s → %s\n", args[0], ref.Location(), args[1])
-		return nil
-	},
+			fmt.Fprintf(a.env.Stdout, "set agent for %s%s → %s\n", args[0], ref.Location(), args[1])
+			return nil
+		},
+	}
+	setModelCmd.Flags().Bool("local", false, localFlagUsage)
+	return setModelCmd
 }
 
 // ---- set-agent -------------------------------------------------------------
-
-var (
-	setAgentEffort     string
-	setAgentChrome     bool
-	setAgentSurface    string
-	setAgentProjectDir string
-)
 
 // setAgentCmd is the axis-aware mutation verb: it composes base agent × effort ×
 // chrome in one validated write. set-model stays the narrow base-agent verb; this
 // is the superset. Each axis is set surgically (a real !!bool for chrome, a
 // delete for a cleared effort/agent) so the runtime keys are preserved.
-var setAgentCmd = &cobra.Command{
-	Use:   "set-agent <fiber> [agent]",
-	Short: "Set the dispatch agent and/or axes (effort, chrome, surface) for a fiber",
-	Long: `Composes a fiber's dispatch axes — base agent, effort, chrome, surface — and
+func (a *app) setAgentCmd() *cobra.Command {
+	var setAgentEffort string
+	var setAgentChrome bool
+	var setAgentSurface string
+	var setAgentProjectDir string
+	setAgentCmd := &cobra.Command{
+		Use:   "set-agent <fiber> [agent]",
+		Short: "Set the dispatch agent and/or axes (effort, chrome, surface) for a fiber",
+		Long: `Composes a fiber's dispatch axes — base agent, effort, chrome, surface — and
 writes them to the shuttle: block after validating the combination against the
 agent registry's per-harness constraints. The base agent argument is optional:
 omit it to mutate only the axes of the current agent; an omitted flag keeps
@@ -826,89 +852,96 @@ block on the app to another harness takes --surface cli in the same call.
 Use --project-dir to update the worker cwd without changing its lifecycle.
 Settings apply to the next launch; this command does not start, stop, resume,
 or replace a worker.`,
-	Args: cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0], "use 'shuttle repeat' to install first")
-		if err != nil {
-			return err
-		}
-		defer unlock()
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		if cmd.Flags().Changed("project-dir") {
-			if owner != "" {
-				err = setRemoteProjectDirFlag(cmd, setAgentProjectDir, f, block)
-			} else {
-				err = setProjectDirFlag(cmd, setAgentProjectDir, f, block)
-			}
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "use 'shuttle repeat' to install first")
 			if err != nil {
 				return err
 			}
-		}
-
-		agentID := block.Agent
-		if len(args) == 2 {
-			agentID = args[1]
-		}
-		effort := block.Effort
-		if cmd.Flags().Changed("effort") {
-			effort = setAgentEffort
-		}
-		chrome := block.Chrome
-		if cmd.Flags().Changed("chrome") {
-			chrome = setAgentChrome
-		}
-		surface := block.Surface
-		if cmd.Flags().Changed("surface") {
-			surface = setAgentSurface
-		}
-
-		if owner != "" {
-			fields := map[string]any{}
-			if len(args) == 2 {
-				fields["agent"] = args[1]
-			}
-			if cmd.Flags().Changed("effort") {
-				fields["effort"] = setAgentEffort
-			}
-			if cmd.Flags().Changed("chrome") {
-				fields["chrome"] = setAgentChrome
-			}
-			if cmd.Flags().Changed("surface") {
-				fields["surface"] = setAgentSurface
-			}
-			if cmd.Flags().Changed("project-dir") {
-				fields["project_dir"] = block.ProjectDir
-			}
-			routed, err := forwardLifecycleAction(cmd, args, owner, "set-agent", f, fields)
-			if routed || err != nil {
+			defer unlock()
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
 				return err
 			}
-		}
-		reg, err := shuttle.LoadAgentRegistry()
-		if err != nil {
-			return fmt.Errorf("loading agent registry: %w", err)
-		}
-		axes := agentAxes{agent: agentID, effort: effort, chrome: chrome, surface: surface}
-		if err := axes.write(f, reg); err != nil {
-			return err
-		}
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
+			if cmd.Flags().Changed("project-dir") {
+				if owner != "" {
+					err = setRemoteProjectDirFlag(cmd, setAgentProjectDir, f, block)
+				} else {
+					err = a.setProjectDirFlag(cmd, setAgentProjectDir, f, block)
+				}
+				if err != nil {
+					return err
+				}
+			}
 
-		fmt.Printf("set agent for %s%s → %s", args[0], ref.Location(), shuttleNonEmpty(agentID, "(default)"))
-		if effort != "" {
-			fmt.Printf(" effort=%s", effort)
-		}
-		if chrome {
-			fmt.Printf(" chrome")
-		}
-		fmt.Println()
-		return nil
-	},
+			agentID := block.Agent
+			if len(args) == 2 {
+				agentID = args[1]
+			}
+			effort := block.Effort
+			if cmd.Flags().Changed("effort") {
+				effort = setAgentEffort
+			}
+			chrome := block.Chrome
+			if cmd.Flags().Changed("chrome") {
+				chrome = setAgentChrome
+			}
+			surface := block.Surface
+			if cmd.Flags().Changed("surface") {
+				surface = setAgentSurface
+			}
+
+			if owner != "" {
+				fields := map[string]any{}
+				if len(args) == 2 {
+					fields["agent"] = args[1]
+				}
+				if cmd.Flags().Changed("effort") {
+					fields["effort"] = setAgentEffort
+				}
+				if cmd.Flags().Changed("chrome") {
+					fields["chrome"] = setAgentChrome
+				}
+				if cmd.Flags().Changed("surface") {
+					fields["surface"] = setAgentSurface
+				}
+				if cmd.Flags().Changed("project-dir") {
+					fields["project_dir"] = block.ProjectDir
+				}
+				routed, err := a.forwardLifecycleAction(cmd, args, owner, "set-agent", f, fields)
+				if routed || err != nil {
+					return err
+				}
+			}
+			reg, err := shuttle.LoadAgentRegistry(a.env)
+			if err != nil {
+				return fmt.Errorf("loading agent registry: %w", err)
+			}
+			axes := agentAxes{agent: agentID, effort: effort, chrome: chrome, surface: surface}
+			if err := axes.write(f, reg); err != nil {
+				return err
+			}
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+
+			fmt.Fprintf(a.env.Stdout, "set agent for %s%s → %s", args[0], ref.Location(), shuttleNonEmpty(agentID, "(default)"))
+			if effort != "" {
+				fmt.Fprintf(a.env.Stdout, " effort=%s", effort)
+			}
+			if chrome {
+				fmt.Fprintf(a.env.Stdout, " chrome")
+			}
+			fmt.Fprintln(a.env.Stdout)
+			return nil
+		},
+	}
+	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
+	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
+	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
+	setAgentCmd.Flags().StringVar(&setAgentProjectDir, "project-dir", "", "Set the worker cwd without changing its lifecycle")
+	setAgentCmd.Flags().Bool("local", false, localFlagUsage)
+	return setAgentCmd
 }
 
 // agentAxes is one composition of a block's dispatch axes: base agent (empty
@@ -970,11 +1003,6 @@ func axisValue(s string) any {
 
 // ---- reshape ---------------------------------------------------------------
 
-var (
-	reshapeSchedule string
-	reshapeTZ       string
-)
-
 // reshape is the surgical setter for `kind`. The create verbs rebuild the
 // whole block (re-resolving project_dir and host) and refuse a closed fiber,
 // so they cannot re-shape a role in Awaiting review; here kind (and, for a
@@ -987,10 +1015,13 @@ var (
 // stays exactly there. Also like every other config verb, there is no
 // live/dispatched guard — set-model on a running worker has always been legal,
 // and reshape deliberately matches that.
-var reshapeCmd = &cobra.Command{
-	Use:   "reshape <fiber> [kind]",
-	Short: "Change a role's kind (and standing schedule) in place",
-	Long: `Surgically rewrites the shuttle: block's kind — and, for a standing role, its
+func (a *app) reshapeCmd() *cobra.Command {
+	var reshapeSchedule string
+	var reshapeTZ string
+	reshapeCmd := &cobra.Command{
+		Use:   "reshape <fiber> [kind]",
+		Short: "Change a role's kind (and standing schedule) in place",
+		Long: `Surgically rewrites the shuttle: block's kind — and, for a standing role, its
 schedule — leaving every other key (agent, host, project_dir, the daemon-owned
 runtime keys) and the fiber's whole lifecycle (status, tempered, closed-at,
 outcome) untouched.
@@ -1008,120 +1039,125 @@ with one is an error.
 Requires an existing shuttle: block — use install / repeat / pin to create one.
 This is a config edit, not a lifecycle move: it never changes status, so use
 pause / resume / close / reopen for that.`,
-	Args: cobra.RangeArgs(1, 2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, block, ref, unlock, err := resolveOwnedShuttleFiber(args[0],
-			"use 'shuttle install' / 'repeat' / 'pin' to create one first")
-		if err != nil {
-			return err
-		}
-		defer unlock()
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		if owner != "" {
-			fields := map[string]any{}
-			if len(args) == 2 {
-				fields["kind"] = args[1]
-			}
-			if cmd.Flags().Changed("schedule") {
-				fields["schedule"] = reshapeSchedule
-			}
-			if cmd.Flags().Changed("tz") {
-				fields["tz"] = reshapeTZ
-			}
-			routed, err := forwardLifecycleAction(cmd, args, owner, "reshape", f, fields)
-			if routed || err != nil {
-				return err
-			}
-		}
-		reg, err := shuttle.LoadAgentRegistry()
-		if err != nil {
-			return fmt.Errorf("loading agent registry: %w", err)
-		}
-
-		kind := block.Kind
-		if len(args) == 2 {
-			kind = args[1]
-		}
-		if !slices.Contains(shuttle.ValidKinds, kind) {
-			return fmt.Errorf("kind must be one of %v, got %q", shuttle.ValidKinds, kind)
-		}
-
-		// Build the candidate block off the decoded one and validate the WHOLE
-		// composition before any write, so a rejected reshape leaves the block on
-		// disk exactly as it was.
-		candidate := *block
-		candidate.Kind = kind
-		var next time.Time
-		if kind == "standing" {
-			expr := reshapeSchedule
-			if !cmd.Flags().Changed("schedule") && block.Schedule != nil {
-				expr = block.Schedule.Expr
-			}
-			if strings.TrimSpace(expr) == "" {
-				return fmt.Errorf("--schedule is required to reshape %s to a standing role (the block being reshaped has none to echo)", args[0])
-			}
-			tz := reshapeTZ
-			if tz == "" && block.Schedule != nil {
-				tz = block.Schedule.TZ
-			}
-			if tz == "" {
-				tz = "UTC"
-			}
-			candidate.Schedule = &shuttle.Schedule{Expr: expr, TZ: tz}
-		} else {
-			if cmd.Flags().Changed("schedule") {
-				return fmt.Errorf("--schedule is only meaningful for kind=standing (target kind is %s)", kind)
-			}
-			if cmd.Flags().Changed("tz") {
-				return fmt.Errorf("--tz is only meaningful for kind=standing (target kind is %s)", kind)
-			}
-			candidate.Schedule = nil
-		}
-
-		if errs := shuttle.Validate(&candidate, reg); len(errs) > 0 {
-			return printShuttleValidationErrors(errs)
-		}
-		if candidate.Schedule != nil {
-			next, err = shuttle.NextOccurrence(candidate.Schedule, time.Now())
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0],
+				"use 'shuttle install' / 'repeat' / 'pin' to create one first")
 			if err != nil {
-				return fmt.Errorf("computing next occurrence: %w", err)
-			}
-		}
-
-		// Surgical writes: kind as a scalar, schedule as a typed sub-mapping — or
-		// deleted (nil) for a schedule-less kind.
-		if err := shuttle.SetField(f, "kind", kind); err != nil {
-			return err
-		}
-		if candidate.Schedule != nil {
-			if err := shuttle.SetNodeField(f, "schedule", candidate.Schedule); err != nil {
 				return err
 			}
-		} else if err := shuttle.SetNodeField(f, "schedule", nil); err != nil {
-			return err
-		}
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("writing fiber: %w", err)
-		}
+			defer unlock()
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if owner != "" {
+				fields := map[string]any{}
+				if len(args) == 2 {
+					fields["kind"] = args[1]
+				}
+				if cmd.Flags().Changed("schedule") {
+					fields["schedule"] = reshapeSchedule
+				}
+				if cmd.Flags().Changed("tz") {
+					fields["tz"] = reshapeTZ
+				}
+				routed, err := a.forwardLifecycleAction(cmd, args, owner, "reshape", f, fields)
+				if routed || err != nil {
+					return err
+				}
+			}
+			reg, err := shuttle.LoadAgentRegistry(a.env)
+			if err != nil {
+				return fmt.Errorf("loading agent registry: %w", err)
+			}
 
-		if block.Kind == kind {
-			fmt.Printf("reshaped %s%s (kind: %s, unchanged)\n", args[0], ref.Location(), kind)
-		} else {
-			fmt.Printf("reshaped %s%s (kind: %s → %s)\n", args[0], ref.Location(), shuttleNonEmpty(block.Kind, "(unset)"), kind)
-		}
-		if candidate.Schedule != nil {
-			fmt.Printf("  schedule: %s (%s)\n", candidate.Schedule.Expr, candidate.Schedule.TZ)
-			fmt.Printf("  next due: %s\n", next.Format(time.RFC3339))
-		} else if block.Schedule != nil {
-			fmt.Printf("  schedule: dropped (kind=%s has no recurrence)\n", kind)
-		}
-		printPreservedStatus(f.Status)
-		fmt.Println("  verdict fields (tempered, closed-at, outcome): untouched")
-		return nil
-	},
+			kind := block.Kind
+			if len(args) == 2 {
+				kind = args[1]
+			}
+			if !slices.Contains(shuttle.ValidKinds, kind) {
+				return fmt.Errorf("kind must be one of %v, got %q", shuttle.ValidKinds, kind)
+			}
+
+			// Build the candidate block off the decoded one and validate the WHOLE
+			// composition before any write, so a rejected reshape leaves the block on
+			// disk exactly as it was.
+			candidate := *block
+			candidate.Kind = kind
+			var next time.Time
+			if kind == "standing" {
+				expr := reshapeSchedule
+				if !cmd.Flags().Changed("schedule") && block.Schedule != nil {
+					expr = block.Schedule.Expr
+				}
+				if strings.TrimSpace(expr) == "" {
+					return fmt.Errorf("--schedule is required to reshape %s to a standing role (the block being reshaped has none to echo)", args[0])
+				}
+				tz := reshapeTZ
+				if tz == "" && block.Schedule != nil {
+					tz = block.Schedule.TZ
+				}
+				if tz == "" {
+					tz = "UTC"
+				}
+				candidate.Schedule = &shuttle.Schedule{Expr: expr, TZ: tz}
+			} else {
+				if cmd.Flags().Changed("schedule") {
+					return fmt.Errorf("--schedule is only meaningful for kind=standing (target kind is %s)", kind)
+				}
+				if cmd.Flags().Changed("tz") {
+					return fmt.Errorf("--tz is only meaningful for kind=standing (target kind is %s)", kind)
+				}
+				candidate.Schedule = nil
+			}
+
+			if errs := shuttle.Validate(&candidate, reg); len(errs) > 0 {
+				return a.printShuttleValidationErrors(errs)
+			}
+			if candidate.Schedule != nil {
+				next, err = shuttle.NextOccurrence(candidate.Schedule, time.Now())
+				if err != nil {
+					return fmt.Errorf("computing next occurrence: %w", err)
+				}
+			}
+
+			// Surgical writes: kind as a scalar, schedule as a typed sub-mapping — or
+			// deleted (nil) for a schedule-less kind.
+			if err := shuttle.SetField(f, "kind", kind); err != nil {
+				return err
+			}
+			if candidate.Schedule != nil {
+				if err := shuttle.SetNodeField(f, "schedule", candidate.Schedule); err != nil {
+					return err
+				}
+			} else if err := shuttle.SetNodeField(f, "schedule", nil); err != nil {
+				return err
+			}
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+
+			if block.Kind == kind {
+				fmt.Fprintf(a.env.Stdout, "reshaped %s%s (kind: %s, unchanged)\n", args[0], ref.Location(), kind)
+			} else {
+				fmt.Fprintf(a.env.Stdout, "reshaped %s%s (kind: %s → %s)\n", args[0], ref.Location(), shuttleNonEmpty(block.Kind, "(unset)"), kind)
+			}
+			if candidate.Schedule != nil {
+				fmt.Fprintf(a.env.Stdout, "  schedule: %s (%s)\n", candidate.Schedule.Expr, candidate.Schedule.TZ)
+				fmt.Fprintf(a.env.Stdout, "  next due: %s\n", next.Format(time.RFC3339))
+			} else if block.Schedule != nil {
+				fmt.Fprintf(a.env.Stdout, "  schedule: dropped (kind=%s has no recurrence)\n", kind)
+			}
+			a.printPreservedStatus(f.Status)
+			fmt.Fprintln(a.env.Stdout, "  verdict fields (tempered, closed-at, outcome): untouched")
+			return nil
+		},
+	}
+	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
+	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
+	reshapeCmd.Flags().Bool("local", false, localFlagUsage)
+	return reshapeCmd
 }
 
 // printPreservedStatus reports that a reshape left status exactly as it found
@@ -1129,7 +1165,7 @@ pause / resume / close / reopen for that.`,
 // draft stays parked, an armed role stays armed. Lifecycle verbs
 // (pause/resume/close/reopen) are the only way to move status; changing standing
 // → oneshot is not one of them.
-func printPreservedStatus(status string) {
+func (a *app) printPreservedStatus(status string) {
 	shown := status
 	if shown == "" {
 		shown = "(missing)"
@@ -1138,92 +1174,61 @@ func printPreservedStatus(status string) {
 	if status == felt.StatusClosed {
 		note = "unchanged — reshape does not requeue; `shuttle reopen` does"
 	}
-	fmt.Printf("  status: %s (%s)\n", shown, note)
+	fmt.Fprintf(a.env.Stdout, "  status: %s (%s)\n", shown, note)
 }
 
 // ---- uninstall -------------------------------------------------------------
 
-var uninstallShuttleCmd = &cobra.Command{
-	Use:   "uninstall <fiber>",
-	Short: "Remove the shuttle: block from a fiber",
-	Long: `Removes the shuttle: block entirely. The fiber is left in place; the
+func (a *app) uninstallShuttleCmd() *cobra.Command {
+	uninstallShuttleCmd := &cobra.Command{
+		Use:   "uninstall <fiber>",
+		Short: "Remove the shuttle: block from a fiber",
+		Long: `Removes the shuttle: block entirely. The fiber is left in place; the
 daemon will no longer dispatch it. The fiber's status and tags are not changed,
 and a live worker is left running.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		f, st, ref, err := shuttleResolveFiberRef(args[0], true)
-		if err != nil {
-			return err
-		}
-		if !shuttle.HasFacet(f) {
-			fmt.Printf("fiber %s has no shuttle: block (nothing to do)\n", args[0])
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, ref, err := a.shuttleResolveFiberRef(args[0], true)
+			if err != nil {
+				return err
+			}
+			if !shuttle.HasFacet(f) {
+				fmt.Fprintf(a.env.Stdout, "fiber %s has no shuttle: block (nothing to do)\n", args[0])
+				return nil
+			}
+			f, unlock, err := lockAndReloadFiber(st, f)
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			block, ok, err := shuttle.BlockOf(f)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				fmt.Fprintf(a.env.Stdout, "fiber %s has no shuttle: block (nothing to do)\n", args[0])
+				return nil
+			}
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "uninstall", f, nil); routed || err != nil {
+				return err
+			}
+			if err := a.ensureOwnedHere(f, args[0]); err != nil {
+				return err
+			}
+			if err := f.SetExtraField(shuttle.FacetKey, nil); err != nil {
+				return fmt.Errorf("removing shuttle block: %w", err)
+			}
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("removing shuttle block: %w", err)
+			}
+			fmt.Fprintf(a.env.Stdout, "uninstalled %s%s (shuttle: block removed)\n", args[0], ref.Location())
 			return nil
-		}
-		f, unlock, err := lockAndReloadFiber(st, f)
-		if err != nil {
-			return err
-		}
-		defer unlock()
-		block, ok, err := shuttle.BlockOf(f)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			fmt.Printf("fiber %s has no shuttle: block (nothing to do)\n", args[0])
-			return nil
-		}
-		owner, err := routeOwnerForCommand(cmd, args, block.Host)
-		if err != nil {
-			return err
-		}
-		if routed, err := forwardLifecycleAction(cmd, args, owner, "uninstall", f, nil); routed || err != nil {
-			return err
-		}
-		if err := ensureOwnedHere(f, args[0]); err != nil {
-			return err
-		}
-		if err := f.SetExtraField(shuttle.FacetKey, nil); err != nil {
-			return fmt.Errorf("removing shuttle block: %w", err)
-		}
-		if err := st.Write(f); err != nil {
-			return fmt.Errorf("removing shuttle block: %w", err)
-		}
-		fmt.Printf("uninstalled %s%s (shuttle: block removed)\n", args[0], ref.Location())
-		return nil
-	},
-}
-
-func init() {
-	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); writes here, without the daemon hop")
-	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, localFlagUsage)
-	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
-	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
-	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
-	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
-	reopenCmd.Flags().BoolVar(&reopenConcludeRun, "conclude-run", false, "Conclude a standing role's run (shuttle.runtime.handed_off_at = now) in the same write")
-	_ = reopenCmd.Flags().MarkHidden("conclude-run")
-	reopenCmd.Flags().StringVar(&reopenMessage, "message", "", "Launch directive for a remote worker (the From User prompt block)")
-	reopenCmd.Flags().StringVar(&reopenMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
-	setOutcomeCmd.Flags().StringVar(&setOutcomeValue, "outcome", "", "Outcome text; omit to read from stdin")
-	acceptCmd.Flags().BoolVar(&acceptLocal, "local", false, localFlagUsage)
-	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
-	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
-	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
-	setAgentCmd.Flags().StringVar(&setAgentProjectDir, "project-dir", "", "Set the worker cwd without changing its lifecycle")
-	reshapeCmd.Flags().StringVarP(&reshapeSchedule, "schedule", "s", "", "Cron expression (5-field standard syntax); standing target only")
-	reshapeCmd.Flags().StringVarP(&reshapeTZ, "tz", "z", "", "IANA timezone name (default: the block's existing tz, else UTC); standing target only")
-	for _, c := range []*cobra.Command{pauseCmd, closeCmd, reopenCmd, setOutcomeCmd, setModelCmd, setAgentCmd, reshapeCmd, uninstallShuttleCmd} {
-		c.Flags().Bool("local", false, localFlagUsage)
+		},
 	}
-
-	addShuttleCommand(pauseCmd)
-	addShuttleCommand(resumeCmd)
-	addShuttleCommand(closeCmd)
-	addShuttleCommand(reopenCmd)
-	addShuttleCommand(setOutcomeCmd)
-	addShuttleCommand(acceptCmd)
-	addShuttleCommand(setModelCmd)
-	addShuttleCommand(setAgentCmd)
-	addShuttleCommand(reshapeCmd)
-	addShuttleCommand(uninstallShuttleCmd)
+	uninstallShuttleCmd.Flags().Bool("local", false, localFlagUsage)
+	return uninstallShuttleCmd
 }

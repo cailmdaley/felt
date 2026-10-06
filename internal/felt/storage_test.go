@@ -9,9 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func TestNewStorage(t *testing.T) {
+	t.Parallel()
 	s := NewStorage("/tmp/test-project")
 	if s.root != "/tmp/test-project/.felt" {
 		t.Errorf("root = %q, want %q", s.root, "/tmp/test-project/.felt")
@@ -19,6 +22,7 @@ func TestNewStorage(t *testing.T) {
 }
 
 func TestFindMetadataWithoutGuessingUsesTypedNotFound(t *testing.T) {
+	t.Parallel()
 	storage := NewStorage(t.TempDir())
 	if err := storage.Init(); err != nil {
 		t.Fatal(err)
@@ -32,6 +36,7 @@ func TestFindMetadataWithoutGuessingUsesTypedNotFound(t *testing.T) {
 }
 
 func TestStorageInit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 
@@ -69,6 +74,7 @@ func TestStorageInit(t *testing.T) {
 }
 
 func TestStorageInitCreatesGitignoreInExistingDirectory(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	feltDir := filepath.Join(dir, DirName)
 	if err := os.MkdirAll(feltDir, 0755); err != nil {
@@ -86,6 +92,7 @@ func TestStorageInitCreatesGitignoreInExistingDirectory(t *testing.T) {
 }
 
 func TestStorageInitDoesNotOverwriteExistingGitignore(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	if err := os.MkdirAll(s.root, 0755); err != nil {
@@ -110,6 +117,7 @@ func TestStorageInitDoesNotOverwriteExistingGitignore(t *testing.T) {
 }
 
 func TestStorageWriteRead(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -160,6 +168,7 @@ func TestStorageWriteRead(t *testing.T) {
 }
 
 func TestStorageReadNonExistent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -171,6 +180,7 @@ func TestStorageReadNonExistent(t *testing.T) {
 }
 
 func TestStorageDelete(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -195,6 +205,7 @@ func TestStorageDelete(t *testing.T) {
 }
 
 func TestStorageDeleteNonExistent(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -206,6 +217,7 @@ func TestStorageDeleteNonExistent(t *testing.T) {
 }
 
 func TestStorageList(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -237,6 +249,7 @@ func TestStorageList(t *testing.T) {
 }
 
 func TestStorageListMetadataSkipsBody(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -267,6 +280,7 @@ func TestStorageListMetadataSkipsBody(t *testing.T) {
 }
 
 func TestStorageListMetadataWithModTimePopulatesModifiedAt(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -289,6 +303,7 @@ func TestStorageListMetadataWithModTimePopulatesModifiedAt(t *testing.T) {
 }
 
 func TestStorageListMetadataHavingFrontmatterFields(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -349,6 +364,7 @@ created-at: 2026-05-08T00:00:00Z
 }
 
 func TestStorageFindMetadataSkipsBody(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -384,6 +400,7 @@ func TestStorageFindMetadataSkipsBody(t *testing.T) {
 }
 
 func TestStorageFindMetadataExactIDAvoidsStoreWalk(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	f := &Felt{
@@ -411,6 +428,7 @@ func TestStorageFindMetadataExactIDAvoidsStoreWalk(t *testing.T) {
 }
 
 func TestStorageFindMetadataFastPathPreservesScopedBasenameOrder(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	now := time.Now()
@@ -434,6 +452,7 @@ func TestStorageFindMetadataFastPathPreservesScopedBasenameOrder(t *testing.T) {
 }
 
 func TestStorageFindMetadataFastPathRejectsParentTraversal(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(filepath.Join(dir, "project"))
 	if err := s.Init(); err != nil {
@@ -458,6 +477,7 @@ func TestStorageFindMetadataFastPathRejectsParentTraversal(t *testing.T) {
 }
 
 func TestReadFrontmatter(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: Test Task
 status: open
@@ -482,6 +502,7 @@ Body should never be read.
 }
 
 func TestReadFrontmatterRespectsBlockScalarMarkers(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: Standing Inbox
 outcome: |-
@@ -513,6 +534,7 @@ Body should never be read.
 }
 
 func TestFrontmatterHasTopLevelFields(t *testing.T) {
+	t.Parallel()
 	frontmatter := []byte(`name: Test
 status: active
 shuttle:
@@ -531,6 +553,7 @@ shuttle:
 }
 
 func TestFrontmatterHasTopLevelFieldsAfterBlockScalarMarker(t *testing.T) {
+	t.Parallel()
 	frontmatter := []byte(`name: Standing Inbox
 outcome: |-
   first run
@@ -549,6 +572,7 @@ tempered: true
 }
 
 func TestReadFrontmatterErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		content string
@@ -569,6 +593,7 @@ func TestReadFrontmatterErrors(t *testing.T) {
 }
 
 func TestStorageListIgnoresNonMdFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -591,6 +616,7 @@ func TestStorageListIgnoresNonMdFiles(t *testing.T) {
 }
 
 func TestStorageListIgnoresDirectories(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -613,6 +639,7 @@ func TestStorageListIgnoresDirectories(t *testing.T) {
 }
 
 func TestStorageFind(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -642,6 +669,7 @@ func TestStorageFind(t *testing.T) {
 }
 
 func TestStorageFindByUID(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -742,6 +770,7 @@ func TestReadResolvedRescansAMovedUID(t *testing.T) {
 }
 
 func TestLooksLikeUID(t *testing.T) {
+	t.Parallel()
 	if !LooksLikeUID(NewULID()) {
 		t.Error("LooksLikeUID(NewULID()) = false, want true")
 	}
@@ -753,6 +782,7 @@ func TestLooksLikeUID(t *testing.T) {
 }
 
 func TestStorageFindNotFound(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -764,6 +794,7 @@ func TestStorageFindNotFound(t *testing.T) {
 }
 
 func TestStorageFindAmbiguous(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -792,6 +823,7 @@ func TestStorageFindAmbiguous(t *testing.T) {
 }
 
 func TestStoragePath(t *testing.T) {
+	t.Parallel()
 	s := NewStorage("/project")
 	path := s.Path("test-path")
 	expected := "/project/.felt/test-path/test-path.md"
@@ -801,6 +833,7 @@ func TestStoragePath(t *testing.T) {
 }
 
 func TestStoragePathNested(t *testing.T) {
+	t.Parallel()
 	s := NewStorage("/project")
 	path := s.Path("bao-analysis/damping-prior")
 	expected := "/project/.felt/bao-analysis/damping-prior/damping-prior.md"
@@ -810,6 +843,7 @@ func TestStoragePathNested(t *testing.T) {
 }
 
 func TestStorageCheckAvailableID(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	f := &Felt{
@@ -830,6 +864,7 @@ func TestStorageCheckAvailableID(t *testing.T) {
 }
 
 func TestStorageFindNestedByBasename(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	f := &Felt{
@@ -851,6 +886,7 @@ func TestStorageFindNestedByBasename(t *testing.T) {
 }
 
 func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	f := &Felt{
@@ -868,6 +904,7 @@ func TestStorageFindNestedByBasenameRequiresScope(t *testing.T) {
 }
 
 func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	for _, f := range []*Felt{
@@ -889,6 +926,7 @@ func TestStorageFindPrefersExactIDOverPrefix(t *testing.T) {
 }
 
 func TestParentPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		id   string
 		want string
@@ -909,6 +947,7 @@ func TestParentPath(t *testing.T) {
 }
 
 func TestResolveAddPath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		slug          string
@@ -1033,6 +1072,7 @@ func TestResolveAddPath(t *testing.T) {
 // strings in the ambiguity message so users can pick the fully-qualified
 // path they meant without re-running felt ls.
 func TestResolveAddPathAmbiguityListsAllCandidates(t *testing.T) {
+	t.Parallel()
 	_, _, err := ResolveAddPath("launch-cluster/dogfood", []string{
 		"other-project/launch-cluster",
 		"lightcone/paper2astra-as-skill/launch-cluster",
@@ -1051,6 +1091,7 @@ func TestResolveAddPathAmbiguityListsAllCandidates(t *testing.T) {
 }
 
 func TestResolveScopedIDWalksUpLexicalScopes(t *testing.T) {
+	t.Parallel()
 	ids := []string{
 		"project",
 		"project/analysis",
@@ -1076,6 +1117,7 @@ func TestResolveScopedIDWalksUpLexicalScopes(t *testing.T) {
 }
 
 func TestResolveScopedIDPrefersExactBasenameOverPrefix(t *testing.T) {
+	t.Parallel()
 	// When a query matches one fiber exactly and others by prefix, the exact match wins.
 	ids := []string{
 		"project/status",
@@ -1093,6 +1135,7 @@ func TestResolveScopedIDPrefersExactBasenameOverPrefix(t *testing.T) {
 }
 
 func TestResolveScopedIDPrefersExactPathOverDescendants(t *testing.T) {
+	t.Parallel()
 	// A slash-path to a parent fiber must resolve even though that parent has
 	// children whose ids share its prefix (the children must not defeat it
 	// into a spurious ambiguity error).
@@ -1112,6 +1155,7 @@ func TestResolveScopedIDPrefersExactPathOverDescendants(t *testing.T) {
 }
 
 func TestResolveScopedIDGlobalUniqueBasenameFallback(t *testing.T) {
+	t.Parallel()
 	// A globally-unique slug resolves from a scope that cannot reach it by
 	// walking up — e.g. a cross-project link in the aggregated monorepo.
 	ids := []string{
@@ -1135,6 +1179,7 @@ func TestResolveScopedIDGlobalUniqueBasenameFallback(t *testing.T) {
 }
 
 func TestFindProjectRoot(t *testing.T) {
+	t.Parallel()
 	// Create a nested directory structure with .felt at the top
 	rootDir := t.TempDir()
 	feltDir := filepath.Join(rootDir, ".felt")
@@ -1143,13 +1188,8 @@ func TestFindProjectRoot(t *testing.T) {
 	nested := filepath.Join(rootDir, "a", "b", "c")
 	os.MkdirAll(nested, 0755)
 
-	// Change to nested directory
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(nested)
-
-	// FindProjectRoot should find the root
-	found, err := FindProjectRoot()
+	// FindProjectRoot should find the root from the nested working directory
+	found, err := FindProjectRoot(sysenv.New(nested, nil))
 	if err != nil {
 		t.Fatalf("FindProjectRoot() error: %v", err)
 	}
@@ -1162,14 +1202,11 @@ func TestFindProjectRoot(t *testing.T) {
 }
 
 func TestFindProjectRootNotFound(t *testing.T) {
+	t.Parallel()
 	// Create a temp directory with no .felt
 	dir := t.TempDir()
 
-	oldWd, _ := os.Getwd()
-	defer os.Chdir(oldWd)
-	os.Chdir(dir)
-
-	_, err := FindProjectRoot()
+	_, err := FindProjectRoot(sysenv.New(dir, nil))
 	if err == nil {
 		t.Error("FindProjectRoot() should error when no .felt found")
 	}
@@ -1181,6 +1218,7 @@ func TestFindProjectRootNotFound(t *testing.T) {
 // a suffix path from outside — so none of them is rewritten, and a reference
 // to an unmoved fiber is untouched.
 func TestStorageMoveSubtreeLeavesInputRefsThatStillResolve(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	parent := &Felt{
@@ -1231,6 +1269,7 @@ func TestStorageMoveSubtreeLeavesInputRefsThatStillResolve(t *testing.T) {
 // body-link rule, so a reference spelled through the old parent is rewritten,
 // its output fragment kept.
 func TestStorageMoveSubtreeRewritesInputRefsItBreaks(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	for _, id := range []string{"a", "b", "a/x", "a/x/y"} {
 		if err := s.Write(&Felt{ID: id, Name: id, CreatedAt: time.Now()}); err != nil {
@@ -1260,6 +1299,7 @@ func TestStorageMoveSubtreeRewritesInputRefsItBreaks(t *testing.T) {
 }
 
 func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	for _, f := range []*Felt{
@@ -1306,6 +1346,7 @@ func TestStorageMoveSubtreePreservesLooseArtifacts(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	f := &Felt{
@@ -1323,6 +1364,7 @@ func TestStorageMoveSubtreeRejectsSelfNesting(t *testing.T) {
 }
 
 func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	for _, f := range []*Felt{
@@ -1341,6 +1383,7 @@ func TestStorageMoveSubtreeRejectsExistingDestination(t *testing.T) {
 }
 
 func TestStorageMigrateFlatFiles(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	legacyA := `---
@@ -1395,6 +1438,7 @@ Analysis body.
 }
 
 func TestStorageBackfillIntrinsicIDs(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	missing := `---
@@ -1478,6 +1522,7 @@ Already identified.
 }
 
 func TestStorageBackfillIntrinsicIDsSkipsNonFiberMarkdown(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	if err := os.WriteFile(filepath.Join(s.root, "README.md"), []byte("not frontmatter\n"), 0644); err != nil {
@@ -1494,6 +1539,7 @@ func TestStorageBackfillIntrinsicIDsSkipsNonFiberMarkdown(t *testing.T) {
 }
 
 func TestStorageMigrateFlatFilesDryRun(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	legacy := `---
@@ -1527,6 +1573,7 @@ Body.
 }
 
 func TestStorageMigrateSingleBareFilePreservedAsEntryPoint(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	// A single bare .md at .felt/ root is the entry-point fiber (the shape
@@ -1558,6 +1605,7 @@ Root narrative.
 }
 
 func TestStorageMigrateRewritesPreExistingDirectoryInputs(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	// Flat files that will be migrated (two so migration runs — a single bare
@@ -1607,6 +1655,7 @@ Analysis body.
 }
 
 func TestStorageMigrateRenamesTitleAndStripsMystAnchor(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	legacy := `---
@@ -1662,6 +1711,7 @@ created-at: 2026-03-16T10:00:00Z
 }
 
 func TestStorageMigrateDryRunReportsTitleAndAnchorWithoutWriting(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 
 	legacy := `---
@@ -1707,6 +1757,7 @@ created-at: 2026-03-16T10:00:00Z
 }
 
 func TestStorageBareRootFiber(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -1745,6 +1796,7 @@ func TestStorageBareRootFiber(t *testing.T) {
 }
 
 func TestStoragePathFallsBackToDirectoryForm(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -1758,6 +1810,7 @@ func TestStoragePathFallsBackToDirectoryForm(t *testing.T) {
 }
 
 func TestStoragePathBareWithNestedChild(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -1788,6 +1841,7 @@ func TestStoragePathBareWithNestedChild(t *testing.T) {
 // outer namespace (`<symlink-name>/<inner-id>`), not the leaked `../../...`
 // traversal that `filepath.Rel(outerRoot, resolvedAbsPath)` would yield.
 func TestStorageListSymlinkedSubstoreLiftsIds(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 
 	// Outer store: has its own root fiber so we can confirm the rest of
@@ -1856,6 +1910,7 @@ func TestStorageListSymlinkedSubstoreLiftsIds(t *testing.T) {
 // the symlink branch to only recurse-or-skip, silently dropping any symlink
 // that didn't resolve to a directory.
 func TestStorageListSymlinkedFiberFile(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	s := NewStorage(tmp)
 	if err := s.Init(); err != nil {
@@ -1914,6 +1969,7 @@ func TestStorageListSymlinkedFiberFile(t *testing.T) {
 // must produce clean, `..`-free ids and agree on identity (the same files
 // surface in both, just under different namespaces).
 func TestStorageListSymlinkedFeltDirIntoOuter(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 
 	// Outer monorepo store with a project's content nested inside it.
@@ -2029,6 +2085,7 @@ func newSubstoreFixture(t *testing.T) (loomProj, subProj string) {
 }
 
 func TestEnclosingStoreReportsMountPoint(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newSubstoreFixture(t)
 
 	root, prefix, ok := NewStorage(subProj).EnclosingStore()
@@ -2057,6 +2114,7 @@ func TestEnclosingStoreReportsMountPoint(t *testing.T) {
 // full to a fiber in another project's tree used to be rescued by the
 // basename fallback into the local fiber of the same slug.
 func TestResolveScopedIDRefusesEnclosingStorePath(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 	if external == nil {
@@ -2087,6 +2145,7 @@ func TestResolveScopedIDRefusesEnclosingStorePath(t *testing.T) {
 // store; the probe can change the outcome only when basename fallback is about
 // to fire.
 func TestExternalProbeStaysOffWhenItCannotMatter(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 	ids := []string{"debug", "notes/runbook"}
@@ -2126,6 +2185,7 @@ func TestExternalProbeStaysOffWhenItCannotMatter(t *testing.T) {
 // `felt rm <foreign-slug>` would report "no fiber found" for a fiber that is
 // plainly there.
 func TestExternalPathLookupNeedsNoWalk(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 	ids := []string{"debug", "notes/runbook"}
@@ -2147,6 +2207,7 @@ func TestExternalPathLookupNeedsNoWalk(t *testing.T) {
 // id genuinely begins with this store's prefix must stay addressable by its
 // real spelling — prefix stripping is a fallback, not a rewrite.
 func TestResolveScopedIDLocalIDUnderOwnPrefixKeepsItsAddress(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 	ids := []string{"debug", "ai-futures/felt/debug"}
@@ -2167,6 +2228,7 @@ func TestResolveScopedIDLocalIDUnderOwnPrefixKeepsItsAddress(t *testing.T) {
 }
 
 func TestResolveScopedIDUnknownPathIsOrdinaryMiss(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 	ids := []string{"debug", "notes/runbook"}
@@ -2187,6 +2249,7 @@ func TestResolveScopedIDUnknownPathIsOrdinaryMiss(t *testing.T) {
 // swallow the case it sits next to — a link whose path went stale after a
 // `felt nest` but whose slug is still unique in this store.
 func TestResolveScopedIDStalePathRescueSurvives(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 	ids := []string{"debug", "notes/runbook"}
@@ -2205,6 +2268,7 @@ func TestResolveScopedIDStalePathRescueSurvives(t *testing.T) {
 // exists in the enclosing store too (it is the same file), so the prefix
 // strip has to happen before the external check.
 func TestResolveScopedIDLocalizesOwnPrefix(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	storage := NewStorage(subProj)
 	external := storage.ExternalRefs()
@@ -2223,6 +2287,7 @@ func TestResolveScopedIDLocalizesOwnPrefix(t *testing.T) {
 // can reach this store's own fibers, so a hit under our prefix must not be
 // called external — it falls through to the local fallbacks.
 func TestResolveScopedIDEnclosingHitInsideOwnPrefixIsLocal(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 	ids := []string{"debug", "notes/runbook"}
@@ -2241,6 +2306,7 @@ func TestResolveScopedIDEnclosingHitInsideOwnPrefixIsLocal(t *testing.T) {
 // rather than quietly showing the local fiber of the same slug, while a link
 // spelled with this store's own prefix still opens the local fiber.
 func TestStorageLookupsKnowTheEnclosingStore(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	storage := NewStorage(subProj)
 	external := storage.ExternalRefs()
@@ -2305,6 +2371,7 @@ func writeRawFiber(t *testing.T, root, id string) {
 // listed, not addressable by the id its path suggests, and not claimed by
 // CheckAvailableID; a lookup that misses because of a stray says why.
 func TestStrayFiberFileIsNotAFiber(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "parent")
 	writeFile(t, s.root, "parent/leaf.md", "---\nname: leaf\ntags: [x]\n---\n")
@@ -2337,6 +2404,7 @@ func TestStrayFiberFileIsNotAFiber(t *testing.T) {
 // through a symlinked subdirectory. It stays listed and addressable, and is
 // not reported as stray; a bare file one level inside that mount is.
 func TestStorageMountedEntryPointIsNotStray(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	outer := NewStorage(filepath.Join(tmp, "outer"))
 	if err := outer.Init(); err != nil {
@@ -2373,6 +2441,7 @@ func TestStorageMountedEntryPointIsNotStray(t *testing.T) {
 // `<slug>/<slug>.md` (dry run only reports it), after which it is an ordinary
 // fiber and a link spelling its path resolves. Companion markdown is untouched.
 func TestStorageMigrateFoldsStrayFiber(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "parent")
 	stray := writeFile(t, s.root, "parent/leaf.md", "---\nname: leaf\ntags: [x]\n---\nleaf body\n")
@@ -2412,6 +2481,7 @@ func TestStorageMigrateFoldsStrayFiber(t *testing.T) {
 // already holds a fiber is reported Blocked and left where it is; the fiber
 // already there is untouched and the rest of the pass still runs.
 func TestStorageMigrateRefusesStrayCollision(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "parent/leaf")
 	stray := writeFile(t, s.root, "parent/leaf.md", "---\nname: other leaf\ntags: [x]\n---\n")
@@ -2461,6 +2531,7 @@ func writeStray(t *testing.T, root, rel string) string {
 // rescue and answer with a same-named fiber elsewhere, which `rm` would then
 // delete.
 func TestLookupOfStrayIDRefusesSlugTwin(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "proj/a/citer")
 	writeRawFiber(t, s.root, "x/leaf2")
@@ -2490,6 +2561,7 @@ func TestLookupOfStrayIDRefusesSlugTwin(t *testing.T) {
 // TestCheckAvailableIDRefusesStray: creating a fiber at a stray's id would
 // manufacture the collision migrate cannot resolve.
 func TestCheckAvailableIDRefusesStray(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "proj/a")
 	writeStray(t, s.root, "proj/a/leaf3.md")
@@ -2504,6 +2576,7 @@ func TestCheckAvailableIDRefusesStray(t *testing.T) {
 // home is a symlinked mount would be written into the mounted store's root.
 // It is reported blocked and nothing moves.
 func TestStorageMigrateBlocksFoldThroughSymlink(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	outer := NewStorage(filepath.Join(tmp, "outer"))
 	inner := NewStorage(filepath.Join(tmp, "inner"))
@@ -2540,6 +2613,7 @@ func TestStorageMigrateBlocksFoldThroughSymlink(t *testing.T) {
 // under its own path and never moved, and the stray it points to is held back
 // too, since folding it would leave the link dangling.
 func TestStraySymlinkIsReportedNotFolded(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "parent")
 	writeRawFiber(t, s.root, "notes")
@@ -2573,6 +2647,7 @@ func TestStraySymlinkIsReportedNotFolded(t *testing.T) {
 // that fails anyway is reported as blocked while the pass carries on: the
 // other stray folds and the normalization still runs.
 func TestStorageMigrateStrayBlockersAndFailures(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("permission bits do not bind root")
 	}
@@ -2618,6 +2693,7 @@ func TestStorageMigrateStrayBlockersAndFailures(t *testing.T) {
 // TestStrayHiddenPathIsStoreLevel: a hidden segment anywhere in the store
 // path — here, a store mounted under `.archive/` — keeps loose files out.
 func TestStrayHiddenPathIsStoreLevel(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	outer := NewStorage(filepath.Join(tmp, "outer"))
 	other := NewStorage(filepath.Join(tmp, "other"))
@@ -2651,6 +2727,7 @@ func TestStrayHiddenPathIsStoreLevel(t *testing.T) {
 // even when it carries a fiber-shaped key — validation reports record their
 // own `status:` and `date:`.
 func TestStrayTitleDocumentIsACompanion(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "parent")
 	writeFile(t, s.root, "parent/report.md", "---\ntitle: Validation\ndate: 2026-07-16\nstatus: closed\nverdict: equivalent\n---\n")
@@ -2667,6 +2744,7 @@ func TestStrayTitleDocumentIsACompanion(t *testing.T) {
 // TestReadFrontmatterFileMatchesSplit: the bounded reader returns exactly
 // what SplitFrontmatter finds in the whole file, errors included.
 func TestReadFrontmatterFileMatchesSplit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for i, content := range []string{
 		"---\nname: a\n---\nbody\n",
@@ -2693,6 +2771,7 @@ func TestReadFrontmatterFileMatchesSplit(t *testing.T) {
 // TestMemoizeWalkForgetsOnWrite: a memoized walk serves repeat listings, and
 // a write through the same Storage drops it.
 func TestMemoizeWalkForgetsOnWrite(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	s.MemoizeWalk()
 	writeRawFiber(t, s.root, "one")
@@ -2716,6 +2795,7 @@ func TestMemoizeWalkForgetsOnWrite(t *testing.T) {
 // is. `a/a.md` is directory form by its own path, so it is the fiber `a`, not
 // a stray; its target's path never leaks into the id.
 func TestSymlinkedFiberFileIsNamedByItsOwnPath(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	s := NewStorage(filepath.Join(tmp, "p"))
 	if err := s.Init(); err != nil {
@@ -2750,6 +2830,7 @@ func TestSymlinkedFiberFileIsNamedByItsOwnPath(t *testing.T) {
 // opens as `Notes`. Folding it to `Notes/notes/notes.md` would change its id,
 // so it is reported with a rename instead.
 func TestStrayDifferingOnlyInCaseIsBlocked(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	stray := writeStray(t, s.root, "Notes/notes.md")
 
@@ -2770,6 +2851,7 @@ func TestStrayDifferingOnlyInCaseIsBlocked(t *testing.T) {
 // to the stray `a/bar` and is broken — not rescued to the twin `b/bar` — and a
 // link naming a stray in the enclosing store reports that store's file.
 func TestCheckFromViewLocalizedLinkToStrayIsBroken(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newSubstoreFixture(t)
 	loom := NewStorage(loomProj)
 	sub := NewStorage(subProj)
@@ -2806,6 +2888,7 @@ func TestCheckFromViewLocalizedLinkToStrayIsBroken(t *testing.T) {
 // outranks every completion. From scope a/b, [[c]] names a/c exactly; a/b/cx
 // only begins with the same letter.
 func TestResolveScopedIDExactOuterScopeBeatsInnerPrefix(t *testing.T) {
+	t.Parallel()
 	ids := []string{"a", "a/b", "a/b/cx", "a/c"}
 	for _, tc := range []struct{ scope, query, want string }{
 		{"a/b", "c", "a/c"},
@@ -2824,6 +2907,7 @@ func TestResolveScopedIDExactOuterScopeBeatsInnerPrefix(t *testing.T) {
 // --consumers and check see an unlabelled entry too, and an id without a
 // from is no edge.
 func TestDataFlowEdgeNeedsFromNotID(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	if err := s.Init(); err != nil {
@@ -2865,6 +2949,7 @@ func TestDataFlowEdgeNeedsFromNotID(t *testing.T) {
 // is an ordinary stale path — show rescues it by its slug — and never a
 // stray to migrate.
 func TestFiberFileSpelledAsIDIsNotStray(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	if err := s.Init(); err != nil {
@@ -2885,6 +2970,7 @@ func TestFiberFileSpelledAsIDIsNotStray(t *testing.T) {
 // TestAmbiguousSlugNamesItsCandidates: a slug that tails several fibers
 // resolves to none and says which, while still reading as no match.
 func TestAmbiguousSlugNamesItsCandidates(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "science/cmbx/data")
 	writeRawFiber(t, s.root, "science/lensing/data")

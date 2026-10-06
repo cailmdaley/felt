@@ -32,6 +32,7 @@ func wsTestServer(t *testing.T, h http.Handler) *httptest.Server {
 }
 
 func TestRPCCallIgnoresNotificationsAndServerRequests(t *testing.T) {
+	t.Parallel()
 	up := websocket.Upgrader{}
 	srv := wsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := up.Upgrade(w, r, nil)
@@ -73,6 +74,7 @@ func TestRPCCallIgnoresNotificationsAndServerRequests(t *testing.T) {
 }
 
 func TestRPCRejectsPeerError(t *testing.T) {
+	t.Parallel()
 	up := websocket.Upgrader{}
 	srv := wsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, e := up.Upgrade(w, r, nil)
@@ -97,6 +99,7 @@ func TestRPCRejectsPeerError(t *testing.T) {
 }
 
 func TestRPCCapsUnrelatedFrames(t *testing.T) {
+	t.Parallel()
 	up := websocket.Upgrader{}
 	srv := wsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, e := up.Upgrade(w, r, nil)
@@ -128,6 +131,7 @@ func TestRPCCapsUnrelatedFrames(t *testing.T) {
 }
 
 func TestCodexMutationResultShapes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		raw   string
 		valid bool

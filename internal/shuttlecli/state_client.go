@@ -73,12 +73,12 @@ type CompositeState struct {
 // decodes the response. This is the surface where `shuttle status --all`
 // discovers the daemon is down, so it adds the how-to-fix hint the shared
 // transport has no business carrying.
-func fetchComposite() (*CompositeState, error) {
-	endpoint, err := daemonEndpoint("/api/v1/state/composite")
+func (a *app) fetchComposite() (*CompositeState, error) {
+	endpoint, err := a.daemonEndpoint("/api/v1/state/composite")
 	if err != nil {
 		return nil, err
 	}
-	out, err := fetchCompositeFrom(endpoint)
+	out, err := a.fetchCompositeFrom(endpoint)
 	if err != nil {
 		if isLifecycleTransportError(err) {
 			return nil, fmt.Errorf("%w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)
@@ -90,8 +90,8 @@ func fetchComposite() (*CompositeState, error) {
 
 // fetchCompositeFrom calls the given composite URL and decodes it (tests point
 // it at an httptest stub).
-func fetchCompositeFrom(url string) (*CompositeState, error) {
-	out, err := getDaemonJSON[CompositeState](url, "parsing daemon response")
+func (a *app) fetchCompositeFrom(url string) (*CompositeState, error) {
+	out, err := getDaemonJSON[CompositeState](a, url, "parsing daemon response")
 	if err != nil {
 		return nil, err
 	}

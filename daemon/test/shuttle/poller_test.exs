@@ -16,6 +16,11 @@ defmodule Shuttle.PollerTest do
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
   alias Shuttle.Test.Env
 
+  # Every `:sys.get_state/2` on a Poller waits this long: on a loaded machine
+  # a Poller applying a cycle can take longer than the 5 s default to answer,
+  # and that is "not yet", not a failure.
+  @state_timeout 30_000
+
   # ── Setup ──
 
   setup do
@@ -46,45 +51,47 @@ defmodule Shuttle.PollerTest do
 
   # ── Helpers ──
 
-  # Ceiling ~3s (was ~500ms). wait_until returns the instant the condition holds,
-  # so a generous ceiling costs passing assertions nothing — but the poll cycle is
-  # a multi-hop async chain (tick → 20ms timer → run_poll_cycle → read Task →
-  # :poll_world → apply → dispatch → spawn_tmux), and under CPU load (the full
-  # suite, or a tight repeat loop) a tick that used to land in <500ms can slip
-  # well past it. The tight ceiling was the dominant intrinsic-timing flake here.
   # Companion to wait_until for when the check IS the assertion (e.g. a pattern
-  # match or a snapshot-shape assert). A fixed `Process.sleep` before such an
-  # assert raced the async poll under load; this re-runs the assertion every 25ms
-  # (~3s ceiling), catching its own failure, so it passes the instant the polled
-  # state settles and costs nothing when it already has.
-  defp assert_eventually(fun, attempts \\ 120) do
+  # match or a snapshot-shape assert). It re-runs the assertion every 5ms,
+  # catching its own failure, so it passes the instant the polled state settles.
+  # The poll cycle is a multi-hop async chain (tick → 20ms timer → run_poll_cycle
+  # → read Task → :poll_world → apply → dispatch → spawn_tmux) that a loaded
+  # machine stretches arbitrarily, so the ceiling (~30s, as wait_until's) is
+  # reached only when the state never settles.
+  defp assert_eventually(fun, attempts \\ 6_000) do
     fun.()
   rescue
     error in [ExUnit.AssertionError, MatchError] ->
       if attempts > 0 do
-        Process.sleep(25)
+        Process.sleep(5)
         assert_eventually(fun, attempts - 1)
       else
         reraise(error, __STACKTRACE__)
       end
   end
 
-  defp wait_until(fun, attempts \\ 120)
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, attempts \\ 6_000)
   defp wait_until(fun, 0), do: fun.()
 
   defp wait_until(fun, attempts) do
     if fun.() do
       true
     else
-      Process.sleep(25)
+      Process.sleep(5)
       wait_until(fun, attempts - 1)
     end
   end
 
   # Drive exactly ONE poll cycle and return only once it has been applied.
+  # Every cycle a test drives goes through here. A raw `send(poller,
+  # :run_poll_cycle)` is dropped while another cycle is in flight, and when it
+  # lands it can leave the boot cycle unsettled — a read taken before the
+  # test's next mutation (a kill, an exit, a closed fiber) that then applies
+  # after it and re-dispatches.
   #
-  # For anything the poll cycle *accumulates* (running, commands issued), a
-  # `wait_until` is fine. For what a cycle merely *observes*, it is not:
+  # What a cycle merely *observes* needs the bound too:
   # `reconcile/1` resets `state.orphans` to `[]` at the top of every cycle, so
   # an orphan reports what THIS cycle saw and is gone the moment the next one
   # runs. A wall-clock wait that re-nudges the poller (the old idiom here)
@@ -100,7 +107,7 @@ defmodule Shuttle.PollerTest do
   # test, so no further cycle can start behind the assertions.
   defp settle_poller!(poller) do
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
              state.poll_cycles > 0 and not state.poll_check_in_progress
            end)
 
@@ -109,12 +116,37 @@ defmodule Shuttle.PollerTest do
 
   defp sync_poll_cycle!(poller) do
     settle_poller!(poller)
-    before = :sys.get_state(poller).poll_cycles
+    before = :sys.get_state(poller, @state_timeout).poll_cycles
 
     send(poller, :run_poll_cycle)
 
-    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > before end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > before end)
     :ok
+  end
+
+  # Every trace the `:dbg` relay has forwarded from `poller`, oldest first, then
+  # tracing stops. `trace_delivered` returns once the runtime has handed all of
+  # the poller's traces so far to the tracer; a sentinel sent to the tracer
+  # after that is relayed after them, so receiving it means nothing is still in
+  # flight. (A non-`:call` sentinel, so the tracer does not suspend the sender.)
+  defp drain_dbg_relay!(poller) do
+    ref = :erlang.trace_delivered(poller)
+    assert_receive {:trace_delivered, ^poller, ^ref}
+    {:ok, tracer} = apply(:dbg, :get_tracer, [])
+    sentinel = make_ref()
+    send(tracer, {:trace, self(), :dbg_sentinel, sentinel})
+    traces = receive_dbg_relay_until(sentinel, [])
+    apply(:dbg, :stop_clear, [])
+    traces
+  end
+
+  defp receive_dbg_relay_until(sentinel, acc) do
+    receive do
+      {:dbg_relay, {:trace, _pid, :dbg_sentinel, ^sentinel}} -> Enum.reverse(acc)
+      {:dbg_relay, msg} -> receive_dbg_relay_until(sentinel, [msg | acc])
+    after
+      30_000 -> flunk("the :dbg relay never forwarded its sentinel")
+    end
   end
 
   defp shuttle_show_count do
@@ -231,8 +263,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -257,7 +288,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -352,7 +383,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # The poller uses shuttle's widened kanban projection (the full field set
     # the document cache builds entries from).
@@ -375,7 +406,10 @@ defmodule Shuttle.PollerTest do
            end)
 
     assert {:ok, fiber} =
-             Poller.fetch_fiber_full("tests/projected-discovery", :sys.get_state(poller))
+             Poller.fetch_fiber_full(
+               "tests/projected-discovery",
+               :sys.get_state(poller, @state_timeout)
+             )
 
     assert get_in(fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-sonnet"
 
@@ -416,7 +450,7 @@ defmodule Shuttle.PollerTest do
     # `shuttle ls` projection carries every field — so NO `shuttle show` fires.
     assert shuttle_show_count() == 0
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              stats = Poller.snapshot(poller)[:document_cache]
@@ -437,7 +471,7 @@ defmodule Shuttle.PollerTest do
       })
 
     MockRunner.set_fiber("tests/cached-document", changed_fiber)
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              stats = Poller.snapshot(poller)[:document_cache]
@@ -518,7 +552,7 @@ defmodule Shuttle.PollerTest do
     assert is_binary(fresh_refreshed_at)
 
     MockRunner.set_listing_timeout(true)
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              stats = Poller.snapshot(poller)[:document_cache]
@@ -540,7 +574,7 @@ defmodule Shuttle.PollerTest do
     # Shuttle recovers: the live listing resumes, the entry is served, and the tick
     # is "fresh" again with an ADVANCED refreshed_at.
     MockRunner.set_listing_timeout(false)
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert {:ok, body} = Poller.cached_fiber_documents(poller)
@@ -598,7 +632,7 @@ defmodule Shuttle.PollerTest do
       }
     end)
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # The Task-built cache carries "disk-old" (mtime m1); the merge prefers the
     # live "patched-newer" entry (mtime m2 > m1) instead of clobbering it.
@@ -648,7 +682,7 @@ defmodule Shuttle.PollerTest do
       Map.put(current, "report_path", "#{MockRunner.felt_dir()}/tests/report-toggle/report.html")
     )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert {:ok, body} = Poller.cached_fiber_documents(poller)
@@ -660,7 +694,7 @@ defmodule Shuttle.PollerTest do
     # The report is removed (field drops) — again without an mtime bump. The
     # reconcile drops the stale report_path on the reuse hit.
     MockRunner.set_fiber("tests/report-toggle", Map.delete(current, "report_path"))
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert {:ok, body} = Poller.cached_fiber_documents(poller)
@@ -680,7 +714,7 @@ defmodule Shuttle.PollerTest do
       )
 
     # Let the boot poll warm the cache, then force it cold and re-arm the guard.
-    assert wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).document_cache_ready end)
 
     :sys.replace_state(poller, fn state ->
       %{state | document_cache_ready: false, cold_feed_logged: false, document_cache: %{}}
@@ -692,7 +726,7 @@ defmodule Shuttle.PollerTest do
         {:ok, _} = Poller.cached_fiber_documents(poller)
         {:ok, _} = Poller.cached_fiber_documents(poller)
         # Flush the GenServer so its logging is done before capture_log returns.
-        _ = :sys.get_state(poller)
+        _ = :sys.get_state(poller, @state_timeout)
       end)
 
     occurrences =
@@ -702,7 +736,7 @@ defmodule Shuttle.PollerTest do
       |> Kernel.-(1)
 
     assert occurrences == 1
-    assert :sys.get_state(poller).cold_feed_logged == true
+    assert :sys.get_state(poller, @state_timeout).cold_feed_logged == true
   end
 
   test "owner feed stamps serve-time runtime onto an owned fiber with a live worker" do
@@ -726,7 +760,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # The fiber dispatches (lands in state.running) AND its document caches.
     assert wait_until(fn ->
@@ -771,7 +805,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              snap = Poller.snapshot(poller)
@@ -817,7 +851,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              snap = Poller.snapshot(poller)
@@ -877,7 +911,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              get_in(Poller.snapshot(poller), [:document_cache, "entries"]) >= 1
@@ -909,7 +943,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # Wait until the fiber is live (stamped with runtime on the owner feed).
     assert wait_until(fn ->
@@ -980,7 +1014,9 @@ defmodule Shuttle.PollerTest do
           felt_stores: [MockRunner.felt_root()]
         )
 
-      send(poller, :run_poll_cycle)
+      # Bound the cycles: a still-active fiber is re-dispatched by any cycle
+      # applied after the kill, so none may be in flight or pending behind it.
+      sync_poll_cycle!(poller)
 
       assert wait_until(fn ->
                case Poller.cached_fiber_documents(poller) do
@@ -989,8 +1025,8 @@ defmodule Shuttle.PollerTest do
                end
              end)
 
-      {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
-      session = get_in(live, [:runtime, :tmux_session])
+      assert {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
+      assert %{tmux_session: session} = live[:runtime]
 
       MockRunner.set_kill_session_failure(variant)
       assert {:ok, ^session} = Poller.kill_session(poller, fiber_id)
@@ -1025,7 +1061,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              case Poller.cached_fiber_documents(poller) do
@@ -1034,7 +1070,7 @@ defmodule Shuttle.PollerTest do
              end
            end)
 
-    state_before = :sys.get_state(poller)
+    state_before = :sys.get_state(poller, @state_timeout)
     [{runtime_key, meta_before}] = Map.to_list(state_before.running)
     original_watcher_pid = meta_before.pid
     assert is_pid(original_watcher_pid) and Process.alive?(original_watcher_pid)
@@ -1053,7 +1089,7 @@ defmodule Shuttle.PollerTest do
     # failed kill must re-arm a fresh watcher against the still-live
     # session — otherwise nobody observes its eventual exit until this
     # daemon restarts, a second flavor of ghost worker.
-    state_after = :sys.get_state(poller)
+    state_after = :sys.get_state(poller, @state_timeout)
     meta_after = Map.get(state_after.running, runtime_key)
     assert is_pid(meta_after.pid) and Process.alive?(meta_after.pid)
     refute meta_after.pid == original_watcher_pid
@@ -1274,38 +1310,57 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    # Boot and its first cycle read undelayed; the delay applies to the
-    # cycle under test, whose listing is a command recorded after them.
+    # The cycle under test is held inside its listing until the snapshot has
+    # been answered, so the snapshot can only have been served while that
+    # same read was in flight.
     settle_poller!(poller)
-    booted = length(MockRunner.commands())
-    MockRunner.set_ls_delay(1_000)
+    MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
+    assert_receive {:ls_held, reader}
 
-    assert wait_until(fn ->
-             MockRunner.commands()
-             |> Enum.drop(booted)
-             |> Enum.any?(&match?({"shuttle", ["-C", _store, "ls", "--json" | _]}, &1))
-           end)
+    %{poll_token: token, poll_cycles: cycles} = :sys.get_state(poller, @state_timeout)
+    assert is_map(Poller.snapshot(poller, 30_000))
 
-    started_at_ms = System.monotonic_time(:millisecond)
-    snap = Poller.snapshot(poller, 100)
+    state = :sys.get_state(poller, @state_timeout)
+    assert state.poll_check_in_progress
+    assert state.poll_token == token
+    assert state.poll_cycles == cycles
 
-    assert is_map(snap)
-    assert System.monotonic_time(:millisecond) - started_at_ms < 100
+    send(reader, :release_ls)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > cycles end)
   end
 
   test "a completed poll cycle cancels its stall watchdog" do
+    # A cycle's read is held to catch its watchdog armed; the watchdog itself
+    # is far longer than the test, so a timer that reads as gone after the
+    # cycle completes was cancelled, not expired. (An empty store skips its
+    # listing, so the store carries a fiber to list.)
+    fiber = make_fiber("tests/watchdog-completion", %{"status" => "closed"})
+    MockRunner.set_fiber("tests/watchdog-completion", fiber)
+    MockRunner.set_shuttle("tests/watchdog-completion", oneshot_shuttle(), "closed")
+
     {:ok, poller} =
       start_poller!(
         name: :test_poller_stall_watchdog_completion,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        stall_timeout_ms: 30,
+        stall_timeout_ms: 600_000,
         felt_stores: [MockRunner.felt_root()]
       )
 
     settle_poller!(poller)
-    state = :sys.get_state(poller)
+    cycles = :sys.get_state(poller, @state_timeout).poll_cycles
+    MockRunner.hold_ls()
+    send(poller, :run_poll_cycle)
+    assert_receive {:ls_held, reader}
+
+    watchdog = :sys.get_state(poller, @state_timeout).poll_stall_timer_ref
+    assert is_integer(Process.read_timer(watchdog))
+
+    send(reader, :release_ls)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > cycles end)
+    assert Process.read_timer(watchdog) == false
+    state = :sys.get_state(poller, @state_timeout)
     assert state.poll_check_in_progress == false
     assert state.poll_token == nil
     assert state.poll_task_pid == nil
@@ -1313,14 +1368,10 @@ defmodule Shuttle.PollerTest do
 
     assert Poller.snapshot(poller).poll_health == %{
              state: "idle",
-             stall_timeout_ms: 30,
+             stall_timeout_ms: 600_000,
              stalls: 0,
              last_stalled_at: nil
            }
-
-    cycles = state.poll_cycles
-    Process.sleep(60)
-    assert :sys.get_state(poller).poll_cycles == cycles
   end
 
   test "repeated stalled reads advance the poller and supersede late replies" do
@@ -1338,12 +1389,13 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
+    assert wait_until(fn -> is_pid(:sys.get_state(poller, @state_timeout).poll_task_pid) end)
 
-    %{poll_task_pid: first_task, poll_token: abandoned_token} = :sys.get_state(poller)
+    %{poll_task_pid: first_task, poll_token: abandoned_token} =
+      :sys.get_state(poller, @state_timeout)
 
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
 
              state.poll_stalls >= 1 and is_pid(state.poll_task_pid) and
                state.poll_task_pid != first_task
@@ -1351,10 +1403,10 @@ defmodule Shuttle.PollerTest do
 
     assert wait_until(fn -> not Process.alive?(first_task) end)
 
-    second_task = :sys.get_state(poller).poll_task_pid
+    second_task = :sys.get_state(poller, @state_timeout).poll_task_pid
 
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
 
              state.poll_stalls >= 2 and is_pid(state.poll_task_pid) and
                state.poll_task_pid != second_task
@@ -1373,19 +1425,19 @@ defmodule Shuttle.PollerTest do
     # such a cycle.
     MockRunner.set_ls_delay(60_000)
     :sys.replace_state(poller, &%{&1 | stall_timeout_ms: 600_000})
-    token_at_swap = :sys.get_state(poller).poll_token
+    token_at_swap = :sys.get_state(poller, @state_timeout).poll_token
 
     assert wait_until(fn ->
-             state = :sys.get_state(poller)
+             state = :sys.get_state(poller, @state_timeout)
              is_pid(state.poll_task_pid) and state.poll_token not in [nil, token_at_swap]
            end)
 
     # Inject the first, abandoned cycle's reply. The current cycle remains
     # authoritative: its token stands and no cycle is counted as applied.
-    %{poll_token: current_token, poll_cycles: cycles} = :sys.get_state(poller)
+    %{poll_token: current_token, poll_cycles: cycles} = :sys.get_state(poller, @state_timeout)
     send(poller, {:poll_world, abandoned_token, {:error, :late_abandoned_cycle}})
     _ = Poller.snapshot(poller)
-    state = :sys.get_state(poller)
+    state = :sys.get_state(poller, @state_timeout)
     assert state.poll_token == current_token
     assert state.poll_cycles == cycles
   end
@@ -1405,13 +1457,13 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert wait_until(fn -> is_pid(:sys.get_state(poller).poll_task_pid) end)
+    assert wait_until(fn -> is_pid(:sys.get_state(poller, @state_timeout).poll_task_pid) end)
 
-    task_pid = :sys.get_state(poller).poll_task_pid
+    task_pid = :sys.get_state(poller, @state_timeout).poll_task_pid
     monitor = Process.monitor(poller)
     Process.exit(poller, :shutdown)
 
-    assert_receive {:DOWN, ^monitor, :process, ^poller, :shutdown}, 1_000
+    assert_receive {:DOWN, ^monitor, :process, ^poller, :shutdown}
     assert wait_until(fn -> not Process.alive?(task_pid) end)
   end
 
@@ -1428,8 +1480,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     commands = MockRunner.commands()
 
@@ -1453,8 +1504,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     commands = MockRunner.commands()
 
@@ -1485,9 +1535,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    # Flush the poll cycle through the GenServer mailbox.
-    _ = Poller.snapshot(poller)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -1531,8 +1579,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    _ = Poller.snapshot(poller)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -1568,7 +1615,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
     _ = Poller.snapshot(poller)
 
     assert wait_until(fn ->
@@ -1596,8 +1643,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -1673,21 +1719,8 @@ defmodule Shuttle.PollerTest do
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(150)
-
-    apply(:dbg, :stop_clear, [])
-
-    stat_calls =
-      Stream.repeatedly(fn ->
-        receive do
-          {:dbg_relay, msg} -> {:ok, msg}
-        after
-          0 -> :done
-        end
-      end)
-      |> Enum.take_while(&(&1 != :done))
-      |> Enum.map(fn {:ok, msg} -> msg end)
+    sync_poll_cycle!(poller)
+    stat_calls = drain_dbg_relay!(poller)
 
     refute Enum.any?(stat_calls, fn
              {:trace, _pid, :call, {File, :dir?, [^sentinel_dir]}} -> true
@@ -1741,8 +1774,7 @@ defmodule Shuttle.PollerTest do
     assert new_sessions.() == 1
 
     # Worker session ends while the document is still active (it did NOT self-close).
-    MockRunner.remove_tmux_session(session)
-    notify_worker_exit(poller, fiber_id)
+    end_worker_session(poller, fiber_id)
     # Flush the GenServer mailbox so the exit write lands before the disk read.
     _ = Poller.snapshot(poller)
 
@@ -1756,8 +1788,7 @@ defmodule Shuttle.PollerTest do
     # No loop: the next poll does NOT re-dispatch (now status:open anyway, and
     # filter_eligible would exclude it even if active). Session count stays at 1.
     # it explicitly. (Reverting the pinned guard flips this to a second launch.)
-    send(poller, :run_poll_cycle)
-    _ = Poller.snapshot(poller)
+    sync_poll_cycle!(poller)
     assert new_sessions.() == 1
   end
 
@@ -1794,8 +1825,7 @@ defmodule Shuttle.PollerTest do
     # The worker hands off cleanly (stamps handed_off_at strictly after dispatch),
     # then its session ends.
     write_handoff_marker(fiber_id, DateTime.add(DateTime.utc_now(), 60, :second))
-    MockRunner.remove_tmux_session(session)
-    notify_worker_exit(poller, fiber_id)
+    end_worker_session(poller, fiber_id)
     _ = Poller.snapshot(poller)
 
     # The document stays active — NOT parked to open (that's the dirty-exit path).
@@ -1805,7 +1835,7 @@ defmodule Shuttle.PollerTest do
 
     # And the next autonomous tick re-dispatches a fresh worker (clean handoff →
     # tick_kind_eligible?), so the session count climbs to 2.
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn -> new_sessions.() == 2 end),
            "a cleanly-handed-off pinned role must redispatch on the next tick"
@@ -1843,8 +1873,7 @@ defmodule Shuttle.PollerTest do
 
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
 
-    MockRunner.remove_tmux_session(FiberUid.session(fiber_id))
-    notify_worker_exit(poller, fiber_id)
+    end_worker_session(poller, fiber_id)
     _ = Poller.snapshot(poller)
 
     doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
@@ -2097,7 +2126,7 @@ defmodule Shuttle.PollerTest do
         boot_quarantine: true
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # Parked, not dispatched: the row lands in pending_launch with the
     # quarantine reason, and no tmux session is spawned.
@@ -2147,7 +2176,7 @@ defmodule Shuttle.PollerTest do
         boot_quarantine: true
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # Parked like any other candidate — no session spawned, quarantine intact.
     assert_eventually(fn ->
@@ -2189,7 +2218,7 @@ defmodule Shuttle.PollerTest do
     # Adopted as running while quarantined (not parked): observed-running now
     # carries this fiber's key, and nothing is in pending_launch.
     assert_eventually(fn ->
-      state = :sys.get_state(poller)
+      state = :sys.get_state(poller, @state_timeout)
       assert MapSet.member?(state.was_running, FiberUid.for(fiber_id))
       assert Enum.any?(state.running, fn {_k, m} -> Map.get(m, :fiber_id) == fiber_id end)
     end)
@@ -2200,7 +2229,7 @@ defmodule Shuttle.PollerTest do
     # (drops it from running, releases the claim) → the fiber is a candidate
     # again. Was-running membership survives the exit, so it re-dispatches.
     MockRunner.remove_tmux_session(session)
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -2251,7 +2280,7 @@ defmodule Shuttle.PollerTest do
         boot_quarantine: true
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert [%{fiber_id: ^fiber_id, state: "running"}] = Poller.snapshot(poller).eligible
@@ -2282,7 +2311,7 @@ defmodule Shuttle.PollerTest do
         boot_quarantine: true
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # Parked despite zero slots — the bookkeeping runs regardless of capacity.
     assert_eventually(fn ->
@@ -2293,7 +2322,7 @@ defmodule Shuttle.PollerTest do
     # map and the stale row drops out.
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "closed"}))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle(), "closed")
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert Poller.snapshot(poller).pending_launch == []
@@ -2314,7 +2343,7 @@ defmodule Shuttle.PollerTest do
         boot_quarantine: true
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
@@ -2354,7 +2383,7 @@ defmodule Shuttle.PollerTest do
 
     # First a poll parks it as a fresh launch (held): the autonomous tick's
     # parking is not slot-gated, so it runs even with 0 worker slots.
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert %{parked_at: _} = Map.get(Poller.parked_index(poller), fiber_id)
@@ -2435,8 +2464,8 @@ defmodule Shuttle.PollerTest do
     path
   end
 
-  defp start_quarantined_poller!(name) do
-    start_poller!(
+  defp start_quarantined_poller!(name, opts \\ []) do
+    [
       name: name,
       runner: MockRunner,
       poll_interval_ms: 60_000,
@@ -2444,7 +2473,9 @@ defmodule Shuttle.PollerTest do
       boot_quarantine: true,
       quarantine_auto_release: true,
       daemon_heartbeat_file: heartbeat_file()
-    )
+    ]
+    |> Keyword.merge(opts)
+    |> start_poller!()
   end
 
   # The fresh candidate every test below watches: parked while the hold stands,
@@ -2463,21 +2494,17 @@ defmodule Shuttle.PollerTest do
 
   # Did a worker actually launch for `fiber_id`? Read from the recorded commands
   # rather than the poller's state, so the check never waits on the GenServer
-  # that is busy doing the launching. The ceiling is generous (~15s) because
-  # that GenServer shells felt synchronously per candidate, which on a loaded
-  # host takes seconds — `wait_until` returns the instant the launch lands, so
-  # the ceiling costs a passing assertion nothing.
+  # that is busy doing the launching. That GenServer shells felt synchronously
+  # per candidate, which on a loaded host takes seconds; `wait_until`'s ceiling
+  # absorbs it and returns the instant the launch lands.
   defp assert_launched!(fiber_id) do
     session = FiberUid.session(fiber_id)
 
-    assert wait_until(
-             fn ->
-               Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-                 cmd == "tmux" and hd(args) == "new-session" and session in args
-               end)
-             end,
-             600
-           )
+    assert wait_until(fn ->
+             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session" and session in args
+             end)
+           end)
   end
 
   # Both directions assert on the SAME two observables, so a hold and a release
@@ -2498,6 +2525,24 @@ defmodule Shuttle.PollerTest do
     snap
   end
 
+  # Kill `poller` hard, then stand its last heartbeat in for a long,
+  # healthy-looking uptime that ended seconds ago, with `fields` merged over.
+  defp hard_kill_after_long_run!(poller, fields \\ %{}) do
+    ref = Process.monitor(poller)
+    Process.exit(poller, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^poller, :killed}
+
+    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
+    now = System.system_time(:millisecond)
+
+    record =
+      hb
+      |> Map.merge(%{"at" => now - 4_000, "booted_at" => now - 1_800_000})
+      |> Map.merge(fields)
+
+    File.write!(heartbeat_file(), Jason.encode!(record))
+  end
+
   test "a fast bounce with its workers still alive auto-releases the boot quarantine" do
     # The whole point: the daemon was killed seconds ago, its worker is still in
     # tmux and gets adopted, so the fresh candidate launches without a human.
@@ -2513,7 +2558,7 @@ defmodule Shuttle.PollerTest do
     # Nudge a cycle rather than relying on the boot tick alone, and nudge it
     # with a message rather than a call: the assertions below must not queue
     # behind the poller while it is shelling felt to launch.
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # The launch itself is the proof the hold is off, and reading it from the
     # recorded commands never waits on the busy poller.
@@ -2531,7 +2576,7 @@ defmodule Shuttle.PollerTest do
     write_heartbeat!()
 
     {:ok, poller} = start_quarantined_poller!(:test_poller_hb_idle)
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_launched!(fresh_id)
     assert hb_snapshot(poller).boot_quarantine == false
@@ -2551,24 +2596,8 @@ defmodule Shuttle.PollerTest do
       assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
     end)
 
-    ref = Process.monitor(first)
-    Process.exit(first, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
-
-    # Stand in for a long, healthy-looking uptime right up to the kill.
-    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
-    now = System.system_time(:millisecond)
-
-    File.write!(
-      heartbeat_file(),
-      Jason.encode!(%{
-        hb
-        | "at" => now - 4_000,
-          "booted_at" => now - 1_800_000,
-          # A different VM, so the pid check is not what holds here.
-          "os_pid" => "0"
-      })
-    )
+    # A different VM, so the pid check is not what holds here.
+    hard_kill_after_long_run!(first, %{"os_pid" => "0"})
 
     {:ok, second} = start_quarantined_poller!(:test_poller_hb_launder_2)
     send(second, :run_poll_cycle)
@@ -2589,22 +2618,7 @@ defmodule Shuttle.PollerTest do
       assert {:ok, %{"held" => true}} = DaemonHeartbeat.read(heartbeat_file())
     end)
 
-    ref = Process.monitor(first)
-    Process.exit(first, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
-
-    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
-    now = System.system_time(:millisecond)
-
-    File.write!(
-      heartbeat_file(),
-      Jason.encode!(%{
-        hb
-        | "at" => now - 4_000,
-          "booted_at" => now - 1_800_000,
-          "os_pid" => "0"
-      })
-    )
+    hard_kill_after_long_run!(first, %{"os_pid" => "0"})
 
     MockRunner.set_contract_level(Integer.to_string(Shuttle.Contract.expected_level()))
     {:ok, second} = start_quarantined_poller!(:test_poller_hb_skew_release_2)
@@ -2624,17 +2638,7 @@ defmodule Shuttle.PollerTest do
       assert {:ok, %{"held" => false}} = DaemonHeartbeat.read(heartbeat_file())
     end)
 
-    ref = Process.monitor(first)
-    Process.exit(first, :kill)
-    assert_receive {:DOWN, ^ref, :process, ^first, :killed}
-
-    {:ok, hb} = DaemonHeartbeat.read(heartbeat_file())
-    now = System.system_time(:millisecond)
-
-    File.write!(
-      heartbeat_file(),
-      Jason.encode!(%{hb | "at" => now - 4_000, "booted_at" => now - 1_800_000})
-    )
+    hard_kill_after_long_run!(first)
 
     MockRunner.reset()
     fresh_candidate!(fiber_id)
@@ -2669,166 +2673,124 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  test "a gracefully stopped previous incarnation (stop marker) still quarantines" do
+  # Every way the evidence can fall short of a fast bounce, one row each, all
+  # judged by the same act and the same observables (`assert_held!/2`, then
+  # the parked row's reason, the contract verdict and whether the boot scan
+  # completed). A row arranges only what differs from a releasable boot: the
+  # `heartbeat` on disk (fields merged over `write_heartbeat!/1`'s, with times
+  # given as ms before now; `:missing`; or a raw `{:body, _}`), a stop marker
+  # beside it, the Poller's own options, and what the runner reports. Its
+  # `expect` overrides `@held_expectations` where it differs from a plain hold.
+  @held_expectations [
+    reason: ~r/\Aboot quarantine — awaiting release\z/,
+    contract_ok: true,
+    adopted?: true
+  ]
+
+  @unreleasable_boots [
     # A deploy or operator restart: fresh, released, long-run — everything a
     # hard kill would look like, except the stop marker its SIGTERM left.
-    fiber_id = fresh_candidate!("tests/hb-stopped")
-    path = write_heartbeat!()
-    :ok = DaemonHeartbeat.mark_stopped(path)
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stopped)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a host that has not opted in holds even a provable hard-kill bounce" do
-    fiber_id = fresh_candidate!("tests/hb-opt-out")
-    write_heartbeat!()
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_hb_opt_out,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()],
-        boot_quarantine: true,
-        quarantine_auto_release: false,
-        daemon_heartbeat_file: heartbeat_file()
-      )
-
-    send(poller, :run_poll_cycle)
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a stale heartbeat (a real outage) still quarantines" do
-    fiber_id = fresh_candidate!("tests/hb-stale")
-    now = System.system_time(:millisecond)
+    {"a gracefully stopped previous incarnation (stop marker)", stop_marker: true},
+    {"a host that has not opted in, even on a provable hard-kill bounce",
+     poller: [quarantine_auto_release: false]},
     # Five minutes of silence: far past the 60s grace, so the daemon has no
     # evidence the gap was short.
-    write_heartbeat!(%{"at" => now - 300_000})
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_stale)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a crash loop (fresh heartbeat, short-lived previous incarnation) still quarantines" do
+    {"a stale heartbeat (a real outage)", heartbeat: %{"at" => 300_000}},
     # The case freshness CANNOT catch: a daemon dying every few seconds has a
     # heartbeat that is always fresh. The recorded boot time is what exposes it.
-    fiber_id = fresh_candidate!("tests/hb-crash-loop")
-    now = System.system_time(:millisecond)
-    at = now - 2_000
-    write_heartbeat!(%{"at" => at, "booted_at" => at - 10_000, "boots" => [at - 10_000]})
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_crash_loop)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "too many recent boots still quarantines even when each incarnation looked healthy" do
+    {"a crash loop (fresh heartbeat, short-lived previous incarnation)",
+     heartbeat: %{"at" => 2_000, "booted_at" => 12_000, "boots" => [12_000]}},
     # The coarse brake: every incarnation lived just past the healthy-run
     # threshold, so the per-incarnation check passes — but the daemon has come
-    # back five times in ten minutes (this boot included), which is a human's problem, not new work's.
-    fiber_id = fresh_candidate!("tests/hb-churn")
-    now = System.system_time(:millisecond)
-    at = now - 3_000
-
-    write_heartbeat!(%{
-      "at" => at,
-      "booted_at" => at - 100_000,
-      "boots" => [at - 400_000, at - 300_000, at - 200_000, at - 100_000]
-    })
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_churn)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a heartbeat whose recorded workers are gone still quarantines" do
+    # back five times in ten minutes (this boot included), which is a human's
+    # problem, not new work's.
+    {"too many recent boots, even when each incarnation looked healthy",
+     heartbeat: %{
+       "at" => 3_000,
+       "booted_at" => 103_000,
+       "boots" => [403_000, 303_000, 203_000, 103_000]
+     }},
     # Fresh and loop-free, but the workers it vouched for are not in tmux — so
     # something ended them too, and this is not the fast bounce it looks like.
     # Continuity is established by adoption, never by trusting the file.
-    fiber_id = fresh_candidate!("tests/hb-ghost-workers")
-    write_heartbeat!(%{"workers" => ["tests/hb-ghost"]})
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_ghost)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a missing heartbeat file still quarantines (fail closed)" do
-    fiber_id = fresh_candidate!("tests/hb-missing")
-    refute File.exists?(heartbeat_file())
-
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_missing)
-    send(poller, :run_poll_cycle)
-
-    assert_held!(poller, fiber_id)
-  end
-
-  test "a boot whose tmux scan is unknown holds even with a releasable heartbeat" do
+    {"a heartbeat whose recorded workers are gone",
+     heartbeat: %{"workers" => ["tests/hb-ghost"]}},
+    {"a missing heartbeat file (fail closed)", heartbeat: :missing},
+    # A kill mid-write is exactly what this daemon is exposed to, so the parse
+    # has to survive garbage — and a file that says the right keys with the
+    # wrong types is no better evidence than one that says nothing.
+    {"a truncated heartbeat file", heartbeat: {:body, ~s({"v":1,"at":17)}},
+    {"a heartbeat that is not an object", heartbeat: {:body, ~s(["at", 17])}},
+    {"a heartbeat with the right keys of the wrong types",
+     heartbeat: {:body, ~s({"v":1,"at":"soon","booted_at":null,"workers":"nope"})}},
+    {"an empty heartbeat file", heartbeat: {:body, ""}},
     # An empty recorded set is vacuously continuous, so the verdict alone would
     # release. It must not: without a completed adoption scan the daemon has not
     # observed what is live, and the `adopted?` guard fails the release closed.
-    MockRunner.set_tmux_server_missing(true)
-    MockRunner.set_ps_result({"ps: boom", 1})
-    fiber_id = fresh_candidate!("tests/hb-scan-unknown")
-    write_heartbeat!()
+    {"a boot whose tmux scan is unknown",
+     runner: [tmux_server_missing: true, ps_fails: true], expect: [adopted?: false]},
+    # Skew has no release endpoint by design: every shelled write is suspect, so
+    # the auto-release must not become a back door into dispatching under one.
+    # It names itself over the quarantine it rides on: the more actionable fix.
+    {"a contract skew",
+     runner: [contract_skew: true],
+     expect: [reason: ~r/\Acontract skew — /, contract_ok: false]}
+  ]
 
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_scan_unknown)
-    refute :sys.get_state(poller).adopted?
+  for {{label, row}, index} <- Enum.with_index(@unreleasable_boots) do
+    @row row
+    @index index
+    test "the boot quarantine holds on #{label}" do
+      fiber_id = fresh_candidate!("tests/hb-hold-#{@index}")
+      arrange_unreleasable_boot!(@row)
 
-    # Force a cycle and wait for it to park the candidate: the hold is observed
-    # doing its job, not merely set.
-    send(poller, :run_poll_cycle)
-    assert_held!(poller, fiber_id)
-  end
+      {:ok, poller} =
+        start_quarantined_poller!(
+          :"test_poller_hb_hold_#{@index}",
+          Keyword.get(@row, :poller, [])
+        )
 
-  test "a truncated or malformed heartbeat file still quarantines without crashing the poller" do
-    # A kill mid-write is exactly what this daemon is exposed to, so the parse
-    # has to survive garbage — and a file that says the right keys with the wrong
-    # types is no better evidence than one that says nothing.
-    for {label, body} <- [
-          {:truncated, ~s({"v":1,"at":17)},
-          {:not_an_object, ~s(["at", 17])},
-          {:wrong_types, ~s({"v":1,"at":"soon","booted_at":null,"workers":"nope"})},
-          {:empty, ""}
-        ] do
-      MockRunner.reset()
-      fiber_id = fresh_candidate!("tests/hb-malformed-#{label}")
-      File.write!(heartbeat_file(), body)
+      sync_poll_cycle!(poller)
 
-      {:ok, poller} = start_quarantined_poller!(:"test_poller_hb_malformed_#{label}")
-      send(poller, :run_poll_cycle)
-
-      assert_held!(poller, fiber_id)
+      snap = assert_held!(poller, fiber_id)
       assert Process.alive?(poller)
+
+      expect = Keyword.merge(@held_expectations, Keyword.get(@row, :expect, []))
+      assert [%{reason: reason}] = snap.pending_launch
+      assert reason =~ expect[:reason]
+      assert snap.contract.ok == expect[:contract_ok]
+      assert :sys.get_state(poller, @state_timeout).adopted? == expect[:adopted?]
     end
   end
 
-  test "a contract skew holds even with an otherwise-auto-releasable heartbeat" do
-    # Skew has no release endpoint by design: every shelled write is suspect, so
-    # the auto-release must not become a back door into dispatching under one.
-    MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
-    fiber_id = fresh_candidate!("tests/hb-skew")
-    write_heartbeat!()
+  defp arrange_unreleasable_boot!(row) do
+    runner = Keyword.get(row, :runner, [])
+    if runner[:tmux_server_missing], do: MockRunner.set_tmux_server_missing(true)
+    if runner[:ps_fails], do: MockRunner.set_ps_result({"ps: boom", 1})
 
-    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_skew)
-    send(poller, :run_poll_cycle)
+    if runner[:contract_skew],
+      do: MockRunner.set_contract_level(Integer.to_string(skewed_contract_level()))
 
-    assert_eventually(fn ->
-      assert [%{fiber_id: ^fiber_id, reason: reason}] = hb_snapshot(poller).pending_launch
-      assert reason =~ "contract skew"
-    end)
+    case Keyword.get(row, :heartbeat, %{}) do
+      :missing ->
+        refute File.exists?(heartbeat_file())
 
-    snap = hb_snapshot(poller)
-    assert snap.contract.ok == false
-    assert snap.boot_quarantine == true
+      {:body, body} ->
+        File.write!(heartbeat_file(), body)
+
+      %{} = ago ->
+        now = System.system_time(:millisecond)
+
+        ago
+        |> Map.new(fn
+          {key, ms} when key in ["at", "booted_at"] -> {key, now - ms}
+          {"boots", boots} -> {"boots", Enum.map(boots, &(now - &1))}
+          other -> other
+        end)
+        |> write_heartbeat!()
+    end
+
+    if row[:stop_marker], do: :ok = DaemonHeartbeat.mark_stopped(heartbeat_file())
   end
 
   test "the daemon writes its own heartbeat while healthy" do
@@ -2857,11 +2819,15 @@ defmodule Shuttle.PollerTest do
     assert_eventually(fn ->
       assert {:ok, hb} = Shuttle.DaemonHeartbeat.read(heartbeat_file())
       # This incarnation's own boot time, appended to the inherited ring.
-      assert hb["boots"] == [previous_boot, :sys.get_state(poller).daemon_booted_at]
-      assert hb["booted_at"] == :sys.get_state(poller).daemon_booted_at
+      assert hb["boots"] == [
+               previous_boot,
+               :sys.get_state(poller, @state_timeout).daemon_booted_at
+             ]
+
+      assert hb["booted_at"] == :sys.get_state(poller, @state_timeout).daemon_booted_at
       assert FiberUid.for(live_id) in hb["workers"]
       # Stamped with this daemon's fleet identity and this machine's node name.
-      assert hb["host"] == :sys.get_state(poller).own_host_id
+      assert hb["host"] == :sys.get_state(poller, @state_timeout).own_host_id
       assert hb["node"] == Shuttle.DaemonHeartbeat.node_name()
       assert hb["os_pid"] == System.pid()
       # And it keeps writing: `at` advances past the boot write.
@@ -2905,7 +2871,7 @@ defmodule Shuttle.PollerTest do
              reason: nil
            }
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -2938,7 +2904,7 @@ defmodule Shuttle.PollerTest do
     assert reason =~ "expected contract level #{level}"
     assert reason =~ "CLI reports #{skewed}"
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # Held, not dispatched: parked as a pending_launch with the skew reason,
     # and no tmux session spawned — same shape as a boot-quarantine park.
@@ -2975,7 +2941,7 @@ defmodule Shuttle.PollerTest do
     level = Shuttle.Contract.expected_level()
     assert %{expected: ^level, ok: false} = Poller.snapshot(poller).contract
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).pending_launch
@@ -3005,7 +2971,7 @@ defmodule Shuttle.PollerTest do
       )
 
     assert_eventually(fn ->
-      state = :sys.get_state(poller)
+      state = :sys.get_state(poller, @state_timeout)
       assert MapSet.member?(state.was_running, FiberUid.for(fiber_id))
       assert Enum.any?(state.running, fn {_k, m} -> Map.get(m, :fiber_id) == fiber_id end)
     end)
@@ -3013,7 +2979,7 @@ defmodule Shuttle.PollerTest do
     assert Poller.snapshot(poller).pending_launch == []
 
     MockRunner.remove_tmux_session(session)
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -3071,8 +3037,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -3115,7 +3080,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # The schedule-derived snapshot state is scheduled or due (cron + now), never
     # a review-derived "review"/"accepted".
@@ -3159,7 +3124,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert [%{fiber_id: ^fiber_id, state: "running"}] = Poller.snapshot(poller).eligible
@@ -3199,8 +3164,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -3237,7 +3201,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     query_opts = [felt_stores: [MockRunner.felt_root()], runner: MockRunner]
 
@@ -3289,8 +3253,7 @@ defmodule Shuttle.PollerTest do
     armed = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md")
     assert armed =~ "status: active"
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(75)
+    sync_poll_cycle!(poller)
 
     # Still active after the poll — nothing clobbers the document back to awaiting.
     assert File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/standing-accept-sticks.md") =~
@@ -3329,7 +3292,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [store]
       )
 
-    assert wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).document_cache_ready end)
 
     assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
 
@@ -3378,21 +3341,19 @@ defmodule Shuttle.PollerTest do
 
     # Hold the next poll inside its read-only felt walk; its snapshot still sees
     # the role as the closed (awaiting) document.
-    MockRunner.set_ls_delay(400)
+    settle_poller!(poller)
+    cycles = :sys.get_state(poller, @state_timeout).poll_cycles
+    MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
-
-    assert wait_until(fn ->
-             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "felt" and Enum.take(args, 2) == ["ls", "--json"]
-             end)
-           end)
+    assert_receive {:ls_held, reader}
 
     # Accept while the poll is still reading (the GenServer stays responsive).
     assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
     assert File.read!(doc_path) =~ "status: active"
 
-    # Let the held poll complete and apply against current state.
-    Process.sleep(500)
+    # The held poll completes and applies against current state.
+    send(reader, :release_ls)
+    assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > cycles end)
 
     assert File.read!(doc_path) =~ "status: active",
            "a poll completing after the accept reverted the acceptance to awaiting"
@@ -3443,20 +3404,12 @@ defmodule Shuttle.PollerTest do
 
     assert String.starts_with?(run_id, "adhoc-")
 
-    MockRunner.remove_tmux_session(FiberUid.session(fiber_id))
-    notify_worker_exit(poller, fiber_id)
-    Process.sleep(50)
+    end_worker_session(poller, fiber_id)
+    sync_poll_cycle!(poller)
 
-    send(poller, :run_poll_cycle)
-
-    assert_eventually(fn ->
-      new_session_count =
-        MockRunner.commands()
-        |> Enum.filter(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
-        |> length()
-
-      assert new_session_count == 1
-    end)
+    assert MockRunner.commands()
+           |> Enum.filter(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
+           |> length() == 1
   end
 
   test "ad-hoc dispatch of an awaiting standing role spawns" do
@@ -3496,6 +3449,8 @@ defmodule Shuttle.PollerTest do
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
       )
+
+    settle_poller!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -3880,7 +3835,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert [%{fiber_id: "tests/standing-due", state: "running", run_id: run_id}] =
@@ -3911,20 +3866,12 @@ defmodule Shuttle.PollerTest do
       "closed"
     )
 
-    MockRunner.remove_tmux_session(FiberUid.session("tests/standing-due"))
-    notify_worker_exit(poller, "tests/standing-due")
-    Process.sleep(50)
+    end_worker_session(poller, "tests/standing-due")
+    sync_poll_cycle!(poller)
 
-    send(poller, :run_poll_cycle)
-
-    assert_eventually(fn ->
-      new_session_count =
-        MockRunner.commands()
-        |> Enum.filter(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
-        |> length()
-
-      assert new_session_count == 1
-    end)
+    assert MockRunner.commands()
+           |> Enum.filter(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
+           |> length() == 1
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "felt" and Enum.take(args, 2) == ["standing", "review"]
@@ -4057,7 +4004,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert wait_until(fn ->
              length(Poller.snapshot(poller).standing_roles) == 2
@@ -4081,8 +4028,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     commands = MockRunner.commands()
 
@@ -4120,7 +4066,7 @@ defmodule Shuttle.PollerTest do
           felt_stores: [MockRunner.felt_root()]
         )
 
-      send(poller, :run_poll_cycle)
+      sync_poll_cycle!(poller)
 
       assert_eventually(fn ->
         commands = MockRunner.commands()
@@ -4147,8 +4093,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     # Should not create a new session
     new_session_count =
@@ -4177,7 +4122,7 @@ defmodule Shuttle.PollerTest do
       )
 
     # Dispatch
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       snap1 = Poller.snapshot(poller)
@@ -4186,8 +4131,7 @@ defmodule Shuttle.PollerTest do
 
     # Simulate worker exit (tmux session dies). The claim is released; the fiber
     # is no longer running, and the snapshot carries no retry queue.
-    MockRunner.remove_tmux_session(FiberUid.session("tests/haiku-retry"))
-    notify_worker_exit(poller, "tests/haiku-retry")
+    end_worker_session(poller, "tests/haiku-retry")
 
     assert_eventually(fn ->
       snap2 = Poller.snapshot(poller)
@@ -4196,16 +4140,13 @@ defmodule Shuttle.PollerTest do
     end)
 
     # The next poll re-dispatches it: a second new-session call.
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
-    assert wait_until(
-             fn ->
-               MockRunner.commands()
-               |> Enum.count(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
-               |> Kernel.==(2)
-             end,
-             80
-           )
+    assert wait_until(fn ->
+             MockRunner.commands()
+             |> Enum.count(fn {cmd, args} -> cmd == "tmux" and hd(args) == "new-session" end)
+             |> Kernel.==(2)
+           end)
   end
 
   test "running snapshot keys the in-memory registry and rows by intrinsic uid" do
@@ -4227,7 +4168,7 @@ defmodule Shuttle.PollerTest do
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, [])
 
     # The in-memory running registry is keyed by uid.
-    state = :sys.get_state(poller)
+    state = :sys.get_state(poller, @state_timeout)
     assert Map.has_key?(state.running, uid)
     refute Map.has_key?(state.running, fiber_id)
 
@@ -4309,8 +4250,8 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    assert wait_until(fn -> new_session_scripts() != [] end, 80)
+    sync_poll_cycle!(poller)
+    assert wait_until(fn -> new_session_scripts() != [] end)
 
     script = new_session_scripts() |> List.last() |> File.read!()
     assert script =~ "--resume"
@@ -4343,8 +4284,8 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    assert wait_until(fn -> new_session_scripts() != [] end, 80)
+    sync_poll_cycle!(poller)
+    assert wait_until(fn -> new_session_scripts() != [] end)
 
     script = new_session_scripts() |> List.last() |> File.read!()
     assert script =~ "Fiber: #{fiber_id}"
@@ -4371,7 +4312,7 @@ defmodule Shuttle.PollerTest do
       )
 
     # Wait for dispatch to install the watcher before closing the fixture.
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert %{pid: watcher} = Poller.worker_status(poller, "tests/haiku-close")
@@ -4413,7 +4354,7 @@ defmodule Shuttle.PollerTest do
       )
 
     # Wait for the autonomous tick to dispatch and install the watcher.
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert %{pid: watcher} = Poller.worker_status(poller, fiber_id)
@@ -4432,7 +4373,7 @@ defmodule Shuttle.PollerTest do
     # handoff` call — closed itself is now the deliberate-exit signal.
     MockRunner.set_fiber(fiber_id, Map.put(dispatched_fiber, "status", "closed"))
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # The reap here only stops the daemon's watcher (the closed-externally
     # branch never kills the worker's own tmux session — a real worker ends
@@ -4460,67 +4401,58 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "poller adopts orphan tmux sessions on startup" do
-    MockRunner.set_shuttle("tests/orphan", oneshot_shuttle())
-    MockRunner.add_tmux_session(FiberUid.session("tests/orphan"))
+  # Startup adoption recognizes every live worker session by the
+  # `<leaf>-<uid>-shuttle` name its fiber resolves to, whatever the fiber id
+  # looks like and whatever else the listing prints. The boot quarantine is on,
+  # so a fresh launch cannot stand in for adoption: the only way a row's fiber
+  # shows running in its live session is the boot scan having recognized it.
+  @adoptable_orphans [
+    {"a fiber's worker", "tests/orphan", []},
+    {"a uid-carrying fiber's worker under the uid-keyed session", "tests/orphan-uid",
+     uid: "01KTHDNZS287ZSSG8X8V59XKWB"},
+    {"uid workers when Shuttle listing warnings go to stderr", "life/french/daily-practice",
+     uid: "01KTHDNZS287ZSSG8X8V59XKWB",
+     shuttle: "kind: pinned\nagent: claude-opus\n",
+     ls_stderr_warning: true},
+    {"a literal hyphenated fiber id", "ai-futures/shuttle/constitution-shuttle-standalone",
+     shuttle: "enabled: true\nkind: oneshot\nagent: claude-sonnet\n"}
+  ]
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_9,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
+  for {{label, fiber_id, row}, index} <- Enum.with_index(@adoptable_orphans) do
+    @fiber_id fiber_id
+    @row row
+    @index index
+    test "poller adopts on startup #{label}" do
+      fiber_id = @fiber_id
+      uid = Keyword.get(@row, :uid, FiberUid.for(fiber_id))
+      session = Dispatcher.session_name(fiber_id, uid)
+      MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid}))
+      MockRunner.set_shuttle(fiber_id, Keyword.get(@row, :shuttle, oneshot_shuttle()))
+      MockRunner.set_ls_stderr_warning(Keyword.get(@row, :ls_stderr_warning, false))
+      MockRunner.add_tmux_session(session)
 
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-      assert length(snap.eligible) == 1
-      assert hd(snap.eligible).fiber_id == "tests/orphan"
-    end)
-  end
+      {:ok, poller} =
+        start_poller!(
+          name: :"test_poller_adopt_orphan_#{@index}",
+          runner: MockRunner,
+          poll_interval_ms: 60_000,
+          felt_stores: [MockRunner.felt_root()],
+          boot_quarantine: true
+        )
 
-  test "poller adopts a uid-carrying fiber's worker under the new uid-keyed session" do
-    fiber_id = "tests/orphan-uid"
-    uid = "01KTHDNZS287ZSSG8X8V59XKWB"
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid}))
-    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
+      assert_eventually(fn ->
+        snap = Poller.snapshot(poller)
 
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_orphan_uid,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
+        assert [%{fiber_id: ^fiber_id, state: "running", tmux_session: ^session}] =
+                 snap.eligible
 
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-      assert Enum.any?(snap.eligible, &(&1.fiber_id == fiber_id and &1.state == "running"))
-    end)
-  end
+        assert snap.pending_launch == []
+      end)
 
-  test "poller adopts uid workers when Shuttle listing warnings go to stderr" do
-    fiber_id = "life/french/daily-practice"
-    uid = "01KTHDNZS287ZSSG8X8V59XKWB"
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
-    MockRunner.set_shuttle(fiber_id, "kind: pinned\nagent: claude-opus\n", "active")
-    MockRunner.set_ls_stderr_warning(true)
-    MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_orphan_stderr_warning,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-
-      assert Enum.any?(snap.eligible, &(&1.fiber_id == fiber_id and &1.state == "running"))
-    end)
+      refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session"
+             end)
+    end
   end
 
   test "a fiber without an intrinsic id is refused and shown blocked, naming the fix" do
@@ -4561,7 +4493,7 @@ defmodule Shuttle.PollerTest do
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, force: true)
     assert session == FiberUid.session(fiber_id)
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       refute Enum.any?(Poller.snapshot(poller).blocked, &(&1.fiber_id == fiber_id))
@@ -4660,8 +4592,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(150)
+    sync_poll_cycle!(poller)
 
     snap = Poller.snapshot(poller)
     assert snap.claimed_count == 0
@@ -4690,8 +4621,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(150)
+    sync_poll_cycle!(poller)
 
     snap = Poller.snapshot(poller)
     assert snap.eligible == []
@@ -4747,8 +4677,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     snap = Poller.snapshot(poller)
     assert snap.eligible == []
@@ -4795,9 +4724,9 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
-    assert wait_until(fn -> File.read!(doc_path) =~ "status: closed" end, 80)
+    assert wait_until(fn -> File.read!(doc_path) =~ "status: closed" end)
 
     # No worker was spawned — the role was marked awaiting, not dispatched.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -4840,19 +4769,16 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # Self-heal fired: a `shuttle mark-runtime --handed-off-at` write was
     # issued to conclude the phantom run.
-    assert wait_until(
-             fn ->
-               Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-                 cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
-                   "--handed-off-at" in args
-               end)
-             end,
-             80
-           )
+    assert wait_until(fn ->
+             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
+                 "--handed-off-at" in args
+             end)
+           end)
 
     # The document was NEVER closed — the role stays armed.
     assert File.read!(doc_path) =~ "status: active"
@@ -4899,10 +4825,10 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # Parked back to the strip.
-    assert wait_until(fn -> File.read!(doc_path) =~ "status: open" end, 80)
+    assert wait_until(fn -> File.read!(doc_path) =~ "status: open" end)
 
     # No self-heal write: stamping handed_off_at would arm the relaunch trigger.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -4949,8 +4875,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(150)
+    sync_poll_cycle!(poller)
 
     # The scheduled role's document is untouched: still armed, never closed.
     assert File.read!(doc_path) =~ "status: active"
@@ -4996,8 +4921,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(200)
+    sync_poll_cycle!(poller)
 
     # The role's document is untouched: still armed, never flipped to closed.
     assert File.read!(doc_path) =~ "status: active"
@@ -5026,8 +4950,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(150)
+    sync_poll_cycle!(poller)
 
     # Closed is the don't-re-fire gate: no new session is spawned.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
@@ -5115,12 +5038,14 @@ defmodule Shuttle.PollerTest do
 
     # The tmux session is still alive (the MockRunner tracks it across the
     # GenServer restart) — the restarted poller re-adopts it from the tmux scan.
+    # Its boot quarantine keeps a fresh dispatch from standing in for that.
     {:ok, restarted} =
       start_poller!(
         name: :test_poller_runtime_rehydrate_live_2,
         runner: MockRunner,
         poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true
       )
 
     assert wait_until(fn ->
@@ -5220,7 +5145,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     # tmux args: ["new-session", "-d", "-s", session, "-c", work_dir, "bash", "-l", script]
     # work_dir is at index 5
@@ -5260,8 +5185,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(100)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
@@ -5350,22 +5274,14 @@ defmodule Shuttle.PollerTest do
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
 
-    send(poller, :run_poll_cycle)
-    Process.sleep(150)
-
-    apply(:dbg, :stop_clear, [])
+    sync_poll_cycle!(poller)
 
     touched =
-      Stream.repeatedly(fn ->
-        receive do
-          {:dbg_relay, {:trace, _pid, :call, {_mod, _fun, [arg]}}} -> {:ok, to_string(arg)}
-          {:dbg_relay, _other} -> {:ok, ""}
-        after
-          0 -> :done
-        end
+      drain_dbg_relay!(poller)
+      |> Enum.flat_map(fn
+        {:trace, _pid, :call, {_mod, _fun, [arg]}} -> [to_string(arg)]
+        _other -> []
       end)
-      |> Enum.take_while(&(&1 != :done))
-      |> Enum.map(fn {:ok, arg} -> arg end)
       |> Enum.filter(fn arg -> Enum.any?(home_prefixes, &String.starts_with?(arg, &1)) end)
 
     assert touched == [],
@@ -5499,7 +5415,7 @@ defmodule Shuttle.PollerTest do
              sync_poll_cycle!(poller)
 
              running =
-               :sys.get_state(poller).running
+               :sys.get_state(poller, @state_timeout).running
                |> Enum.map(fn {_k, meta} -> meta.fiber_id end)
                |> MapSet.new()
 
@@ -5514,38 +5430,6 @@ defmodule Shuttle.PollerTest do
     sync_poll_cycle!(poller)
 
     assert drain.() == [], "a stable fleet must touch no project_dir at all"
-  end
-
-  test "poller adopts orphan sessions with literal hyphenated fiber ids" do
-    fiber_id = "ai-futures/shuttle/constitution-shuttle-standalone"
-    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-    fiber = make_fiber(fiber_id, %{"tags" => ["constitution", "codex"]})
-
-    MockRunner.set_fiber(
-      fiber_id,
-      Map.put(fiber, "shuttle", %{
-        "enabled" => true,
-        "kind" => "oneshot",
-        "agent" => "claude-sonnet",
-        "host" => "test-host"
-      })
-    )
-
-    MockRunner.add_tmux_session(FiberUid.session(fiber_id))
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_10,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    assert_eventually(fn ->
-      snap = Poller.snapshot(poller)
-      assert [%{fiber_id: ^fiber_id, tmux_session: session}] = snap.eligible
-      assert session == FiberUid.session(fiber_id)
-    end)
   end
 
   # Regression: a fiber with a shuttle: block but *no* constitution tag must be
@@ -5606,12 +5490,13 @@ defmodule Shuttle.PollerTest do
     assert session == FiberUid.session(slow_id)
     assert Poller.snapshot(poller).eligible |> Enum.any?(&(&1.fiber_id == slow_id))
 
-    # ...and the wait is that timeout, not GenServer's default: shrunk below a
-    # spawn's duration, the caller gives up first.
+    # ...and the wait is that timeout, not GenServer's default: shrunk well
+    # below a spawn's duration, the caller gives up first, at the timeout its
+    # exit names.
     Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 200)
-    MockRunner.set_new_session_delay(600)
+    MockRunner.set_new_session_delay(2_000)
 
-    assert {:timeout, {GenServer, :call, _}} =
+    assert {:timeout, {GenServer, :call, [_server, _msg, 200]}} =
              catch_exit(Poller.dispatch_fiber(poller, late_id, []))
   end
 
@@ -5627,9 +5512,9 @@ defmodule Shuttle.PollerTest do
     settle_poller!(poller)
     Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 100)
 
-    # A suspended Poller never answers. Each call must give up at the shrunk
-    # 100 ms, well inside the 2 s window; GenServer's 5 s default or the 30 s
-    # production value would still be waiting when the window closes.
+    # A suspended Poller never answers, so each call exits on its own timeout,
+    # and the exit names the timeout it waited: the shrunk 100 ms, not
+    # GenServer's 5 s default or the 30 s production value.
     :sys.suspend(poller)
 
     calls = [
@@ -5643,7 +5528,8 @@ defmodule Shuttle.PollerTest do
     for {name, call} <- calls do
       task = Task.async(fn -> catch_exit(call.()) end)
 
-      assert {:ok, {:timeout, {GenServer, :call, _}}} = Task.yield(task, 2_000),
+      assert {:ok, {:timeout, {GenServer, :call, [_server, _msg, 100]}}} =
+               Task.yield(task, 30_000),
              "#{name} did not give up at the configured timeout"
     end
   end
@@ -5888,7 +5774,7 @@ defmodule Shuttle.PollerTest do
     assert Poller.snapshot(poller).felt_stores == ["/tmp/host-a"]
 
     File.write!(config_path, Jason.encode!(%{"version" => 1, "felt_stores" => ["/tmp/host-c"]}))
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
     assert_eventually(fn ->
       assert Poller.snapshot(poller).felt_stores == ["/tmp/host-c"]
@@ -5965,17 +5851,14 @@ defmodule Shuttle.PollerTest do
     # session is noticed by reconciliation, the stale running entry clears, and
     # the same poll tick retries the active fiber under its canonical name.
     MockRunner.remove_tmux_session(session)
-    send(poller, :run_poll_cycle)
+    sync_poll_cycle!(poller)
 
-    assert wait_until(
-             fn ->
-               Enum.count(MockRunner.commands(), fn {cmd, args} ->
-                 cmd == "tmux" and hd(args) == "new-session" and Enum.at(args, 3) == session
-               end) > new_sessions_before and
-                 Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == id))
-             end,
-             80
-           )
+    assert wait_until(fn ->
+             Enum.count(MockRunner.commands(), fn {cmd, args} ->
+               cmd == "tmux" and hd(args) == "new-session" and Enum.at(args, 3) == session
+             end) > new_sessions_before and
+               Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == id))
+           end)
   end
 
   test "claim ledger records an explicit agent but never infers the fiber recipe" do
@@ -6125,8 +6008,7 @@ defmodule Shuttle.PollerTest do
 
     # Pre-claim, the capture session is invisible to the shuttle-session
     # machinery (not `-shuttle`-suffixed): a poll does not adopt or kill it.
-    send(poller, :run_poll_cycle)
-    Process.sleep(50)
+    sync_poll_cycle!(poller)
 
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "kill-session" and Enum.at(args, 2) =~ "capture-"
@@ -6177,6 +6059,15 @@ defmodule Shuttle.PollerTest do
 
   defp notify_worker_exit(poller, fiber_id) do
     %{pid: watcher, session: session} = Poller.worker_status(poller, fiber_id)
+    send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit})
+  end
+
+  # A worker's tmux session ends and its watcher reports the exit. The watcher
+  # identity is read while the session is still live: once it is gone, a
+  # watcher or poll cycle may observe that first and release the claim.
+  defp end_worker_session(poller, fiber_id) do
+    %{pid: watcher, session: session} = Poller.worker_status(poller, fiber_id)
+    MockRunner.remove_tmux_session(session)
     send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit})
   end
 end

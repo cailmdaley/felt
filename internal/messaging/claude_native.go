@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 const (
@@ -35,11 +37,11 @@ type claudeNativeRegistration struct {
 
 // RegisterClaudeNative records the receiver's own hook environment. It never
 // stores the child authentication token or launches another conversation.
-func RegisterClaudeNative(id, host, cwd, socket, transcript string, active bool) error {
+func RegisterClaudeNative(env *sysenv.Env, id, host, cwd, socket, transcript string, active bool) error {
 	if _, err := FormatAddress(host, "claude", id); err != nil {
 		return err
 	}
-	path := filepath.Join(mailboxDir("claude", id), "native.json")
+	path := filepath.Join(mailboxDir(env, "claude", id), "native.json")
 	if err := ensureDir(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
@@ -52,14 +54,14 @@ func RegisterClaudeNative(id, host, cwd, socket, transcript string, active bool)
 		return err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	old, oldErr := readClaudeNative(id)
+	old, oldErr := readClaudeNative(env, id)
 	if !active {
 		if oldErr != nil || old.Host != host || old.Socket != socket {
 			return nil
 		}
 		// Hooks carry no endpoint generation. A delayed SessionEnd cannot
 		// withdraw a still-live receiver that reused this native session id.
-		if claudeNativeLive(id, host) {
+		if claudeNativeLive(env, id, host) {
 			return nil
 		}
 		err := os.Remove(path)
@@ -103,9 +105,9 @@ func RegisterClaudeNative(id, host, cwd, socket, transcript string, active bool)
 	return mailboxWrite(path, b, false)
 }
 
-func readClaudeNative(id string) (claudeNativeRegistration, error) {
+func readClaudeNative(env *sysenv.Env, id string) (claudeNativeRegistration, error) {
 	var r claudeNativeRegistration
-	b, err := readBounded(filepath.Join(mailboxDir("claude", id), "native.json"), 16384)
+	b, err := readBounded(filepath.Join(mailboxDir(env, "claude", id), "native.json"), 16384)
 	if err == nil {
 		err = json.Unmarshal(b, &r)
 	}
@@ -202,12 +204,12 @@ const claudeRetryObservationTimeout = 2 * time.Second
 
 // refreshClaudeNativeReceipt scans only from the persisted send-time offset. It
 // observes transcript evidence and never connects to or writes to the receiver.
-func refreshClaudeNativeReceipt(ctx context.Context, req Request, stored record) (claudeReceiptRefresh, bool) {
+func refreshClaudeNativeReceipt(ctx context.Context, env *sysenv.Env, req Request, stored record) (claudeReceiptRefresh, bool) {
 	address, err := ParseAddress(req.Address)
 	if err != nil || address.Harness != "claude" || stored.TranscriptOffset == nil || *stored.TranscriptOffset < 0 || stored.ClaudeQueueContentHash == "" {
 		return claudeReceiptRefresh{}, false
 	}
-	registration, err := readClaudeNative(address.ID)
+	registration, err := readClaudeNative(env, address.ID)
 	if err != nil || registration.ID != address.ID || registration.Host != address.Host {
 		return claudeReceiptRefresh{}, false
 	}
@@ -243,8 +245,8 @@ func refreshClaudeNativeReceipt(ctx context.Context, req Request, stored record)
 
 // claudeNativeLive verifies that the registered receiver still owns its bound
 // endpoint. SessionEnd hooks use this when no generation identity is available.
-func claudeNativeLive(id, host string) bool {
-	r, err := readClaudeNative(id)
+func claudeNativeLive(env *sysenv.Env, id, host string) bool {
+	r, err := readClaudeNative(env, id)
 	if err != nil || r.ID != id || r.Host != host {
 		return false
 	}
@@ -258,8 +260,8 @@ func claudeNativeLive(id, host string) bool {
 	return true
 }
 
-func claudeNativeAvailable(id, host string) bool {
-	r, err := readClaudeNative(id)
+func claudeNativeAvailable(env *sysenv.Env, id, host string) bool {
+	r, err := readClaudeNative(env, id)
 	if err != nil || r.ID != id || r.Host != host {
 		return false
 	}
@@ -271,11 +273,11 @@ func claudeNativeAvailable(id, host string) bool {
 	return uint64(st.Dev) == r.Device && uint64(st.Ino) == r.Inode && r.PID > 0
 }
 
-func sendClaudeNativeWithMetadata(ctx context.Context, a Address, req Request) (Receipt, error, dedupMetadata) {
+func sendClaudeNativeWithMetadata(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error, dedupMetadata) {
 	preflight := func(detail string) (Receipt, error, dedupMetadata) {
 		return rejected(req, claudeNativeTransport, detail), errCode("preflight_failed", "%s", detail), dedupMetadata{}
 	}
-	r, err := readClaudeNative(a.ID)
+	r, err := readClaudeNative(env, a.ID)
 	if err != nil || r.ID != a.ID || r.Host != a.Host {
 		return preflight("Claude session has not registered a native receiver endpoint")
 	}

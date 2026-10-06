@@ -40,14 +40,12 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import * as api from './settingsApi.js'
 import {
-  chooseFolder,
   loadConfigFile,
   loadHostState,
   loadHosts,
-  releaseQuarantine,
   saveConfigFile,
-  setAgentEffort,
   type SettingsHost,
 } from './settingsApi.js'
 
@@ -238,75 +236,95 @@ describe('loadHosts', () => {
 // ── Where the origin rides ───────────────────────────────────────────────────
 
 describe('the origin on the wire', () => {
-  const query = (calls: Call[]): URLSearchParams => new URL(calls[0].url).searchParams
+  type Routed = [
+    name: keyof typeof api,
+    call: (host: SettingsHost) => Promise<unknown>,
+    wire: { method: 'GET' | 'POST'; path: string; body?: Record<string, unknown> },
+  ]
 
-  it('omits the parameter entirely for the local host', async () => {
-    // O2: `?origin=` is a name, and a blank name is not the same question as
-    // no name at all.
-    const calls = recorder(() => json({ id: 'stores', text: '{}' }))
-    await loadConfigFile(BASE, local, 'stores')
-    expect(calls[0].url).toBe(`${BASE}/api/v1/config/stores`)
-    expect(query(calls).has('origin')).toBe(false)
-  })
-
-  it('names the remote in the query on a read', async () => {
-    const calls = recorder(() => json({ id: 'stores', text: '{}' }))
-    await loadConfigFile(BASE, remote, 'stores')
-    expect(query(calls).get('origin')).toBe('candide')
-    expect(calls[0].method).toBe('GET')
-  })
-
-  it('moves it into the BODY on a write, leaving the path bare', async () => {
-    const calls = recorder(() => json({ id: 'stores', text: '{"a":1}' }))
-    await saveConfigFile(BASE, remote, 'stores', '{"a":1}')
-    expect(calls[0].method).toBe('POST')
-    expect(calls[0].url).toBe(`${BASE}/api/v1/config/stores`)
-    expect(calls[0].body).toEqual({ text: '{"a":1}', origin: 'candide' })
-  })
-
-  it('still states the origin on a local write, as the empty string', async () => {
-    // The inverse of O2, and deliberate: present-and-empty on a POST, absent
-    // on a GET. `toEqual` rather than `toMatchObject` so an extra key is a
-    // failure too — the body IS the address here.
-    const calls = recorder(() => json({ id: 'stores', text: '' }))
-    await saveConfigFile(BASE, local, 'stores', '')
-    expect(calls[0].body).toEqual({ text: '', origin: '' })
-  })
-
-  it('routes the folder dialog like everything else', async () => {
+  /** Every call addressed to a host, with what it sends besides the origin. */
+  const ROUTED: Routed[] = [
+    ['loadConfigIndex', (h) => api.loadConfigIndex(BASE, h), { method: 'GET', path: '/api/v1/config' }],
+    ['loadConfigFile', (h) => api.loadConfigFile(BASE, h, 'stores'), { method: 'GET', path: '/api/v1/config/stores' }],
+    ['loadAgents', (h) => api.loadAgents(BASE, h), { method: 'GET', path: '/api/v1/agents' }],
+    ['loadFleet', (h) => api.loadFleet(BASE, h), { method: 'GET', path: '/api/v1/fleet' }],
+    ['saveConfigFile', (h) => api.saveConfigFile(BASE, h, 'stores', '{"a":1}'),
+      { method: 'POST', path: '/api/v1/config/stores', body: { text: '{"a":1}' } }],
+    // An emptied file still sends its text: '' is the content, not an absence.
+    ['saveConfigFile', (h) => api.saveConfigFile(BASE, h, 'stores', ''),
+      { method: 'POST', path: '/api/v1/config/stores', body: { text: '' } }],
+    ['saveStores', (h) => api.saveStores(BASE, h, ['/x/loom']),
+      { method: 'POST', path: '/api/v1/felt-stores', body: { felt_stores: ['/x/loom'] } }],
+    ['saveProjects', (h) => api.saveProjects(BASE, h, ['/x/dev']),
+      { method: 'POST', path: '/api/v1/projects', body: { projects: ['/x/dev'] } }],
+    ['addProject', (h) => api.addProject(BASE, h, '/x/dev'),
+      { method: 'POST', path: '/api/v1/projects', body: { path: '/x/dev' } }],
     // A folder dialog is owner-routed too: only the daemon ON a machine can
-    // raise one there, so the origin is what decides WHICH screen it appears
-    // on. Which host may be asked at all is a separate question, answered by
-    // `nativeFolderPicker` at the call site — each host reports its own, so a
-    // remote with a desktop can say true and a headless node says false and
-    // gets a typed path instead.
-    const calls = recorder(() => json({ ok: true, path: '/home/x/dev/cmbx' }))
-    await chooseFolder(BASE, remote)
-    expect(calls[0].url).toBe(`${BASE}/api/v1/choose-folder`)
-    expect(calls[0].body).toEqual({ origin: 'candide' })
+    // raise one there, so the origin decides WHICH screen it appears on.
+    // Whether a host may be asked at all is `nativeFolderPicker`, at the call
+    // site.
+    ['chooseFolder', (h) => api.chooseFolder(BASE, h), { method: 'POST', path: '/api/v1/choose-folder', body: {} }],
+    ['setAgentEffort', (h) => api.setAgentEffort(BASE, h, 'claude-opus', 'high'),
+      { method: 'POST', path: '/api/v1/agents/effort', body: { id: 'claude-opus', effort: 'high' } }],
+    // null is the reset.
+    ['setAgentEffort', (h) => api.setAgentEffort(BASE, h, 'claude-opus', null),
+      { method: 'POST', path: '/api/v1/agents/effort', body: { id: 'claude-opus', effort: null } }],
+    ['saveRemote', (h) => api.saveRemote(BASE, h, { name: 'nibi', ssh: 'nibi' }),
+      { method: 'POST', path: '/api/v1/fleet/remotes', body: { name: 'nibi', ssh: 'nibi' } }],
+    ['removeRemote', (h) => api.removeRemote(BASE, h, 'nibi'),
+      { method: 'POST', path: '/api/v1/fleet/remotes', body: { name: 'nibi', remove: true } }],
+    ['runTunnels', (h) => api.runTunnels(BASE, h, 'install', 'nibi'),
+      { method: 'POST', path: '/api/v1/tunnels', body: { action: 'install', name: 'nibi' } }],
+    // The one write that changes what a daemon will DO rather than what it
+    // reads. Sent to the wrong machine it starts workers on it.
+    ['releaseQuarantine', (h) => api.releaseQuarantine(BASE, h),
+      { method: 'POST', path: '/api/v1/quarantine/release', body: {} }],
+  ]
 
-    const localCalls = recorder(() => json({ ok: true, path: '/Users/x/dev/felt' }))
-    await chooseFolder(BASE, local)
-    expect(localCalls[0].body).toEqual({ origin: '' })
+  /** The exported functions that name no host on the wire, each for a reason. */
+  const UNROUTED = new Set<keyof typeof api>([
+    'loadHosts', // the origins feed itself
+    'loadVersion', // this daemon's own build
+    'resetRemote', // addressed by the remote's name in the path
+    'loadHostState', // the hub's cached fan-out, read in one call
+    'DaemonRefusal', // the refusal type and its predicates, not requests
+    'isConflict',
+    'isUnavailable',
+  ])
+
+  it('rides in the query on a remote read, nowhere on a local one, and in every write’s body', async () => {
+    // O2: `?origin=` is a name, and a blank name is not the same question as
+    // no name at all — so a local read has no query. On a write the body IS
+    // the address, so `origin` is always there, `''` included, and the path
+    // stays bare. `toEqual` on the whole body so an extra key is a failure.
+    const sent: unknown[] = []
+    const want: unknown[] = []
+    for (const [name, call, wire] of ROUTED) {
+      for (const host of [local, remote]) {
+        const calls = recorder(() => json({ ok: true }))
+        await call(host)
+        const as = `${name} on ${host.label}`
+        const query = wire.method === 'GET' && host.origin ? `?origin=${host.origin}` : ''
+        sent.push({ as, method: calls[0]?.method, url: calls[0]?.url, body: calls[0]?.body })
+        want.push({
+          as,
+          method: wire.method,
+          url: `${BASE}${wire.path}${query}`,
+          body: wire.method === 'POST' ? { ...wire.body, origin: host.origin } : null,
+        })
+        vi.unstubAllGlobals()
+      }
+    }
+    expect(sent).toEqual(want)
   })
 
-  it('routes the quarantine release, which is the call that ARMS a host', async () => {
-    // The one write here that changes what a daemon will do rather than what
-    // it reads. Sent to the wrong machine it starts workers on it.
-    const calls = recorder(() => json({ ok: true }))
-    await releaseQuarantine(BASE, remote)
-    expect(calls[0].body).toEqual({ origin: 'candide' })
-  })
-
-  it('routes an agent’s effort override, with null as the reset', async () => {
-    const calls = recorder(() => json({ ok: true, output: 'claude-opus: default_effort high' }))
-    await setAgentEffort(BASE, remote, 'claude-opus', 'high')
-    expect(calls[0].url).toBe(`${BASE}/api/v1/agents/effort`)
-    expect(calls[0].body).toEqual({ id: 'claude-opus', effort: 'high', origin: 'candide' })
-
-    const resetCalls = recorder(() => json({ ok: true, output: '' }))
-    await setAgentEffort(BASE, local, 'claude-opus', null)
-    expect(resetCalls[0].body).toEqual({ id: 'claude-opus', effort: null, origin: '' })
+  it('names the routing of every exported function', () => {
+    // A new call must say which side it is on before it can ship.
+    const requests = Object.entries(api)
+      .filter(([, value]) => typeof value === 'function')
+      .map(([name]) => name)
+    const named = new Set<string>([...ROUTED.map(([name]) => name), ...UNROUTED])
+    expect(requests.filter((name) => !named.has(name))).toEqual([])
   })
 })
 

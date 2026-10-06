@@ -28,12 +28,12 @@ const maxLaunchMessageBytes = 64 << 10
 // so a daemon-run verb only ever writes a fiber this host owns, and a
 // remote-owned one is refused with ownerMismatchError rather than sent back
 // through the daemon.
-func routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
+func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (string, error) {
 	owner := strings.TrimSpace(blockHost)
 	if owner == "" {
 		return "", nil
 	}
-	own, source, err := resolveOwnHostSourced("")
+	own, source, err := a.resolveOwnHostSourced("")
 	if err != nil {
 		return "", fmt.Errorf("cannot verify fiber %s ownership: %w", args[0], err)
 	}
@@ -41,27 +41,27 @@ func routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost string) (
 		return "", nil
 	}
 	if localOnly(cmd) {
-		return "", ownerMismatchError{fiber: args[0], owner: owner, own: own, source: source}
+		return "", ownerMismatchError{fiber: args[0], owner: owner, own: own, source: source, hostFile: a.hostConfigFilePath()}
 	}
 
 	// The file answers first, so a configured owner costs no daemon read.
-	doc, err := loadRemotesFile()
+	doc, err := a.loadRemotesFile()
 	if err != nil {
 		return "", ownerRouteRefusal(cmd, args, owner, fmt.Sprintf("cannot read the configured fleet: %v", err))
 	}
-	for _, remote := range resolveRemotes(doc, nil) {
+	for _, remote := range a.resolveRemotes(doc, nil) {
 		if remote.Name == owner {
 			return owner, nil
 		}
 	}
-	path, _ := shuttleRemotesPath()
+	path, _ := a.shuttleRemotesPath()
 	reason := fmt.Sprintf("host %q is neither an enabled remote in %s nor a discovered tailnet peer", owner, path)
 	if doc.discoverEnabled() {
-		discovery, err := fetchDaemonDiscovery()
+		discovery, err := a.fetchDaemonDiscovery()
 		if err != nil {
 			reason += fmt.Sprintf(" (discovered peers unknown: %v)", err)
 		} else {
-			for _, remote := range admitDiscovered(doc, discovery.Peers) {
+			for _, remote := range a.admitDiscovered(doc, discovery.Peers) {
 				if remote.Name == owner {
 					return owner, nil
 				}
@@ -208,7 +208,7 @@ func requestCouldHaveReachedDaemon(err error) bool {
 	return strings.Contains(err.Error(), "reaching daemon") || strings.Contains(err.Error(), "reading daemon response")
 }
 
-func postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields map[string]any) (string, error) {
+func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields map[string]any) (string, error) {
 	payload := map[string]any{"action": action, "fiber": fiber.ID, "origin": owner}
 	for key, value := range fields {
 		payload[key] = value
@@ -217,18 +217,18 @@ func postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields map[strin
 	if err != nil {
 		return "", fmt.Errorf("encoding lifecycle request: %w", err)
 	}
-	endpoint, err := daemonEndpoint("/api/v1/lifecycle")
+	endpoint, err := a.daemonEndpoint("/api/v1/lifecycle")
 	if err != nil {
 		return "", err
 	}
-	response, err := postDaemon(endpoint, body, daemonLifecycleTimeout)
+	response, err := a.postDaemon(endpoint, body, a.daemonLifecycleTimeout)
 	if err != nil {
 		return "", err
 	}
 	return string(response), nil
 }
 
-func postOwnerDispatch(owner string, fiber *felt.Felt, fields map[string]any) ([]byte, error) {
+func (a *app) postOwnerDispatch(owner string, fiber *felt.Felt, fields map[string]any) ([]byte, error) {
 	payload := map[string]any{"fiber_id": fiber.ID, "origin": owner}
 	for key, value := range fields {
 		payload[key] = value
@@ -237,40 +237,40 @@ func postOwnerDispatch(owner string, fiber *felt.Felt, fields map[string]any) ([
 	if err != nil {
 		return nil, fmt.Errorf("encoding dispatch request: %w", err)
 	}
-	endpoint, err := daemonEndpoint("/api/v1/dispatch")
+	endpoint, err := a.daemonEndpoint("/api/v1/dispatch")
 	if err != nil {
 		return nil, err
 	}
-	return postDaemon(endpoint, body, daemonPostTimeout)
+	return a.postDaemon(endpoint, body, daemonPostTimeout)
 }
 
-func forwardLifecycleAction(cmd *cobra.Command, args []string, owner, action string, fiber *felt.Felt, fields map[string]any) (bool, error) {
+func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, action string, fiber *felt.Felt, fields map[string]any) (bool, error) {
 	if owner == "" {
 		return false, nil
 	}
-	output, err := postOwnerLifecycle(action, owner, fiber, fields)
+	output, err := a.postOwnerLifecycle(action, owner, fiber, fields)
 	if err != nil {
 		return true, remoteRouteError(cmd, args, owner, err)
 	}
-	printDaemonBody([]byte(output))
+	a.printDaemonBody([]byte(output))
 	return true, nil
 }
 
-func forwardDispatch(cmd *cobra.Command, args []string, owner string, fiber *felt.Felt, fields map[string]any) (bool, error) {
+func (a *app) forwardDispatch(cmd *cobra.Command, args []string, owner string, fiber *felt.Felt, fields map[string]any) (bool, error) {
 	if owner == "" {
 		return false, nil
 	}
-	body, err := postOwnerDispatch(owner, fiber, fields)
+	body, err := a.postOwnerDispatch(owner, fiber, fields)
 	if err != nil {
 		return true, remoteRouteError(cmd, args, owner, err)
 	}
-	printDaemonBody(body)
+	a.printDaemonBody(body)
 	return true, nil
 }
 
 // readLaunchMessage implements the same bounded multiline input convention as
 // `shuttle message`: one text source, either --message or --message-file.
-func readLaunchMessage(cmd *cobra.Command, message, messageFile string) (text string, supplied bool, err error) {
+func (a *app) readLaunchMessage(cmd *cobra.Command, message, messageFile string) (text string, supplied bool, err error) {
 	messageSet := cmd.Flags().Changed("message")
 	fileSet := cmd.Flags().Changed("message-file")
 	if messageSet && fileSet {
@@ -287,7 +287,7 @@ func readLaunchMessage(cmd *cobra.Command, message, messageFile string) (text st
 	}
 	var reader io.Reader = cmd.InOrStdin()
 	if messageFile != "-" {
-		file, openErr := os.Open(messageFile)
+		file, openErr := os.Open(a.env.Resolve(messageFile))
 		if openErr != nil {
 			return "", false, fmt.Errorf("reading message file: %w", openErr)
 		}
@@ -308,12 +308,12 @@ func readLaunchMessage(cmd *cobra.Command, message, messageFile string) (text st
 // snapshot. A fresh remote snapshot in quarantine means an ordinary resume may
 // remain pending until the operator releases that host; force-dispatch paths do
 // not use this warning because they bypass the quarantine.
-func ownerBootQuarantine(owner string) bool {
-	endpoint, err := daemonEndpoint("/api/v1/state/composite")
+func (a *app) ownerBootQuarantine(owner string) bool {
+	endpoint, err := a.daemonEndpoint("/api/v1/state/composite")
 	if err != nil {
 		return false
 	}
-	body, err := getDaemon(endpoint, daemonReadTimeout)
+	body, err := a.getDaemon(endpoint, daemonReadTimeout)
 	if err != nil {
 		return false
 	}

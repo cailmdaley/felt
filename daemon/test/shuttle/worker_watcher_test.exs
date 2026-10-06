@@ -14,10 +14,12 @@ defmodule Shuttle.WorkerWatcherTest do
     use Agent
 
     def start_link(_ \\ []) do
-      Agent.start_link(fn -> %{sessions: MapSet.new()} end, name: __MODULE__)
+      Agent.start_link(fn -> %{sessions: MapSet.new(), checks: 0} end, name: __MODULE__)
     end
 
-    def reset, do: Agent.update(__MODULE__, fn _ -> %{sessions: MapSet.new()} end)
+    def reset, do: Agent.update(__MODULE__, fn _ -> %{sessions: MapSet.new(), checks: 0} end)
+
+    def checks, do: Agent.get(__MODULE__, & &1.checks)
 
     def add_session(s),
       do: Agent.update(__MODULE__, &%{&1 | sessions: MapSet.put(&1.sessions, s)})
@@ -27,7 +29,7 @@ defmodule Shuttle.WorkerWatcherTest do
 
     @impl true
     def cmd("tmux", ["has-session", "-t", session], _opts) do
-      sessions = Agent.get(__MODULE__, & &1.sessions)
+      sessions = Agent.get_and_update(__MODULE__, &{&1.sessions, %{&1 | checks: &1.checks + 1}})
 
       if tmux_session_exists?(sessions, session) do
         {"", 0}
@@ -54,13 +56,19 @@ defmodule Shuttle.WorkerWatcherTest do
 
     def start_link(_ \\ []) do
       Agent.start_link(
-        fn -> %{sessions: MapSet.new(), inject_failures: 0} end,
+        fn -> %{sessions: MapSet.new(), inject_failures: 0, checks: 0} end,
         name: __MODULE__
       )
     end
 
     def reset,
-      do: Agent.update(__MODULE__, fn _ -> %{sessions: MapSet.new(), inject_failures: 0} end)
+      do:
+        Agent.update(__MODULE__, fn _ ->
+          %{sessions: MapSet.new(), inject_failures: 0, checks: 0}
+        end)
+
+    def checks, do: Agent.get(__MODULE__, & &1.checks)
+    def pending_failures, do: Agent.get(__MODULE__, & &1.inject_failures)
 
     def add_session(s),
       do: Agent.update(__MODULE__, &%{&1 | sessions: MapSet.put(&1.sessions, s)})
@@ -76,6 +84,8 @@ defmodule Shuttle.WorkerWatcherTest do
     @impl true
     def cmd("tmux", ["has-session", "-t", session], _opts) do
       Agent.get_and_update(__MODULE__, fn state ->
+        state = %{state | checks: state.checks + 1}
+
         cond do
           state.inject_failures > 0 ->
             # Transient failure: return non-zero even if the session is alive.
@@ -103,13 +113,12 @@ defmodule Shuttle.WorkerWatcherTest do
     :ok
   end
 
-  # Poll a condition until it holds (or the attempts run out). Used instead of a
-  # fixed Process.sleep so timing assertions wait for the OBSERVABLE event (the
-  # watcher actually dying / a log line landing) rather than guessing how long
-  # heartbeat detection takes — which, under any scheduler jitter, overran the
-  # old fixed margins. ~2s ceiling; returns as soon as the condition is true, so
-  # passing tests pay nothing.
-  defp wait_until(fun, attempts \\ 80)
+  # Poll a condition until it holds (or the attempts run out), so assertions
+  # wait for the observable event (the watcher dying, a log line landing)
+  # rather than guessing how long heartbeat detection takes. A ceiling of
+  # ~30 s, reached only when the condition never holds: a passing test returns
+  # as soon as it does, however loaded the machine.
+  defp wait_until(fun, attempts \\ 1_200)
   defp wait_until(fun, 0), do: fun.()
 
   defp wait_until(fun, attempts) do
@@ -119,6 +128,22 @@ defmodule Shuttle.WorkerWatcherTest do
       Process.sleep(25)
       wait_until(fun, attempts - 1)
     end
+  end
+
+  # Wait until the watcher has run `n` more liveness checks than it had when
+  # called. Checks are serial, so once check k+1 has started, everything check
+  # k decided (an exit notice included) is already in the test's mailbox: a
+  # `refute_received` after this speaks for every check before the last.
+  defp await_checks(runner, n) do
+    target = runner.checks() + n
+    assert wait_until(fn -> runner.checks() >= target end)
+  end
+
+  # Wait until every injected failure has been consumed, then for one more
+  # check, so the watcher has fully acted on the last injected failure.
+  defp await_injected_consumed do
+    assert wait_until(fn -> FlakeyRunner.pending_failures() == 0 end)
+    await_checks(FlakeyRunner, 2)
   end
 
   # ── Tests ──
@@ -140,18 +165,15 @@ defmodule Shuttle.WorkerWatcherTest do
         heartbeat_interval_ms: 50
       )
 
-    # Wait for a few heartbeats
-    Process.sleep(120)
-
-    # Session still alive — no exit message
-    refute_receive {:worker_exited, _, _, _, _}, 50
+    # A few heartbeats with the session alive: no exit message.
+    await_checks(MockRunner, 3)
+    refute_received {:worker_exited, _, _, _, _}
 
     # Kill the session
     MockRunner.remove_session(session)
-    Process.sleep(120)
 
     # Should receive exit notification
-    assert_receive {:worker_exited, "tests/haiku", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/haiku", _, _, :normal_exit}
 
     # Watcher should have stopped
     assert wait_until(fn -> not Process.alive?(watcher) end)
@@ -167,7 +189,7 @@ defmodule Shuttle.WorkerWatcherTest do
                heartbeat_interval_ms: 50
              )
 
-    assert_receive {:worker_exited, "tests/missing", _, _, :session_not_found}, 1000
+    assert_receive {:worker_exited, "tests/missing", _, _, :session_not_found}
   end
 
   test "watcher can be stopped gracefully" do
@@ -185,7 +207,6 @@ defmodule Shuttle.WorkerWatcherTest do
 
     assert Process.alive?(watcher)
     WorkerWatcher.stop(watcher)
-    Process.sleep(50)
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -217,21 +238,17 @@ defmodule Shuttle.WorkerWatcherTest do
     # The session is still alive in FlakeyRunner.sessions.
     FlakeyRunner.inject_failures(2)
 
-    # Wait for those 2 failures to be consumed (≥ 2 × 50ms heartbeats).
-    Process.sleep(200)
+    await_injected_consumed()
 
     # Watcher should NOT have exited: 2 < max_consecutive_failures.
-    refute_receive {:worker_exited, _, _, _, _}, 50
+    refute_received {:worker_exited, _, _, _, _}
     assert Process.alive?(watcher)
 
     # Now truly remove the session (sustained failure).
     FlakeyRunner.remove_session(session)
 
-    # Wait for max_consecutive_failures × heartbeat_interval to elapse.
-    Process.sleep(300)
-
     # Now the watcher should declare the worker dead.
-    assert_receive {:worker_exited, "tests/flaky", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/flaky", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -255,14 +272,14 @@ defmodule Shuttle.WorkerWatcherTest do
 
     # 12 inconclusive checks in a row — 4× the death threshold.
     FlakeyRunner.inject_failures(12)
-    Process.sleep(400)
+    await_injected_consumed()
 
-    refute_receive {:worker_exited, _, _, _, _}, 50
+    refute_received {:worker_exited, _, _, _, _}
     assert Process.alive?(watcher)
 
     # A confirmed absence still kills it, proving death detection is intact.
     FlakeyRunner.remove_session(session)
-    assert_receive {:worker_exited, "tests/inconclusive", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/inconclusive", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -282,25 +299,24 @@ defmodule Shuttle.WorkerWatcherTest do
 
     # Inject 2 transient failures, then let it recover.
     FlakeyRunner.inject_failures(2)
-    Process.sleep(250)
+    await_injected_consumed()
 
     # Still alive after 2 failures and recovery.
-    refute_receive {:worker_exited, _, _, _, _}, 50
+    refute_received {:worker_exited, _, _, _, _}
     assert Process.alive?(watcher)
 
     # Now inject 2 more failures — the counter must have reset to 0 after
     # the recovery, so 2 < 3 is still safe.
     FlakeyRunner.inject_failures(2)
-    Process.sleep(250)
+    await_injected_consumed()
 
-    refute_receive {:worker_exited, _, _, _, _}, 50
+    refute_received {:worker_exited, _, _, _, _}
     assert Process.alive?(watcher)
 
     # Sustained failure: remove session so all future checks fail.
     FlakeyRunner.remove_session(session)
-    Process.sleep(300)
 
-    assert_receive {:worker_exited, "tests/recover", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/recover", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 
@@ -334,9 +350,8 @@ defmodule Shuttle.WorkerWatcherTest do
       )
 
     MockRunner.remove_session(session)
-    Process.sleep(200)
 
-    assert_receive {:worker_exited, "tests/named-poller", _, _, :normal_exit}, 1000
+    assert_receive {:worker_exited, "tests/named-poller", _, _, :normal_exit}
     assert wait_until(fn -> not Process.alive?(watcher) end)
   end
 

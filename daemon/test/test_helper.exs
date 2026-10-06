@@ -87,8 +87,17 @@ System.put_env("PATH", marker_dir <> ":" <> System.get_env("PATH", ""))
 # Per-test scoped env overrides (Shuttle.Env / Shuttle.Test.Env).
 Shuttle.Test.Env.start!()
 
+# `@tag :timing` marks the tests whose subject is a wall-clock deadline the
+# code under test reads itself, with no injectable clock. Each is arranged so
+# load can only hide a regression, not fail a correct implementation, but it
+# is still the tier to suspect first on a loaded machine. It runs by default;
+# `mix test --only timing` or `--exclude timing` selects it.
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
-ExUnit.start(exclude: exclude)
+# A bare `assert_receive` waits this long for its message. It is reached only
+# when the message never comes, so it costs a passing test nothing, and it is
+# set for a machine whose cores the concurrently running suite already fills.
+# `refute_receive` keeps ExUnit's short default: that window is a real wait.
+ExUnit.start(exclude: exclude, assert_receive_timeout: 10_000)
 
 # A test that saves stores without its own SHUTTLE_STORES_FILE writes the
 # suite-wide registry; remove it with the run.

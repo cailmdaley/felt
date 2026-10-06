@@ -4,18 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
 func TestDirectOwnerCommandUsesShuttleAndOmitsLocalStore(t *testing.T) {
+	t.Parallel()
 	root := &cobra.Command{Use: "shuttle"}
 	command := &cobra.Command{Use: "reopen"}
 	root.AddCommand(command)
@@ -28,10 +30,47 @@ func TestDirectOwnerCommandUsesShuttleAndOmitsLocalStore(t *testing.T) {
 	}
 }
 
-func configureRemoteLifecycleTest(t *testing.T) {
+// remoteLifecycleEnv is an env on host "hub" whose fleet names one remote,
+// "worker".
+func remoteLifecycleEnv(t *testing.T) *sysenv.Env {
 	t.Helper()
-	withOwnHost(t, "hub")
-	writeRemotes(t, `{"version":1,"remotes":[{"name":"worker","port":4001}]}`)
+	env := testEnv(t)
+	ownHost(t, env, "hub")
+	writeRemotesIn(t, env, `{"version":1,"remotes":[{"name":"worker","port":4001}]}`)
+	return env
+}
+
+// requestBodies records the JSON body of each request a fake daemon receives;
+// handler goroutines write it while the test reads it.
+type requestBodies struct {
+	mu     sync.Mutex
+	bodies []map[string]any
+}
+
+func (b *requestBodies) record(t testing.TB, r *http.Request) {
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Errorf("decode request: %v", err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.bodies = append(b.bodies, body)
+}
+
+func (b *requestBodies) all() []map[string]any {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]map[string]any(nil), b.bodies...)
+}
+
+// last is the most recent body, nil before any request.
+func (b *requestBodies) last() map[string]any {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.bodies) == 0 {
+		return nil
+	}
+	return b.bodies[len(b.bodies)-1]
 }
 
 func remoteShuttleBlock(projectDir string) map[string]any {
@@ -44,27 +83,25 @@ func remoteShuttleBlock(projectDir string) map[string]any {
 }
 
 func TestShuttleReopenRemoteDispatchesFreshWithMessage(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "work/task", felt.StatusClosed, remoteShuttleBlock(t.TempDir()), nil)
 
-	var got map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/dispatch" {
 			t.Errorf("request = %s %s, want POST /api/v1/dispatch", r.Method, r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
+		bodies.record(t, r)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"dispatched":true}`))
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	if _, err := runCommand(t, dir, "reopen", "work/task", "--message", "Start with the latest measurements"); err != nil {
+	if _, _, err := executeIn(t, env, dir, "reopen", "work/task", "--message", "Start with the latest measurements"); err != nil {
 		t.Fatalf("remote reopen: %v", err)
 	}
+	got := bodies.last()
 	if got["fiber_id"] != "work/task" || got["origin"] != "worker" || got["force"] != true || got["ad_hoc"] != true || got["resume_mode"] != "fresh" || got["user_message"] != "Start with the latest measurements" {
 		t.Fatalf("dispatch payload = %#v", got)
 	}
@@ -74,7 +111,8 @@ func TestShuttleReopenRemoteDispatchesFreshWithMessage(t *testing.T) {
 }
 
 func TestShuttleRemoteReopenDraftUsesLifecycleAndMessageFileFeedsDispatch(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "draft", felt.StatusClosed, remoteShuttleBlock(t.TempDir()), nil)
 	messageFile := filepath.Join(t.TempDir(), "directive.txt")
@@ -82,23 +120,20 @@ func TestShuttleRemoteReopenDraftUsesLifecycleAndMessageFileFeedsDispatch(t *tes
 		t.Fatal(err)
 	}
 
-	var got map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/dispatch" {
 			t.Errorf("request path = %s, want dispatch", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
+		bodies.record(t, r)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"dispatched":true}`))
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	if _, err := runCommand(t, dir, "reopen", "draft", "--message-file", messageFile); err != nil {
+	if _, _, err := executeIn(t, env, dir, "reopen", "draft", "--message-file", messageFile); err != nil {
 		t.Fatalf("reopen with message file: %v", err)
 	}
+	got := bodies.last()
 	if got["user_message"] != "Read the handoff first.\n" || got["resume_mode"] != "fresh" {
 		t.Fatalf("dispatch payload = %#v", got)
 	}
@@ -111,28 +146,26 @@ func TestShuttleRemoteReopenDraftUsesLifecycleAndMessageFileFeedsDispatch(t *tes
 }
 
 func TestShuttleRemoteSetAgentRoutesProjectDir(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "fiber", felt.StatusClosed, map[string]any{
 		"kind": "oneshot", "host": "worker", "agent": "claude-opus",
 	}, nil)
 	projectDir := t.TempDir()
-	var got map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/lifecycle" {
 			t.Errorf("request path = %s, want lifecycle", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
+		bodies.record(t, r)
 		_, _ = w.Write([]byte("project_dir updated\n"))
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	if _, err := runCommand(t, dir, "set-agent", "fiber", "--project-dir", projectDir); err != nil {
+	if _, _, err := executeIn(t, env, dir, "set-agent", "fiber", "--project-dir", projectDir); err != nil {
 		t.Fatalf("remote set-agent project_dir: %v", err)
 	}
+	got := bodies.last()
 	if got["action"] != "set-agent" || got["fiber"] != "fiber" || got["origin"] != "worker" || got["project_dir"] != projectDir {
 		t.Fatalf("lifecycle payload = %#v", got)
 	}
@@ -142,19 +175,16 @@ func TestShuttleRemoteSetAgentRoutesProjectDir(t *testing.T) {
 }
 
 func TestShuttleRemoteReopenSetsProjectDirBeforeFreshDispatch(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "closed", felt.StatusClosed, map[string]any{
 		"kind": "oneshot", "host": "worker", "agent": "claude-opus",
 	}, nil)
 	projectDir := filepath.Join(t.TempDir(), "remote-only")
-	var calls []map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		calls = append(calls, body)
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodies.record(t, r)
 		switch r.URL.Path {
 		case "/api/v1/lifecycle":
 			_, _ = w.Write([]byte("project_dir updated\n"))
@@ -165,12 +195,11 @@ func TestShuttleRemoteReopenSetsProjectDirBeforeFreshDispatch(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	if _, err := runCommand(t, dir, "reopen", "closed", "--project-dir", projectDir); err != nil {
+	if _, _, err := executeIn(t, env, dir, "reopen", "closed", "--project-dir", projectDir); err != nil {
 		t.Fatalf("remote reopen with project_dir: %v", err)
 	}
+	calls := bodies.all()
 	if len(calls) != 2 {
 		t.Fatalf("requests = %#v, want project-dir write followed by dispatch", calls)
 	}
@@ -186,27 +215,25 @@ func TestShuttleRemoteReopenSetsProjectDirBeforeFreshDispatch(t *testing.T) {
 }
 
 func TestShuttleRemoteDraftReopenUsesLifecycleAction(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "draft", felt.StatusClosed, remoteShuttleBlock(""), nil)
 
-	var got map[string]any
+	var bodies requestBodies
 	projectDir := t.TempDir()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/lifecycle" {
 			t.Errorf("request path = %s, want lifecycle", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
+		bodies.record(t, r)
 		_, _ = w.Write([]byte("reopened draft\n"))
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	if _, err := runCommand(t, dir, "reopen", "draft", "--as-draft", "--project-dir", projectDir); err != nil {
+	if _, _, err := executeIn(t, env, dir, "reopen", "draft", "--as-draft", "--project-dir", projectDir); err != nil {
 		t.Fatalf("remote draft reopen: %v", err)
 	}
+	got := bodies.last()
 	if got["action"] != "reopen" || got["fiber"] != "draft" || got["origin"] != "worker" || got["as_draft"] != true || got["project_dir"] != projectDir {
 		t.Fatalf("lifecycle payload = %#v", got)
 	}
@@ -216,7 +243,8 @@ func TestShuttleRemoteDraftReopenUsesLifecycleAction(t *testing.T) {
 }
 
 func TestShuttleRemoteDispatchRoutesAndCarriesMessageFile(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "active", felt.StatusActive, remoteShuttleBlock(t.TempDir()), nil)
 	messageFile := filepath.Join(t.TempDir(), "directive.txt")
@@ -224,22 +252,19 @@ func TestShuttleRemoteDispatchRoutesAndCarriesMessageFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var got map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/dispatch" {
 			t.Errorf("request path = %s, want dispatch", r.URL.Path)
 		}
-		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
+		bodies.record(t, r)
 		_, _ = w.Write([]byte(`{"dispatched":true}`))
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	if _, err := runCommand(t, dir, "dispatch", "active", "--ad-hoc", "--message-file", messageFile); err != nil {
+	if _, _, err := executeIn(t, env, dir, "dispatch", "active", "--ad-hoc", "--message-file", messageFile); err != nil {
 		t.Fatalf("remote dispatch: %v", err)
 	}
+	got := bodies.last()
 	if got["fiber_id"] != "active" || got["origin"] != "worker" || got["ad_hoc"] != true || got["user_message"] != "Run the focused check" {
 		t.Fatalf("dispatch payload = %#v", got)
 	}
@@ -249,8 +274,7 @@ func TestShuttleRemoteDispatchRoutesAndCarriesMessageFile(t *testing.T) {
 }
 
 func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
-	configureRemoteLifecycleTest(t)
-	dir, storage := newStore(t)
+	t.Parallel()
 	project := t.TempDir()
 	for _, tc := range []struct {
 		id     string
@@ -295,9 +319,12 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 		{"uninstall", felt.StatusActive, remoteShuttleBlock(project), []string{"uninstall", "uninstall"}, "uninstall", nil},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, tc.id, tc.status, tc.block, nil)
-			var got map[string]any
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var bodies requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/state/composite" {
 					_, _ = w.Write([]byte(`{"remotes":{}}`))
 					return
@@ -305,17 +332,13 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				if r.URL.Path != "/api/v1/lifecycle" {
 					t.Errorf("request path = %s, want lifecycle", r.URL.Path)
 				}
-				if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
-					t.Errorf("decode request: %v", err)
-				}
+				bodies.record(t, r)
 				_, _ = w.Write([]byte("forwarded\n"))
 			}))
-			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			if _, err := runCommand(t, dir, tc.args...); err != nil {
-				server.Close()
+			if _, _, err := executeIn(t, env, dir, tc.args...); err != nil {
 				t.Fatalf("%s: %v", tc.id, err)
 			}
-			server.Close()
+			got := bodies.last()
 			if got["action"] != tc.action || got["fiber"] != tc.id || got["origin"] != "worker" {
 				t.Fatalf("lifecycle payload = %#v", got)
 			}
@@ -334,13 +357,16 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 }
 
 func TestRemoteLifecycleUnknownOwnerAndLocalDaemonDownRefuseWithCommand(t *testing.T) {
+	t.Parallel()
 	t.Run("unknown remote", func(t *testing.T) {
-		withOwnHost(t, "hub")
+		t.Parallel()
+		env := testEnv(t)
+		ownHost(t, env, "hub")
 		missing := filepath.Join(t.TempDir(), "remotes.json")
-		t.Setenv("SHUTTLE_REMOTES_FILE", missing)
+		env.Set("SHUTTLE_REMOTES_FILE", missing)
 		dir, storage := newStore(t)
 		seedShuttleRole(t, storage, "task", felt.StatusClosed, remoteShuttleBlock(t.TempDir()), nil)
-		_, err := runCommand(t, dir, "reopen", "task")
+		_, _, err := executeIn(t, env, dir, "reopen", "task")
 		if err == nil || !strings.Contains(err.Error(), "nor a discovered tailnet peer") || !strings.Contains(err.Error(), "shuttle reopen task") || !strings.Contains(err.Error(), missing) {
 			t.Fatalf("unknown-owner refusal = %v", err)
 		}
@@ -350,14 +376,12 @@ func TestRemoteLifecycleUnknownOwnerAndLocalDaemonDownRefuseWithCommand(t *testi
 	})
 
 	t.Run("local daemon down", func(t *testing.T) {
-		configureRemoteLifecycleTest(t)
+		t.Parallel()
+		env := remoteLifecycleEnv(t)
 		dir, storage := newStore(t)
 		seedShuttleRole(t, storage, "task", felt.StatusClosed, remoteShuttleBlock(t.TempDir()), nil)
-		server := httptest.NewServer(http.NotFoundHandler())
-		url := server.URL
-		server.Close()
-		t.Setenv("SHUTTLE_DAEMON_URL", url)
-		_, err := runCommand(t, dir, "reopen", "task")
+		serveDaemon(t, env, http.NotFoundHandler()).Close()
+		_, _, err := executeIn(t, env, dir, "reopen", "task")
 		if err == nil || !strings.Contains(err.Error(), "local shuttle daemon is unreachable") || !strings.Contains(err.Error(), "did not receive the request") || !strings.Contains(err.Error(), "shuttle reopen task") {
 			t.Fatalf("daemon-down refusal = %v", err)
 		}
@@ -368,20 +392,20 @@ func TestRemoteLifecycleUnknownOwnerAndLocalDaemonDownRefuseWithCommand(t *testi
 }
 
 func TestRemoteForwardFailuresSayOwnerUnreachableAndActionMayHaveApplied(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{
 		"forward to worker failed: :socket_closed_remotely",
 		"forward to worker failed: stale origin",
 	} {
 		t.Run(body, func(t *testing.T) {
-			configureRemoteLifecycleTest(t)
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
 			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "task", felt.StatusActive, remoteShuttleBlock(t.TempDir()), nil)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, body, http.StatusBadGateway)
 			}))
-			defer server.Close()
-			t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-			_, err := runCommand(t, dir, "close", "task")
+			_, _, err := executeIn(t, env, dir, "close", "task")
 			if err == nil || !strings.Contains(err.Error(), `owning host "worker" is unreachable`) || !strings.Contains(err.Error(), "action may have been applied") || !strings.Contains(err.Error(), "shuttle close task") {
 				t.Fatalf("forward failure = %v", err)
 			}
@@ -393,17 +417,16 @@ func TestRemoteForwardFailuresSayOwnerUnreachableAndActionMayHaveApplied(t *test
 }
 
 func TestRemoteDispatchForwardFailureMapsAmbiguousOwnerOutcome(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "active", felt.StatusActive, remoteShuttleBlock(t.TempDir()), nil)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"dispatched":false,"reason":"forward_failed","origin":"worker","error":"socket_closed_remotely"}`))
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
-	_, err := runCommand(t, dir, "dispatch", "active")
+	_, _, err := executeIn(t, env, dir, "dispatch", "active")
 	if err == nil || !strings.Contains(err.Error(), `owning host "worker" is unreachable`) || !strings.Contains(err.Error(), "action may have been applied") {
 		t.Fatalf("dispatch forward failure = %v", err)
 	}
@@ -413,10 +436,11 @@ func TestRemoteDispatchForwardFailureMapsAmbiguousOwnerOutcome(t *testing.T) {
 }
 
 func TestRemoteResumeReportsFreshRemoteBootQuarantine(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "draft", felt.StatusOpen, remoteShuttleBlock(t.TempDir()), nil)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/lifecycle":
 			_, _ = w.Write([]byte("resumed draft\n"))
@@ -426,9 +450,7 @@ func TestRemoteResumeReportsFreshRemoteBootQuarantine(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
-	out, err := runCommand(t, dir, "resume", "draft")
+	out, _, err := executeIn(t, env, dir, "resume", "draft")
 	if err != nil {
 		t.Fatalf("remote resume: %v", err)
 	}
@@ -441,18 +463,17 @@ func TestRemoteResumeReportsFreshRemoteBootQuarantine(t *testing.T) {
 // remote-owned fiber is refused as a mirror write and never routed back through
 // the daemon.
 func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
-	configureRemoteLifecycleTest(t)
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	block := remoteShuttleBlock(t.TempDir())
 	block["kind"] = "pinned"
 	seedShuttleRole(t, storage, "work/task", felt.StatusActive, block, nil)
 	before, _ := os.ReadFile(storage.Path("work/task"))
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("--local verb reached the daemon: %s %s", r.Method, r.URL.Path)
 	}))
-	defer server.Close()
-	t.Setenv("SHUTTLE_DAEMON_URL", server.URL)
 
 	for _, verb := range [][]string{
 		{"pause"}, {"resume"}, {"close"}, {"reopen"}, {"accept"}, {"set-outcome", "--outcome", "x"},
@@ -460,7 +481,7 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 	} {
 		argv := append([]string{verb[0], "work/task"}, verb[1:]...)
 		argv = append(argv, "--local")
-		_, err := runCommand(t, dir, argv...)
+		_, _, err := executeIn(t, env, dir, argv...)
 		var mismatch ownerMismatchError
 		if !errors.As(err, &mismatch) {
 			t.Fatalf("%s --local on a remote-owned fiber: want ownerMismatchError, got %T: %v", verb[0], err, err)
@@ -469,5 +490,43 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 	after, _ := os.ReadFile(storage.Path("work/task"))
 	if string(before) != string(after) {
 		t.Fatal("refused --local verb modified the hub mirror")
+	}
+}
+
+// TestShuttleRemoteDispatchReadsMessageFileFromItsWorkingDirectory runs two
+// dispatches side by side with the same relative --message-file in different
+// working directories, beside a decoy of that name in the test process's own.
+func TestShuttleRemoteDispatchReadsMessageFileFromItsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	const name = "relative-launch-directive.txt"
+	if err := os.WriteFile(name, []byte("decoy from the process working directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(name) })
+
+	for _, directive := range []string{"directive one", "directive two"} {
+		t.Run(directive, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "active", felt.StatusActive, remoteShuttleBlock(t.TempDir()), nil)
+			cwd := t.TempDir()
+			if err := os.WriteFile(filepath.Join(cwd, name), []byte(directive), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			env.Chdir(cwd)
+
+			var bodies requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				bodies.record(t, r)
+				_, _ = w.Write([]byte(`{"dispatched":true}`))
+			}))
+			if _, _, err := executeIn(t, env, dir, "dispatch", "active", "--ad-hoc", "--message-file", name); err != nil {
+				t.Fatalf("dispatch: %v", err)
+			}
+			if got := bodies.last()["user_message"]; got != directive {
+				t.Fatalf("daemon received user_message %q, want %q", got, directive)
+			}
+		})
 	}
 }

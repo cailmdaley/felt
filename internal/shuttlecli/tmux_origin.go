@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"os/exec"
 	"strings"
 )
 
@@ -139,10 +138,10 @@ func classifyCoalition(name string) string {
 	}
 }
 
-// detectTmuxOrigin reads the live server: its pid from tmux, then the launchd
-// coalition the kernel charges it to. A func var so tests stub it out.
-var detectTmuxOrigin = func() tmuxOriginReport {
-	out, err := exec.Command("tmux", "display-message", "-p", "#{pid}").Output()
+// probeTmuxOrigin reads the live server (app.detectTmuxOrigin): its pid from
+// tmux, then the launchd coalition the kernel charges it to.
+func (a *app) probeTmuxOrigin() tmuxOriginReport {
+	out, err := a.env.Command("tmux", "display-message", "-p", "#{pid}").Output()
 	pid := ""
 	if err == nil {
 		pid = strings.TrimSpace(string(out))
@@ -153,7 +152,7 @@ var detectTmuxOrigin = func() tmuxOriginReport {
 
 	// CombinedOutput, not Output: a launchctl that exits non-zero may still have
 	// printed the block, and one that printed nothing parses to "" → unknown.
-	printed, _ := exec.Command("launchctl", "print", "pid/"+pid).CombinedOutput()
+	printed, _ := a.env.Command("launchctl", "print", "pid/"+pid).CombinedOutput()
 	name := parseResourceCoalitionName(string(printed))
 
 	return tmuxOriginReport{Origin: classifyCoalition(name), ServerPID: pid, Coalition: name, RootedBy: coalitionRoot(name)}

@@ -7,16 +7,8 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 )
 
-func readFiberBody(t *testing.T, s *felt.Storage, id string) string {
-	t.Helper()
-	f, err := s.Read(id)
-	if err != nil {
-		t.Fatalf("read %s: %v", id, err)
-	}
-	return f.Body
-}
-
 func TestNestNamesRewrittenFibersAndCheckStaysClean(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, f := range []*felt.Felt{
 		{ID: "a", Name: "A"},
@@ -36,7 +28,7 @@ func TestNestNamesRewrittenFibersAndCheckStaysClean(t *testing.T) {
 	if want := "Nested a/x under b as b/x\nRewrote references in c\n"; out != want {
 		t.Fatalf("nest output = %q, want %q", out, want)
 	}
-	if got := readFiberBody(t, storage, "c"); got != "See [[b]] and [[b/x]]." {
+	if got := mustRead(t, storage, "c").Body; got != "See [[b]] and [[b/x]]." {
 		t.Fatalf("c body = %q", got)
 	}
 
@@ -47,7 +39,7 @@ func TestNestNamesRewrittenFibersAndCheckStaysClean(t *testing.T) {
 	if want := "Promoted b/x to x\nRewrote references in c\n"; out != want {
 		t.Fatalf("unnest output = %q, want %q", out, want)
 	}
-	if got := readFiberBody(t, storage, "c"); got != "See [[b]] and [[x]]." {
+	if got := mustRead(t, storage, "c").Body; got != "See [[b]] and [[x]]." {
 		t.Fatalf("c body = %q", got)
 	}
 
@@ -59,6 +51,7 @@ func TestNestNamesRewrittenFibersAndCheckStaysClean(t *testing.T) {
 // In a view, links to a local fiber are written either with the view's own
 // ids or with the enclosing store's; a move inside the view rewrites both.
 func TestNestInViewRewritesBothSpellings(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 	sub := felt.NewStorage(subProj)
 	body := "Local [[notes/runbook]], outer [[ai-futures/felt/notes/runbook]]."
@@ -73,7 +66,7 @@ func TestNestInViewRewritesBothSpellings(t *testing.T) {
 		t.Fatalf("nest: %v\n%s", err, out)
 	}
 	want := "Local [[debug/runbook]], outer [[ai-futures/felt/debug/runbook]]."
-	if got := readFiberBody(t, sub, "citer"); got != want {
+	if got := mustRead(t, sub, "citer").Body; got != want {
 		t.Fatalf("citer body = %q, want %q", got, want)
 	}
 }
@@ -81,6 +74,7 @@ func TestNestInViewRewritesBothSpellings(t *testing.T) {
 // A move lifted into the enclosing store sees every fiber there, the view's
 // included, and rewrites their links in the spelling each was written in.
 func TestNestAcrossBoundaryRewritesViewLinks(t *testing.T) {
+	t.Parallel()
 	_, subProj := newCrossStoreFixture(t)
 	sub := felt.NewStorage(subProj)
 	if err := sub.Write(&felt.Felt{ID: "citer", Name: "Citer", Body: "See [[ai-futures/portolan/debug]]."}); err != nil {
@@ -91,7 +85,7 @@ func TestNestAcrossBoundaryRewritesViewLinks(t *testing.T) {
 		t.Fatalf("nest: %v\n%s", err, out)
 	}
 	want := "See [[ai-futures/felt/notes/runbook/debug]]."
-	if got := readFiberBody(t, sub, "citer"); got != want {
+	if got := mustRead(t, sub, "citer").Body; got != want {
 		t.Fatalf("citer body = %q, want %q", got, want)
 	}
 }
@@ -100,6 +94,7 @@ func TestNestAcrossBoundaryRewritesViewLinks(t *testing.T) {
 // in that store's coordinates, keeping each link's shape; nest names them by
 // their ids there.
 func TestNestInViewRewritesEnclosingStore(t *testing.T) {
+	t.Parallel()
 	loomProj, subProj := newCrossStoreFixture(t)
 	loom := felt.NewStorage(loomProj)
 	body := "Full [[ai-futures/felt/notes/runbook]], suffix [[felt/notes/runbook]], bare [[runbook]]."
@@ -115,7 +110,7 @@ func TestNestInViewRewritesEnclosingStore(t *testing.T) {
 		t.Fatalf("nest output = %q, want it to end %q", out, want)
 	}
 	want := "Full [[ai-futures/felt/debug/runbook]], suffix [[felt/debug/runbook]], bare [[runbook]]."
-	if got := readFiberBody(t, loom, "commons/citer"); got != want {
+	if got := mustRead(t, loom, "commons/citer").Body; got != want {
 		t.Fatalf("outer citer body = %q, want %q", got, want)
 	}
 }

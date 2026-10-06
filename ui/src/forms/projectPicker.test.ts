@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 
 import {
   ADD_PROJECT_VALUE,
@@ -26,6 +27,12 @@ const projects: PickerProject[] = [
 ]
 
 describe('projectsForHost', () => {
+  const HOSTS = ['local', 'candide', 'cineca'] as const
+  const generated = fc.uniqueArray(
+    fc.record({ n: fc.nat({ max: 99 }), originId: fc.constantFrom(...HOSTS) }),
+    { selector: (p) => p.n, maxLength: 12 },
+  ).map((rows) => rows.map(({ n, originId }) => ({ id: `${originId}:/p${n}`, originId })))
+
   it('keeps only the selected host’s projects', () => {
     expect(projectsForHost(projects, 'local').map((p) => p.id)).toEqual([
       'local:/dev/felt',
@@ -41,16 +48,33 @@ describe('projectsForHost', () => {
     expect(projectsForHost(projects, 'cineca')).toEqual([])
   })
 
-  it('answers empty rather than everything when no host is selected', () => {
-    expect(projectsForHost(projects, null)).toEqual([])
-  })
-
   it('preserves the incoming order, which is the form’s recency ranking', () => {
     const reversed = [...projects].reverse()
     expect(projectsForHost(reversed, 'local').map((p) => p.id)).toEqual([
       'local:/dev/sample',
       'local:/dev/felt',
     ])
+  })
+
+  it('returns the input with every other host’s rows struck out', () => {
+    // Every row it returns is on the host, every row on the host is returned,
+    // and the rows come back as a subsequence of the input — nothing
+    // reordered, nothing dropped, nothing added.
+    fc.assert(fc.property(generated, fc.constantFrom(...HOSTS), (list, host) => {
+      const out = projectsForHost(list, host)
+      for (const p of out) expect(p.originId, p.id).toBe(host)
+      for (const p of list) if (p.originId === host) expect(out, p.id).toContain(p)
+      let at = 0
+      for (const p of out) {
+        while (at < list.length && list[at] !== p) at += 1
+        expect(at, `${p.id} in input order`).toBeLessThan(list.length)
+        at += 1
+      }
+    }), { seed: 0x9e57ed, numRuns: 200 })
+  })
+
+  it('answers empty rather than everything when no host is selected', () => {
+    expect(projectsForHost(projects, null)).toEqual([])
   })
 })
 

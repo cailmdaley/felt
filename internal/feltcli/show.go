@@ -2,16 +2,20 @@ package feltcli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 // NewShowCmd builds the shared fiber-showing command for a Felt-compatible view.
-func NewShowCmd(view ViewOptions) *cobra.Command {
+// It reads the store through env and writes to the output stream its root
+// command was given (the felt root sets it from env).
+func NewShowCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var showBodyOnly bool
 	var showDetail string
 	var showCitations bool
@@ -35,10 +39,11 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
   felt show analysis/covariance --field status`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			storage, root, err := felt.RequireStore(view.directory())
+			storage, root, err := felt.RequireStore(env, view.directory())
 			if err != nil {
 				return err
 			}
+			out := env.Stdout
 
 			detail := showDetail
 			if detail == "" {
@@ -63,7 +68,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				return fmt.Errorf("show selectors are mutually exclusive: choose only one of --body, --citations, --consumers, or --field")
 			}
 
-			scopeID := felt.CommandScope(root, view.directory())
+			scopeID := felt.CommandScope(env, root, view.directory())
 
 			// Everything below runs against the store that holds the fiber, with
 			// the fiber addressed by its resolved id in that store's coordinates:
@@ -91,7 +96,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				if err != nil {
 					return err
 				}
-				fmt.Print(renderFelt(f, nil, detail, nil, nil, storage.ExternalRefs()))
+				fmt.Fprint(out, renderFelt(f, nil, detail, nil, nil, storage.ExternalRefs()))
 				return nil
 			}
 
@@ -103,7 +108,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 			// Targeted views: full single-file read, optionally structured output.
 			if selectorCount > 0 || view.jsonOutput() {
 				if showBodyOnly {
-					return outputShowBody(storage, f, view.jsonOutput())
+					return outputShowBody(out, storage, f, view.jsonOutput())
 				}
 				if showCitations {
 					citations, _, err := storage.ScanRelationshipsAcrossStore(f.ID)
@@ -111,9 +116,9 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 						return err
 					}
 					if view.jsonOutput() {
-						return outputJSON(citations)
+						return writeJSON(out, citations)
 					}
-					printCitations(f.ID, citations)
+					printCitations(out, f.ID, citations)
 					return nil
 				}
 				if showConsumers {
@@ -122,13 +127,13 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 						return err
 					}
 					if view.jsonOutput() {
-						return outputJSON(consumers)
+						return writeJSON(out, consumers)
 					}
-					printConsumers(f.ID, consumers)
+					printConsumers(out, f.ID, consumers)
 					return nil
 				}
 				if showField != "" {
-					return outputShowField(storage, f, showField, view.jsonOutput())
+					return outputShowField(out, storage, f, showField, view.jsonOutput())
 				}
 				if view.jsonOutput() {
 					if view.Decorate != nil {
@@ -136,7 +141,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 							return err
 						}
 					}
-					return outputJSON(f)
+					return writeJSON(out, f)
 				}
 			}
 
@@ -153,7 +158,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				}
 			}
 
-			fmt.Print(renderFelt(f, graph, detail, citations, consumers, storage.ExternalRefs()))
+			fmt.Fprint(out, renderFelt(f, graph, detail, citations, consumers, storage.ExternalRefs()))
 			return nil
 		},
 	}
@@ -169,8 +174,6 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 	}
 	return command
 }
-
-var showCmd = NewShowCmd(ViewOptions{})
 
 // Graph is a resolved set of felts keyed by ID, used to render body references
 // with their display names.
@@ -195,16 +198,12 @@ func graphForBodyRefs(storage *felt.Storage, f *felt.Felt) *Graph {
 	return g
 }
 
-func init() {
-	rootCmd.AddCommand(showCmd)
-}
-
 type showBodyOutput struct {
 	Body          string `json:"body"`
 	BodyStartLine int    `json:"body_start_line"`
 }
 
-func outputShowBody(storage *felt.Storage, f *felt.Felt, jsonMode bool) error {
+func outputShowBody(w io.Writer, storage *felt.Storage, f *felt.Felt, jsonMode bool) error {
 	data, err := os.ReadFile(storage.Path(f.ID))
 	if err != nil {
 		return fmt.Errorf("reading file %s: %w", storage.Path(f.ID), err)
@@ -219,14 +218,14 @@ func outputShowBody(storage *felt.Storage, f *felt.Felt, jsonMode bool) error {
 		BodyStartLine: startLine,
 	}
 	if jsonMode {
-		return outputJSON(payload)
+		return writeJSON(w, payload)
 	}
 
-	fmt.Printf("Body start line: %d\n", startLine)
+	fmt.Fprintf(w, "Body start line: %d\n", startLine)
 	if f.Body != "" {
-		fmt.Printf("\n%s", f.Body)
+		fmt.Fprintf(w, "\n%s", f.Body)
 		if f.Body[len(f.Body)-1] != '\n' {
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 	}
 	return nil
@@ -234,9 +233,9 @@ func outputShowBody(storage *felt.Storage, f *felt.Felt, jsonMode bool) error {
 
 // printCitations lists the fibers that link to id, one per line, in the same
 // shape as show's "Cited by:" line, then the citing fiber's name.
-func printCitations(id string, citations []felt.Citation) {
+func printCitations(w io.Writer, id string, citations []felt.Citation) {
 	if len(citations) == 0 {
-		fmt.Printf("No fibers link to %s\n", id)
+		fmt.Fprintf(w, "No fibers link to %s\n", id)
 		return
 	}
 	for _, c := range citations {
@@ -244,16 +243,16 @@ func printCitations(id string, citations []felt.Citation) {
 		if c.Fragment != "" {
 			ref += "#" + c.Fragment
 		}
-		fmt.Printf("%s  %s\n", ref, c.SourceName)
+		fmt.Fprintf(w, "%s  %s\n", ref, c.SourceName)
 	}
 }
 
 // printConsumers lists the fibers that name id in inputs.from, one per line,
 // in the same shape as show's "Consumed by:" line: the output consumed, the
 // consuming fiber and its input id, then the consumer's name.
-func printConsumers(id string, consumers []felt.DataFlowConsumer) {
+func printConsumers(w io.Writer, id string, consumers []felt.DataFlowConsumer) {
 	if len(consumers) == 0 {
-		fmt.Printf("No fibers name %s in inputs.from\n", id)
+		fmt.Fprintf(w, "No fibers name %s in inputs.from\n", id)
 		return
 	}
 	for _, c := range consumers {
@@ -264,13 +263,13 @@ func printConsumers(id string, consumers []felt.DataFlowConsumer) {
 		if c.OutputID != "" {
 			ref = c.OutputID + " \u2192 " + ref
 		}
-		fmt.Printf("%s  %s\n", ref, c.SourceName)
+		fmt.Fprintf(w, "%s  %s\n", ref, c.SourceName)
 	}
 }
 
 // outputShowField emits a single frontmatter field, identified by its
 // raw YAML key, in a shape shell consumers can rely on.
-func outputShowField(storage *felt.Storage, f *felt.Felt, key string, jsonMode bool) error {
+func outputShowField(w io.Writer, storage *felt.Storage, f *felt.Felt, key string, jsonMode bool) error {
 	if jsonMode {
 		return fmt.Errorf("--field cannot combine with --json; use --json without --field for the structured view")
 	}
@@ -298,20 +297,20 @@ func outputShowField(storage *felt.Storage, f *felt.Felt, key string, jsonMode b
 			continue
 		}
 		valueNode := mapping.Content[i+1]
-		return emitFieldNode(valueNode)
+		return emitFieldNode(w, valueNode)
 	}
 	return nil
 }
 
-func emitFieldNode(n *yaml.Node) error {
+func emitFieldNode(w io.Writer, n *yaml.Node) error {
 	switch n.Kind {
 	case yaml.ScalarNode:
-		fmt.Println(n.Value)
+		fmt.Fprintln(w, n.Value)
 		return nil
 	case yaml.SequenceNode:
 		if allScalar(n.Content) {
 			for _, child := range n.Content {
-				fmt.Println(child.Value)
+				fmt.Fprintln(w, child.Value)
 			}
 			return nil
 		}
@@ -321,7 +320,7 @@ func emitFieldNode(n *yaml.Node) error {
 		if err != nil {
 			return fmt.Errorf("marshal field value: %w", err)
 		}
-		fmt.Print(string(out))
+		fmt.Fprint(w, string(out))
 		return nil
 	default:
 		return nil

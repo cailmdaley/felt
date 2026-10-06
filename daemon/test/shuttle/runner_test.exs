@@ -36,10 +36,13 @@ defmodule Shuttle.RunnerTest do
                  "IFS= read -r frame; test \"$frame\" = '{\"text\":\"hello\"}' && printf '{\"ok\":true}\\n'"
                ],
                input: ~s({"text":"hello"}\n),
-               timeout_ms: 5_000
+               timeout_ms: 30_000
              )
   end
 
+  # The runner's wall-clock deadline is the subject: 100 ms against a 10 s
+  # command, with the elapsed bound halfway between.
+  @tag :timing
   test "a wedged command times out into {message, :timeout} instead of blocking" do
     started = System.monotonic_time(:millisecond)
     assert {message, :timeout} = Shuttle.Runner.Default.cmd("sleep", ["10"], timeout_ms: 100)
@@ -56,11 +59,13 @@ defmodule Shuttle.RunnerTest do
 
     # `exec` keeps the pid: the shell that writes the pid file BECOMES the
     # sleep, so `kill -0` on it probes the exact process the runner must reap.
+    # The deadline leaves a loaded machine time to start bash and write the
+    # file before the kill.
     assert {_message, :timeout} =
              Shuttle.Runner.Default.cmd(
                "bash",
                ["-c", "echo $$ > #{pid_file}; exec sleep 30"],
-               timeout_ms: 300
+               timeout_ms: 2_000
              )
 
     pid = pid_file |> File.read!() |> String.trim()
@@ -71,7 +76,9 @@ defmodule Shuttle.RunnerTest do
     refute_receive _, 200
   end
 
-  defp eventually_dead?(pid, attempts \\ 50) do
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually_dead?(pid, attempts \\ 1_500) do
     case System.cmd("kill", ["-0", pid], stderr_to_stdout: true) do
       {_, 0} when attempts > 0 ->
         Process.sleep(20)

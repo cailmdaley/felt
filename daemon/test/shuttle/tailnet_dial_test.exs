@@ -11,6 +11,11 @@ defmodule Shuttle.TailnetDialTest do
   @key Path.expand("../fixtures/tailnet/server.key", __DIR__)
   @ca Path.expand("../fixtures/tailnet/ca.crt", __DIR__)
 
+  # A failure-only bound on every request, connect and recv a test expects to
+  # finish (or fail for another reason) long before it: generous for a loaded
+  # machine, and five in a row still fit ExUnit's 60 s per-test timeout.
+  @http_timeout_ms 10_000
+
   defmodule HTTPSPlug do
     @moduledoc false
     @behaviour Plug
@@ -164,7 +169,7 @@ defmodule Shuttle.TailnetDialTest do
         send(self(), {:long_path_manager, manager})
       end)
 
-    assert_receive {:long_path_manager, manager}, 1_000
+    assert_receive {:long_path_manager, manager}
     on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
 
     assert {:tailnet_dial, :listen, reason} = TailnetDial.last_error(remote.name)
@@ -203,9 +208,9 @@ defmodule Shuttle.TailnetDialTest do
     url = "https://#{@host}:#{tls_port}/api/v1/version"
 
     assert {:error, {:tailnet_dial, :tls, %{httpc: _httpc_reason, bridge: _tls_reason}}} =
-             Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
+             Shuttle.RemoteRegistry.Client.Default.get(url, @http_timeout_ms)
 
-    assert_receive {:dial_request, rejected_request}, 5_000
+    assert_receive {:dial_request, rejected_request}
     assert rejected_request =~ "Dial-Host: #{@host}\r\n"
 
     assert eventually(fn ->
@@ -218,14 +223,14 @@ defmodule Shuttle.TailnetDialTest do
     Application.put_env(:shuttle, :tailnet_dial_test_cacerts, certs)
 
     assert {:ok, "tailnet-response"} =
-             Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
+             Shuttle.RemoteRegistry.Client.Default.get(url, @http_timeout_ms)
 
-    assert_receive {:dial_request, accepted_request}, 5_000
+    assert_receive {:dial_request, accepted_request}
     assert accepted_request =~ "POST /localapi/v0/dial HTTP/1.1"
     assert accepted_request =~ "Dial-Host: #{@host}\r\n"
     assert accepted_request =~ "Dial-Port: #{tls_port}\r\n"
     assert accepted_request =~ "Sec-Tailscale: localapi\r\n"
-    assert_receive {:https_request, [host_header]}, 5_000
+    assert_receive {:https_request, [host_header]}
     assert host_header == "#{@host}:#{tls_port}"
     assert TailnetDial.last_error(remote.name) == nil
     assert Process.alive?(Process.whereis(Shuttle.TailnetDial))
@@ -235,6 +240,8 @@ defmodule Shuttle.TailnetDialTest do
     base: base,
     tls_port: tls_port
   } do
+    # The probe's whole-exchange deadline (4 s in production) is incidental here.
+    Shuttle.Test.Env.put_app_env(:tailnet_probe_timeout_ms, @http_timeout_ms)
     previous = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
     previous_socket = Application.get_env(:shuttle, :tailscale_socket)
     Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
@@ -250,10 +257,10 @@ defmodule Shuttle.TailnetDialTest do
     assert %{"body" => %{"host" => "hub-a", "ready" => true}} =
              Shuttle.TailnetPeers.probe("https://#{@host}/peer")
 
-    assert_receive {:dial_request, request}, 5_000
+    assert_receive {:dial_request, request}
     assert request =~ "Dial-Host: #{@host}\r\n"
     assert request =~ "Dial-Port: 443\r\n"
-    assert_receive {:https_request, [@host]}, 5_000
+    assert_receive {:https_request, [@host]}
   end
 
   test "the private HTTP authority omits an explicit default HTTPS port", %{
@@ -280,12 +287,12 @@ defmodule Shuttle.TailnetDialTest do
     assert {:ok, "tailnet-response"} =
              Shuttle.RemoteRegistry.Client.Default.get(
                "https://#{@host}:443/api/v1/version",
-               5_000
+               @http_timeout_ms
              )
 
-    assert_receive {:dial_request, request}, 5_000
+    assert_receive {:dial_request, request}
     assert request =~ "Dial-Port: 443\r\n"
-    assert_receive {:https_request, [host_header]}, 5_000
+    assert_receive {:https_request, [host_header]}
     assert host_header == @host
   end
 
@@ -306,10 +313,10 @@ defmodule Shuttle.TailnetDialTest do
     assert {:error, {:tailnet_dial, :unavailable, {:no_bridge, @host, ^tls_port}}} =
              Shuttle.RemoteRegistry.Client.Default.get(
                "https://#{@host}:#{tls_port}/api/v1/version",
-               1_000
+               @http_timeout_ms
              )
 
-    refute_receive {:https_request, _}, 100
+    refute_received {:https_request, _}
   end
 
   test "private HTTPS requests do not follow cross-authority redirects", %{
@@ -335,12 +342,12 @@ defmodule Shuttle.TailnetDialTest do
     assert {:error, {:http_status, 302}} =
              Shuttle.RemoteRegistry.Client.Default.get(
                "https://#{@host}:#{tls_port}/redirect",
-               5_000
+               @http_timeout_ms
              )
 
-    assert_receive {:https_request, [host_header]}, 5_000
+    assert_receive {:https_request, [host_header]}
     assert host_header == "#{@host}:#{tls_port}"
-    refute_receive :redirect_followed, 100
+    refute_received :redirect_followed
   end
 
   test "large binary HTTPS responses survive the private bridge relay", %{
@@ -367,12 +374,12 @@ defmodule Shuttle.TailnetDialTest do
     assert {:ok, body} =
              Shuttle.RemoteRegistry.Client.Default.get(
                "https://#{@host}:#{tls_port}/large",
-               10_000
+               @http_timeout_ms
              )
 
     assert byte_size(body) == byte_size(expected)
     assert :crypto.hash(:sha256, body) == :crypto.hash(:sha256, expected)
-    assert_receive {:https_request, [host_header]}, 5_000
+    assert_receive {:https_request, [host_header]}
     assert host_header == "#{@host}:#{tls_port}"
   end
 
@@ -399,7 +406,10 @@ defmodule Shuttle.TailnetDialTest do
     end)
 
     assert {:error, {:tailnet_dial, :config, :invalid_tailscale_socket}} =
-             Shuttle.RemoteRegistry.Client.Default.get("https://#{@host}/api/v1/version", 1_000)
+             Shuttle.RemoteRegistry.Client.Default.get(
+               "https://#{@host}/api/v1/version",
+               @http_timeout_ms
+             )
 
     assert %{configured: true, socket: nil, bridges: []} = TailnetDial.status()
   end
@@ -440,13 +450,19 @@ defmodule Shuttle.TailnetDialTest do
     first_token = Shuttle.Remotes.config_token()
 
     assert {:error, {:tailnet_dial, :unavailable, {:no_bridge, @host, 443}}} =
-             Shuttle.RemoteRegistry.Client.Default.get("https://#{@host}/api/v1/version", 1_000)
+             Shuttle.RemoteRegistry.Client.Default.get(
+               "https://#{@host}/api/v1/version",
+               @http_timeout_ms
+             )
 
     System.put_env("SHUTTLE_REMOTES_FILE", second_file)
     assert Shuttle.Remotes.config_token() == first_token
 
     assert {:error, {:tailnet_dial, :config, :invalid_tailscale_socket}} =
-             Shuttle.RemoteRegistry.Client.Default.get("https://#{@host}/api/v1/version", 1_000)
+             Shuttle.RemoteRegistry.Client.Default.get(
+               "https://#{@host}/api/v1/version",
+               @http_timeout_ms
+             )
   end
 
   test "idle keep-alive closure is quiet and the next request reconnects", %{
@@ -476,23 +492,25 @@ defmodule Shuttle.TailnetDialTest do
     baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
     url = "https://#{@host}:#{tls_port}/api/v1/version"
 
-    assert {:ok, "tailnet-response"} = Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
-    assert_receive {:dial_request, _request}, 5_000
-    assert_receive {:https_request, [host_header]}, 5_000
-    assert host_header == "#{@host}:#{tls_port}"
-    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) != baseline end, 200)
+    assert {:ok, "tailnet-response"} =
+             Shuttle.RemoteRegistry.Client.Default.get(url, @http_timeout_ms)
 
-    assert eventually(
-             fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end,
-             1_000
-           )
+    assert_receive {:dial_request, _request}
+    assert_receive {:https_request, [host_header]}
+    assert host_header == "#{@host}:#{tls_port}"
+
+    # The dial above opened a relay; its 500 ms idle budget reaps it, and the
+    # second request below must dial again.
+    assert eventually(fn -> new_relays(baseline) == [] end)
 
     assert TailnetDial.last_error(remote.name) == nil
     assert %{bridges: [%{name: "idle-keep-alive", status: "ready"}]} = TailnetDial.status()
 
-    assert {:ok, "tailnet-response"} = Shuttle.RemoteRegistry.Client.Default.get(url, 5_000)
-    assert_receive {:dial_request, _request}, 5_000
-    assert_receive {:https_request, [host_header]}, 5_000
+    assert {:ok, "tailnet-response"} =
+             Shuttle.RemoteRegistry.Client.Default.get(url, @http_timeout_ms)
+
+    assert_receive {:dial_request, _request}
+    assert_receive {:https_request, [host_header]}
     assert host_header == "#{@host}:#{tls_port}"
   end
 
@@ -531,28 +549,28 @@ defmodule Shuttle.TailnetDialTest do
       Task.async(fn ->
         Shuttle.RemoteRegistry.Client.Default.get(
           "https://#{@host}:#{tls_port}/in-flight",
-          10_000
+          30_000
         )
       end)
 
-    assert_receive {:inflight_request, stalled_pid}, 5_000
+    assert_receive {:inflight_request, stalled_pid}
     on_exit(fn -> if Process.alive?(stalled_pid), do: Process.exit(stalled_pid, :kill) end)
-    assert [relay_pid] = Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+    assert [relay_pid] = new_relays(baseline)
 
-    # Three idle budgets (500 ms each) pass with the request unanswered.
+    # At least three idle budgets (500 ms each) pass with the request
+    # unanswered; the 30 s client timeout keeps it pending however long this
+    # sleep overruns.
     Process.sleep(1_500)
     assert Process.alive?(relay_pid)
     assert Task.yield(request, 0) == nil
 
     send(stalled_pid, :respond)
-    assert {:ok, {:ok, "in-flight-retried"}} = Task.yield(request, 5_000)
-    refute_receive {:inflight_request, _retried_pid}, 100
+    assert {:ok, {:ok, "in-flight-retried"}} = Task.yield(request, 30_000)
+    # A retry would have reached the plug before the answer came back.
+    refute_received {:inflight_request, _retried_pid}
 
     # Once answered, the relay is an idle keep-alive again and is reaped.
-    assert eventually(
-             fn -> relay_pid not in Task.Supervisor.children(Shuttle.TaskSupervisor) end,
-             1_500
-           )
+    assert eventually(fn -> relay_pid not in new_relays(baseline) end)
 
     assert TailnetDial.last_error(remote.name) == nil
   end
@@ -590,25 +608,23 @@ defmodule Shuttle.TailnetDialTest do
       Task.async(fn ->
         Shuttle.RemoteRegistry.Client.Default.get(
           "https://#{@host}:#{tls_port}/in-flight",
-          5_000
+          @http_timeout_ms
         )
       end)
 
-    assert_receive {:inflight_request, stalled_pid}, 5_000
+    assert_receive {:inflight_request, stalled_pid}
     on_exit(fn -> if Process.alive?(stalled_pid), do: Process.exit(stalled_pid, :kill) end)
-    assert [relay_pid] = Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
 
-    assert eventually(
-             fn -> relay_pid not in Task.Supervisor.children(Shuttle.TaskSupervisor) end,
-             2_000
-           )
+    # The plug never answers, so only the 600 ms ceiling closes the relay
+    # (httpc's own timeout would come back `:timeout`). The relay may already
+    # be gone by the time this test looks, so it observes the closed request
+    # first and then that no relay is left behind.
+    assert {:ok, {:error, :socket_closed_remotely}} =
+             Task.yield(request, 2 * @http_timeout_ms)
 
+    assert eventually(fn -> new_relays(baseline) == [] end)
     assert TailnetDial.last_error(remote.name) == nil
     assert %{bridges: [%{name: "idle-in-flight", status: "ready"}]} = TailnetDial.status()
-
-    assert {:ok, {:error, :socket_closed_remotely}} = Task.yield(request, 2_000)
-    if Process.alive?(stalled_pid), do: Process.exit(stalled_pid, :kill)
-    assert TailnetDial.last_error(remote.name) == nil
   end
 
   test "a closed client cannot leave a stalled TLS relay task behind", %{base: base} do
@@ -622,14 +638,16 @@ defmodule Shuttle.TailnetDialTest do
     path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
     baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
 
-    {:ok, client} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 5_000)
-    assert_receive {:localapi_relay_pid, relay_pid}, 5_000
-    assert_receive {:silent_tls_handshake, _peer_pid}, 5_000
+    {:ok, client} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, active: false], @http_timeout_ms)
+
+    assert_receive {:localapi_relay_pid, relay_pid}
+    assert_receive {:silent_tls_handshake, _peer_pid}
     send(relay_pid, :hold)
-    assert_receive {:localapi_relay_held, ^relay_pid}, 5_000
+    assert_receive {:localapi_relay_held, ^relay_pid}
     :gen_tcp.close(client)
 
-    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 600)
+    assert eventually(fn -> new_relays(baseline) == [] end)
     assert TailnetDial.last_error(remote.name) == nil
   end
 
@@ -646,15 +664,19 @@ defmodule Shuttle.TailnetDialTest do
 
     {tls_port, _peer} = start_silent_tls_peer(base, close_write?: true)
     localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
-    remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 250)
+    # An idle budget (2 x 5 s) far beyond the drain timeout, so only the
+    # drain can end this relay.
+    remote = start_bridge(base, localapi, @host, 443, request_timeout_ms: 5_000)
     path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
     baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
 
-    {:ok, client} = :gen_tcp.connect({:local, path}, 0, [:binary, active: false], 5_000)
-    assert_receive {:silent_tls_handshake, _peer_pid}, 5_000
-    assert_receive {:silent_tls_write_closed, _peer_pid}, 5_000
+    {:ok, client} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, active: false], @http_timeout_ms)
 
-    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end, 600)
+    assert_receive {:silent_tls_handshake, _peer_pid}
+    assert_receive {:silent_tls_write_closed, _peer_pid}
+
+    assert eventually(fn -> new_relays(baseline) == [] end)
     assert TailnetDial.last_error(remote.name) == {:tailnet_dial, :relay, :drain_timeout}
     :gen_tcp.close(client)
   end
@@ -679,7 +701,7 @@ defmodule Shuttle.TailnetDialTest do
     bridge_path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
 
     assert {:error, _reason} = request_via_bridge(bridge_path, @host, 443)
-    assert_receive {:dial_request, _request}, 5_000
+    assert_receive {:dial_request, _request}
 
     assert eventually(fn ->
              TailnetDial.last_error(remote.name) ==
@@ -706,18 +728,27 @@ defmodule Shuttle.TailnetDialTest do
     remote = start_bridge(base, localapi, @host, 443)
     url = "https://#{@host}/api/v1/version"
 
-    assert_private_dial_error(Shuttle.RemoteRegistry.Client.Default.get(url, 1_000))
+    assert_private_dial_error(Shuttle.RemoteRegistry.Client.Default.get(url, @http_timeout_ms))
 
     assert_private_dial_error(
-      Shuttle.RemoteRegistry.Client.Default.get(url, [{"if-none-match", "etag"}], 1_000)
+      Shuttle.RemoteRegistry.Client.Default.get(
+        url,
+        [{"if-none-match", "etag"}],
+        @http_timeout_ms
+      )
     )
 
     assert_private_dial_error(
-      Shuttle.RemoteRegistry.Client.Default.post(url, "{}", "application/json", 1_000)
+      Shuttle.RemoteRegistry.Client.Default.post(url, "{}", "application/json", @http_timeout_ms)
     )
 
-    assert_private_dial_error(Shuttle.RemoteRegistry.Client.Default.get_file(url, 1_000))
-    assert_private_dial_error(Shuttle.RemoteRegistry.Client.Default.get_file(url, [], 1_000))
+    assert_private_dial_error(
+      Shuttle.RemoteRegistry.Client.Default.get_file(url, @http_timeout_ms)
+    )
+
+    assert_private_dial_error(
+      Shuttle.RemoteRegistry.Client.Default.get_file(url, [], @http_timeout_ms)
+    )
 
     assert TailnetDial.last_error(remote.name) ==
              {:tailnet_dial, :localapi_status, {:http_status, 403, "dial forbidden"}}
@@ -729,14 +760,14 @@ defmodule Shuttle.TailnetDialTest do
     bridge_path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
 
     assert {:error, _reason} = request_via_bridge(bridge_path, @host, 443)
-    assert_receive {:dial_request, _request}, 5_000
+    assert_receive {:dial_request, _request}
 
     assert eventually(fn ->
              TailnetDial.last_error(remote.name) ==
                {:tailnet_dial, :localapi_upgrade, :invalid_upgrade_headers}
            end)
 
-    refute_receive {:https_request, _}, 100
+    refute_received {:https_request, _}
   end
 
   test "TLS hostname verification rejects a certificate for another SNI", %{
@@ -761,7 +792,7 @@ defmodule Shuttle.TailnetDialTest do
 
     assert {:tailnet_dial, :tls, reason} = TailnetDial.last_error(remote.name)
     assert inspect(reason) =~ "hostname_check_failed"
-    refute_receive {:https_request, _}, 100
+    refute_received {:https_request, _}
   end
 
   test "fleet token changes add, replace, and remove per-remote bridges", %{base: base} do
@@ -785,10 +816,7 @@ defmodule Shuttle.TailnetDialTest do
     Process.unlink(manager)
     on_exit(fn -> if Process.alive?(manager), do: Supervisor.stop(manager, :normal) end)
 
-    assert eventually(
-             fn -> is_binary(TailnetDial.socket_for("hub-a.example.ts.net", 443)) end,
-             400
-           )
+    assert eventually(fn -> is_binary(TailnetDial.socket_for("hub-a.example.ts.net", 443)) end)
 
     first_path = TailnetDial.socket_for("hub-a.example.ts.net", 443)
 
@@ -808,28 +836,22 @@ defmodule Shuttle.TailnetDialTest do
 
     send(Shuttle.TailnetDial.Reconciler, :refresh)
 
-    assert eventually(
-             fn ->
-               TailnetDial.socket_for("hub-a.example.ts.net", 443) == nil and
-                 TailnetDial.socket_for("hub-b.example.ts.net", 443) == first_path and
-                 is_binary(TailnetDial.socket_for("hub-c.example.ts.net", 443))
-             end,
-             400
-           )
+    assert eventually(fn ->
+             TailnetDial.socket_for("hub-a.example.ts.net", 443) == nil and
+               TailnetDial.socket_for("hub-b.example.ts.net", 443) == first_path and
+               is_binary(TailnetDial.socket_for("hub-c.example.ts.net", 443))
+           end)
 
     second_path = TailnetDial.socket_for("hub-c.example.ts.net", 443)
 
     write_fleet(remote_file, localapi, [])
 
-    assert eventually(
-             fn ->
-               TailnetDial.socket_for("hub-b.example.ts.net", 443) == nil and
-                 TailnetDial.socket_for("hub-c.example.ts.net", 443) == nil and
-                 File.lstat(first_path) == {:error, :enoent} and
-                 File.lstat(second_path) == {:error, :enoent}
-             end,
-             400
-           )
+    assert eventually(fn ->
+             TailnetDial.socket_for("hub-b.example.ts.net", 443) == nil and
+               TailnetDial.socket_for("hub-c.example.ts.net", 443) == nil and
+               File.lstat(first_path) == {:error, :enoent} and
+               File.lstat(second_path) == {:error, :enoent}
+           end)
   end
 
   test "the bridge refuses a traversable socket directory with Host's refusal", %{base: base} do
@@ -946,7 +968,7 @@ defmodule Shuttle.TailnetDialTest do
     assert Bitwise.band(mode, 0o777) == 0o700
   end
 
-  defp request_via_bridge(path, host, port, timeout_ms \\ 5_000) do
+  defp request_via_bridge(path, host, port, timeout_ms \\ @http_timeout_ms) do
     case :inets.start(:httpc, profile: @profile) do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
@@ -983,8 +1005,8 @@ defmodule Shuttle.TailnetDialTest do
 
         {:ok, {{127, 0, 0, 1}, port}} = :ssl.sockname(listener)
         send(parent, {:silent_tls_peer_ready, self(), port})
-        {:ok, transport} = :ssl.transport_accept(listener, 5_000)
-        {:ok, socket} = :ssl.handshake(transport, 5_000)
+        {:ok, transport} = :ssl.transport_accept(listener, @http_timeout_ms)
+        {:ok, socket} = :ssl.handshake(transport, @http_timeout_ms)
         send(parent, {:silent_tls_handshake, self()})
 
         if Keyword.get(opts, :close_write?, false) do
@@ -999,7 +1021,7 @@ defmodule Shuttle.TailnetDialTest do
         :ssl.close(listener)
       end)
 
-    assert_receive {:silent_tls_peer_ready, ^pid, port}, 5_000
+    assert_receive {:silent_tls_peer_ready, ^pid, port}
     on_exit(fn -> if Process.alive?(pid), do: Process.exit(pid, :kill) end)
     {port, pid}
   end
@@ -1089,7 +1111,7 @@ defmodule Shuttle.TailnetDialTest do
   end
 
   defp recv_until_headers(socket, acc) do
-    case :gen_tcp.recv(socket, 0, 5_000) do
+    case :gen_tcp.recv(socket, 0, @http_timeout_ms) do
       {:ok, data} ->
         next = acc <> data
         if String.contains?(next, "\r\n\r\n"), do: next, else: recv_until_headers(socket, next)
@@ -1199,7 +1221,13 @@ defmodule Shuttle.TailnetDialTest do
   defp restore_cacerts(value),
     do: Application.put_env(:shuttle, :tailnet_dial_test_cacerts, value)
 
-  defp eventually(fun, attempts \\ 100)
+  # Relays started since `baseline`. Relays left by earlier tests may be
+  # reaped mid-test, so a test compares only what it added.
+  defp new_relays(baseline), do: Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp eventually(fun, attempts \\ 3_000)
   defp eventually(_fun, 0), do: false
 
   defp eventually(fun, attempts) do

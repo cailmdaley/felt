@@ -1,6 +1,10 @@
 package shuttle
 
-import "time"
+import (
+	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+)
 
 // ResolvedAgent is the daemon-facing resolution of a block's agent: the base
 // agent record (cli/wrapper/model/...) plus the effective axes (effort/chrome/
@@ -48,13 +52,17 @@ func (r *Resolved) IsEmpty() bool {
 // so `shuttle show -j`'s shuttle.resolved.agent (via ResolveBlock) and
 // `shuttle agents resolve` (ad-hoc, for the daemon's capture path) emit a
 // byte-identical shape.
-func NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAgent {
+func (r *AgentRegistry) NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAgent {
+	var env *sysenv.Env
+	if r != nil {
+		env = r.env
+	}
 	return &ResolvedAgent{
 		ID:            rec.ID,
 		CLI:           rec.CLI,
 		Wrapper:       rec.Wrapper,
 		Provider:      rec.Provider,
-		Model:         resolveModelFamily(rec),
+		Model:         resolveModelFamily(env, rec),
 		ExtraFlags:    rec.ExtraFlags,
 		RequiresModel: rec.RequiresModel,
 		Effort:        axes.Effort,
@@ -83,7 +91,7 @@ func ResolveBlock(b *Block, reg *AgentRegistry, now time.Time) (*Resolved, error
 		if err != nil {
 			return nil, err
 		}
-		res.Agent = NewResolvedAgent(rec, axes)
+		res.Agent = reg.NewResolvedAgent(rec, axes)
 	}
 
 	if b.Kind == "standing" && b.Schedule != nil {

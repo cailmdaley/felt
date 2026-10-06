@@ -158,21 +158,21 @@ type hostEvidence struct {
 	isDaemonCommand func(string) bool
 }
 
-func collectHostReceipt(daemon ReceiptDaemon) ReceiptHost {
-	ev := gatherHostEvidence()
+func (a *app) collectHostReceipt(daemon ReceiptDaemon) ReceiptHost {
+	ev := a.gatherHostEvidence()
 	ev.daemonTailnetDial = daemon.TailnetDial
 	ev.daemonVersionReported = daemon.Listen != ""
 	ev.daemonListen, ev.daemonClass, ev.daemonPeerGate = daemon.Listen, daemon.HostClass, daemon.PeerGate
 	ev.daemonPeerGateUID, ev.daemonPeerGateUIDSource = daemon.PeerGateUID, daemon.PeerGateUIDSource
 	ev.daemonPortOwner, ev.daemonPortListen = observedDaemonPortOwner(ev, os.Geteuid())
-	return evaluateHost(ev)
+	return a.evaluateHost(ev)
 }
 
-func gatherHostEvidence() hostEvidence {
+func (a *app) gatherHostEvidence() hostEvidence {
 	ev := hostEvidence{isDaemonCommand: func(cmd string) bool { return isShuttleDaemonCommand(cmd, fileExists) }}
-	ev.settings, ev.settingsErr = resolveHostSettings()
-	if _, err := exec.LookPath("who"); err == nil {
-		if out, err := exec.Command("who").Output(); err == nil {
+	ev.settings, ev.settingsErr = a.resolveHostSettings()
+	if _, err := a.env.LookPath("who"); err == nil {
+		if out, err := a.env.Command("who").Output(); err == nil {
 			n := countLoggedInUsers(string(out))
 			ev.users = &n
 		}
@@ -180,13 +180,13 @@ func gatherHostEvidence() hostEvidence {
 	if ev.settingsErr == nil && ev.settings.listen.Network == "unix" {
 		ev.socketDir = inspectSocketDir(filepath.Dir(ev.settings.listen.Address), os.Geteuid())
 	}
-	ev.listeners, ev.listenFrom = enumerateListeners()
-	attachCommands(ev.listeners)
+	ev.listeners, ev.listenFrom = a.enumerateListeners()
+	a.attachCommands(ev.listeners)
 
 	// 4000 always: a daemon started from another shell, or by the
 	// supervisor, need not share this shell's SHUTTLE_PORT.
 	ev.daemonPorts = []int{defaultDaemonPort}
-	if p, err := parsePort(strings.TrimSpace(os.Getenv("SHUTTLE_PORT"))); err == nil && p != defaultDaemonPort {
+	if p, err := parsePort(strings.TrimSpace(a.env.Getenv("SHUTTLE_PORT"))); err == nil && p != defaultDaemonPort {
 		ev.daemonPorts = append(ev.daemonPorts, p)
 	}
 	if ev.settingsErr == nil && ev.settings.listen.Network == "tcp" {
@@ -196,7 +196,7 @@ func gatherHostEvidence() hostEvidence {
 			}
 		}
 	}
-	if doc, err := loadRemotesFileRaw(); err == nil {
+	if doc, err := a.loadRemotesFileRaw(); err == nil {
 		for _, r := range doc.Remotes {
 			if r.Port != 0 {
 				ev.tunnelPorts = append(ev.tunnelPorts, r.Port)
@@ -208,9 +208,9 @@ func gatherHostEvidence() hostEvidence {
 			ev.httpsProxy = strings.TrimSpace(doc.Defaults.HTTPSProxy)
 			proxy, proxyErr = doc.Defaults.normalizedHTTPSProxy()
 		}
-		socket, source, socketErr := effectiveTailscaleSocket(doc.Defaults)
+		socket, source, socketErr := a.effectiveTailscaleSocket(doc.Defaults)
 		ev.tailscaleSocketSource = source
-		ev.tailscaleDefaultRefused = defaultSocketRefusal(doc.Defaults)
+		ev.tailscaleDefaultRefused = a.defaultSocketRefusal(doc.Defaults)
 		if source == socketSourceConfigured {
 			ev.tailscaleSocket = strings.TrimSpace(doc.Defaults.TailscaleSocket)
 		}
@@ -225,7 +225,7 @@ func gatherHostEvidence() hostEvidence {
 			ev.tailscaleSocket = socket
 		}
 		if ev.tailscaleSocket != "" && socketErr == nil {
-			ev.tailnetSocketEvidence = inspectTailnetSocket(ev.tailscaleSocket, os.Geteuid())
+			ev.tailnetSocketEvidence = a.inspectTailnetSocket(ev.tailscaleSocket, os.Geteuid())
 		}
 		if socket != "" && socketErr == nil && !proxy.configured() {
 			for _, remote := range doc.Remotes {
@@ -265,7 +265,7 @@ func isShuttleDaemonCommand(cmd string, exists func(string) bool) bool {
 
 // attachCommands fills each listener's command line: /proc/<pid>/cmdline on
 // Linux, one `ps` call elsewhere. Unreadable processes keep an empty command.
-func attachCommands(ls []rawListener) {
+func (a *app) attachCommands(ls []rawListener) {
 	if len(ls) == 0 {
 		return
 	}
@@ -284,7 +284,7 @@ func attachCommands(ls []rawListener) {
 			}
 		}
 	} else if len(pids) > 0 {
-		if out, err := exec.Command("ps", "-o", "pid=,command=", "-p", strings.Join(pids, ",")).Output(); err == nil {
+		if out, err := a.env.Command("ps", "-o", "pid=,command=", "-p", strings.Join(pids, ",")).Output(); err == nil {
 			commands = parsePSCommands(string(out))
 		}
 	}
@@ -363,7 +363,7 @@ func observedDaemonPortOwnerFromProc(ev hostEvidence, callerUID int, procRoot st
 }
 
 // evaluateHost applies the status rules to gathered evidence.
-func evaluateHost(ev hostEvidence) ReceiptHost {
+func (a *app) evaluateHost(ev hostEvidence) ReceiptHost {
 	h := ReceiptHost{Status: receiptHealthy, Listeners: []ReceiptListener{}}
 	if ev.settingsErr != nil {
 		h.Status = receiptMismatch
@@ -482,7 +482,7 @@ func evaluateHost(ev hostEvidence) ReceiptHost {
 	if h.TailscaleSocket != "" {
 		socket := h.TailnetSocketEvidence
 		if socket == nil {
-			socket = inspectTailnetSocket(h.TailscaleSocket, os.Geteuid())
+			socket = a.inspectTailnetSocket(h.TailscaleSocket, os.Geteuid())
 			h.TailnetSocketEvidence = socket
 		}
 		switch {
@@ -637,12 +637,12 @@ func classifyFleetListeners(raw []rawListener, daemonPorts, tunnelPorts []int, i
 
 // enumerateListeners lists this user's listening TCP sockets with the tool
 // the platform has, returning the tool's name, or "" when none worked.
-func enumerateListeners() ([]rawListener, string) {
+func (a *app) enumerateListeners() ([]rawListener, string) {
 	uid := os.Getuid()
 	switch runtime.GOOS {
 	case "linux":
-		if _, err := exec.LookPath("ss"); err == nil {
-			if out, err := exec.Command("ss", "-ltnpH").Output(); err == nil {
+		if _, err := a.env.LookPath("ss"); err == nil {
+			if out, err := a.env.Command("ss", "-ltnpH").Output(); err == nil {
 				return parseSSListeners(string(out)), "ss"
 			}
 		}
@@ -650,8 +650,8 @@ func enumerateListeners() ([]rawListener, string) {
 			return ls, "proc"
 		}
 	case "darwin":
-		if _, err := exec.LookPath("lsof"); err == nil {
-			out, err := exec.Command("lsof", "+c", "0", "-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-u", strconv.Itoa(uid), "-F", "pcn").Output()
+		if _, err := a.env.LookPath("lsof"); err == nil {
+			out, err := a.env.Command("lsof", "+c", "0", "-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-u", strconv.Itoa(uid), "-F", "pcn").Output()
 			// lsof exits 1 when nothing matched; empty output is an empty list.
 			if err == nil || (len(out) == 0 && isExitCode(err, 1)) {
 				return parseLsofListeners(string(out)), "lsof"
@@ -1085,7 +1085,7 @@ func inspectSocketDir(dir string, euid int) *ReceiptSocketDir {
 	return d
 }
 
-func inspectTailnetSocket(path string, euid int) *ReceiptTailnetSocket {
+func (a *app) inspectTailnetSocket(path string, euid int) *ReceiptTailnetSocket {
 	socket := &ReceiptTailnetSocket{Path: path}
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -1109,7 +1109,7 @@ func inspectTailnetSocket(path string, euid int) *ReceiptTailnetSocket {
 		socket.BadAncestor = fmt.Sprintf("%s (unresolvable: %v)", filepath.Dir(path), err)
 		return socket
 	}
-	socket.PrivateDir, socket.BadAncestor = privateSocketDirectory(parent, euid)
+	socket.PrivateDir, socket.BadAncestor = a.privateSocketDirectory(parent, euid)
 	if socket.PrivateDir == "" {
 		if socket.BadAncestor == "" {
 			socket.BadAncestor = "no ancestor directory owned by the daemon uid blocks traversal by other users"
@@ -1121,14 +1121,14 @@ func inspectTailnetSocket(path string, euid int) *ReceiptTailnetSocket {
 	return socket
 }
 
-func privateSocketDirectory(dir string, euid int) (string, string) {
+func (a *app) privateSocketDirectory(dir string, euid int) (string, string) {
 	for current := dir; ; current = filepath.Dir(current) {
 		info, err := os.Stat(current)
 		if err == nil && info.IsDir() {
 			st, ok := info.Sys().(*syscall.Stat_t)
 			mode := info.Mode().Perm()
 			if ok && int(st.Uid) == euid && mode&0o100 != 0 && mode&0o011 == 0 {
-				searchACL, err := directoryHasSearchACL(current)
+				searchACL, err := a.directoryHasSearchACL(current)
 				if err != nil {
 					return "", fmt.Sprintf("%s (ACL inspection failed: %v)", current, err)
 				}
@@ -1145,11 +1145,11 @@ func privateSocketDirectory(dir string, euid int) (string, string) {
 }
 
 // Darwin ACLs can grant directory traversal without changing FileMode.Perm.
-func directoryHasSearchACL(path string) (bool, error) {
+func (a *app) directoryHasSearchACL(path string) (bool, error) {
 	if runtime.GOOS != "darwin" {
 		return false, nil
 	}
-	output, err := exec.Command("/bin/ls", "-lde", path).CombinedOutput()
+	output, err := a.env.Command("/bin/ls", "-lde", path).CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("ls -lde: %w: %s", err, strings.TrimSpace(string(output)))
 	}

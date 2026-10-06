@@ -46,8 +46,8 @@ import (
 //
 // Errors only when every source fails — an empty host would silently never
 // dispatch, so fail loud instead.
-func resolveOwnHost(flagVal string) (string, error) {
-	host, _, err := resolveOwnHostSourced(flagVal)
+func (a *app) resolveOwnHost(flagVal string) (string, error) {
+	host, _, err := a.resolveOwnHostSourced(flagVal)
 	return host, err
 }
 
@@ -64,49 +64,43 @@ const (
 )
 
 // describe renders the source for a user-facing message. The file tier names
-// the resolved path (the user can edit it); the hostname tier names both,
-// because a hostname-derived identity has just been seeded into that path.
-func (s hostSource) describe() string {
+// the resolved host file path (the user can edit it); the hostname tier names
+// both, because a hostname-derived identity has just been seeded into that path.
+func (s hostSource) describe(hostFile string) string {
 	switch s {
 	case hostSourceFlag:
 		return "--host"
 	case hostSourceEnv:
 		return "$SHUTTLE_HOST"
 	case hostSourceHostname:
-		return "the OS hostname, seeded into " + hostConfigFilePath()
+		return "the OS hostname, seeded into " + hostFile
 	default:
-		return hostConfigFilePath()
+		return hostFile
 	}
 }
 
 // resolveOwnHostSourced is resolveOwnHost plus the tier that answered.
-func resolveOwnHostSourced(flagVal string) (string, hostSource, error) {
+func (a *app) resolveOwnHostSourced(flagVal string) (string, hostSource, error) {
 	if s := strings.TrimSpace(flagVal); s != "" {
 		return s, hostSourceFlag, nil
 	}
-	if env := strings.TrimSpace(os.Getenv("SHUTTLE_HOST")); env != "" {
+	if env := strings.TrimSpace(a.env.Getenv("SHUTTLE_HOST")); env != "" {
 		return env, hostSourceEnv, nil
 	}
-	if h, ok := hostConfigFileValue(); ok {
+	if h, ok := a.hostConfigFileValue(); ok {
 		return h, hostSourceFile, nil
 	}
-	if name, err := osHostname(); err == nil {
+	if name, err := a.osHostname(); err == nil {
 		if name = normalizeHostname(name); name != "" {
-			seedHostConfigFile(name)
+			a.seedHostConfigFile(name)
 			return name, hostSourceHostname, nil
 		}
 	}
 	return "", "", fmt.Errorf(
 		"could not resolve a host to stamp: SHUTTLE_HOST unset, %s empty/missing, and os.Hostname() empty; pass --host <name> explicitly",
-		hostConfigFilePath(),
+		a.hostConfigFilePath(),
 	)
 }
-
-// osHostname is os.Hostname, indirected so tests can force the
-// last-resort tier of resolveOwnHost's precedence to fail without needing an
-// OS-level way to break the real hostname syscall (there isn't a portable
-// one). Production code never reassigns it.
-var osHostname = os.Hostname
 
 // normalizeHostname reduces a raw OS hostname to its canonical short form:
 // trimmed, lowercased, and cut at the first "." so "Studio-Air.home" and
@@ -134,8 +128,8 @@ func normalizeHostname(raw string) string {
 // stream's own gate is consulted — a mkdir here would create ~/.shuttle on a
 // Felt-only machine and thereby switch that machine's event stream on. Seeding
 // is explicitly best-effort, so declining is free; breaking the gate is not.
-func seedHostConfigFile(name string) {
-	path := hostConfigFilePath()
+func (a *app) seedHostConfigFile(name string) {
+	path := a.hostConfigFilePath()
 	dir := filepath.Dir(path)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return
@@ -155,15 +149,15 @@ func seedHostConfigFile(name string) {
 // shuttle's own state: it creates the file's directory, and it persists
 // $SHUTTLE_HOST, so a daemon installed from a shell exporting it and a CLI
 // shell without the export still name the machine alike.
-func seedOwnHost() (id string, source hostSource, seeded bool, err error) {
-	if h, ok := hostConfigFileValue(); ok {
+func (a *app) seedOwnHost() (id string, source hostSource, seeded bool, err error) {
+	if h, ok := a.hostConfigFileValue(); ok {
 		return h, hostSourceFile, false, nil
 	}
-	id, source, err = resolveOwnHostSourced("")
+	id, source, err = a.resolveOwnHostSourced("")
 	if err != nil {
 		return "", "", false, err
 	}
-	path := hostConfigFilePath()
+	path := a.hostConfigFilePath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", "", false, fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
@@ -176,14 +170,14 @@ func seedOwnHost() (id string, source hostSource, seeded bool, err error) {
 // hostConfigFilePath is the canonical per-host identity file: SHUTTLE_HOST_FILE
 // if set, else ~/.shuttle/host. The daemon asks `shuttle host --json`
 // rather than reading it, so this is its only reader.
-func hostConfigFilePath() string {
-	if v := strings.TrimSpace(os.Getenv("SHUTTLE_HOST_FILE")); v != "" {
-		if expanded, err := expandUserPath(v); err == nil {
+func (a *app) hostConfigFilePath() string {
+	if v := strings.TrimSpace(a.env.Getenv("SHUTTLE_HOST_FILE")); v != "" {
+		if expanded, err := a.expandUserPath(v); err == nil {
 			return expanded
 		}
 		return v
 	}
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return ".shuttle/host"
 	}
@@ -194,8 +188,8 @@ func hostConfigFilePath() string {
 // or ("", false) when the file is absent/unreadable or that line is blank.
 // This is the tier resolveOwnHost seeds on first fallback, so after one
 // resolve on a fresh machine it is the tier that answers.
-func hostConfigFileValue() (string, bool) {
-	data, err := os.ReadFile(hostConfigFilePath())
+func (a *app) hostConfigFileValue() (string, bool) {
+	data, err := os.ReadFile(a.hostConfigFilePath())
 	if err != nil {
 		return "", false
 	}
@@ -215,6 +209,7 @@ func hostConfigFileValue() (string, bool) {
 type ownerMismatchError struct {
 	fiber, owner, own string
 	source            hostSource
+	hostFile          string
 }
 
 func (e ownerMismatchError) Error() string {
@@ -225,7 +220,7 @@ func (e ownerMismatchError) Error() string {
 			"  Run this verb on %q, or use the kanban (it routes to the owning daemon).\n"+
 			"  If both names are THIS machine, that source is the canonical one: set\n"+
 			"  the fiber's host: to match it.",
-		e.fiber, e.owner, e.own, e.source.describe(), e.owner)
+		e.fiber, e.owner, e.own, e.source.describe(e.hostFile), e.owner)
 }
 
 // ensureOwnedHere refuses to mutate a fiber whose shuttle.host names a daemon
@@ -250,7 +245,7 @@ func (e ownerMismatchError) Error() string {
 // Lifecycle verbs that can route to a configured remote owner check ownership
 // through routeOwnerForCommand instead, which refuses with this same error
 // under --local.
-func ensureOwnedHere(f *felt.Felt, fiber string) error {
+func (a *app) ensureOwnedHere(f *felt.Felt, fiber string) error {
 	block, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok || block == nil {
 		return nil
@@ -259,12 +254,12 @@ func ensureOwnedHere(f *felt.Felt, fiber string) error {
 	if owner == "" {
 		return nil
 	}
-	own, source, err := resolveOwnHostSourced("")
+	own, source, err := a.resolveOwnHostSourced("")
 	if err != nil {
 		return fmt.Errorf("cannot verify fiber %s ownership (owned by %q): %w", fiber, owner, err)
 	}
 	if owner == own {
 		return nil
 	}
-	return ownerMismatchError{fiber: fiber, owner: owner, own: own, source: source}
+	return ownerMismatchError{fiber: fiber, owner: owner, own: own, source: source, hostFile: a.hostConfigFilePath()}
 }

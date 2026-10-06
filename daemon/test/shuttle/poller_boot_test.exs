@@ -9,12 +9,19 @@ defmodule Shuttle.PollerBootTest do
     def cmd("shuttle", ["contract"], _opts),
       do: {Integer.to_string(Shuttle.Contract.expected_level()) <> "\n", 0}
 
+    # Only boot adoption's scan blocks. Every poll cycle's apply runs the same
+    # scan on the Poller process, and a block there would wedge the Poller
+    # against the test's on_exit stop.
     def cmd("tmux", ["ls", "-F", _format], _opts) do
-      test_pid = Shuttle.Env.app(:poller_boot_test_pid)
-      send(test_pid, {:adoption_blocked, self()})
+      if Process.put(:boot_scan_blocked, true) do
+        {"", 1}
+      else
+        test_pid = Shuttle.Env.app(:poller_boot_test_pid)
+        send(test_pid, {:adoption_blocked, self()})
 
-      receive do
-        :finish_adoption -> {"", 1}
+        receive do
+          :finish_adoption -> {"", 1}
+        end
       end
     end
 
@@ -43,17 +50,17 @@ defmodule Shuttle.PollerBootTest do
         )
       end)
 
-    assert_receive {:adoption_blocked, adoption_process}, 1_000
+    assert_receive {:adoption_blocked, adoption_process}
     assert Process.whereis(name)
 
     # GenServer registers its name before init/1. The call message queues in
     # that registered process while orphan adoption is blocked, then is served
     # from initialized state after init returns.
-    snapshot = Task.async(fn -> Poller.snapshot(name, 5_000) end)
+    snapshot = Task.async(fn -> Poller.snapshot(name, 30_000) end)
     send(adoption_process, :finish_adoption)
 
-    assert {:ok, poller} = Task.await(starter, 5_000)
-    assert is_map(Task.await(snapshot, 5_000))
+    assert {:ok, poller} = Task.await(starter, 30_000)
+    assert is_map(Task.await(snapshot, 30_000))
     assert Process.alive?(poller)
   end
 end

@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 // The user agent registry — how a machine adds to or restricts the agents the
@@ -73,11 +75,11 @@ type agentOverride struct {
 
 // UserAgentsPath is where the user registry is read from (and written to by
 // `shuttle agents init`): $SHUTTLE_AGENTS_FILE, else ~/.config/shuttle/agents.json.
-func UserAgentsPath() (string, error) {
-	if env := os.Getenv("SHUTTLE_AGENTS_FILE"); env != "" {
-		return expandHome(env)
+func UserAgentsPath(env *sysenv.Env) (string, error) {
+	if path := env.Getenv("SHUTTLE_AGENTS_FILE"); path != "" {
+		return expandHome(env, path)
 	}
-	home, err := os.UserHomeDir()
+	home, err := env.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
@@ -85,8 +87,8 @@ func UserAgentsPath() (string, error) {
 }
 
 // layerUserAgents folds the user registry (if present) onto the built-in layer.
-func layerUserAgents(builtins *AgentRegistry) (*AgentRegistry, error) {
-	path, err := UserAgentsPath()
+func layerUserAgents(env *sysenv.Env, builtins *AgentRegistry) (*AgentRegistry, error) {
+	path, err := UserAgentsPath(env)
 	if err != nil {
 		return nil, err
 	}
@@ -336,11 +338,11 @@ func isBareArray(data []byte) bool {
 }
 
 // expandHome resolves a leading `~` against the home directory.
-func expandHome(path string) (string, error) {
+func expandHome(env *sysenv.Env, path string) (string, error) {
 	if path != "~" && !strings.HasPrefix(path, "~/") {
 		return path, nil
 	}
-	home, err := os.UserHomeDir()
+	home, err := env.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}

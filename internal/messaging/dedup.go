@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 type record struct {
@@ -119,11 +120,11 @@ type dedupOptions struct {
 // withDedup runs send at most once per message_id: a replay returns the stored
 // receipt, a concurrent duplicate waits for the live owner, and a different
 // request under the same id is rejected.
-func withDedup(ctx context.Context, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
-	return dedupOptions{}.run(ctx, req, send)
+func withDedup(ctx context.Context, env *sysenv.Env, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
+	return dedupOptions{}.run(ctx, env, req, send)
 }
 
-func (o dedupOptions) run(ctx context.Context, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
+func (o dedupOptions) run(ctx context.Context, env *sysenv.Env, req Request, send func(context.Context) dedupSendResult) (Receipt, error) {
 	if o.timeout <= 0 {
 		o.timeout = duplicateWaitTimeout
 	}
@@ -133,7 +134,7 @@ func (o dedupOptions) run(ctx context.Context, req Request, send func(context.Co
 	if o.reserve == nil {
 		o.reserve = mailboxWriteReservation
 	}
-	dir := filepath.Join(dataDir(), "messages")
+	dir := filepath.Join(dataDir(env), "messages")
 	if err := ensureDir(dir, 0700); err != nil {
 		return Receipt{}, errCode("dedup_unavailable", "cannot create message store: %v", err)
 	}
@@ -167,7 +168,7 @@ func (o dedupOptions) run(ctx context.Context, req Request, send func(context.Co
 	for {
 		owned, err := reserveDedupRecord(path, reservation, o.reserve)
 		if errors.Is(err, os.ErrExist) {
-			receipt, readErr, retry := duplicateResult(ctx, req, path, hash, o)
+			receipt, readErr, retry := duplicateResult(ctx, env, req, path, hash, o)
 			if retry {
 				continue
 			}
@@ -179,11 +180,11 @@ func (o dedupOptions) run(ctx context.Context, req Request, send func(context.Co
 		if !owned {
 			return Receipt{}, errCode("dedup_unavailable", "message reservation was not published")
 		}
-		return sendReserved(ownerCtx, dir, path, hash, req, nonce, send)
+		return sendReserved(ownerCtx, env, dir, path, hash, req, nonce, send)
 	}
 }
 
-func sendReserved(ctx context.Context, dir, path, hash string, req Request, nonce string, send func(context.Context) dedupSendResult) (Receipt, error) {
+func sendReserved(ctx context.Context, env *sysenv.Env, dir, path, hash string, req Request, nonce string, send func(context.Context) dedupSendResult) (Receipt, error) {
 	ownerCtx := context.WithValue(ctx, reservationDeadlinePublisherKey{}, func(deadline time.Time) error {
 		return updateReservationOwnerDeadline(path, hash, nonce, deadline)
 	})
@@ -260,7 +261,7 @@ func updateReservationOwnerDeadline(path, hash, nonce string, deadline time.Time
 // owner's published deadline (plus a margin) or ctx ends. It returns
 // retry=true only when the reservation disappeared, which happens when its
 // owner reports a preflight failure.
-func duplicateResult(ctx context.Context, req Request, path, hash string, o dedupOptions) (Receipt, error, bool) {
+func duplicateResult(ctx context.Context, env *sysenv.Env, req Request, path, hash string, o dedupOptions) (Receipt, error, bool) {
 	var ownerDeadlineStamp int64
 	var deadline time.Time
 	for waited := false; ; waited = true {
@@ -292,7 +293,7 @@ func duplicateResult(ctx context.Context, req Request, path, hash string, o dedu
 		case old.Hash != hash:
 			receipt, err = rejected(req, "dedup", "message_id was already used for a different request"), errCode("message_id_conflict", "message_id was already used for a different request")
 		case old.State == "complete":
-			receipt, err = storedResult(refreshCompletedClaudeReceipt(ctx, req, path, hash, old))
+			receipt, err = storedResult(refreshCompletedClaudeReceipt(ctx, env, req, path, hash, old))
 		case old.State != "reserved" || old.OwnerPID <= 0:
 			receipt, err = ownerlessRecord(req)
 		case !processAlive(old.OwnerPID, old.OwnerStart):
@@ -338,11 +339,11 @@ func readDedupRecord(path string) (record, error) {
 	return old, nil
 }
 
-func refreshCompletedClaudeReceipt(ctx context.Context, req Request, path, hash string, old record) record {
+func refreshCompletedClaudeReceipt(ctx context.Context, env *sysenv.Env, req Request, path, hash string, old record) record {
 	if old.State != "complete" || old.Hash != hash || old.Receipt.Transport != claudeNativeTransport || old.TranscriptOffset == nil || old.ClaudeQueueContentHash == "" || (old.Receipt.Status != StatusQueued && old.Receipt.Status != StatusSubmitted && old.Receipt.Status != StatusUnknown) {
 		return old
 	}
-	candidate, ok := refreshClaudeNativeReceipt(ctx, req, old)
+	candidate, ok := refreshClaudeNativeReceipt(ctx, env, req, old)
 	if !ok {
 		return old
 	}

@@ -15,6 +15,7 @@ func mustExtra(t *testing.T, f *Felt, key string, value any) {
 }
 
 func TestCheckBrokenBodyReference(t *testing.T) {
+	t.Parallel()
 	issues := Check([]*Felt{{
 		ID:   "fiber-a",
 		Name: "Fiber A",
@@ -33,6 +34,7 @@ func TestCheckBrokenBodyReference(t *testing.T) {
 }
 
 func TestCheckEmptyName(t *testing.T) {
+	t.Parallel()
 	issues := Check([]*Felt{{ID: "blank-name", Name: "  "}}, nil)
 
 	if len(issues) != 1 {
@@ -47,6 +49,7 @@ func TestCheckEmptyName(t *testing.T) {
 }
 
 func TestCheckBrokenBodyReferenceFragmentAgainstOpaqueFrontmatter(t *testing.T) {
+	t.Parallel()
 	target := &Felt{ID: "fiber-b", Name: "Fiber B"}
 	mustExtra(t, target, "decisions", map[string]any{
 		"choice": map[string]any{"label": "Choice"},
@@ -69,6 +72,7 @@ func TestCheckBrokenBodyReferenceFragmentAgainstOpaqueFrontmatter(t *testing.T) 
 }
 
 func TestCheckBrokenDataFlowReference(t *testing.T) {
+	t.Parallel()
 	fiber := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, fiber, "inputs", []map[string]any{{
 		"id":   "catalog",
@@ -88,6 +92,7 @@ func TestCheckBrokenDataFlowReference(t *testing.T) {
 }
 
 func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
+	t.Parallel()
 	consumer := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, consumer, "inputs", []map[string]any{{
 		"id":   "catalog",
@@ -109,6 +114,7 @@ func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
 }
 
 func TestCheckLegacyFormatReportsTitleDependsOnAndMystAnchor(t *testing.T) {
+	t.Parallel()
 	dir, s := newStore(t)
 
 	content := `---
@@ -160,6 +166,7 @@ Body.
 }
 
 func TestCheckLegacyFormatSkipsMalformedFrontmatter(t *testing.T) {
+	t.Parallel()
 	dir, s := newStore(t)
 
 	path := filepath.Join(dir, DirName, "broken-fiber", "broken-fiber.md")
@@ -181,6 +188,7 @@ func TestCheckLegacyFormatSkipsMalformedFrontmatter(t *testing.T) {
 }
 
 func TestCheckStructureMultipleBareFibers(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -201,6 +209,7 @@ func TestCheckStructureMultipleBareFibers(t *testing.T) {
 }
 
 func TestCheckStructureSlugCollision(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -229,6 +238,7 @@ func TestCheckStructureSlugCollision(t *testing.T) {
 }
 
 func TestCheckStructureCleanRepo(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := NewStorage(dir)
 	s.Init()
@@ -251,6 +261,7 @@ func TestCheckStructureCleanRepo(t *testing.T) {
 // to a fiber elsewhere in the enclosing store is healthy — this view just
 // cannot see it — while a link to nothing anywhere is still an error.
 func TestCheckSkipsEnclosingStoreReferences(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 
@@ -291,6 +302,7 @@ func TestCheckSkipsEnclosingStoreReferences(t *testing.T) {
 // full — and a local basename rescue would otherwise have fired, the reader
 // loses a repair. Check names both candidates rather than losing it silently.
 func TestCheckReportsShadowedBasenameRescue(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 
@@ -313,6 +325,7 @@ func TestCheckReportsShadowedBasenameRescue(t *testing.T) {
 // enclosing store is not a citation of the local same-slug fiber. Only the
 // genuinely local reference counts.
 func TestRelationshipsDropForeignCitations(t *testing.T) {
+	t.Parallel()
 	_, subProj := newSubstoreFixture(t)
 	external := NewStorage(subProj).ExternalRefs()
 
@@ -331,6 +344,7 @@ func TestRelationshipsDropForeignCitations(t *testing.T) {
 }
 
 func TestCheckParseabilityReportsMalformedFrontmatterAsError(t *testing.T) {
+	t.Parallel()
 	dir, s := newStore(t)
 
 	// The failure from the field: an unquoted scalar carrying a colon-space,
@@ -383,6 +397,7 @@ Body.
 }
 
 func TestCheckParseabilityQuietOnHealthyStore(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	if err := s.Write(&Felt{ID: "fiber-a", Name: "Fiber A"}); err != nil {
 		t.Fatalf("Write() error: %v", err)
@@ -402,6 +417,7 @@ func TestCheckParseabilityQuietOnHealthyStore(t *testing.T) {
 // outcome written through the CLI must NOT be reported. Only hand-edited
 // frontmatter can land here.
 func TestCheckParseabilitySurvivesFeltWrittenColonOutcomes(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	if err := s.Write(&Felt{ID: "venue", Name: "Venue", Outcome: "booked 8/1: deposit paid"}); err != nil {
 		t.Fatalf("Write() error: %v", err)
@@ -417,6 +433,7 @@ func TestCheckParseabilitySurvivesFeltWrittenColonOutcomes(t *testing.T) {
 }
 
 func TestCheckDependsOnScalarRefOK(t *testing.T) {
+	t.Parallel()
 	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, dependent, "depends_on", "fiber-b")
 
@@ -427,6 +444,7 @@ func TestCheckDependsOnScalarRefOK(t *testing.T) {
 }
 
 func TestCheckDependsOnListRefOK(t *testing.T) {
+	t.Parallel()
 	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, dependent, "depends_on", []string{"fiber-b", "fiber-c"})
 
@@ -441,6 +459,7 @@ func TestCheckDependsOnListRefOK(t *testing.T) {
 }
 
 func TestCheckDependsOnMapEntryOK(t *testing.T) {
+	t.Parallel()
 	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, dependent, "depends_on", []map[string]any{{"id": "fiber-b"}})
 
@@ -451,6 +470,7 @@ func TestCheckDependsOnMapEntryOK(t *testing.T) {
 }
 
 func TestCheckDependsOnDanglingRef(t *testing.T) {
+	t.Parallel()
 	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, dependent, "depends_on", "missing-fiber")
 
@@ -467,6 +487,7 @@ func TestCheckDependsOnDanglingRef(t *testing.T) {
 }
 
 func TestCheckDependsOnMalformedEntry(t *testing.T) {
+	t.Parallel()
 	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, dependent, "depends_on", []map[string]any{{"not-id": "fiber-b"}})
 
@@ -489,6 +510,7 @@ func TestCheckDependsOnMalformedEntry(t *testing.T) {
 // the only place that can say so — it must not bless a shape the runtime
 // refuses.
 func TestCheckDependsOnTopLevelMapIsMalformed(t *testing.T) {
+	t.Parallel()
 	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
 	mustExtra(t, dependent, "depends_on", map[string]any{"id": "fiber-b"})
 
@@ -507,6 +529,7 @@ func TestCheckDependsOnTopLevelMapIsMalformed(t *testing.T) {
 // someone left behind after clearing a dependency, which is exactly the moment
 // they were being tidy.
 func TestCheckDependsOnNullIsAbsent(t *testing.T) {
+	t.Parallel()
 	// Parsed from real frontmatter rather than built with SetExtraField: the
 	// bug is about the yaml NODE a bare `depends_on:` produces (a !!null
 	// scalar), and only the parse path produces one.
@@ -541,6 +564,7 @@ func writeFile(t *testing.T, root, rel, content string) string {
 // frontmatter that names nothing — are not fibers and draw no issue, and
 // nothing under a hidden directory is inspected.
 func TestCheckStructureFlagsStrayFiberFile(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "parent")
 	writeFile(t, s.root, "parent/leaf.md", "---\nname: leaf\ntags: [x]\n---\n")
@@ -574,6 +598,7 @@ func TestCheckStructureFlagsStrayFiberFile(t *testing.T) {
 // already taken, migrate cannot fold the file, so check says so instead of
 // recommending it.
 func TestCheckStructureStrayFiberCollision(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "parent/leaf")
 	writeFile(t, s.root, "parent/leaf.md", "---\nname: other leaf\ntags: [x]\n---\n")
@@ -593,6 +618,7 @@ func TestCheckStructureStrayFiberCollision(t *testing.T) {
 // TestCheckRootFlatFilesRecommendMigrate: the root-level flat-file error and
 // the nested stray error share the migrate hint.
 func TestCheckRootFlatFilesRecommendMigrate(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeFile(t, s.root, "alpha.md", "---\nname: alpha\n---\n")
 	writeFile(t, s.root, "beta.md", "---\nname: beta\n---\n")
@@ -612,6 +638,7 @@ func TestCheckRootFlatFilesRecommendMigrate(t *testing.T) {
 // relative to the citing fiber's scope, a bare slug, a correct partial tail —
 // is how links are meant to be written and stays silent.
 func TestCheckWarnsOnSlugRescuedReference(t *testing.T) {
+	t.Parallel()
 	consumer := &Felt{ID: "notes", Name: "Notes"}
 	mustExtra(t, consumer, "inputs", []map[string]any{{"id": "cov", "from": "old/jackknife.matrix"}})
 	target := &Felt{ID: "proj1/a2/jackknife", Name: "Jackknife"}
@@ -654,6 +681,7 @@ func TestCheckWarnsOnSlugRescuedReference(t *testing.T) {
 // it with a same-named fiber elsewhere, and check must not advise rewriting
 // the link toward that twin.
 func TestCheckLinkToStrayIsBrokenNotRescued(t *testing.T) {
+	t.Parallel()
 	_, s := newStore(t)
 	writeRawFiber(t, s.root, "proj/a")
 	writeRawFiber(t, s.root, "x/leaf2")

@@ -144,11 +144,11 @@ defmodule Shuttle.RegistryCommon do
   # registries record an attempt and a failure identically; each keeps its own
   # success path, which is where their shapes actually differ.
 
-  @doc "Stamp `remote`'s entry with the current attempt time."
-  @spec stamp_attempt(map(), Remote.t(), (Remote.t() -> map())) :: map()
-  def stamp_attempt(entries, %Remote{name: name} = remote, init_fun) do
+  @doc "Stamp `remote`'s entry with the attempt time `now`."
+  @spec stamp_attempt(map(), Remote.t(), DateTime.t(), (Remote.t() -> map())) :: map()
+  def stamp_attempt(entries, %Remote{name: name} = remote, now, init_fun) do
     entry = Map.get(entries, name, init_fun.(remote))
-    Map.put(entries, name, %{entry | last_attempt_at: DateTime.utc_now()})
+    Map.put(entries, name, %{entry | last_attempt_at: now})
   end
 
   @doc """

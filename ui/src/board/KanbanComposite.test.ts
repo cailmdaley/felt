@@ -82,48 +82,47 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
     }), { nowMs: 1_790_727_600_000 })
   const inFlightIds = (resp: ReturnType<typeof board>) => resp.now.inFlight.map((c) => c.id)
 
-  it('puts a running app worker on a pinned role in flight, not on the strip', () => {
-    const resp = board('pinned', appRuntime('running'))
-    expect(inFlightIds(resp)).toEqual(['role'])
-    expect(resp.pinned).toEqual([])
-    const card = resp.now.inFlight[0]
-    expect(card.workerState).toBe('running')
-    expect(card.tmuxSession).toBeUndefined()
-    expect(card.desktopLink).toBe(desktop)
-    expect(card.runtimePhase).toBe('waiting')
+  // Every role kind against every runtime shape the daemon serves. Any
+  // runtime puts the card in flight, whatever its kind; with none, a pinned
+  // role rests on the strip, a standing role waits on the timeline, and an
+  // active one-shot stays in flight. The card carries the runtime's own fields.
+  const runtimes: [shape: string, runtime: unknown, fields: Record<string, unknown> | null][] = [
+    ['no worker', undefined, null],
+    ['a running app worker', appRuntime('running'),
+      { workerState: 'running', tmuxSession: undefined, desktopLink: desktop, runtimePhase: 'waiting' }],
+    ['a blocked app launch', appRuntime('blocked', { launch_error: 'The app conversation no longer exists.' }),
+      { workerState: 'blocked', runtimePhase: 'blocked', launchError: 'The app conversation no longer exists.' }],
+    ['an idle app conversation', appRuntime('idle'), { workerState: 'running', desktopLink: desktop }],
+    ['a CLI worker', { state: 'running', surface: 'cli', tmux_session: 'role-shuttle', phase: 'working' },
+      { workerState: 'running', tmuxSession: 'role-shuttle', workerSurface: 'cli', runtimePhase: 'working' }],
+    ['a runtime without a state', { tmux_session: 'role-shuttle' }, { workerState: 'running', tmuxSession: 'role-shuttle' }],
+  ]
+  const restingPlace = { pinned: 'pinned', standing: 'timeline', oneshot: 'inFlight' } as const
+  // Each surface's whole id list, so a card on two surfaces, or twice on one,
+  // is as wrong as a card on the wrong one.
+  const placeOf = (resp: ReturnType<typeof board>) => ({
+    inFlight: inFlightIds(resp),
+    pinned: resp.pinned.map((c) => c.id),
+    timeline: resp.timeline.futureDated.map((c) => c.id),
+  })
+  const only = (surface: keyof ReturnType<typeof placeOf>) => ({
+    inFlight: [], pinned: [], timeline: [], [surface]: ['role'],
   })
 
-  it('puts a running app worker on a standing role in flight, not on the timeline', () => {
-    const resp = board('standing', appRuntime('running'))
-    expect(inFlightIds(resp)).toEqual(['role'])
-    expect(resp.timeline.futureDated.map((c) => c.id)).not.toContain('role')
-  })
-
-  it('keeps a blocked app launch in flight, at the top, with its error', () => {
-    const resp = board('pinned', appRuntime('blocked', { launch_error: 'The app conversation no longer exists.' }))
-    expect(inFlightIds(resp)).toEqual(['role'])
-    const card = resp.now.inFlight[0]
-    expect(card.workerState).toBe('blocked')
-    expect(card.runtimePhase).toBe('blocked')
-    expect(card.launchError).toBe('The app conversation no longer exists.')
-  })
-
-  it('rests a pinned role on the strip when the daemon holds no worker', () => {
-    const resp = board('pinned', undefined)
-    expect(inFlightIds(resp)).toEqual([])
-    expect(resp.pinned.map((c) => c.id)).toEqual(['role'])
-    expect(resp.pinned[0].workerState).toBeUndefined()
-  })
-
-  it('keeps a CLI worker in flight with its tmux handle', () => {
-    const resp = board('pinned', { state: 'running', surface: 'cli', tmux_session: 'role-shuttle', phase: 'working' })
-    expect(inFlightIds(resp)).toEqual(['role'])
-    expect(resp.now.inFlight[0]).toMatchObject({ workerState: 'running', tmuxSession: 'role-shuttle', workerSurface: 'cli' })
-  })
-
-  it('reads a runtime without a state as a running worker', () => {
-    const resp = board('pinned', { tmux_session: 'role-shuttle' })
-    expect(resp.now.inFlight[0]?.workerState).toBe('running')
+  it('places each kind by the daemon runtime and carries that runtime onto the card', () => {
+    const wrong: unknown[] = []
+    for (const kind of ['pinned', 'standing', 'oneshot'] as const) {
+      for (const [shape, runtime, fields] of runtimes) {
+        const resp = board(kind, runtime)
+        const expected = fields ? 'inFlight' : restingPlace[kind]
+        const place = placeOf(resp)
+        const card = [...resp.now.inFlight, ...resp.pinned].find((c) => c.id === 'role')
+        const got = card && Object.fromEntries(Object.keys(fields ?? { workerState: 0 }).map((k) => [k, card[k as keyof typeof card]]))
+        if (JSON.stringify(place) !== JSON.stringify(only(expected))) wrong.push({ kind, shape, expected, place })
+        else if (card && JSON.stringify(got) !== JSON.stringify(fields ?? { workerState: undefined })) wrong.push({ kind, shape, fields, got })
+      }
+    }
+    expect(wrong).toEqual([])
   })
 
   it('sorts a blocked launch above a busy worker', () => {

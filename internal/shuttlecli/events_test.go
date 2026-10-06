@@ -14,8 +14,11 @@ import (
 // file. A second rename would move that fresh file over .1 and lose the
 // history it replaced.
 func TestEventRotationUnderConcurrentWriters(t *testing.T) {
+	t.Parallel()
 	const writers = 64
-	t.Setenv("SHUTTLE_EVENTS_MAX_BYTES", "4096")
+	env := testEnv(t)
+	env.Set("SHUTTLE_EVENTS_MAX_BYTES", "4096")
+	a := newApp(env)
 	full := bytes.Repeat([]byte(strings.Repeat("x", 63)+"\n"), 64) // exactly 4096 bytes
 
 	for round := 0; round < 30; round++ {
@@ -31,7 +34,7 @@ func TestEventRotationUnderConcurrentWriters(t *testing.T) {
 			go func() {
 				defer done.Done()
 				start.Wait()
-				if err := appendEventLine(path, "{\"type\":\"stop\"}\n"); err != nil {
+				if err := a.appendEventLine(path, "{\"type\":\"stop\"}\n"); err != nil {
 					t.Error(err)
 				}
 			}()

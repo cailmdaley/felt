@@ -1,0 +1,33 @@
+run 1  seed 548196  3s  failures 0  exit 0
+run 2  seed 865088  3s  failures 0  exit 0
+run 3  seed 44449  4s  failures 0  exit 0
+run 4  seed 564230  2s  failures 0  exit 0
+run 5  seed 533677  2s  failures 0  exit 0
+run 6  seed 291781  3s  failures 0  exit 0
+run 7  seed 221463  3s  failures 0  exit 0
+run 8  seed 78291  4s  failures 0  exit 0
+run 9  seed 310907  3s  failures 0  exit 0
+run 10  seed 466601  3s  failures 0  exit 0
+run 11  seed 784032  4s  failures 0  exit 0
+run 12  seed 664226  3s  failures 0  exit 0
+run 13  seed 752337  3s  failures 0  exit 0
+run 14  seed 521523  3s  failures 0  exit 0
+run 15  seed 301180  4s  failures 0  exit 0
+run 16  seed 972264  4s  failures 0  exit 0
+run 17  seed 364940  3s  failures 0  exit 0
+run 18  seed 448291  4s  failures 0  exit 0
+run 19  seed 836742  3s  failures 0  exit 0
+run 20  seed 228755  4s  failures 0  exit 0
+run 21  seed 478245  3s  failures 0  exit 0
+run 22  seed 325557  3s  failures 0  exit 0
+run 23  seed 947702  3s  failures 0  exit 0
+run 24  seed 939341  4s  failures 0  exit 0
+run 25  seed 204788  3s  failures 0  exit 0
+run 26  seed 592163  3s  failures 0  exit 0
+run 27  seed 229217  3s  failures 0  exit 0
+run 28  seed 659070  3s  failures 0  exit 0
+run 29  seed 668073  3s  failures 0  exit 0
+run 30  seed 859618  3s  failures 0  exit 0
+
+== per-test failures across 30 runs (16 burners), logs in run-N.log (not committed; failure blocks in failures.txt)
+exit 0

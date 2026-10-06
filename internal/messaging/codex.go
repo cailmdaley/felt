@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"sort"
 	"sync/atomic"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/gorilla/websocket"
 )
 
@@ -37,21 +37,21 @@ type codexThread struct {
 	CanAcceptDirectInput *bool                         `json:"canAcceptDirectInput"`
 }
 
-func codexSocket() string {
-	if p := os.Getenv("SHUTTLE_CODEX_SOCKET"); p != "" {
+func codexSocket(env *sysenv.Env) string {
+	if p := env.Getenv("SHUTTLE_CODEX_SOCKET"); p != "" {
 		return p
 	}
-	home := os.Getenv("CODEX_HOME")
+	home := env.Getenv("CODEX_HOME")
 	if home == "" {
-		h, _ := os.UserHomeDir()
+		h, _ := env.UserHomeDir()
 		home = filepath.Join(h, ".codex")
 	}
 	return filepath.Join(home, "app-server-control", "app-server-control.sock")
 }
 
-func dialCodex(ctx context.Context) (*rpcClient, error) {
+func dialCodex(ctx context.Context, env *sysenv.Env) (*rpcClient, error) {
 	d := websocket.Dialer{EnableCompression: false, HandshakeTimeout: 3 * time.Second, NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", codexSocket())
+		return (&net.Dialer{}).DialContext(ctx, "unix", codexSocket(env))
 	}}
 	c, _, err := d.DialContext(ctx, "ws://localhost/", http.Header{"Host": []string{"localhost"}})
 	if err != nil {
@@ -121,9 +121,9 @@ func (r *rpcClient) call(ctx context.Context, method string, params any, out any
 	return fmt.Errorf("codex %s: too many unrelated frames", method)
 }
 
-func (codexAdapter) discover(ctx context.Context, host string) ([]Session, error) {
-	hookSessions := mailboxSessions("codex", host)
-	r, err := dialCodex(ctx)
+func (codexAdapter) discover(ctx context.Context, env *sysenv.Env, host string) ([]Session, error) {
+	hookSessions := mailboxSessions(env, "codex", host)
+	r, err := dialCodex(ctx, env)
 	if err != nil {
 		return hookSessions, err
 	}
@@ -209,11 +209,11 @@ func validObjectResult(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null" && json.Unmarshal(raw, &v) == nil && v != nil
 }
 
-func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, error) {
-	r, err := dialCodex(ctx)
+func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error) {
+	r, err := dialCodex(ctx, env)
 	if err != nil {
 		if !req.Wake {
-			return queueMailbox(a, req)
+			return queueMailbox(env, a, req)
 		}
 		return rejected(req, "codex-app-server", "Codex control socket unavailable"), errCode("preflight_failed", "Codex control socket unavailable: %v", err)
 	}
@@ -224,19 +224,19 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 	if err = r.call(ctx, "thread/read", map[string]any{"threadId": a.ID, "includeTurns": false}, &read); err != nil {
 		if _, ok := err.(*rpcPeerError); ok {
 			if !req.Wake {
-				return queueMailbox(a, req)
+				return queueMailbox(env, a, req)
 			}
 			return rejected(req, "codex-app-server", err.Error()), errCode("session_not_found", "Codex thread unavailable: %v", err)
 		}
 		if !req.Wake {
-			return queueMailbox(a, req)
+			return queueMailbox(env, a, req)
 		}
 		return rejected(req, "codex-app-server", "Codex thread lookup failed"), errCode("preflight_failed", "Codex thread lookup failed: %v", err)
 	}
 	t := read.Thread
 	if t.ID != a.ID {
 		if !req.Wake {
-			return queueMailbox(a, req)
+			return queueMailbox(env, a, req)
 		}
 		return rejected(req, "codex-app-server", "thread identity mismatch"), errCode("session_not_found", "thread identity mismatch")
 	}
@@ -293,7 +293,7 @@ func (codexAdapter) send(ctx context.Context, a Address, req Request) (Receipt, 
 		}
 	case "notLoaded", "notFound":
 		if !req.Wake {
-			return queueMailbox(a, req)
+			return queueMailbox(env, a, req)
 		}
 		return rejected(req, "codex-app-server", "thread is not loaded by this Codex runtime"), errCode("session_unavailable", "thread is not loaded by this Codex runtime")
 	default:

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import { Dock } from './workspace/Dock.js'
 import { dispatchFailureMessage, needsProjectDir, type DispatchFailureBody } from './KanbanModalShared.js'
-import { parseCompositeFeed, type CompositeEntry } from './KanbanComposite.js'
+import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, inheritedProjectDir, projectDirIndex } from './KanbanReadModel.js'
 import { buildProjectDirPrompt } from './projectDirPrompt.js'
 import { card } from './testFixtures.js'
@@ -149,22 +150,54 @@ describe('inheritedProjectDir', () => {
         far: { kind: 'remote', stale: false, fiber_count: rows.length },
       },
     })
-  const inherited = (entries: CompositeEntry[], id: string, store?: string) => {
-    const entry = entries.find((e) => e.fiber.id === id && (!store || e.feltStore === store))
-    expect(entry).toBeDefined()
-    return inheritedProjectDir(entry as CompositeEntry, projectDirIndex(entries))
-  }
   const suggested = (...rows: ReturnType<typeof row>[]) =>
     buildKanbanResponseFromComposite(feed(...rows)).now.awaitingReview.find((c) => c.id === 'a/b/c')
       ?.inheritedProjectDir
 
-  it('takes the nearest ancestor on the same host and store', () => {
-    const { entries } = feed(
-      row('a', 'here', { host: 'here', project_dir: '/srv/a' }),
-      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
-      row('a/b/c', 'here', { host: 'here' }),
-    )
-    expect(inherited(entries, 'a/b/c')).toEqual({ path: '/srv/b', from: 'a/b' })
+  // A small tree of fibers spread over two hosts and two stores on each, any
+  // of which may declare a directory or name no host at all.
+  const trees = fc.uniqueArray(
+    fc.record({
+      id: fc.constantFrom('a', 'a/b', 'a/b/c', 'a/b/c/d', 'a/x'),
+      store: fc.constantFrom('/stores/one', '/stores/two'),
+      host: fc.constantFrom(undefined, 'here', 'far'),
+      dir: fc.boolean(),
+    }),
+    { minLength: 1, maxLength: 10, selector: (f) => `${f.store} ${f.id}` },
+  )
+
+  // A fiber naming a host and no directory of its own inherits the nearest id
+  // prefix's directory declared in the same store on the same host, walking
+  // past ancestors that are missing, elsewhere, or undeclared; nothing else
+  // answers for it.
+  it('inherits the nearest same-host, same-store ancestor directory', () => {
+    fc.assert(fc.property(trees, (fibers) => {
+      const dirOf = (f: (typeof fibers)[number]) => `/srv/${f.host}${f.store}/${f.id}`
+      const { entries } = feed(...fibers.map((f) => row(f.id, f.host ?? 'here',
+        { ...(f.host ? { host: f.host } : {}), ...(f.dir ? { project_dir: dirOf(f) } : {}) }, { store: f.store })))
+      const dirs = projectDirIndex(entries)
+      for (const f of fibers) {
+        let expected: { path: string; from: string } | undefined
+        if (f.host && !f.dir) {
+          const prefixes = f.id.split('/').map((_, i, parts) => parts.slice(0, i).join('/')).filter(Boolean).reverse()
+          for (const prefix of prefixes) {
+            const owner = fibers.find((o) => o.id === prefix && o.store === f.store && o.host === f.host && o.dir)
+            if (owner) { expected = { path: dirOf(owner), from: prefix }; break }
+          }
+        }
+        const entry = entries.find((e) => e.fiber.id === f.id && e.feltStore === f.store)!
+        expect(inheritedProjectDir(entry, dirs), `${f.store} ${f.id}`).toEqual(expected)
+      }
+    }), { numRuns: 200, seed: 0xd1ec7 })
+  })
+
+  it('never lets another host’s fiber of the same slug answer', () => {
+    expect(suggested(
+      // One store, so only the host tells the two a/b rows apart.
+      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }, { store: '/stores/shared' }),
+      row('a/b/c', 'here', { host: 'here' }, { status: 'closed', store: '/stores/shared' }),
+      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }, { store: '/stores/shared' }),
+    )).toEqual({ path: '/srv/b', from: 'a/b' })
   })
 
   it('reads the reconciled owner row, not whichever copy the feed listed last', () => {
@@ -178,40 +211,6 @@ describe('inheritedProjectDir', () => {
     )).toEqual({ path: '/srv/b', from: 'a/b' })
   })
 
-  it('never lets another host’s fiber of the same slug answer', () => {
-    expect(suggested(
-      row('a/b', 'here', { host: 'here', project_dir: '/srv/b' }),
-      row('a/b/c', 'here', { host: 'here' }, { status: 'closed' }),
-      row('a/b', 'far', { host: 'far', project_dir: '/far/b' }),
-    )).toEqual({ path: '/srv/b', from: 'a/b' })
-  })
-
-  it('never lets another store on the same host answer', () => {
-    const { entries } = feed(
-      row('a/b', 'here', { host: 'here', project_dir: '/srv/other' }, { store: '/stores/other' }),
-      row('a/b/c', 'here', { host: 'here' }, { store: '/stores/mine' }),
-    )
-    expect(inherited(entries, 'a/b/c', '/stores/mine')).toBeUndefined()
-  })
-
-  it('walks past an ancestor owned elsewhere and one missing from the feed', () => {
-    const { entries } = feed(
-      row('a', 'here', { host: 'here', project_dir: '/srv/a' }),
-      row('a/b/c', 'far', { host: 'far', project_dir: '/far/c' }),
-      row('a/b/c/d', 'here', { host: 'here' }),
-    )
-    expect(inherited(entries, 'a/b/c/d')).toEqual({ path: '/srv/a', from: 'a' })
-  })
-
-  it('suggests nothing for a fiber with its own directory or no owner', () => {
-    const { entries } = feed(
-      row('a', 'here', { host: 'here', project_dir: '/srv/a' }),
-      row('a/b', 'here', { host: 'here', project_dir: '/x' }),
-      row('a/c', 'here', {}),
-    )
-    expect(inherited(entries, 'a/b')).toBeUndefined()
-    expect(inherited(entries, 'a/c')).toBeUndefined()
-  })
 })
 
 describe('buildProjectDirPrompt', () => {
