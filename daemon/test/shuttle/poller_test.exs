@@ -47,18 +47,18 @@ defmodule Shuttle.PollerTest do
   # ── Helpers ──
 
   # Companion to wait_until for when the check IS the assertion (e.g. a pattern
-  # match or a snapshot-shape assert). It re-runs the assertion every 25ms,
+  # match or a snapshot-shape assert). It re-runs the assertion every 5ms,
   # catching its own failure, so it passes the instant the polled state settles.
   # The poll cycle is a multi-hop async chain (tick → 20ms timer → run_poll_cycle
   # → read Task → :poll_world → apply → dispatch → spawn_tmux) that a loaded
   # machine stretches arbitrarily, so the ceiling (~30s, as wait_until's) is
   # reached only when the state never settles.
-  defp assert_eventually(fun, attempts \\ 1_200) do
+  defp assert_eventually(fun, attempts \\ 6_000) do
     fun.()
   rescue
     error in [ExUnit.AssertionError, MatchError] ->
       if attempts > 0 do
-        Process.sleep(25)
+        Process.sleep(5)
         assert_eventually(fun, attempts - 1)
       else
         reraise(error, __STACKTRACE__)
@@ -67,14 +67,14 @@ defmodule Shuttle.PollerTest do
 
   # A ceiling of ~30 s, reached only when the condition never holds: a passing
   # test returns as soon as it does, however loaded the machine.
-  defp wait_until(fun, attempts \\ 1_200)
+  defp wait_until(fun, attempts \\ 6_000)
   defp wait_until(fun, 0), do: fun.()
 
   defp wait_until(fun, attempts) do
     if fun.() do
       true
     else
-      Process.sleep(25)
+      Process.sleep(5)
       wait_until(fun, attempts - 1)
     end
   end
@@ -1302,20 +1302,13 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    # Boot and its first cycle read undelayed; the delay applies to the
-    # cycle under test, whose listing is a command recorded after them. The
-    # held read outlasts the test (teardown reaps it), so the snapshot below
-    # can only have been answered while that same read was in flight.
+    # The cycle under test is held inside its listing until the snapshot has
+    # been answered, so the snapshot can only have been served while that
+    # same read was in flight.
     settle_poller!(poller)
-    booted = length(MockRunner.commands())
-    MockRunner.set_ls_delay(60_000)
+    MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
-
-    assert wait_until(fn ->
-             MockRunner.commands()
-             |> Enum.drop(booted)
-             |> Enum.any?(&match?({"shuttle", ["-C", _store, "ls", "--json" | _]}, &1))
-           end)
+    assert_receive {:ls_held, reader}
 
     %{poll_token: token, poll_cycles: cycles} = :sys.get_state(poller)
     assert is_map(Poller.snapshot(poller, 30_000))
@@ -1324,17 +1317,19 @@ defmodule Shuttle.PollerTest do
     assert state.poll_check_in_progress
     assert state.poll_token == token
     assert state.poll_cycles == cycles
+
+    send(reader, :release_ls)
+    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > cycles end)
   end
 
   test "a completed poll cycle cancels its stall watchdog" do
-    # The boot read is held long enough to catch its watchdog armed; the
-    # watchdog itself is far longer than the test, so a timer that reads as
-    # gone after the cycle completes was cancelled, not expired. (An empty
-    # store skips its listing, so the store carries a fiber to list.)
+    # A cycle's read is held to catch its watchdog armed; the watchdog itself
+    # is far longer than the test, so a timer that reads as gone after the
+    # cycle completes was cancelled, not expired. (An empty store skips its
+    # listing, so the store carries a fiber to list.)
     fiber = make_fiber("tests/watchdog-completion", %{"status" => "closed"})
     MockRunner.set_fiber("tests/watchdog-completion", fiber)
     MockRunner.set_shuttle("tests/watchdog-completion", oneshot_shuttle(), "closed")
-    MockRunner.set_ls_delay(300)
 
     {:ok, poller} =
       start_poller!(
@@ -1345,11 +1340,17 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    assert wait_until(fn -> is_reference(:sys.get_state(poller).poll_stall_timer_ref) end)
+    settle_poller!(poller)
+    cycles = :sys.get_state(poller).poll_cycles
+    MockRunner.hold_ls()
+    send(poller, :run_poll_cycle)
+    assert_receive {:ls_held, reader}
+
     watchdog = :sys.get_state(poller).poll_stall_timer_ref
     assert is_integer(Process.read_timer(watchdog))
 
-    settle_poller!(poller)
+    send(reader, :release_ls)
+    assert wait_until(fn -> :sys.get_state(poller).poll_cycles > cycles end)
     assert Process.read_timer(watchdog) == false
     state = :sys.get_state(poller)
     assert state.poll_check_in_progress == false
@@ -3392,23 +3393,16 @@ defmodule Shuttle.PollerTest do
     # the role as the closed (awaiting) document.
     settle_poller!(poller)
     cycles = :sys.get_state(poller).poll_cycles
-    booted = length(MockRunner.commands())
-    MockRunner.set_ls_delay(400)
+    MockRunner.hold_ls()
     send(poller, :run_poll_cycle)
-
-    assert wait_until(fn ->
-             MockRunner.commands()
-             |> Enum.drop(booted)
-             |> Enum.any?(fn {cmd, args} ->
-               cmd == "felt" and Enum.take(args, 2) == ["ls", "--json"]
-             end)
-           end)
+    assert_receive {:ls_held, reader}
 
     # Accept while the poll is still reading (the GenServer stays responsive).
     assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
     assert File.read!(doc_path) =~ "status: active"
 
     # The held poll completes and applies against current state.
+    send(reader, :release_ls)
     assert wait_until(fn -> :sys.get_state(poller).poll_cycles > cycles end)
 
     assert File.read!(doc_path) =~ "status: active",
