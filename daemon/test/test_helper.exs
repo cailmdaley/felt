@@ -76,6 +76,11 @@ Application.put_env(
 # Per-test scoped env overrides (Shuttle.Env / Shuttle.Test.Env).
 Shuttle.Test.Env.start!()
 
+# `@tag :timing` marks the tests whose subject is a wall-clock deadline the
+# code under test reads itself, with no injectable clock. Each is arranged so
+# load can only hide a regression, not fail a correct implementation, but it
+# is still the tier to suspect first on a loaded machine. It runs by default;
+# `mix test --only timing` or `--exclude timing` selects it.
 exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integration, :linux]
 # A bare `assert_receive` waits this long for its message. It is reached only
 # when the message never comes, so it costs a passing test nothing, and it is
