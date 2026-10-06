@@ -193,7 +193,8 @@
   .ws-dock .kbn-ctl-meet-switch:hover:not(:has(input:disabled)) { color: var(--ws-ink); background: var(--ws-hover); }
   .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment:hover:not(:disabled, [aria-checked='true']) { color: var(--ws-ink); background: var(--ws-hover); }
 }
-.ws-dock .kbn-detail-directive::placeholder { color: var(--ws-ink-muted); }
+/* The empty field says only that it is a prompt: a faint chevron. */
+.ws-dock .kbn-detail-directive::placeholder { color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent); }
 .ws-dock .kbn-ctl-composer-drop { border-style: dashed; border-color: var(--ws-ink); }
 .ws-dock .kbn-ctl-images { display: flex; flex-wrap: wrap; gap: var(--ws-small-gap); padding: 6px 10px; }
 .ws-dock .kbn-ctl-image { position: relative; display: inline-flex; width: 64px; height: 64px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); overflow: hidden; }

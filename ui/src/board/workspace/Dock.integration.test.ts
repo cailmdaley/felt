@@ -202,14 +202,14 @@ describe('Dock dispatch recovery', () => {
 })
 
 describe('state-shaped act zone', () => {
-  it('names the default review send and keeps other columns generic', () => {
+  it('hints a prompt with a bare chevron in every column', () => {
     band = dock.bandFor(task({ status: 'closed' }))
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
-    expect(message.placeholder).toBe('Reply and start…')
+    expect(message.placeholder).toBe('›')
     dock.syncRuntime(task({ status: 'active', workerState: 'running' }))
-    expect(message.placeholder).toBe('What should the worker do next?')
+    expect(message.placeholder).toBe('›')
     dock.syncRuntime(task({ status: 'open' }))
-    expect(message.placeholder).toBe('What should the worker do next?')
+    expect(message.placeholder).toBe('›')
   })
 
   it('seats the verdicts on the status line in every unverdicted column, retaining a draft across runtime changes', () => {
@@ -221,7 +221,7 @@ describe('state-shaped act zone', () => {
     expect(band.head.dataset.column).toBe('awaitingReview')
     expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
-    expect(message.placeholder).toBe('Reply and resume…')
+    expect(message.placeholder).toBe('›')
     dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
