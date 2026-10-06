@@ -2,6 +2,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { fileBytesUrl } from '../utils.js'
 import { fetchDocument, RESOURCE_PRIORITY } from '../documentResources.js'
 import { scopeTheme } from './themeScope.js'
+import { APPEARANCE_CHANGED, appearance, appearanceTheme, currentScheme, watchAppearance } from '../appearance.js'
 import './themes/surface.css'
 
 const bundled = import.meta.glob<string>('./themes/*.css', { query: '?raw', import: 'default', eager: true })
@@ -34,8 +35,18 @@ export class ChannelThemes {
   private readonly changes = new Set<HTMLElement>()
   private changeQueued = false
   private readonly base: string
+  private readonly reappear = (): void => {
+    for (const entry of this.entries.values()) {
+      const base = this.baseName(entry.card)
+      if (entry.base === base) continue
+      entry.base = base
+      this.compile(entry); this.paint(entry)
+    }
+  }
   constructor(base: string) {
     this.base = base
+    watchAppearance()
+    window.addEventListener(APPEARANCE_CHANGED, this.reappear)
     // Snapshot the unthemed root, not the reader. Custom variables at a channel
     // root cannot bleed through the CSS scope limit by ordinary inheritance.
     this.actDefaults = document.createElement('style')
@@ -148,14 +159,16 @@ export class ChannelThemes {
     })
   }
   private key(card: KanbanCard): string { return JSON.stringify([card.originId, card.uid ?? card.id]) }
+  /** The declared bundled base, given way to the viewer's appearance; a preview shows its theme as named. */
   private baseName(card: KanbanCard): string {
     const previews = import.meta.env.DEV ? new URLSearchParams(location.search).getAll('theme-preview') : []
     const preview = previews.find(value => value.startsWith(`${card.uid ?? card.id}:`))?.slice((card.uid ?? card.id).length + 1)
     const declared = preview ?? card.theme ?? 'portolan'
     const name = declared.toLowerCase().replaceAll(' ', '-')
-    if (bundled[`./themes/${name}.css`] && name !== 'surface') return name
-    if (!this.warnings.has(declared)) { console.warn(`Shuttle theme: unknown theme “${declared}”; using Portolan`); this.warnings.add(declared) }
-    return 'portolan'
+    let known = 'portolan'
+    if (`./themes/${name}.css` in bundled && name !== 'surface') known = name
+    else if (!this.warnings.has(declared)) { console.warn(`Shuttle theme: unknown theme “${declared}”; using Portolan`); this.warnings.add(declared) }
+    return preview ? known : appearanceTheme(known, currentScheme(), appearance().dark)
   }
   private compile(entry: ThemeEntry): void {
     const selector = `[data-ws-theme="${entry.scope}"]`
@@ -240,6 +253,7 @@ export class ChannelThemes {
   }
   dispose(): void {
     this.disposed = true
+    window.removeEventListener(APPEARANCE_CHANGED, this.reappear)
     for (const root of [...this.roots.keys()]) this.unbind(root)
     this.entries.clear()
     this.actDefaults.remove()

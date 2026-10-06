@@ -1,3 +1,5 @@
+import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
+
 export type KeySurface = 'desk' | 'overview' | 'reader'
 export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'undoVerdict' | 'compose' | 'conversation'
 /** Reports can request navigation only. New intents are excluded unless named here. */
@@ -13,6 +15,7 @@ export interface KeyBinding {
   alt?: boolean
   command?: boolean
 }
+const VERDICT_UNDO = `${VERDICT_DELAY_MS / 1000} s`
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
 /** Desk regions follow reading order: the three Now columns left-to-right,
@@ -44,8 +47,8 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
     bind(['c', '.'], 'conversation', 'Open conversation'),
     bind(['r'], 'compose', 'Focus composer on the fiber page'),
-    bind(['t'], 'temper', 'Temper the open fiber (6 s undo)'),
-    bind(['x'], 'discard', 'Discard the open fiber (6 s undo)'),
+    bind(['t'], 'temper', `Temper the open fiber (${VERDICT_UNDO} undo)`),
+    bind(['x'], 'discard', `Discard the open fiber (${VERDICT_UNDO} undo)`),
     bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
     bind(['s'], 'sidebar', 'Toggle constitution sidebar'),
     bind(['/'], 'find', 'Find a constitution or file'),

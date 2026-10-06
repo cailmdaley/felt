@@ -151,6 +151,8 @@ const SHEET = `
 .set-opening-choice strong { font-size: 18px; font-weight: 500; }
 .set-opening-note { display: block; font-size: 14px; color: #7A7068; margin-top: 3px; }
 .set-opening-default { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: #8A6A20; }
+.set-appearance-dark { margin-top: 26px; }
+.set-appearance-swatch { width: 34px; height: 34px; border-radius: 3px; flex-shrink: 0; display: grid; place-items: center; font-size: 12px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
 .set-opening-guidance { line-height: 1.5; font-size: 14px; color: #5C544D; margin: 14px 0 20px; }
 .set-opening-tip { font-size: 15px; line-height: 1.45; border-top: 1px solid rgba(46,42,38,.12); padding: 16px 0 10px; }
 .set-opening-tip strong { display: block; font-weight: 500; margin-bottom: 3px; }

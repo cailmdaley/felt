@@ -3,6 +3,11 @@
    iframe-with-loading-veil for workspace documents and Board thumbnails.
    These classes make each body fill its view cell. */
 
+/* An embedded document's prefers-color-scheme follows its frame's color scheme,
+   so every frame carries the viewer's resolved appearance. */
+:root[data-ws-appearance='light'] iframe { color-scheme: light; }
+:root[data-ws-appearance='dark'] iframe { color-scheme: dark; }
+
 .kbn-fileview-frame-wrap {
   position: relative;
   flex: 1 1 auto;

@@ -2465,10 +2465,23 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
   assert.equal(await selected(p).locator('.ws-dock').getAttribute('data-part'), 'act')
 }, { width: 1379, height: 900 })
 
-test('Night Chart text and protected control pigments meet AA on dark paper', async p => {
-  await p.locator('.kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+// Appearance is chosen in the Settings sheet; this browser keeps it.
+async function chooseAppearance(p, mode, dark) {
+  await p.locator('.kbn-viewtabs-settings').click()
+  await p.getByRole('button', { name: 'Appearance', exact: true }).click()
+  await p.locator(`input[name="appearance-mode"][value="${mode}"]`).check()
+  if (dark) await p.locator(`input[name="appearance-dark"][value="${dark}"]`).check()
+  await p.getByRole('button', { name: 'Done', exact: true }).click()
+  await poll(p, mode => mode === 'system' || document.documentElement.dataset.wsAppearance === mode, mode)
+}
+
+for (const [label, theme] of [['Night Chart', 'night-chart'], ['Lamplight', 'lamplight']]) test(`${label} text and protected control pigments meet AA on dark paper`, async p => {
+  // Remote covariance review declares Night Chart: a dark system shows it, and a Lamplight choice leaves a declared dark theme alone.
+  await p.emulateMedia({ colorScheme: 'dark' })
+  if (theme === 'lamplight') await chooseAppearance(p, 'dark', 'lamplight')
+  await p.locator('.kbn-card').filter({ hasText: theme === 'lamplight' ? name : 'Remote covariance review' }).click()
   await choose(p, 'Constitution')
-  await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'night-chart')
+  await poll(p, theme => document.querySelector('.ws-reader')?.dataset.wsThemeName === theme, theme)
   const contrasts = await selected(p).evaluate(page => {
     const band = page.querySelector('.ws-dock')
     const error = document.createElement('span')
@@ -2487,7 +2500,37 @@ test('Night Chart text and protected control pigments meet AA on dark paper', as
     return result
   })
   for (const { part, ratio } of contrasts) assert.ok(ratio >= 4.5, `${part}: ${ratio.toFixed(2)}:1`)
-  console.log(`CONTRAST Night Chart ${Math.min(...contrasts.map(c => c.ratio)).toFixed(2)}:1 minimum across ${contrasts.length} text samples`)
+  console.log(`CONTRAST ${label} ${Math.min(...contrasts.map(c => c.ratio)).toFixed(2)}:1 minimum across ${contrasts.length} text samples`)
+})
+
+test('Appearance gives declared themes way, and embedded reports read their frame\'s scheme', async p => {
+  // No emulated scheme: the frames' color-scheme alone decides what the report's media query sees.
+  await p.emulateMedia({ colorScheme: null })
+  const readerTheme = () => p.locator('.ws-reader').getAttribute('data-ws-theme-name')
+  const reportLook = async () => {
+    const frame = await reportReady(p)
+    const scheme = await frame.evaluate(el => getComputedStyle(el).colorScheme)
+    const inside = await (await frame.elementHandle()).contentFrame()
+    return { scheme, dark: await inside.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches), paper: await inside.evaluate(() => getComputedStyle(document.body).backgroundColor) }
+  }
+  await chooseAppearance(p, 'dark', 'lamplight')
+  await open(p)
+  assert.equal(await readerTheme(), 'lamplight', 'a light declared theme gives way to the dark choice')
+  assert.deepEqual(await reportLook(), { scheme: 'dark', dark: true, paper: 'rgb(22, 24, 29)' })
+  const thumbLook = async () => {
+    const thumb = p.locator('.ws-tab iframe[sandbox=""]').first()
+    await thumb.waitFor({ state: 'attached' })
+    const inside = await (await thumb.elementHandle()).contentFrame()
+    return [await thumb.evaluate(el => getComputedStyle(el).colorScheme), await inside.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)]
+  }
+  assert.deepEqual(await thumbLook(), ['dark', true], 'report thumbnails follow')
+  await chooseAppearance(p, 'light')
+  await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'portolan')
+  assert.deepEqual(await reportLook(), { scheme: 'light', dark: false, paper: 'rgba(0, 0, 0, 0)' })
+  assert.deepEqual(await thumbLook(), ['light', false])
+  await p.reload()
+  await poll(p, () => document.querySelector('.ws-reader')?.dataset.wsThemeName === 'portolan')
+  assert.equal(await p.evaluate(() => document.documentElement.dataset.wsAppearance), 'light', 'the choice survives a reload')
 })
 
 test('Overview and sidebar never fan out theme.css probes; folios reuse the reader ETag cache', async p => {

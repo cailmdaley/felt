@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppDialog } from '../AppDialog'
 import { SettingsDraftContext } from './SettingsDraftContext'
 import { AgentsSection } from './AgentsSection'
+import { AppearanceSection } from './AppearanceSection'
 import { ConversationsSection } from './ConversationsSection'
 import { FleetSection } from './FleetSection'
 import { HostClassSection } from './HostClassSection'
@@ -18,10 +19,14 @@ import {
   type SettingsHost,
 } from './settingsApi'
 
-type SectionId = 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host' | 'conversations'
+type SectionId = 'appearance' | 'stores' | 'projects' | 'agents' | 'fleet' | 'hostClass' | 'host' | 'conversations'
+
+/** Preferences this browser keeps; every other section configures a worker host. */
+const BROWSER_SECTIONS: ReadonlySet<SectionId> = new Set(['conversations', 'appearance'])
 
 const SECTIONS: Array<{ id: SectionId; label: string; description: string }> = [
   { id: 'conversations', label: 'Conversations', description: 'Where Aloft and History take you' },
+  { id: 'appearance', label: 'Appearance', description: 'Light or dark pages and reports' },
   { id: 'stores', label: 'Notes & tasks', description: 'Folders containing the notes and tasks this host reads' },
   { id: 'projects', label: 'Project folders', description: 'Where you can create and capture work' },
   { id: 'agents', label: 'Worker agents', description: 'Models and their default effort' },
@@ -118,7 +123,7 @@ export function SettingsDialog({
   // variable is overriding it — the one thing a section cannot discover from
   // its own data, and the one that decides whether editing it does anything.
   useEffect(() => {
-    if (!host || section === 'conversations') return
+    if (!host || BROWSER_SECTIONS.has(section)) return
     let cancelled = false
     // Deliberately NOT cleared first on a revision bump. The index carries the
     // environment-override flag a section uses to disable editing, and a blank
@@ -149,8 +154,9 @@ export function SettingsDialog({
       : undefined
 
   const changed = (): void => setRevision((n) => n + 1)
+  const browser = BROWSER_SECTIONS.has(section)
 
-  if (!host && section !== 'conversations') {
+  if (!host && !BROWSER_SECTIONS.has(section)) {
     return (
       <AppDialog open onOpenChange={(next) => !next && navigate(onClose)} title="Settings" eyebrow="shuttle">
         <div className="set-empty">
@@ -173,8 +179,8 @@ export function SettingsDialog({
       <SettingsDraftContext.Provider value={trackDraft}>
       <div className="set-page">
         <div className="set-hostbar">
-          <span className="set-hostbar-label">{section === 'conversations' ? 'This browser' : 'Configuring'}</span>
-          {section !== 'conversations' && host && <select
+          <span className="set-hostbar-label">{browser ? 'This browser' : 'Configuring'}</span>
+          {!browser && host && <select
             className="set-select"
             value={host.origin}
             onChange={(e) => {
@@ -191,8 +197,8 @@ export function SettingsDialog({
               </option>
             ))}
           </select>}
-          <span className={`set-hostbar-note${section !== 'conversations' && host?.stale ? ' set-hostbar-stale' : ''}`}>
-            {section === 'conversations' ? 'saved automatically · applies across your fleet' : host?.isLocal
+          <span className={`set-hostbar-note${!browser && host?.stale ? ' set-hostbar-stale' : ''}`}>
+            {section === 'appearance' ? 'saved automatically in this browser' : browser ? 'saved automatically · applies across your fleet' : host?.isLocal
               ? 'the daemon serving this page'
               : host?.stale
                 ? 'not answering this hub’s poll — reads and writes may time out'
@@ -219,7 +225,7 @@ export function SettingsDialog({
             {['This browser', 'Worker hosts'].map((group, index) => (
               <div className="set-railgroup" key={group}>
                 <div className="set-railgroup-label">{group}</div>
-                {SECTIONS.filter(s => index === 0 ? s.id === 'conversations' : s.id !== 'conversations').map(s => (
+                {SECTIONS.filter(s => BROWSER_SECTIONS.has(s.id) === (index === 0)).map(s => (
                   <button key={s.id} type="button"
                     className={`set-railbtn${s.id === section ? ' set-railbtn-active' : ''}`}
                     aria-current={s.id === section ? 'page' : undefined}
@@ -237,12 +243,13 @@ export function SettingsDialog({
               outright rather than feeding new props to a component still
               holding the previous host's draft text. On this page that is a
               correctness rule, not a performance one. */}
-          <div className="set-pane" key={section === 'conversations' ? section : `${host?.origin}:${section}`}>
-            {section !== 'conversations' && <header className="set-pane-heading">
+          <div className="set-pane" key={browser ? section : `${host?.origin}:${section}`}>
+            {!browser && <header className="set-pane-heading">
               <h2>{SECTIONS.find(s => s.id === section)?.label}</h2>
               <p>{SECTIONS.find(s => s.id === section)?.description}</p>
             </header>}
             {section === 'conversations' && <ConversationsSection />}
+            {section === 'appearance' && <AppearanceSection />}
             {host && section === 'stores' && (
               <PathListSection
                 shuttleBase={shuttleBase}

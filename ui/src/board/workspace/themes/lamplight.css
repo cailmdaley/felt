@@ -1,0 +1,251 @@
+/* Lamplight prints candle-gilt stars and faint routes on aubergine-charcoal stock, read by a lamp. */
+:scope {
+  --ws-ground: #0f0b0f;
+  --ws-paper: #191419;
+  --ws-sheet: #221b21;
+  --ws-ink: #f3e9d8;
+  --ws-ink-soft: #e0d2bc;
+  --ws-ink-muted: #c4b39c;
+  --ws-ink-faint: #ad9c86;
+  --ws-hairline: #4b3b46;
+  --ws-hairline-soft: #33292f;
+  --ws-fill: #2b222a;
+  --ws-hover: rgb(240 196 130 / 9%);
+  --ws-you: #f19b92;
+  --ws-agent: #aebcf0;
+  --ws-machine: var(--ws-agent);
+  --ws-machine-halo: rgb(174 188 240 / 22%);
+  --ws-owed: #e3b86f;
+  --ws-fresh: #f6ca6e;
+  --ws-verdict: #9fcca9;
+  --ws-focus: var(--ws-you);
+  --ws-red: var(--ws-owed);
+  --ws-veil: rgb(10 7 9 / 92%);
+  --ws-veil-filter: blur(10px) saturate(0.8) brightness(0.7);
+  --ws-float:
+    inset 0 1px 0 var(--ws-chart-edge),
+    0 1px 2px rgb(0 0 0 / 40%),
+    0 30px 70px -18px rgb(4 2 3 / 72%);
+  --ws-mask: #fff;
+  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
+  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
+  --ws-mono-tracking: 0.08em;
+  --ws-chart-edge: rgb(255 220 170 / 6%);
+  --ws-chart-grid: rgb(230 180 110 / 5.5%);
+  --ws-chart-grid-minor: rgb(230 180 110 / 2.5%);
+  --ws-chart-star: rgb(245 205 140 / 20%);
+  --ws-chart-star-dim: rgb(245 205 140 / 10%);
+  --ws-chart-ornament: #ecbd76;
+  --ws-chart-route: rgb(230 185 120 / 4%);
+  --ws-chart-glow: radial-gradient(ellipse 75% 60% at 18% 0%, rgb(246 200 130 / 6.5%), transparent 72%);
+  --ws-chart-vignette: radial-gradient(ellipse 120% 95% at 22% 0%, transparent 50%, rgb(9 5 9 / 60%));
+  --ws-accent: var(--ws-chart-ornament);
+}
+
+[data-part="veil"] {
+  background: var(--ws-veil);
+  -webkit-backdrop-filter: var(--ws-veil-filter);
+  backdrop-filter: var(--ws-veil-filter);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  [data-part="veil"] {
+    background: var(--ws-ground);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+[data-part="tab"] { color: var(--ws-ink-muted); }
+[data-part="tab"][aria-selected="true"] { color: var(--ws-ink); }
+
+/* One chart under the whole sheet: the frame carries it, the panes above it stay clear. */
+[data-part="page-frame"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image:
+    var(--ws-chart-vignette),
+    var(--ws-chart-glow),
+    radial-gradient(circle at center, var(--ws-chart-star) 0.9px, transparent 1.4px),
+    repeating-linear-gradient(34deg, transparent 0 191px, var(--ws-chart-route) 192px 193px, transparent 194px 384px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(var(--ws-chart-grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid-minor) 1px, transparent 1px);
+  background-size: auto, auto, 96px 96px, auto, 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+  background-position: 0 0, 0 0, -48px -48px, 0 0, 0 0, 0 0, 0 0, 0 0;
+  border-color: var(--ws-hairline-soft);
+  box-shadow: var(--ws-float);
+}
+[data-part="page-frame"] .ws-content,
+[data-part="prose"],
+[data-part="fiber-header"] { background: transparent; }
+/* The composer's plate takes the prose's clear paper, so the chart runs under it too. */
+[data-part="prose"] { --ws-paper: transparent; }
+
+[data-part="label-bar"] {
+  color: var(--ws-ink-muted);
+  background-color: color-mix(in srgb, var(--ws-paper) 88%, transparent);
+  border-color: var(--ws-hairline-soft);
+}
+
+[data-part="fiber-title"] {
+  color: var(--ws-ink);
+  font-variant-caps: small-caps;
+  letter-spacing: 0.035em;
+}
+[data-part="fiber-title"]::after {
+  content: "✦";
+  display: inline-block;
+  margin-inline-start: 0.45em;
+  color: var(--ws-chart-ornament);
+  font-size: 0.56em;
+  vertical-align: 0.2em;
+  opacity: 0.85;
+}
+
+[data-part="prose"] { color: var(--ws-ink-soft); }
+[data-part="prose"] :is(blockquote, .kbn-detail-lede) { border-left-color: var(--ws-chart-ornament); }
+
+:scope[data-part="folio"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  box-shadow: inset 0 0 0 1px var(--ws-hairline-soft), inset 0 1px 0 var(--ws-chart-edge);
+}
+:scope[data-part="folio"][data-density="full"] {
+  padding: 10px;
+  border-radius: 5px;
+  background-image: var(--ws-chart-glow), radial-gradient(circle at center, var(--ws-chart-star) 0.9px, transparent 1.3px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(var(--ws-chart-grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid-minor) 1px, transparent 1px);
+  background-size: auto, 96px 96px, 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+  background-position: 0 0, -48px -48px, 0 0, 0 0, 0 0, 0 0;
+}
+:scope[data-part="folio"][data-density="compact"] {
+  padding: 4px 6px;
+  border-radius: 4px;
+  background-image: var(--ws-chart-glow), radial-gradient(circle at center, var(--ws-chart-star) 0.9px, transparent 1.3px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(var(--ws-chart-grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid-minor) 1px, transparent 1px);
+  background-size: auto, 48px 48px, 48px 48px, 48px 48px, 12px 12px, 12px 12px;
+  background-position: 0 0, -24px -24px, 0 0, 0 0, 0 0, 0 0;
+}
+:scope[data-part="folio"][data-density="line"] {
+  padding: 0 4px;
+  border-radius: 0;
+  background-image: none;
+  box-shadow: none;
+}
+
+[data-part="tab-strip"] { color: var(--ws-ink-muted); }
+.ws-thumbnail[data-part="thumbnail"] {
+  background-color: var(--ws-paper);
+  border-color: var(--ws-hairline-soft);
+  border-radius: 2px;
+}
+.ws-thumbnail [data-part="thumbnail-face"] {
+  color: var(--ws-ink-soft);
+  background-color: var(--ws-paper);
+  background-image: radial-gradient(circle at center, var(--ws-chart-star) 0.9px, transparent 1.3px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(var(--ws-chart-grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid-minor) 1px, transparent 1px);
+  background-size: 48px 48px, 48px 48px, 48px 48px, 12px 12px, 12px 12px;
+  background-position: -24px -24px, 0 0, 0 0, 0 0, 0 0;
+}
+.ws-thumbnail [data-part="thumbnail-face"] .ws-thumbnail-kind { color: var(--ws-accent); }
+
+/* The Desk card in the reader's sidebar: a lit sheet edge, a dark shadow, no painted rule. */
+:scope[data-part="sidebar-card"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-sheet);
+  background-image: var(--ws-chart-glow), radial-gradient(circle at center, var(--ws-chart-star) 0.9px, transparent 1.3px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(var(--ws-chart-grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid-minor) 1px, transparent 1px);
+  background-size: auto, 48px 48px, 48px 48px, 48px 48px, 12px 12px, 12px 12px;
+  background-position: 0 0, -24px -24px, 0 0, 0 0, 0 0, 0 0;
+  border-color: var(--ws-hairline-soft);
+  border-radius: 4px;
+  box-shadow: inset 0 1px 0 var(--ws-chart-edge), 0 10px 24px -14px rgb(0 0 0 / 80%);
+}
+:scope[data-part="sidebar-card"][aria-current="true"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-fill);
+  border-color: color-mix(in srgb, var(--ws-accent) 45%, var(--ws-hairline));
+  box-shadow: inset 0 1px 0 var(--ws-chart-edge), 0 0 0 1px color-mix(in srgb, var(--ws-accent) 18%, transparent), 0 10px 24px -14px rgb(0 0 0 / 80%);
+}
+:scope[data-part="sidebar-card"] :is(.kbn-card-name, .kbn-card-outcome) { color: var(--ws-ink-soft); }
+:scope[data-part="sidebar-card"] .kbn-card-name { color: var(--ws-ink); font-variant-caps: small-caps; }
+:scope[data-part="sidebar-card"] .ws-channel-owner { color: var(--ws-ink-muted); }
+
+:scope[data-part="since-row"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-paper);
+  background-image: var(--ws-chart-glow);
+  border-inline-start: 1px solid var(--ws-accent);
+  border-block-end-color: var(--ws-hairline-soft);
+}
+:scope[data-part="since-row"] .ws-overview-change-name { color: var(--ws-ink); font-variant-caps: small-caps; }
+:scope[data-part="since-row"] .ws-overview-change-outcome { color: var(--ws-ink-soft); }
+:scope[data-part="since-row"] .ws-overview-change-summary { color: var(--ws-owed); }
+
+[data-part="page-sheet"] { color: var(--ws-ink); }
+[data-part="page-sheet"]::backdrop { background: rgb(0 0 0 / 48%); }
+[data-part="page-sheet-panel"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-sheet);
+  background-image: var(--ws-chart-glow), radial-gradient(circle at center, var(--ws-chart-star) 0.9px, transparent 1.3px),
+    linear-gradient(var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid) 1px, transparent 1px),
+    linear-gradient(var(--ws-chart-grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ws-chart-grid-minor) 1px, transparent 1px);
+  background-size: auto, 96px 96px, 96px 96px, 96px 96px, 24px 24px, 24px 24px;
+  background-position: 0 0, -48px -48px, 0 0, 0 0, 0 0, 0 0;
+  border-color: var(--ws-hairline-soft);
+  box-shadow: inset 0 1px 0 var(--ws-chart-edge), 0 -10px 34px rgb(0 0 0 / 55%);
+}
+.ws-reader [data-part="page-sheet-row"] {
+  color: var(--ws-ink-soft);
+  border-color: var(--ws-hairline-soft);
+}
+.ws-reader [data-part="page-sheet-row"][aria-current="page"] {
+  color: var(--ws-ink);
+  background-color: var(--ws-fill);
+  box-shadow: inset 2px 0 var(--ws-accent);
+}
+.ws-reader [data-part="page-sheet-row"] .ws-page-sheet-summary { color: var(--ws-ink-muted); }
+[data-part="audio-page"] { color: var(--ws-ink); background-color: transparent; }
+[data-part="audio-waveform"] { color: var(--ws-accent); }
+
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  :scope[data-part="folio"][data-density="full"],
+  :scope[data-part="folio"][data-density="compact"] { padding: 14px 0; }
+  :scope[data-part="folio"][data-density="line"] { padding: 4px 0; }
+  [data-part="page-frame"] {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    clip-path: none;
+  }
+  [data-part="phone-topbar"], [data-part="phone-bottom-bar"] {
+    color: var(--ws-ink);
+    background-color: var(--ws-paper);
+    border-color: var(--ws-hairline-soft);
+  }
+  [data-part="phone-topbar"] { border-bottom: 1px solid var(--ws-hairline-soft); }
+  [data-part="phone-bottom-bar"] { border-top: 1px solid var(--ws-hairline-soft); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  [data-part="page-sheet"]::backdrop {
+    background: var(--ws-ground);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
