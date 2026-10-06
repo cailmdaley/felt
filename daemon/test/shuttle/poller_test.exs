@@ -2653,11 +2653,19 @@ defmodule Shuttle.PollerTest do
   end
 
   # Every way the evidence can fall short of a fast bounce, one row each, all
-  # judged by the same act and the same two observables (`assert_held!/2`). A
-  # row arranges only what differs from a releasable boot: the `heartbeat` on
-  # disk (fields merged over `write_heartbeat!/1`'s, with times given as ms
-  # before now; `:missing`; or a raw `{:body, _}`), a stop marker beside it,
-  # the Poller's own options, and what the runner reports.
+  # judged by the same act and the same observables (`assert_held!/2`, then
+  # the parked row's reason, the contract verdict and whether the boot scan
+  # completed). A row arranges only what differs from a releasable boot: the
+  # `heartbeat` on disk (fields merged over `write_heartbeat!/1`'s, with times
+  # given as ms before now; `:missing`; or a raw `{:body, _}`), a stop marker
+  # beside it, the Poller's own options, and what the runner reports. Its
+  # `expect` overrides `@held_expectations` where it differs from a plain hold.
+  @held_expectations [
+    reason: ~r/\Aboot quarantine — awaiting release\z/,
+    contract_ok: true,
+    adopted?: true
+  ]
+
   @unreleasable_boots [
     # A deploy or operator restart: fresh, released, long-run — everything a
     # hard kill would look like, except the stop marker its SIGTERM left.
@@ -2698,10 +2706,14 @@ defmodule Shuttle.PollerTest do
     # An empty recorded set is vacuously continuous, so the verdict alone would
     # release. It must not: without a completed adoption scan the daemon has not
     # observed what is live, and the `adopted?` guard fails the release closed.
-    {"a boot whose tmux scan is unknown", runner: [tmux_server_missing: true, ps_fails: true]},
+    {"a boot whose tmux scan is unknown",
+     runner: [tmux_server_missing: true, ps_fails: true], expect: [adopted?: false]},
     # Skew has no release endpoint by design: every shelled write is suspect, so
     # the auto-release must not become a back door into dispatching under one.
-    {"a contract skew", runner: [contract_skew: true]}
+    # It names itself over the quarantine it rides on: the more actionable fix.
+    {"a contract skew",
+     runner: [contract_skew: true],
+     expect: [reason: ~r/\Acontract skew — /, contract_ok: false]}
   ]
 
   for {{label, row}, index} <- Enum.with_index(@unreleasable_boots) do
@@ -2719,8 +2731,14 @@ defmodule Shuttle.PollerTest do
 
       send(poller, :run_poll_cycle)
 
-      assert_held!(poller, fiber_id)
+      snap = assert_held!(poller, fiber_id)
       assert Process.alive?(poller)
+
+      expect = Keyword.merge(@held_expectations, Keyword.get(@row, :expect, []))
+      assert [%{reason: reason}] = snap.pending_launch
+      assert reason =~ expect[:reason]
+      assert snap.contract.ok == expect[:contract_ok]
+      assert :sys.get_state(poller).adopted? == expect[:adopted?]
     end
   end
 
