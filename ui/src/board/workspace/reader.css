@@ -68,19 +68,19 @@
 .ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0; }
 .ws-head-worker { flex: none; display: flex; align-items: baseline; }
 .ws-head-worker[hidden] { display: none; }
-/* The card's own pill, bare: a pigmented dot, the state in the serif, the time in mono. */
+/* The card's own pill, bare: a pigmented dot, the state in mono capitals, the time in mono. */
 .ws-reader .ws-navbar .ws-head-worker .ws-worker-control {
   display: inline-flex; align-items: baseline; gap: 6px; height: var(--ws-control-height); margin: 0 calc(-1 * var(--ws-small-gap));
   padding: 0 var(--ws-small-gap); border: 0; border-radius: var(--ws-control-radius); background: transparent; box-shadow: none;
-  color: var(--ws-ink-muted); font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif);
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/var(--ws-control-height) var(--ws-mono);
   letter-spacing: 0; text-transform: none; text-decoration: none; animation: none;
 }
 .ws-reader .ws-navbar .ws-head-worker .ws-worker-control:hover { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-head-worker .ws-worker-dot { align-self: center; width: 7px; height: 7px; }
-.ws-head-worker .ws-worker-state { font: inherit; }
+.ws-head-worker .ws-worker-state { font: inherit; letter-spacing: .06em; text-transform: uppercase; }
 .ws-head-worker .ws-worker-elapsed { font: var(--ws-small-size)/1 var(--ws-mono); letter-spacing: 0; }
 .ws-head-position { color: var(--ws-ink-muted); font-size: var(--ws-small-size); letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ws-worker-state { font: var(--ws-label-size)/1.2 var(--ws-serif); }
+.ws-worker-state { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
 .ws-worker-elapsed { font: var(--ws-small-size)/1.4 var(--ws-mono); }
 /* A dot is too small for ink-mixed pigments: working is the machine's own cobalt, waiting the undiluted gold. */
 .ws-worker-dot { --ws-dot: var(--ws-machine); width: 8px; height: 8px; border-radius: 50%; background: var(--ws-dot); flex: none; }

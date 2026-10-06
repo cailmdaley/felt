@@ -903,15 +903,15 @@ export class Dock {
     // so what is sent is what was shown.
     let busy = false
     const fresh = ctlButton('Start ↵', 'kbn-ctl-send')
-    const resume = ctlButton('Resume ↵', 'kbn-ctl-send kbn-ctl-resume')
+    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     this.composerPaint = () => {
       const draft = fiberPageColumn(card) === 'drafts'
       const resumable = !draft && Boolean(card.sessionUuid)
-      // A resumable session makes Resume the default verb; a fresh session
-      // stays beside it as the secondary verb (⌥↵).
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : resumable ? 'New session' : 'Start ↵'
-      fresh.classList.toggle('kbn-ctl-secondary', resumable)
-      fresh.title = resumable ? 'Start a new session (⌥↵)' : ''
+      // A fresh session is always the default verb (↵); a resumable session
+      // adds Resume beside it as the secondary verb (⌥↵).
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : resumable ? 'New session ↵' : 'Start ↵'
+      resume.classList.toggle('kbn-ctl-secondary', resumable)
+      resume.title = resumable ? 'Resume the previous session (⌥↵)' : ''
       resume.hidden = !resumable
       message.placeholder = fiberPageColumn(card) === 'awaitingReview'
         ? resumable ? 'Reply and resume…' : 'Reply and start…'
@@ -1015,8 +1015,7 @@ export class Dock {
       if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
-      const previous = Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
-      const resumeSession = event.altKey ? !previous : previous
+      const resumeSession = event.altKey && Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
     })
     box.append(...(meeting ? [meeting] : []), message, strip.el, foot)

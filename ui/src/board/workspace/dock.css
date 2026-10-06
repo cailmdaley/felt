@@ -282,7 +282,7 @@
 .ws-dock .kbn-ctl-composer .kbn-ctl-composer-foot { padding-right: 0; }
 .ws-dock .kbn-ctl-sends { border: 0; overflow: visible; }
 .ws-dock .kbn-ctl-sends .kbn-ctl-btn { border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-fill); }
-/* Beside a resumable session, a new session is the quieter, secondary verb. */
+/* Beside a new session, resuming the previous one is the quieter, secondary verb. */
 .ws-dock .kbn-ctl-sends { gap: var(--ws-small-gap); }
 .ws-dock .kbn-ctl-sends .kbn-ctl-btn.kbn-ctl-secondary { background: transparent; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-sends .kbn-ctl-btn.kbn-ctl-secondary:hover:not(:disabled) { color: var(--ws-ink); background: var(--ws-hover); }
