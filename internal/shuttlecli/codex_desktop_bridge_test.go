@@ -167,7 +167,34 @@ func (h *bridgeHarness) native(t *testing.T) map[string]string {
 	return env
 }
 
-func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
+// TestCodexDesktopBridge runs the bridge cases in parallel with each other
+// but not with the rest of the package: it is a sequential top-level test, so
+// the package's parallel tests wait until it returns. The bridge's real
+// startup and stop deadlines (bridgeStartupTimeout, bridgeStopTimeout) are
+// behaviour under test, and the package's whole parallel subprocess load can
+// starve a bridge past them on a loaded host.
+func TestCodexDesktopBridge(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"RoundTripPreservesProcessBoundary", bridgeCaseRoundTripPreservesProcessBoundary},
+		{"NativeExitCleansEndpoint", bridgeCaseNativeExitCleansEndpoint},
+		{"AlreadyIsolatedProcess", bridgeCaseAlreadyIsolatedProcess},
+		{"RefusesConcurrentOwner", bridgeCaseRefusesConcurrentOwner},
+		{"UnexpectedNativeExitKillsDescendants", bridgeCaseUnexpectedNativeExitKillsDescendants},
+		{"EmptyStdinStopsNative", bridgeCaseEmptyStdinStopsNative},
+		{"TimeoutStopsNative", bridgeCaseTimeoutStopsNative},
+		{"BlockedStdoutShutdown", bridgeCaseBlockedStdoutShutdown},
+		{"RefusesPreexistingEndpoint", bridgeCaseRefusesPreexistingEndpoint},
+		{"ExecFailureReapsRelay", bridgeCaseExecFailureReapsRelay},
+		{"PassthroughPreservesPIDAndExitCode", bridgeCasePassthroughPreservesPIDAndExitCode},
+	} {
+		t.Run(c.name, c.run)
+	}
+}
+
+func bridgeCaseRoundTripPreservesProcessBoundary(t *testing.T) {
 	t.Parallel()
 	h := newBridgeHarness(t)
 	input := `{"id":1,"blob":"` + strings.Repeat("x", 1<<20) + `"}` + "\n"
@@ -201,7 +228,7 @@ func TestCodexDesktopBridgeRoundTripPreservesProcessBoundary(t *testing.T) {
 	h.clean(t)
 }
 
-func TestCodexDesktopBridgeNativeExitCleansEndpoint(t *testing.T) {
+func bridgeCaseNativeExitCleansEndpoint(t *testing.T) {
 	t.Parallel()
 	h := newBridgeHarness(t)
 	h.native(t)
@@ -262,7 +289,7 @@ func TestBridgeEndpointAbsentAfterNativeExitStopsPolling(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopBridgeAlreadyIsolatedProcess(t *testing.T) {
+func bridgeCaseAlreadyIsolatedProcess(t *testing.T) {
 	t.Parallel()
 	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_TEST_ALREADY_ISOLATED=1")
 	h.native(t)
@@ -271,7 +298,7 @@ func TestCodexDesktopBridgeAlreadyIsolatedProcess(t *testing.T) {
 	h.clean(t)
 }
 
-func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
+func bridgeCaseRefusesConcurrentOwner(t *testing.T) {
 	t.Parallel()
 	h := newBridgeHarness(t)
 	h.native(t)
@@ -296,7 +323,7 @@ func TestCodexDesktopBridgeRefusesConcurrentOwner(t *testing.T) {
 	h.clean(t)
 }
 
-func TestCodexDesktopBridgeUnexpectedNativeExitKillsDescendants(t *testing.T) {
+func bridgeCaseUnexpectedNativeExitKillsDescendants(t *testing.T) {
 	t.Parallel()
 	marker := filepath.Join(bridgeTempDir(t), "descendant.json")
 	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_DESCENDANT_FILE="+marker)
@@ -323,7 +350,7 @@ func TestCodexDesktopBridgeUnexpectedNativeExitKillsDescendants(t *testing.T) {
 	h.clean(t)
 }
 
-func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
+func bridgeCaseEmptyStdinStopsNative(t *testing.T) {
 	t.Parallel()
 	h := newBridgeHarness(t)
 	h.input.Close()
@@ -337,7 +364,7 @@ func TestCodexDesktopBridgeEmptyStdinStopsNative(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
+func bridgeCaseTimeoutStopsNative(t *testing.T) {
 	t.Parallel()
 	h := newBridgeHarness(t, "SHUTTLE_BRIDGE_NO_SOCKET=1")
 	h.native(t)
@@ -350,7 +377,7 @@ func TestCodexDesktopBridgeTimeoutStopsNative(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopBridgeBlockedStdoutShutdown(t *testing.T) {
+func bridgeCaseBlockedStdoutShutdown(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"stdin-eof", "parent-exit"} {
 		t.Run(mode, func(t *testing.T) {
@@ -382,7 +409,7 @@ func TestCodexDesktopBridgeBlockedStdoutShutdown(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopBridgeRefusesPreexistingEndpoint(t *testing.T) {
+func bridgeCaseRefusesPreexistingEndpoint(t *testing.T) {
 	t.Parallel()
 	dir := bridgeTempDir(t)
 	socket := filepath.Join(dir, "existing.sock")
@@ -404,7 +431,7 @@ func TestCodexDesktopBridgeRefusesPreexistingEndpoint(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopBridgeExecFailureReapsRelay(t *testing.T) {
+func bridgeCaseExecFailureReapsRelay(t *testing.T) {
 	t.Parallel()
 	dir := bridgeTempDir(t)
 	native := filepath.Join(dir, "not-executable")
@@ -435,7 +462,7 @@ func TestCodexDesktopBridgeExecFailureReapsRelay(t *testing.T) {
 	}
 }
 
-func TestCodexDesktopBridgePassthroughPreservesPIDAndExitCode(t *testing.T) {
+func bridgeCasePassthroughPreservesPIDAndExitCode(t *testing.T) {
 	t.Parallel()
 	cli, native := bridgeBinaryPaths(t)
 	marker := filepath.Join(t.TempDir(), "native.json")
