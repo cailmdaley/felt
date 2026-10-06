@@ -63,14 +63,14 @@ defmodule ShuttleWeb.MeetingAudioSocketTest do
     assert {:push, [status], state} = Relay.init(resolve_to(live(path)))
     assert %{"state" => "waiting", "reason" => reason} = json(status)
     assert reason =~ "loading"
-    assert_receive :retry, 200
+    assert_receive :retry
 
     {:ok, state} = Relay.handle_in({"early-", opcode: :binary}, state)
     {:ok, state} = Relay.handle_in({"speech", opcode: :binary}, state)
 
     # Still not listening: the retry stays quiet rather than repeating "waiting".
     assert {:ok, state} = Relay.handle_info(:retry, state)
-    assert_receive :retry, 200
+    assert_receive :retry
 
     listener = listen(path)
     assert {:push, [status], state} = Relay.handle_info(:retry, state)

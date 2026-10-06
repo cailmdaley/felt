@@ -81,7 +81,7 @@ exclude = if :os.type() == {:unix, :linux}, do: [:integration], else: [:integrat
 # when the message never comes, so it costs a passing test nothing, and it is
 # set for a machine whose cores the concurrently running suite already fills.
 # `refute_receive` keeps ExUnit's short default: that window is a real wait.
-ExUnit.start(exclude: exclude, assert_receive_timeout: 5_000)
+ExUnit.start(exclude: exclude, assert_receive_timeout: 10_000)
 
 # A test that saves stores without its own SHUTTLE_STORES_FILE writes the
 # suite-wide registry; remove it with the run.

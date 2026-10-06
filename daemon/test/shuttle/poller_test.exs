@@ -1413,7 +1413,7 @@ defmodule Shuttle.PollerTest do
     monitor = Process.monitor(poller)
     Process.exit(poller, :shutdown)
 
-    assert_receive {:DOWN, ^monitor, :process, ^poller, :shutdown}, 1_000
+    assert_receive {:DOWN, ^monitor, :process, ^poller, :shutdown}
     assert wait_until(fn -> not Process.alive?(task_pid) end)
   end
 

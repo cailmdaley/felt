@@ -43,7 +43,7 @@ defmodule Shuttle.PollerBootTest do
         )
       end)
 
-    assert_receive {:adoption_blocked, adoption_process}, 1_000
+    assert_receive {:adoption_blocked, adoption_process}
     assert Process.whereis(name)
 
     # GenServer registers its name before init/1. The call message queues in
@@ -52,8 +52,8 @@ defmodule Shuttle.PollerBootTest do
     snapshot = Task.async(fn -> Poller.snapshot(name, 5_000) end)
     send(adoption_process, :finish_adoption)
 
-    assert {:ok, poller} = Task.await(starter, 5_000)
-    assert is_map(Task.await(snapshot, 5_000))
+    assert {:ok, poller} = Task.await(starter, 30_000)
+    assert is_map(Task.await(snapshot, 30_000))
     assert Process.alive?(poller)
   end
 end
