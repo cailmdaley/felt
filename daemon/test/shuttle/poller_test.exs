@@ -980,7 +980,9 @@ defmodule Shuttle.PollerTest do
           felt_stores: [MockRunner.felt_root()]
         )
 
-      send(poller, :run_poll_cycle)
+      # Bound the cycles: a still-active fiber is re-dispatched by any cycle
+      # applied after the kill, so none may be in flight or pending behind it.
+      sync_poll_cycle!(poller)
 
       assert wait_until(fn ->
                case Poller.cached_fiber_documents(poller) do
@@ -989,8 +991,8 @@ defmodule Shuttle.PollerTest do
                end
              end)
 
-      {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
-      session = get_in(live, [:runtime, :tmux_session])
+      assert {:ok, %{fibers: [live]}} = Poller.cached_fiber_documents(poller)
+      assert %{tmux_session: session} = live[:runtime]
 
       MockRunner.set_kill_session_failure(variant)
       assert {:ok, ^session} = Poller.kill_session(poller, fiber_id)

@@ -46,7 +46,7 @@ defmodule Shuttle.WaitingTrackerTest do
   defp last_event_at(name, session), do: (activity(name, session) || %{})[:last_event_at]
   defp ingested?(name, session), do: not is_nil(activity(name, session))
 
-  defp wait_until(fun, tries \\ 50) do
+  defp wait_until(fun, tries \\ 500) do
     cond do
       fun.() ->
         true
@@ -439,7 +439,9 @@ defmodule Shuttle.WaitingTrackerTest do
            end)
 
     File.write!(events, "")
-    Process.sleep(40)
+    # The tail must see the shrink before the next append: `bar`'s line is as
+    # long as `foo`'s, so a truncate-and-rewrite it missed is invisible to it.
+    assert wait_until(fn -> :sys.get_state(name).offset == 0 end)
     append(events, "notification", "bar-01J00000000000000000000000-shuttle")
 
     assert wait_until(fn ->

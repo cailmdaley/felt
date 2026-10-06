@@ -1578,7 +1578,15 @@ defmodule Shuttle.DispatchIntegrationTest do
   # the window) is the sharpest probe; the handed_off_at stamp felt writes with
   # the re-arm keeps it at rest. Also asserts accept keeps the prior run's
   # outcome.
+  #
+  # The schedule is a daily tick at the minute the test starts, not
+  # `* * * * *`: the just-served tick sits inside the due-window exactly as an
+  # every-minute one would, but no further tick can elapse between accept and
+  # the poll — on an every-minute schedule a minute boundary crossed there is a
+  # genuinely new, due occurrence, and the poll rightly fires it.
   test "accept re-arms a standing role without re-firing the just-served tick", %{host: host} do
+    served = DateTime.shift_zone!(DateTime.utc_now(), "Europe/Paris")
+
     write_fiber(host, "tests/standing-temper-rest", """
     ---
     name: Standing temper-and-rest
@@ -1594,13 +1602,13 @@ defmodule Shuttle.DispatchIntegrationTest do
       host: test-host
       project_dir: #{host}
       schedule:
-        expr: "* * * * *"
+        expr: "#{served.minute} #{served.hour} * * *"
         tz: Europe/Paris
     ---
     A standing role awaiting review; the human drags it to tempered (accept).
     """)
 
-    # The run under review was dispatched ten minutes ago, so the current
+    # The run under review was dispatched ten minutes ago, so the served
     # minute's tick is newer than every service marker until accept concludes
     # the run with a fresh handed_off_at.
     write_dispatch_marker(
