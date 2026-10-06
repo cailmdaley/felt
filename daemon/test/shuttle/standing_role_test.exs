@@ -1,5 +1,6 @@
 defmodule Shuttle.StandingRoleTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Shuttle.StandingRole
 
@@ -46,46 +47,45 @@ defmodule Shuttle.StandingRoleTest do
   end
 
   describe "due_by_cron? — the dispatch gate: prev_due > now - window_ms" do
-    @window_ms 90_000
+    # The gate is purely the resolved prev_due against the lookback, strictly:
+    # a tick exactly window_ms old is not due. The live system anchors the
+    # lookback at the role's last service, so a tick the daemon slept through
+    # is replayed however late — the catch-up that fires a Friday-08:00 chase
+    # when the laptop wakes later — and a tick before the last service is
+    # skipped. An invalid role (a oneshot block) or one whose schedule Shuttle
+    # could not resolve (empty `resolved`) fails closed; a leftover review key
+    # in the block has no effect.
+    property "a valid, resolved role is due iff its last tick falls inside the lookback" do
+      check all(
+              prev_s <- integer(-600..0),
+              # How far the lookback reaches past prev_due; > 0 is due.
+              reach_ms <-
+                frequency([
+                  {1, constant(0)},
+                  {1, member_of([-1, 1])},
+                  {2, integer(-400_000..400_000)}
+                ]),
+              window_ms = -prev_s * 1000 + reach_ms,
+              window_ms > 0,
+              defect <- member_of([nil, :oneshot, :unresolved]),
+              stray <-
+                member_of([%{}, %{"review" => %{"state" => "awaiting", "run_id" => "a-1"}}]),
+              max_runs: 100
+            ) do
+        overrides =
+          Map.merge(
+            stray,
+            case defect do
+              nil -> %{}
+              :oneshot -> %{"kind" => "oneshot"}
+              :unresolved -> %{"resolved" => %{}}
+            end
+          )
 
-    test "a role whose last tick fell inside the lookback is due" do
-      # prev_due 30s ago sits inside the 90s window → due.
-      assert StandingRole.due_by_cron?(role(-30), @now, @window_ms)
-    end
-
-    test "a role whose last tick fell before the lookback is not due" do
-      # prev_due 5 min ago is outside the 90s window — the tick was already
-      # serviced (missed ticks before the last service are skipped).
-      refute StandingRole.due_by_cron?(role(-300), @now, @window_ms)
-    end
-
-    test "due-ness is the occurrence + the doc, never a review axis" do
-      # The dispatch gate is purely prev_due vs the lookback (and the poller's
-      # document status/tempered check before it). A leftover review key in the
-      # block has no effect.
-      with_stray_review =
-        role(-30, 30, %{"review" => %{"state" => "awaiting", "run_id" => "adhoc-1"}})
-
-      assert StandingRole.due_by_cron?(with_stray_review, @now, @window_ms)
-    end
-
-    test "a missed tick IS replayed when the lookback reaches it (catch-up)" do
-      # The live system anchors the lookback at the role's last service, so a tick
-      # the daemon slept through is caught however late: prev_due 5 min ago with a
-      # 6 min lookback (spanning the last service) is due — the catch-up that fires
-      # a Friday-08:00 chase when the laptop wakes later.
-      assert StandingRole.due_by_cron?(role(-300), @now, 6 * 60 * 1000)
-    end
-
-    test "an invalid role is never due" do
-      # mode must be standing; a oneshot block fails validation.
-      refute StandingRole.due_by_cron?(role(-30, 30, %{"kind" => "oneshot"}), @now, @window_ms)
-    end
-
-    test "an unparseable schedule produces no resolved occurrence and is not due" do
-      # Shuttle emits no resolved.next_due/prev_due when the cron won't parse →
-      # next_due_at/prev_due nil → not dispatchable → not due.
-      refute StandingRole.due_by_cron?(role(-30, 30, %{"resolved" => %{}}), @now, @window_ms)
+        assert StandingRole.due_by_cron?(role(prev_s, 30, overrides), @now, window_ms) ==
+                 (defect == nil and reach_ms > 0),
+               "prev_due #{prev_s}s, window #{window_ms}ms, defect #{inspect(defect)}, #{inspect(stray)}"
+      end
     end
   end
 
