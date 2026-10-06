@@ -106,34 +106,40 @@ function transitions(z: Zone, year: number): number[] {
   return out
 }
 
+/** Any instant of a UTC year, its first millisecond to its last. */
+const instantsIn = (year: number): fc.Arbitrary<number> =>
+  fc.integer({ min: Date.UTC(year, 0, 1), max: Date.UTC(year + 1, 0, 1) - 1 })
+
+/** Any civil day of a year, Jan 1 to Dec 31. */
+const daysIn = (year: number): fc.Arbitrary<string> =>
+  fc.integer({ min: 0, max: (Date.UTC(year + 1, 0, 1) - Date.UTC(year, 0, 1)) / DAY - 1 })
+    .map((n) => shiftCivilDay(`${year}-01-01`, n))
+
+const years = fc.integer({ min: FIRST_YEAR, max: LAST_YEAR })
+
 /** A zone and an instant in it: uniform over the years half the time, and
  *  otherwise within twelve hours of one of that zone's own transitions. */
 const zonedInstants = fc
-  .tuple(
-    zones,
-    fc.integer({ min: FIRST_YEAR, max: LAST_YEAR }),
-    fc.boolean(),
-    fc.nat(),
-    fc.integer({ min: -12 * HOUR, max: 12 * HOUR }),
-  )
-  .map(([z, year, nearTransition, pick, delta]) => {
+  .tuple(zones, years, fc.boolean())
+  .chain(([z, year, nearTransition]) => {
     const near = nearTransition ? transitions(z, year) : []
     const ms = near.length > 0
-      ? near[pick % near.length] + delta
-      : Date.UTC(year, 0, 1) + (pick % (365 * DAY))
-    return { z, ms }
+      ? fc.tuple(fc.constantFrom(...near), fc.integer({ min: -12 * HOUR, max: 12 * HOUR }))
+        .map(([t, delta]) => t + delta)
+      : instantsIn(year)
+    return ms.map((ms) => ({ z, ms }))
   })
 
 /** A zone and a civil day: any day of the years, or — half the time — a day
  *  on which that zone changes its clocks. */
 const zonedDays = fc
-  .tuple(zones, fc.integer({ min: FIRST_YEAR, max: LAST_YEAR }), fc.boolean(), fc.nat())
-  .map(([z, year, transitionDay, pick]) => {
+  .tuple(zones, years, fc.boolean())
+  .chain(([z, year, transitionDay]) => {
     const near = transitionDay ? transitions(z, year) : []
     const day = near.length > 0
-      ? isoDayLocal(near[pick % near.length], z)
-      : shiftCivilDay(`${year}-01-01`, pick % 365)
-    return { z, day }
+      ? fc.constantFrom(...near).map((t) => isoDayLocal(t, z))
+      : daysIn(year)
+    return day.map((day) => ({ z, day }))
   })
 
 /** Any civil day of the years, zone-free. */
@@ -191,6 +197,32 @@ function oracle(ms: number, z: Zone): { day: string; hour: number; minute: numbe
   const p = Object.fromEntries(f.formatToParts(ms).map((x) => [x.type, x.value]))
   return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour), minute: Number(p.minute) }
 }
+
+// ── The generators ───────────────────────────────────────────────────────────
+
+describe('the year draws', () => {
+  /** Every value a seeded run of `arb` draws. */
+  const drawn = <T>(arb: fc.Arbitrary<T>): T[] => fc.sample(arb, { seed: 0xb0b, numRuns: 2_000 })
+
+  it.each([2023, 2024])('draws instants of %i from its first millisecond to its last', (year) => {
+    const first = Date.UTC(year, 0, 1)
+    const last = Date.UTC(year + 1, 0, 1) - 1
+    const ms = drawn(instantsIn(year))
+    expect(Math.min(...ms)).toBe(first)
+    expect(Math.max(...ms)).toBe(last)
+  })
+
+  it.each([[2023, '2023-12-31'], [2024, '2024-12-31']])('draws days of %i from Jan 1 to %s', (year, last) => {
+    const days = drawn(daysIn(year)).sort()
+    expect(days[0]).toBe(`${year}-01-01`)
+    expect(days.at(-1)).toBe(last)
+  })
+
+  it('draws a leap day only in a leap year', () => {
+    expect(drawn(daysIn(2024))).toContain('2024-02-29')
+    expect(drawn(daysIn(2023))).not.toContain('2023-02-29')
+  })
+})
 
 // ── The laws ─────────────────────────────────────────────────────────────────
 
