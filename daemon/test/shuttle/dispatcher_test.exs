@@ -882,7 +882,7 @@ defmodule Shuttle.DispatcherTest do
 
     paths = [
       {"dispatch", fn -> Dispatcher.dispatch("tests/haiku", runner: MockRunner) end,
-       &(match?({:ok, _}, &1) and spawned?.())},
+       &(&1 == {:ok, FiberUid.session("tests/haiku")} and spawned?.())},
       {"resume",
        fn -> Dispatcher.dispatch("tests/haiku", runner: MockRunner, resume_mode: "previous") end,
        &(&1 == {:error, :missing_session_id})},
@@ -2153,7 +2153,13 @@ defmodule Shuttle.DispatcherTest do
 
       case outcome do
         :spawned ->
-          assert {:ok, _} = result, row
+          # The worker's session comes back, never the anchor kitty forked.
+          assert {:ok, spawned} = result, row
+          case path do
+            "dispatch" -> assert spawned == FiberUid.session("tests/haiku"), row
+            "capture" -> assert spawned.session =~ ~r/\Acapture-/, row
+          end
+
           assert is_integer(new_session_at), row
           if launches != [], do: assert(kitty_at < new_session_at, row)
 
