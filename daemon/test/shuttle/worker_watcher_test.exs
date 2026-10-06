@@ -1,5 +1,5 @@
 defmodule Shuttle.WorkerWatcherTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Shuttle.WorkerWatcher
   alias Shuttle.Test.FiberUid

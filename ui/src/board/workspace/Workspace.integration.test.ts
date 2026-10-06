@@ -126,7 +126,7 @@ describe('workspace reader integration', () => {
     vi.useFakeTimers()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
     vi.advanceTimersByTime(3000)
-    document.querySelector<HTMLButtonElement>('.ws-review-plate .kbn-ctl-temper')!.click()
+    document.querySelector<HTMLButtonElement>('.ws-fiber-acts .kbn-ctl-verdict .kbn-ctl-temper')!.click()
     expect(commit).not.toHaveBeenCalled()
     expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
     expect(document.querySelector('.ws-verdict-toast')?.textContent).toMatch(/^Tempered/)
@@ -208,17 +208,17 @@ describe('workspace reader integration', () => {
     if (result === 'same identity') expect(commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: linked.uid, id: renamed.id, originId: linked.originId }), 'tempered')
     else expect(commit).not.toHaveBeenCalled()
   })
-  it('keeps the originating Desk column and bands through j/k and returns the current card', async () => {
+  it('groups the sidebar as Awaiting review, Working and Read lately wherever it opens, stepping it with j/k', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const returned = vi.fn()
+    const grouped = [{ ...cards[0], status: 'closed' }, { ...cards[1], status: 'active' }]
     workspace = new Workspace(document.body, {
-      shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility,
-      deskColumn: () => [{ card: cards[0], band: 'Needs you' }, { card: cards[1], band: 'Working' }],
+      shuttleBase: '', cards: () => grouped, origin: () => 'Board', onVisibility: visibility,
       onReturnCard: returned, dock: new Dock('', changed),
     })
-    workspace.open(cards[0]); await flush()
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Needs you', 'Working'])
+    workspace.open(grouped[0], 'Board'); await flush()
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Awaiting review', 'Working'])
     expect(document.querySelectorAll('.ws-sidebar .kbn-card')).toHaveLength(2)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
     expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
@@ -496,15 +496,16 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(0)
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *):not(.ws-fiber-acts *)')).toHaveLength(0)
+    expect(document.querySelectorAll('.ws-fiber-acts .kbn-card-worker')).toHaveLength(1)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^aloft/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
     confirm.mockReturnValue(true)
-    // In flight, the head carries the verdict pair.
-    document.querySelector<HTMLButtonElement>('.ws-nav-verdicts .kbn-ctl-temper')!.click()
+    // In flight, the status line carries the verdict pair.
+    document.querySelector<HTMLButtonElement>('.ws-fiber-acts .kbn-ctl-temper')!.click()
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(transition).not.toHaveBeenCalled()
     vi.advanceTimersByTime(6000)
@@ -673,11 +674,10 @@ describe('workspace reader integration', () => {
   })
 
   it('uses j/k for constitution order and held arrows for document scrolling', async () => {
-    workspace.open(cards[0])
+    // Read lately holds the constitutions opened here, most recent first.
+    workspace.open(cards[1])
     await flush()
-    workspace.overview.opened(cards[1])
-    const ordered = workspace.overview.orderedCards()
-    expect(ordered.length).toBeGreaterThan(1)
+    const ordered = [cards[0], cards[1]]
     workspace.open(ordered[0])
     await flush()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
@@ -845,27 +845,24 @@ describe('workspace reader integration', () => {
   })
 
   it('mouse entry does not focus chrome, but keyboard entry does', async () => {
+    workspace.open(cards[1])
+    await flush()
     workspace.open(cards[0])
     await flush()
-    workspace.overview.opened(cards[1])
-    const first = workspace.overview.orderedCards()[0]
-    workspace.open(first)
-    await flush()
-    expect(document.activeElement).not.toBe(document.querySelector('.ws-return'))
+    expect(document.activeElement).not.toBe(document.querySelector('.ws-tab[aria-selected="true"]'))
     const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
     const press = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
     control.dispatchEvent(press)
     expect(press.defaultPrevented).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
     await flush()
-    expect(document.activeElement).toBe(document.querySelector('.ws-return'))
+    expect(document.activeElement).toBe(document.querySelector('.ws-tab[aria-selected="true"]'))
   })
 
-  it('keeps Alt-arrow stepping in overview order and ignores messages from unrelated frames', async () => {
-    workspace.open(cards[0])
+  it('keeps Alt-arrow stepping in sidebar order and ignores messages from unrelated frames', async () => {
+    workspace.open(cards[1])
     await flush()
-    workspace.overview.opened(cards[1])
-    const ordered = workspace.overview.orderedCards()
+    const ordered = [cards[0], cards[1]]
     const hash = window.location.hash
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'shuttle-workspace-key', key: 'ArrowRight' }, source: window }))
     expect(window.location.hash).toBe(hash)

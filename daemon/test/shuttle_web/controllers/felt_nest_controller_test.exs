@@ -1,27 +1,12 @@
 defmodule ShuttleWeb.FeltNestControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
+  alias Shuttle.Test.{Env, FakeCli, ForwardStub, StubPostClient}
+
   @endpoint ShuttleWeb.Endpoint
-
-  # POST transport stub for the write-forward plane: records the last (url, body)
-  # and replays a scripted response.
-  defmodule FeltNestForwardClient do
-    use Agent
-
-    def start_link(response),
-      do: Agent.start_link(fn -> %{response: response, last: nil} end, name: __MODULE__)
-
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def post(url, body, _content_type, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
 
   test "nest shells felt nest <fiber> <parent> against the owning store" do
     {store, args_file} = setup_store!("nest")
@@ -63,17 +48,12 @@ defmodule ShuttleWeb.FeltNestControllerTest do
   end
 
   test "forwards a remote-origin nest to the owning daemon, origin stripped, relaying its response" do
-    start_supervised!({FeltNestForwardClient, {:ok, 200, "tests/parent/child\n"}})
-
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, FeltNestForwardClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    ForwardStub.stub_forward(
+      "candide",
+      "http://localhost:4001",
+      {:ok, 200, "tests/parent/child\n"},
+      StubPostClient
+    )
 
     conn =
       post(
@@ -92,7 +72,7 @@ defmodule ShuttleWeb.FeltNestControllerTest do
 
     # Forwarded to the owning remote's identical /felt-nest, origin stripped so
     # the owner re-parents within its own store.
-    last = FeltNestForwardClient.last()
+    last = StubPostClient.last()
     assert last.url == "http://localhost:4001/api/v1/felt-nest"
     forwarded = Jason.decode!(last.body)
     refute Map.has_key?(forwarded, "origin")
@@ -111,48 +91,37 @@ defmodule ShuttleWeb.FeltNestControllerTest do
     store = Path.join(root, "loom")
     File.mkdir_p!(Path.join(store, ".felt"))
 
-    bin_dir = Path.join(root, "bin")
-    File.mkdir_p!(bin_dir)
-    bin = Path.join(bin_dir, "felt")
     args_file = Path.join(root, "felt-args")
 
-    File.write!(bin, """
-    #!/bin/sh
-    case " $* " in
-      *" show "*)
-        store=""
-        id=""
-        next_store=0
-        next_id=0
-        for a in "$@"; do
-          if [ "$next_store" = 1 ]; then store="$a"; next_store=0; fi
-          if [ "$next_id" = 1 ] && [ "$id" = "" ]; then id="$a"; next_id=0; fi
-          if [ "$a" = "-C" ]; then next_store=1; fi
-          if [ "$a" = "show" ]; then next_id=1; fi
-        done
-        printf '{"id":"%s","path":"%s/.felt/%s/x.md"}\\n' "$id" "$store" "$id"
-        ;;
-      *)
-        printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
-        printf 'ok\\n'
-        ;;
-    esac
-    """)
+    FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      case " $* " in
+        *" show "*)
+          store=""
+          id=""
+          next_store=0
+          next_id=0
+          for a in "$@"; do
+            if [ "$next_store" = 1 ]; then store="$a"; next_store=0; fi
+            if [ "$next_id" = 1 ] && [ "$id" = "" ]; then id="$a"; next_id=0; fi
+            if [ "$a" = "-C" ]; then next_store=1; fi
+            if [ "$a" = "show" ]; then next_id=1; fi
+          done
+          printf '{"id":"%s","path":"%s/.felt/%s/x.md"}\\n' "$id" "$store" "$id"
+          ;;
+        *)
+          printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
+          printf 'ok\\n'
+          ;;
+      esac
+      """
+    })
 
-    File.chmod!(bin, 0o755)
-
-    old_path = System.get_env("PATH")
-    old_args_file = System.get_env("FELT_ARGS_FILE")
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-
-    System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
-    System.put_env("FELT_ARGS_FILE", args_file)
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("FELT_ARGS_FILE", args_file)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("PATH", old_path)
-      restore_env("FELT_ARGS_FILE", old_args_file)
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 

@@ -142,4 +142,18 @@ describe('attachLongPress', () => {
     detach()
     card.remove()
   })
+
+  it('holds a window listener only while a press is armed, so a card that is never detached can still be collected', () => {
+    const add = vi.spyOn(window, 'addEventListener'), remove = vi.spyOn(window, 'removeEventListener')
+    const card = document.createElement('div')
+    const clock = fakeClock()
+    attachLongPress(card, { onFire: vi.fn(), setTimer: clock.setTimer, clearTimer: clock.clearTimer })
+    expect(add).not.toHaveBeenCalled()
+    card.dispatchEvent(Object.assign(new Event('pointerdown'), { button: 0, pointerId: 1, pointerType: 'touch', clientX: 0, clientY: 0 }))
+    expect(add.mock.calls.length).toBe(4)
+    window.dispatchEvent(new Event('pointerup'))
+    expect(remove.mock.calls.length).toBe(4)
+    expect(clock.armed).toBe(0)
+    add.mockRestore(); remove.mockRestore()
+  })
 })

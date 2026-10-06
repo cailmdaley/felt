@@ -63,6 +63,6 @@ defmodule Shuttle.ActionQueries do
   end
 
   defp default_runner do
-    Application.get_env(:shuttle, :action_query_runner, Runner.Default)
+    Shuttle.Env.app(:action_query_runner, Runner.Default)
   end
 end

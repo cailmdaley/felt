@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { cacheDocumentTitle, extractDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { buildChannel, documentLabels, documentLabelMetadata } from './documents.js'
 
@@ -33,4 +33,33 @@ it('caches each document and ETag; tabs, frames and filename collision fallbacks
   const fallback = buildChannel({ uid: 'v', owner: 'titles', name: 'Note', path: '/note.md', fiberDir: '/', body: '', embeds: [{ path: '/one/result.txt' }, { path: '/two/result.txt' }] })
   expect(documentLabels(fallback.documents)).toEqual(['Note', 'one/result.txt', 'two/result.txt'])
   stop()
+})
+
+it('reads a title again when a stat validator stays put but the bytes change', () => {
+  const stat = 'W/"stat-1790000000-40-42"'
+  expect(cacheDocumentTitle('host:/stat.md', '/stat.md', '# First take', stat).title).toBe('First take')
+  expect(cacheDocumentTitle('host:/stat.md', '/stat.md', '# Second take', stat).title).toBe('Second take')
+  const digest = 'W/"sha256-' + 'c'.repeat(64) + '"'
+  expect(cacheDocumentTitle('host:/digest.md', '/digest.md', '# Kept', digest).title).toBe('Kept')
+  expect(cacheDocumentTitle('host:/digest.md', '/digest.md', '# Not reread', digest).title).toBe('Kept')
+})
+
+it('versions a long body by its head and length, extracting the same title', () => {
+  const tail = 'x'.repeat(1024 * 1024)
+  const report = `<title>Long report</title><p>Opening</p>${tail}`
+  expect(cacheDocumentTitle('host:/long.html', '/long.html', report).title).toBe('Long report')
+  expect(cacheDocumentTitle('host:/long.html', '/long.html', report).title).toBe('Long report')
+  expect(cacheDocumentTitle('host:/long.html', '/long.html', `<title>Retitled</title><p>Opening</p>${tail}`).title).toBe('Retitled')
+  const bytes = new TextEncoder().encode('# Binary head\n' + 'y'.repeat(200_000))
+  expect(cacheDocumentTitle('host:/long.md', '/long.md', new TextDecoder().decode(bytes)).title).toBe('Binary head')
+})
+
+it('parses only the first 64 KiB of a large body for its title', () => {
+  const parse = vi.spyOn(DOMParser.prototype, 'parseFromString')
+  const report = `<title>Head only</title><h1>Opening</h1>${'<p>body</p>'.repeat(200_000)}`
+  expect(extractDocumentTitle('/big.html', report).title).toBe('Head only')
+  expect(parse).toHaveBeenCalledOnce()
+  expect(parse.mock.calls[0][0].length).toBeLessThanOrEqual(65536)
+  expect(extractDocumentTitle('/big.md', `# Markdown head\n${'z'.repeat(2_000_000)}`).title).toBe('Markdown head')
+  parse.mockRestore()
 })

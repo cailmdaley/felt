@@ -1,14 +1,17 @@
+// @vitest-environment jsdom
 // Dollar signs in outcomes and bodies: money stays prose, TeX still renders.
 // The regression: an outcome listing several prices ("$5,866.24 (CapOne
 // $1,232.30 …") rendered as one long italic KaTeX span, because the old
 // extension paired any two `$` on a line.
 
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { loadMath } from './mathDollars.js'
 import { renderMarkdown } from './utils.js'
 
 const isMath = (html: string) => html.includes('class="katex')
 
 describe('dollar-delimited math', () => {
+  beforeAll(loadMath)
   it('leaves a line of prices as plain text', () => {
     const outcome =
       'Sep: total $5,866.24 (CapOne $1,232.30 Sep 20 · Fidelity $36.27 · ' +
@@ -48,5 +51,22 @@ describe('dollar-delimited math', () => {
     const html = renderMarkdown('run `echo $HOME$PATH`')
     expect(isMath(html)).toBe(false)
     expect(html).toContain('$HOME$PATH')
+  })
+})
+
+describe('math before KaTeX has loaded', () => {
+  it('draws the source in a placeholder and typesets it when KaTeX arrives', async () => {
+    vi.resetModules()
+    const fresh = await import('./mathDollars.js')
+    const { renderMarkdown: render } = await import('./utils.js')
+    const html = render('so $C_\\ell < x$ holds')
+    expect(html).toContain('class="math-pending"')
+    expect(html).toContain('$C_\\ell &lt; x$')
+    expect(html).not.toContain('class="katex')
+    document.body.innerHTML = html
+    await fresh.loadMath()
+    expect(document.body.querySelector('.math-pending')).toBeNull()
+    expect(document.body.innerHTML).toContain('class="katex')
+    expect(render('$x$')).toContain('class="katex')
   })
 })

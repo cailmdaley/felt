@@ -15,8 +15,6 @@
 .ws-page-sheet-grabber::before { content: ''; width: 36px; height: 4px; border-radius: 2px; background: var(--ws-hairline); }
 .ws-page-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; flex: none; }
 .ws-page-sheet h2 { font: var(--ws-section-size)/1.2 var(--ws-serif); margin: 0; }
-.ws-page-sheet-actions .kbn-ctl-verdict { display: flex; gap: var(--ws-small-gap); }
-.ws-reader .ws-page-sheet-actions .kbn-ctl-btn { min-height: var(--ws-phone-target); padding: 0 14px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); font: var(--ws-label-size)/1.2 var(--ws-serif); }
 .ws-page-sheet-list { min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 12px; }
 .ws-reader .ws-page-sheet-row {
   display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 12px;

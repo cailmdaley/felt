@@ -175,7 +175,10 @@ defmodule ShuttleWeb.FleetController do
   # read off one entry: its reachability and the build stamp buried in the last
   # good snapshot. Rendering here would throw the second away.
   defp registry_health do
-    Shuttle.RemoteRegistry.snapshots(Shuttle.RemoteRegistry, @registry_timeout_ms)
+    Shuttle.RemoteRegistry.snapshots(
+      Shuttle.Env.server(Shuttle.RemoteRegistry),
+      @registry_timeout_ms
+    )
   catch
     :exit, _ -> %{}
   end

@@ -89,6 +89,18 @@ afterEach(() => {
 })
 
 describe('board phone meeting card wiring', () => {
+  it('sets no timer while idle and looks at a held mic once a second', async () => {
+    const timeouts = vi.spyOn(window, 'setTimeout'), intervals = vi.spyOn(window, 'setInterval')
+    board.phoneAudio.mount()
+    expect([...timeouts.mock.calls, ...intervals.mock.calls].filter(([, ms]) => ms === 1_000)).toHaveLength(0)
+    vi.useFakeTimers()
+    try {
+      const check = vi.spyOn(board.phoneAudio.session, 'check')
+      find<HTMLButtonElement>('.kbn-phone-connect').click()
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(check.mock.calls.length).toBeGreaterThanOrEqual(2)
+    } finally { vi.useRealTimers() }
+  })
   it('marks hidden and bfcache suspension on the board session and paints the interruption on return', async () => {
     find<HTMLButtonElement>('.kbn-phone-connect').click()
     await flush()

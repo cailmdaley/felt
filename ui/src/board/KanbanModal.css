@@ -269,10 +269,11 @@
   gap: 6px;
   padding: 0 2px 4px;
   border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
-  /* Pulls the page up under the row — `.kbn-body`'s 10px gap is spacing
-     between *sections*, and the tabs are a label for what follows, not a
-     section of their own. */
-  margin-bottom: -4px;
+  /* The bar stands above the body, in the body's own gutters; the body's
+     top padding is the space beneath it. */
+  margin: 6px 12px 0;
+  position: relative;
+  z-index: 6;
 }
 .kbn-viewtab {
   appearance: none;
@@ -779,6 +780,7 @@
 .kbn-viewtabs-lens {
   margin-left: auto;
   min-width: 0;
+  flex: 0 1 auto;
   display: flex;
   justify-content: flex-end;
   align-items: center;
@@ -791,6 +793,37 @@
 }
 .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; }
 
+/* The tabs keep the bar's spacing inside their own tablist. */
+.kbn-viewtabs-views { flex: none; display: flex; align-items: center; gap: 6px; }
+/* Find follows the tabs: a field in the tabs' hairline, its key set as a keycap. */
+.kbn-viewtabs-find {
+  flex: 0 1 220px; min-width: 120px; position: relative; display: flex; align-items: center; box-sizing: border-box; height: 26px;
+  margin-left: 6px; border: 1px solid rgba(122, 111, 92, 0.28); border-radius: 4px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.kbn-viewtabs-find:hover { border-color: rgba(122, 111, 92, 0.45); }
+.kbn-viewtabs-find:focus-within { border-color: rgba(122, 111, 92, 0.6); background: rgba(251, 246, 233, 0.6); }
+.kbn-viewtabs-find input {
+  flex: 1; min-width: 0; height: 100%; padding: 0 6px 0 9px; border: 0; outline: none; background: transparent;
+  font: calc(14px * var(--kbn-type-scale, 1))/1 var(--font-serif, 'EB Garamond', Georgia, serif); color: var(--kbn-ink);
+}
+.kbn-viewtabs-find input::placeholder { color: var(--kbn-ink-faint); }
+.kbn-viewtabs-find input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.kbn-viewtabs-find-key { margin-right: 5px; font-family: var(--font-mono, 'IBM Plex Mono', monospace); font-size: calc(13px * 0.68 * var(--kbn-type-scale, 1)); }
+.kbn-viewtabs-find:focus-within .kbn-viewtabs-find-key { visibility: hidden; }
+/* The centre belongs to the view: the Desk's lens chips, at its right end, or
+   the reader's map of pages. It always spans Find to Settings, so the gear
+   stands still across views. */
+.kbn-viewtabs-centre { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; align-items: center; position: relative; }
+/* The reader's map hangs from the bar's top edge, its tiles level with the
+   tabs, and overhangs into the reader's top margin below. */
+.kbn-viewtabs-reader { display: none; position: absolute; left: 0; right: 0; top: calc(-1 * var(--ws-tile-air, 4px)); }
+.kbn-viewtabs-position { display: none; flex: none; margin-left: 12px; }
+.kbn-reader-open .kbn-viewtabs { z-index: calc(var(--ws-reader-layer, 9000) + 2); }
+.kbn-reader-open .kbn-viewtabs-reader, .kbn-reader-open .kbn-viewtabs-position { display: block; }
+.kbn-reader-open .kbn-viewtabs-lens { display: none !important; }
+/* Expand takes the whole window; the bar steps aside until it is restored. */
+.kbn-reader-expanded .kbn-viewtabs { visibility: hidden; }
 /* The settings gear closes the strip past the lens. Not a tab, and shaped so:
    no keycap, no name, a square of chrome rather than a page you can be on. It
    is iron gall like every other piece of machinery here, and it never takes a
@@ -1990,55 +2023,74 @@
   outline: 1px dashed rgba(107, 78, 113, 0.65);
   outline-offset: 2px;
 }
-/* Running-worker pill — sits inline in the meta row, right-justified
-   before the date stamp. Mirrors the proportions of .kbn-review-meta-btn
-   (Temper / Discard in awaiting-review cards) so the meta row reads
-   uniformly across columns. Single line, never wraps. */
+/* THE WORKER PILL — one treatment wherever a worker is drawn: the Desk card,
+   the reader's sidebar card and the reader's head. A dot carries the state's
+   pigment (cobalt aloft, gold waiting, cinnabar attention or blocked); the
+   state word and its compact age ("11m", "3h", "2d") are lowercase ink, set
+   tight, with no plate. Only the pointer or the keyboard draws a plate. */
+.kbn-card-worker, .kbn-card-phase {
+  --worker-size: calc(13px * var(--kbn-type-scale, 1));
+  --worker-word: 400 var(--worker-size)/1 var(--font-serif, 'EB Garamond', Georgia, serif);
+  --worker-time: 400 var(--worker-size)/1 var(--font-serif, 'EB Garamond', Georgia, serif);
+  --worker-figures: oldstyle-nums tabular-nums;
+  --worker-gap: 0.32em;
+}
 .kbn-card-worker {
-  text-decoration: none;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  /* A WORKER IN THE AIR IS AGENT WORK, so it wears the agent's cobalt. The
-     pill's ALARM states below stay gold and cinnabar, because those are not
-     claims about who is working: they are claims about who is waited on. */
-  color: var(--kbn-agent);
-  background: rgba(61, 91, 160, 0.10);
-  padding: 2px 6px;
-  border-radius: 2px;
-  animation: kbn-pulse 2s ease-in-out infinite;
-  /* Button reset */
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--worker-gap);
+  margin: 0 -4px;
+  padding: 0 4px;
   border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--kbn-ink-soft);
+  font: var(--worker-word);
+  letter-spacing: 0;
+  text-transform: none;
+  text-decoration: none;
   text-align: left;
-  font-weight: inherit;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  transition: color 120ms ease, background 120ms ease;
 }
-.kbn-card-worker:hover {
-  color: #2E4680;
-  border-color: rgba(61, 91, 160, 0.55);
-}
+.kbn-card-worker:hover { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-plate) 70%, transparent); }
 .kbn-card-worker:focus { outline: none; }
-.kbn-card-worker:focus-visible {
-  outline: 1px dashed var(--kbn-agent);
-  outline-offset: 2px;
+.kbn-card-worker:focus-visible { outline: 1px dashed var(--kbn-you); outline-offset: 2px; }
+.kbn-card-worker .ws-worker-dot {
+  --worker-dot: var(--kbn-agent);
+  display: inline-block; vertical-align: middle; position: relative; top: -0.06em; margin-right: var(--worker-gap);
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--worker-dot);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--worker-dot) 18%, transparent);
 }
+.kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--kbn-owed-bright); }
+.kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--kbn-you); }
+.kbn-card-worker[data-worker-state='no worker'] .ws-worker-dot { --worker-dot: var(--kbn-ink-muted); }
+.kbn-card-worker .ws-worker-state { font: var(--worker-word); }
+.kbn-card-worker .ws-worker-elapsed { font: var(--worker-time); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
+.kbn-card-worker .ws-worker-elapsed:empty { display: none; }
+.kbn-card-worker:hover .ws-worker-elapsed { color: inherit; }
+.kbn-card-worker .ws-worker-via { font: var(--worker-word); color: var(--kbn-ink-muted); }
+.kbn-card-worker .ws-worker-via::before { content: '· '; }
+/* A working turn breathes in its dot alone. */
+.kbn-card-worker.ws-turn-active .ws-worker-dot { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
+@keyframes kbn-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .kbn-card-worker .ws-worker-dot { animation: none !important; } }
+/* Behind the reader or the Board's veil the Desk is inert and unread; its dots rest. */
+[inert] .kbn-card-worker .ws-worker-dot { animation: none; }
 
-/* Worker-less runtime phase badge (retrying / due / dispatched). Gold rather
-   than the teal "aloft" pill: the daemon considers it active, but nothing is
-   running right now. No pulse — it's a state, not a heartbeat. */
+/* Worker-less runtime phase badge (retrying / due / dispatched, and the
+   waiting or attention of an app worker with no session matched). It wears
+   the worker pill's type, unplated; its glyph and a pigmented ink say the
+   state, since no worker's dot is there to carry it. */
 .kbn-card-phase {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #7A5E1E;
-  background: rgba(154, 123, 53, 0.12);
-  padding: 2px 7px;
-  border-radius: 2px;
+  font: var(--worker-word);
+  font-variant-numeric: var(--worker-figures);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--kbn-owed-ink);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -2087,54 +2139,9 @@
 .kbn-card-held:focus-visible .kbn-card-held-label { display: none; }
 .kbn-card-held:hover .kbn-card-held-release,
 .kbn-card-held:focus-visible .kbn-card-held-release { display: inline; }
-/* retrying is a soft-error state — warmer, and a slow pulse to read as "still
-   churning" rather than settled. */
-.kbn-card-phase-retrying {
-  color: #8A4B2A;
-  background: rgba(176, 86, 47, 0.13);
-  animation: kbn-pulse 2.8s ease-in-out infinite;
-}
-@keyframes kbn-pulse {
-  0%, 100% { background: rgba(63, 130, 120, 0.10); }
-  50% { background: rgba(63, 130, 120, 0.22); }
-}
-/* Worker-less status badges use the same typography as live worker controls. */
-.kbn-card-phase-waiting {
-  color: #8A5A12;
-  background: rgba(200, 138, 30, 0.20);
-}
-.kbn-card-phase-attention {
-  color: #9A2A1E;
-  background: rgba(168, 38, 28, 0.18);
-}
-/* Needs-you-now on a live worker takes over the worker pill. The state changes
-   its pigment and motion only, so every worker state keeps the same uppercase
-   Aloft typography and remains comparable across surfaces. */
-.kbn-card-worker-attention {
-  color: #9A2A1E;
-  background: rgba(168, 38, 28, 0.18);
-  animation: none; /* override .kbn-card-worker's base kbn-pulse — static, no blink */
-}
-.kbn-card-phase-blocked {
-  color: #9A2A1E;
-  background: rgba(168, 38, 28, 0.18);
-}
-.kbn-card-worker-attention:hover {
-  color: #7A1E14;
-  background: rgba(168, 38, 28, 0.28);
-  border-color: rgba(168, 38, 28, 0.55);
-}
-/* Waiting-for-you on a live worker (idle ≥60s) takes over the worker pill.
-   Like attention, it changes only the state pigment and motion. */
-.kbn-card-worker-waiting {
-  color: #8A5A12;
-  background: rgba(200, 138, 30, 0.20);
-  animation: none; /* override .kbn-card-worker's base kbn-pulse — static, no blink */
-}
-.kbn-card-worker-waiting:hover {
-  color: #6E4710;
-  background: rgba(200, 138, 30, 0.30);
-  border-color: rgba(200, 138, 30, 0.55);
+/* retrying, attention and blocked are claims on you: cinnabar ink. */
+.kbn-card-phase:is(.kbn-card-phase-retrying, .kbn-card-phase-attention, .kbn-card-phase-blocked) {
+  color: color-mix(in srgb, var(--kbn-you) 75%, var(--kbn-ink));
 }
 /* Stale-origin card: the originating agent is disconnected. The
    snapshot is preserved (last-known-good) so the card still reads
@@ -2356,6 +2363,10 @@
     font-size: calc(11.5px * var(--kbn-type-scale, 1));
   }
   .kbn-viewtab-hotkey { display: none; }
+  .kbn-viewtabs-views { gap: 4px; }
+  /* The phone's bar is its bottom nav; the reader covers it and keeps its own bars. */
+  .kbn-viewtabs-find, .kbn-viewtabs-reader, .kbn-viewtabs-position { display: none !important; }
+  .kbn-reader-open .kbn-viewtabs { z-index: 20; }
   .kbn-modal .kbn-body-veiled > .kbn-view-host { top: 0; bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
   .kbn-viewtabs-lens {
     display: block;

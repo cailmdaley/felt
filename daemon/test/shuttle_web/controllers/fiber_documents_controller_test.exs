@@ -1,9 +1,8 @@
 defmodule ShuttleWeb.FiberDocumentsControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ForwardStub
   import Shuttle.Test.ApiConn
   alias Shuttle.Test.StubGetFileClient
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
 
@@ -35,17 +34,10 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     store = Path.join(root, "loom")
     File.mkdir_p!(store)
 
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    old_shuttle_host = System.get_env("SHUTTLE_HOST")
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "test-host")
 
-    System.put_env("SHUTTLE_STORES", store)
-    System.put_env("SHUTTLE_HOST", "test-host")
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
-      restore_env("SHUTTLE_HOST", old_shuttle_host)
-      File.rm_rf(root)
-    end)
+    on_exit(fn -> File.rm_rf(root) end)
 
     {:ok, store: store}
   end
@@ -101,6 +93,31 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = body["fibers"]
 
     refute Map.has_key?(hd(body["fibers"])["fiber"], "body")
+  end
+
+  test "GET /api/v1/fibers?fields=index keeps only each fiber's id, slug and name", %{
+    store: store
+  } do
+    write_fiber!(store, "tests/indexed", """
+    ---
+    name: Indexed fiber
+    status: active
+    outcome: A long outcome the index never needs.
+    ---
+
+    Body.
+    """)
+
+    conn = get(api_conn(), "/api/v1/fibers?fields=index")
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+    assert body["host"] == "test-host"
+    assert [%{"fiber" => fiber} = row] = body["fibers"]
+    assert Map.keys(row) == ["fiber"]
+    assert fiber["name"] == "Indexed fiber"
+    assert fiber["id"] == "tests/indexed"
+    assert Map.keys(fiber) -- ["id", "slug", "name"] == []
   end
 
   test "GET /api/v1/fibers?body=true still finds each fiber's report", %{store: store} do
@@ -771,6 +788,107 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = Jason.decode!(by_slug.resp_body)["fibers"]
   end
 
+  test "GET /api/v1/fibers/:id reads a polled ULID through its slug, and checks the answer",
+       %{store: store} do
+    polled = "01JZ0000000000000000000002"
+    other = "01JZ0000000000000000000003"
+    stale = "01JZ0000000000000000000004"
+
+    for {slug, uid} <- [{"tests/by-slug", polled}, {"tests/other", other}, {"tests/stale", stale}] do
+      write_fiber!(store, slug, """
+      ---
+      id: #{uid}
+      name: #{slug}
+      status: active
+      shuttle:
+        enabled: true
+        host: test-host
+      ---
+
+      Body of #{slug}.
+      """)
+    end
+
+    warm_poller!(store)
+    assert {_store, "tests/by-slug"} = Shuttle.FiberAddresses.lookup(polled)
+    log = install_logging_felt!(store)
+
+    conn = get(api_conn(), "/api/v1/fibers/#{polled}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^polled, "body" => "Body of tests/by-slug."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/by-slug -j\n"
+
+    # A stale slug answers with another fiber's UID; the read falls through to
+    # the UID itself rather than serving the wrong document.
+    Shuttle.FiberAddresses.put_polled(%{stale => {store, "tests/other"}})
+
+    File.write!(log, "")
+    conn = get(api_conn(), "/api/v1/fibers/#{stale}?body=true")
+
+    assert [%{"fiber" => %{"id" => ^stale, "body" => "Body of tests/stale."}}] =
+             Jason.decode!(conn.resp_body)["fibers"]
+
+    assert File.read!(log) == "show tests/other -j\nshow #{stale} -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id reads an unpolled ULID through the slug its first read found",
+       %{store: store} do
+    uid = "01JZ0000000000000000000005"
+
+    write_fiber!(store, "tests/unpolled", """
+    ---
+    id: #{uid}
+    name: Unpolled
+    status: open
+    ---
+
+    Unpolled body.
+    """)
+
+    log = install_logging_felt!(store)
+
+    # The second request is lowercase and still finds the learned address.
+    for requested <- [uid, String.downcase(uid)] do
+      conn = get(api_conn(), "/api/v1/fibers/#{requested}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "body" => "Unpolled body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow tests/unpolled -j\n"
+  end
+
+  test "GET /api/v1/fibers/:id learns a symlinked fiber's traversal id, not its canonical slug",
+       %{store: store} do
+    uid = "01JZ0000000000000000000006"
+    project = Path.join(Path.dirname(store), "shapepipe")
+
+    write_fiber!(project, "review-ngmix", """
+    ---
+    id: #{uid}
+    name: Ngmix review
+    status: open
+    ---
+
+    Ngmix body.
+    """)
+
+    File.mkdir_p!(Path.join(store, ".felt"))
+    File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "shapepipe"]))
+    log = install_logging_felt!(store)
+
+    for _ <- 1..2 do
+      conn = get(api_conn(), "/api/v1/fibers/#{uid}?body=true")
+
+      assert [%{"fiber" => %{"id" => ^uid, "slug" => "review-ngmix", "body" => "Ngmix body."}}] =
+               Jason.decode!(conn.resp_body)["fibers"]
+    end
+
+    assert File.read!(log) == "show #{uid} -j\nshow shapepipe/review-ngmix -j\n"
+  end
+
   test "GET /api/v1/fibers/:id?body=true includes the felt body alongside full metadata",
        %{store: store} do
     write_fiber!(store, "tests/single-body", """
@@ -967,13 +1085,14 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     start_supervised!(StubFiberClient)
     StubFiberClient.set(Remote.fibers_url(remote), {:ok, remote_body})
 
-    # Start the registry under its DEFAULT name so the controller's feeds/0
-    # call (which targets Shuttle.RemoteFiberRegistry) sees it.
-    start_supervised!(
+    # Register the registry as this test's Shuttle.RemoteFiberRegistry so the
+    # controller's feeds/0 call (`Shuttle.Env.server/1`) sees it.
+    Shuttle.Test.Env.start_scoped!(
       # store_dir: nil — this stub feed must not reach the real
       # `~/.shuttle/remote-fibers` store and outlive the test.
       {RemoteFiberRegistry,
-       remotes: [remote], client: StubFiberClient, auto_poll: false, store_dir: nil}
+       name: nil, remotes: [remote], client: StubFiberClient, auto_poll: false, store_dir: nil},
+      RemoteFiberRegistry
     )
 
     :ok = RemoteFiberRegistry.refresh_now()
@@ -1135,7 +1254,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     File.mkdir_p!(Path.join(store, ".felt"))
     File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "felt-project"]))
-    System.put_env("SHUTTLE_STORES", Enum.join([store, project], ","))
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", Enum.join([store, project], ","))
 
     warm_poller!(store)
     conn = get(api_conn(), "/api/v1/fibers?shuttle=true")
@@ -1151,89 +1270,90 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = Jason.decode!(conn.resp_body)["fibers"]
   end
 
+  # A felt that records each invocation's arguments, then runs the real felt.
+  defp install_logging_felt!(store) do
+    real = Shuttle.Test.FakeCli.real!("felt")
+    log = Path.join(Path.dirname(store), "felt-calls.log")
+    File.write!(log, "")
+
+    Shuttle.Test.FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      printf '%s\\n' "$*" >> '#{log}'
+      exec '#{real}' "$@"
+      """
+    })
+
+    log
+  end
+
   # A fake `felt` on PATH that mimics the felt JSON shapes the body-read path can
   # hit. Faithful emulation is the point: `felt show -j` carries id + path + body;
   # `felt show -j --body` is the minimal, id-less editing selector; `felt ls` is
   # the (here empty) whole-store scan. Lets a controller test distinguish the
   # fast path from the scan fallback by RESULT alone, no timing. `$(pwd)` (not
   # `$PWD`, which `cd:` leaves stale) gives felt's per-call working store.
-  defp install_body_read_fake_felt!(store) do
-    bin_dir = Path.join(Path.dirname(store), "fake-bin")
-    File.mkdir_p!(bin_dir)
-    bin = Path.join(bin_dir, "felt")
-
+  defp install_body_read_fake_felt!(_store) do
     # Branch on the SUBCOMMAND ($1) first so `ls --body` (the scan) and
     # `show --body` (the trap) don't collide — both carry `--body`, only the
     # subcommand tells them apart, exactly as real felt distinguishes them.
-    File.write!(bin, """
-    #!/bin/sh
-    case "$1" in
-      ls)
-        # The whole-store scan. Deliberately empty: if get/2 wrongly falls
-        # through to scan_lookup, it finds nothing here and the test fails.
-        printf '[]\\n'
-        ;;
-      show)
-        case " $* " in
-          *" --body "*)
-            # felt's --body selector: body + start line ONLY, no id (the trap).
-            printf '{"body":"The body content.","body_start_line":7}\\n'
-            ;;
-          *)
-            # felt show -j: the full fiber JSON, body included.
-            dir=$(pwd)
-            printf '{"id":"tests/single-body","name":"Single with body","status":"open","path":"%s/.felt/tests/single-body/single-body.md","body":"The body content."}\\n' "$dir"
-            ;;
-        esac
-        ;;
-      *)
-        printf '\\n'
-        ;;
-    esac
-    """)
-
-    File.chmod!(bin, 0o755)
-
-    old_path = System.get_env("PATH")
-    System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
-    on_exit(fn -> restore_env("PATH", old_path) end)
+    Shuttle.Test.FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      case "$1" in
+        ls)
+          # The whole-store scan. Deliberately empty: if get/2 wrongly falls
+          # through to scan_lookup, it finds nothing here and the test fails.
+          printf '[]\\n'
+          ;;
+        show)
+          case " $* " in
+            *" --body "*)
+              # felt's --body selector: body + start line ONLY, no id (the trap).
+              printf '{"body":"The body content.","body_start_line":7}\\n'
+              ;;
+            *)
+              # felt show -j: the full fiber JSON, body included.
+              dir=$(pwd)
+              printf '{"id":"tests/single-body","name":"Single with body","status":"open","path":"%s/.felt/tests/single-body/single-body.md","body":"The body content."}\\n' "$dir"
+              ;;
+          esac
+          ;;
+        *)
+          printf '\\n'
+          ;;
+      esac
+      """
+    })
   end
 
   # A felt whose fast path misses the uid, so `get/2` must scan. `ls` without
   # `--body` lists the fiber; `ls --body` lists nothing; `show` resolves only
   # the traversal id.
-  defp install_scan_fake_felt!(store) do
-    bin_dir = Path.join(Path.dirname(store), "fake-bin")
-    File.mkdir_p!(bin_dir)
-    bin = Path.join(bin_dir, "felt")
-
-    File.write!(bin, """
-    #!/bin/sh
-    dir=$(pwd)
-    row='"id":"shapepipe/review-ngmix","uid":"01JZSCANNED000000000000000","name":"Ngmix review","status":"open"'
-    path="$dir/.felt/shapepipe/review-ngmix/review-ngmix.md"
-    case "$1 $2" in
-      "ls "*)
-        case " $* " in
-          *" --body "*) printf '[]\\n' ;;
-          *) printf '[{%s,"path":"%s"}]\\n' "$row" "$path" ;;
-        esac
-        ;;
-      "show shapepipe/review-ngmix")
-        printf '{%s,"path":"%s","body":"Scanned body."}\\n' "$row" "$path"
-        ;;
-      *)
-        echo "no fiber found matching \\"$2\\"" >&2
-        exit 1
-        ;;
-    esac
-    """)
-
-    File.chmod!(bin, 0o755)
-
-    old_path = System.get_env("PATH")
-    System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
-    on_exit(fn -> restore_env("PATH", old_path) end)
+  defp install_scan_fake_felt!(_store) do
+    Shuttle.Test.FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      dir=$(pwd)
+      row='"id":"shapepipe/review-ngmix","uid":"01JZSCANNED000000000000000","name":"Ngmix review","status":"open"'
+      path="$dir/.felt/shapepipe/review-ngmix/review-ngmix.md"
+      case "$1 $2" in
+        "ls "*)
+          case " $* " in
+            *" --body "*) printf '[]\\n' ;;
+            *) printf '[{%s,"path":"%s"}]\\n' "$row" "$path" ;;
+          esac
+          ;;
+        "show shapepipe/review-ngmix")
+          printf '{%s,"path":"%s","body":"Scanned body."}\\n' "$row" "$path"
+          ;;
+        *)
+          echo "no fiber found matching \\"$2\\"" >&2
+          exit 1
+          ;;
+      esac
+      """
+    })
   end
 
   describe "GET /api/v1/fibers/:id owner-routing" do
@@ -1464,18 +1584,19 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     end
   end
 
-  # Start a Poller under its default name (so the controller's calls reach it),
-  # or reuse a running one — returning the original state to restore on exit.
+  # Start this test's Poller (registered as its `Shuttle.Poller`, so the
+  # controller's calls reach it), or reuse the one it already has — returning
+  # the original state to restore on exit.
   defp start_or_reuse_poller(store) do
-    case Process.whereis(Shuttle.Poller) do
+    case GenServer.whereis(Shuttle.Env.server(Shuttle.Poller)) do
       nil ->
+        # Supervised, so it is stopped before on_exit runs rather than racing
+        # the test's own exit.
         {:ok, pid} =
-          Shuttle.Poller.start_link(
-            name: Shuttle.Poller,
+          Shuttle.Test.PollerHelpers.start_poller!(
             poll_interval_ms: 600_000,
             max_concurrent_workers: 0,
-            felt_stores: [store],
-            daemon_heartbeat_file: Shuttle.Test.PollerHelpers.test_heartbeat_file()
+            felt_stores: [store]
           )
 
         {pid, nil}
@@ -1492,7 +1613,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
   # on-disk shuttle fibers to appear must warm the cache first. Returns the pid.
   defp warm_poller!(store) do
     stores =
-      case System.get_env("SHUTTLE_STORES") do
+      case Shuttle.Env.get("SHUTTLE_STORES") do
         nil -> [store]
         "" -> [store]
         value -> String.split(value, ",", trim: true)

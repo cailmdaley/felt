@@ -42,9 +42,8 @@ defmodule Shuttle.Test.Ledgers do
   Point a ledger controller at a throwaway `.jsonl` under `env_var`, and sweep
   it (plus the rotated sibling the reader also reads) afterwards.
 
-  SHUTTLE_DATA_DIR is deleted for the duration: the daemon resolves it as the
-  fallback root, so leaving a real one set would let ledger resolution find a
-  file this test never wrote.
+  The override lives in the test's scope (`Shuttle.Test.Env`); the suite pins
+  SHUTTLE_DATA_DIR, the fallback root, to an empty dir.
   """
   def ledger_setup!(env_var, prefix) do
     path =
@@ -53,16 +52,11 @@ defmodule Shuttle.Test.Ledgers do
         "#{prefix}_#{System.unique_integer([:positive])}.jsonl"
       )
 
-    previous = System.get_env(env_var)
-    previous_data_dir = System.get_env("SHUTTLE_DATA_DIR")
-    System.delete_env("SHUTTLE_DATA_DIR")
-    System.put_env(env_var, path)
+    Shuttle.Test.Env.put_env(env_var, path)
 
     on_exit(fn ->
       File.rm(path)
       File.rm(path <> ".1")
-      if previous, do: System.put_env(env_var, previous)
-      if previous_data_dir, do: System.put_env("SHUTTLE_DATA_DIR", previous_data_dir)
     end)
 
     path

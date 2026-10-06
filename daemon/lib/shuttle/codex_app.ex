@@ -120,7 +120,7 @@ defmodule Shuttle.CodexApp do
   defp client do
     case Process.whereis(@client) do
       nil ->
-        opts = Application.get_env(:shuttle, :codex_app_transport_opts, [])
+        opts = Shuttle.Env.app(:codex_app_transport_opts, [])
 
         case Transport.start_link(Keyword.put(opts, :name, @client)) do
           {:ok, pid} -> {:ok, pid}
@@ -233,7 +233,7 @@ defmodule Shuttle.CodexApp do
     cwd = opts[:cwd]
 
     if is_binary(cwd) and Path.type(cwd) == :absolute do
-      cwd = Path.expand(cwd)
+      cwd = Shuttle.Env.expand(cwd)
 
       case find_project(cwd, nil, MapSet.new()) do
         {:ok, id} -> {:ok, id}

@@ -123,10 +123,10 @@ defmodule Shuttle.Transcript do
   @doc "The harness that owns `path`, by which transcript root it sits under."
   @spec harness_for(String.t(), keyword()) :: String.t() | nil
   def harness_for(path, opts \\ []) do
-    expanded = Path.expand(path)
-    claude = Path.expand(HarnessPaths.claude_projects_root(opts))
-    pi = Path.expand(HarnessPaths.pi_sessions_root(opts))
-    codex = Path.expand(HarnessPaths.codex_sessions_root(opts))
+    expanded = Shuttle.Env.expand(path)
+    claude = Shuttle.Env.expand(HarnessPaths.claude_projects_root(opts))
+    pi = Shuttle.Env.expand(HarnessPaths.pi_sessions_root(opts))
+    codex = Shuttle.Env.expand(HarnessPaths.codex_sessions_root(opts))
 
     cond do
       under?(expanded, claude) -> "claude-code"

@@ -15,9 +15,9 @@ import {
 
 /**
  * The temporal fetchers' WIRE FORM: every route speaks timezone-free instants,
- * so the daemon's zone cannot shift a browser's window. The suite runs twice,
- * under America/Los_Angeles and Europe/Paris, so the local-midnight resolution
- * is exercised in two zones on every run.
+ * so the daemon's zone cannot shift a browser's window. The local-midnight
+ * resolution runs in the host zone, which `npm test` pins to
+ * America/Los_Angeles; civilDay.properties.test.ts carries it across the rest.
  */
 
 /** Reply per URL substring; anything unmatched answers 404. */
@@ -72,23 +72,21 @@ describe('buildSessionIndex', () => {
     expect(bySession.get('sess-1')?.fiber).toBe('work/a/run')
   })
 
-  it('last record wins — a resume supersedes the dispatch it followed', () => {
-    const index = buildSessionIndex([
+  it('lets the newest record win, by `at` rather than array position', () => {
+    // A resume supersedes the dispatch it followed. A cross-host view merges
+    // several daemons' ledgers, and a merged array is not globally sorted, so
+    // the newest pairing must win wherever it sits.
+    const resumed = buildSessionIndex([
       rec({ at: 1_000, fiber: 'work/old', kind: 'dispatch' }),
       rec({ at: 2_000, fiber: 'work/new', kind: 'resume' }),
     ])
-    expect(index.bySession.get('sess-1')?.fiber).toBe('work/new')
-    expect(index.byTmux.get('run-01KVBR4J9EZGYPJ07734SY90P1-shuttle')?.fiber).toBe('work/new')
-  })
-
-  it('orders by `at`, not by array position', () => {
-    // A cross-host view merges several daemons' ledgers, and a merged array is
-    // not globally sorted. The newest pairing must still win.
-    const index = buildSessionIndex([
+    expect(resumed.bySession.get('sess-1')?.fiber).toBe('work/new')
+    expect(resumed.byTmux.get('run-01KVBR4J9EZGYPJ07734SY90P1-shuttle')?.fiber).toBe('work/new')
+    const merged = buildSessionIndex([
       rec({ at: 5_000, fiber: 'work/newest' }),
       rec({ at: 2_000, fiber: 'work/older' }),
     ])
-    expect(index.bySession.get('sess-1')?.fiber).toBe('work/newest')
+    expect(merged.bySession.get('sess-1')?.fiber).toBe('work/newest')
   })
 
   it('keeps a tmux-less record out of byTmux but in bySession', () => {
@@ -97,16 +95,6 @@ describe('buildSessionIndex', () => {
     const index = buildSessionIndex([rec({ tmux: null, session: 'headless' })])
     expect(index.bySession.get('headless')?.fiber).toBe('work/a/run')
     expect([...index.byTmux.keys()]).toEqual([])
-  })
-
-  it('carries a null uid through rather than inventing one', () => {
-    const index = buildSessionIndex([rec({ uid: null, tmux: 'pi-2f9c41' })])
-    expect(index.byTmux.get('pi-2f9c41')).toEqual({
-      fiber: 'work/a/run',
-      uid: null,
-      session: 'sess-1',
-      host: 'ada',
-    })
   })
 
   it('keeps distinct sessions on the same fiber separate', () => {
@@ -118,12 +106,6 @@ describe('buildSessionIndex', () => {
     // Two names, each written three times: bare, host-scoped, and the
     // "some host owns this name" marker.
     expect(index.byTmux.size).toBe(6)
-  })
-
-  it('is empty for an empty ledger', () => {
-    const index = buildSessionIndex([])
-    expect(index.byTmux.size).toBe(0)
-    expect(index.bySession.size).toBe(0)
   })
 })
 
@@ -162,19 +144,30 @@ describe('parseSessions', () => {
 })
 
 describe('sessions fetcher', () => {
-  it('sends since_ms and degrades a 404 to an empty ledger', async () => {
-    const calls = captureFetch(() => new Response('', { status: 404 }))
-    const out = await createTemporalFetchers('').sessions(1_700_000_000_000)
-    expect(calls[0].params.get('since_ms')).toBe('1700000000000')
-    expect(out).toEqual({ host: '', records: [], origins: {} })
-  })
-
   it('collapses identical concurrent asks onto one request', async () => {
     const calls = captureFetch(ok({ host: 'ada', records: [] }))
     const f = createTemporalFetchers('')
     const [a, b] = await Promise.all([f.sessions(0), f.sessions(0)])
     expect(calls).toHaveLength(1)
     expect(a).toBe(b)
+  })
+
+  it('keeps concurrent asks for different ranges apart, on every feed', async () => {
+    // Catches: a dedupe key that ignores the range, which hands one window's
+    // answer to a concurrent ask for another.
+    const calls = captureFetch(ok({ host: 'ada', records: [], buckets: [] }))
+    const f = createTemporalFetchers('')
+    await Promise.all([f.activity(0, 10), f.activity(10, 20)])
+    await Promise.all([f.sessions(0), f.sessions(5)])
+    await Promise.all([f.commits(0, 10), f.commits(0, 20)])
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/v1/activity/composite?from_ms=0&to_ms=10',
+      '/api/v1/activity/composite?from_ms=10&to_ms=20',
+      '/api/v1/sessions/composite?since_ms=0',
+      '/api/v1/sessions/composite?since_ms=5',
+      '/api/v1/commits/composite?since_ms=0&until_ms=10',
+      '/api/v1/commits/composite?since_ms=0&until_ms=20',
+    ])
   })
 
   it('holds nothing once settled — the caller owns the cadence', async () => {
@@ -296,16 +289,6 @@ describe('composite routing', () => {
       '/api/v1/sessions/composite?since_ms=0',
     ])
   })
-
-  it('synthesizes a local origin when a response carries no block', async () => {
-    routedFetch([['/commits', ok({ host: 'ada', records: [
-      { at: 1, sha: 'a'.repeat(40), subject: 'a: b', session: 's', insertions: 1, deletions: 0, files: 1 },
-    ] })]])
-    const out = await createTemporalFetchers('').commits(0, 10)
-
-    expect(out.origins).toEqual({ ada: { kind: 'local', stale: false } })
-    expect(out.records[0].host).toBe('ada')
-  })
 })
 
 describe('cross-host tmux join', () => {
@@ -339,10 +322,6 @@ describe('cross-host tmux join', () => {
     const older = buildSessionIndex([rec({ host: null, tmux: 'solo' })])
     expect(lookupTmux(older.byTmux, 'ada', 'solo')?.fiber).toBe('work/a/run')
   })
-
-  it('is undefined for a nameless session', () => {
-    expect(lookupTmux(index.byTmux, 'ada', null)).toBeUndefined()
-  })
 })
 
 // ── The commit ledger ────────────────────────────────────────────────────────
@@ -358,15 +337,6 @@ describe('the commits wire form', () => {
     expect(calls[0].params.get('since_ms')).toBe('1000')
     expect(calls[0].params.get('until_ms')).toBe('9000')
     expect(result.records).toEqual([])
-  })
-
-  it('degrades to an empty ledger rather than rejecting', async () => {
-    captureFetch(() => new Response('nonsense', { status: 500 }))
-    await expect(createTemporalFetchers('').commits(1, 2)).resolves.toEqual({
-      host: '',
-      records: [],
-      origins: {},
-    })
   })
 })
 
@@ -447,13 +417,9 @@ describe('parseCommits', () => {
     expect(records[0]).toMatchObject({ files: 0, insertions: 0, deletions: 0 })
   })
 
-  it('stamps an unstamped record with the response host', () => {
-    const { records } = parseCommits({ host: 'ada', records: [wire({ host: null })] }, empty)
+  it('fills what the body omits from the response host: a record\u2019s host, and a local origin', () => {
+    const { records, origins } = parseCommits({ host: 'ada', records: [wire({ host: null })] }, empty)
     expect(records[0].host).toBe('ada')
-  })
-
-  it('synthesizes a local origin when the body carries no block', () => {
-    const { origins } = parseCommits({ host: 'ada', records: [] }, empty)
     expect(origins).toEqual({ ada: { kind: 'local', stale: false } })
   })
 

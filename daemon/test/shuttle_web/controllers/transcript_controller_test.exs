@@ -1,12 +1,11 @@
 defmodule ShuttleWeb.TranscriptControllerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
 
   import Phoenix.ConnTest
   import Plug.Conn
 
-  alias Shuttle.Test.StubGetFileClient
+  alias Shuttle.Test.{Env, StubGetFileClient}
 
   @endpoint ShuttleWeb.Endpoint
   @session "a3edf873-cb1c-40ab-a891-f26f5333b320"
@@ -24,16 +23,8 @@ defmodule ShuttleWeb.TranscriptControllerTest do
     bytes = ~s({"type":"user","message":{"content":"native"}}\n)
     File.write!(path, bytes)
 
-    prior_root = System.get_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
-    System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
-
-    on_exit(fn ->
-      File.rm_rf(root)
-
-      if prior_root,
-        do: System.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", prior_root),
-        else: System.delete_env("SHUTTLE_CLAUDE_PROJECTS_DIR")
-    end)
+    Env.put_env("SHUTTLE_CLAUDE_PROJECTS_DIR", root)
+    on_exit(fn -> File.rm_rf(root) end)
 
     {:ok, root: root, path: path, bytes: bytes}
   end
@@ -81,16 +72,9 @@ defmodule ShuttleWeb.TranscriptControllerTest do
 
   describe "remote host routing" do
     setup do
-      start_supervised!(StubGetFileClient)
-      prior_client = Application.get_env(:shuttle, :write_forward_client)
-      prior_remotes = Application.get_env(:shuttle, :remotes)
-      Application.put_env(:shuttle, :write_forward_client, StubGetFileClient)
-      Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://127.0.0.1:19999"}])
-
-      on_exit(fn ->
-        restore_app_env(:write_forward_client, prior_client)
-        restore_app_env(:remotes, prior_remotes)
-      end)
+      StubGetFileClient.start!()
+      Env.put_app_env(:write_forward_client, StubGetFileClient)
+      Env.put_app_env(:remotes, [%{name: "candide", url: "http://127.0.0.1:19999"}])
 
       :ok
     end

@@ -1,6 +1,6 @@
 import { readThumbnailMetadata } from '../FileViewerPanel.js'
 import { liveFileWatched } from '../LiveFileRefresh.js'
-import { PEEK_PRIORITY } from '../documentResources.js'
+import { RESOURCE_PRIORITY } from '../documentResources.js'
 import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, titleIsCurrent } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
@@ -61,7 +61,7 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
         if (probed.get(doc.key) !== entry) return
         const text = doc.kind === 'html' || doc.kind === 'text'
         cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
-      }, PEEK_PRIORITY.title, fresh)
+      }, RESOURCE_PRIORITY.title, fresh)
       // A peek that could not read (an unreachable owner, a refused request) is tried again on a later render.
       if (!read) setTimeout(() => { if (probed.get(doc.key) === entry) probed.delete(doc.key) }, PROBE_RETRY_MS)
     } })

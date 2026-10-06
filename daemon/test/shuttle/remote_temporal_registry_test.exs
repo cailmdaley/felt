@@ -7,7 +7,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   Driven against a scripted HTTP stub that records every URL it is asked for,
   so each test can say exactly which fetches a request caused.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Shuttle.Remote
   alias Shuttle.RemoteTemporalRegistry

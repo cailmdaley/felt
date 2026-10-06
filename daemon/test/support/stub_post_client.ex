@@ -11,34 +11,39 @@ defmodule Shuttle.Test.StubPostClient do
   it is injected by module name via `:write_forward_client`, and declaring the
   behaviour would warn about callbacks these tests have no need of.
 
-  Globally named, so start it with `start_supervised!/1` from a NON-async test —
-  the supervisor tears it down between tests.
+  One instance per test: `start!/0` starts it under the test supervisor and
+  registers it in the test's scope (`Shuttle.Test.Env.start_scoped!/1`), where
+  every process acting for the test finds it.
   """
 
   use Agent
 
+  @doc "Start this test's instance (see the moduledoc); returns its pid."
+  def start!, do: Shuttle.Test.Env.start_scoped!(__MODULE__)
+
+  defp server, do: Shuttle.Test.Env.server!(__MODULE__)
+
   def start_link(_ \\ []),
     do:
-      Agent.start_link(
-        fn -> %{response: nil, get_response: {:error, :not_set}, last: nil, last_get: nil} end,
-        name: __MODULE__
-      )
+      Agent.start_link(fn ->
+        %{response: nil, get_response: {:error, :not_set}, last: nil, last_get: nil}
+      end)
 
-  def set_response(response), do: Agent.update(__MODULE__, &Map.put(&1, :response, response))
+  def set_response(response), do: Agent.update(server(), &Map.put(&1, :response, response))
 
   def set_get_response(response),
-    do: Agent.update(__MODULE__, &Map.put(&1, :get_response, response))
+    do: Agent.update(server(), &Map.put(&1, :get_response, response))
 
-  def last, do: Agent.get(__MODULE__, & &1.last)
-  def last_get, do: Agent.get(__MODULE__, & &1.last_get)
+  def last, do: Agent.get(server(), & &1.last)
+  def last_get, do: Agent.get(server(), & &1.last_get)
 
   def get(url, _timeout_ms) do
-    Agent.update(__MODULE__, &Map.put(&1, :last_get, %{url: url}))
-    Agent.get(__MODULE__, & &1.get_response)
+    Agent.update(server(), &Map.put(&1, :last_get, %{url: url}))
+    Agent.get(server(), & &1.get_response)
   end
 
   def post(url, body, _content_type, _timeout_ms) do
-    Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
-    Agent.get(__MODULE__, & &1.response)
+    Agent.update(server(), &Map.put(&1, :last, %{url: url, body: body}))
+    Agent.get(server(), & &1.response)
   end
 end

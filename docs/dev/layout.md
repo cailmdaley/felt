@@ -58,8 +58,8 @@ make test                  # go test ./... + mix test + the board suite + the pl
 go test ./...              # Go (felt and shuttle CLIs)
 make mix-test              # full Elixir suite; shells both CLIs on PATH, so `make cli-install` first
 (cd daemon && mix test --only focus)  # tagged subset
-(cd ui && npm test)        # the board suite; runs vitest TWICE, under two
-                           # pinned TZs (America/Los_Angeles, Europe/Paris)
+(cd ui && npm test)        # the board suite; vitest, once, under
+                           # TZ=America/Los_Angeles
 (cd ui && npm run e2e)     # builds the file:// harness and tests the workspace in system Chrome
 make plugin-hooks-test     # shell shims, Pi adapter, handoff policy and transcript pipe tests
 bash scripts/test-plugin-hooks.sh  # the shell hook shims, HOME and PATH sandboxed
@@ -71,11 +71,16 @@ bash scripts/test-bootstrap.sh     # bootstrap.sh's login PATH and fail-fast che
 (cd daemon && SHUTTLE_REAL_HARNESS_SMOKE=1 mix test --only integration test/shuttle/real_harness_smoke_test.exs)
 ```
 
-**The board suite runs twice on purpose, in both local tests and CI.** The
-second pinned offset is where the civil-day logic breaks, so a hand-run `npx
-vitest run` can go green on a change `make test` would fail. CI runs `npm test`
-under America/Los_Angeles and Europe/Paris, then type-checks and builds the
-bundle with `npm run build`.
+**The board suite runs once, under one pinned zone.** `npm test` pins
+TZ=America/Los_Angeles, a negative-offset DST zone, so view code that defaults
+to the host zone renders deterministically and away from UTC. Zone coverage
+does not come from the pin: every zone-dependent computation lives in
+`ui/src/board/civilDay.ts` and takes its zone as a parameter,
+`civilDay.properties.test.ts` checks its laws across the IANA zone database,
+and `ui/test/zoneReads.test.ts` fails on a local-zone `Date` read anywhere
+else (`src/board/workspace/` excepted, whose suite still guards on the pin).
+CI runs `npm test`, then type-checks and builds the bundle with
+`npm run build`.
 
 ### Browser checks
 

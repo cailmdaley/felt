@@ -14,7 +14,7 @@ import {
 import { buildDependents, queuedBehind } from './KanbanRules.js'
 import { clusterStashCards, sortDatedByReturn, splitStashByReturn } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { dueCivilDay, instantMs } from './civilDay.js'
+import { dueCivilDay, instantMs, zone } from './civilDay.js'
 import { card } from './testFixtures.js'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')
@@ -287,14 +287,19 @@ describe('Resting group order', () => {
       card({ id: 'project/cron', uid: 'f', shuttleKind: 'standing', status: 'active',
         nextLaunchAt: '2026-10-06T22:00:00-07:00' }),
     ]
-    // The cron is before Oct 7's local midnight in Los Angeles, after it in Paris.
-    const expectedWarm = new Date(2026, 9, 7).getTime() < Date.parse(dated[5].nextLaunchAt!)
-      ? ['project/new-soon', 'project/old-soon', 'project/cron', 'project/new-later', 'project/invalid']
-      : ['project/cron', 'project/new-soon', 'project/old-soon', 'project/new-later', 'project/invalid']
-    for (let seed = 1; seed <= 40; seed++) {
-      const clusters = sortDatedByReturn(clusterStashCards(shuffled(dated, seed)))
-      expect(ids(clusters[0].cards)).toEqual(expectedWarm)
-      expect(ids(clusters[1].cards)).toEqual(['project/cold'])
+    // The cron is before Oct 7's midnight in Los Angeles, after it in Paris:
+    // a due sorts at the start of its civil day in the reader's zone, a cron
+    // at its instant.
+    const expectedWarm = {
+      'America/Los_Angeles': ['project/cron', 'project/new-soon', 'project/old-soon', 'project/new-later', 'project/invalid'],
+      'Europe/Paris': ['project/new-soon', 'project/old-soon', 'project/cron', 'project/new-later', 'project/invalid'],
+    }
+    for (const [id, warm] of Object.entries(expectedWarm)) {
+      for (let seed = 1; seed <= 40; seed++) {
+        const clusters = sortDatedByReturn(clusterStashCards(shuffled(dated, seed)), zone(id))
+        expect(ids(clusters[0].cards)).toEqual(warm)
+        expect(ids(clusters[1].cards)).toEqual(['project/cold'])
+      }
     }
   })
 })

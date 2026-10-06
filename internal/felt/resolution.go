@@ -85,6 +85,8 @@ type Ref struct {
 	ID            string
 	Elsewhere     bool
 	EnclosingRoot string
+	// UID is the intrinsic UID the query resolved through, if it did.
+	UID string
 }
 
 // Location formats the parenthetical that identifies the enclosing store for
@@ -134,6 +136,26 @@ func resolveRefWith(storage *Storage, scopeID, query string, find func(scopeID, 
 	return Ref{Storage: outer, ID: outerFelt.ID, Elsewhere: true, EnclosingRoot: external.Root}, nil
 }
 
+// ReadResolved resolves query and reads the fiber it names with read. A UID
+// resolves to an id first, and the fiber can move before the read: when the
+// fiber read there is missing or carries another UID, the UID is resolved and
+// read once more.
+func ReadResolved(storage *Storage, scopeID, query string, read func(Ref) (*Felt, error)) (Ref, *Felt, error) {
+	ref, err := ResolveRef(storage, scopeID, query)
+	if err != nil {
+		return Ref{}, nil, err
+	}
+	f, err := read(ref)
+	if ref.UID == "" || (err == nil && f.MatchesUID(ref.UID)) {
+		return ref, f, err
+	}
+	if ref, err = ResolveRef(storage, scopeID, query); err != nil {
+		return Ref{}, nil, err
+	}
+	f, err = read(ref)
+	return ref, f, err
+}
+
 // resolveUIDRef searches the full enclosing namespace because intrinsic
 // identities are global to that store, including fibers outside a project view.
 // It refuses duplicate UIDs instead of choosing whichever path a walk sees first.
@@ -144,15 +166,9 @@ func resolveUIDRef(storage *Storage, uid string) (Ref, error) {
 		external := storage.ExternalRefs()
 		search = NewStorage(external.ProjectDir())
 	}
-	felts, err := search.ListMetadata()
+	matches, err := search.ListMetadataByUID(uid)
 	if err != nil {
 		return Ref{}, fmt.Errorf("listing fibers for UID %q: %w", uid, err)
-	}
-	var matches []*Felt
-	for _, f := range felts {
-		if f.MatchesUID(uid) {
-			matches = append(matches, f)
-		}
 	}
 	if len(matches) > 1 {
 		ids := make([]string, len(matches))
@@ -166,10 +182,10 @@ func resolveUIDRef(storage *Storage, uid string) (Ref, error) {
 	}
 	match := matches[0]
 	if !enclosing {
-		return Ref{Storage: search, ID: match.ID}, nil
+		return Ref{Storage: search, ID: match.ID, UID: uid}, nil
 	}
 	if strings.HasPrefix(match.ID, prefix+"/") {
-		return Ref{Storage: storage, ID: strings.TrimPrefix(match.ID, prefix+"/")}, nil
+		return Ref{Storage: storage, ID: strings.TrimPrefix(match.ID, prefix+"/"), UID: uid}, nil
 	}
-	return Ref{Storage: search, ID: match.ID, Elsewhere: true, EnclosingRoot: root}, nil
+	return Ref{Storage: search, ID: match.ID, Elsewhere: true, EnclosingRoot: root, UID: uid}, nil
 }

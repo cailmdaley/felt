@@ -1,4 +1,5 @@
 defmodule Shuttle.TailnetDialTest do
+  # sync: Bridge's acceptor is a bare spawn_monitor (lib/shuttle/tailnet_dial/bridge.ex:53), so the connection Tasks it starts read tailnet_dial_test_cacerts and the in-flight ceiling globally; needs the acceptor to adopt the Bridge's Shuttle.Env.callers()
   use ExUnit.Case, async: false
   import ExUnit.CaptureLog
   alias Shuttle.Remote
@@ -634,8 +635,14 @@ defmodule Shuttle.TailnetDialTest do
 
   test "a half-closed TLS peer cannot leave a draining relay task behind", %{base: base} do
     previous_cacerts = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    previous_drain = Application.get_env(:shuttle, :tailnet_dial_drain_timeout_ms)
     Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
-    on_exit(fn -> restore_cacerts(previous_cacerts) end)
+    Application.put_env(:shuttle, :tailnet_dial_drain_timeout_ms, 200)
+
+    on_exit(fn ->
+      restore_cacerts(previous_cacerts)
+      restore_app_env(:tailnet_dial_drain_timeout_ms, previous_drain)
+    end)
 
     {tls_port, _peer} = start_silent_tls_peer(base, close_write?: true)
     localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())

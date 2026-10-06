@@ -167,8 +167,12 @@ defmodule Shuttle.RemoteRegistry do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @doc """
@@ -204,7 +208,7 @@ defmodule Shuttle.RemoteRegistry do
   registry.
   """
   @spec poll_now() :: :ok
-  def poll_now, do: poll_now(__MODULE__)
+  def poll_now, do: poll_now(Shuttle.Env.server(__MODULE__))
 
   @spec poll_now(GenServer.server()) :: :ok
   def poll_now(server) do
@@ -227,7 +231,7 @@ defmodule Shuttle.RemoteRegistry do
   `{:error, :unknown_remote}` when the name isn't configured.
   """
   @spec reset_breaker(String.t()) :: :ok | {:error, :not_tripped | :unknown_remote}
-  def reset_breaker(name), do: reset_breaker(__MODULE__, name)
+  def reset_breaker(name), do: reset_breaker(Shuttle.Env.server(__MODULE__), name)
 
   @spec reset_breaker(GenServer.server(), String.t()) ::
           :ok | {:error, :not_tripped | :unknown_remote}
@@ -1060,12 +1064,12 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   defp current_uid do
-    case System.get_env("UID") do
+    case Shuttle.Env.get("UID") do
       uid when is_binary(uid) and uid != "" ->
         uid
 
       _ ->
-        case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+        case Shuttle.Env.cmd("id", ["-u"], stderr_to_stdout: true) do
           {out, 0} -> String.trim(out)
           _ -> "0"
         end
@@ -1479,15 +1483,17 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   defp current_tailscale_socket do
     # The resolved file path matters independently of its stat token: two
     # selected files can have the same `{mtime, size}` and different sockets.
-    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :tailscale_socket)}
+    # The slot is per test scope (`Shuttle.Env.scope_key/1`): the answer also
+    # depends on `:tailscale_home`, HOME and `:os_type`, which a test scopes.
+    key = {remotes_file_snapshot(), Shuttle.Env.app(:tailscale_socket)}
 
-    case :persistent_term.get(@tailscale_socket_key, :unset) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@tailscale_socket_key), :unset) do
       {^key, socket} ->
         socket
 
       _ ->
         socket = Shuttle.Remotes.tailscale_socket()
-        :persistent_term.put(@tailscale_socket_key, {key, socket})
+        :persistent_term.put(Shuttle.Env.scope_key(@tailscale_socket_key), {key, socket})
         socket
     end
   end
@@ -1586,15 +1592,15 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # `SHUTTLE_REMOTES_FILE` cannot reuse a value from another file with matching
   # metadata, and `Shuttle.Remotes.https_proxy/0` owns the precedence decision.
   defp current_proxy do
-    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :https_proxy)}
+    key = {remotes_file_snapshot(), Shuttle.Env.app(:https_proxy)}
 
-    case :persistent_term.get(@proxy_key, :unset) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@proxy_key), :unset) do
       {^key, proxy} ->
         proxy
 
       _ ->
         proxy = Shuttle.Remotes.https_proxy()
-        :persistent_term.put(@proxy_key, {key, proxy})
+        :persistent_term.put(Shuttle.Env.scope_key(@proxy_key), {key, proxy})
         proxy
     end
   end
@@ -1651,7 +1657,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def tls_opts do
     cacerts =
       if @tailnet_dial_test_cacerts_enabled do
-        Application.get_env(:shuttle, :tailnet_dial_test_cacerts) || :public_key.cacerts_get()
+        Shuttle.Env.app(:tailnet_dial_test_cacerts) || :public_key.cacerts_get()
       else
         :public_key.cacerts_get()
       end

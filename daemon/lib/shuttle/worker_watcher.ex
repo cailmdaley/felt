@@ -52,6 +52,7 @@ defmodule Shuttle.WorkerWatcher do
 
   @impl true
   def init(opts) do
+    Shuttle.Env.adopt_callers(Keyword.get(opts, :callers, []))
     fiber_id = Keyword.fetch!(opts, :fiber_id)
     session = Keyword.fetch!(opts, :session)
     poller = Keyword.fetch!(opts, :poller)

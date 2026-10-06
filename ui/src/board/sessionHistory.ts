@@ -15,7 +15,7 @@
  * host's answers swapped in as they arrive. A host the composite reports stale
  * is not asked.
  */
-import { isoDayLocal } from './civilDay.js'
+import { DATE_AND_TIME, formatInstant, hostZone, isoDayLocal, type Zone } from './civilDay.js'
 import { effectiveClaudeOpening, REMOTE_CONTROL_REQUIRED, CLAUDE_APP_ROUTE_UNAVAILABLE, CONVERSATION_OPENING_CHANGED, type ClaudeOpening } from './conversationOpening.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
@@ -195,16 +195,14 @@ export function sessionTargets(
 }
 
 /** `14:02` today, `Sep 26 14:02` otherwise — the strip's clock, 24-hour. */
-export function sessionWhen(ms: number, nowMs: number = Date.now()): string {
-  const d = new Date(ms)
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })
-  if (isoDayLocal(ms) === isoDayLocal(nowMs)) return time
-  const day = d.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    ...(d.getFullYear() === new Date(nowMs).getFullYear() ? {} : { year: 'numeric' }),
-  })
-  return `${day} ${time}`
+export function sessionWhen(ms: number, nowMs: number = Date.now(), z: Zone = hostZone()): string {
+  const time = formatInstant(ms, { hour: '2-digit', minute: '2-digit', hour12: false }, z)
+  const day = isoDayLocal(ms, z)
+  const today = isoDayLocal(nowMs, z)
+  if (day === today) return time
+  const sameYear = day.slice(0, 4) === today.slice(0, 4)
+  const said = formatInstant(ms, { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) }, z)
+  return `${said} ${time}`
 }
 
 /** The hosts to ask for links, with their sessions: every host that ran a
@@ -347,7 +345,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
       if (title) span.title = title
       li.append(span)
     }
-    put('kbn-ctl-session-when', sessionWhen(record.at), new Date(record.at).toLocaleString())
+    put('kbn-ctl-session-when', sessionWhen(record.at), formatInstant(record.at, DATE_AND_TIME))
     put('kbn-ctl-session-agent', record.agent ?? record.harness ?? 'session')
     if (record.kind !== 'dispatch') put('kbn-ctl-session-kind', record.kind)
     if (record.host && record.host !== ctx.fiberHost) put('kbn-ctl-session-host', record.host)

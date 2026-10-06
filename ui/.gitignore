@@ -2,3 +2,5 @@ node_modules
 dist/
 *.log
 .vite/
+.stryker-tmp/
+reports/
