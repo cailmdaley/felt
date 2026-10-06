@@ -36,7 +36,10 @@ global read in `daemon/lib` and on a global write in an async test. In Go,
 reads the process (`os.Getenv`, `os.UserHomeDir`, `exec.LookPath`,
 `exec.Command`, the standard streams) other than through a `sysenv.Env`. In the board,
 `ui/test/zoneReads.test.ts` fails on a local-zone `Date` read outside
-`civilDay.ts`.
+`civilDay.ts`. These guards read source: they catch a direct call, not every
+way a path or a variable can reach the process. Isolation is the seam's job,
+and each seam needs a test of its own that a miss stays inside it, as an
+executable missing from a scoped `PATH` does.
 
 **Never reach the operator's machine.** Fixtures use a fresh home, store and
 config with synthetic data. The daemon's `test_helper.exs` and
@@ -48,7 +51,11 @@ code, pin it there too.
 `:sys.get_state`, a channel or a promise. When the behaviour under test *is*
 a timeout, shrink it through config (for example `:dispatch_call_timeout_ms`)
 and pin the production default with its own assertion. A sleep used as the
-success path is a flake waiting for a loaded machine.
+success path is a flake waiting for a loaded machine. A generous outer wait
+does not rescue a short inner one: if a task's call carries a two-second
+deadline, a thirty-second `Task.await` around it still fails when the call
+does. Make incidental deadlines failure-only all the way down, and tag the
+tests whose subject is a deadline `:timing`.
 
 ## 1. Where does it go?
 
@@ -108,7 +115,7 @@ and add your test to its file.
 
 | Tier | What | Who runs it |
 |---|---|---|
-| the suites | `go test ./...`, `mix test`, `npm test` — all concurrent, each well under a minute on a laptop | every change, every lane |
+| the suites | `go test ./...`, `mix test`, `npm test` — all concurrent; each aims to finish in under a minute on a laptop, a target rather than a guarantee | every change, every lane |
 | full | `make test` plus `make test-linux` (CI's Ubuntu: dash as `/bin/sh`, `/proc`, systemd) | before pushing; CI |
 | browser | `npm run e2e`, which reuses the shared browser (`bin/shared-browser`) when one is running | changes to anything the board draws |
 | opt-in | real harness smoke, the stranger-bootstrap container, `integration`-tagged tests | when touching what they cover |
