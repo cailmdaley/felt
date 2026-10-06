@@ -136,6 +136,9 @@
   --kbn-toast-edge: transparent;
   --kbn-code-ground: var(--kbn-graphite);
   --kbn-code-ink: var(--kbn-hairline);
+  /* A recessed sheet: the Drafts column and its cards, a cold cluster. On
+     paper it is the plate; dark stock sinks it below the desk instead. */
+  --kbn-recess: var(--kbn-plate);
 
   /* MACHINERY HUES. A queued card waits behind another (violet); a standing
      role sleeps on its cron (slate); a launch is held by the daemon (steel). */
@@ -181,6 +184,7 @@
   --kbn-toast-edge: var(--kbn-hairline);
   --kbn-code-ground: color-mix(in srgb, var(--kbn-paper) 55%, var(--kbn-parchment));
   --kbn-code-ink: var(--kbn-ink-soft);
+  --kbn-recess: color-mix(in srgb, var(--kbn-parchment) 84%, var(--kbn-shade));
 }
 
 /* NIGHT CHART — navy-black stock, parchment ink, gold ornament. The desk is
@@ -195,10 +199,16 @@
   --kbn-blank: #1E2935;
   --kbn-plate: #1D2733;
   --kbn-hairline: #363C43;
+  /* Controls on dark stock (darkControls.css): a plate lifted a step off the
+     paper in the stock's own hue, its hover a step further, and an edge that
+     holds 3:1 against the paper so a button's bounds read without its label. */
+  --kbn-lift: #232F3D;
+  --kbn-lift-hover: #2B3949;
+  --kbn-lift-edge: #6B7381;
   --kbn-ink: #F4EBDD;
   --kbn-ink-soft: #E5DAC7;
   --kbn-ink-muted: #A69C8A;
-  --kbn-ink-faint: #938A7A;
+  --kbn-ink-faint: #97907F;
   --kbn-you: #F08A78;
   --kbn-agent: #9EB5F4;
   --kbn-owed: #E0C081;
@@ -223,6 +233,9 @@
   --kbn-blank: #241D23;
   --kbn-plate: #272026;
   --kbn-hairline: #33292F;
+  --kbn-lift: #2D242B;
+  --kbn-lift-hover: #372C34;
+  --kbn-lift-edge: #76696F;
   --kbn-ink: #F3E9D8;
   --kbn-ink-soft: #E0D2BC;
   --kbn-ink-muted: #A89A86;

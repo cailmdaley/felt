@@ -37,6 +37,7 @@
  */
 
 import './palette.css'
+import './darkControls.css'
 import { watchAppearance } from './appearance.js'
 import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'

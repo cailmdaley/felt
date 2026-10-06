@@ -1,0 +1,94 @@
+/* THE CONTROLS ON DARK STOCK — one material recipe for every button family
+ * the board, its forms and its sheets draw, applied only in the dark
+ * appearance (light controls keep the recipes beside their own markup).
+ *
+ * On paper a control is a plate pressed a shade darker than the sheet; on
+ * dark stock the same plate is lifted a step lighter, the way a card rises
+ * off the desk. So, in dark:
+ *
+ *   a quiet control   --kbn-lift, edged in --kbn-lift-edge, inked in ink-soft
+ *   its hover         --kbn-lift-hover, inked in full ink
+ *   a primary         its pigment as the fill, set in --kbn-on-pigment
+ *   a disabled one    no fill and a dashed edge, inked in ink-muted: plainly
+ *                     unavailable but still legible, never a half-faded pastel
+ *   a verdict         its pigment as a tinted plate, a little stronger than on
+ *                     paper so the plate reads off the page
+ *
+ * The page's own controls (the composer, its segmented settings) keep the act
+ * zone's materials and take only a firmer edge, at the end of this sheet. */
+
+:root[data-ws-appearance='dark'] :is(.form-cancel, .set-btn:not(.set-btn-primary, .set-btn-drop), .projpick-addpath-cancel, .capture-meeting-toggle:not([aria-pressed='true'])) {
+  background: var(--kbn-lift);
+  border-color: var(--kbn-lift-edge);
+  color: var(--kbn-ink-soft);
+}
+:root[data-ws-appearance='dark'] :is(.form-cancel, .set-btn:not(.set-btn-primary, .set-btn-drop), .projpick-addpath-cancel, .capture-meeting-toggle:not([aria-pressed='true'])):hover:not(:disabled) {
+  background: var(--kbn-lift-hover);
+  color: var(--kbn-ink);
+}
+:root[data-ws-appearance='dark'] .projpick-addpath-go {
+  background: var(--kbn-lift);
+}
+
+:root[data-ws-appearance='dark'] :is(.form-btn, .set-btn, .projpick-addpath-go, .projpick-addpath-cancel, .capture-meeting-toggle, .capture-meeting-mode):disabled {
+  opacity: 1;
+  background: transparent;
+  border: 1px dashed var(--kbn-lift-edge);
+  box-shadow: none;
+  color: var(--kbn-ink-muted);
+}
+:root[data-ws-appearance='dark'] .capture-meeting-mode:disabled { border-color: transparent; }
+
+/* Segments: the chosen one is the lifted plate. */
+:root[data-ws-appearance='dark'] :is(.stash-segmented, .capture-meeting-modes) {
+  background: var(--kbn-sheet);
+  border-color: var(--kbn-lift-edge);
+}
+:root[data-ws-appearance='dark'] :is(.stash-segment-active, .capture-meeting-mode[aria-checked='true']) {
+  background: var(--kbn-lift-hover);
+  box-shadow: 0 0 0 1px var(--kbn-lift-edge);
+}
+
+/* The bar's view tabs and their keycaps. */
+:root[data-ws-appearance='dark'] .kbn-viewtab {
+  background: color-mix(in srgb, var(--kbn-ink) 3%, transparent);
+  border-color: color-mix(in srgb, var(--kbn-ink-muted) 36%, transparent);
+  color: var(--kbn-ink-muted);
+}
+:root[data-ws-appearance='dark'] .kbn-viewtab:hover {
+  background: color-mix(in srgb, var(--kbn-ink) 7%, transparent);
+  color: var(--kbn-ink-soft);
+}
+:root[data-ws-appearance='dark'] .kbn-viewtab-hotkey { color: var(--kbn-ink-muted); }
+:root[data-ws-appearance='dark'] .kbn-viewtab-active {
+  background: color-mix(in srgb, var(--kbn-you) 14%, transparent);
+  border-color: var(--kbn-you);
+  color: var(--kbn-ink);
+}
+
+/* Verdict plates. */
+:root[data-ws-appearance='dark'] :is(.kbn-action-tempered, .kbn-ctl-temper, .kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word) {
+  --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 82%, var(--ws-ink, var(--kbn-ink)));
+  --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 16%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 28%, var(--ws-paper, var(--kbn-paper)));
+  --verdict-edge: color-mix(in srgb, var(--verdict-pigment) 62%, var(--ws-paper, var(--kbn-paper)));
+}
+
+/* A chosen row in the settings sheet: gold thinned over dark stock turns
+   olive, so the choice is the lifted plate and the gold stays a line. */
+:root[data-ws-appearance='dark'] :is(.set-railbtn-active, .set-opening-selected) {
+  background: var(--kbn-lift);
+}
+:root[data-ws-appearance='dark'] .set-railbtn:not(.set-railbtn-active):hover {
+  background: color-mix(in srgb, var(--kbn-lift) 60%, transparent);
+}
+
+/* The page's act zone derives its materials from the page's paper and ink
+   (ChannelThemes' act defaults). On dark stock its send plate and chosen
+   segment take a firmer edge, so the plate's bounds hold 3:1. */
+:root[data-ws-appearance='dark'] .ws-dock .kbn-ctl-composer .kbn-ctl-send:not(.kbn-ctl-secondary) {
+  border-color: color-mix(in srgb, var(--ws-ink) 48%, transparent) !important;
+}
+:root[data-ws-appearance='dark'] .ws-dock .kbn-ctl-segment[aria-checked='true'] {
+  box-shadow: 0 0 0 var(--ws-line-width) color-mix(in srgb, var(--ws-ink) 48%, transparent);
+}
