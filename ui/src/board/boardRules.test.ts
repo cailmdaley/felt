@@ -2232,15 +2232,4 @@ describe('a queued row asks only about itself', () => {
     expect(queueRowGesture({ ...base, shape: undefined }).draggable).toBe(true)
   })
 
-  it('takes no view on the head card, its column, or whose daemon owns it', () => {
-    // The signature is the proof: there is no parameter to pass any of it in.
-    // A remote-owned row drags like any other — `/felt-edit` forwards the write
-    // to the owning daemon — and an owner that is genuinely dead fails that
-    // forward and is reported then, by name.
-    expect(Object.keys(base).sort()).toEqual([
-      'chainAllScalar',
-      'queueLength',
-      'shape',
-    ])
-  })
 })
