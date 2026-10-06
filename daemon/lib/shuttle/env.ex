@@ -3,9 +3,10 @@ defmodule Shuttle.Env do
   The daemon's one reader of process-global configuration: the OS environment,
   the `:shuttle` application env, and executable lookup on `PATH`.
 
-  Production code calls `get/2`, `app/2`, `fetch_app/1` and `find_executable/1`
-  instead of `System.get_env/2`, `Application.get_env(:shuttle, …)` and
-  `System.find_executable/1`. In `:dev` and `:prod` each is a straight
+  Production code calls `get/2`, `app/2`, `fetch_app/1`, `find_executable/1`,
+  `home/0`, `expand/1` and `cmd/3` instead of `System.get_env/2`,
+  `Application.get_env(:shuttle, …)`, `System.find_executable/1`,
+  `System.user_home!/0`, `Path.expand/1` and `System.cmd/3`. In `:dev` and `:prod` each is a straight
   passthrough to the global value.
 
   Test builds (`config :shuttle, scoped_env: true`, read at compile time) first
@@ -81,6 +82,49 @@ defmodule Shuttle.Env do
         {:ok, :delete} -> nil
         :error -> System.find_executable(name)
       end
+    end
+
+    @doc "The user's home directory: a scoped `HOME`, else `System.user_home!/0`."
+    @spec home() :: String.t()
+    def home do
+      case lookup(:env, "HOME") do
+        {:ok, {:set, home}} -> home
+        _ -> System.user_home!()
+      end
+    end
+
+    @doc "`Path.expand/1`, with a leading `~` resolved against a scoped `HOME`."
+    @spec expand(Path.t()) :: String.t()
+    def expand(path) do
+      case {path, lookup(:env, "HOME")} do
+        {"~", {:ok, {:set, home}}} -> Path.expand(home)
+        {"~/" <> rest, {:ok, {:set, home}}} -> Path.expand(Path.join(home, rest))
+        _ -> Path.expand(path)
+      end
+    end
+
+    @doc """
+    `System.cmd/3` as the caller's scope sees it: the executable resolved on
+    the scoped `PATH`, the scoped env handed to the child (an `env:` entry the
+    caller passes wins).
+    """
+    @spec cmd(String.t(), [String.t()], keyword()) :: {Collectable.t(), non_neg_integer()}
+    def cmd(command, args, opts \\ []) do
+      executable =
+        if Path.type(command) == :absolute, do: command, else: find_executable(command) || command
+
+      opts =
+        case child_env() do
+          [] ->
+            opts
+
+          scoped ->
+            caller = Keyword.get(opts, :env, [])
+            names = MapSet.new(caller, &elem(&1, 0))
+            Keyword.put(opts, :env, caller ++ Enum.reject(scoped, &(elem(&1, 0) in names)))
+        end
+
+      System.cmd(executable, args, opts)
     end
 
     @doc """
@@ -244,6 +288,18 @@ defmodule Shuttle.Env do
     @doc "`System.find_executable/1`."
     @spec find_executable(String.t()) :: String.t() | nil
     def find_executable(name), do: System.find_executable(name)
+
+    @doc "`System.user_home!/0`."
+    @spec home() :: String.t()
+    def home, do: System.user_home!()
+
+    @doc "`Path.expand/1`."
+    @spec expand(Path.t()) :: String.t()
+    def expand(path), do: Path.expand(path)
+
+    @doc "`System.cmd/3`."
+    @spec cmd(String.t(), [String.t()], keyword()) :: {Collectable.t(), non_neg_integer()}
+    def cmd(command, args, opts \\ []), do: System.cmd(command, args, opts)
 
     @doc "No scoped overrides exist outside test builds."
     @spec child_env() :: []

@@ -1069,7 +1069,7 @@ defmodule Shuttle.RemoteRegistry do
         uid
 
       _ ->
-        case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+        case Shuttle.Env.cmd("id", ["-u"], stderr_to_stdout: true) do
           {out, 0} -> String.trim(out)
           _ -> "0"
         end

@@ -127,7 +127,7 @@ defmodule ShuttleWeb.ProjectsController do
 
   defp register_local(conn, raw_path) do
     trimmed = String.trim(raw_path)
-    expanded = Path.expand(trimmed)
+    expanded = Shuttle.Env.expand(trimmed)
 
     cond do
       Path.type(trimmed) != :absolute and not String.starts_with?(trimmed, "~") ->

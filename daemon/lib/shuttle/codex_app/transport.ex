@@ -438,7 +438,7 @@ defmodule Shuttle.CodexApp.Transport do
   defp default_socket do
     home =
       case Shuttle.Env.get("CODEX_HOME") do
-        value when value in [nil, ""] -> Path.join(System.user_home!(), ".codex")
+        value when value in [nil, ""] -> Path.join(Shuttle.Env.home(), ".codex")
         value -> value
       end
 

@@ -928,13 +928,13 @@ defmodule Shuttle.Meeting do
       case configured do
         false -> []
         path when is_binary(path) -> [path]
-        _ -> [Shuttle.Env.find_executable("hark"), Path.expand("~/.local/bin/hark")]
+        _ -> [Shuttle.Env.find_executable("hark"), Shuttle.Env.expand("~/.local/bin/hark")]
       end
 
     Enum.find(candidates, &executable_file?/1)
     |> case do
       nil -> nil
-      path -> Path.expand(path)
+      path -> Shuttle.Env.expand(path)
     end
   end
 
@@ -950,8 +950,8 @@ defmodule Shuttle.Meeting do
   defp hark_dir(opts) do
     Keyword.get(opts, :hark_dir) || Shuttle.Env.app(:hark_dir) ||
       case Shuttle.Env.get("HARK_DIR") do
-        path when is_binary(path) and path != "" -> Path.expand(path)
-        _ -> Path.expand("~/.hark")
+        path when is_binary(path) and path != "" -> Shuttle.Env.expand(path)
+        _ -> Shuttle.Env.expand("~/.hark")
       end
   end
 
@@ -959,7 +959,7 @@ defmodule Shuttle.Meeting do
     Keyword.get(opts, :home_dir) ||
       case Shuttle.Env.get("HOME") do
         path when is_binary(path) and path != "" -> path
-        _ -> Path.expand("~")
+        _ -> Shuttle.Env.expand("~")
       end
   end
 
