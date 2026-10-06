@@ -73,6 +73,17 @@ Application.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
 )
 
+# A marker executable on the VM's real PATH and on no scoped one:
+# `Shuttle.EnvPathMissTest` asserts a scoped PATH that omits it never runs it.
+# It only prints its name; run once here so macOS assesses it before any test.
+marker_dir = Path.join(test_tmp, "real-path-marker")
+File.mkdir_p!(marker_dir)
+marker = Path.join(marker_dir, "shuttle-real-path-marker")
+File.write!(marker, "#!/bin/sh\nprintf shuttle-real-path-marker\n")
+File.chmod!(marker, 0o755)
+System.put_env("PATH", marker_dir <> ":" <> System.get_env("PATH", ""))
+{"shuttle-real-path-marker", 0} = System.cmd(marker, [])
+
 # Per-test scoped env overrides (Shuttle.Env / Shuttle.Test.Env).
 Shuttle.Test.Env.start!()
 
