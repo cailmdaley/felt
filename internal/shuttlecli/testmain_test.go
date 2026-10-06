@@ -163,8 +163,8 @@ func TestTestMainFencesLiveMachineState(t *testing.T) {
 			t.Fatalf("%s path %q is outside the test fence %q", name, path, testFenceDir)
 		}
 	}
-	remotes, err := configuredRemotes()
-	if err != nil || len(remotes) != 0 {
-		t.Fatalf("configured remotes = %v, %v; want none", remotes, err)
+	remotes, err := loadRemotesFile()
+	if err != nil || len(remotes.Remotes) != 0 {
+		t.Fatalf("remotes file = %v, %v; want none", remotes.Remotes, err)
 	}
 }

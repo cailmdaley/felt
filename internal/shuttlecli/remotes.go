@@ -517,21 +517,6 @@ func loadRemotesFile() (remotesFile, error) {
 	return doc, nil
 }
 
-// configuredRemotes returns the normalized, enabled fleet in file order.
-func configuredRemotes() ([]remoteSpec, error) {
-	doc, err := loadRemotesFile()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]remoteSpec, 0, len(doc.Remotes))
-	for _, r := range doc.Remotes {
-		if r.enabledOr() {
-			out = append(out, r)
-		}
-	}
-	return out, nil
-}
-
 // normalizeRemotes fills every default in place and validates the fleet.
 //
 // Validation is fail-loud on the things that silently break routing: a nameless
