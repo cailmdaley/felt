@@ -328,7 +328,7 @@ Observables: 9.
 | | every card exactly once | partition invariant |
 | **aadf7826 settings hotkey (`chassisGuards.test.ts`)** | 23 key × modifier answers | **re-oracled** `bc67bcbf` (written truth table) |
 | | (absent modifier fields) | **restored** `bc67bcbf` |
-| **7811b90f projectsForHost (`projectPicker.test.ts`)** | local → 2 ids in order; candide → 1; cineca → []; reversed order kept | **restored** `593d0584` as fixed examples; property now three invariants |
+| **7811b90f projectsForHost (`projectPicker.test.ts`)** | local → 2 ids in order; a remote host → 1; a host with none → []; reversed order kept | **restored** `593d0584` as fixed examples; property now three invariants |
 | **4c71e70f columnIndexAtX, overlayDueEdits (`chronicleDueDrag.test.ts`)** | 0, 1, 5, edge at 48; clamps; dayW 0; dayCount 0 | floor-bracket property |
 | | 2.99·dayW → 2 | **restored** `76990c5e` |
 | | overlay: untouched cards by reference, no mutation, confirmed / unconfirmed / no-due edits | overlay property (each case 20–88 of 200 runs) |
