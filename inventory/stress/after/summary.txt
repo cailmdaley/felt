@@ -1,0 +1,24 @@
+run 1  seed 80669  69s  failures 0  exit 0
+run 2  seed 216315  67s  failures 0  exit 0
+run 3  seed 268587  65s  failures 0  exit 0
+run 4  seed 771114  65s  failures 0  exit 0
+run 5  seed 236695  88s  failures 1  exit 2
+run 6  seed 784771  73s  failures 0  exit 0
+run 7  seed 219441  55s  failures 0  exit 0
+run 8  seed 185381  68s  failures 0  exit 0
+run 9  seed 626060  55s  failures 0  exit 0
+run 10  seed 52463  54s  failures 0  exit 0
+run 11  seed 340068  54s  failures 0  exit 0
+run 12  seed 681797  53s  failures 0  exit 0
+run 13  seed 999756  56s  failures 0  exit 0
+run 14  seed 265828  56s  failures 0  exit 0
+run 15  seed 47769  55s  failures 0  exit 0
+run 16  seed 614950  52s  failures 0  exit 0
+run 17  seed 687825  64s  failures 0  exit 0
+run 18  seed 413972  56s  failures 0  exit 0
+run 19  seed 376785  53s  failures 0  exit 0
+run 20  seed 620016  49s  failures 0  exit 0
+
+== per-test failures across 20 runs (16 burners), logs in run-N.log (not committed; failure blocks in failures.txt)
+   1 test/shuttle/remote_registry_client_test.exs:82  test the fleet proxy clearing it switches profiles instead of stopping one (Shuttle.RemoteRegistry.ClientTest)
+exit 1

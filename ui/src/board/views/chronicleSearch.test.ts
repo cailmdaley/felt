@@ -32,15 +32,7 @@ describe('localHits', () => {
   const query = fc.tuple(text([' '], 0), text(['a', 'b', 'A', 'B'], 1), text([' '], 0))
     .map(([before, q, after]) => before + q + after)
 
-  /** The rank scale's name/id tiers: exact · name prefix · name substring · id substring. */
-  const tier = (c: { id: string; name: string }, needle: string): number => {
-    const name = c.name.toLowerCase()
-    if (name === needle || c.id.toLowerCase() === needle) return 0
-    if (name.startsWith(needle)) return 1
-    return name.includes(needle) ? 2 : 3
-  }
-
-  it('finds every card whose name or id holds the query, says where, and ranks by tier', () => {
+  it('finds every card whose name or id holds the query, says where, and ranks tighter matches first', () => {
     fc.assert(fc.property(cards, query, (deck, q) => {
       const needle = q.trim().toLowerCase()
       const hits = localHits(deck, q)
@@ -54,11 +46,35 @@ describe('localHits', () => {
         expect(h.where).toEqual([...(holds(c.name) ? ['name'] : []), ...(holds(c.id) ? ['id'] : [])])
         expect(h).toMatchObject({ name: c.name || c.id, excerpt: null, onBoard: true })
       }
-      const tiers = hits.map((h) => tier(byId.get(h.id)!, needle))
-      expect(tiers, 'an exact name above a prefix above a substring').toEqual([...tiers].sort((a, b) => a - b))
+      // Each kind of match sits above every looser one: the hits that match
+      // exactly, then those that at least open their name with the query, then
+      // those that at least hold it in their name, each form a head of the list.
+      const exact = (c: { id: string; name: string }) => c.name.toLowerCase() === needle || c.id.toLowerCase() === needle
+      const opensName = (c: { id: string; name: string }) => exact(c) || c.name.toLowerCase().startsWith(needle)
+      const inName = (c: { id: string; name: string }) => opensName(c) || holds(c.name)
+      for (const [kind, matches] of [['exact', exact], ['name prefix', opensName], ['name', inName]] as const) {
+        const flags = hits.map((h) => matches(byId.get(h.id)!))
+        expect(flags, `${kind} matches lead`).toEqual([...flags].sort((a, b) => Number(b) - Number(a)))
+      }
       // Case and surrounding space are not part of the question.
       expect(localHits(deck, `  ${q.toUpperCase()} `)).toEqual(hits)
     }), { seed: 0x5ea2c4, numRuns: 200 })
+  })
+
+  it('matches name and id, and says which', () => {
+    const [hit] = localHits(CARDS, 'search')
+    expect(hit.id).toBe('felt/board/search-bar')
+    expect(hit.where).toEqual(['name', 'id'])
+    expect(hit.onBoard).toBe(true)
+  })
+
+  it('ranks an exact name above a prefix above a substring', () => {
+    const cards = [
+      { id: 'a/one', name: 'poller clock' },
+      { id: 'a/two', name: 'poller' },
+      { id: 'a/three', name: 'the poller weeps' },
+    ]
+    expect(localHits(cards, 'poller').map((h) => h.id)).toEqual(['a/two', 'a/one', 'a/three'])
   })
 
   it('answers nothing for a blank query rather than everything', () => {

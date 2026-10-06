@@ -250,6 +250,9 @@ describe('the origin on the wire', () => {
     ['loadFleet', (h) => api.loadFleet(BASE, h), { method: 'GET', path: '/api/v1/fleet' }],
     ['saveConfigFile', (h) => api.saveConfigFile(BASE, h, 'stores', '{"a":1}'),
       { method: 'POST', path: '/api/v1/config/stores', body: { text: '{"a":1}' } }],
+    // An emptied file still sends its text: '' is the content, not an absence.
+    ['saveConfigFile', (h) => api.saveConfigFile(BASE, h, 'stores', ''),
+      { method: 'POST', path: '/api/v1/config/stores', body: { text: '' } }],
     ['saveStores', (h) => api.saveStores(BASE, h, ['/x/loom']),
       { method: 'POST', path: '/api/v1/felt-stores', body: { felt_stores: ['/x/loom'] } }],
     ['saveProjects', (h) => api.saveProjects(BASE, h, ['/x/dev']),

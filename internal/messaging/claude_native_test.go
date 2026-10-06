@@ -212,7 +212,7 @@ func TestClaudeNativeWakeAndAttachmentRetry(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "notes.bin")
 	os.WriteFile(file, []byte{0, 1, 255}, 0600)
 	var err error
-	req.Attachments, err = ReadAttachments([]string{file})
+	req.Attachments, err = ReadAttachments(sysenv.New(t.TempDir(), nil), []string{file})
 	if err != nil {
 		t.Fatal(err)
 	}

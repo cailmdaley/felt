@@ -102,6 +102,37 @@ defmodule Shuttle.ContinuationTest do
     defp present(value) when value in [nil, ""], do: nil
     defp present(value), do: value
 
+    test "a nested key shadows its flat sibling" do
+      fiber = %{
+        "shuttle" => %{
+          "kind" => "oneshot",
+          "dispatched_at" => "2026-01-01T00:00:00Z",
+          "session_uuid" => "flat-uuid",
+          "runtime" => %{
+            "dispatched_at" => "2026-06-21T12:00:00Z",
+            "session_uuid" => "nested-uuid"
+          }
+        }
+      }
+
+      assert Continuation.dispatched_at(fiber) == ~U[2026-06-21 12:00:00Z]
+      assert Continuation.resumable_session_id(fiber) == "nested-uuid"
+    end
+
+    test "clean_handoff?: a nested dispatch with only a FLAT handoff reads as no handoff → resume" do
+      # The flat handed_off_at is invisible, so a nested dispatched_at with
+      # nothing nested under handed_off_at reads as "never handed off since
+      # this dispatch".
+      fiber = %{
+        "shuttle" => %{
+          "handed_off_at" => "2026-01-02T00:00:00Z",
+          "runtime" => %{"dispatched_at" => "2026-06-21T12:00:00Z"}
+        }
+      }
+
+      refute Continuation.clean_handoff_since_dispatch?(fiber)
+    end
+
     test "clean_handoff?: nested handoff >= nested dispatch → fresh" do
       fiber = %{
         "shuttle" => %{

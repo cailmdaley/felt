@@ -87,6 +87,24 @@ defmodule Shuttle.StandingRoleTest do
                "prev_due #{prev_s}s, window #{window_ms}ms, defect #{inspect(defect)}, #{inspect(stray)}"
       end
     end
+
+    test "the property's named cases, pinned" do
+      stray_review = %{"review" => %{"state" => "awaiting", "run_id" => "adhoc-1"}}
+
+      # {prev_due s, overrides, window ms, due?}
+      for {prev_s, overrides, window_ms, due?} <- [
+            {-30, %{}, 90_000, true},
+            {-300, %{}, 90_000, false},
+            {-90, %{}, 90_000, false},
+            {-30, stray_review, 90_000, true},
+            {-300, %{}, 6 * 60 * 1000, true},
+            {-30, %{"kind" => "oneshot"}, 90_000, false},
+            {-30, %{"resolved" => %{}}, 90_000, false}
+          ] do
+        assert StandingRole.due_by_cron?(role(prev_s, 30, overrides), @now, window_ms) == due?,
+               "prev_due #{prev_s}s, window #{window_ms}ms, #{inspect(overrides)}"
+      end
+    end
   end
 
   describe "next_due_from_cron — display next_due is Shuttle's resolved next_due" do

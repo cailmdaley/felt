@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func testAttachment(name string, data []byte) Attachment {
@@ -49,7 +51,7 @@ func TestReadAttachmentsPreservesBinaryBytes(t *testing.T) {
 	if err := os.WriteFile(path, want, 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ReadAttachments([]string{path})
+	got, err := ReadAttachments(sysenv.New(t.TempDir(), nil), []string{path})
 	if err != nil || len(got) != 1 || got[0].Name != "payload.bin" || !reflect.DeepEqual(got[0].Data, want) {
 		t.Fatalf("ReadAttachments() = %#v, %v", got, err)
 	}
@@ -66,7 +68,7 @@ func TestReadAttachmentsRejectsFIFOWithoutBlocking(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := ReadAttachments([]string{path})
+		_, err := ReadAttachments(sysenv.New(t.TempDir(), nil), []string{path})
 		done <- err
 	}()
 	select {

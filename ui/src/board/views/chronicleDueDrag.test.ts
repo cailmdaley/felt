@@ -25,14 +25,16 @@ const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
 
 describe('columnIndexAtX — the drag snap math', () => {
   it('floors the cursor into the column it sits over, clamped to a real column', () => {
-    // Integer pixels keep the column edges exact, so a cursor anywhere in
-    // [left + k·w, left + (k+1)·w) must answer k — floored, never rounded to
-    // the nearer edge — and a cursor past either end the nearest real column.
-    // A width of 0 is a track not measured yet: still a real column, never a
-    // division by zero. An empty track answers 0, never a negative index.
+    // Cursors land on quarter pixels, which binary floats hold exactly, so the
+    // column edges stay exact while the cursor still falls between pixels. A
+    // cursor anywhere in [left + k·w, left + (k+1)·w) must answer k — floored,
+    // never rounded to the nearer edge — and a cursor past either end the
+    // nearest real column. A width of 0 is a track not measured yet: still a
+    // real column, never a division by zero. An empty track answers 0, never a
+    // negative index.
     fc.assert(fc.property(
       fc.integer({ min: -500, max: 500 }), fc.integer({ min: 0, max: 40 }),
-      fc.integer({ min: 0, max: 31 }), fc.integer({ min: -2000, max: 2000 }),
+      fc.integer({ min: 0, max: 31 }), fc.integer({ min: -8000, max: 8000 }).map((q) => q / 4),
       (trackLeft, dayW, dayCount, offset) => {
         const at = columnIndexAtX(trackLeft + offset, trackLeft, dayW, dayCount)
         expect(Number.isInteger(at)).toBe(true)
@@ -47,6 +49,13 @@ describe('columnIndexAtX — the drag snap math', () => {
         }
       },
     ), { seed: 0xd1a95, numRuns: 200 })
+  })
+
+  it('keeps a cursor short of the next edge in its own column, and moves it on the edge', () => {
+    expect(columnIndexAtX(100 + 24 * 2.99, 100, 24, 30)).toBe(2)
+    expect(columnIndexAtX(100 + 24 * 3 - 0.01, 100, 24, 30)).toBe(2)
+    expect(columnIndexAtX(100 + 24 * 3, 100, 24, 30)).toBe(3)
+    expect(columnIndexAtX(100 + 24 * 2, 100, 24, 30)).toBe(2)
   })
 })
 

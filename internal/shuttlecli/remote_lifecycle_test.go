@@ -492,3 +492,41 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 		t.Fatal("refused --local verb modified the hub mirror")
 	}
 }
+
+// TestShuttleRemoteDispatchReadsMessageFileFromItsWorkingDirectory runs two
+// dispatches side by side with the same relative --message-file in different
+// working directories, beside a decoy of that name in the test process's own.
+func TestShuttleRemoteDispatchReadsMessageFileFromItsWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	const name = "relative-launch-directive.txt"
+	if err := os.WriteFile(name, []byte("decoy from the process working directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(name) })
+
+	for _, directive := range []string{"directive one", "directive two"} {
+		t.Run(directive, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "active", felt.StatusActive, remoteShuttleBlock(t.TempDir()), nil)
+			cwd := t.TempDir()
+			if err := os.WriteFile(filepath.Join(cwd, name), []byte(directive), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			env.Chdir(cwd)
+
+			var bodies requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				bodies.record(t, r)
+				_, _ = w.Write([]byte(`{"dispatched":true}`))
+			}))
+			if _, _, err := executeIn(t, env, dir, "dispatch", "active", "--ad-hoc", "--message-file", name); err != nil {
+				t.Fatalf("dispatch: %v", err)
+			}
+			if got := bodies.last()["user_message"]; got != directive {
+				t.Fatalf("daemon received user_message %q, want %q", got, directive)
+			}
+		})
+	}
+}

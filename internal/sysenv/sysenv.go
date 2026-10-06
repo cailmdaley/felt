@@ -197,13 +197,27 @@ func (e *Env) Abs(path string) (string, error) {
 	return filepath.Join(wd, path), nil
 }
 
-// LookPath is exec.LookPath against e's PATH.
+// Resolve is path as package os must open it for e: a relative path joins e's
+// working directory. The live process's working directory is already the one
+// package os uses, so there path is returned unchanged.
+func (e *Env) Resolve(path string) string {
+	if e.live || path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return filepath.Join(e.dir, path)
+}
+
+// LookPath is exec.LookPath against e's PATH. A relative name or PATH entry
+// is probed from e's working directory, where Command starts the child, and
+// the result keeps exec.LookPath's spelling and its ErrDot refusal.
 func (e *Env) LookPath(file string) (string, error) {
 	if e.live {
 		return exec.LookPath(file)
 	}
 	if strings.Contains(file, string(filepath.Separator)) {
-		if err := findExecutable(file); err != nil {
+		if err := findExecutable(e.Resolve(file)); err != nil {
 			return "", &exec.Error{Name: file, Err: err}
 		}
 		return file, nil
@@ -213,7 +227,7 @@ func (e *Env) LookPath(file string) (string, error) {
 			dir = "."
 		}
 		path := filepath.Join(dir, file)
-		if findExecutable(path) == nil {
+		if findExecutable(e.Resolve(path)) == nil {
 			if !filepath.IsAbs(path) {
 				return path, &exec.Error{Name: file, Err: exec.ErrDot}
 			}

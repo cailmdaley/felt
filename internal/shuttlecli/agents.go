@@ -179,7 +179,7 @@ to overwrite an existing file without --force. The seeded file works every
 field across several harnesses — edit it in place.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := agentsInitPath
+			path := a.env.Resolve(agentsInitPath)
 			if path == "" {
 				p, err := shuttle.UserAgentsPath(a.env)
 				if err != nil {

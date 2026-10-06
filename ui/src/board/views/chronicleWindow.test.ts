@@ -238,7 +238,18 @@ describe('activity chunks', () => {
       for (const chunk of chunks.filter((c) => !c.live)) {
         expect(grown.find((g) => g.key === chunk.key), chunk.key).toEqual(chunk);
       }
+      // At the same clock, a window grown leftward holds every chunk it already
+      // held, the live one included, unchanged.
+      const grownNow = activityChunks(windowOf(shiftCivilDay(win.first, -grownDays), win.last), now, z);
+      for (const chunk of chunks) {
+        expect(grownNow.find((g) => g.key === chunk.key), chunk.key).toEqual(chunk);
+      }
     }), { numRuns: 200, seed: 0x6a3c4d });
+  });
+
+  it('starts chunk zero on the epoch day', () => {
+    expect(chunkIndexOf('1970-01-01')).toBe(0);
+    expect(chunkBounds(chunkIndexOf('1970-01-01'))).toEqual({ first: '1970-01-01', last: '1970-01-28' });
   });
 
   it('caps the live chunk at now and leaves the settled ones whole', () => {

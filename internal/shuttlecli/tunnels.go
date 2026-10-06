@@ -209,7 +209,7 @@ func (a *app) installTunnels(requested []string, o tunnelsInstallOptions) error 
 		return err
 	}
 
-	jobDir := o.jobDir
+	jobDir := a.env.Resolve(o.jobDir)
 	if jobDir == "" {
 		jobDir = sup.JobDir
 	}
@@ -241,7 +241,7 @@ func (a *app) installTunnels(requested []string, o tunnelsInstallOptions) error 
 			}
 		}
 
-		logDir := o.logDir
+		logDir := a.env.Resolve(o.logDir)
 		if logDir == "" {
 			logDir = filepath.Join(home, ".local", "state", "shuttle")
 		}
