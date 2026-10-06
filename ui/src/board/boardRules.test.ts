@@ -2020,21 +2020,22 @@ describe('a card claims a drop only when it really is a stack', () => {
     expect(inStackHotZone({ left: 0, top: 0, width: 0, height: 0 }, { x: 0, y: 0 })).toBe(false)
   })
 
-  it('claims a legal stack released in the hot zone', () => {
-    expect(stackClaimsDrop(ok, true)).toBe(true)
-  })
-
-  it('lets a legal stack released on the OUTER band fall through to the column', () => {
-    expect(stackClaimsDrop(ok, false)).toBe(false)
-  })
-
-  it('NEVER claims a refused stack — the column keeps the gesture it always had', () => {
-    expect(stackClaimsDrop(no, true)).toBe(false)
-    expect(stackClaimsDrop(no, false)).toBe(false)
-  })
-
-  it('claims nothing when there is no verdict to make', () => {
-    expect(stackClaimsDrop(null, true)).toBe(false)
+  // A legal stack claims the drop when released in the hot zone or after a
+  // dwell; a refused or absent verdict never does. Dwell exists because the
+  // board shifts ~60px the moment a card is picked up (the drag horizon
+  // materializes), so the middle you aimed at is not the middle any more, and
+  // resting on the card says what aiming could not.
+  it('claims exactly the legal stacks that are in the zone or dwell-armed', () => {
+    const wrong: string[] = []
+    for (const [name, verdict] of [['legal', ok], ['refused', no], ['absent', null]] as const) {
+      for (const inZone of [false, true]) {
+        for (const dwelled of [undefined, false, true]) {
+          const expected = name === 'legal' && (inZone || dwelled === true)
+          if (stackClaimsDrop(verdict, inZone, dwelled) !== expected) wrong.push(`${name} verdict, inZone=${inZone}, dwelled=${dwelled}: expected ${expected}`)
+        }
+      }
+    }
+    expect(wrong).toEqual([])
   })
 })
 
@@ -2101,32 +2102,6 @@ describe('a card must be substantially on screen to be aimed at', () => {
   it('offers nothing for a card with no visible height at all', () => {
     expect(stackZoneOffered(186, 0)).toBe(false)
     expect(stackZoneOffered(0, 0)).toBe(false)
-  })
-})
-
-describe('dwell arms a card the zone cannot', () => {
-  const ok = { ok: true, tail: 'a' } as const
-  const no = { ok: false, reason: 'nope' } as const
-
-  it('arms on dwell even when the pointer is nowhere near the zone', () => {
-    // The board shifts ~60px the moment a card is picked up (the drag horizon
-    // materializes), so the middle you aimed at is not the middle any more.
-    // Resting on the card says what aiming could not.
-    expect(stackClaimsDrop(ok, false, true)).toBe(true)
-  })
-
-  it('still arms immediately in the zone, without waiting', () => {
-    expect(stackClaimsDrop(ok, true, false)).toBe(true)
-  })
-
-  it('never arms a refused stack, dwell or no dwell', () => {
-    expect(stackClaimsDrop(no, false, true)).toBe(false)
-    expect(stackClaimsDrop(no, true, true)).toBe(false)
-    expect(stackClaimsDrop(null, false, true)).toBe(false)
-  })
-
-  it('does not arm a card merely passed over', () => {
-    expect(stackClaimsDrop(ok, false, false)).toBe(false)
   })
 })
 
