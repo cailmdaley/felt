@@ -121,7 +121,7 @@ defmodule ShuttleWeb.FiberController do
       not is_binary(Map.get(shuttle, "project_dir")) or Map.get(shuttle, "project_dir") == "" ->
         {:error, "shuttle.project_dir is required when status: active"}
 
-      not File.dir?(Path.expand(Map.fetch!(shuttle, "project_dir"))) ->
+      not File.dir?(Shuttle.Env.expand(Map.fetch!(shuttle, "project_dir"))) ->
         {:error, "shuttle.project_dir does not exist on this host"}
 
       true ->
@@ -270,7 +270,7 @@ defmodule ShuttleWeb.FiberController do
 
   defp felt_root(%{"shuttle" => %{"project_dir" => project_dir}})
        when is_binary(project_dir) and project_dir != "" do
-    Path.expand(project_dir)
+    Shuttle.Env.expand(project_dir)
   end
 
   defp felt_root(_frontmatter) do

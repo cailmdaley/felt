@@ -25,7 +25,7 @@ defmodule Shuttle.Realpath do
   """
   @spec resolve(Path.t()) :: {:ok, String.t()} | {:error, atom()}
   def resolve(path) do
-    case Path.split(Path.expand(path)) do
+    case Path.split(Shuttle.Env.expand(path)) do
       ["/" | rest] -> resolve_segments("/", rest, 0)
       [first | rest] -> resolve_segments(first, rest, 0)
       [] -> {:error, :empty_path}
@@ -46,7 +46,7 @@ defmodule Shuttle.Realpath do
 
         expanded_target =
           case Path.type(target_path) do
-            :absolute -> Path.expand(target_path)
+            :absolute -> Shuttle.Env.expand(target_path)
             _ -> Path.expand(target_path, Path.dirname(candidate))
           end
 

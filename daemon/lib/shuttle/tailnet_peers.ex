@@ -499,7 +499,7 @@ defmodule Shuttle.TailnetPeers do
         {:error, "cli", "no executable tailscale CLI found"}
 
       path ->
-        run = fn -> System.cmd(path, ["status", "--json"], stderr_to_stdout: true) end
+        run = fn -> Shuttle.Env.cmd(path, ["status", "--json"], stderr_to_stdout: true) end
 
         case isolated(run, @status_timeout_ms) do
           # `tailscale status` exits non-zero when stopped but still prints the

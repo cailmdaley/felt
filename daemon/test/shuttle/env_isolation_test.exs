@@ -121,3 +121,74 @@ defmodule Shuttle.EnvIsolationBTest do
     Shuttle.EnvIsolationTest.Shared.run("b")
   end
 end
+
+defmodule Shuttle.EnvOwnerByPidTest do
+  use ExUnit.Case, async: true
+
+  # A child records its parent's registered name in `$ancestors`; once the
+  # child has resolved its owner, a later holder of that name changes nothing.
+  test "an owner reached through a registered name stays that pid" do
+    name = :"shuttle_env_owner_probe_#{System.unique_integer([:positive])}"
+    Process.register(self(), name)
+    Shuttle.Test.Env.put_env("SHUTTLE_ENV_OWNER_PROBE", "mine")
+    parent = self()
+
+    child =
+      :proc_lib.spawn(fn ->
+        loop = fn loop ->
+          receive do
+            :read ->
+              send(parent, {:read, Shuttle.Env.get("SHUTTLE_ENV_OWNER_PROBE")})
+              loop.(loop)
+          end
+        end
+
+        loop.(loop)
+      end)
+
+    send(child, :read)
+    assert_receive {:read, "mine"}
+
+    Process.unregister(name)
+    impostor = spawn(fn -> Process.sleep(:infinity) end)
+    Process.register(impostor, name)
+
+    send(child, :read)
+    assert_receive {:read, "mine"}
+
+    Process.exit(child, :kill)
+    Process.exit(impostor, :kill)
+  end
+end
+
+defmodule Shuttle.EnvScopeHygieneTest do
+  use ExUnit.Case, async: true
+
+  test "a write from outside a test process raises and registers no owner" do
+    parent = self()
+
+    spawn(fn ->
+      result =
+        try do
+          Shuttle.Test.Env.put_env("SHUTTLE_ENV_HYGIENE_PROBE", "x")
+        rescue
+          e -> {:raised, e}
+        end
+
+      send(parent, {:done, self(), result})
+    end)
+
+    assert_receive {:done, pid, {:raised, _}}
+    refute :ets.member(Shuttle.Env.table(), {:owner, pid})
+  end
+
+  test "clearing a scope erases its persistent_term slots" do
+    Shuttle.Test.Env.own_scope!()
+    key = Shuttle.Env.scope_key({__MODULE__, :slot})
+    assert key == {{__MODULE__, :slot}, self()}
+    :persistent_term.put(key, :value)
+
+    Shuttle.Test.Env.clear(self())
+    assert :persistent_term.get(key, :gone) == :gone
+  end
+end

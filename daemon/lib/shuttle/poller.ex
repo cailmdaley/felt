@@ -2235,7 +2235,7 @@ defmodule Shuttle.Poller do
   # validation (armed installs must carry one), not re-litigated here.
   defp declared_project_dir(shuttle) when is_map(shuttle) do
     case Map.get(shuttle, "project_dir") do
-      dir when is_binary(dir) and dir != "" -> Path.expand(dir)
+      dir when is_binary(dir) and dir != "" -> Shuttle.Env.expand(dir)
       _ -> nil
     end
   end

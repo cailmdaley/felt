@@ -32,12 +32,15 @@ defmodule Shuttle.Kitty do
   @launch_budget_ms 5_000
   @launch_interval_ms 100
 
-  @kitty_candidates [
-    Path.expand("~/.local/bin/kitty"),
-    "/opt/homebrew/bin/kitty",
-    "/usr/local/bin/kitty",
-    "/Applications/kitty.app/Contents/MacOS/kitty"
-  ]
+  # Resolved at call time: a module attribute would bake the build machine's
+  # home into the release.
+  defp kitty_candidates,
+    do: [
+      Shuttle.Env.expand("~/.local/bin/kitty"),
+      "/opt/homebrew/bin/kitty",
+      "/usr/local/bin/kitty",
+      "/Applications/kitty.app/Contents/MacOS/kitty"
+    ]
 
   @doc """
   Open (or focus) `session` in a kitty tab. `host` is the fiber's
@@ -421,15 +424,16 @@ defmodule Shuttle.Kitty do
     end
   end
 
-  @kitten_candidates [
-    Path.expand("~/.local/bin/kitten"),
-    "/opt/homebrew/bin/kitten",
-    "/usr/local/bin/kitten",
-    "/Applications/kitty.app/Contents/MacOS/kitten"
-  ]
+  defp kitten_candidates,
+    do: [
+      Shuttle.Env.expand("~/.local/bin/kitten"),
+      "/opt/homebrew/bin/kitten",
+      "/usr/local/bin/kitten",
+      "/Applications/kitty.app/Contents/MacOS/kitten"
+    ]
 
   defp kitten_bin,
-    do: find_bin("kitten", @kitten_candidates, "kitten not found on this host")
+    do: find_bin("kitten", kitten_candidates(), "kitten not found on this host")
 
   defp to_opt(nil), do: []
   defp to_opt(socket), do: ["--to", socket]
@@ -495,7 +499,7 @@ defmodule Shuttle.Kitty do
   # `/tmp/kitty-<pid>` files that caused `connect: no such file` get excluded.
   defp socket_kind(path) do
     with "kitty-" <> pid when pid != "" <- Path.basename(path),
-         {out, 0} <- System.cmd("ps", ["-o", "args=", "-p", pid], stderr_to_stdout: true) do
+         {out, 0} <- Shuttle.Env.cmd("ps", ["-o", "args=", "-p", pid], stderr_to_stdout: true) do
       if String.contains?(out, "quick-access") or String.contains?(out, "kitten panel"),
         do: :panel,
         else: :normal
@@ -517,7 +521,7 @@ defmodule Shuttle.Kitty do
     do:
       find_bin(
         "kitty",
-        @kitty_candidates,
+        kitty_candidates(),
         "kitty not found on this host (is it installed / on PATH?)"
       )
 
@@ -575,7 +579,7 @@ defmodule Shuttle.Kitty do
   # pre-resolve kitty, but osascript / kitty edge cases shouldn't crash the
   # request — fold any spawn failure into a non-zero result.
   defp run(cmd, args) do
-    System.cmd(cmd, args, stderr_to_stdout: true)
+    Shuttle.Env.cmd(cmd, args, stderr_to_stdout: true)
   rescue
     e -> {Exception.message(e), 127}
   end

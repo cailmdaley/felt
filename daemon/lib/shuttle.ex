@@ -45,9 +45,9 @@ defmodule Shuttle do
   @spec data_dir() :: String.t()
   def data_dir do
     case String.trim(Shuttle.Env.get("SHUTTLE_DATA_DIR", "")) do
-      "" -> Path.join(System.user_home!(), ".shuttle")
-      "~" -> System.user_home!()
-      "~/" <> rest -> System.user_home!() <> "/" <> rest
+      "" -> Path.join(Shuttle.Env.home(), ".shuttle")
+      "~" -> Shuttle.Env.home()
+      "~/" <> rest -> Shuttle.Env.home() <> "/" <> rest
       dir -> dir
     end
   end

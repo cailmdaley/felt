@@ -136,8 +136,8 @@ defmodule Shuttle.PathListConfig do
   @spec config_path(spec()) :: String.t()
   def config_path(spec) do
     case Shuttle.Env.get(spec.config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(spec.default_path)
+      v when is_binary(v) and v != "" -> Shuttle.Env.expand(v)
+      _ -> Shuttle.Env.expand(spec.default_path)
     end
   end
 
@@ -165,7 +165,7 @@ defmodule Shuttle.PathListConfig do
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&Path.expand/1)
+    |> Enum.map(&Shuttle.Env.expand/1)
     |> Enum.uniq()
   end
 end

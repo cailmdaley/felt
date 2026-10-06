@@ -572,7 +572,7 @@ defmodule Shuttle.FiberDocuments do
   # (dir-contained, symlinked-flat substore, entry point) with no served-store-
   # prefix coupling. `:error` when felt carries no `path`.
   defp fiber_dir(%{"path" => path}) when is_binary(path) and path != "" do
-    {:ok, Path.dirname(Path.expand(path))}
+    {:ok, Path.dirname(Shuttle.Env.expand(path))}
   end
 
   defp fiber_dir(_fiber), do: :error

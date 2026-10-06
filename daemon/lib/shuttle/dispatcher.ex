@@ -1805,7 +1805,7 @@ defmodule Shuttle.Dispatcher do
          cwd when is_binary(cwd) <- Map.get(header, "cwd"),
          timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
          {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      Path.expand(cwd) == Path.expand(work_dir) and
+      Shuttle.Env.expand(cwd) == Shuttle.Env.expand(work_dir) and
         DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
         String.contains?(content, "Fiber: #{fiber_id}")
     else
