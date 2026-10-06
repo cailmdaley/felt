@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 type synchronizedMessageBuffer struct {
@@ -270,7 +271,7 @@ func TestPostMessageFilesUsesVersionSafeRoute(t *testing.T) {
 	if err := os.WriteFile(path, []byte{0, 255, 13, 10}, 0600); err != nil {
 		t.Fatal(err)
 	}
-	attachments, err := messaging.ReadAttachments([]string{path})
+	attachments, err := messaging.ReadAttachments(sysenv.New(t.TempDir(), nil), []string{path})
 	if err != nil {
 		t.Fatal(err)
 	}

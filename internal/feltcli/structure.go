@@ -304,7 +304,7 @@ func (a *app) resolveMigrationStorage(dir string) (*felt.Storage, error) {
 		return storage, nil
 	}
 
-	clean := filepath.Clean(dir)
+	clean := filepath.Clean(a.env.Resolve(dir))
 	projectRoot := clean
 	if filepath.Base(clean) == felt.DirName {
 		projectRoot = filepath.Dir(clean)

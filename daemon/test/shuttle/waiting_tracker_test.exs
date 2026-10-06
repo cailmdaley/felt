@@ -46,6 +46,15 @@ defmodule Shuttle.WaitingTrackerTest do
   defp last_event_at(name, session), do: (activity(name, session) || %{})[:last_event_at]
   defp ingested?(name, session), do: not is_nil(activity(name, session))
 
+  # Lines are ingested in file order, so once a line appended after the ones
+  # under test has landed, those have been ingested too: a negative assertion
+  # after this speaks for lines the tracker has read.
+  defp barrier(events, name) do
+    session = "barrier-01J00000000000000000000000-shuttle"
+    append(events, "pre_tool_use", session)
+    assert wait_until(fn -> ingested?(name, session) end)
+  end
+
   # A ceiling of ~30 s, reached only when the condition never holds: a passing
   # test returns as soon as it does, however loaded the machine.
   defp wait_until(fun, tries \\ 3_000) do
@@ -183,7 +192,7 @@ defmodule Shuttle.WaitingTrackerTest do
       notificationKind: "idle_prompt"
     })
 
-    Process.sleep(30)
+    barrier(events, name)
     assert phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
   end
 
@@ -406,7 +415,7 @@ defmodule Shuttle.WaitingTrackerTest do
   test "non-shuttle sessions are ignored", %{events: events} do
     name = start(events)
     append(events, "notification", "my-interactive-session")
-    Process.sleep(40)
+    barrier(events, name)
     refute ingested?(name, "my-interactive-session")
   end
 

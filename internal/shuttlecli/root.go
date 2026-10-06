@@ -265,6 +265,9 @@ func Execute() { os.Exit(Run(sysenv.OS(), os.Args[1:])) }
 // code, printing a failure to env's stderr.
 func Run(env *sysenv.Env, args []string) int {
 	root := NewRootCmd(env)
+	if args == nil {
+		args = []string{}
+	}
 	root.SetArgs(args)
 	return exitCode(env, root.Execute())
 }

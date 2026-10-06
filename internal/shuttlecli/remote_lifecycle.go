@@ -270,7 +270,7 @@ func (a *app) forwardDispatch(cmd *cobra.Command, args []string, owner string, f
 
 // readLaunchMessage implements the same bounded multiline input convention as
 // `shuttle message`: one text source, either --message or --message-file.
-func readLaunchMessage(cmd *cobra.Command, message, messageFile string) (text string, supplied bool, err error) {
+func (a *app) readLaunchMessage(cmd *cobra.Command, message, messageFile string) (text string, supplied bool, err error) {
 	messageSet := cmd.Flags().Changed("message")
 	fileSet := cmd.Flags().Changed("message-file")
 	if messageSet && fileSet {
@@ -287,7 +287,7 @@ func readLaunchMessage(cmd *cobra.Command, message, messageFile string) (text st
 	}
 	var reader io.Reader = cmd.InOrStdin()
 	if messageFile != "-" {
-		file, openErr := os.Open(messageFile)
+		file, openErr := os.Open(a.env.Resolve(messageFile))
 		if openErr != nil {
 			return "", false, fmt.Errorf("reading message file: %w", openErr)
 		}

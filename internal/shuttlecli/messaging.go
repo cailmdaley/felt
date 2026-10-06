@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -277,11 +278,11 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 	if o.requestJSON {
 		return readMessageRequestFrame(stdin)
 	}
-	text, err := readMessageText(stdin, args, o.file)
+	text, err := readMessageText(a.env, stdin, args, o.file)
 	if err != nil {
 		return messaging.Request{}, err
 	}
-	attachments, err := messaging.ReadAttachments(o.attachments)
+	attachments, err := messaging.ReadAttachments(a.env, o.attachments)
 	if err != nil {
 		return messaging.Request{}, err
 	}
@@ -332,12 +333,12 @@ func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
 	return request, nil
 }
 
-func readMessageText(stdin io.Reader, args []string, messageFile string) (string, error) {
+func readMessageText(env *sysenv.Env, stdin io.Reader, args []string, messageFile string) (string, error) {
 	if messageFile != "" {
 		if messageFile == "-" {
 			return readMessageInput(stdin)
 		}
-		file, err := os.Open(messageFile)
+		file, err := os.Open(env.Resolve(messageFile))
 		if err != nil {
 			return "", fmt.Errorf("reading message file: %w", err)
 		}
