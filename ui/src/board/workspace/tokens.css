@@ -74,6 +74,7 @@
   --ws-tile-width: 64px;
   --ws-tile-height: 44px;
   --ws-tile-gap: 8px;
+  --ws-tile-group-gap: 8px;
   --ws-tile-pad: 5px;
   --ws-tile-radius: 3px;
   --ws-tile-lift: -3px;

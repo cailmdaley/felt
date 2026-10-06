@@ -28,10 +28,10 @@ it('caches each document and ETag; tabs, frames and filename collision fallbacks
   expect(cacheDocumentTitle(key, '/report.html', '<title>Not parsed twice</title>', 'a')).toBe(first)
   expect(notifications).toBe(1)
   const channel = buildChannel({ uid: 'u', owner: 'titles', name: 'Note', path: '/note.md', fiberDir: '/', body: '', embeds: [{ path: '/report.html', title: 'Embed title' }] })
-  expect(channel.labels[1]).toBe('Own report title')
-  expect(documentLabelMetadata(channel.documents[1], channel.labels[1], 'titles').title).toBe('Own report title')
+  expect(channel.labels[0]).toBe('Own report title')
+  expect(documentLabelMetadata(channel.documents[0], channel.labels[0], 'titles').title).toBe('Own report title')
   const fallback = buildChannel({ uid: 'v', owner: 'titles', name: 'Note', path: '/note.md', fiberDir: '/', body: '', embeds: [{ path: '/one/result.txt' }, { path: '/two/result.txt' }] })
-  expect(documentLabels(fallback.documents)).toEqual(['Note', 'one/result.txt', 'two/result.txt'])
+  expect(documentLabels(fallback.documents)).toEqual(['two/result.txt', 'one/result.txt', 'Note'])
   stop()
 })
 

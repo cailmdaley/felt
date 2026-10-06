@@ -163,7 +163,7 @@ export class Reader {
     this.stopTitles = watchDocumentTitles(key => {
       const ch = this.channel
       if (!ch?.documents.some(d => d.key === key)) return
-      ch.labels = documentLabels(ch.documents, ch.labels[0] === 'Constitution')
+      ch.labels = documentLabels(ch.documents, ch.labels[ch.documents.findIndex(d => d.kind === 'fiber')] === 'Constitution')
       this.tabs.render(ch.labels, ch.documents.map(d => d.key), ch)
       if (this.active) this.paint(false)
     })

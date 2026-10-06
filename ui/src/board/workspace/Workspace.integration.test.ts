@@ -276,8 +276,8 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.host.get(reportKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
     const order = [...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))
-    // The table's later receipt leads; the report's newer file time does not move it.
-    expect(order.indexOf('table.html')).toBeLessThan(order.indexOf('Report'))
+    // The declared report sits left of the fiber page, the sent table right; the report's newer file time moves neither.
+    expect(order).toEqual(['Report', 'Note', 'table.html'])
     const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
     expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
     document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
@@ -613,8 +613,8 @@ describe('workspace reader integration', () => {
       card({ id: 'work/second', uid: 'second', name: 'Second', originId: 'host-b', fiberDir: '/notes/shared', path: 'work/second/second.md' }),
     ]
     bodyCards = orderedCards
-    bodyOverrides.set('host-a:first', 'First result.\n\n:::{embed} report.html\n:::\n\n:::{embed} table.html\n:::')
-    bodyOverrides.set('host-b:second', 'Second result.\n\n:::{embed} table.html\n:::\n\n:::{embed} report.html\n:::')
+    bodyOverrides.set('host-a:first', 'First result.\n\n:::{embed} report.html\n:::\n\n:::{embed} table.html\n:::\n\n:::{embed} notes.md\n:::')
+    bodyOverrides.set('host-b:second', 'Second result.\n\n:::{embed} notes.md\n:::\n\n:::{embed} table.html\n:::\n\n:::{embed} report.html\n:::')
     workspace.dispose()
     workspace = new Workspace(document.body, {
       shuttleBase: '', cards: () => orderedCards, origin: () => 'Desk', onVisibility: visibility,
@@ -624,19 +624,19 @@ describe('workspace reader integration', () => {
     await flush()
     const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.getAttribute('aria-label') ?? '')
     const firstOrder = labels()
-    expect(firstOrder).toEqual(['Note', 'shared', 'table.html'])
+    expect(firstOrder).toEqual(['notes.md', 'table.html', 'shared', 'Note'])
 
     workspace.open(orderedCards[1])
     await flush()
-    // Each channel orders its declarations as its own body does.
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
+    // Each channel orders its declarations as its own body does, its report beside the fiber page.
+    expect(labels()).toEqual(['table.html', 'notes.md', 'shared', 'Note'])
     // Nothing named a page before the channel painted, so it stays on its own page.
     expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Note')
     const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
+    expect(labels()).toEqual(['table.html', 'notes.md', 'shared', 'Note'])
   })
 
   it('uses the shared Reader keymap for single-step tab roving focus', async () => {
@@ -687,7 +687,7 @@ describe('workspace reader integration', () => {
     await flush()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[0].name)
 
-    document.querySelector<HTMLButtonElement>('.ws-tab')!.click()
+    document.querySelector<HTMLButtonElement>('.ws-tab-anchor')!.click()
     const scroller = document.querySelector<HTMLElement>('.ws-selected .ws-prose-scroll')!
     let scrollHeight = 1800
     Object.defineProperties(scroller, {

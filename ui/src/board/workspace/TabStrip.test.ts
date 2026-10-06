@@ -146,35 +146,35 @@ describe('TabStrip', () => {
 
   it('names pages in words: the fiber page as §, file names without their extension unless that collides', () => {
     const channel = buildChannel({ uid: 'words', owner: 'words-host', name: 'A named fiber', path: '/fiber.md', fiberDir: '/', body: 'Preview prose', embeds: [{ path: '/song.mp3' }, { path: '/a/take.wav' }, { path: '/b/take.flac' }] })
-    expect(indexCaptions(channel.labels, channel)).toEqual(['§', 'song', 'take.wav', 'take.flac'])
+    expect(indexCaptions(channel.labels, channel)).toEqual(['take.flac', 'take.wav', 'song', '§'])
     const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
     strips.push(strip)
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
-    expect(strip.buttons.map(button => button.querySelector('.ws-tab-label')?.textContent)).toEqual(['§', 'song', 'take.wav', 'take.flac'])
+    expect(strip.buttons.map(button => button.querySelector('.ws-tab-label')?.textContent)).toEqual(['take.flac', 'take.wav', 'song', '§'])
     expect(strip.buttons.map(button => button.getAttribute('aria-label'))).toEqual(channel.labels)
-    expect(strip.buttons[0].classList.contains('ws-tab-anchor')).toBe(true)
+    expect(strip.buttons[3].classList.contains('ws-tab-anchor')).toBe(true)
     expect(strip.buttons.some(button => button.hasAttribute('title'))).toBe(false)
   })
 
   it('gives every tile a legible face at once: its title, its kind, and a recording its sketch or length', () => {
     const channel = buildChannel({ uid: 'faces', owner: 'faces-host', name: 'Faces', path: '/fiber.md', fiberDir: '/', body: 'Body', embeds: [{ path: '/report.html', title: 'The composer’s desk' }, { path: '/etude.mp3' }, { path: '/score.pdf' }, { path: '/coda.mp3' }] })
     noteAudioSketch(channel.documents[2].key, [0.1, 0.9, 0.4, 0.2], 61)
-    noteAudioSketch(channel.documents[4].key, null, 125)
+    noteAudioSketch(channel.documents[0].key, null, 125)
     const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
     strips.push(strip)
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
     const face = (i: number): Element => strip.buttons[i].querySelector('[data-part="thumbnail-face"]')!
-    expect(strip.buttons.map(b => b.dataset.kind)).toEqual(['fiber', 'html', 'audio', 'pdf', 'audio'])
-    expect(strip.buttons.map(b => b.dataset.caption)).toEqual([undefined, 'The composer’s desk', 'etude', 'score', 'coda'])
-    expect(face(0).querySelector('.ws-thumbnail-kind')?.textContent).toBe('§')
-    expect(face(1).querySelector('.ws-thumbnail-title')?.textContent).toBe('The composer’s desk')
+    expect(strip.buttons.map(b => b.dataset.kind)).toEqual(['audio', 'pdf', 'audio', 'html', 'fiber'])
+    expect(strip.buttons.map(b => b.dataset.caption)).toEqual(['coda', 'score', 'etude', 'The composer’s desk', undefined])
+    expect(face(4).querySelector('.ws-thumbnail-kind')?.textContent).toBe('§')
+    expect(face(3).querySelector('.ws-thumbnail-title')?.textContent).toBe('The composer’s desk')
     expect(face(2).querySelector('.ws-thumbnail-title')?.textContent).toBe('etude')
     expect(face(2).querySelectorAll('.ws-tile-sketch[data-form="peaks"] i')).toHaveLength(4)
-    expect(face(3).querySelector('.ws-thumbnail-title')?.textContent).toBe('score')
-    expect(face(3).querySelector('.ws-thumbnail-kind')?.textContent).toBe('▧')
-    expect(face(4).querySelector('.ws-tile-sketch')?.textContent).toBe('2:05')
-    noteAudioSketch(channel.documents[4].key, [0.5, 0.5], 125)
-    expect(face(4).querySelectorAll('.ws-tile-sketch i')).toHaveLength(2)
+    expect(face(1).querySelector('.ws-thumbnail-title')?.textContent).toBe('score')
+    expect(face(1).querySelector('.ws-thumbnail-kind')?.textContent).toBe('▧')
+    expect(face(0).querySelector('.ws-tile-sketch')?.textContent).toBe('2:05')
+    noteAudioSketch(channel.documents[0].key, [0.5, 0.5], 125)
+    expect(face(0).querySelectorAll('.ws-tile-sketch i')).toHaveLength(2)
   })
 
   describe('hover caption', () => {
@@ -185,7 +185,7 @@ describe('TabStrip', () => {
     }
     const setup = (): TabStrip => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
-      const channel = buildChannel({ uid: 'peek', owner: 'peek-host', name: 'Peek', path: '/fiber.md', fiberDir: '/', body: 'Body prose', embeds: [{ path: '/one.html' }, { path: '/two.png' }] })
+      const channel = buildChannel({ uid: 'peek', owner: 'peek-host', name: 'Peek', path: '/fiber.md', fiberDir: '/', body: 'Body prose', sent: [{ path: '/one.html', time: 20 }, { path: '/two.png', time: 10 }] })
       const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
       strips.push(strip)
       const band = document.createElement('div')

@@ -721,7 +721,7 @@ test('A click on the bare stage closes the reader to its origin; a press on a ne
   assert.equal(await activeBarView(p), 'desk', 'the reader closes back to its origin view')
 })
 
-test('The map in the board bar indexes pages as legible tiles, captions a hover, and follows a re-send to the front', async p => {
+test('The map in the board bar indexes pages as legible tiles, captions a hover, and follows a re-send to the head of the sent run', async p => {
   await open(p); await reportReady(p)
   const film = p.locator('.kbn-viewtabs-reader > [data-part="page-band"].ws-head-index > .ws-tabs')
   const bar = await p.locator('.kbn-viewtabs').boundingBox(), page = await selected(p).boundingBox()
@@ -830,8 +830,10 @@ test('The map in the board bar indexes pages as legible tiles, captions a hover,
   await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__filmReport))
-  const resent = ['Constitution', 'Field note', ...sendOrder.filter(label => label !== 'Constitution' && label !== 'Field note')]
-  assert.deepEqual(await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), resent, 'a re-send moves its tile to the front, beside §, and marks it fresh')
+  const others = sendOrder.filter(label => label !== 'Field note'), section = others.indexOf('Constitution')
+  const resent = [...others.slice(0, section + 1), 'Field note', ...others.slice(section + 1)]
+  assert.deepEqual(await film.locator('.ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), resent, 'a re-send moves its tile beside §, at the head of the sent run, and marks it fresh')
+  assert.ok(others.indexOf('Calibration report') < section, 'the embedded report runs left of §')
   if (process.env.WORKSPACE_SHOTS) {
     await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
     await p.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/harness-fresh-desktop.png` })
@@ -937,8 +939,9 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
   })
   await p.clock.fastForward(15001)
   await poll(p, () => document.querySelector('.ws-tab-fresh')?.getAttribute('aria-label') === 'Field note')
-  const resent = ['Constitution', 'Field note', ...sendOrder.filter(label => label !== 'Constitution' && label !== 'Field note')]
-  assert.deepEqual(await p.locator('.ws-tabs .ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), resent, 'a re-send moves its tile to the front; selection stays with the report')
+  const others = sendOrder.filter(label => label !== 'Field note'), anchor = others.indexOf('Constitution')
+  const resent = [...others.slice(0, anchor + 1), 'Field note', ...others.slice(anchor + 1)]
+  assert.deepEqual(await p.locator('.ws-tabs .ws-tab').evaluateAll(tabs => tabs.map(t => t.getAttribute('aria-label'))), resent, 'a re-send moves its tile beside the §; selection stays with the report')
   assert.equal(await tab(p, 'calibration-report').getAttribute('aria-selected'), 'true')
   assert.ok(await report(p).evaluate(f => f.contentWindow === window.__arrivalReport))
   const tabs = await p.evaluate(() => window.__receiptAnimations.filter(a => a.tab))
@@ -2773,7 +2776,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   for (const control of ['.kbn-viewtab[data-view="desk"]', '.kbn-viewtab[data-view="chronicle"]', '.kbn-viewtab[data-view="shelf"]', '.kbn-viewtabs-find', '.kbn-viewtabs-settings', '.ws-sidebar-toggle', '.ws-selected .ws-expand-button']) {
     await still(p, `hovering ${control}`, () => p.locator(control).hover(), { allow: [control] })
   }
-  await still(p, 'hovering a tile', () => p.locator('.ws-tab').nth(3).hover(), { settle: 600 })
+  await still(p, 'hovering a tile', () => p.locator('.ws-tab[aria-selected="true"] + .ws-tab + .ws-tab').hover(), { settle: 600 })
   await p.mouse.move(viewport.width / 2, viewport.height - 4)
   await still(p, 'opening the document menu', () => p.locator('.ws-selected .ws-menu-button').click(), { allow: ['[popover]', '.ws-menu'] })
   await p.keyboard.press('Escape')

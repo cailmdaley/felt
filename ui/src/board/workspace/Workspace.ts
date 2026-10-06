@@ -10,7 +10,7 @@ import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, type Channel, type DocKey } from './documents.js'
+import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
@@ -143,7 +143,7 @@ export class Workspace {
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),
       onRefreshProse: async doc => {
-        const state = [...this.channels.values()].find(s => s.channel.documents[0]?.key === doc.key)
+        const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === doc.key)
         if (!state) return
         await this.load(state)
         if (this.current === state && this.isActive) this.show(state)
@@ -196,7 +196,7 @@ export class Workspace {
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
     this.startPrompt = { card, failure }
-    this.open(card, this.opts.origin(), this.ensure(card).channel.documents[0].key)
+    this.open(card, this.opts.origin(), proseDocument(this.ensure(card).channel)?.key)
   }
 
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
@@ -320,7 +320,7 @@ export class Workspace {
   private focusComposer(): void {
     const state = this.current
     if (!state) return
-    const key = state.channel.documents[0]?.key
+    const key = proseDocument(state.channel)?.key
     if (key) this.select(key)
     this.controls(state)?.focusComposer()
   }
@@ -332,7 +332,7 @@ export class Workspace {
     return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.error, state.loaded, state.metadataKnown])
   }
   private prose(key: DocKey): HTMLElement {
-    const state = [...this.channels.values()].find(s => s.channel.documents[0]?.key === key)
+    const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
     if (!state) return document.createElement('div')
     this.proseRevisions.set(key, this.proseRevision(state))
     const page = buildFiberProse(state.card, state.channel, {
@@ -357,7 +357,7 @@ export class Workspace {
     return page
   }
   private refreshProse(state: ChannelState): void {
-    const key = state.channel.documents[0]?.key
+    const key = proseDocument(state.channel)?.key
     if (!key || this.proseRevisions.get(key) === this.proseRevision(state) || !this.reader.host.get(key)?.viewer) return
     this.reader.host.updateProse(key, this.prose(key))
   }
@@ -457,7 +457,7 @@ export class Workspace {
   /** The page on screen: the selection when the channel lists it, else the fiber's own page. */
   private shown(state: ChannelState): DocKey {
     const documents = state.channel.documents
-    return state.selected && documents.some(d => d.key === state.selected) ? state.selected : documents[0].key
+    return state.selected && documents.some(d => d.key === state.selected) ? state.selected : (proseDocument(state.channel) ?? documents[0]).key
   }
   private show(state: ChannelState, animate = true): void {
     const ch = state.channel

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
-  fiberKey, normalizeAbsolutePath, parseDocKey, type ChannelInput, type WorkspaceDocument,
+  fiberKey, normalizeAbsolutePath, parseDocKey, proseDocument, type ChannelInput, type WorkspaceDocument,
 } from './documents.js'
 
 const base: ChannelInput = {
@@ -47,9 +47,9 @@ describe('frame metadata', () => {
   const now = Date.parse('2026-10-05T12:00:00Z')
   it('carries genuine modification time and never substitutes creation or previous metadata', () => {
     const first = buildChannel({ ...base, modifiedAt: '2026-10-05T11:00:00Z' })
-    expect(first.documents[0].modifiedAt).toBe('2026-10-05T11:00:00Z')
-    expect(documentLabelMetadata(first.documents[0], 'Constitution', base.owner, now)).toEqual({ title: '', summary: 'Last changed 1h ago' })
-    const unknown = buildChannel({ ...base, previous: first }).documents[0]
+    expect(proseDocument(first)?.modifiedAt).toBe('2026-10-05T11:00:00Z')
+    expect(documentLabelMetadata(proseDocument(first)!, 'Constitution', base.owner, now)).toEqual({ title: '', summary: 'Last changed 1h ago' })
+    const unknown = proseDocument(buildChannel({ ...base, previous: first }))!
     expect(unknown.modifiedAt).toBeUndefined()
     expect(documentLabelMetadata(unknown, 'Note', base.owner, now)).toEqual({ title: '', summary: 'Last changed unknown' })
     expect(documentLabelMetadata({ ...unknown, modifiedAt: 'invalid' }, 'Note', base.owner, now).summary).toBe('Last changed unknown')
@@ -72,14 +72,14 @@ describe('buildChannel', () => {
     const channel = buildChannel(base)
     expect(channel.body).toBe(base.body)
     expect(channel.documents.map((document) => document.key)).toEqual([
-      'fiber:host-a:fiber-1', 'host-a:/store/project/task/report.html',
+      'host-a:/store/project/task/report.html', 'fiber:host-a:fiber-1',
     ])
-    expect(channel.documents[1]).toMatchObject({
+    expect(channel.documents[0]).toMatchObject({
       name: 'report.html', kind: 'html',
       provenance: [{ kind: 'embed', title: 'Results' }],
     })
-    expect(channel.labels).toEqual(['Note', 'Results'])
-    expect(channel.documents[0].path).toBe('/store/project/task/task.md')
+    expect(channel.labels).toEqual(['Results', 'Note'])
+    expect(channel.documents[1].path).toBe('/store/project/task/task.md')
   })
 
   it('labels the fiber page as a Note or Constitution according to Shuttle presence', () => {
@@ -93,8 +93,8 @@ describe('buildChannel', () => {
       embeds: [{ path: 'explicit.pdf', title: 'Explicit' }],
     })
     expect(channel.body).toBe(base.body)
-    expect(channel.documents.map((document) => document.name)).toEqual(['A channel', 'explicit.pdf'])
-    expect(channel.documents[1].provenance).toEqual([{ kind: 'embed', title: 'Explicit' }])
+    expect(channel.documents.map((document) => document.name)).toEqual(['explicit.pdf', 'A channel'])
+    expect(channel.documents[0].provenance).toEqual([{ kind: 'embed', title: 'Explicit' }])
   })
 
   it('merges embed, send, and link provenance by owner and normalized path', () => {
@@ -109,8 +109,8 @@ describe('buildChannel', () => {
       links: [{ path: 'report.html', title: 'linked report' }],
     })
     expect(channel.documents).toHaveLength(3)
-    expect(channel.documents[1]).toMatchObject({ owner: 'host-a', path: '/store/project/task/report.html' })
-    expect(channel.documents[1].provenance).toEqual([
+    expect(channel.documents[0]).toMatchObject({ owner: 'host-a', path: '/store/project/task/report.html' })
+    expect(channel.documents[0].provenance).toEqual([
       { kind: 'embed', title: 'Results' },
       { kind: 'sent', time: 10, session: 'session-1' },
       { kind: 'sent', time: 20, session: 'session-2', worker: 'sol' },
@@ -120,7 +120,7 @@ describe('buildChannel', () => {
     expect(channel.documents[2].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
   })
 
-  it('orders deliveries by latest receipt, newest first, then declarations by body, while retaining receipt history', () => {
+  it('runs declarations leftward from the fiber page in body order and deliveries rightward, newest first, retaining receipt history', () => {
     const first = buildChannel({
       ...base,
       embeds: [{ path: 'second.html' }, { path: 'first.html' }],
@@ -141,10 +141,10 @@ describe('buildChannel', () => {
       previous: first,
     })
     expect(first.documents.map((document) => document.name)).toEqual([
-      'A channel', 'later.pdf', 'earlier.pdf', 'second.html', 'first.html',
+      'first.html', 'second.html', 'A channel', 'later.pdf', 'earlier.pdf',
     ])
     expect(second.documents.map((document) => document.name)).toEqual([
-      'A channel', 'arrival.txt', 'later.pdf', 'earlier.pdf', 'new-report.html', 'first.html',
+      'first.html', 'new-report.html', 'A channel', 'arrival.txt', 'later.pdf', 'earlier.pdf',
     ])
     expect(second.documents.find((document) => document.name === 'later.pdf')?.provenance)
       .toEqual([
@@ -172,7 +172,7 @@ describe('selection and labels', () => {
     const sent = buildChannel({ ...base, embeds: [{ path: 'notes.md' }], sent: [{ path: 'sent/report.html', time: 10 }] })
     expect(defaultSelection(sent)).toBe(sent.documents.find(d => d.name === 'report.html')?.key)
     const withoutReport = buildChannel({ ...base, embeds: [{ path: 'notes.md' }] })
-    expect(defaultSelection(withoutReport)).toBe(withoutReport.documents[0].key)
+    expect(defaultSelection(withoutReport)).toBe(proseDocument(withoutReport)?.key)
   })
 
   it('falls back to the page at the old position, then the prior page', () => {

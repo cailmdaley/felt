@@ -12,19 +12,23 @@ function shuffled<T>(items: readonly T[], seed: number): T[] {
 }
 const input = { uid: 'u', owner: 'host', name: 'Note', path: '/fiber/note.md', fiberDir: '/fiber', body: '' }
 describe('channel order properties', () => {
-  it('anchors prose, then sends by latest receipt, newest first, unknown times last, then unsent declarations in body order', () => {
+  it('centres prose: declarations to its left, nearest first in body order; sends to its right by latest receipt, newest nearest, unknown times last', () => {
     const channel = buildChannel({ ...input,
       embeds: [{ path: 'zeta.txt' }, { path: 'alpha.txt' }, { path: 'sent-embed.txt' }],
       fileModifiedAt: new Map([[docKey('host', '/fiber/alpha.txt', 'host'), new Date(600).toISOString()]]),
       sent: [{ path: 'b.txt', time: 10 }, { path: 'b.txt', time: 90 }, { path: 'a.txt', time: 20 }, { path: 'sent-embed.txt', time: 30 }, { path: 'bad.txt', time: NaN }],
       links: [{ path: 'linked.txt' }],
     })
-    expect(channel.documents.map(d => d.name)).toEqual(['Note', 'b.txt', 'sent-embed.txt', 'a.txt', 'bad.txt', 'zeta.txt', 'alpha.txt', 'linked.txt'])
-    expect(lastSent(channel.documents[1])).toBe(90)
-    expect(lastSent(channel.documents[4])).toBeUndefined()
+    expect(channel.documents.map(d => d.name)).toEqual(['linked.txt', 'sent-embed.txt', 'alpha.txt', 'zeta.txt', 'Note', 'b.txt', 'a.txt', 'bad.txt'])
+    expect(lastSent(channel.documents[5])).toBe(90)
+    expect(lastSent(channel.documents[7])).toBeUndefined()
     expect(documentActivity(channel.documents.find(d => d.name === 'b.txt')!)).toBe(90)
   })
-  it('a re-send moves its document to the front', () => {
+  it('sets the declared report beside the fiber page wherever the body declares it', () => {
+    const channel = buildChannel({ ...input, embeds: [{ path: 'notes.md' }, { path: 'out/report.html' }, { path: 'plot.png' }], sent: [{ path: 'log.txt', time: 5 }] })
+    expect(channel.documents.map(d => d.name)).toEqual(['plot.png', 'notes.md', 'report.html', 'Note', 'log.txt'])
+  })
+  it('a re-send moves its document beside the fiber page', () => {
     const before = buildChannel({ ...input, sent: [{ path: 'old.html', time: 10 }, { path: 'new.html', time: 20 }] })
     expect(before.documents.map(d => d.name)).toEqual(['Note', 'new.html', 'old.html'])
     const after = buildChannel({ ...input, previous: before, sent: [{ path: 'old.html', time: 10 }, { path: 'new.html', time: 20 }, { path: 'old.html', time: 99 }] })
@@ -40,7 +44,7 @@ describe('channel order properties', () => {
       const actual = buildChannel({ ...input, sent: shuffled(sent, seed), embeds, previous: { ...expected, documents: shuffled(expected.documents, seed + 2) } })
       expect(actual.documents.map(d => d.key)).toEqual(expected.documents.map(d => d.key))
     }
-    const docs = expected.documents.slice(1)
+    const docs = expected.documents.filter(d => d.kind !== 'fiber')
     for (const a of docs) for (const b of docs) {
       expect(Math.sign(compare(a, b)) + Math.sign(compare(b, a))).toBe(0)
       for (const c of docs) if (compare(a, b) <= 0 && compare(b, c) <= 0) expect(compare(a, c)).toBeLessThanOrEqual(0)

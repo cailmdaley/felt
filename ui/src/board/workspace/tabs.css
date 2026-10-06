@@ -55,6 +55,9 @@
 .ws-tab-anchor .ws-tab-thumb .ws-thumbnail-face { align-items: center; justify-content: center; }
 .ws-tab-anchor .ws-tab-thumb .ws-thumbnail-title { display: none; }
 .ws-tab-anchor .ws-tab-thumb .ws-thumbnail-kind { position: static; color: inherit; font: var(--ws-tile-anchor-size)/1 var(--ws-serif); }
+/* Declared documents run left of the §, sent ones right: a little more air either side of it sets the three apart. */
+.ws-tab-anchor:not(:first-child) { margin-left: var(--ws-tile-group-gap); }
+.ws-tab-anchor:not(:last-child) { margin-right: var(--ws-tile-group-gap); }
 /* A recording's sketch: the loudest moment of each stretch, along the foot. */
 .ws-tile-sketch {
   position: absolute; left: var(--ws-tile-pad); right: 18px; bottom: 5px; height: 11px;

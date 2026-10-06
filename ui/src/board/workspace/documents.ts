@@ -136,25 +136,45 @@ export function lastSent(document: WorkspaceDocument): number | undefined {
   return times.length ? Math.max(...times) : undefined
 }
 
+/** True when the body declares the document, as an embed or a link. */
+export function isDeclared(document: WorkspaceDocument): boolean {
+  return document.provenance.some(p => p.kind === 'embed' || p.kind === 'link')
+}
+
 /**
- * A channel's order after its fiber page: sent documents by their latest
- * receipt, newest first, then sends whose time is unknown; then documents
- * declared in the body and never sent, in body order. A re-send moves its
- * document to the front. Identity breaks every tie. `declared` maps a
- * document to its position among the body's declarations.
+ * Each side's order outward from the fiber page. Declared documents (left
+ * of it) run in body order, the declared report.html first; documents only
+ * sent (right of it) run by their latest receipt, newest first, then sends
+ * whose time is unknown, so a re-send moves its document beside the fiber
+ * page. Identity breaks every tie. `declared` maps a document to its
+ * position among the body's declarations.
  */
 export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map()) {
   const rank = (doc: WorkspaceDocument): [number, number] => {
+    if (isDeclared(doc)) return [0, doc.name.toLowerCase() === 'report.html' ? -1 : declared.get(doc.key) ?? Infinity]
     const sent = lastSent(doc)
-    if (sent !== undefined) return [0, -sent]
-    if (doc.provenance.some(p => p.kind === 'sent')) return [1, 0]
-    const position = declared.get(doc.key)
-    return position !== undefined ? [2, position] : [3, 0]
+    if (sent !== undefined) return [1, -sent]
+    return doc.provenance.some(p => p.kind === 'sent') ? [2, 0] : [3, 0]
   }
   return (a: WorkspaceDocument, b: WorkspaceDocument): number => {
     const [ag, av] = rank(a), [bg, bv] = rank(b)
-    return ag - bg || av - bv || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+    return ag - bg || (av === bv ? 0 : av < bv ? -1 : 1) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
   }
+}
+
+/**
+ * A channel's run of pages with the fiber page at its centre: declared
+ * documents to its left and sent ones to its right, each side ordered
+ * outward from it by `compareDocuments`.
+ */
+export function arrangeDocuments(prose: WorkspaceDocument, others: Iterable<WorkspaceDocument>, declared: ReadonlyMap<DocKey, number> = new Map()): WorkspaceDocument[] {
+  const outward = [...others].sort(compareDocuments(declared))
+  return [...outward.filter(isDeclared).reverse(), prose, ...outward.filter(d => !isDeclared(d))]
+}
+
+/** The fiber's own page in a channel's run. */
+export function proseDocument(channel: Channel): WorkspaceDocument | undefined {
+  return channel.documents.find(d => d.kind === 'fiber')
 }
 
 /** Build one owner-aware row, retaining receipt history without mutating inputs. */
@@ -233,7 +253,7 @@ export function buildChannel(input: ChannelInput): Channel {
   }
 
   documents.delete(prose.key)
-  const ordered = [prose, ...[...documents.values()].sort(compareDocuments(declared))]
+  const ordered = arrangeDocuments(prose, documents.values(), declared)
 
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
@@ -264,7 +284,8 @@ export function documentLabelMetadata(doc: WorkspaceDocument, label: string, cha
 
 export function defaultSelection(channel: Channel): DocKey {
   const reports = channel.documents.filter((document) => document.name.toLowerCase() === 'report.html')
-  const report = reports.find((document) => document.provenance.some((item) => item.kind === 'embed')) ?? reports[0]
+  const report = reports.find((document) => document.provenance.some((item) => item.kind === 'embed'))
+    ?? reports.find((document) => !isDeclared(document)) ?? reports[0]
   const prose = channel.documents.find((document) => document.kind === 'fiber')
   const first = report ?? prose ?? channel.documents[0]
   if (!first) throw new Error('Cannot select a document from an empty constitution')
