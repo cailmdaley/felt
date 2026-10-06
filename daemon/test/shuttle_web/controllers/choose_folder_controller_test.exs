@@ -8,15 +8,15 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
   `:folder_picker_runner` stub, so the mechanism is decided in config and the
   "dialog" is a scripted `{output, status}` tuple.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
   import Plug.Conn
 
   @endpoint ShuttleWeb.Endpoint
 
   alias Shuttle.FolderPicker
+  alias Shuttle.Test.{Env, ForwardStub, StubPostClient}
 
   # Stands in for osascript/zenity: records the invocation, replays a scripted
   # result. Same shape as the `:felt_stores_runner` stubs.
@@ -36,31 +36,9 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
     end
   end
 
-  # POST transport stub for the write-forward plane.
-  defmodule ForwardClient do
-    use Agent
-
-    def start_link(response),
-      do: Agent.start_link(fn -> %{response: response, last: nil} end, name: __MODULE__)
-
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def post(url, body, _content_type, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
-
   setup do
-    previous_mechanism = Application.get_env(:shuttle, :folder_picker_mechanism)
-    previous_runner = Application.get_env(:shuttle, :folder_picker_runner)
     # Default for every test: no dialog. A test that wants one opts in.
-    Application.put_env(:shuttle, :folder_picker_mechanism, :none)
-
-    on_exit(fn ->
-      restore_app_env(:folder_picker_mechanism, previous_mechanism)
-      restore_app_env(:folder_picker_runner, previous_runner)
-    end)
+    Env.put_app_env(:folder_picker_mechanism, :none)
 
     :ok
   end
@@ -75,10 +53,13 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
       assert body["error"] =~ "no native folder picker"
     end
 
-    test "the probe is what the felt-stores origin payload reports" do
+    @tag :tmp_dir
+    test "the probe is what the felt-stores origin payload reports", %{tmp_dir: tmp_dir} do
+      # Keep the payload off the developer's real store registry.
+      Env.put_env("SHUTTLE_STORES", tmp_dir)
       refute FolderPicker.available?()
 
-      Application.put_env(:shuttle, :folder_picker_mechanism, :zenity)
+      Env.put_app_env(:folder_picker_mechanism, :zenity)
       assert FolderPicker.available?()
 
       conn = local_conn() |> get("/api/v1/felt-stores")
@@ -156,34 +137,27 @@ defmodule ShuttleWeb.ChooseFolderControllerTest do
   end
 
   test "a remote origin forwards to the owning daemon, origin stripped" do
-    start_supervised!(
-      {ForwardClient, {:ok, 200, Jason.encode!(%{"ok" => true, "path" => "/srv/x"})}}
+    ForwardStub.stub_forward(
+      "candide",
+      "http://localhost:4001",
+      {:ok, 200, Jason.encode!(%{"ok" => true, "path" => "/srv/x"})},
+      StubPostClient
     )
-
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, ForwardClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
 
     conn = post_choose(%{"origin" => "candide"})
 
     assert conn.status == 200
     assert Jason.decode!(conn.resp_body)["path"] == "/srv/x"
 
-    last = ForwardClient.last()
+    last = StubPostClient.last()
     assert last.url == "http://localhost:4001/api/v1/choose-folder"
     refute Map.has_key?(Jason.decode!(last.body), "origin")
   end
 
   defp arm(mechanism, result) do
     start_supervised!({DialogRunner, result})
-    Application.put_env(:shuttle, :folder_picker_mechanism, mechanism)
-    Application.put_env(:shuttle, :folder_picker_runner, DialogRunner)
+    Env.put_app_env(:folder_picker_mechanism, mechanism)
+    Env.put_app_env(:folder_picker_runner, DialogRunner)
   end
 
   defp post_choose(params \\ %{}) do

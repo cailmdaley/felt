@@ -856,7 +856,7 @@ defmodule Shuttle.Dispatcher do
   # the daemon refuses with :already_running and the caller adopts instead.
   defp check_not_running(fiber_id, uid, runner, surface) do
     cond do
-      surface == "app" and System.find_executable("tmux") == nil -> :ok
+      surface == "app" and Shuttle.Env.find_executable("tmux") == nil -> :ok
       Shuttle.Tmux.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
       true -> :ok
     end
@@ -1805,7 +1805,7 @@ defmodule Shuttle.Dispatcher do
          cwd when is_binary(cwd) <- Map.get(header, "cwd"),
          timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
          {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      Path.expand(cwd) == Path.expand(work_dir) and
+      Shuttle.Env.expand(cwd) == Shuttle.Env.expand(work_dir) and
         DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
         String.contains?(content, "Fiber: #{fiber_id}")
     else

@@ -3,11 +3,11 @@ defmodule ShuttleWeb.TemporalCompositeTest do
   The cross-host temporal composites, plus the conditional-fetch support the
   hub and the board depend on.
 
-  A live `Shuttle.RemoteTemporalRegistry` under its default name backs the
-  composites; its cache is filled synchronously from a scripted HTTP stub, so
+  A live `Shuttle.RemoteTemporalRegistry`, registered as the test's instance,
+  backs the composites; its cache is filled synchronously from a scripted HTTP stub, so
   each test states exactly what "candide" is remembered as having.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
 
   import Plug.Conn
@@ -51,7 +51,7 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     :ok
   end
 
-  # A registry under the DEFAULT name, so the controllers find it, primed with
+  # A registry the controllers find as this test's instance, primed with
   # whatever the caller scripted. Returns after one synchronous refresh, which
   # also starts every feed's freshness gate: the composites below read memory.
   defp with_remote(feeds, opts \\ []) do
@@ -66,14 +66,15 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     dir = Path.join(System.tmp_dir!(), "shuttle-composite-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf(dir) end)
 
-    start_supervised!(
+    Shuttle.Test.Env.start_scoped!(
       {RemoteTemporalRegistry,
        [
-         name: RemoteTemporalRegistry,
+         name: nil,
          remotes: [%Remote{name: "candide", url: "http://localhost:4001"}],
          client: MockClient,
          store_dir: dir
-       ] ++ opts}
+       ] ++ opts},
+      RemoteTemporalRegistry
     )
   end
 
@@ -83,8 +84,7 @@ defmodule ShuttleWeb.TemporalCompositeTest do
   # can fall through to a dev machine's real ~/.shuttle.
   defp with_data_files(events_lines, session_lines) do
     keys = ~w(SHUTTLE_EVENTS_FILE SHUTTLE_SESSIONS_FILE SHUTTLE_COMMITS_FILE SHUTTLE_DATA_DIR)
-    previous = Map.new(keys, &{&1, System.get_env(&1)})
-    Enum.each(keys, &System.delete_env/1)
+    Enum.each(keys, &Shuttle.Test.Env.delete_env/1)
 
     dir = Path.join(System.tmp_dir!(), "shuttle-local-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -93,17 +93,11 @@ defmodule ShuttleWeb.TemporalCompositeTest do
     File.write!(events, Enum.map_join(events_lines, "", &(Jason.encode!(&1) <> "\n")))
     File.write!(sessions, Enum.map_join(session_lines, "", &(Jason.encode!(&1) <> "\n")))
 
-    System.put_env("SHUTTLE_EVENTS_FILE", events)
-    System.put_env("SHUTTLE_SESSIONS_FILE", sessions)
-    System.put_env("SHUTTLE_COMMITS_FILE", Path.join(dir, "commits.jsonl"))
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", events)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", sessions)
+    Shuttle.Test.Env.put_env("SHUTTLE_COMMITS_FILE", Path.join(dir, "commits.jsonl"))
 
-    on_exit(fn ->
-      File.rm_rf(dir)
-
-      Enum.each(previous, fn {k, v} ->
-        if v, do: System.put_env(k, v), else: System.delete_env(k)
-      end)
-    end)
+    on_exit(fn -> File.rm_rf(dir) end)
 
     %{dir: dir, events: events, sessions: sessions}
   end

@@ -1,5 +1,5 @@
 defmodule ShuttleWeb.PeerGatePlugTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
   import Plug.Test
@@ -139,21 +139,11 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     uid = String.to_integer(String.trim(uid_text))
     refute uid == 0
     port = unused_port()
-    keys = [:listen, :host_class, :peer_gate, :peer_gate_expected_uid, :peer_gate_uid_source]
-    previous = Map.new(keys, &{&1, Application.fetch_env(:shuttle, &1)})
-
-    on_exit(fn ->
-      Enum.each(previous, fn
-        {key, {:ok, value}} -> Application.put_env(:shuttle, key, value)
-        {key, :error} -> Application.delete_env(:shuttle, key)
-      end)
-    end)
-
-    Application.put_env(:shuttle, :listen, "tcp://127.0.0.1:#{port}")
-    Application.put_env(:shuttle, :host_class, :shared_multi_user)
-    Application.put_env(:shuttle, :peer_gate, "uid")
-    Application.put_env(:shuttle, :peer_gate_expected_uid, uid)
-    Application.put_env(:shuttle, :peer_gate_uid_source, "euid")
+    Shuttle.Test.Env.put_app_env(:listen, "tcp://127.0.0.1:#{port}")
+    Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
+    Shuttle.Test.Env.put_app_env(:peer_gate, "uid")
+    Shuttle.Test.Env.put_app_env(:peer_gate_expected_uid, uid)
+    Shuttle.Test.Env.put_app_env(:peer_gate_uid_source, "euid")
 
     {:ok, server} =
       Bandit.start_link(
@@ -174,7 +164,7 @@ defmodule ShuttleWeb.PeerGatePlugTest do
              "peer_gate_uid_source" => "euid"
            } = Jason.decode!(allowed_body)
 
-    Application.put_env(:shuttle, :peer_gate_expected_uid, uid + 1)
+    Shuttle.Test.Env.put_app_env(:peer_gate_expected_uid, uid + 1)
     {refused_head, refused_body} = request_version(port)
 
     assert refused_head =~ "HTTP/1.1 403"
@@ -187,21 +177,11 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     table = Path.join([root, "net", "tcp"])
     File.mkdir_p!(Path.dirname(table))
     port = unused_port()
-    keys = [:listen, :host_class, :peer_gate, :peer_gate_expected_uid, :proc_net_root]
-    previous = Map.new(keys, &{&1, Application.fetch_env(:shuttle, &1)})
-
-    on_exit(fn ->
-      Enum.each(previous, fn
-        {key, {:ok, value}} -> Application.put_env(:shuttle, key, value)
-        {key, :error} -> Application.delete_env(:shuttle, key)
-      end)
-    end)
-
-    Application.put_env(:shuttle, :listen, "tcp://127.0.0.1:#{port}")
-    Application.put_env(:shuttle, :host_class, :shared_multi_user)
-    Application.put_env(:shuttle, :peer_gate, "uid")
-    Application.put_env(:shuttle, :peer_gate_expected_uid, 4321)
-    Application.put_env(:shuttle, :proc_net_root, root)
+    Shuttle.Test.Env.put_app_env(:listen, "tcp://127.0.0.1:#{port}")
+    Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
+    Shuttle.Test.Env.put_app_env(:peer_gate, "uid")
+    Shuttle.Test.Env.put_app_env(:peer_gate_expected_uid, 4321)
+    Shuttle.Test.Env.put_app_env(:proc_net_root, root)
 
     http_1_options =
       :shuttle

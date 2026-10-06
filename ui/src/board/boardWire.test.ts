@@ -17,9 +17,10 @@
 // body, in call order. Nothing reaches into the classes' state; a test that
 // re-derived the payload from its own copy of the rule would pin nothing.
 //
-// `npm test` runs this file twice — TZ=America/Los_Angeles and TZ=Europe/Paris
-// — and the due fixtures are built so the negative-offset pass FAILS if anyone
-// reintroduces a `new Date(due)` round trip on the write side. See civilDay.ts.
+// `npm test` pins TZ=America/Los_Angeles, and the due fixtures are built so a
+// negative-offset zone FAILS if anyone reintroduces a `new Date(due)` round
+// trip on the write side. See civilDay.ts, whose properties carry the same
+// law across every zone.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
@@ -749,7 +750,7 @@ describe('Dock.livePatch — the due branch', () => {
     // commits whatever the input holds; re-saving an untouched field must
     // therefore hand the wire back exactly the day felt stored. Anywhere a
     // `new Date(due)` crept into that path, this loses a day west of
-    // Greenwich — so the America/Los_Angeles pass is the one that catches it.
+    // Greenwich — which is why `npm test` pins America/Los_Angeles.
     const stored = '2026-08-20T00:00:00Z'
     const c = card({ due: stored })
     const seeded = dueCivilDay(c.due) // what the date input holds on open

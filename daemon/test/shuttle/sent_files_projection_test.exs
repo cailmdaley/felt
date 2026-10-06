@@ -10,7 +10,7 @@ defmodule Shuttle.SentFilesProjectionTest do
   re-read, truncation, rotation, malformed lines, a partial trailing line, and
   the ledger join that has to stay at read time.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.{EventStream, SentFiles}
 
@@ -56,10 +56,7 @@ defmodule Shuttle.SentFilesProjectionTest do
   defp start_stream(events) do
     name = :"sent_files_stream_#{System.unique_integer([:positive])}"
 
-    {:ok, pid} =
-      EventStream.start_link(events_file: events, poll_interval_ms: 10, name: name)
-
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+    start_supervised!({EventStream, events_file: events, poll_interval_ms: 10, name: name})
     name
   end
 

@@ -9,8 +9,7 @@ defmodule Shuttle.BuildStampTest do
   `mix shuttle.gen_version` must still boot and report that, rather than failing
   to compile the endpoint that would have told you so.
   """
-  use ExUnit.Case, async: false
-  import Shuttle.Test.EnvHelpers
+  use ExUnit.Case, async: true
 
   alias Shuttle.BuildStamp
 
@@ -46,19 +45,15 @@ defmodule Shuttle.BuildStampTest do
     # `booted_at` is a RUNTIME fact stamped by `Shuttle.Application.start/2`,
     # deliberately not a compile-time one — so "nobody stamped it" is a state
     # this has to survive, and it is the field a deploy verifier reads.
-    previous = Application.get_env(:shuttle, :booted_at)
-    Application.delete_env(:shuttle, :booted_at)
-    on_exit(fn -> restore_app_env(:booted_at, previous) end)
+    Shuttle.Test.Env.delete_app_env(:booted_at)
 
     assert BuildStamp.booted_at() == "unknown"
     assert BuildStamp.stamp().booted_at == "unknown"
   end
 
   test "a stamped boot is rendered ISO8601" do
-    previous = Application.get_env(:shuttle, :booted_at)
     {:ok, dt, 0} = DateTime.from_iso8601("2026-09-16T09:00:00Z")
-    Application.put_env(:shuttle, :booted_at, dt)
-    on_exit(fn -> restore_app_env(:booted_at, previous) end)
+    Shuttle.Test.Env.put_app_env(:booted_at, dt)
 
     assert BuildStamp.booted_at() == "2026-09-16T09:00:00Z"
   end

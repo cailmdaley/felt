@@ -25,11 +25,9 @@ defmodule Shuttle.KittyTest do
       # The destination comes from the fleet file, not from the host id: here
       # they differ, which is the case that catches a reader who assumed the
       # routing name doubles as an ssh host.
-      Application.put_env(:shuttle, :remotes, [
+      Shuttle.Test.Env.put_app_env(:remotes, [
         %{name: "hub-a", port: 4001, ssh: "hub-a-login"}
       ])
-
-      on_exit(fn -> Application.put_env(:shuttle, :remotes, []) end)
 
       assert Kitty.attach_command("shuttle-foo-bar", "hub-a") ==
                {:ok, ["ssh", "-tt", "hub-a-login", "tmux", "attach", "-t", "=shuttle-foo-bar"]}
@@ -39,11 +37,9 @@ defmodule Shuttle.KittyTest do
       # The mesh-VPN shape. `ssh hub-a` would be a guess at a destination the
       # operator deliberately did not give, so attach refuses and names the
       # reason rather than failing slowly inside ssh.
-      Application.put_env(:shuttle, :remotes, [
+      Shuttle.Test.Env.put_app_env(:remotes, [
         %{name: "hub-a", url: "https://hub-a.example.ts.net", tunnel: %{manager: "none"}}
       ])
-
-      on_exit(fn -> Application.put_env(:shuttle, :remotes, []) end)
 
       assert {:error, reason} = Kitty.attach_command("shuttle-foo-bar", "hub-a")
       assert reason =~ "no ssh path to hub-a"

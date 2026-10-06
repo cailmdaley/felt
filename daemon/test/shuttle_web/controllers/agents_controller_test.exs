@@ -4,12 +4,11 @@ defmodule ShuttleWeb.AgentsControllerTest do
   `agents.json`, which shells `shuttle agents effort`. The CLI is stubbed at
   the shared `:felt_runner` seam, so the argv is the thing under test.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
 
-  alias Shuttle.Test.{ForwardStub, StubPostClient}
+  alias Shuttle.Test.{Env, ForwardStub, StubPostClient}
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -34,16 +33,10 @@ defmodule ShuttleWeb.AgentsControllerTest do
   end
 
   setup do
-    previous_runner = Application.get_env(:shuttle, :felt_runner)
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    Application.put_env(:shuttle, :felt_runner, MockFelt)
-    Application.put_env(:shuttle, :remotes, [])
+    Env.put_app_env(:felt_runner, MockFelt)
+    Env.put_app_env(:remotes, [])
     start_supervised!(MockFelt)
-
-    on_exit(fn ->
-      restore_app_env(:felt_runner, previous_runner)
-      restore_app_env(:remotes, previous_remotes)
-    end)
+    :ok
   end
 
   test "a level sets the override, and shuttle's line comes back" do

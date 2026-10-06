@@ -1,27 +1,12 @@
 defmodule ShuttleWeb.FeltEditControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
+  alias Shuttle.Test.{Env, FakeCli, ForwardStub, StubPostClient}
+
   @endpoint ShuttleWeb.Endpoint
-
-  # POST transport stub for the write-forward plane: records the last (url, body)
-  # and replays a scripted response.
-  defmodule FeltEditForwardClient do
-    use Agent
-
-    def start_link(response),
-      do: Agent.start_link(fn -> %{response: response, last: nil} end, name: __MODULE__)
-
-    def last, do: Agent.get(__MODULE__, & &1.last)
-
-    def post(url, body, _content_type, _timeout_ms) do
-      Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
-      Agent.get(__MODULE__, & &1.response)
-    end
-  end
 
   # Feed transport stub for RemoteFiberRegistry: counts how many times a feed
   # fetch was issued, so the test can prove the post-forward refresh fired (or
@@ -53,11 +38,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -95,11 +78,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -141,11 +122,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -175,11 +154,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -222,11 +199,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -278,11 +253,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -318,7 +291,7 @@ defmodule ShuttleWeb.FeltEditControllerTest do
 
     # Forwarded to the owning remote's identical /felt-edit with origin stripped,
     # so the owner edits its own loom mirror as local.
-    last = FeltEditForwardClient.last()
+    last = StubPostClient.last()
     assert last.url == "http://localhost:4001/api/v1/felt-edit"
     forwarded = Jason.decode!(last.body)
     refute Map.has_key?(forwarded, "origin")
@@ -351,7 +324,7 @@ defmodule ShuttleWeb.FeltEditControllerTest do
       )
 
     assert conn.status == 200
-    forwarded = FeltEditForwardClient.last().body |> Jason.decode!()
+    forwarded = StubPostClient.last().body |> Jason.decode!()
     refute Map.has_key?(forwarded, "origin")
     assert forwarded["collaboration"] == collaboration
   end
@@ -381,81 +354,61 @@ defmodule ShuttleWeb.FeltEditControllerTest do
   # with candide configured, so a remote-origin edit forwards through the stub
   # and the post-forward refresh is observable via the feed stub's call count.
   defp setup_forward_plane!(forward_response) do
-    start_supervised!({FeltEditForwardClient, forward_response})
     start_supervised!(FeltEditFeedClient)
 
-    start_supervised!({
+    Env.start_scoped!({
       Shuttle.RemoteFiberRegistry,
       # No disk persistence: this stub feed must not reach the real
       # `~/.shuttle/remote-fibers` store and outlive the test.
+      name: nil,
       remotes: [%{name: "candide", url: "http://localhost:4001"}],
       client: FeltEditFeedClient,
       auto_poll: false,
       store_dir: nil
     })
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "candide", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, FeltEditForwardClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    ForwardStub.stub_forward(
+      "candide",
+      "http://localhost:4001",
+      forward_response,
+      StubPostClient
+    )
   end
 
   defp install_fake_felt!(root) do
-    bin_dir = Path.join(root, "bin")
-    File.mkdir_p!(bin_dir)
-
-    bin = Path.join(bin_dir, "felt")
-    shuttle_bin = Path.join(bin_dir, "shuttle")
     args_file = Path.join(root, "cli-args")
 
     # `FeltStores.resolve_fiber` asks felt for the fiber's carried path
     # (`felt show -j`), so the fake answers that with felt-shaped JSON (id +
     # absolute path). The `edit` invocation under test records its args and
     # prints `ok`.
-    File.write!(bin, """
-    #!/bin/sh
-    case " $* " in
-      *" show "*" -j "*|*" show "*" -j")
-        store=""
-        next=0
-        for a in "$@"; do
-          if [ "$next" = 1 ]; then store="$a"; next=0; fi
-          if [ "$a" = "-C" ]; then next=1; fi
-        done
-        printf '{"id":"tests/remote-tags","path":"%s/.felt/tests/remote-tags/remote-tags.md"}\\n' "$store"
-        ;;
-      *)
-        printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
-        printf 'ok\\n'
-        ;;
-    esac
-    """)
+    FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      case " $* " in
+        *" show "*" -j "*|*" show "*" -j")
+          store=""
+          next=0
+          for a in "$@"; do
+            if [ "$next" = 1 ]; then store="$a"; next=0; fi
+            if [ "$a" = "-C" ]; then next=1; fi
+          done
+          printf '{"id":"tests/remote-tags","path":"%s/.felt/tests/remote-tags/remote-tags.md"}\\n' "$store"
+          ;;
+        *)
+          printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
+          printf 'ok\\n'
+          ;;
+      esac
+      """,
+      "shuttle" => """
+      #!/bin/sh
+      printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
+      printf 'ok\\n'
+      """
+    })
 
-    File.chmod!(bin, 0o755)
-
-    File.write!(shuttle_bin, """
-    #!/bin/sh
-    printf '%s\\n' "$@" > "$FELT_ARGS_FILE"
-    printf 'ok\\n'
-    """)
-
-    File.chmod!(shuttle_bin, 0o755)
-
-    old_path = System.get_env("PATH")
-    old_args_file = System.get_env("FELT_ARGS_FILE")
-
-    System.put_env("PATH", bin_dir <> ":" <> (old_path || ""))
-    System.put_env("FELT_ARGS_FILE", args_file)
-
-    on_exit(fn ->
-      restore_env("PATH", old_path)
-      restore_env("FELT_ARGS_FILE", old_args_file)
-    end)
+    Env.put_env("FELT_ARGS_FILE", args_file)
 
     args_file
   end
@@ -478,11 +431,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 
@@ -535,11 +486,9 @@ defmodule ShuttleWeb.FeltEditControllerTest do
     )
 
     args_file = install_fake_felt!(root)
-    old_loom_homes = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_STORES", store)
 
     on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_loom_homes)
       File.rm_rf(root)
     end)
 

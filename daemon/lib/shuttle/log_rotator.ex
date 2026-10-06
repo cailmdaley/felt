@@ -242,14 +242,14 @@ defmodule Shuttle.LogRotator do
   # the tmux respawn loop lands on when it starts the daemon with no baked
   # environment.
   defp daemon_log_path do
-    case System.get_env("SHUTTLE_LOG") do
+    case Shuttle.Env.get("SHUTTLE_LOG") do
       path when is_binary(path) and path != "" ->
         path
 
       _ ->
         case :os.type() do
-          {:unix, :darwin} -> Path.join([System.user_home!(), "Library", "Logs", "shuttle.log"])
-          _ -> Path.join([System.user_home!(), ".shuttle", "shuttle.log"])
+          {:unix, :darwin} -> Path.join([Shuttle.Env.home(), "Library", "Logs", "shuttle.log"])
+          _ -> Path.join([Shuttle.Env.home(), ".shuttle", "shuttle.log"])
         end
     end
   end
@@ -258,7 +258,7 @@ defmodule Shuttle.LogRotator do
   # convention. Mirrored here as a convention, not imported: the daemon never
   # reaches into CLI internals.
   defp default_tunnel_log_dir do
-    Path.join([System.user_home!(), ".local", "state", "shuttle"])
+    Path.join([Shuttle.Env.home(), ".local", "state", "shuttle"])
   end
 
   # ── Reporting ──

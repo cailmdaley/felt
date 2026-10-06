@@ -60,7 +60,7 @@ defmodule Shuttle.BuildStamp do
   """
   @spec booted_at() :: String.t()
   def booted_at do
-    case Application.get_env(:shuttle, :booted_at) do
+    case Shuttle.Env.app(:booted_at) do
       %DateTime{} = dt -> DateTime.to_iso8601(dt)
       _ -> "unknown"
     end

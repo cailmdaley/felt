@@ -134,8 +134,12 @@ defmodule Shuttle.RemoteFiberRegistry do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   # The default on-disk home for the per-remote caches, honoring the same env
@@ -152,7 +156,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   callers tolerate this for graceful degradation).
   """
   @spec feeds() :: %{String.t() => map()}
-  def feeds, do: feeds(__MODULE__)
+  def feeds, do: feeds(Shuttle.Env.server(__MODULE__))
 
   @spec feeds(GenServer.server()) :: %{String.t() => map()}
   def feeds(server) do
@@ -165,7 +169,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   deterministically against a stub client.
   """
   @spec refresh_now() :: :ok
-  def refresh_now, do: refresh_now(__MODULE__)
+  def refresh_now, do: refresh_now(Shuttle.Env.server(__MODULE__))
 
   @spec refresh_now(GenServer.server()) :: :ok
   def refresh_now(server),
@@ -179,7 +183,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   previous scheduled-poll snapshot.
   """
   @spec refresh(String.t()) :: :ok | {:error, term()}
-  def refresh(name), do: refresh(__MODULE__, name)
+  def refresh(name), do: refresh(Shuttle.Env.server(__MODULE__), name)
 
   @doc """
   Best-effort feed invalidation after a forwarded remote mutation: refresh the

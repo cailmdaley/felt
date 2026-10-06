@@ -1,5 +1,6 @@
 defmodule Shuttle.RemoteRegistryTest do
-  use ExUnit.Case
+  # group: Shuttle.TailnetPeers keeps its peers in an ETS table named after the module, which Remotes.configured/0 reads when :remotes is unset
+  use ExUnit.Case, async: true, group: :tailnet_peers
 
   alias Shuttle.Remote
   alias Shuttle.RemoteRegistry
@@ -1133,20 +1134,9 @@ defmodule Shuttle.RemoteRegistryTest do
       File.mkdir_p!(dir)
       path = Path.join(dir, "remotes.json")
 
-      prev_file = System.get_env("SHUTTLE_REMOTES_FILE")
-      prev_remotes = Application.get_env(:shuttle, :remotes)
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
-      Application.delete_env(:shuttle, :remotes)
-
-      on_exit(fn ->
-        File.rm_rf(dir)
-        if prev_file, do: System.put_env("SHUTTLE_REMOTES_FILE", prev_file)
-        if prev_file == nil, do: System.delete_env("SHUTTLE_REMOTES_FILE")
-
-        if prev_remotes == nil,
-          do: Application.delete_env(:shuttle, :remotes),
-          else: Application.put_env(:shuttle, :remotes, prev_remotes)
-      end)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.delete_app_env(:remotes)
+      on_exit(fn -> File.rm_rf(dir) end)
 
       {:ok, path: path}
     end

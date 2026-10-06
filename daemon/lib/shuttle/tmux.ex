@@ -140,7 +140,7 @@ defmodule Shuttle.Tmux do
   @stop_ladder [{nil, 3_000}, {"TERM", 2_000}, {"KILL", 1_000}]
   @stop_poll_ms 50
 
-  defp stop_ladder, do: Application.get_env(:shuttle, :worker_stop_ladder, @stop_ladder)
+  defp stop_ladder, do: Shuttle.Env.app(:worker_stop_ladder, @stop_ladder)
 
   defp await_gone(_runner, session, []),
     do: {"worker of #{session} is still running after SIGKILL", 1}

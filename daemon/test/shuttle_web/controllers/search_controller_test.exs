@@ -6,11 +6,10 @@ defmodule ShuttleWeb.SearchControllerTest do
   depend on what happens to be in the real loom (or on felt being on PATH).
   """
 
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
   import Plug.Conn
   import Phoenix.ConnTest
-  import Shuttle.Test.EnvHelpers
 
   @endpoint ShuttleWeb.Endpoint
 
@@ -52,18 +51,14 @@ defmodule ShuttleWeb.SearchControllerTest do
   end
 
   setup do
-    previous = Application.get_env(:shuttle, :felt_runner)
-    Application.put_env(:shuttle, :felt_runner, MockRunner)
-    on_exit(fn -> restore_app_env(:felt_runner, previous) end)
+    Shuttle.Test.Env.put_app_env(:felt_runner, MockRunner)
 
     # configured_stores/0 falls through to SHUTTLE_STORES / the persisted
     # ~/.config/shuttle/stores.json registry — on a dev machine that registry is
     # rarely empty, so this suite silently rode ambient config and only CI (a
     # fresh runner with neither) exposed it. One store is enough: MockRunner
     # answers every `felt` invocation regardless of which store it names.
-    prev_stores = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", "/tmp/shuttle-search-controller-test-store")
-    on_exit(fn -> restore_env("SHUTTLE_STORES", prev_stores) end)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", "/tmp/shuttle-search-controller-test-store")
 
     :ok
   end

@@ -32,12 +32,15 @@ defmodule Shuttle.Kitty do
   @launch_budget_ms 5_000
   @launch_interval_ms 100
 
-  @kitty_candidates [
-    Path.expand("~/.local/bin/kitty"),
-    "/opt/homebrew/bin/kitty",
-    "/usr/local/bin/kitty",
-    "/Applications/kitty.app/Contents/MacOS/kitty"
-  ]
+  # Resolved at call time: a module attribute would bake the build machine's
+  # home into the release.
+  defp kitty_candidates,
+    do: [
+      Shuttle.Env.expand("~/.local/bin/kitty"),
+      "/opt/homebrew/bin/kitty",
+      "/usr/local/bin/kitty",
+      "/Applications/kitty.app/Contents/MacOS/kitty"
+    ]
 
   @doc """
   Open (or focus) `session` in a kitty tab. `host` is the fiber's
@@ -154,7 +157,7 @@ defmodule Shuttle.Kitty do
   defp launch_kitty_app(runner) do
     case runner.cmd("open", ["-n", "-g", "-a", "kitty"], stderr_to_stdout: true) do
       {_out, 0} ->
-        budget = Application.get_env(:shuttle, :kitty_launch_budget_ms, @launch_budget_ms)
+        budget = Shuttle.Env.app(:kitty_launch_budget_ms, @launch_budget_ms)
         await_kitty_rooted_socket(runner, System.monotonic_time(:millisecond) + budget)
 
       {out, code} ->
@@ -263,7 +266,7 @@ defmodule Shuttle.Kitty do
   @spec kitty_rooted?(String.t()) :: boolean()
   def kitty_rooted?(coalition), do: String.starts_with?(coalition, @kitty_coalition_prefix)
 
-  defp socket_dir, do: Application.get_env(:shuttle, :kitty_socket_dir, "/tmp")
+  defp socket_dir, do: Shuttle.Env.app(:kitty_socket_dir, "/tmp")
 
   # ── kitty remote-control plumbing ──────────────────────────────────────────
 
@@ -287,7 +290,7 @@ defmodule Shuttle.Kitty do
 
     env =
       if remote? do
-        case System.get_env("SSH_AUTH_SOCK") do
+        case Shuttle.Env.get("SSH_AUTH_SOCK") do
           s when is_binary(s) and s != "" -> ["--env", "SSH_AUTH_SOCK=" <> s]
           _ -> []
         end
@@ -421,15 +424,16 @@ defmodule Shuttle.Kitty do
     end
   end
 
-  @kitten_candidates [
-    Path.expand("~/.local/bin/kitten"),
-    "/opt/homebrew/bin/kitten",
-    "/usr/local/bin/kitten",
-    "/Applications/kitty.app/Contents/MacOS/kitten"
-  ]
+  defp kitten_candidates,
+    do: [
+      Shuttle.Env.expand("~/.local/bin/kitten"),
+      "/opt/homebrew/bin/kitten",
+      "/usr/local/bin/kitten",
+      "/Applications/kitty.app/Contents/MacOS/kitten"
+    ]
 
   defp kitten_bin,
-    do: find_bin("kitten", @kitten_candidates, "kitten not found on this host")
+    do: find_bin("kitten", kitten_candidates(), "kitten not found on this host")
 
   defp to_opt(nil), do: []
   defp to_opt(socket), do: ["--to", socket]
@@ -447,7 +451,7 @@ defmodule Shuttle.Kitty do
   # value is dropped and the live Quick-Access panel still wins.
   defp kitty_socket do
     env_candidate =
-      case System.get_env("KITTY_LISTEN_ON") do
+      case Shuttle.Env.get("KITTY_LISTEN_ON") do
         s when is_binary(s) and s != "" -> [String.replace_prefix(s, "unix:", "")]
         _ -> []
       end
@@ -495,7 +499,7 @@ defmodule Shuttle.Kitty do
   # `/tmp/kitty-<pid>` files that caused `connect: no such file` get excluded.
   defp socket_kind(path) do
     with "kitty-" <> pid when pid != "" <- Path.basename(path),
-         {out, 0} <- System.cmd("ps", ["-o", "args=", "-p", pid], stderr_to_stdout: true) do
+         {out, 0} <- Shuttle.Env.cmd("ps", ["-o", "args=", "-p", pid], stderr_to_stdout: true) do
       if String.contains?(out, "quick-access") or String.contains?(out, "kitten panel"),
         do: :panel,
         else: :normal
@@ -507,7 +511,7 @@ defmodule Shuttle.Kitty do
   end
 
   defp kitty_bin do
-    case Application.get_env(:shuttle, :kitty_bin) do
+    case Shuttle.Env.app(:kitty_bin) do
       path when is_binary(path) -> {:ok, path}
       nil -> find_kitty_bin()
     end
@@ -517,12 +521,12 @@ defmodule Shuttle.Kitty do
     do:
       find_bin(
         "kitty",
-        @kitty_candidates,
+        kitty_candidates(),
         "kitty not found on this host (is it installed / on PATH?)"
       )
 
   defp find_bin(name, candidates, error_message) do
-    case System.find_executable(name) || Enum.find(candidates, &File.exists?/1) do
+    case Shuttle.Env.find_executable(name) || Enum.find(candidates, &File.exists?/1) do
       nil -> {:error, error_message}
       path -> {:ok, path}
     end
@@ -575,7 +579,7 @@ defmodule Shuttle.Kitty do
   # pre-resolve kitty, but osascript / kitty edge cases shouldn't crash the
   # request — fold any spawn failure into a non-zero result.
   defp run(cmd, args) do
-    System.cmd(cmd, args, stderr_to_stdout: true)
+    Shuttle.Env.cmd(cmd, args, stderr_to_stdout: true)
   rescue
     e -> {Exception.message(e), 127}
   end

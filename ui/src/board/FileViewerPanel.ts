@@ -272,7 +272,7 @@ function buildUnsupportedViewer(base: string, path: string, owner: string, optio
   void head(fileBytesUrl(base, path, owner), RESOURCE_PRIORITY.selected).then(info => {
     if (disposed) return
     if (!info?.exists) { options.onState?.({ status: 'error', error: headError(info), hasContent: false }); return }
-    if (info.size !== undefined) detail.textContent = `Not drawn here · ${info.size.toLocaleString()} bytes`
+    if (info.size !== undefined) detail.textContent = `Not drawn here · ${new Intl.NumberFormat().format(info.size)} bytes`
     options.onState?.({ status: 'ready' })
   })
   return box

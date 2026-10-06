@@ -1,8 +1,7 @@
 defmodule ShuttleWeb.FileRelayTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -66,18 +65,11 @@ defmodule ShuttleWeb.FileRelayTest do
 
     {:ok, {_, port}} = ThousandIsland.listener_info(server)
 
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    Application.put_env(:shuttle, :write_forward_client, Shuttle.RemoteRegistry.Client.Default)
+    Shuttle.Test.Env.put_app_env(:write_forward_client, Shuttle.RemoteRegistry.Client.Default)
 
-    Application.put_env(:shuttle, :remotes, [
+    Shuttle.Test.Env.put_app_env(:remotes, [
       %{name: "file-owner", url: "http://127.0.0.1:#{port}"}
     ])
-
-    on_exit(fn ->
-      restore_app_env(:write_forward_client, previous_client)
-      restore_app_env(:remotes, previous_remotes)
-    end)
 
     {:ok, owner_url: "http://127.0.0.1:#{port}"}
   end

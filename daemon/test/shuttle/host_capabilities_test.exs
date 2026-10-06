@@ -1,5 +1,5 @@
 defmodule Shuttle.HostCapabilitiesTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.HostCapabilities
 
@@ -20,15 +20,8 @@ defmodule Shuttle.HostCapabilitiesTest do
 
   # Mutation control: bypass the cache hit or never expire the cached result.
   test "browser probes cache both answers for 60 seconds and refresh expired login state" do
-    key = {HostCapabilities, :browser_capable}
-    previous = :persistent_term.get(key, :missing)
-    :persistent_term.erase(key)
-
-    on_exit(fn ->
-      if previous == :missing,
-        do: :persistent_term.erase(key),
-        else: :persistent_term.put(key, previous)
-    end)
+    # This test's own cache slot, not the one every owner-feed request reads.
+    Shuttle.Test.Env.own_scope!()
 
     assert HostCapabilities.cached_browser_capable?(fn -> true end, 100)
 

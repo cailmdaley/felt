@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "TZ=America/Los_Angeles vitest run && TZ=Europe/Paris vitest run",
+    "test": "TZ=America/Los_Angeles vitest run",
     "typecheck": "tsc --noEmit",
     "e2e": "npm run harness:board && node e2e/workspace.mjs && node e2e/requestBudget.mjs",
     "harness:board": "vite build -c vite.harness-board.config.ts",

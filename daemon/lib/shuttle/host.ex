@@ -87,9 +87,9 @@ defmodule Shuttle.Host do
   @doc "Path host.json is read from: `$SHUTTLE_HOST_CONFIG_FILE`, else `~/.config/shuttle/host.json`."
   @spec config_path() :: String.t()
   def config_path do
-    case System.get_env(@config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(@default_config_path)
+    case Shuttle.Env.get(@config_env) do
+      v when is_binary(v) and v != "" -> Shuttle.Env.expand(v)
+      _ -> Shuttle.Env.expand(@default_config_path)
     end
   end
 
@@ -131,7 +131,7 @@ defmodule Shuttle.Host do
   @doc "The uid and source used by the TCP peer gate. Raises on an invalid uid."
   @spec expected_peer_uid_config!() :: {non_neg_integer(), :euid | :env}
   def expected_peer_uid_config! do
-    case System.get_env("SHUTTLE_PEER_UID") do
+    case Shuttle.Env.get("SHUTTLE_PEER_UID") do
       nil ->
         {effective_uid(), :euid}
 
@@ -272,7 +272,7 @@ defmodule Shuttle.Host do
   end
 
   defp resolve_listen(file_listen, class, path, fallback_port) do
-    env_listen = System.get_env("SHUTTLE_LISTEN")
+    env_listen = Shuttle.Env.get("SHUTTLE_LISTEN")
 
     cond do
       present?(env_listen) ->
@@ -290,7 +290,7 @@ defmodule Shuttle.Host do
   end
 
   defp class_default(:single_user, fallback_port) do
-    case System.get_env("SHUTTLE_PORT") do
+    case Shuttle.Env.get("SHUTTLE_PORT") do
       value when is_binary(value) ->
         if String.trim(value) == "" do
           {:ok, {:tcp, {127, 0, 0, 1}, fallback_port}}
@@ -490,7 +490,7 @@ defmodule Shuttle.Host do
   # a real, already-checked directory, so `..` is its physical parent.
   defp secure_ancestors!(path, euid) do
     check_ancestor!("/", euid)
-    walk!("/", tl(Path.split(Path.expand(path))), euid, 0)
+    walk!("/", tl(Path.split(Shuttle.Env.expand(path))), euid, 0)
   end
 
   defp walk!(current, [], _euid, _links), do: current
@@ -780,7 +780,7 @@ defmodule Shuttle.Host do
 
   # The BEAM exposes no geteuid. `id -u` is POSIX and runs once per boot.
   defp effective_uid do
-    case System.cmd("id", ["-u"]) do
+    case Shuttle.Env.cmd("id", ["-u"]) do
       {out, 0} -> parse_uid!(out, "id -u")
       {_out, status} -> raise ArgumentError, "id -u failed with status #{status}"
     end

@@ -78,7 +78,11 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
       # for a fiber they cannot observe or write.
       pinned = %{"due" => "2026-11-30T00:00:00Z", "shuttle" => %{"host" => "nibi"}}
       refute FiberDocuments.kanban_aux_admissible?(pinned)
-      refute FiberDocuments.kanban_aux_admissible?(%{"tags" => ["cycle"], "shuttle" => %{"host" => "nibi"}})
+
+      refute FiberDocuments.kanban_aux_admissible?(%{
+               "tags" => ["cycle"],
+               "shuttle" => %{"host" => "nibi"}
+             })
     end
 
     test "still claims a shuttle fiber that names NO host — unowned, not elsewhere-owned" do

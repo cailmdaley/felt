@@ -214,8 +214,8 @@ test-linux:
 mix-test:
 	cd daemon && $(MIX) test
 
-# The board's own suite. `npm test` runs it twice, once per pinned timezone —
-# the civil-day rules are only meaningful against a real UTC offset.
+# The board's own suite, under a pinned TZ=America/Los_Angeles; the civil-day
+# properties inside it cover every other zone.
 js-test:
 	cd ui && npm test
 

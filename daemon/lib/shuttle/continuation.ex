@@ -75,7 +75,7 @@ defmodule Shuttle.Continuation do
   the `:resume_warm_window_s` application setting, else 45 minutes.
   """
   @spec warm_window_s() :: pos_integer()
-  def warm_window_s, do: Application.get_env(:shuttle, :resume_warm_window_s, @warm_window_s)
+  def warm_window_s, do: Shuttle.Env.app(:resume_warm_window_s, @warm_window_s)
 
   @doc """
   The transcript of `session` on this host, as `%{path, mtime}` (`mtime` a UTC
