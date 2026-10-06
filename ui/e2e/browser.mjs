@@ -56,33 +56,9 @@ export async function getBrowser({ args = [], executablePath } = {}) {
 
   async function newContext(options) {
     if (closed) throw new Error('This browser session is already closed')
-    // Set CDP media emulation after commit, before page scripts, so parallel clients keep separate preferences.
-    const mediaOptions = Object.fromEntries(['colorScheme', 'reducedMotion', 'forcedColors', 'contrast']
-      .filter(name => options?.[name] !== undefined).map(name => [name, options[name]]))
-    const contextOptions = shared && Object.keys(mediaOptions).length ? { ...options } : options
-    if (shared && contextOptions) for (const name of Object.keys(mediaOptions)) delete contextOptions[name]
-    const context = await browser.newContext(contextOptions)
+    const context = await browser.newContext(options)
     contexts.add(context)
     context.once('close', () => contexts.delete(context))
-    if (shared && Object.keys(mediaOptions).length) {
-      const newPage = context.newPage.bind(context)
-      context.newPage = async (...args) => {
-        const page = await newPage(...args)
-        for (const method of ['goto', 'reload', 'goBack', 'goForward']) {
-          const navigate = page[method].bind(page)
-          const optionsIndex = method === 'goto' ? 1 : 0
-          page[method] = async (...navigationArgs) => {
-            const { waitUntil = 'load', ...waitOptions } = navigationArgs[optionsIndex] ?? {}
-            navigationArgs[optionsIndex] = { ...waitOptions, waitUntil: 'commit' }
-            const response = await navigate(...navigationArgs)
-            await page.emulateMedia(mediaOptions)
-            if (waitUntil !== 'commit') await page.waitForLoadState(waitUntil, waitOptions)
-            return response
-          }
-        }
-        return page
-      }
-    }
     return context
   }
 
