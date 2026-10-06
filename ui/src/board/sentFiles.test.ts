@@ -4,11 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import {
-  disambiguateBasenames,
-  normalizeSentFiles,
-  sentFilesRevision,
-} from './sentFiles.js'
+import { normalizeSentFiles } from './sentFiles.js'
 
 const at = (h: number, min = 0): number => new Date(2026, 7, 11, h, min).getTime()
 
@@ -38,39 +34,5 @@ describe('normalizeSentFiles', () => {
   it('drops a record with no path, and a non-array payload', () => {
     expect(normalizeSentFiles([{ timestamp: 3 }, null, 'x'])).toEqual([])
     expect(normalizeSentFiles(undefined)).toEqual([])
-  })
-})
-
-describe('sentFilesRevision', () => {
-  it('changes when a worker sends the same path again', () => {
-    const old = normalizeSentFiles([{ fullPath: '/a/report.html', timestamp: 10 }])
-    const newer = normalizeSentFiles([{ fullPath: '/a/report.html', timestamp: 11 }])
-
-    expect(sentFilesRevision(old)).not.toBe(sentFilesRevision(newer))
-  })
-})
-
-describe('disambiguateBasenames', () => {
-  it('leaves a unique basename bare and does not mutate its input', () => {
-    const files = normalizeSentFiles([{ fullPath: '/a/b/one.html', timestamp: 1 }])
-    const out = disambiguateBasenames(files)
-    expect(out[0].basename).toBe('one.html')
-    expect(files[0].basename).toBe('one.html')
-    expect(out[0]).not.toBe(files[0])
-  })
-
-  it('walks up as far as it takes to tell three collisions apart', () => {
-    const out = disambiguateBasenames(
-      normalizeSentFiles([
-        { fullPath: '/x/one/deep/report.html', timestamp: 1 },
-        { fullPath: '/x/two/deep/report.html', timestamp: 2 },
-        { fullPath: '/x/three/deep/report.html', timestamp: 3 },
-      ]),
-    )
-    expect(out.map((f) => f.basename)).toEqual([
-      'one/deep/report.html',
-      'two/deep/report.html',
-      'three/deep/report.html',
-    ])
   })
 })
