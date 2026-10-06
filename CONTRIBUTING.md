@@ -28,6 +28,10 @@ suite, so `make test` needs it too.
 
 ## Running tests
 
+Before writing a test, read [`docs/dev/testing.md`](docs/dev/testing.md):
+where it goes, which tier runs it, which fixture to reuse, and how to write a
+property.
+
 ```bash
 go test ./...                       # Go (felt and shuttle CLIs)
 make mix-test                       # Elixir (daemon)

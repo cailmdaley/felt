@@ -53,9 +53,21 @@ Run `npm run harness:board` inside `ui/` to build a self-contained bundle in
 
 ## Tests
 
+To add a test, read [Writing tests](testing.md) first: it maps each contract
+to its test files and covers fixtures, properties and the guards. The suites
+run in four tiers:
+
+| Tier | Commands | When |
+|---|---|---|
+| the suites | `go test ./...`, `make mix-test`, `(cd ui && npm test)` | every change |
+| full | `make test`, then `make test-linux` (CI's Ubuntu) | before pushing; CI |
+| browser | `(cd ui && npm run e2e)` | changes to anything the board draws |
+| opt-in | real harness smoke, `scripts/test-bootstrap.sh`, `integration`-tagged tests | when touching what they cover |
+
 ```bash
 make test                  # go test ./... + mix test + the board suite + the plugin hooks + the bootstrap shims
 go test ./...              # Go (felt and shuttle CLIs)
+make test-linux            # the Go suite in a Linux container, as CI runs it
 make mix-test              # full Elixir suite; shells both CLIs on PATH, so `make cli-install` first
 (cd daemon && mix test --only focus)  # tagged subset
 (cd ui && npm test)        # the board suite; vitest, once, under
