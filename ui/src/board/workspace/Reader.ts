@@ -127,6 +127,7 @@ export class Reader {
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
+  private readonly pageChoice: HTMLButtonElement
   private readonly next: HTMLButtonElement
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
@@ -207,7 +208,7 @@ export class Reader {
     thumb.dataset.part = 'phone-bottom-bar'
     thumb.dataset.wsSwipe = 'on'
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
-    const pageChoice = button('ws-page-choice', '', () => { if (!this.runSettled) return; this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
+    const pageChoice = this.pageChoice = button('ws-page-choice', '', () => { if (!this.runSettled) return; this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
     pageChoice.setAttribute('aria-haspopup', 'dialog')
     pageChoice.setAttribute('aria-expanded', 'false')
     const pageMeta = element('span', 'ws-thumb-meta')
@@ -418,6 +419,7 @@ export class Reader {
   private settleRun(settled: boolean): void {
     const landing = settled && !this.runSettled
     this.runSettled = settled
+    this.pageChoice.setAttribute('aria-disabled', String(!settled))
     for (const el of [this.tabs.el, this.barPosition, this.ticks, this.position, this.prev, this.next]) {
       el.classList.toggle('ws-run-pending', !settled)
       if (!settled || landing) el.classList.remove('ws-run-landing')
@@ -526,7 +528,8 @@ export class Reader {
     this.prev.disabled = index <= 0
     this.next.disabled = index >= ch.documents.length - 1
     const announcement = `${ch.labels[index]}, ${index + 1} of ${ch.documents.length}`
-    if (this.announcement.textContent !== announcement) this.announcement.textContent = announcement
+    // A provisional run's count goes unannounced; the final one is read once it lands.
+    if (this.runSettled && this.announcement.textContent !== announcement) this.announcement.textContent = announcement
     this.layout(animate)
   }
   private prepareFrame(frame: DocumentFrame): void {

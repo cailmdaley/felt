@@ -292,6 +292,51 @@ describe('workspace reader integration', () => {
       expect(selected()).not.toBe(key)
     })
   }
+  it('shows the body as soon as it lands while the strip waits for the receipts, then the strip in its final order', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('/api/v1/sent-files?')) await gate
+      return original(input, init)
+    })
+    workspace.open(cards[0]); await flush(); await flush()
+    const strip = workspace.reader.el.querySelector('.ws-tabs')!
+    const prose = (): string => document.querySelector('.ws-prose')?.textContent ?? ''
+    // The body is in hand: its prose shows and the loading note is gone, while the run waits.
+    expect(prose()).toContain('The result is ready.')
+    expect(document.querySelector('.ws-body-status')).toBeNull()
+    expect(strip.classList.contains('ws-run-pending')).toBe(true)
+    const choice = workspace.reader.el.querySelector('.ws-page-choice')!
+    const live = workspace.reader.el.querySelector(':scope > .ws-sr-only[aria-live]')!
+    expect(choice.getAttribute('aria-disabled')).toBe('true')
+    expect(live.textContent).toBe('')
+    // A feed-poll repaint in this window keeps the strip pending.
+    workspace.update(); await flush()
+    expect(strip.classList.contains('ws-run-pending')).toBe(true)
+    release(); await flush(); await flush()
+    expect(strip.classList.contains('ws-run-pending')).toBe(false)
+    expect(choice.getAttribute('aria-disabled')).toBe('false')
+    expect(live.textContent).toBe('Note, 2 of 3')
+    const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.classList.contains('ws-tab-anchor') ? '§' : tab.dataset.tabKey!)
+    expect(tabs).toEqual([docKey('host-a', '/notes/alpha/report.html', 'host-a'), '§', docKey('host-a', '/notes/alpha/table.html', 'host-a')])
+  })
+  it('holds a sent page opened by address between the channel\'s body and its receipts', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('/api/v1/sent-files?')) await gate
+      return original(input, init)
+    })
+    workspace.open(cards[0]); await flush(); await flush()
+    const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    workspace.open(cards[0], 'Desk', table); await flush()
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    expect(selected()).toBe(table)
+    release(); await flush(); await flush()
+    expect(selected()).toBe(table)
+  })
   it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {

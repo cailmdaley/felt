@@ -47,6 +47,8 @@ interface ChannelState {
   selected?: DocKey
   routedFile?: DocKey
   loaded: boolean
+  /** The run is final: body and receipts are both in, or the body read failed. The strip waits for it. */
+  runFinal: boolean
   metadataKnown: boolean
   error?: string
 }
@@ -370,7 +372,7 @@ export class Workspace {
       state = {
         card,
         channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, modifiedAt: card.modifiedAt }),
-        links: [], fileModifiedAt: new Map(), loaded: false, metadataKnown,
+        links: [], fileModifiedAt: new Map(), loaded: false, runFinal: false, metadataKnown,
       }
       this.channels.set(key, state)
     } else { state.card = card; state.metadataKnown ||= metadataKnown }
@@ -419,7 +421,7 @@ export class Workspace {
     this.overview.setVisible(false)
     // Selection resolves before the first paint; data arriving later never moves it.
     const wanted = route.doc ?? state.selected ?? this.knownReport(state)
-    const loadedBefore = state.loaded
+    const loadedBefore = state.loaded && state.runFinal
     if (wanted) this.intend(state, wanted)
     this.opts.onVisibility(true)
     this.depth.setActive(true)
@@ -463,7 +465,7 @@ export class Workspace {
     const ch = state.channel
     const selected = this.shown(state)
     this.refreshProse(state)
-    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded, state.loaded || state.error !== undefined)
+    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.dock.syncRuntime(state.card)
   }
@@ -543,6 +545,7 @@ export class Workspace {
   private load(state: ChannelState, refresh = false): Promise<void> {
     if (state.channel.uid.startsWith('other:')) {
       state.loaded = true
+      state.runFinal = true
       state.channel.body = `Files sent on ${state.channel.owner} without a filed fiber.`
       this.rebuild(state)
       return Promise.resolve()
@@ -555,8 +558,7 @@ export class Workspace {
       const controller = new AbortController()
       let timeout = 0
       const receiptRead = this.readReceipts(state)
-      let body: { body: string; outcome?: string } | undefined
-      let failure: string | undefined
+      const wasLoaded = state.loaded
       const read = () => {
         timeout = window.setTimeout(() => controller.abort(), 25000)
         return readFiber(this.opts.shuttleBase, state.card.id, state.channel.owner, controller.signal)
@@ -575,19 +577,20 @@ export class Workspace {
           state.metadataKnown = true
           this.overview.resolved(metadata)
         }
-        body = { body: entry.fiber.body ?? '', outcome: entry.fiber.outcome ?? state.card.outcome }
-      } catch (error) {
-        failure = error instanceof Error && /^(Fiber not found on |.+ is unreachable$)/.test(error.message)
-          ? error.message : `${state.card.originId} is unreachable`
-      } finally { window.clearTimeout(timeout) }
-      await receiptRead
-      if (this.disposed) return
-      // The body and the receipts land together, so the run settles once, final.
-      if (body) {
-        state.channel = { ...state.channel, ...body }
+        // A body the run has not held yet reorders it, so the strip waits for the receipts too.
+        if (!wasLoaded) state.runFinal = false
+        state.channel = { ...state.channel, body: entry.fiber.body ?? '', outcome: entry.fiber.outcome ?? state.card.outcome }
         state.loaded = true
         state.error = undefined
-      } else state.error = failure
+      } catch (error) {
+        state.error = error instanceof Error && /^(Fiber not found on |.+ is unreachable$)/.test(error.message)
+          ? error.message : `${state.card.originId} is unreachable`
+      } finally { window.clearTimeout(timeout) }
+      // The body (or its failure) shows as soon as it lands; the run's order waits for the receipts.
+      if (!wasLoaded && this.current === state && this.isActive && !this.disposed) this.show(state, false)
+      await receiptRead
+      if (this.disposed) return
+      state.runFinal = true
       this.rebuild(state)
       this.refreshProse(state)
       void this.readFileMetadata(state).then(changed => {
@@ -625,7 +628,8 @@ export class Workspace {
     const before = state.channel
     const card = state.card
     const routed = state.routedFile
-    if (state.loaded && state.routedFile) {
+    // A routed page holds its provisional frame until the run is final, receipts included.
+    if (state.loaded && state.runFinal && state.routedFile) {
       const file = parseDocKey(state.routedFile)
       if (file && this.isBodyFile(state, state.routedFile)) state.links.push({ path: file.path, owner: file.owner })
       state.routedFile = undefined
