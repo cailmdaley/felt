@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { Workspace } from './Workspace.js'
@@ -128,6 +128,32 @@ describe('workspace reader integration', () => {
       workspace.update(); await flush()
       expect(roles()).toEqual([])
     } finally { cards[0] = original }
+  })
+
+  it('gives a role page its holds from the feed and none of a constitution\'s controls', async () => {
+    const original = cards[0]
+    const role = card({ id: 'roles/surveyor', uid: 'surveyor-uid', name: 'Surveyor', originId: 'host-a', fiberDir: '/roles/surveyor', path: 'roles/surveyor/surveyor.md' })
+    cards[0] = { ...original, shuttleKind: 'oneshot', roles: ['surveyor'] }
+    bodyCards = [...cards, role]
+    onTestFinished(() => { cards[0] = original })
+    const holds = (): string[] => [...document.querySelectorAll('.ws-role-hold-name')].map(name => name.textContent ?? '')
+    workspace.open(role); await flush(); await flush()
+    expect(holds()).toEqual(['Alpha'])
+    const page = document.querySelector<HTMLElement>('.ws-fiber-prose')!
+    for (const chrome of ['.ws-dock', '.kbn-detail-controls', '.kbn-ctl-history-toggle', '.kbn-detail-directive', '.kbn-ctl-verdict']) {
+      expect(page.querySelector(chrome), chrome).toBeNull()
+    }
+    // A role is outside the feed; its holds still follow the feed's rosters.
+    cards[0] = { ...original, shuttleKind: 'oneshot' }
+    workspace.update(); await flush()
+    expect(holds()).toEqual([])
+    expect(document.querySelector('[data-part="role-holds"]')).toBeNull()
+    cards[0] = { ...original, shuttleKind: 'oneshot', roles: ['surveyor'] }
+    workspace.update(); await flush()
+    document.querySelector<HTMLButtonElement>('.ws-role-hold')!.click()
+    await flush(); await flush()
+    expect(document.querySelector('.ws-selected [data-part="fiber-title"]')?.textContent).toBe('Alpha')
+    expect(document.querySelector('.ws-fiber-prose .ws-dock')).not.toBeNull()
   })
 
   it('replaces key verdicts with clicks and commits only the live identity after a move', async () => {
@@ -501,6 +527,10 @@ describe('workspace reader integration', () => {
   })
 
   it('keeps body links and embeds while placing the outcome above inline controls', async () => {
+    // Inline controls belong to a fiber on the Desk's lifecycle.
+    const original = cards[0]
+    cards[0] = { ...original, shuttleKind: 'oneshot' }
+    onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0])
     await flush()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
@@ -511,7 +541,7 @@ describe('workspace reader integration', () => {
     expect(outcome.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Note')!
+    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Constitution')!
     proseTab.click()
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
@@ -633,6 +663,9 @@ describe('workspace reader integration', () => {
   })
 
   it('Escape gives inline and reader popovers first refusal, then collapses and returns', async () => {
+    const original = cards[0]
+    cards[0] = { ...original, shuttleKind: 'oneshot' }
+    onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0])
     await flush()
     const escape = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) }

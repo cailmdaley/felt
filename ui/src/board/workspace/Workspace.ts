@@ -1,7 +1,8 @@
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
-import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
+import { fiberPageColumn, onDesk, verdictReachable } from './fiberPageState.js'
+import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
@@ -271,7 +272,8 @@ export class Workspace {
     this.overview.cardsChanged()
     if (!this.current || !this.isActive) return
     const card = this.opts.cards().find(c => (c.uid ?? c.id) === this.current?.channel.uid && c.originId === this.current.channel.owner)
-    if (!card) return
+    // A fiber outside the feed (a role, a note) keeps its card; a role page still follows its holds.
+    if (!card) { this.refreshProse(this.current); return }
     this.current.card = card
     this.current.channel = {
       ...this.current.channel, name: card.name, outcome: card.outcome ?? this.current.channel.outcome,
@@ -331,11 +333,16 @@ export class Workspace {
     this.controls(state)?.focusComposer()
   }
 
+  /** Settings, history and the composer belong to fibers on the Desk's lifecycle; a note or role has none. */
   private controls(state: ChannelState | null): Dock | undefined {
-    return state?.metadataKnown && !state.channel.uid.startsWith('other:') ? this.dock.bandFor(state.card) : undefined
+    return state?.metadataKnown && !state.channel.uid.startsWith('other:') && onDesk(state.card) ? this.dock.bandFor(state.card) : undefined
+  }
+  private holds(state: ChannelState): KanbanCard[] {
+    const slug = roleSlug(state.card)
+    return slug ? roleHolds(this.opts.cards(), slug) : []
   }
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.roles, state.error, state.loaded, state.metadataKnown])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.roles, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
   }
   private prose(key: DocKey): HTMLElement {
     const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
@@ -347,6 +354,8 @@ export class Workspace {
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title) => this.openFile(path, title),
+      holds: this.holds(state),
+      onCard: card => { void this.openFiber(card.uid ?? card.id, card.originId) },
     })
     if (!state.loaded || state.error) {
       const note = document.createElement('p')
