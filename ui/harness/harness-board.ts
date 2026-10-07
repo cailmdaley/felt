@@ -34,7 +34,7 @@
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
-import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
+import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, workspaceExample } from './workspace-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
@@ -79,7 +79,7 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || 
       state: 'live',
       title: 'Shear telecon',
       mirror_host: 'project-host',
-      fiber: meetingScenario === 'joined' ? 'work/spt3g_papers/bmodes-2d/run' : null,
+      fiber: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run') : null,
       scribe_session_uuid: meetingScenario === 'scribe' ? '6bc045dc-92e0-473a-bf9e-e1cc263223bc' : null,
       started_at: iso(-13 * 60_000 - 12_000),
       tail: MOCK_TAIL,

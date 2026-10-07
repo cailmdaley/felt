@@ -4,7 +4,7 @@ import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../../forms/meetingApi.js'
-import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
+import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../../forms/executionSurface.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
@@ -71,6 +71,10 @@ export interface MeetingJoinControl {
   join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>): Promise<MeetingJoinResult>
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
+  /** Stop (or dismiss, once failed) the recording: the board's one stop path. */
+  stop?(meeting: MeetingRecord): void | Promise<void>
+  /** Whether a stop for `meeting` has been asked and not yet observed. */
+  stopRequested?(meeting: MeetingRecord): boolean
 }
 
 export interface SessionWindow {
@@ -627,7 +631,16 @@ export class Dock {
     state.className = 'kbn-detail-transcript-state'
     const title = document.createElement('span')
     title.className = 'kbn-detail-transcript-title'
-    meta.append(dot, state, title)
+    const stop = document.createElement('button')
+    stop.type = 'button'
+    stop.className = 'kbn-detail-transcript-stop'
+    stop.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const current = this.meeting?.current()
+      if (!current || this.meeting?.stopRequested?.(current)) return
+      void this.meeting?.stop?.(current)
+    })
+    meta.append(dot, state, title, stop)
     const list = document.createElement('ol')
     list.className = 'kbn-detail-transcript-lines'
     list.setAttribute('aria-label', 'Transcript')
@@ -650,8 +663,16 @@ export class Dock {
     if (!pane || !card) return
     const meeting = this.meeting?.current() ?? null
     const hosted = meetingHostCard(meeting, [card]) !== null
-    pane.hidden = !hosted || meeting === null || meeting.tail.length === 0
+    pane.hidden = !hosted || meeting === null
     if (!meeting || !hosted) return
+    const actions = this.meeting?.stop ? meetingActions(meeting, this.meeting.stopRequested?.(meeting) ?? false) : null
+    const stop = pane.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
+    stop.hidden = !actions
+    if (actions) {
+      stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
+      stop.disabled = actions.stopDisabled
+    }
+    pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = meeting.tail.length === 0
     for (const st of ['starting', 'loading', 'live', 'stopping', 'failed']) {
       pane.classList.toggle(`kbn-detail-transcript-${st}`, meeting.state === st)
     }
@@ -1151,6 +1172,7 @@ export class Dock {
     arm(false)
     input.addEventListener('change', () => arm(input.checked))
     this.meetingArmed = () => input.checked && !input.disabled
+
 
     const paint = (): void => {
       const control = this.meeting

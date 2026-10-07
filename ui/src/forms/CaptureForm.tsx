@@ -112,7 +112,7 @@ export function CaptureForm({
   const [chrome, setChrome] = useState<boolean>(false)
   const [surface, setSurface] = useState<ExecutionSurface>('cli')
   const [mobileMeeting] = useState(() => isMobileViewport())
-  const [meetingIntent, setMeetingIntent] = useState(() => mobileMeeting)
+  const [meetingIntent, setMeetingIntent] = useState(false)
   const [meetingMode, setMeetingMode] = useState<MeetingMode | null>(() => mobileMeeting ? 'phone' : null)
   const [meetingCapabilities, setMeetingCapabilities] = useState({
     loading: true,
