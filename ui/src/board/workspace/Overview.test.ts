@@ -623,7 +623,7 @@ describe('Overview news, visits and graduated density', () => {
 })
 
 describe('Overview civil days and fleet shapes', () => {
-  it('runs under both pinned non-UTC zones', () => { expectPinnedZone() })
+  it('runs under the pinned zone', () => { expectPinnedZone() })
   it('uses local midnight and calendar strides across DST, including the seven-day boundary', () => {
     const anchor = new Date(2026, 2, 30, 0, 10).getTime()
     expect(overviewDayGroup(new Date(2026, 2, 30, 0, 1).getTime(), anchor)).toBe('Today')
