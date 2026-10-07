@@ -2191,8 +2191,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await open(p); await choose(p, 'Constitution')
     const header = selected(p).locator('.ws-prose-header')
     assert.equal((await header.locator('.ws-prose-status').innerText()).trim().toLowerCase(), 'awaiting your review', 'fiber kicker uses the Desk state')
-    // The status line reads the kicker, then the act zone: the worker pill (none here) and the verdicts.
-    assert.deepEqual(await header.locator(':scope > *').evaluateAll(es => es.map(e => e.className)), ['ws-prose-status', 'ws-fiber-acts'])
+    // The status line reads the kicker, the roster's roles, then the act zone: the worker pill (none here) and the verdicts.
+    assert.deepEqual(await header.locator(':scope > *').evaluateAll(es => es.map(e => e.className)), ['ws-prose-status', 'ws-fiber-roles', 'ws-fiber-acts'])
     assert.deepEqual(await header.locator('.ws-fiber-acts button:visible').allTextContents(), ['Temper', 'Discard'])
     const settings = selected(p).locator('.kbn-detail-controls-toggle')
     assert.equal(await settings.getAttribute('aria-expanded'), 'false')
@@ -2793,13 +2793,18 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover())
   await still(p, 'a sidebar poll repaint', () => repaint(p))
   // A worker starting on a fiber that awaits review moves nothing in the bar
-  // or on a document page.
+  // or on a document page. Where the § line is full, its roles give way to
+  // the pill (narrower, left edge held) and the act zone widens leftward
+  // (right edge held), so the verdicts stay put.
   await choose(p, 'calibration-report')
-  assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-stage'], act: () => p.evaluate(async () => {
+  const gives = ({ element, dx, dy, dw, dh }) => !dy && !dh && (
+    (element.endsWith('span.ws-fiber-roles') && !dx && dw < 0) ||
+    (element.endsWith('div.ws-fiber-acts') && Math.abs(dx + dw) <= 0.5 && dw > 0))
+  assert.deepEqual((await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-stage'], act: () => p.evaluate(async () => {
     const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
     row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', last_activity_at: Date.now(), started_at: Date.now() - 60000 }
     await window.__harness.modal.fetchAndRender()
-  }), settle: 100 }), [], 'a worker starting under review')
+  }), settle: 100 })).filter(shift => !gives(shift)), [], 'a worker starting under review')
   await choose(p, 'Constitution')
   await composerKeyStaysPut(p)
   // The § page's pill and the sidebar card's change word and age in place.
