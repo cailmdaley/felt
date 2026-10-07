@@ -393,48 +393,68 @@ SH
 seed_deploy_cache_cmd() {
   local root="$1" target="$2"
   cat <<SH
-set -u
-root=\$root
-target=\$target
-source=
-while IFS= read -r candidate; do
-  candidate=\${candidate%/}
-  [ "\$candidate" = "\$target" ] && continue
-  [ -d "\$candidate" ] || continue
-  source=\$candidate
-  break
-done < <(ls -td "\$root"/*/ 2>/dev/null)
-[ -n "\$source" ] || exit 0
-copy_tree() {
-  from=\$1; to=\$2
-  mkdir -p "\$(dirname "\$to")" || return 1
-  case \$(uname -s) in
-    Darwin) cp -cR "\$from" "\$to" 2>/dev/null || { rm -rf "\$to"; cp -R "\$from" "\$to"; } ;;
-    *) cp -R --reflink=auto "\$from" "\$to" 2>/dev/null || { rm -rf "\$to"; cp -R "\$from" "\$to"; } ;;
-  esac
-}
-failed=0
-for relative in daemon/deps daemon/_build ui/node_modules; do
-  [ -d "\$source/\$relative" ] || continue
-  if ! copy_tree "\$source/\$relative" "\$target/\$relative"; then
-    echo "cache seed failed for \$relative; building cold" >&2
-    rm -rf "\$target/\$relative"
-    failed=1
+(
+  set +e
+  root=\$root
+  target=\$target
+  ledger="\$root/deployed.log"
+  previous=\$(tail -n 1 "\$ledger" 2>/dev/null | awk '{print \$1}')
+  [ -n "\$previous" ] || exit 0
+  source="\$root/\$previous"
+  [ -d "\$source" ] || exit 0
+  for relative in daemon/deps daemon/_build ui/node_modules; do
+    if [ -L "\$source/\$relative" ] || [ -L "\$target/\$relative" ]; then
+      printf 'cache seeding skipped: symlinked cache root %s\\n' "\$relative" >&2
+      exit 0
+    fi
+  done
+  stage="\$target/.deploy-cache-seed.\$\$"
+  if ! mkdir -p "\$stage"; then
+    printf 'cache seeding failed; building cold\\n' >&2
+    exit 1
   fi
-done
-if [ -d "\$target/ui/node_modules" ]; then
-  if [ -f "\$source/ui/node_modules/.npm-ci-stamp" ] &&
-     cmp -s "\$source/ui/package-lock.json" "\$target/ui/package-lock.json"; then
-    touch "\$target/ui/node_modules/.npm-ci-stamp" || {
-      echo "cache seed failed for ui npm stamp; building cold" >&2
-      rm -f "\$target/ui/node_modules/.npm-ci-stamp"
-    }
-  else
-    rm -f "\$target/ui/node_modules/.npm-ci-stamp"
+  failed=0
+  for relative in daemon/deps daemon/_build ui/node_modules; do
+    [ -d "\$source/\$relative" ] || continue
+    mkdir -p "\$stage/\$relative" || { failed=1; break; }
+    case \$(uname -s) in
+      Darwin)
+        cp -cR -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null ||
+          cp -R -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null || failed=1 ;;
+      *)
+        cp -R -P --reflink=auto "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null ||
+          cp -R -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null || failed=1 ;;
+    esac
+    [ "\$failed" = 0 ] || break
+  done
+  if [ -d "\$stage/ui/node_modules" ]; then
+    if [ -f "\$source/ui/node_modules/.npm-ci-stamp" ] &&
+       cmp -s "\$source/ui/package-lock.json" "\$target/ui/package-lock.json"; then
+      touch "\$stage/ui/node_modules/.npm-ci-stamp" || failed=1
+    else
+      rm -f "\$stage/ui/node_modules/.npm-ci-stamp" || failed=1
+    fi
   fi
-fi
-[ "\$failed" = 0 ] || exit 0
-printf 'seeded build caches from %s\\n' "\$source"
+  for relative in daemon/deps daemon/_build ui/node_modules; do
+    if [ -d "\$stage/\$relative" ] && [ -e "\$target/\$relative" ]; then failed=1; fi
+  done
+  published=
+  if [ "\$failed" = 0 ]; then
+    for relative in daemon/deps daemon/_build ui/node_modules; do
+      [ -d "\$stage/\$relative" ] || continue
+      if ! mv "\$stage/\$relative" "\$target/\$relative"; then failed=1; break; fi
+      published="\$published \$relative"
+    done
+  fi
+  if [ "\$failed" != 0 ]; then
+    for relative in \$published; do rm -rf "\$target/\$relative" 2>/dev/null || true; done
+    rm -rf "\$stage" 2>/dev/null || true
+    printf 'cache seeding failed; building cold\\n' >&2
+    exit 1
+  fi
+  rm -rf "\$stage" 2>/dev/null || true
+  printf 'seeded build caches from %s\\n' "\$source"
+) || { printf 'cache seeding failed; building cold\\n' >&2; }
 SH
 }
 
@@ -449,67 +469,71 @@ case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
 common=\$(cd "\$common" && pwd -P)
 root="\$(dirname "\$common").deploy"
 target="\$root/\$commit"
+ledger="\$root/deployed.log"
 git -C "\$source" fetch --tags origin
 git -C "\$source" cat-file -e "\$commit^{commit}"
+reuse=0
 if [ -e "\$target" ]; then
-  [ "\$(git -C "\$target" rev-parse HEAD)" = "\$commit" ] || { echo "deployment worktree has the wrong revision: \$target" >&2; exit 1; }
-  [ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ] || { echo "deployment worktree has local edits: \$target" >&2; exit 1; }
-else
+  [ "\$(git -C "\$target" rev-parse HEAD 2>/dev/null)" = "\$commit" ] || { echo "deployment worktree has the wrong revision: \$target" >&2; exit 1; }
+  for stale_stage in "\$target"/.deploy-cache-seed.*; do
+    [ -e "\$stale_stage" ] || continue
+    rm -rf "\$stale_stage"
+  done
+  if awk -v sha="\$commit" '\$1 == sha { found=1 } END { exit !found }' "\$ledger" 2>/dev/null; then
+    [ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ] || { echo "completed deployment worktree has tracked edits: \$target" >&2; exit 1; }
+    reuse=1
+  else
+    [ -z "\$(git -C "\$target" status --porcelain)" ] || { echo "incomplete deployment worktree is dirty: \$target" >&2; exit 1; }
+    git -C "\$source" worktree remove --force "\$target"
+    git -C "\$source" worktree prune
+  fi
+fi
+if [ "\$reuse" = 0 ]; then
   mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
   $(seed_deploy_cache_cmd "\$root" "\$target")
+  printf 'deploy-tree-ready\\n'
+else
+  printf 'deploy-tree-reused\\n'
 fi
 SH
 }
 
+record_deploy_cmd() {
+  local checkout="$1" sha="$2"
+  cat <<SH
+set -eu
+source=$(shell_quote "$checkout")
+common=\$(git -C "\$source" rev-parse --git-common-dir)
+case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
+common=\$(cd "\$common" && pwd -P)
+root="\$(dirname "\$common").deploy"
+mkdir -p "\$root"
+printf '%s %s\\n' $(shell_quote "$sha") "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "\$root/deployed.log"
+SH
+}
+
 prune_deploy_cmd() {
-  local checkout="$1" current="$2"
+  local checkout="$1"
   cat <<SH
 set -u
 source=$(shell_quote "$checkout")
-current=$(shell_quote "$current")
 common=\$(git -C "\$source" rev-parse --git-common-dir 2>/dev/null) || exit 0
 case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
 common=\$(cd "\$common" 2>/dev/null && pwd -P) || exit 0
 root="\$(dirname "\$common").deploy"
-newest=
-while IFS= read -r candidate; do
-  candidate=\${candidate%/}
-  [ "\$candidate" = "\$current" ] && continue
-  [ -d "\$candidate" ] || continue
-  newest=\$candidate
-  break
-done < <(ls -td "\$root"/*/ 2>/dev/null)
-referenced() {
-  path=\$1
-  if ps -axo command= 2>/dev/null | grep -F -- "\$path" | grep -v 'grep -F' >/dev/null; then return 0; fi
-  if [ -d /proc ]; then
-    for proc in /proc/[0-9]*; do
-      [ -e "\$proc/cwd" ] || continue
-      cwd=\$(readlink "\$proc/cwd" 2>/dev/null) || continue
-      case "\$cwd" in *"\$path"*) return 0 ;; esac
-      cmd=\$(tr '\\000' ' ' < "\$proc/cmdline" 2>/dev/null)
-      case "\$cmd" in *grep*) continue ;; esac
-      case "\$cmd" in *"\$path"*) return 0 ;; esac
-    done
-  elif command -v lsof >/dev/null 2>&1; then
-    while IFS= read -r pid; do
-      cwd=\$(lsof -a -p "\$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)
-      case "\$cwd" in *"\$path"*) return 0 ;; esac
-    done < <(ps -axo pid= 2>/dev/null)
-  fi
-  for config in "\$HOME"/Library/LaunchAgents/*.plist "\$HOME"/.config/systemd/user/*.service; do
-    [ -f "\$config" ] || continue
-    grep -F -- "\$path" "\$config" >/dev/null && return 0
-  done
-  return 1
-}
+ledger="\$root/deployed.log"
+current= previous= older=
+if [ -r "\$ledger" ]; then
+  while read -r sha timestamp; do older=\$previous; previous=\$current; current=\$sha; done < "\$ledger"
+fi
 removed=
 for candidate in "\$root"/*; do
   [ -d "\$candidate" ] || continue
-  [ "\$candidate" = "\$current" ] && continue
-  [ "\$candidate" = "\$newest" ] && continue
-  if referenced "\$candidate"; then continue; fi
+  name=\${candidate##*/}
+  [ "\$name" = "\$current" ] && continue
+  [ -n "\$previous" ] && [ "\$name" = "\$previous" ] && continue
+  [ -n "\$older" ] && [ "\$name" = "\$older" ] && continue
   status=\$(git -C "\$candidate" status --porcelain 2>/dev/null) || {
     printf 'cannot inspect deploy worktree; keeping: %s\\n' "\$candidate" >&2
     continue
@@ -518,7 +542,7 @@ for candidate in "\$root"/*; do
     printf 'dirty deploy worktree kept: %s\\n' "\$candidate" >&2
     continue
   fi
-  if git -C "\$source" worktree remove "\$candidate"; then
+  if git -C "\$source" worktree remove --force "\$candidate"; then
     removed="\$removed \$candidate"
   else
     printf 'could not remove deploy worktree: %s\\n' "\$candidate" >&2
@@ -526,23 +550,14 @@ for candidate in "\$root"/*; do
 done
 git -C "\$source" worktree prune
 if [ -n "\$removed" ]; then printf 'pruned deploy worktrees:%s\\n' "\$removed"; else printf 'pruned deploy worktrees: none\\n'; fi
-# Old lane-local roots are reported, never modified; operators can review the
-# shell-quoted commands before removing them.
 legacy="\$source.deploy"
 if [ -d "\$legacy" ] && [ "\$legacy" != "\$root" ]; then
-  legacy_rollback=
-  while IFS= read -r candidate; do
-    candidate=\${candidate%/}
-    [ "\$candidate" = "\$current" ] && continue
-    [ -d "\$candidate" ] || continue
-    legacy_rollback=\$candidate
-    break
-  done < <(ls -td "\$legacy"/*/ 2>/dev/null)
   for candidate in "\$legacy"/*; do
     [ -d "\$candidate" ] || continue
-    [ "\$candidate" = "\$current" ] && continue
-    [ "\$candidate" = "\$legacy_rollback" ] && continue
-    if referenced "\$candidate"; then continue; fi
+    name=\${candidate##*/}
+    [ "\$name" = "\$current" ] && continue
+    [ -n "\$previous" ] && [ "\$name" = "\$previous" ] && continue
+    [ -n "\$older" ] && [ "\$name" = "\$older" ] && continue
     status=\$(git -C "\$candidate" status --porcelain 2>/dev/null) || {
       printf 'cannot inspect legacy deploy worktree; keeping: %s\\n' "\$candidate" >&2
       continue
@@ -571,9 +586,16 @@ build_checkout_cmd() {
   return 0
 }
 
+build_deploy_cmd() { # $1 = checkout, $2 = skip UI, $3 = completed ledger entry
+  local checkout="$1" skip_ui="$2" reuse="$3"
+  if [ "$reuse" = 1 ]; then printf ':'; else build_checkout_cmd "$checkout" "$skip_ui"; fi
+}
+
 BUILD_REPO="$REPO"
+BUILD_REUSE=0
 if [ -n "$DEPLOY_REF" ]; then
-  bash -lc "$(revision_checkout_cmd "$REPO")" || { bad "could not prepare the deploy revision"; exit 1; }
+  prepare_output="$(run_on_visible "" "$(revision_checkout_cmd "$REPO")")" || { bad "could not prepare the deploy revision"; exit 1; }
+  case "$prepare_output" in *deploy-tree-reused*) BUILD_REUSE=1 ;; esac
   BUILD_ROOT="$(bash -lc "$(deploy_root_cmd "$REPO")")" || { bad "could not resolve the deploy worktree root"; exit 1; }
   BUILD_REPO="${BUILD_ROOT%/}/$TARGET_COMMIT"
 fi
@@ -628,6 +650,11 @@ run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so both CL
   else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi 2>/dev/null
 }
 
+run_on_visible() { # Like run_on, preserving remote stderr for operator diagnostics.
+  if [ -z "$1" ]; then bash -lc "$2"
+  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi
+}
+
 version_json() { # $1 = "" (local) | host
   run_on "$1" "$(daemon_call "" /api/v1/version)"
 }
@@ -641,7 +668,7 @@ release_quarantine() { # $1 = "" | host
 }
 
 wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also ready
-  local host="$1" version sha booted ready mix_vsn started now elapsed next_notice
+  local host="$1" version="" sha="" booted="" ready="" mix_vsn="" started="" now="" elapsed="" next_notice=""
   local timeout="${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}"
   local interval="${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}"
 
@@ -694,11 +721,26 @@ wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also
   done
 }
 
-verify_and_prune() { # $1 = host, $2 = checkout, $3 = deployed worktree
-  local host="$1" checkout="$2" deployed="$3"
-  wait_for_sha "$host" || return 1
+finish_verified_deploy() { # $1 = host, $2 = checkout, $3 = harness failure flag
+  local host="$1" checkout="$2" harness_failed="$3"
+  release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
+    || { bad "quarantine release failed"; return 1; }
+  [ "$harness_failed" = 0 ] || { bad "harness setup failed; deployment was not recorded"; return 1; }
   [ -n "$DEPLOY_REF" ] || return 0
-  run_on "$host" "$(prune_deploy_cmd "$checkout" "$deployed")"
+  run_on_visible "$host" "$(record_deploy_cmd "$checkout" "$TARGET_COMMIT")" || {
+    bad "could not record the successful deployment on ${host:-local}"
+    return 1
+  }
+  run_on_visible "$host" "$(prune_deploy_cmd "$checkout")" || {
+    bad "could not prune deploy worktrees on ${host:-local}"
+    return 1
+  }
+}
+
+verify_and_finish() { # $1 = host, $2 = checkout, $3 = harness failure flag
+  local host="$1" checkout="$2" harness_failed="$3"
+  wait_for_sha "$host" || return 1
+  finish_verified_deploy "$host" "$checkout" "$harness_failed"
 }
 
 # A host marked `"build_ui": false` is served the deploy host's bundle, so the
@@ -707,6 +749,7 @@ verify_and_prune() { # $1 = host, $2 = checkout, $3 = deployed worktree
 # lockfile and vite rebuilds from a warm cache — and deploy_local's `make build`
 # has already done it, so the flag keeps a full-fleet run to one build.
 LOCAL_UI_BUILT=0
+if [ "$BUILD_REUSE" = 1 ]; then LOCAL_UI_BUILT=1; fi
 ensure_local_ui() {
   [ "$LOCAL_UI_BUILT" = 1 ] && return 0
   bash -lc "cd $(shell_quote "$BUILD_REPO") && make ui" >/dev/null \
@@ -931,9 +974,14 @@ refresh_harnesses() { # $1 = "" (local) | host, $2 = checkout dir
 
 deploy_local() {
   say "local ($TARGET_SHA)"
-  bash -lc "$(build_checkout_cmd "$BUILD_REPO")" >/dev/null \
-    || { bad "make build failed"; return 1; }
-  LOCAL_UI_BUILT=1
+  if [ "$BUILD_REUSE" = 1 ]; then
+    LOCAL_UI_BUILT=1
+    ok "reusing completed deployment worktree"
+  else
+    bash -lc "$(build_deploy_cmd "$BUILD_REPO" 0 "$BUILD_REUSE")" >/dev/null \
+      || { bad "make build failed"; return 1; }
+    LOCAL_UI_BUILT=1
+  fi
   run_on "" "$(config_migration_cmd 1 "$BUILD_REPO/bin/rel")" \
     || { bad "config migration or supervisor refresh failed on the deploy host"; return 1; }
   # A harness failure is reported now and fails the host after its daemon step.
@@ -944,7 +992,7 @@ deploy_local() {
   # and the old BEAM keeps running the previous release. The booted_at check
   # in wait_for_sha verifies that the cycle actually happened.
   check_listen "" || return 1
-  local supervisor
+  local supervisor=""
   supervisor="$(run_on "" "$(supervisor_probe_cmd)")" || { bad "could not inspect the local supervisor"; return 1; }
   if [ "$supervisor" = 1 ]; then
     run_on "" "$(daemon_kill)"; sleep 2
@@ -957,38 +1005,44 @@ deploy_local() {
     run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO")" \
       || { bad "could not install and restart the local respawn loop"; return 1; }
   fi
-  verify_and_prune "" "$REPO" "$BUILD_REPO" || { bad "daemon did not verify or deploy worktrees could not be pruned"; return 1; }
-  release_quarantine "" && ok "live on $TARGET_SHA, quarantine released" \
-    || { bad "quarantine release failed"; return 1; }
-  return "$harness_failed"
+  verify_and_finish "" "$REPO" "$harness_failed" || {
+    bad "deployment did not complete successfully on the deploy host"
+    return 1
+  }
+  return 0
 }
 
 deploy_remote() {
-  local host="$1" dir dest flags build_cmd remote_root=""
+  local host="$1" dir="" dest="" flags="" build_cmd="" remote_root="" prepare_output="" remote_reuse=0
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
   ssh $flags "$dest" "true" 2>/dev/null \
     || try_handshake "$host" \
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
   if [ -n "$DEPLOY_REF" ]; then
-    run_on "$host" "$(revision_checkout_cmd "$dir")" \
+    prepare_output="$(run_on_visible "$host" "$(revision_checkout_cmd "$dir")")" \
       || { bad "could not prepare the deploy revision"; return 1; }
-    remote_root="$(run_on "$host" "$(deploy_root_cmd "$dir")")" \
+    case "$prepare_output" in *deploy-tree-reused*) remote_reuse=1 ;; esac
+    remote_root="$(run_on_visible "$host" "$(deploy_root_cmd "$dir")")" \
       || { bad "could not resolve the deploy worktree root on $host"; return 1; }
     dir="${remote_root%/}/$TARGET_COMMIT"
   fi
   # The bundle goes over BEFORE the build, so the release this build assembles
   # embeds it (see the bundle note at the top of this file).
-  build_cmd="$(build_checkout_cmd "$dir")"
-  if [ -z "$DEPLOY_REF" ]; then
-    build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
+  if [ "$remote_reuse" = 1 ]; then
+    ok "reusing completed deployment worktree"
+  else
+    build_cmd="$(build_deploy_cmd "$dir" 0 "$remote_reuse")"
+    if [ -z "$DEPLOY_REF" ]; then
+      build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
+    fi
+    if [ "$remote_reuse" = 0 ] && ! builds_ui "$host"; then
+      ship_ui "$host" "$dest" "$dir" "$flags" || return 1
+      build_cmd="$(build_deploy_cmd "$dir" 1 "$remote_reuse")"
+    fi
+    ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
+      || { bad "pull/build failed"; return 1; }
   fi
-  if ! builds_ui "$host"; then
-    ship_ui "$host" "$dest" "$dir" "$flags" || return 1
-    build_cmd="$build_cmd SKIP_UI=1"
-  fi
-  ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
-    || { bad "pull/build failed"; return 1; }
   if [ -f "$AGENTS_FILE" ]; then
     ssh $flags "$dest" "mkdir -p ~/.config/shuttle" \
       || { bad "could not prepare remote agent registry"; return 1; }
@@ -1002,7 +1056,7 @@ deploy_remote() {
   # Cycle through the installed supervisor, or replace the tmux loop when no
   # launchd/systemd unit owns this host.
   check_listen "$host" || return 1
-  local supervisor
+  local supervisor=""
   supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
   if [ "$supervisor" = 1 ]; then
     run_on "$host" "$(daemon_kill)"
@@ -1013,11 +1067,9 @@ deploy_remote() {
     run_on "$host" "$(respawn_launcher_restart_cmd "$dir")" \
       || { bad "could not install and restart the respawn loop on $host"; return 1; }
   fi
-  verify_and_prune "$host" "$(fleet_dir "$host")" "$dir" \
-    || { bad "daemon did not verify or deploy worktrees could not be pruned on $host"; return 1; }
-  release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
-    || { bad "quarantine release failed"; return 1; }
-  return "$harness_failed"
+  verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" \
+    || { bad "deployment did not complete successfully on $host"; return 1; }
+  return 0
 }
 
 FAILED=""
