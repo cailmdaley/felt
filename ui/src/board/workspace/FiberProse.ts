@@ -109,10 +109,11 @@ export function buildFiberProse(
   const header = document.createElement('header')
   header.className = 'ws-prose-header'
   header.dataset.part = 'fiber-header'
-  if (card.status) {
+  const kicker = card.status ? fiberPageKicker(card) : ''
+  if (kicker) {
     const status = document.createElement('span')
     status.className = 'ws-prose-status'
-    status.textContent = fiberPageKicker(card)
+    status.textContent = kicker
     header.append(status)
   }
   const roles = rosterRoles(card.roles ?? [], opts)

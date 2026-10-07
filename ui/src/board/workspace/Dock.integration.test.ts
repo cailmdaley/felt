@@ -212,6 +212,11 @@ describe('state-shaped act zone', () => {
     expect(message.placeholder).toBe('')
   })
 
+  it.each([['open', 'open'], ['closed', 'closed']])('offers no verdicts on a %s fiber without a shuttle block', (_label, status) => {
+    // A note or a role opened from a link is not on the Desk's lifecycle.
+    band = dock.bandFor(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
+  })
   it('seats the verdicts on the status line in every unverdicted column, retaining a draft across runtime changes', () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
