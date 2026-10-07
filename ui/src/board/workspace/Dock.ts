@@ -1,5 +1,5 @@
 import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
-import { confirmWorkerStop, markVerdictHost } from './Verdicts.js'
+import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
@@ -433,7 +433,7 @@ export class Dock {
   private readonly shuttleBase: string
   private readonly onSaved: () => void
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
-  private queueVerdict?: (card: KanbanCard, target: 'tempered' | 'composted') => void
+  private queueVerdict?: (card: KanbanCard, target: Verdict) => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
   private readonly workerPhase: (card: KanbanCard) => boolean
@@ -699,18 +699,18 @@ export class Dock {
   }
 
   /** All control bands share the workspace's identity-keyed undo queue. */
-  setVerdictQueue(queue?: (card: KanbanCard, target: 'tempered' | 'composted') => void): void {
+  setVerdictQueue(queue?: (card: KanbanCard, target: Verdict) => void): void {
     this.queueVerdict = queue
     for (const band of this.bands.values()) band.setVerdictQueue(queue)
   }
 
-  verdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
+  verdict(card: KanbanCard, target: Verdict): void {
     if (this.queueVerdict) this.queueVerdict(card, target)
     else if (confirmWorkerStop(card, target)) this.commitVerdict(card, target)
   }
 
   /** Only the expired undo queue calls this in the workspace. */
-  commitVerdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
+  commitVerdict(card: KanbanCard, target: Verdict): void {
     this.onTransition(card, target)
   }
 

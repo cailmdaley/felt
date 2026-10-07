@@ -1769,6 +1769,7 @@
    zone keeps) never leaves the verb illegible. */
 :is(.kbn-action-tempered, .kbn-ctl-temper, .ws-verdict-word[data-verdict='tempered']) { --verdict-pigment: var(--kbn-tempered); }
 :is(.kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word[data-verdict='discarded']) { --verdict-pigment: var(--kbn-discarded); }
+.ws-verdict-word[data-verdict='review'] { --verdict-pigment: var(--ws-ink-muted, var(--kbn-ink)); }
 :is(.kbn-action-tempered, .kbn-ctl-temper, .kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word) {
   --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 72%, var(--ws-ink, var(--kbn-ink)));
   --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 12%, var(--ws-paper, var(--kbn-paper)));

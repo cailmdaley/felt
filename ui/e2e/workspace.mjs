@@ -1304,6 +1304,33 @@ test('A key discard waits on the constitution in place of the pair; undo, then T
   assert.equal(JSON.parse(writes[0].body).target, 'tempered')
 })
 
+test('a moves in-flight work to review through the Desk drag\'s transition, after an undo window z can cancel', async p => {
+  await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
+  p.on('dialog', dialog => dialog.accept())
+  const posts = async () => (await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition'))
+  await chooseDeskColumn(p, 1)
+  const card = p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' })
+  await card.click()
+  await choose(p, 'Constitution')
+  await appFocus(p); await p.keyboard.press('a')
+  const line = selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict > .ws-verdict-undo')
+  assert.equal(await line.textContent(), 'To review·undo z')
+  assert.equal(await p.locator('.ws-sr-only[aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'To review Remote covariance review · undo z')
+  if (process.env.WORKSPACE_SHOTS) {
+    await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+    await selected(p).locator('.ws-prose-header').screenshot({ path: `${process.env.WORKSPACE_SHOTS}/to-review-window-reader.png` })
+  }
+  await p.keyboard.press('z')
+  await p.clock.runFor(6000)
+  assert.equal((await posts()).length, 0)
+  await p.keyboard.press('a')
+  await p.clock.runFor(3999)
+  assert.equal((await posts()).length, 0)
+  await p.clock.runFor(1)
+  await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
+  assert.equal(JSON.parse((await posts())[0].body).target, 'awaitingReview')
+})
+
 for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay and undo through the same queue`, async p => {
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   if (surface === 'fiber') { await open(p); await choose(p, 'Constitution') }
