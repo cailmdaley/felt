@@ -2232,6 +2232,11 @@
 @media (prefers-reduced-motion: reduce) {
   .kbn-card-review-meta-actions { transition: none; }
 }
+/* A verdict given from the Desk waits out its undo window on the card's
+   foot: the meta row keeps its chips' height and gives way to the undo line
+   (workspace/verdicts.css), set in the actor chip's size. */
+.kbn-card-meta[data-verdict-pending] { min-height: 19px; }
+.kbn-card-meta > .ws-verdict-undo { font-size: calc(10px * var(--kbn-type-scale, 1)); letter-spacing: 0.04em; }
 
 /* ══════════════════════════════════════════════════════════════════════════
    THE DESK AT PHONE WIDTH

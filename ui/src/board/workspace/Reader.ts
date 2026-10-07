@@ -20,6 +20,7 @@ import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.
 import { groupJump } from './groupJump.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
+import { markVerdictHost } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
@@ -832,6 +833,7 @@ export class Reader {
     face.dataset.wsThemeBoundary = ''
     face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
     const meta = element('div', 'kbn-card-meta')
+    markVerdictHost(meta, card)
     const host = element('small', 'ws-channel-owner')
     const marks = overviewHostMarks(this.opts.cards().map(row => row.originId).concat(card.originId))
     host.textContent = `${marks.get(card.originId) ?? '○'} ${card.originId}`

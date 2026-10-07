@@ -73,7 +73,7 @@ export class ChannelThemes {
         color: var(--ws-ink); font-family: var(--ws-serif); line-height: 1.4; box-sizing: border-box;
       }
       }
-      :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) {
+      :where([data-ws-theme] [data-part="act"]) {
         ${declarations([...this.defaults].filter(([name]) => name !== '--ws-paper' && name !== '--ws-ink'))}
         --ws-ink-soft: var(--ws-ink); --ws-ink-muted: var(--ws-ink); --ws-ink-faint: var(--ws-ink);
         --ws-hairline: color-mix(in srgb, var(--ws-ink) 35%, transparent);
@@ -144,13 +144,6 @@ export class ChannelThemes {
     delete root.dataset.wsThemeName
     if (old) this.paint(old)
     if (changed) this.changed(root)
-  }
-  /** Only the queued verdict's paper and ink cross into the body-level ACT toast. */
-  material(root: HTMLElement): { paper: string; ink: string } | undefined {
-    const entry = this.roots.get(root)
-    if (!entry || this.plain.has(entry.key) || !root.classList.contains('ws-reader')) return
-    const style = getComputedStyle(root)
-    return { paper: style.getPropertyValue('--ws-paper').trim(), ink: style.getPropertyValue('--ws-ink').trim() }
   }
   private changed(root: HTMLElement): void {
     this.changes.add(root)

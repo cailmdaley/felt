@@ -107,40 +107,30 @@ native('serializes escaped custom-property names without escaping the channel', 
   expect(facts).toEqual({ opacity: '0.75', own: '1', act: '' })
 })
 
-native('keeps standalone toast material and ACT pigments independent of channel author CSS', async () => {
+native('keeps ACT pigments independent of channel author CSS', async () => {
   const surface = readFileSync(resolve('src/board/workspace/themes/surface.css'), 'utf8')
-  const toastCss = readFileSync(resolve('src/board/workspace/verdicts.css'), 'utf8')
-  const facts = await page.evaluate(({ sharedDefaults, surface, toastCss }) => {
+  const facts = await page.evaluate(({ sharedDefaults, surface }) => {
     const compile = (globalThis as unknown as { compileTheme(css: string, scope: string, ns: string): string }).compileTheme
     document.head.querySelectorAll('style').forEach(el => el.remove())
     document.body.innerHTML = `<section class="ws-reader" data-ws-theme="dark" data-ws-theme-boundary>
       <div data-part="act" data-act="worker" class="worker"><button>Worker</button></div>
       <div class="ws-constitution-card" data-ws-theme-boundary><button class="kbn-card-worker">Plain worker</button></div>
-      </section><div class="ws-verdict-toasts"><div class="ws-verdict-toast" data-part="act" data-act="toast" data-ws-act-material>Tempered <button>Undo</button></div></div>`
+      </section>`
     const add = (css: string): void => { const style = document.createElement('style'); style.textContent = css; document.head.append(style) }
     add(`:root { --ws-paper: white; --ws-ink: black; --ws-serif: Georgia, serif; --ws-radius: 10px; }
       .worker button { color: var(--ws-agent); font-family: var(--ws-serif); }
       .kbn-card-worker { color: black; }
       .ws-constitution-card { display: grid; width: 280px; padding: 12px; }`)
-    add(surface); add(sharedDefaults); add(toastCss)
+    add(surface); add(sharedDefaults)
     add(compile(':scope { --ws-paper: rgb(20, 36, 39); --ws-ink: rgb(240, 237, 225); --ws-agent: red; --ws-verdict: red; --custom: 1; font-family: fantasy; } button { color: red; }', '[data-ws-theme="dark"]', 'dark'))
-    const reader = document.querySelector<HTMLElement>('.ws-reader')!, toast = document.querySelector<HTMLElement>('.ws-verdict-toast')!
-    const material = getComputedStyle(reader)
-    toast.style.setProperty('--ws-paper', material.getPropertyValue('--ws-paper'))
-    toast.style.setProperty('--ws-ink', material.getPropertyValue('--ws-ink'))
-    const style = getComputedStyle(toast), undo = getComputedStyle(toast.querySelector('button')!)
+    const reader = document.querySelector<HTMLElement>('.ws-reader')!
     const worker = getComputedStyle(reader.querySelector('.worker button')!)
     const plain = getComputedStyle(reader.querySelector('.ws-constitution-card')!)
     const plainWorker = getComputedStyle(reader.querySelector('.kbn-card-worker')!)
-    const facts = { paper: style.backgroundColor, ink: style.color, undo: undo.color, font: undo.fontFamily, custom: style.getPropertyValue('--custom').trim(),
+    return { custom: getComputedStyle(reader.querySelector('.worker')!).getPropertyValue('--custom').trim(),
       worker: worker.color, workerFont: worker.fontFamily,
       plain: { display: plain.display, width: plain.width, padding: plain.padding, worker: plainWorker.color } }
-    reader.removeAttribute('data-ws-theme')
-    return { ...facts, afterNavigation: getComputedStyle(toast).backgroundColor }
-  }, { sharedDefaults, surface, toastCss })
-  expect(facts.paper).toBe('rgb(20, 36, 39)'); expect(facts.ink).toBe('rgb(240, 237, 225)')
-  expect(facts.afterNavigation).toBe(facts.paper)
-  expect(facts.undo).not.toBe('rgb(255, 0, 0)'); expect(facts.font).not.toContain('fantasy')
+  }, { sharedDefaults, surface })
   expect(facts.custom).toBe(''); expect(facts.worker).not.toBe('rgb(255, 0, 0)'); expect(facts.workerFont).not.toContain('fantasy')
   expect(facts.plain).toEqual({ display: 'grid', width: '280px', padding: '12px', worker: 'rgb(0, 0, 0)' })
 }, 15000)

@@ -282,7 +282,7 @@ test('Hostile report keys cannot queue verdicts or open controls; trusted and po
     }
   })
   await p.waitForTimeout(150)
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal(await p.locator('.ws-verdict-undo').count(), 0)
   assert.equal(await selected(p).getAttribute('data-key'), key)
   assert.equal(await p.locator('.ws-expanded').count(), 0)
   assert.equal((await records(p)).filter(r => r.method === 'POST').length, before)
@@ -1052,7 +1052,7 @@ test('Verdicts live on the constitution: leading plates in review, the composer 
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('t')
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 1, 't still works from a delivery')
+  assert.equal(await selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict > .ws-verdict-undo').count(), 1, 't still works from a delivery, and brings the constitution forward to show it')
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
   await p.clock.runFor(6000)
   await poll(p, () => window.__harness.requests.some(r => r.method === 'POST' && r.url.includes('/transition')))
@@ -1078,9 +1078,8 @@ async function verdictLook(locator) {
     const rgb = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3) }
     const luminance = color => rgb(color).map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0)
     const style = getComputedStyle(el)
-    // A bare verb stands on its surface: the toast, or the fiber page's paper.
+    // A bare verb stands on its surface: the act zone, or the fiber page's paper.
     const fillColor = style.backgroundColor !== 'rgba(0, 0, 0, 0)' ? style.backgroundColor
-      : el.closest('.ws-verdict-toast') ? getComputedStyle(el.closest('.ws-verdict-toast')).backgroundColor
       : el.closest('.ws-dock') ? getComputedStyle(el.closest('.ws-dock')).backgroundColor
       : getComputedStyle(el.closest('.ws-reader')?.querySelector('[data-part="veil"]') ?? document.body).getPropertyValue('--ws-ground').trim() || getComputedStyle(document.body).backgroundColor
     const ink = luminance(style.color), fill = luminance(fillColor)
@@ -1097,12 +1096,12 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
   looks.act = [await verdictLook(selected(p).locator('.kbn-ctl-verdict .kbn-ctl-temper')), await verdictLook(selected(p).locator('.kbn-ctl-verdict .kbn-ctl-discard'))]
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await selected(p).locator('.kbn-ctl-verdict .kbn-ctl-discard').click()
-  looks.toast = [await verdictLook(p.locator('.ws-verdict-toast .ws-verdict-word'))]
+  looks.line = [await verdictLook(selected(p).locator('.kbn-ctl-verdict > .ws-verdict-undo .ws-verdict-word'))]
   for (const [surface, [temper, discard]] of Object.entries(looks)) {
     if (temper && discard) { assert.ok(tealish(temper.color), `${surface} Temper ink is verdigris: ${temper.color}`); assert.ok(reddish(discard.color), `${surface} Discard ink is red: ${discard.color}`) }
     for (const look of [temper, discard].filter(Boolean)) assert.ok(look.ratio >= 4.5, `${surface} verdict ink ${look.color} on ${look.fill}: ${look.ratio.toFixed(2)}:1`)
   }
-  assert.ok(reddish(looks.toast[0].color), 'the toast names a discard in red')
+  assert.ok(reddish(looks.line[0].color), 'the undo line names a discard in red')
   if (!theme) {
     await p.keyboard.press('z')
     await p.goto(url)
@@ -1228,15 +1227,19 @@ for (const reducedMotion of ['no-preference', 'reduce']) test(`Sidebar toggle is
   }
 }, undefined, 'false', reducedMotion)
 
-test('Key discard then act-zone Temper replaces the pending verdict with one delayed write', async p => {
+test('A key discard waits on the constitution in place of the pair; undo, then Temper, makes one delayed write', async p => {
   await open(p); await reportReady(p)
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('x')
+  assert.equal(await tab(p, 'Constitution').getAttribute('aria-selected'), 'true', 'the key brings the constitution forward')
+  const pair = selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict')
+  assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^DISCARDED/i)
+  assert.ok(await pair.getByRole('button', { name: 'Temper', exact: true }).isHidden(), 'the pair gives way to the line')
   await p.clock.runFor(3000)
-  await choose(p, 'Constitution')
-  await selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict').getByRole('button', { name: 'Temper', exact: true }).click()
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
-  assert.match(await p.locator('.ws-verdict-toast').innerText(), /^Tempered/)
+  await pair.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
+  await pair.getByRole('button', { name: 'Temper', exact: true }).click()
+  assert.equal(await selected(p).locator('.ws-fiber-acts .ws-verdict-undo').count(), 1)
+  assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^TEMPERED/i)
   await p.clock.runFor(3999)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
   await p.clock.runFor(1)
@@ -1253,7 +1256,9 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
     ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-review-meta-actions')
     : selected(p).locator('.kbn-ctl-verdict')
   await controls.getByRole('button', { name: /Discard/ }).click({ force: true })
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 1)
+  const host = surface === 'Desk' ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta') : controls
+  assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
+  assert.equal(await p.locator('.ws-verdict-toasts').count(), 0, 'no floating line')
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
   await p.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
   await p.clock.runFor(6000)
@@ -1269,14 +1274,15 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   const composer = selected(p).locator('textarea.kbn-detail-directive')
   assert.ok(await composer.evaluate(el => el === document.activeElement))
   await composer.press('t'); await composer.press('x')
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal(await p.locator('.ws-verdict-undo').count(), 0)
   await appFocus(p)
   for (const init of [{ isComposing: true }, { keyCode: 229 }, { metaKey: true }, { ctrlKey: true }]) {
     await p.evaluate(init => document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', bubbles: true, ...init })), init)
   }
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal(await p.locator('.ws-verdict-undo').count(), 0)
   await p.keyboard.press('t')
-  assert.equal((await p.locator('.ws-verdict-toast').textContent()).replace(/\s+/g, ' '), 'Tempered Calibrate the shear response · undo z')
+  assert.equal(await selected(p).locator('.ws-fiber-acts .ws-verdict-undo').textContent(), 'Tempered·undo z')
+  assert.equal(await p.locator('.ws-sr-only[aria-live="polite"]').filter({ hasText: 'undo z' }).textContent(), 'Tempered Calibrate the shear response · undo z')
   assert.equal((await posts()).length, 0)
   await p.clock.runFor(3999)
   assert.equal((await posts()).length, 0)
@@ -1302,9 +1308,9 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
   await choose(p, 'Constitution')
   assert.ok(await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), 'a draft carries the pair on its status line')
   await p.keyboard.press('t')
-  await p.locator('.ws-verdict-toast').waitFor()
+  await selected(p).locator('.ws-fiber-acts .ws-verdict-undo').waitFor()
   await p.keyboard.press('z')
-  await poll(p, () => !document.querySelector('.ws-verdict-toast'))
+  await poll(p, () => !document.querySelector('.ws-verdict-undo'))
   await leave(p)
   await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
@@ -1324,7 +1330,7 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
   await Promise.race([dialogHandled, p.waitForTimeout(50)])
   assert.deepEqual(dialogErrors, [])
   assert.equal(asked.length, 1, 'tempering a live worker asks first')
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 0)
+  assert.equal(await p.locator('.ws-verdict-undo').count(), 0)
   assert.equal((await records(p)).filter(r => r.method === 'POST' && r.url.includes('/transition')).length, 0)
 })
 
@@ -1336,7 +1342,7 @@ test('Pending verdicts on two fibers commit independently', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Mask validation notes' }).click()
   await poll(p, () => document.querySelector('.ws-channel-title')?.textContent === 'Mask validation notes')
   await p.keyboard.press('x')
-  assert.equal(await p.locator('.ws-verdict-toast').count(), 2)
+  assert.equal(await p.evaluate(() => new Set([...document.querySelectorAll('[data-verdict-pending]')].map(el => el.dataset.verdictKey)).size), 2)
   await p.clock.runFor(6000)
   await poll(p, () => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length === 2)
 })
@@ -2072,7 +2078,7 @@ for (const view of ['desk', 'chronicle']) test(`${view === 'desk' ? 'Desk' : 'Ch
 })
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-  test(`Worker plate and undo toast states: ${device}`, async p => {
+  test(`Worker plate and undo line states: ${device}`, async p => {
     const shot = async state => {
       if (!process.env.WORKSPACE_SHOTS) return
       await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
@@ -2095,13 +2101,12 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     }
     await shot('awaiting-review')
     await p.keyboard.press('t')
-    await p.locator('.ws-verdict-toast').waitFor()
-    assert.equal(await p.locator('.ws-verdict-toasts').getAttribute('aria-live'), 'polite')
-    assert.equal(await p.locator('.ws-verdict-toast').evaluate(e => getComputedStyle(e).animationName), 'none')
-    const toastBox = await p.locator('.ws-verdict-toasts').boundingBox()
-    const labelBox = await p.locator(device === 'phone' ? '.ws-thumbbar' : '.ws-selected .ws-labelbar').boundingBox()
-    assert.ok(toastBox.y + toastBox.height <= labelBox.y - 12, 'undo toast clears the page label or phone bottom bar by 12 px')
-    await shot('toast')
+    const line = selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict > .ws-verdict-undo')
+    await line.waitFor()
+    assert.equal(await line.evaluate(e => getComputedStyle(e).animationName), 'none')
+    assert.deepEqual(await line.boundingBox(), await selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict').boundingBox(), 'the undo line takes the pair\'s footprint')
+    if (device === 'phone') assert.ok((await line.getByRole('button').boundingBox()).height >= 44, 'undo is thumb-sized')
+    await shot('undo-line')
     await p.keyboard.press('z')
     await leave(p)
     await chooseDeskColumn(p, 1)
@@ -2599,24 +2604,17 @@ test('Nested sidebar cards reset foreign variables, including cards in Plain', a
   await assertNeutral()
 }, { width: 1379, height: 900 }, 'true')
 
-test('Protected verdict plate and portaled toast retain material without author CSS', async p => {
+test('Protected verdict plate and its undo line hold without author CSS', async p => {
   await open(p)
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   await choose(p, 'Constitution')
   const plate = selected(p).locator('.ws-fiber-acts .kbn-ctl-verdict')
   assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'verdict')
   assert.notEqual(await plate.getByRole('button', { name: 'Temper', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
-  await choose(p, 'calibration-report')
-  const material = await p.locator('.ws-reader').evaluate(el => ({ paper: getComputedStyle(el).getPropertyValue('--ws-paper').trim(), ink: getComputedStyle(el).getPropertyValue('--ws-ink').trim() }))
   await appFocus(p); await p.keyboard.press('t')
-  const toast = p.locator('.ws-verdict-toast')
-  await toast.waitFor()
-  assert.equal(await toast.getAttribute('data-part'), 'act')
-  assert.equal(await toast.getAttribute('data-act'), 'toast')
-  assert.equal(await toast.getAttribute('data-ws-theme'), null)
-  await leave(p)
-  assert.deepEqual(await toast.evaluate(el => ({ paper: getComputedStyle(el).getPropertyValue('--ws-paper').trim(), ink: getComputedStyle(el).getPropertyValue('--ws-ink').trim() })), material)
-  assert.ok(!await toast.getByRole('button').evaluate(el => getComputedStyle(el).fontFamily.includes('fantasy')))
+  const undo = plate.locator('.ws-verdict-undo button')
+  await undo.waitFor()
+  assert.ok(!await undo.evaluate(el => getComputedStyle(el).fontFamily.includes('fantasy')))
   await p.keyboard.press('z')
 }, { width: 1379, height: 900 })
 

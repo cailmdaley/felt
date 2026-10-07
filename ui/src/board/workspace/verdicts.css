@@ -1,32 +1,35 @@
-.ws-verdict-toasts {
-  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: calc(var(--ws-stage-inset) + var(--ws-label-height) + var(--ws-inset) + var(--ws-line-width));
-  left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px;
-  width: max-content; max-width: calc(100vw - 24px); pointer-events: none;
+/* A verdict's undo window is drawn where the verdict was given: the
+   controls that gave it keep their footprint but give way to one quiet
+   line, the verdict in its pigment and "undo z", in the status line's mono
+   capitals. It fades through its last moments, so its going is not a
+   surprise; a host rebuilt mid-window joins the fade where it stands. */
+[data-verdict-pending] { position: relative; }
+[data-verdict-pending] > :not(.ws-verdict-undo) { visibility: hidden; }
+.ws-verdict-undo {
+  position: absolute; inset: 0; display: flex; align-items: center; gap: var(--ws-small-gap);
+  white-space: nowrap; pointer-events: auto; text-box: trim-both cap alphabetic;
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase;
+  animation: ws-verdict-leave 600ms ease calc(var(--ws-verdict-left, 4000ms) - 600ms) forwards;
 }
-/* A verdict's undo window is one quiet line: the verdict in its pigment and
-   "undo z", on a small paper plate with a hairline. It fades through its
-   last moments, so its going is not a surprise. */
-.ws-verdict-toast {
-  pointer-events: auto; display: inline-flex; align-items: baseline; gap: 12px; padding: 4px 12px;
-  border: var(--ws-line-width) solid var(--ws-hairline-soft, var(--ws-hairline)); border-radius: var(--ws-control-radius);
-  background: var(--ws-paper); box-shadow: var(--ws-shadow-low);
-  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-serif);
-  animation: ws-verdict-arrive 160ms ease, ws-verdict-leave 600ms ease calc(var(--ws-verdict-life, 4000ms) - 600ms) forwards;
+.ws-verdict-undo[data-fresh] {
+  animation: ws-verdict-arrive 160ms ease, ws-verdict-leave 600ms ease calc(var(--ws-verdict-left, 4000ms) - 600ms) forwards;
 }
-.ws-verdict-toast button {
-  border: 0; padding: 0; color: var(--ws-ink-muted); background: transparent; font: inherit; cursor: pointer;
+.ws-verdict-undo button {
+  border: 0; padding: 0; color: inherit; background: transparent; cursor: pointer;
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
 }
-.ws-verdict-toast button:hover { color: var(--ws-ink); }
-.ws-verdict-toast kbd { font: var(--ws-small-size)/1 var(--ws-mono); opacity: .7; }
-.ws-verdict-toast button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
-@keyframes ws-verdict-arrive { from { opacity: 0; transform: translateY(4px); } }
-@keyframes ws-verdict-leave { to { opacity: 0; } }
+.ws-verdict-undo button:hover { color: var(--ws-ink); }
+.ws-verdict-undo kbd { font: inherit; text-transform: none; }
+.ws-verdict-undo button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
+/* The fiber page's pair sits at its line's right end; so does the line. */
+.kbn-ctl-verdict > .ws-verdict-undo { justify-content: flex-end; }
+/* On a Desk card the line takes the card's foot (KanbanModal.css). */
+@keyframes ws-verdict-arrive { from { opacity: 0; } }
+@keyframes ws-verdict-leave { to { opacity: .3; } }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-verdict-toasts { bottom: calc(var(--ws-thumb-height) + 12px + env(safe-area-inset-bottom)); }
-  .ws-verdict-toast { padding-block: 0; align-items: center; }
-  .ws-verdict-toast button { min-height: 44px; min-width: 44px; }
+  .ws-verdict-undo button { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin-block: -12px; }
 }
-@media (prefers-reduced-motion: reduce) { .ws-verdict-toast { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ws-verdict-undo, .ws-verdict-undo[data-fresh] { animation: none; } }
 
 /* Verdict verbs wear their pigment wherever the workspace offers them (the
    recipe and pigments live with the Desk's, in KanbanModal.css). */

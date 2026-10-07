@@ -1,5 +1,5 @@
 /* Inherited CSS stops here too; the ordinary control rules rebuild this zone. */
-:where([data-ws-theme] [data-part='act'], [data-ws-act-material]) { all: initial; display: revert; }
+:where([data-ws-theme] [data-part='act']) { all: initial; display: revert; }
 /* The shared worker control keeps its pigments on the channel's paper. */
 @scope ([data-ws-theme]) to (:scope [data-ws-theme-boundary], :scope [data-ws-theme]) {
   :scope .kbn-card-worker { color: var(--ws-ink-soft); }

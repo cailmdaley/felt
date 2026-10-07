@@ -93,7 +93,6 @@ describe('channel theme lifetime and owner reads', () => {
     expect(defaults).toContain(':where([data-ws-theme-boundary]:not(.ws-reader))')
     expect(defaults).toContain('@layer shuttle-theme-defaults')
     expect(defaults).toContain('--ws-paper: white;')
-    expect(defaults).toContain('[data-ws-act-material]')
     themes.togglePlain(card)
     expect(el.hasAttribute('data-ws-theme-boundary')).toBe(true)
     expect(el.hasAttribute('data-ws-theme')).toBe(false)
@@ -130,20 +129,6 @@ describe('channel theme lifetime and owner reads', () => {
       expect(events).toHaveLength(4)
     } finally { document.removeEventListener('workspace-theme-change', listener) }
   })
-  it('returns material only from a currently bound, non-Plain reader', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })))
-    const reader = root(), folio = root()
-    reader.className = 'ws-reader'
-    reader.style.setProperty('--ws-paper', 'rgb(1, 2, 3)')
-    reader.style.setProperty('--ws-ink', 'rgb(250, 251, 252)')
-    themes.bind(reader, card); themes.bind(folio, card)
-    expect(themes.material(reader)).toEqual({ paper: 'rgb(1, 2, 3)', ink: 'rgb(250, 251, 252)' })
-    expect(themes.material(folio)).toBeUndefined()
-    themes.togglePlain(card); expect(themes.material(reader)).toBeUndefined()
-    themes.togglePlain(card); themes.unbind(reader)
-    expect(themes.material(reader)).toBeUndefined()
-  })
-
   it('coalesces reader and folio reads, revalidates by ETag only on the refresh cadence', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(':scope { --ws-paper: white; }', { headers: { ETag: '"one"' } }))
       .mockResolvedValueOnce(new Response(null, { status: 304 }))

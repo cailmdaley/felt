@@ -51,13 +51,11 @@ Nested roots reset inherited typography and custom properties, so a foreign card
 
 ### Act zone
 
-The composer and its verbs, Temper/Discard, verdict plates, the fiber page and sidebar worker controls, and the undo toast are **act zones**, marked `data-part="act"`.
-The `data-act` attribute identifies `composer`, `verdict`, `worker` or `toast`; it isn't permission for theme rules to enter.
+The composer and its verbs, Temper/Discard, verdict plates (and the undo line that takes their place while a verdict waits), and the fiber page and sidebar worker controls are **act zones**, marked `data-part="act"`.
+The `data-act` attribute identifies `composer`, `verdict` or `worker`; it isn't permission for theme rules to enter.
 Each generated CSS scope stops before that zone, so even a broad `button { color: red }` rule can't select Temper or the worker control.
 The zone also resets inherited UI variables and typography to the unthemed defaults, accepting only `--ws-paper` and `--ws-ink` from the channel.
 Its hairlines and control fills derive from that paper and ink; its fonts, sizing and pigment meanings remain Shuttle's.
-The body-level undo toast copies those two material tokens when the verdict is queued, retaining that constitution's paper and ink if the reader navigates elsewhere.
-It never receives the author's scoped CSS.
 This boundary is structural, not a styling convention.
 
 `@font-face` definitions are hoisted as written; give custom font families distinctive names because their definitions are document-wide.
@@ -111,7 +109,7 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | `[data-part='page-frame']` | Paper sheet enclosing content and label |
 | `[data-part='fiber-header']` | Fiber status header |
 | `[data-part='fiber-title']` | Constitution title |
-| `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts, workers and undo toast |
+| `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts and workers |
 | `[data-part='prose']` | Fiber article or text/Markdown pane |
 | `[data-part='prose'] h1`, `h2`, `h3`, `p`, `blockquote`, `code`, `table`, `hr` | Prose elements; prefix each with the prose selector |
 | `[data-part='thumbnail']` | Shared preview's UI paper in folios, changed-work rows and the page sheet |
