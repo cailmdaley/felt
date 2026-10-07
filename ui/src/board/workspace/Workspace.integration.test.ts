@@ -322,6 +322,22 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(returned).toHaveBeenCalledWith(expect.objectContaining({ uid: 'beta', originId: 'host-b' }))
   })
+  it('includes folded queued drafts in their own lifecycle group without moving closed queue members out of review', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const head = { ...cards[0], status: 'active' }
+    const queued = { ...cards[1], dependsOn: [head.uid!], dependsOnShape: 'scalar' as const, foldedUnder: head.id }
+    const review = { ...queued, id: 'work/review', uid: 'review', name: 'Review', status: 'closed' }
+    const feed = [review, head, queued]
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.open(head, 'Desk'); await flush()
+    const rows = [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')]
+    expect(rows.map(row => row.dataset.channelUid)).toEqual(['beta', 'alpha', 'review'])
+    expect(rows.map(row => row.closest('.ws-channel-group')?.querySelector('h3')?.textContent)).toEqual(['Drafts', 'Aloft', 'Awaiting review'])
+    expect(rows[0].querySelector('.ws-channel-queued')?.textContent).toBe('QUEUED')
+    expect(rows[0].querySelector('.ws-channel-queued')?.getAttribute('title')).toBe('Queued after Alpha')
+    expect(rows[2].querySelector('.ws-channel-queued')?.textContent).toBe('QUEUED')
+  })
   it('captions In flight as its Aloft and Holding bands even from an interleaved feed, and J/K stops at each', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')

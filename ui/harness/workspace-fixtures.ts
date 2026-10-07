@@ -251,6 +251,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
         // Distinct from frontmatter stamps and receipt times: real file mtime.
         modified_at: iso(-47 * minute),
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
+        ...(fiber.id === 'research/workspace/weekly-summary' ? { depends_on: WORKSPACE_UID } : {}),
         ...(fiber.collaboration ? { collaboration: fiber.collaboration } : {}),
         shuttle: {
           kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
