@@ -99,6 +99,8 @@ export async function installWikilinks(
   opts: {
     shuttleBase: string
     onOpen: (fiberId: string) => void
+    /** Resolve only a target the index names exactly, never by suffix, case or title. */
+    exact?: boolean
     /** Guard against a panel that closed (or re-rendered) while we awaited. */
     stillCurrent?: () => boolean
   },
@@ -119,7 +121,7 @@ export async function installWikilinks(
 
   for (const a of links) {
     const target = a.dataset.fiber ?? ''
-    const id = resolveWikilink(target, index)
+    const id = opts.exact ? (index.some(row => row.id === target) ? target : null) : resolveWikilink(target, index)
     if (!id) {
       deaden(a)
       continue

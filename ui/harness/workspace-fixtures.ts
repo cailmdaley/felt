@@ -101,6 +101,24 @@ export function installWorkspaceNativeURLs(example: WorkspaceExample): Workspace
   return { blobURLs, rewrites }
 }
 
+/** The role store's fibers the fixture rosters name: a role and its holder, each a plain note. */
+export const ROLE_NOTES = [
+  {
+    id: 'roles/surveyor',
+    uid: '01KVBR8P3JM2BTP4BB78T245T5',
+    name: 'Surveyor',
+    outcome: 'Walks a project end to end and maps what is there before anyone builds on it.',
+    body: 'The surveyor reads before it writes: the code, the data products and the open questions, in that order.\n\nHeld by [[roles/surveyor/opus]].',
+  },
+  {
+    id: 'roles/surveyor/opus',
+    uid: '01KVBR9Q4KN3CVQ5CC89V356V6',
+    name: 'Surveyor: opus',
+    outcome: 'Opus holds the surveyor role across the workspace projects.',
+    body: 'Notes this holder keeps between surveys.',
+  },
+]
+
 export const MUSIC_UID = '01KVBR7N2HK1ASN3AA67W134S4'
 export const MUSIC_NAME = 'Music'
 export const MUSIC_TRACKS = 19
@@ -124,6 +142,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       age: 0.1,
       outcome: 'The response passes the null test at every scale; the report and source products are ready for review.',
       host: WORKSPACE_HOST,
+      collaboration: { surveyor: ['opus'] },
     },
     {
       id: 'research/workspace/weekly-summary',
@@ -142,6 +161,9 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       age: 2,
       outcome: 'Check the covariance products on the remote host before the next run.',
       host: WORKSPACE_REMOTE,
+      // Two roles; the second names no role fiber, so it reads as plain text,
+      // and is long enough to need cutting at a phone's width.
+      collaboration: { surveyor: [], 'covariance-archivist-and-steward': [] },
     },
     {
       id: 'research/workspace/mask-validation',
@@ -203,6 +225,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
         // Distinct from frontmatter stamps and receipt times: real file mtime.
         modified_at: iso(-47 * minute),
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
+        ...(fiber.collaboration ? { collaboration: fiber.collaboration } : {}),
         shuttle: {
           kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
           schedule: fiber.id === 'pipeline/spin/remote-review' ? { expr: '0 9 * * *', tz: 'UTC' } : undefined,
@@ -361,6 +384,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       return { id: String(fiber.id), name: String(fiber.name) }
     }),
     { id: 'research/workspace/method-note', name: 'Method note' },
+    ...ROLE_NOTES.map(({ id, name }) => ({ id, name })),
   ]
   const fileMap = new Map(files.map(item => [key(item.owner, item.path), item]))
   const fileResponse = (url: string, method: string, requestHeaders?: HeadersInit): Response => {

@@ -62,6 +62,33 @@ export function installBodyFileLinks(
   }
 }
 
+/**
+ * The roster's roles for the status line, left of the worker pill: each role
+ * is a wikilink to its fiber `roles/<slug>`, live when the index names that
+ * exact id and plain text otherwise.
+ */
+function rosterRoles(roles: string[], opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement | null {
+  if (roles.length === 0) return null
+  const el = document.createElement('span')
+  el.className = 'ws-fiber-roles'
+  el.dataset.part = 'roles'
+  el.setAttribute('role', 'group')
+  el.setAttribute('aria-label', roles.length === 1 ? 'Role' : 'Roles')
+  for (const slug of roles) {
+    const role = document.createElement('span')
+    role.className = 'ws-fiber-role'
+    const link = document.createElement('a')
+    link.className = 'kbn-wikilink'
+    link.dataset.fiber = `roles/${slug}`
+    link.dataset.wikilinkRaw = slug
+    link.textContent = slug
+    role.append(link)
+    el.append(role)
+  }
+  void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, exact: true })
+  return el
+}
+
 export function buildFiberProse(
   card: KanbanCard,
   channel: Channel,
@@ -88,6 +115,8 @@ export function buildFiberProse(
     status.textContent = fiberPageKicker(card)
     header.append(status)
   }
+  const roles = rosterRoles(card.roles ?? [], opts)
+  if (roles) header.append(roles)
   if (opts.acts) header.append(opts.acts)
   const title = document.createElement('h1')
   title.textContent = channel.name
