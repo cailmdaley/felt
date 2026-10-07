@@ -228,7 +228,7 @@ export class Workspace {
     const cards = this.opts.cards()
     const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
     return [
-      ...cards.filter(card => fiberPageColumn(card) === 'drafts' && !card.foldedUnder),
+      ...cards.filter(card => fiberPageColumn(card) === 'drafts'),
       ...IN_FLIGHT_BANDS.flatMap(([band]) => flight.filter(card => inFlightBand(card) === band)),
       ...cards.filter(card => fiberPageColumn(card) === 'awaitingReview'),
     ]

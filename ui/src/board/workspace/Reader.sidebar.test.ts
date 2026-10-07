@@ -94,6 +94,33 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
+  it('replaces worker text with queued text, resolves predecessor UIDs, and refreshes when the edge clears', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const queued = { ...beta, dependsOn: [alpha.uid!.toUpperCase()], foldedUnder: alpha.id }
+    listedCards = [queued, alpha]
+    const workerPill = vi.fn(() => {
+      const pill = document.createElement('button'); pill.className = 'kbn-card-worker'; return pill
+    })
+    const reader = makeReader(alpha, undefined, workerPill)
+    const row = (): HTMLElement => reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="beta"]')!
+    expect(row().querySelector('.ws-channel-queued')?.textContent).toBe('QUEUED')
+    expect(row().querySelector('.ws-channel-queued')?.getAttribute('title')).toBe('Queued after Alpha')
+    expect(row().querySelector('.kbn-card-worker')).toBeNull()
+    listedCards = [{ ...queued, workerState: 'running', runtimePhase: 'working', tmuxSession: 'beta-worker' }, alpha]
+    reader.refreshChannels()
+    expect(row().querySelector('.ws-channel-queued')).toBeNull()
+    expect(row().querySelector('.ws-worker-state')?.textContent).toBe('aloft')
+    listedCards = [beta, alpha]
+    reader.refreshChannels()
+    expect(row().querySelector('.ws-channel-queued')).toBeNull()
+    expect(row().querySelector('.kbn-card-worker')).not.toBeNull()
+  })
+  it('names missing and multiple predecessors without inventing a live worker', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    listedCards = [{ ...beta, dependsOn: [alpha.id, 'missing'], dependsOnShape: 'list' }, alpha]
+    const reader = makeReader()
+    expect(reader.el.querySelector('.ws-channel-queued')?.getAttribute('title')).toBe('Queued after Alpha, missing')
+  })
   it('gives a sidebar worker separate state and elapsed text without replacing its conversation target', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 60000 }

@@ -1,6 +1,7 @@
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker } from '../KanbanTypes.js'
 import { onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
@@ -839,10 +840,19 @@ export class Reader {
     host.textContent = `${marks.get(card.originId) ?? '○'} ${card.originId}`
     host.title = card.originId
     meta.append(host)
-    const pill = this.opts.workerPill?.(card)
-    if (pill) {
-      pill.dataset.part = 'act'; pill.dataset.act = 'worker'
-      meta.append(workerPlate(card, pill))
+    if (card.dependsOn?.length && !hasLiveWorker(card)) {
+      const queued = element('span', 'ws-channel-queued ws-role-hold-column')
+      queued.textContent = 'QUEUED'
+      const rows = this.opts.cards()
+      const names = card.dependsOn.map(id => rows.find(row => row.id === id || row.uid?.toLowerCase() === id.toLowerCase())?.name ?? id)
+      queued.title = `Queued after ${names.join(', ')}`
+      meta.append(queued)
+    } else {
+      const pill = this.opts.workerPill?.(card)
+      if (pill) {
+        pill.dataset.part = 'act'; pill.dataset.act = 'worker'
+        meta.append(workerPlate(card, pill))
+      }
     }
     face.append(meta)
     return face
