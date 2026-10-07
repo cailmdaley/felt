@@ -96,6 +96,7 @@ type harnessDeployCase struct {
 	after      string // `felt setup receipt --json` once a Claude/Codex setup has run (default: receipt)
 	version    string // `felt --version`
 	piAt       string // pi's clone HEAD; empty = pi has no felt GitHub package
+	exactRef   string // deploy revision, empty for a branch deploy
 	piAfter    string // pi's clone HEAD once `felt setup pi` has run
 	piLocal    string // a local pi package: "checkout", a commit, "nogit", or "" for none
 	piLocalAs  string // its committed package.json name (default felt)
@@ -211,9 +212,14 @@ case "$3 $4 $5" in
   "rev-parse HEAD ") cat "$2/HEAD_SHA" ;;
   "rev-parse --git-dir ") echo .git ;;
   "show HEAD:package.json ") cat "$2/HEAD_package.json" ;;
-  "status --porcelain --untracked-files=no")
+  "status --porcelain --untracked-files=no"|"status --porcelain ")
     [ ! -f "$2/STATUS_FAIL" ] || { echo "fatal: index file corrupt" >&2; exit 128; }
     cat "$2/STATUS" 2>/dev/null ;;
+  "fetch origin $5")
+    [ "$5" = "$HARNESS_HEAD" ] || { echo "could not fetch $5" >&2; exit 1; } ;;
+  "checkout --detach $5")
+    [ "$5" = "$HARNESS_HEAD" ] || exit 1
+    printf '%s' "$5" > "$2/HEAD_SHA" ;;
   *) exit 2 ;;
 esac
 `, 0o755)
@@ -226,7 +232,7 @@ esac
 harness_setup_cmd "$CHECKOUT" | /bin/bash
 `
 	cmd := exec.Command("/bin/bash", "-c", harness)
-	cmd.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin", "FAKE_DIR="+fake, "CHECKOUT="+checkout)
+	cmd.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin", "FAKE_DIR="+fake, "CHECKOUT="+checkout, "HARNESS_HEAD="+harnessHead, "DEPLOY_REF="+c.exactRef)
 	out, runErr := cmd.CombinedOutput()
 	var calls []string
 	if data, err := os.ReadFile(filepath.Join(fake, "calls")); err == nil {
@@ -300,6 +306,17 @@ func TestDeployHarnessSetup(t *testing.T) {
 			wantLine:   "harness-fail setup receipt still fails after felt setup: " + genericRepair,
 			wantFailed: true,
 			wantCalls:  []string{"setup claude --source <checkout>"},
+		},
+		"an exact-ref pi clone behind HEAD is pinned": {
+			receipt: fakeHarnessReceipt(t, ""), receiptRC: "1", afterRC: "1",
+			version: "dev (111111111111)", piAt: harnessOld, exactRef: harnessHead,
+			wantLine: "harness-ok harness plugins: pi pinned",
+		},
+		"an exact-ref pi clone with tracked edits is not pinned": {
+			receipt: fakeHarnessReceipt(t, ""), receiptRC: "1", afterRC: "1",
+			version: "dev (111111111111)", piAt: harnessOld, exactRef: harnessHead, piEdits: " M extensions/pi/index.ts\n",
+			wantLine:   "harness-fail pi's felt package",
+			wantFailed: true,
 		},
 		"pi behind HEAD is set up": {
 			receipt: fakeHarnessReceipt(t, ""), receiptRC: "1", afterRC: "1",

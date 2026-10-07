@@ -209,9 +209,11 @@ network. They are skipped when the receipt already passes and its active
 generation was sealed at the checkout's `HEAD` by a clean build. A dirty
 checkout builds felt as `dev (<sha>-dirty)`, which does not identify a single
 tree, so a dirty host is set up again on every deploy. pi has no `--source`
-flag and no generation. For pi's GitHub package, `felt setup pi` installs the
-default branch, so the helper runs it only when pi's clone is not at the
-checkout's `HEAD`. A local felt package is never re-pointed: it is current when
+flag and no generation. For pi's GitHub package, a regular deploy runs
+`felt setup pi` only when pi's clone is not at the checkout's `HEAD`. An exact-ref
+deploy fetches and detaches a clean clone at the deployed commit when it differs;
+tracked edits or a commit that cannot be fetched fail the host. A local felt
+package is never re-pointed: it is current when
 it is the deployed checkout or sits at its `HEAD`, and otherwise the host fails
 with the package's path and commit. Any pi package other than the deployed
 checkout must also have no tracked edits or deletions (`git status
@@ -226,9 +228,8 @@ repair, for example a stale `felt` shadowing the new one on `PATH`, or `hooks
 mismatch: open a Codex session and approve felt's hooks`. It falls back to the
 receipt's top-level repair when no component reports one. The host counts as failed
 only after its daemon cycle and quarantine release have run, so a harness
-problem never leaves the daemon on the old build. A pi clone that cannot reach
-`HEAD` also fails the host; this happens when the deployed revision is not on
-the default branch.
+problem never leaves the daemon on the old build. A pi clone that cannot fetch
+the deployed commit fails the host.
 
 ### The bundle on a host that does not build it
 

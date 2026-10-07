@@ -574,8 +574,8 @@ ship_ui() { # $1 = host, $2 = ssh destination, $3 = checkout dir, $4 = ssh flags
 # build ("dev (<sha>-dirty)") names no fixed tree, so it is always set up
 # again. pi has no --source and no generation. Its GitHub package follows the
 # default branch, so `felt setup pi` runs only when that clone is not at HEAD.
-# A local felt package is never re-pointed: it is current when it is the
-# checkout or sits at its HEAD, and a mismatch otherwise.
+# A local felt package is never re-pointed. Exact-ref deploys pin a clean
+# GitHub clone to the deployed commit; ordinary deploys follow felt setup pi.
 # The snippet runs in the host's login shell, the PATH its harnesses' hooks
 # resolve felt through, and ends with one `harness-ok` or `harness-fail` line.
 harness_setup_cmd() { # $1 = checkout dir
@@ -721,8 +721,16 @@ if command -v pi >/dev/null 2>&1; then
     at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
     if [ "$at" = "$head" ]; then
       state="pi current"
+    elif [ -n "$exact_ref" ]; then
+      edits "$path"
+      [ -z "$changed" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
+      out=$(git -C "$path" fetch origin "$head" 2>&1) &&
+        out=$(git -C "$path" checkout --detach "$head" 2>&1) ||
+        fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
+      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
+      [ "$at" = "$head" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
+      state="pi pinned"
     else
-      [ -z "$exact_ref" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
       out=$(felt setup pi 2>&1) || fail "felt setup pi failed: $(tail_of "$out")"
       at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
       [ "$at" = "$head" ] || fail "pi's felt package is at ${at:0:7}, not ${head:0:7}; felt setup pi installs GitHub's default branch"
