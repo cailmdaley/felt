@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { card } from '../testFixtures.js'
-import type { KanbanCard } from '../KanbanTypes.js'
+import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import { Workspace } from './Workspace.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
@@ -204,6 +204,54 @@ describe('workspace reader integration', () => {
     vi.advanceTimersByTime(6000); await flush()
     expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
     expect(commit).not.toHaveBeenCalled()
+  })
+  it('a moves in-flight or draft work to review through the shared verb after an undo window, z cancels, and it is inert elsewhere', async () => {
+    workspace.dispose()
+    const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    const open = async (fiber: KanbanCard, commit: (card: KanbanCard, target: ColumnKind) => void): Promise<HTMLElement> => {
+      bodyCards = [fiber]
+      workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [fiber], origin: () => 'Desk',
+        onVisibility: visibility, dock: new Dock('', changed, commit) })
+      workspace.open(fiber); await flush()
+      return document.querySelector<HTMLElement>('.ws-fiber-acts .kbn-ctl-verdict')!
+    }
+    const flying = card({ id: 'work/fly', uid: 'fly-uid', name: 'Fly', originId: 'host-a', status: 'active',
+      workerState: 'running', shuttleKind: 'oneshot', path: 'work/fly/fly.md', fiberDir: '/notes/fly' })
+    const commit = vi.fn<(card: KanbanCard, target: ColumnKind) => void>()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pair = await open(flying, commit)
+    vi.useFakeTimers()
+    press('a')
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(pair.dataset.verdictPending).toBe('review')
+    expect(pair.querySelector(':scope > .ws-verdict-undo')?.textContent).toBe('To review·undo z')
+    press('z')
+    expect(pair.hasAttribute('data-verdict-pending')).toBe(false)
+    vi.advanceTimersByTime(6000); await flush()
+    expect(commit).not.toHaveBeenCalled()
+    press('a')
+    vi.advanceTimersByTime(3999)
+    expect(commit).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1); await flush()
+    expect(commit).toHaveBeenCalledExactlyOnceWith(flying, 'awaitingReview')
+    // A declined worker stop queues nothing.
+    vi.useRealTimers(); workspace.dispose(); document.body.replaceChildren()
+    commit.mockClear(); confirm.mockReturnValue(false)
+    await open(flying, commit); press('a')
+    expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
+    // Inert on work already awaiting review, and on a note.
+    for (const fiber of [
+      card({ id: 'work/done', uid: 'done-uid', name: 'Done', originId: 'host-a', status: 'closed', shuttleKind: 'oneshot', path: 'work/done/done.md', fiberDir: '/notes/done' }),
+      card({ id: 'notes/plain', uid: 'plain-uid', name: 'Plain', originId: 'host-a', status: 'open', path: 'notes/plain/plain.md', fiberDir: '/notes/plain' }),
+    ]) {
+      workspace.dispose(); document.body.replaceChildren(); vi.useFakeTimers()
+      await open(fiber, commit); press('a')
+      expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
+      vi.advanceTimersByTime(6000); await flush()
+      expect(commit).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    }
+    confirm.mockRestore()
   })
   it('asks to stop a worker at gesture time and carries the answer to the delayed write', async () => {
     workspace.dispose()

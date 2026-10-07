@@ -1,7 +1,7 @@
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
-import { fiberPageColumn, fiberPageKicker, onDesk, verdictReachable } from './fiberPageState.js'
+import { fiberPageColumn, fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
@@ -305,6 +305,7 @@ export class Workspace {
     // Linked fibers can be outside the board index; cached metadata only labels the undo line.
     if (!indexed && !state?.metadataKnown) return false
     const card = indexed ?? requested
+    if (verdict === 'awaitingReview' && !reviewReachable(card)) return false
     const review = fiberPageColumn(card) === 'awaitingReview'
     // Ask while the gesture is fresh; the undo window carries the answer to the write.
     if (!confirmWorkerStop(card, verdict)) return false
@@ -324,6 +325,10 @@ export class Workspace {
       // A worker may start during the undo window; never stop it from a stale review.
       if (review && fiberPageColumn(live) !== 'awaitingReview') {
         showToast(`${live.name} no longer awaits review; verdict not written`, 'error')
+        return
+      }
+      if (verdict === 'awaitingReview' && !reviewReachable(live)) {
+        showToast(`${live.name} is no longer in progress; not moved to review`, 'error')
         return
       }
       if (hasWorkerToStop(live) && !workerStopConfirmed) {
