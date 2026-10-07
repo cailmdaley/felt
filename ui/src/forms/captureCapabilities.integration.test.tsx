@@ -48,7 +48,7 @@ const yap = () => act(() => {
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(element, 'A thought')
   element.dispatchEvent(new Event('input', { bubbles: true }))
 })
-const mount = async (overrides: Partial<CaptureFormProps> = {}) => {
+const mount = async (overrides: Partial<CaptureFormProps> = {}, armed = true) => {
   const container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -58,6 +58,8 @@ const mount = async (overrides: Partial<CaptureFormProps> = {}) => {
     phoneAudio={{ begin }} {...overrides}
   />))
   await tick()
+  const toggle = document.querySelector<HTMLButtonElement>('.capture-meeting-toggle')
+  if (mobile && armed && toggle?.getAttribute('aria-pressed') === 'false') { await click('.capture-meeting-toggle'); await tick() }
 }
 const meetingReads = () => fetcher.mock.calls.filter(([url]) => String(url).includes('/meeting'))
 const captureBody = (): Record<string, unknown> => {
@@ -127,9 +129,12 @@ describe('rendered Capture capabilities', () => {
     expect(bind).toHaveBeenCalledWith(7, expect.objectContaining({ launch: 'fake-launch' }))
   })
 
-  it('mobile narrows Mac modes to phone, defaults on, and offers no selector', async () => {
+  it('mobile narrows Mac modes to phone, starts off, and offers no selector', async () => {
     mobile = true
-    await mount()
+    await mount({}, false)
+    expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('false')
+    expect(query('.form-submit').textContent).toBe('Spawn')
+    click('.capture-meeting-toggle')
     expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('true')
     expect(document.querySelector('[role="radiogroup"]')).toBeNull()
     expect(document.activeElement?.tagName).not.toBe('TEXTAREA')
