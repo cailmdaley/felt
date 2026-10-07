@@ -7,6 +7,8 @@ export interface ConstitutionPickerOptions {
   current?(card: KanbanCard): boolean
   revealCurrent?: boolean
   renderCard?(card: KanbanCard): HTMLElement
+  /** Includes external data used by a retained card's face, such as its queue. */
+  revision?(card: KanbanCard): string
   group?(card: KanbanCard): string | undefined
   /** The retained root, after placement and revision patching, on every refresh. */
   onRow?(el: HTMLElement, card: KanbanCard): void
@@ -113,6 +115,7 @@ export class ConstitutionPicker {
       }
       previousGroup = group
       const key = identity(card)
+      const revision = this.opts.revision?.(card) ?? JSON.stringify(card)
       let row = this.rows.get(key)
       if (!row) {
         const el = this.opts.renderCard?.(card) ?? document.createElement('button')
@@ -122,7 +125,7 @@ export class ConstitutionPicker {
         const name = el.querySelector<HTMLElement>('.ws-channel-name') ?? document.createElement('span'); name.classList.add('ws-channel-name')
         const owner = el.querySelector<HTMLElement>('.ws-channel-owner') ?? document.createElement('small')
         if (!this.opts.renderCard) el.append(name, owner)
-        row = { el, name, owner, card, revision: JSON.stringify(card) }
+        row = { el, name, owner, card, revision }
         const record = row
         const open = (): void => { this.close(); this.opts.onOpen(record.card) }
         el.addEventListener('click', event => {
@@ -136,13 +139,13 @@ export class ConstitutionPicker {
         })
         this.rows.set(key, row)
       }
-      if (this.opts.renderCard && row.revision !== JSON.stringify(card)) {
+      if (this.opts.renderCard && row.revision !== revision) {
         const face = this.opts.renderCard(card)
         row.el.replaceChildren(...face.childNodes)
         row.name = row.el.querySelector<HTMLElement>('.ws-channel-name')!
         row.owner = row.el.querySelector<HTMLElement>('.ws-channel-owner')!
       }
-      row.revision = JSON.stringify(card)
+      row.revision = revision
       row.card = card
       row.el.dataset.channelUid = card.uid ?? card.id
       row.el.dataset.channelOwner = card.originId

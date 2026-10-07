@@ -135,7 +135,7 @@ describe('Desk keyboard selection', () => {
   })
   it('opens the reader on one grouped sidebar, and keeps the flight column for the cards that fly', () => {
     press('j'); press('h'); press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'child-uid', 'working', 'head-uid', 'review'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'working', 'head-uid', 'review'])
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Aloft', 'Holding', 'Awaiting review'])
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
@@ -147,7 +147,7 @@ describe('Desk keyboard selection', () => {
     press('j'); press('h')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'child-uid', 'working', 'head-uid', 'review'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'working', 'head-uid', 'review'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')

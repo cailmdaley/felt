@@ -77,7 +77,7 @@ try {
   await reviewHead.waitFor()
   const queueChip = reviewHead.locator('.kbn-card-queued')
   await queueChip.click()
-  const sourceRow = page.locator(`.kbn-card-queued-row`, { hasText: sourceName })
+  const sourceRow = reviewHead.locator('.kbn-card-queued-row', { hasText: sourceName })
   await sourceRow.waitFor()
   assert.equal(await queueChip.getAttribute('aria-expanded'), 'true')
 

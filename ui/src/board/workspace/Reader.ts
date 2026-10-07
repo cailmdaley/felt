@@ -1,7 +1,8 @@
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { hasLiveWorker } from '../KanbanTypes.js'
+import { queuedControl } from '../QueuedControl.js'
+import { sidebarQueue } from './sidebarQueue.js'
 import { onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
@@ -42,6 +43,8 @@ export interface ReaderOptions {
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
+  /** Full Desk graph, including folded children and heads outside the sidebar groups. */
+  queueCards?(): KanbanCard[]
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
   pickerCards?(): KanbanCard[]
@@ -243,6 +246,7 @@ export class Reader {
       // Escape on a card leaves the reader, as it does anywhere else in it.
       onEscape: () => { this.handleIntent('back') },
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
+      revision: card => JSON.stringify([card, this.queues().members(card)]),
       onRow: (el, card) => {
         this.sidebarRows.set(el, card)
         if (this.active && this.sidebarShown) this.opts.themes?.bind(el, card)
@@ -840,21 +844,16 @@ export class Reader {
     host.textContent = `${marks.get(card.originId) ?? '○'} ${card.originId}`
     host.title = card.originId
     meta.append(host)
-    if (card.dependsOn?.length && !hasLiveWorker(card)) {
-      const queued = element('span', 'ws-channel-queued ws-role-hold-column')
-      queued.textContent = 'QUEUED'
-      const rows = this.opts.cards()
-      const names = card.dependsOn.map(id => rows.find(row => row.id === id || row.uid?.toLowerCase() === id.toLowerCase())?.name ?? id)
-      queued.title = `Queued after ${names.join(', ')}`
-      meta.append(queued)
-    } else {
-      const pill = this.opts.workerPill?.(card)
-      if (pill) {
-        pill.dataset.part = 'act'; pill.dataset.act = 'worker'
-        meta.append(workerPlate(card, pill))
-      }
+    const members = this.queues().members(card)
+    const queue = members.length ? queuedControl(card, members.map(member => member.id), members, member => this.opts.onChannel(member)) : null
+    if (queue) meta.append(queue.chip)
+    const pill = this.opts.workerPill?.(card)
+    if (pill) {
+      pill.dataset.part = 'act'; pill.dataset.act = 'worker'
+      meta.append(workerPlate(card, pill))
     }
     face.append(meta)
+    if (queue) face.append(queue.list)
     return face
   }
   /** Re-list the channel rows after the overview's order changes. */
@@ -1079,12 +1078,12 @@ export class Reader {
     else if (intent === 'open') this.toggleExpand()
     else if (intent === 'prevChannel' || intent === 'nextChannel') {
       const cards = this.sidebarCards()
-      const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
+      const index = this.sidebarPosition(cards)
       const card = cards[index + (intent === 'prevChannel' ? -1 : 1)]
       if (index >= 0 && card) this.opts.onChannel(card)
     } else if (intent === 'prevGroup' || intent === 'nextGroup') {
       const cards = this.sidebarCards()
-      const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
+      const index = this.sidebarPosition(cards)
       this.rememberStop()
       const card = groupJump(cards, index, intent === 'prevGroup' ? -1 : 1, this.stopOf, cardIdentity, this.groupMemory)
       if (card) this.opts.onChannel(card)
@@ -1102,8 +1101,17 @@ export class Reader {
     const current = this.currentCard
     return current && !cards.some(card => cardIdentity(card) === cardIdentity(current)) ? [...cards, current] : cards
   }
-  /** The sidebar's cards in drawn order, which j/k and J/K walk whether or not it is shown. */
-  private sidebarCards(): KanbanCard[] { return this.withCurrent(this.opts.switcherCards?.() ?? this.opts.cards()) }
+  private queues() { return sidebarQueue(this.opts.queueCards?.() ?? this.opts.cards()) }
+  /** A peek-opened child steps from its visible head without becoming a row. */
+  private sidebarPosition(cards: KanbanCard[]): number {
+    const head = this.currentCard && this.queues().head(this.currentCard)
+    return cards.findIndex(card => head ? card.id === head : (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner)
+  }
+  /** The sidebar's visible rows, which j/k and J/K walk whether or not it is shown. */
+  private sidebarCards(): KanbanCard[] {
+    const queues = this.queues()
+    return this.withCurrent(this.opts.switcherCards?.() ?? this.opts.cards()).filter(card => !queues.folded(card))
+  }
   /** The index strip names every group stop, unfiltered by Find, and marks the open constitution's. */
   private renderIndex(): void {
     const stops = this.opts.sidebarBand ? groupStops(this.sidebarCards(), this.stopOf).filter(stop => stop.key) : []
