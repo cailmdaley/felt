@@ -10,8 +10,9 @@ export function fiberPageColumn(card: KanbanCard) {
   return classifyFiber({ id: card.id, name: card.name, status: card.status, createdAt: card.createdAt, tags: card.tags, tempered: card.tempered, shuttleKind: card.shuttleKind, hasShuttleBlock: isAgentCard(card) }, { liveWorker: hasLiveWorker(card) })
 }
 /** Only what the Desk admits is on its lifecycle: a Shuttle-managed fiber or a
- *  cycle. Any other fiber (a note opened from a link, a role) has no column. */
-function onDesk(card: KanbanCard): boolean {
+ *  cycle. Any other fiber (a note opened from a link, a role) has no column,
+ *  and its page offers nothing to launch, set or review. */
+export function onDesk(card: KanbanCard): boolean {
   return isAgentCard(card) || card.isCycle
 }
 /** Temper and Discard reach every fiber on the Desk's lifecycle that has no

@@ -1,7 +1,7 @@
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { verdictReachable } from './fiberPageState.js'
+import { onDesk, verdictReachable } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -827,6 +827,8 @@ export class Reader {
   captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
   private sidebarCard(card: KanbanCard): HTMLElement {
     const face = buildCardPaper(card)
+    // A note or role has no lifecycle, so it carries no lifecycle glyph.
+    if (!onDesk(card)) face.querySelector('.kbn-card-glyph')?.remove()
     face.classList.add('ws-constitution-card')
     face.dataset.part = 'sidebar-card'
     face.dataset.wsThemeBoundary = ''
