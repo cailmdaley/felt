@@ -47,6 +47,8 @@ export interface KanbanCard {
   theme?: string
   due?: string
   tags?: string[]
+  /** The `collaboration:` roster's role slugs; each names the fiber `roles/<slug>`. */
+  roles?: string[]
   createdAt: string
   closedAt?: string
   /** File mtime the owning daemon reports (`modified_at`). Tracks last activity

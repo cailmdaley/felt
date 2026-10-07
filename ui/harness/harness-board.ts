@@ -34,7 +34,7 @@
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
-import { installWorkspaceNativeURLs, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
+import { installWorkspaceNativeURLs, ROLE_NOTES, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
@@ -1274,6 +1274,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         },
       }] })
     }
+    const role = ROLE_NOTES.find(note => note.id === id)
+    if (role) {
+      return json({ fibers: [{
+        origin: WORKSPACE_HOST,
+        felt_store: '/fixture-store/workspace',
+        path: `.felt/${id}/${id.split('/').at(-1)}.md`,
+        dir: `/fixture-store/workspace/.felt/${id}`,
+        fiber: { id, uid: role.uid, name: role.name, status: 'open', outcome: role.outcome, body: role.body, tags: ['role'] },
+      }] })
+    }
     return json({ fibers: [] }, 404)
   }
   if (docsExample && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
@@ -1296,7 +1306,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // The parent picker's index: the feed's rows plus a sibling of the null-test
   // run, so its picker offers a parent before anything is typed.
   if (url.endsWith('/api/v1/fibers?fields=index')) {
-    if (workspaceFixture) return json({ fibers: [...workspaceFixture.feed.fibers, { fiber: { id: 'research/workspace/method-note', name: 'Method note' } }] })
+    if (workspaceFixture) return json({ fibers: [...workspaceFixture.feed.fibers, { fiber: { id: 'research/workspace/method-note', name: 'Method note' } }, ...ROLE_NOTES.map(({ id, name }) => ({ fiber: { id, name } }))] })
     if (docsExample) return json({ fibers: docsExample.feed.fibers })
     return json({ fibers: [...MOCK_FEED.fibers, { fiber: { id: 'work/spt3g_papers/bmodes-2d/null-suite', name: 'Null-test suite' } }] })
   }

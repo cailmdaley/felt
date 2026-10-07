@@ -48,6 +48,19 @@
    and the pill's words to their capitals, so their middles meet. */
 .ws-fiber-prose .ws-prose-header { display: flex; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
 .ws-fiber-prose .ws-prose-status { text-box: trim-both ex alphabetic; }
+/* The roster's roles, left of the pill and in its register: mono capitals,
+   muted, a middot between two. Each opens its role's page; the link firms
+   under the pointer the way the pill does, with no underline at rest. */
+.ws-fiber-prose .ws-fiber-roles {
+  flex: none; display: flex; align-items: baseline; gap: var(--ws-small-gap); min-width: 0;
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase;
+}
+.ws-fiber-roles .ws-fiber-role { text-box: trim-both cap alphabetic; white-space: nowrap; }
+.ws-fiber-roles .ws-fiber-role + .ws-fiber-role::before { content: '·'; margin-right: var(--ws-small-gap); }
+.ws-fiber-prose .ws-fiber-roles a.kbn-wikilink-live { color: inherit; text-decoration: none; }
+.ws-fiber-prose .ws-fiber-roles a.kbn-wikilink-live:is(:hover, :focus-visible) {
+  color: var(--ws-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
 .ws-fiber-prose .ws-fiber-acts {
   flex: 1; display: flex; align-items: center; gap: var(--ws-gap); min-width: 0;
   font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: normal; letter-spacing: 0; text-transform: none; color: var(--ws-ink);
@@ -70,7 +83,10 @@
   background: var(--verdict-tint-strong); border-color: var(--verdict-pigment) !important;
 }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  /* The phone's top bar carries the worker's dot; its status line carries the verdicts alone, at a full target. */
+  /* The phone's top bar carries the worker's dot; its status line carries the verdicts alone, at a full target.
+     When the kicker, the roles and the verdicts outgrow the line, the verdicts take a line of their own. */
+  .ws-fiber-prose .ws-prose-header { flex-wrap: wrap; }
+  .ws-fiber-prose .ws-fiber-acts { flex: 1 1 auto; }
   .ws-fiber-acts .ws-fiber-worker { display: none; }
   .ws-reader .ws-fiber-acts[data-column] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
     min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px; border-color: var(--verdict-edge) !important;

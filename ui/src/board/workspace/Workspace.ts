@@ -331,7 +331,7 @@ export class Workspace {
     return state?.metadataKnown && !state.channel.uid.startsWith('other:') ? this.dock.bandFor(state.card) : undefined
   }
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.error, state.loaded, state.metadataKnown])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.roles, state.error, state.loaded, state.metadataKnown])
   }
   private prose(key: DocKey): HTMLElement {
     const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
