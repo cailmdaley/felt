@@ -2,14 +2,12 @@ package shuttlecli
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestShuttleDeployWaitsForFreshReadyVersion(t *testing.T) {
@@ -494,7 +492,7 @@ func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
 	if err := os.WriteFile(tracked, []byte("my edits\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + shellFunction(t, string(script), "revision_checkout_cmd") + "\nrevision_checkout_cmd \"$SOURCE\" | bash -eu\n"
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + shellFunction(t, string(script), "revision_checkout_cmd") + "\nrevision_checkout_cmd \"$SOURCE\" | bash -eu\n"
 	run := func() ([]byte, error) {
 		cmd := exec.Command("bash", "-c", harness)
 		cmd.Env = append(os.Environ(), "SOURCE="+source, "TARGET_COMMIT="+commit)
@@ -516,26 +514,10 @@ func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out, err := run(); err != nil {
-		t.Fatalf("incomplete target rebuild: %v\n%s", err, out)
+		t.Fatalf("repeat preparation: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(worktree, "ignored-build-output")); !os.IsNotExist(err) {
-		t.Fatalf("incomplete worktree was reused instead of rebuilt: %v", err)
-	}
-	if err := os.MkdirAll(canonicalSource+".deploy", 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(canonicalSource+".deploy", "deployed.log"), []byte(commit+" 2026-10-07T00:00:00Z\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(worktree, "ignored-build-output"), []byte("completed artifact"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	out, err := run()
-	if err != nil || !strings.Contains(string(out), "deploy-tree-reused") {
-		t.Fatalf("completed target was not recognized: %v\\n%s", err, out)
-	}
-	if got, err := os.ReadFile(filepath.Join(worktree, "ignored-build-output")); err != nil || string(got) != "completed artifact" {
-		t.Fatalf("completed target was rebuilt: %q, %v", got, err)
+	if got, err := os.ReadFile(filepath.Join(worktree, "ignored-build-output")); err != nil || string(got) != "stale" {
+		t.Fatalf("existing build cache was discarded: %q, %v", got, err)
 	}
 	if got := git(source, "branch", "--show-current"); got != "active-work" {
 		t.Fatalf("source branch changed to %q", got)
@@ -545,12 +527,6 @@ func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(filepath.Join(worktree, "tracked")); string(got) != "release\n" {
 		t.Fatalf("worktree did not contain release: %q", got)
-	}
-	if err := os.WriteFile(filepath.Join(worktree, "tracked"), []byte("retained edits\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run(); err == nil || !strings.Contains(string(out), "tracked edits") {
-		t.Fatalf("dirty completed worktree was not refused: %v\n%s", err, out)
 	}
 }
 
@@ -669,7 +645,7 @@ func TestDeployRootUsesMainWorktreeFromLinkedCheckout(t *testing.T) {
 	}
 }
 
-func TestDeployCacheSeedUsesPreviousLedgerEntryAndCopies(t *testing.T) {
+func TestDeployCacheSeedUsesPreviousLiveTreeAndCopies(t *testing.T) {
 	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
@@ -697,9 +673,6 @@ func TestDeployCacheSeedUsesPreviousLedgerEntryAndCopies(t *testing.T) {
 	if err := os.WriteFile(decoy, []byte("mtime decoy"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "deployed.log"), []byte(previous+" 2026-10-07T00:00:00Z\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	for _, dir := range []string{filepath.Join(target, "daemon"), filepath.Join(target, "ui")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -708,8 +681,8 @@ func TestDeployCacheSeedUsesPreviousLedgerEntryAndCopies(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "ui/package-lock.json"), []byte("same lock"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	command := `root=$ROOT; target=$TARGET; export root target
-` + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT" "$TARGET" | bash -eu`
+	command := `target=$TARGET; export target
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu`
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target)
 	out, err := cmd.CombinedOutput()
@@ -755,14 +728,11 @@ func TestDeployCacheSeedSkipsSymlinkedRoots(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(source, "daemon/deps")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "deployed.log"), []byte(previous+" 2026-10-07T00:00:00Z\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(filepath.Join(target, "daemon"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	command := `root=$ROOT; target=$TARGET; export root target
-` + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT" "$TARGET" | bash -eu`
+	command := `target=$TARGET; export target
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu`
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target)
 	out, err := cmd.CombinedOutput()
@@ -792,9 +762,6 @@ func TestDeployCacheSeedFailureFallsBackUnderErrexit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(source, "payload"), []byte("cache"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "deployed.log"), []byte(previous+" 2026-10-07T00:00:00Z\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if err := os.MkdirAll(filepath.Join(target, "daemon"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -805,8 +772,8 @@ func TestDeployCacheSeedFailureFallsBackUnderErrexit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fakeBin, "cp"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	command := `root=$ROOT; target=$TARGET; export root target
-` + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT" "$TARGET" | bash -eu; echo cold-build-continues`
+	command := `target=$TARGET; export target
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu; echo cold-build-continues`
 	cmd := exec.Command("bash", "-c", command)
 	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target, "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
@@ -818,40 +785,7 @@ func TestDeployCacheSeedFailureFallsBackUnderErrexit(t *testing.T) {
 	}
 }
 
-func TestDeployRecordWritesFullSHAAndUTCTime(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := filepath.Join(t.TempDir(), "repo with spaces")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command("git", "-C", repo, "init").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v\\n%s", err, out)
-	}
-	sha := strings.Repeat("a", 40)
-	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "record_deploy_cmd") + `record_deploy_cmd "$REPO" "$SHA" | bash -eu`
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "REPO="+repo, "SHA="+sha)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("record deployment: %v\\n%s", err, out)
-	}
-	log, err := os.ReadFile(repo + ".deploy/deployed.log")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fields := strings.Fields(string(log))
-	if len(fields) != 2 || fields[0] != sha {
-		t.Fatalf("deployment ledger entry = %q", log)
-	}
-	if parsed, err := time.Parse(time.RFC3339, fields[1]); err != nil || parsed.Location() != time.UTC {
-		t.Fatalf("ledger timestamp %q is not UTC RFC3339: %v", fields[1], err)
-	}
-}
-
-func TestDeployPruneUsesLedgerAndKeepsDirtyTrees(t *testing.T) {
+func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
@@ -892,63 +826,46 @@ func TestDeployPruneUsesLedgerAndKeepsDirtyTrees(t *testing.T) {
 	}
 	deployRoot := repo + ".deploy"
 	paths := make([]string, len(commits))
+	if err := os.WriteFile(filepath.Join(repo, ".git/info/exclude"), []byte("build-output\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for i, sha := range commits {
 		paths[i] = filepath.Join(deployRoot, sha)
 		git("worktree", "add", "--detach", paths[i], sha)
+		if err := os.WriteFile(filepath.Join(paths[i], "build-output"), []byte("generated"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(filepath.Join(paths[1], "untracked"), []byte("dirty"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ledger := fmt.Sprintf("%s 2026-10-05T00:00:00Z\n%s 2026-10-06T00:00:00Z\n%s 2026-10-07T00:00:00Z\n", commits[2], commits[3], commits[4])
-	if err := os.WriteFile(filepath.Join(deployRoot, "deployed.log"), []byte(ledger), 0o600); err != nil {
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "pi"), []byte("#!/bin/sh\nprintf 'local package\\n    %s\\n' \"$PI_TREE\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "prune_deploy_cmd") + `prune_deploy_cmd "$REPO" | bash -eu`
+	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "prune_deploy_cmd") + `prune_deploy_cmd "$REPO" "$PREVIOUS" | bash -eu`
 	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "REPO="+repo)
+	cmd.Env = append(os.Environ(), "REPO="+repo, "PREVIOUS="+paths[3], "TARGET_COMMIT="+commits[4], "PI_TREE="+paths[2], "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("prune: %v\n%s", err, out)
 	}
-	for _, path := range []string{paths[1], paths[2], paths[3], paths[4]} {
+	for _, path := range paths[2:] {
 		if _, err := os.Stat(path); err != nil {
-			t.Errorf("ledger/dirty worktree %s missing: %v", path, err)
+			t.Errorf("retained worktree %s missing: %v", path, err)
 		}
 	}
-	if _, err := os.Stat(paths[0]); !os.IsNotExist(err) {
-		t.Errorf("worktree outside ledger retention remains: %s (%v)", paths[0], err)
-	}
-	if !strings.Contains(string(out), "dirty deploy worktree kept:") || !strings.Contains(string(out), paths[1]) {
-		t.Errorf("dirty report missing: %s", out)
-	}
-	if !strings.Contains(string(out), paths[0]) {
-		t.Errorf("removed tree absent from summary: %s", out)
-	}
-}
-
-func TestDeployCompletedTreeSkipsBuild(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(t.TempDir(), "make-ran")
-	harness := shellFunction(t, string(script), "build_deploy_cmd") + `make() { touch "$MARKER"; }
-command=$(build_deploy_cmd /checkout 0 1)
-[ "$command" = ':' ] || exit 2
-eval "$command"
-`
-	cmd := exec.Command("bash", "-c", harness)
-	cmd.Env = append(os.Environ(), "MARKER="+marker)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("reuse command: %v\n%s", err, out)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("completed tree ran make build: %v", err)
+	for _, path := range paths[:2] {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("obsolete worktree remains: %s (%v)", path, err)
+		}
+		if strings.Contains(git("worktree", "list", "--porcelain"), path) {
+			t.Errorf("removed worktree still registered: %s", path)
+		}
 	}
 }
 
-func TestDeployFinishDoesNotRecordOrPruneOnHarnessOrReleaseFailure(t *testing.T) {
+func TestDeployFinishDoesNotPruneOnHarnessOrReleaseFailure(t *testing.T) {
 	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
@@ -962,12 +879,11 @@ func TestDeployFinishDoesNotRecordOrPruneOnHarnessOrReleaseFailure(t *testing.T)
 		{name: "release failure", harnessFailed: false, releaseOK: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			marker := filepath.Join(t.TempDir(), "record-or-prune")
+			marker := filepath.Join(t.TempDir(), "prune")
 			harness := `release_quarantine() { [ "$RELEASE_OK" = 1 ]; }
 run_on_visible() { printf '%s\\n' "$2" >> "$MARKER"; }
 ok() { :; }
 bad() { :; }
-record_deploy_cmd() { printf record; }
 prune_deploy_cmd() { printf prune; }
 ` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo "$HARNESS_FAILED"
 `
@@ -985,13 +901,13 @@ prune_deploy_cmd() { printf prune; }
 				t.Fatalf("failed deployment accepted: %s", out)
 			}
 			if _, err := os.Stat(marker); !os.IsNotExist(err) {
-				t.Fatalf("failure recorded/pruned a worktree: %v", err)
+				t.Fatalf("failure pruned a worktree: %v", err)
 			}
 		})
 	}
 }
 
-func TestDeployLedgerAppendPrecedesPruningAfterRelease(t *testing.T) {
+func TestDeployPrunesAfterRelease(t *testing.T) {
 	t.Parallel()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
@@ -1002,7 +918,6 @@ func TestDeployLedgerAppendPrecedesPruningAfterRelease(t *testing.T) {
 run_on_visible() { printf '%s\n' "$2" >> "$EVENTS"; }
 ok() { :; }
 bad() { :; }
-record_deploy_cmd() { printf record; }
 prune_deploy_cmd() { printf prune; }
 ` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo 0`
 	cmd := exec.Command("bash", "-c", harness)
@@ -1014,8 +929,91 @@ prune_deploy_cmd() { printf prune; }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "release\nrecord\nprune\n" {
-		t.Fatalf("success events = %q, want release then ledger append then prune", got)
+	if string(got) != "release\nprune\n" {
+		t.Fatalf("success events = %q, want release then prune", got)
+	}
+}
+
+func TestDeployRemotePullsWithBuiltOrShippedUI(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, buildUI := range []string{"0", "1"} {
+		t.Run("build_ui="+buildUI, func(t *testing.T) {
+			dir := t.TempDir()
+			events := filepath.Join(dir, "events")
+			harness := `fleet_dir() { printf '%s' "$CHECKOUT"; }
+fleet_ssh() { printf remote; }
+fleet_flags() { :; }
+builds_ui() { [ "$BUILD_UI" = 1 ]; }
+say() { :; }
+ok() { :; }
+bad() { echo "$1" >&2; }
+ship_ui() { printf 'ship\n' >> "$EVENTS"; }
+git() { printf 'git %s\n' "$*" >> "$EVENTS"; }
+make() { printf 'make %s\n' "$*" >> "$EVENTS"; }
+export -f git make
+ssh() { [ "$2" = true ] || bash -c "$2"; }
+run_on() { printf 1; }
+config_migration_cmd() { :; }
+refresh_harnesses() { :; }
+check_listen() { :; }
+supervisor_probe_cmd() { :; }
+daemon_kill() { :; }
+verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "deploy_remote") + `deploy_remote remote`
+			cmd := exec.Command("bash", "-c", harness)
+			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "EVENTS="+events, "BUILD_UI="+buildUI, "DEPLOY_REF=", "DEPLOY_VERSION=", "AGENTS_FILE="+filepath.Join(dir, "absent"))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("remote deploy: %v\n%s", err, out)
+			}
+			got, err := os.ReadFile(events)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "git pull --ff-only -q\nmake build\nverified\n"
+			if buildUI == "0" {
+				want = "ship\ngit pull --ff-only -q\nmake build SKIP_UI=1\nverified\n"
+			}
+			if string(got) != want {
+				t.Fatalf("remote events = %q; want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestDeployPreviousTreeUsesLiveVersion(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `version_json() { printf '{"git_short_sha":"abc1234"}'; }
+deploy_root_cmd() { printf 'printf /repo.deploy'; }
+run_on() { bash -c "$2"; }
+git() { [ "$*" = '-C /repo rev-parse --verify abc1234^{commit}' ] || exit 2; printf abc123456789; }
+export -f git
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "previous_deploy") + `previous_deploy remote /repo`
+	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "/repo.deploy/abc123456789" {
+		t.Fatalf("previous live tree = %q, %v", out, err)
+	}
+}
+
+func TestDeployFailedVersionDoesNotPrune(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `wait_for_sha() { return 1; }
+finish_verified_deploy() { echo should-not-finish; }
+` + shellFunction(t, string(script), "verify_and_finish") + `verify_and_finish remote /repo 0 /previous`
+	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
+	if err == nil || len(out) != 0 {
+		t.Fatalf("failed version check reached cleanup: %q, %v", out, err)
 	}
 }
 

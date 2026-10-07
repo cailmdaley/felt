@@ -122,11 +122,20 @@ To deploy a release candidate across the configured fleet, pin its tag:
 bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
 ```
 
-The helper resolves the tag to one commit and builds it in a detached Git worktree under `<main-worktree>.deploy/<commit>`. The main worktree is derived from Git's common directory, so deploys launched from linked worktrees share one per-repository root. The regular checkout's branch and local edits stay in place. A tracked-clean worktree whose commit is already in `deployed.log` is reused without seeding or building; an unrecorded clean worktree is removed and rebuilt, while an unrecorded dirty one fails.
+The helper resolves the tag to one commit and builds it in a detached Git worktree under `<main-worktree>.deploy/<commit>`.
+Git's common directory selects the main worktree, so linked checkouts share one deploy root.
+The regular checkout's branch and local edits stay in place; every deploy runs the build.
 
-Each host's `<main-worktree>.deploy/deployed.log` records `<full-sha> <UTC-ISO-time>` after the daemon verifies the expected SHA and fresh ready boot, harness setup succeeds, and quarantine release succeeds. Pruning runs after that append and keeps the three most recent ledger worktrees: the deployed tree, its known-good rollback, and one additional tree because Pi can load a local felt package directly from a deploy worktree. Every other clean worktree directly under the root is removed. Dirty or uninspectable trees remain and are reported on stderr. Pruning does not scan processes or supervisor configuration. Clean legacy worktrees under a linked checkout's old `<checkout>.deploy/` path are reported as shell-escaped removal commands, never removed automatically.
+Before retargeting the launcher, the helper reads the live daemon's commit from `/api/v1/version`.
+After the new daemon verifies a fresh ready boot, harness setup succeeds, and quarantine release succeeds, it removes other worktrees under the deploy root with `git worktree remove --force`, then runs `git worktree prune`.
+It keeps the new tree, the previous live tree, and any tree referenced by `pi list`.
+Generated files and local edits do not prevent removal of other trees.
 
-A new worktree seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous ledger entry, not from directory timestamps. These are Mix dependencies and compiled artifacts, plus npm dependencies and the `.npm-ci-stamp` that lets `make ui` skip `npm ci`. Symlinked cache roots disable seeding. Otherwise the helper stages no-dereference copies (APFS clones with `cp -c` on macOS, reflinks where supported on Linux) and publishes them only after successful copying; any seeding failure is reported and the build proceeds cold. Version tags stamp both CLIs and the daemon with the release version.
+A new worktree seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous live tree.
+These are Mix dependencies and compiled artifacts, plus npm dependencies and the `.npm-ci-stamp` that lets `make ui` skip `npm ci`.
+Symlinked cache roots disable seeding.
+Otherwise the helper stages no-dereference copies (APFS clones with `cp -c` on macOS, reflinks where supported on Linux) and publishes them only after successful copying; any seeding failure is reported and the build proceeds cold.
+Version tags stamp both CLIs and the daemon with the release version.
 If Pi loads a Felt package from another revision, the helper reports the mismatch without replacing that package choice.
 Use Pi's native package commands to select the deployed source directory, then rerun the host's deployment check.
 Use `--hosts local,hub-a` to deploy a subset.

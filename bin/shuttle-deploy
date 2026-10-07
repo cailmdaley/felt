@@ -391,16 +391,11 @@ SH
 }
 
 seed_deploy_cache_cmd() {
-  local root="$1" target="$2"
+  local source="$1" # The emitted snippet runs with the caller's target variable.
   cat <<SH
 (
   set +e
-  root=\$root
-  target=\$target
-  ledger="\$root/deployed.log"
-  previous=\$(tail -n 1 "\$ledger" 2>/dev/null | awk '{print \$1}')
-  [ -n "\$previous" ] || exit 0
-  source="\$root/\$previous"
+  source=$(shell_quote "$source")
   [ -d "\$source" ] || exit 0
   for relative in daemon/deps daemon/_build ui/node_modules; do
     if [ -L "\$source/\$relative" ] || [ -L "\$target/\$relative" ]; then
@@ -459,118 +454,38 @@ SH
 }
 
 revision_checkout_cmd() {
-  local checkout="$1"
+  local checkout="$1" previous="${2:-}"
   cat <<SH
 set -eu
 source=$(shell_quote "$checkout")
 commit=$(shell_quote "$TARGET_COMMIT")
-common=\$(git -C "\$source" rev-parse --git-common-dir)
-case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
-common=\$(cd "\$common" && pwd -P)
-root="\$(dirname "\$common").deploy"
+root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
 target="\$root/\$commit"
-ledger="\$root/deployed.log"
 git -C "\$source" fetch --tags origin
 git -C "\$source" cat-file -e "\$commit^{commit}"
-reuse=0
-if [ -e "\$target" ]; then
-  [ "\$(git -C "\$target" rev-parse HEAD 2>/dev/null)" = "\$commit" ] || { echo "deployment worktree has the wrong revision: \$target" >&2; exit 1; }
-  for stale_stage in "\$target"/.deploy-cache-seed.*; do
-    [ -e "\$stale_stage" ] || continue
-    rm -rf "\$stale_stage"
-  done
-  if awk -v sha="\$commit" '\$1 == sha { found=1 } END { exit !found }' "\$ledger" 2>/dev/null; then
-    [ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ] || { echo "completed deployment worktree has tracked edits: \$target" >&2; exit 1; }
-    reuse=1
-  else
-    [ -z "\$(git -C "\$target" status --porcelain)" ] || { echo "incomplete deployment worktree is dirty: \$target" >&2; exit 1; }
-    git -C "\$source" worktree remove --force "\$target"
-    git -C "\$source" worktree prune
-  fi
-fi
-if [ "\$reuse" = 0 ]; then
+if [ ! -d "\$target" ]; then
   mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
-  $(seed_deploy_cache_cmd "\$root" "\$target")
-  printf 'deploy-tree-ready\\n'
-else
-  printf 'deploy-tree-reused\\n'
+  $(seed_deploy_cache_cmd "$previous")
 fi
-SH
-}
-
-record_deploy_cmd() {
-  local checkout="$1" sha="$2"
-  cat <<SH
-set -eu
-source=$(shell_quote "$checkout")
-common=\$(git -C "\$source" rev-parse --git-common-dir)
-case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
-common=\$(cd "\$common" && pwd -P)
-root="\$(dirname "\$common").deploy"
-mkdir -p "\$root"
-printf '%s %s\\n' $(shell_quote "$sha") "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "\$root/deployed.log"
 SH
 }
 
 prune_deploy_cmd() {
-  local checkout="$1"
+  local checkout="$1" previous="${2:-}"
   cat <<SH
-set -u
+set -eu
 source=$(shell_quote "$checkout")
-common=\$(git -C "\$source" rev-parse --git-common-dir 2>/dev/null) || exit 0
-case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
-common=\$(cd "\$common" 2>/dev/null && pwd -P) || exit 0
-root="\$(dirname "\$common").deploy"
-ledger="\$root/deployed.log"
-current= previous= older=
-if [ -r "\$ledger" ]; then
-  while read -r sha timestamp; do older=\$previous; previous=\$current; current=\$sha; done < "\$ledger"
-fi
-removed=
+root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
+previous=$(shell_quote "$previous")
 for candidate in "\$root"/*; do
   [ -d "\$candidate" ] || continue
-  name=\${candidate##*/}
-  [ "\$name" = "\$current" ] && continue
-  [ -n "\$previous" ] && [ "\$name" = "\$previous" ] && continue
-  [ -n "\$older" ] && [ "\$name" = "\$older" ] && continue
-  status=\$(git -C "\$candidate" status --porcelain 2>/dev/null) || {
-    printf 'cannot inspect deploy worktree; keeping: %s\\n' "\$candidate" >&2
-    continue
-  }
-  if [ -n "\$status" ]; then
-    printf 'dirty deploy worktree kept: %s\\n' "\$candidate" >&2
-    continue
-  fi
-  if git -C "\$source" worktree remove --force "\$candidate"; then
-    removed="\$removed \$candidate"
-  else
-    printf 'could not remove deploy worktree: %s\\n' "\$candidate" >&2
-  fi
+  [ "\$candidate" = "\$root/$TARGET_COMMIT" ] && continue
+  [ "\$candidate" = "\$previous" ] && continue
+  pi list 2>/dev/null | grep -Fq "    \$candidate" && continue
+  git -C "\$source" worktree remove --force "\$candidate"
 done
 git -C "\$source" worktree prune
-if [ -n "\$removed" ]; then printf 'pruned deploy worktrees:%s\\n' "\$removed"; else printf 'pruned deploy worktrees: none\\n'; fi
-legacy="\$source.deploy"
-if [ -d "\$legacy" ] && [ "\$legacy" != "\$root" ]; then
-  for candidate in "\$legacy"/*; do
-    [ -d "\$candidate" ] || continue
-    name=\${candidate##*/}
-    [ "\$name" = "\$current" ] && continue
-    [ -n "\$previous" ] && [ "\$name" = "\$previous" ] && continue
-    [ -n "\$older" ] && [ "\$name" = "\$older" ] && continue
-    status=\$(git -C "\$candidate" status --porcelain 2>/dev/null) || {
-      printf 'cannot inspect legacy deploy worktree; keeping: %s\\n' "\$candidate" >&2
-      continue
-    }
-    if [ -n "\$status" ]; then
-      printf 'dirty legacy deploy worktree kept: %s\\n' "\$candidate" >&2
-      continue
-    fi
-    source_q=\$(printf '%q' "\$source")
-    candidate_q=\$(printf '%q' "\$candidate")
-    printf 'legacy cleanup command: git -C %s worktree remove %s\\n' "\$source_q" "\$candidate_q"
-  done
-fi
 SH
 }
 
@@ -586,19 +501,8 @@ build_checkout_cmd() {
   return 0
 }
 
-build_deploy_cmd() { # $1 = checkout, $2 = skip UI, $3 = completed ledger entry
-  local checkout="$1" skip_ui="$2" reuse="$3"
-  if [ "$reuse" = 1 ]; then printf ':'; else build_checkout_cmd "$checkout" "$skip_ui"; fi
-}
-
 BUILD_REPO="$REPO"
-BUILD_REUSE=0
-if [ -n "$DEPLOY_REF" ]; then
-  prepare_output="$(run_on_visible "" "$(revision_checkout_cmd "$REPO")")" || { bad "could not prepare the deploy revision"; exit 1; }
-  case "$prepare_output" in *deploy-tree-reused*) BUILD_REUSE=1 ;; esac
-  BUILD_ROOT="$(bash -lc "$(deploy_root_cmd "$REPO")")" || { bad "could not resolve the deploy worktree root"; exit 1; }
-  BUILD_REPO="${BUILD_ROOT%/}/$TARGET_COMMIT"
-fi
+PREVIOUS_LOCAL=""
 
 # Shell snippets reach the daemon at the address `shuttle host --json`
 # resolves: its unix socket on a shared or exposed host, loopback TCP
@@ -657,6 +561,13 @@ run_on_visible() { # Like run_on, preserving remote stderr for operator diagnost
 
 version_json() { # $1 = "" (local) | host
   run_on "$1" "$(daemon_call "" /api/v1/version)"
+}
+
+previous_deploy() { # Capture the live commit before retargeting the host's launcher.
+  local host="$1" checkout="$2" sha
+  sha="$(version_json "$host" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [ -n "$sha" ] || return 0
+  run_on "$host" "root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")")); commit=\$(git -C $(shell_quote "$checkout") rev-parse --verify $(shell_quote "$sha^{commit}")) && printf '%s/%s\\n' \"\$root\" \"\$commit\""
 }
 
 version_ready() { # JSON response -> true only for an explicit ready:true
@@ -721,26 +632,21 @@ wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also
   done
 }
 
-finish_verified_deploy() { # $1 = host, $2 = checkout, $3 = harness failure flag
-  local host="$1" checkout="$2" harness_failed="$3"
+finish_verified_deploy() { # $1 = host, $2 = checkout, $3 = harness failure flag, $4 = previous live tree
+  local host="$1" checkout="$2" harness_failed="$3" previous="${4:-}"
   release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
-  [ "$harness_failed" = 0 ] || { bad "harness setup failed; deployment was not recorded"; return 1; }
+  [ "$harness_failed" = 0 ] || { bad "harness setup failed"; return 1; }
   [ -n "$DEPLOY_REF" ] || return 0
-  run_on_visible "$host" "$(record_deploy_cmd "$checkout" "$TARGET_COMMIT")" || {
-    bad "could not record the successful deployment on ${host:-local}"
-    return 1
-  }
-  run_on_visible "$host" "$(prune_deploy_cmd "$checkout")" || {
+  run_on_visible "$host" "$(prune_deploy_cmd "$checkout" "$previous")" || {
     bad "could not prune deploy worktrees on ${host:-local}"
     return 1
   }
 }
 
-verify_and_finish() { # $1 = host, $2 = checkout, $3 = harness failure flag
-  local host="$1" checkout="$2" harness_failed="$3"
-  wait_for_sha "$host" || return 1
-  finish_verified_deploy "$host" "$checkout" "$harness_failed"
+verify_and_finish() { # $1 = host, $2 = checkout, $3 = harness failure flag, $4 = previous live tree
+  wait_for_sha "$1" || return 1
+  finish_verified_deploy "$@"
 }
 
 # A host marked `"build_ui": false` is served the deploy host's bundle, so the
@@ -749,7 +655,6 @@ verify_and_finish() { # $1 = host, $2 = checkout, $3 = harness failure flag
 # lockfile and vite rebuilds from a warm cache — and deploy_local's `make build`
 # has already done it, so the flag keeps a full-fleet run to one build.
 LOCAL_UI_BUILT=0
-if [ "$BUILD_REUSE" = 1 ]; then LOCAL_UI_BUILT=1; fi
 ensure_local_ui() {
   [ "$LOCAL_UI_BUILT" = 1 ] && return 0
   bash -lc "cd $(shell_quote "$BUILD_REPO") && make ui" >/dev/null \
@@ -974,14 +879,9 @@ refresh_harnesses() { # $1 = "" (local) | host, $2 = checkout dir
 
 deploy_local() {
   say "local ($TARGET_SHA)"
-  if [ "$BUILD_REUSE" = 1 ]; then
-    LOCAL_UI_BUILT=1
-    ok "reusing completed deployment worktree"
-  else
-    bash -lc "$(build_deploy_cmd "$BUILD_REPO" 0 "$BUILD_REUSE")" >/dev/null \
-      || { bad "make build failed"; return 1; }
-    LOCAL_UI_BUILT=1
-  fi
+  bash -lc "$(build_checkout_cmd "$BUILD_REPO")" >/dev/null \
+    || { bad "make build failed"; return 1; }
+  LOCAL_UI_BUILT=1
   run_on "" "$(config_migration_cmd 1 "$BUILD_REPO/bin/rel")" \
     || { bad "config migration or supervisor refresh failed on the deploy host"; return 1; }
   # A harness failure is reported now and fails the host after its daemon step.
@@ -1005,7 +905,7 @@ deploy_local() {
     run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO")" \
       || { bad "could not install and restart the local respawn loop"; return 1; }
   fi
-  verify_and_finish "" "$REPO" "$harness_failed" || {
+  verify_and_finish "" "$REPO" "$harness_failed" "$PREVIOUS_LOCAL" || {
     bad "deployment did not complete successfully on the deploy host"
     return 1
   }
@@ -1013,36 +913,32 @@ deploy_local() {
 }
 
 deploy_remote() {
-  local host="$1" dir="" dest="" flags="" build_cmd="" remote_root="" prepare_output="" remote_reuse=0
+  local host="$1" dir="" dest="" flags="" build_cmd="" remote_root="" previous="" skip_ui=0
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
   ssh $flags "$dest" "true" 2>/dev/null \
     || try_handshake "$host" \
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
   if [ -n "$DEPLOY_REF" ]; then
-    prepare_output="$(run_on_visible "$host" "$(revision_checkout_cmd "$dir")")" \
+    previous="$(previous_deploy "$host" "$dir")"
+    run_on_visible "$host" "$(revision_checkout_cmd "$dir" "$previous")" \
       || { bad "could not prepare the deploy revision"; return 1; }
-    case "$prepare_output" in *deploy-tree-reused*) remote_reuse=1 ;; esac
     remote_root="$(run_on_visible "$host" "$(deploy_root_cmd "$dir")")" \
       || { bad "could not resolve the deploy worktree root on $host"; return 1; }
     dir="${remote_root%/}/$TARGET_COMMIT"
   fi
   # The bundle goes over BEFORE the build, so the release this build assembles
   # embeds it (see the bundle note at the top of this file).
-  if [ "$remote_reuse" = 1 ]; then
-    ok "reusing completed deployment worktree"
-  else
-    build_cmd="$(build_deploy_cmd "$dir" 0 "$remote_reuse")"
-    if [ -z "$DEPLOY_REF" ]; then
-      build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
-    fi
-    if [ "$remote_reuse" = 0 ] && ! builds_ui "$host"; then
-      ship_ui "$host" "$dest" "$dir" "$flags" || return 1
-      build_cmd="$(build_deploy_cmd "$dir" 1 "$remote_reuse")"
-    fi
-    ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
-      || { bad "pull/build failed"; return 1; }
+  if ! builds_ui "$host"; then
+    ship_ui "$host" "$dest" "$dir" "$flags" || return 1
+    skip_ui=1
   fi
+  build_cmd="$(build_checkout_cmd "$dir" "$skip_ui")"
+  if [ -z "$DEPLOY_REF" ]; then
+    build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
+  fi
+  ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
+    || { bad "pull/build failed"; return 1; }
   if [ -f "$AGENTS_FILE" ]; then
     ssh $flags "$dest" "mkdir -p ~/.config/shuttle" \
       || { bad "could not prepare remote agent registry"; return 1; }
@@ -1067,10 +963,18 @@ deploy_remote() {
     run_on "$host" "$(respawn_launcher_restart_cmd "$dir")" \
       || { bad "could not install and restart the respawn loop on $host"; return 1; }
   fi
-  verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" \
+  verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" "$previous" \
     || { bad "deployment did not complete successfully on $host"; return 1; }
   return 0
 }
+
+if [ -n "$DEPLOY_REF" ]; then
+  PREVIOUS_LOCAL="$(previous_deploy "" "$REPO")"
+  run_on_visible "" "$(revision_checkout_cmd "$REPO" "$PREVIOUS_LOCAL")" \
+    || { bad "could not prepare the deploy revision"; exit 1; }
+  BUILD_ROOT="$(bash -lc "$(deploy_root_cmd "$REPO")")" || exit 1
+  BUILD_REPO="$BUILD_ROOT/$TARGET_COMMIT"
+fi
 
 FAILED=""
 for h in $HOSTS; do
