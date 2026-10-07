@@ -38,6 +38,9 @@ export interface Fiber {
   cold?: boolean;     // project-owned frontmatter `cold:` — when true, stash
                       // cluster renders dimmer and below warm clusters.
   tags?: string[];
+  /** The role slugs of the `collaboration:` roster, in frontmatter order. Each
+   * names the role fiber `roles/<slug>`; the holders are not carried. */
+  roles?: string[];
   dependsOn?: string[]; // fiber IDs this depends on
   /**
    * How `depends_on:` was WRITTEN, not what it means — `scalar` for the bare
@@ -144,6 +147,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   const modifiedAt = pickIsoString(f, 'modified_at');
 
   const tags = stringList(f.tags);
+  const roles = rosterRoles(f.collaboration);
   // depends_on ships as `[{id: "..."}]` (common), bare-string arrays (legacy),
   // or a BARE STRING — the one-dep form `felt edit --set depends_on=<id>`
   // writes, which is what the board's drag-to-stack gesture produces. Accept
@@ -246,6 +250,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     horizon,
     cold,
     tags,
+    roles,
     dependsOn,
     dependsOnShape,
     tempered,
@@ -264,6 +269,19 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     parentId,
     isRoot,
   };
+}
+
+/**
+ * The roles a `collaboration:` roster assigns: each key whose value is a list
+ * of holders (an empty list assigns the role alone). The older pointer shape
+ * (`{role: {...}, collaborator: {...}}`) carries no lists and yields nothing.
+ */
+function rosterRoles(v: unknown): string[] | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const roles = Object.entries(v as Record<string, unknown>)
+    .filter(([slug, holders]) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && Array.isArray(holders))
+    .map(([slug]) => slug);
+  return roles.length > 0 ? roles : undefined;
 }
 
 function pickIsoString(obj: Record<string, unknown>, key: string): string | undefined {

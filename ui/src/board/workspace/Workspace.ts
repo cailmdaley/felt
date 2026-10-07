@@ -331,7 +331,7 @@ export class Workspace {
     return state?.metadataKnown && !state.channel.uid.startsWith('other:') ? this.dock.bandFor(state.card) : undefined
   }
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.error, state.loaded, state.metadataKnown])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.roles, state.error, state.loaded, state.metadataKnown])
   }
   private prose(key: DocKey): HTMLElement {
     const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
@@ -567,11 +567,15 @@ export class Workspace {
         const entry = await (refresh ? inLane('slow', read) : read())
         if (entry) {
           // Body reads carry document metadata; the composite feed owns live workers.
-          const live = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner) ?? state.card
+          const feed = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner)
+          const live = feed ?? state.card
           const metadata = cardFromCompositeEntry({ ...entry, origin: state.channel.owner })
           for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
             metadata[key] = live[key] as never
           }
+          // Every feed poll replaces the card, so a fiber the feed lists takes its
+          // roster from the feed too, and the roles never flicker between reads.
+          if (feed) metadata.roles = feed.roles
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
           state.card = metadata
           state.metadataKnown = true
