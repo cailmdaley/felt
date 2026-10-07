@@ -22,6 +22,12 @@ export function verdictReachable(card: KanbanCard): boolean {
   const column = fiberPageColumn(card)
   return column === 'drafts' || column === 'inFlight' || column === 'awaitingReview'
 }
+/** Work still on its way, a draft or in flight, can be moved to Awaiting review. */
+export function reviewReachable(card: KanbanCard): boolean {
+  if (!onDesk(card)) return false
+  const column = fiberPageColumn(card)
+  return column === 'drafts' || column === 'inFlight'
+}
 /** The column's name for the page's status line; empty for a fiber with no column. */
 export function fiberPageKicker(card: KanbanCard): string {
   if (!onDesk(card)) return ''

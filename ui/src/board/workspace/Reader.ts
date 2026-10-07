@@ -1,7 +1,7 @@
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { onDesk, verdictReachable } from './fiberPageState.js'
+import { onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -20,7 +20,7 @@ import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.
 import { groupJump, groupStops, stopLanding } from './groupJump.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
-import { markVerdictHost } from './Verdicts.js'
+import { markVerdictHost, type Verdict } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
@@ -35,7 +35,7 @@ export interface ReaderOptions {
   onCrossing?(travel: number): void
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
-  onVerdict?(verdict: 'tempered' | 'composted'): void
+  onVerdict?(verdict: Verdict): void
   onCompose?(): void
   onConversation?(card: KanbanCard): void
   onEscapeLayer?(): boolean
@@ -1048,6 +1048,10 @@ export class Reader {
     if (intent === 'temper' || intent === 'discard') {
       if (!this.currentCard || !verdictReachable(this.currentCard)) return false
       this.opts.onVerdict?.(intent === 'temper' ? 'tempered' : 'composted')
+    }
+    else if (intent === 'toReview') {
+      if (!this.currentCard || !reviewReachable(this.currentCard)) return false
+      this.opts.onVerdict?.('awaitingReview')
     }
     else if (intent === 'compose') this.opts.onCompose?.()
     else if (intent === 'conversation') {
