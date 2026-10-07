@@ -5,7 +5,7 @@ import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
-import { cardFromCompositeEntry } from '../KanbanReadModel.js'
+import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
@@ -130,6 +130,7 @@ export class Workspace {
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
       sidebarBand: card => this.sidebarGroup(card),
+      sidebarStop: card => fiberPageColumn(card) === 'inFlight' ? `${this.sidebarGroup(card)}:${inFlightBand(card)}` : this.sidebarGroup(card),
       files: card => this.overview.fileNames(card),
       find: opts.find,
       onFind: () => opts.focusFind?.() ?? false,
@@ -220,13 +221,15 @@ export class Workspace {
 
   /**
    * The sidebar is one grouped list wherever the reader was opened from:
-   * Awaiting review and Working in the Desk's own order, then the
-   * constitutions read lately, most recent first.
+   * Awaiting review and Working in the Desk's own order, Working's Needs you
+   * band ahead of the rest as the Desk draws it even for cards the Desk left
+   * undrawn, then the constitutions read lately, most recent first.
    */
   private sidebarCards(): KanbanCard[] {
     const cards = this.opts.cards()
     const review = cards.filter(card => fiberPageColumn(card) === 'awaitingReview')
-    const working = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const working = [...flight.filter(card => inFlightBand(card) === 'needsYou'), ...flight.filter(card => inFlightBand(card) === 'working')]
     const listed = new Set([...review, ...working].map(cardIdentity))
     const live = new Map(cards.map(card => [cardIdentity(card), card]))
     const read = this.readLately.flatMap(id => {

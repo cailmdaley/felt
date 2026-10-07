@@ -16,7 +16,8 @@ import { ConstitutionPicker } from './ConstitutionPicker.js'
 import type { ChannelThemes } from './ChannelThemes.js'
 import { buildCardPaper } from '../KanbanSurfaces.js'
 import { overviewHostMarks } from './Overview.js'
-import { SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
+import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
+import { groupJump } from './groupJump.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
 import { ReceiptArrivals } from './receiptMotion.js'
@@ -43,6 +44,8 @@ export interface ReaderOptions {
   switcherCards?(): KanbanCard[]
   pickerCards?(): KanbanCard[]
   sidebarBand?(card: KanbanCard): string | undefined
+  /** The sidebar's group stops for J/K; In flight splits into its bands. Defaults to the band. */
+  sidebarStop?(card: KanbanCard): string
   files?(card: KanbanCard): string[]
   /** The board bar's Find field: on the desktop it filters the open sidebar. */
   find?: HTMLInputElement
@@ -133,6 +136,8 @@ export class Reader {
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
   private currentCard: KanbanCard | null = null
+  /** The constitution last open in each sidebar group stop, for this session. */
+  private readonly groupMemory = new Map<string, string>()
   private selected: DocKey | null = null
   private expanded = false
   private active = false
@@ -329,7 +334,7 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
-    if (this.currentCard) this.opts.themes?.bind(this.el, this.currentCard, 'reader')
+    if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
     if (arriving) this.arrive(origin === 'Board')
@@ -1063,9 +1068,20 @@ export class Reader {
       const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
       const card = cards[index + (intent === 'prevChannel' ? -1 : 1)]
       if (index >= 0 && card) this.opts.onChannel(card)
+    } else if (intent === 'prevGroup' || intent === 'nextGroup') {
+      const cards = this.opts.switcherCards?.() ?? this.opts.cards()
+      const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
+      this.rememberStop()
+      const card = groupJump(cards, index, intent === 'prevGroup' ? -1 : 1, this.stopOf, cardIdentity, this.groupMemory)
+      if (card) this.opts.onChannel(card)
     } else if (['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp'].includes(intent)) this.scrollDocument(intent, repeat)
     else return false
     return true
+  }
+
+  private readonly stopOf = (card: KanbanCard): string => this.opts.sidebarStop?.(card) ?? this.opts.sidebarBand?.(card) ?? ''
+  private rememberStop(): void {
+    if (this.currentCard) this.groupMemory.set(this.stopOf(this.currentCard), cardIdentity(this.currentCard))
   }
 
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
