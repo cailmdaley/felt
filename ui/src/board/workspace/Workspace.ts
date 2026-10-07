@@ -5,7 +5,7 @@ import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
-import { cardFromCompositeEntry } from '../KanbanReadModel.js'
+import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
@@ -130,6 +130,7 @@ export class Workspace {
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
       sidebarBand: card => this.sidebarGroup(card),
+      sidebarStop: card => fiberPageColumn(card) === 'inFlight' ? `${this.sidebarGroup(card)}:${inFlightBand(card)}` : this.sidebarGroup(card),
       files: card => this.overview.fileNames(card),
       find: opts.find,
       onFind: () => opts.focusFind?.() ?? false,

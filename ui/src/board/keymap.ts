@@ -1,10 +1,10 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'undoVerdict' | 'compose' | 'conversation'
+export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'undoVerdict' | 'compose' | 'conversation'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
-  'prev', 'next', 'prevChannel', 'nextChannel', 'first', 'last',
+  'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
   'back', 'sidebar', 'find', 'help',
 ]
@@ -58,6 +58,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['d'], 'halfDown', 'Scroll half a viewport down'), bind(['u'], 'halfUp', 'Scroll half a viewport up'),
     bind([' '], 'pageDown', 'Page document down'), bind(['Shift+ '], 'pageUp', 'Page document up'),
     bind(['j'], 'nextChannel', 'Next constitution'), bind(['k'], 'prevChannel', 'Previous constitution'),
+    bind(['J'], 'nextGroup', 'Next sidebar group'), bind(['K'], 'prevGroup', 'Previous sidebar group'),
     bind(['ArrowLeft'], 'prev', 'Previous page', true), bind(['ArrowRight'], 'next', 'Next page', true),
     bind(['ArrowDown'], 'nextChannel', 'Next constitution', true), bind(['ArrowUp'], 'prevChannel', 'Previous constitution', true),
     bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Return to origin view'),
