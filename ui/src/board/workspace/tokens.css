@@ -39,6 +39,7 @@
   --ws-agent: var(--kbn-agent);
   --ws-verdict: var(--kbn-tempered);
   --ws-red: var(--ws-owed);
+  --ws-stop: var(--kbn-error);
 
   --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
   --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);

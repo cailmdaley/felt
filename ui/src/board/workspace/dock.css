@@ -270,7 +270,7 @@
 .ws-dock .kbn-detail-transcript-live .kbn-detail-transcript-dot { background: var(--ws-ink); }
 .ws-dock .kbn-detail-transcript-failed .kbn-detail-transcript-dot { background: var(--ws-red); }
 .ws-dock .kbn-detail-transcript-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--ws-label-size)/1.2 var(--ws-serif); }
-.ws-dock button.kbn-detail-transcript-stop:not(.kbn-card-worker) { margin-left: auto; flex: none; padding: 2px 6px; border: 0; background: transparent; color: var(--kbn-error); font: var(--ws-small-size) var(--ws-mono); cursor: pointer; }
+.ws-dock button.kbn-detail-transcript-stop:not(.kbn-card-worker) { margin-left: auto; flex: none; padding: 2px 6px; border: 0; background: transparent; color: var(--ws-stop); font: var(--ws-small-size) var(--ws-mono); cursor: pointer; }
 .ws-dock .kbn-detail-transcript-stop:disabled { opacity: .55; cursor: default; }
 .ws-dock .kbn-detail-transcript-lines { margin: 0; padding: 0; list-style: none; max-height: 9em; overflow-y: auto; overscroll-behavior: contain; font: var(--ws-prose-size)/1.4 var(--ws-serif); overflow-wrap: anywhere; }
 .ws-dock .kbn-meeting-speaker { margin-right: 5px; color: var(--ws-ink-muted); font: var(--ws-label-size)/1.4 var(--ws-serif); }
