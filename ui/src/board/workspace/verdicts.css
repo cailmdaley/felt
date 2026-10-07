@@ -43,16 +43,18 @@
   outline: 2px solid var(--verdict-pigment); outline-offset: 2px;
 }
 .ws-verdict-word { color: var(--verdict-ink); }
-/* The fiber page's status line: the kicker, the worker pill, then Temper and
-   Discard at the line's right end. Outside review the pair is two verbs in
+/* The fiber page's status line: the kicker, the roles, the worker pill, then
+   Temper and Discard at the line's right end. It is one line on a wide page;
+   the roles give way when it runs out. Outside review the pair is two verbs in
    their pigments, plated only under the pointer; awaiting review they are
    the page's plates, verdigris and the Desk's deletion red. The line is
    centred on its glyphs: the kicker's box is trimmed to its small capitals
    and the pill's words to their capitals, so their middles meet. */
-.ws-fiber-prose .ws-prose-header { display: flex; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
-.ws-fiber-prose .ws-prose-status { text-box: trim-both ex alphabetic; }
+.ws-fiber-prose .ws-prose-header { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
+.ws-fiber-prose .ws-prose-status { flex: none; text-box: trim-both ex alphabetic; }
 /* The roster's roles, left of the pill and in its register: mono capitals,
-   muted, a middot between two, cut with an ellipsis when the line runs out.
+   muted, a middot between two, cut with an ellipsis when the line runs out:
+   they give way, so a worker arriving never pushes the verdicts off the line.
    Each opens its role's page; the link firms under the pointer the way the
    pill does, with no underline at rest. */
 .ws-fiber-prose .ws-fiber-roles {
@@ -65,7 +67,7 @@
   color: var(--ws-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
 }
 .ws-fiber-prose .ws-fiber-acts {
-  flex: 1; display: flex; align-items: center; gap: var(--ws-gap); min-width: 0;
+  flex: 1 0 auto; display: flex; align-items: center; gap: var(--ws-gap);
   font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: normal; letter-spacing: 0; text-transform: none; color: var(--ws-ink);
 }
 .ws-fiber-acts .ws-fiber-worker { display: contents; }
