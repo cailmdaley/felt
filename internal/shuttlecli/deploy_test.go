@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestShuttleDeployWaitsForFreshReadyVersion(t *testing.T) {
@@ -440,9 +442,13 @@ func shellFunction(t *testing.T, script, name string) string {
 	if start < 0 {
 		t.Fatalf("function %s not found", name)
 	}
-	end := strings.Index(script[start:], "\n}")
+	end := strings.Index(script[start:], "\n}\n\n")
 	if end < 0 {
-		t.Fatalf("function %s is unterminated", name)
+		if strings.HasSuffix(script[start:], "\n}") {
+			end = len(script[start:]) - 2
+		} else {
+			t.Fatalf("function %s is unterminated", name)
+		}
 	}
 	return script[start:start+end+2] + "\n"
 }
@@ -582,6 +588,300 @@ func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
 	}
 	if calls[0][0] != "STORES_FILE="+options.StoresFile || calls[0][len(calls[0])-1] != "CODEX_HOME="+options.CodexHome {
 		t.Fatalf("supervisor environment not retained: %v", calls[0])
+	}
+}
+
+func TestDeployRootUsesMainWorktreeFromLinkedCheckout(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	main := filepath.Join(root, "main checkout")
+	linked := filepath.Join(root, "linked checkout")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(main, "init")
+	if err := os.WriteFile(filepath.Join(main, "tracked"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(main, "add", "tracked")
+	git(main, "commit", "-m", "initial")
+	git(main, "worktree", "add", "-b", "linked-lane", linked)
+	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + `deploy_root_cmd "$LINKED" | bash`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "LINKED="+linked)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("deploy root: %v\n%s", err, out)
+	}
+	want, err := filepath.EvalSymlinks(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want += ".deploy"
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Fatalf("deploy root = %q; want %q", got, want)
+	}
+}
+
+func TestDeployCacheSeedCopiesCachesWithoutChangingSource(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	source := filepath.Join(root, "older worktree")
+	target := filepath.Join(root, "newer worktree")
+	for relative, value := range map[string]string{
+		"daemon/deps/pkg/file": "dependency", "daemon/_build/prod/file": "beam", "ui/node_modules/.npm-ci-stamp": "stamp",
+		"ui/package-lock.json": "same lock",
+	} {
+		path := filepath.Join(source, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{filepath.Join(target, "daemon"), filepath.Join(target, "ui")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "ui", "package-lock.json"), []byte("same lock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := `root=$ROOT; target=$TARGET; export root target
+` + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT" "$TARGET" | bash`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cache seed: %v\n%s", err, out)
+	}
+	for relative, want := range map[string]string{
+		"daemon/deps/pkg/file": "dependency", "daemon/_build/prod/file": "beam", "ui/node_modules/.npm-ci-stamp": "stamp",
+		"ui/package-lock.json": "same lock",
+	} {
+		for _, dir := range []string{source, target} {
+			got, err := os.ReadFile(filepath.Join(dir, relative))
+			if err != nil || string(got) != want {
+				t.Errorf("%s = %q, %v; want %q", filepath.Join(dir, relative), got, err, want)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "daemon/deps/pkg/file"), []byte("target edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(source, "daemon/deps/pkg/file")); err != nil || string(got) != "dependency" {
+		t.Fatalf("cache seed altered its source: %q, %v", got, err)
+	}
+}
+
+func TestDeployPruneKeepsCurrentRollbackReferencedAndDirty(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo with spaces")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo, err = filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init")
+	if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte("0"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "tracked")
+	git("commit", "-m", "zero")
+	commits := []string{git("rev-parse", "HEAD")}
+	for i := 1; i < 6; i++ {
+		if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte(strconv.Itoa(i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git("commit", "-am", strconv.Itoa(i))
+		commits = append(commits, git("rev-parse", "HEAD"))
+	}
+	deployRoot := repo + ".deploy"
+	paths := make([]string, len(commits))
+	for i, commit := range commits {
+		paths[i] = filepath.Join(deployRoot, commit)
+		git("worktree", "add", "--detach", paths[i], commit)
+		time.Sleep(20 * time.Millisecond)
+	}
+	current, rollback, referenced, dirty, removed := paths[5], paths[4], paths[3], paths[2], paths[1]
+	if err := os.WriteFile(filepath.Join(referenced, "live-process"), []byte("live"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirty, "untracked"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unitDir := filepath.Join(base, "home", ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unitDir, "shuttle-daemon.service"), []byte(referenced), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rollbackTime := time.Now().Add(time.Hour)
+	if err := os.Chtimes(rollback, rollbackTime, rollbackTime); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := filepath.Join(base, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakeBin, "ps"), []byte("#!/bin/sh\nprintf '%s\\n' \"$SHUTTLE_REFERENCED\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "prune_deploy_cmd") + `prune_deploy_cmd "$REPO" "$CURRENT" | bash`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "REPO="+repo, "CURRENT="+current, "HOME="+filepath.Join(base, "home"), "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"), "SHUTTLE_REFERENCED="+referenced)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("prune: %v\n%s", err, out)
+	}
+	for _, path := range []string{current, rollback, referenced, dirty} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("kept worktree %s missing: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(removed); !os.IsNotExist(err) {
+		t.Errorf("old clean worktree still exists: %s (%v)", removed, err)
+	}
+	if !strings.Contains(string(out), removed) || !strings.Contains(string(out), "pruned deploy worktrees:") {
+		t.Errorf("prune output does not list removal: %s", out)
+	}
+	if !strings.Contains(string(out), "dirty deploy worktree kept:") {
+		t.Errorf("dirty worktree was not reported: %s", out)
+	}
+}
+
+func TestDeployVerificationFailureDoesNotPrune(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "prune-called")
+	harness := `wait_for_sha() { return 1; }
+run_on() { printf called > "$MARKER"; }
+` + shellFunction(t, string(script), "verify_and_prune") + `verify_and_prune local /repo /repo.deploy/current`
+	cmd := exec.Command("bash", "-c", harness)
+	cmd.Env = append(os.Environ(), "DEPLOY_REF=abc", "MARKER="+marker)
+	if out, err := cmd.CombinedOutput(); err == nil {
+		t.Fatalf("verification failure was accepted: %s", out)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("prune ran after failed version verification: %v", err)
+	}
+}
+
+func TestDeployLegacyPrunePrintsQuotedCommands(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(t.TempDir(), "repo with spaces")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo, err = filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := exec.Command("git", "-C", repo, "init")
+	if out, err := git.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	git = exec.Command("git", "-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "root")
+	if out, err := git.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	commit := exec.Command("git", "-C", repo, "rev-parse", "HEAD")
+	shaOut, err := commit.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.TrimSpace(string(shaOut))
+	linked := filepath.Join(filepath.Dir(repo), "linked checkout")
+	addLinked := exec.Command("git", "-C", repo, "worktree", "add", "-b", "linked-lane", linked)
+	if out, err := addLinked.CombinedOutput(); err != nil {
+		t.Fatalf("linked worktree: %v\n%s", err, out)
+	}
+	legacy := linked + ".deploy"
+	if err := os.MkdirAll(repo+".deploy", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(legacy, "old revision")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	add := exec.Command("git", "-C", linked, "worktree", "add", "--detach", old, sha)
+	if out, err := add.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+	time.Sleep(30 * time.Millisecond)
+	newer := filepath.Join(legacy, "newer revision")
+	if err := os.MkdirAll(newer, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	newerTime := time.Now().Add(time.Hour)
+	if err := os.Chtimes(newer, newerTime, newerTime); err != nil {
+		t.Fatal(err)
+	}
+	current := filepath.Join(t.TempDir(), "shared.deploy", "current")
+	fakeBin := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakeBin, "ps"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "prune_deploy_cmd") + `prune_deploy_cmd "$REPO" "$CURRENT" | bash`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "REPO="+linked, "CURRENT="+current, "HOME="+t.TempDir(), "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("legacy report: %v\n%s", err, out)
+	}
+	want := "git -C " + strings.ReplaceAll(linked, " ", `\ `) + " worktree remove " + strings.ReplaceAll(old, " ", `\ `)
+	if !strings.Contains(string(out), want) {
+		t.Fatalf("legacy command not shell-quoted or missing: want %q in %s", want, out)
+	}
+	if _, err := os.Stat(old); err != nil {
+		t.Fatalf("legacy worktree was removed rather than reported: %v", err)
 	}
 }
 

@@ -6,7 +6,7 @@
 #   bin/shuttle-deploy --hosts local,hub-a    # a subset
 #   bin/shuttle-deploy --list                 # show the host table
 #   bin/shuttle-deploy --no-push              # skip the git push (already pushed)
-#   bin/shuttle-deploy --ref v2.0.0-rc.1      # build an exact revision in retained worktrees
+#   bin/shuttle-deploy --ref v2.0.0-rc.1      # build an exact revision in immutable worktrees
 #   bin/shuttle-deploy --handshake            # bootstrap interactive ssh auth when
 #                                             # no live master — human must approve
 #
@@ -375,24 +375,186 @@ for h in $HOSTS; do
   break
 done
 
-# Retained worktrees are runtime roots: supervisors, the respawn loop and
-# plugin setup refer to them after this helper exits. Never reset a checkout
-# or discard edits to an existing worktree.
+# Exact-ref worktrees are immutable runtime roots. Build in a new path, seed
+# only disposable caches by copying, and prune old roots only after verification.
+deploy_root_cmd() {
+  local checkout="$1"
+  cat <<SH
+set -eu
+source=$(shell_quote "$checkout")
+common=\$(git -C "\$source" rev-parse --git-common-dir)
+case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
+common=\$(cd "\$common" && pwd -P)
+main=\$(dirname "\$common")
+printf '%s.deploy\\n' "\$main"
+SH
+}
+
+seed_deploy_cache_cmd() {
+  local root="$1" target="$2"
+  cat <<SH
+set -u
+root=\$root
+target=\$target
+source=
+while IFS= read -r candidate; do
+  candidate=\${candidate%/}
+  [ "\$candidate" = "\$target" ] && continue
+  [ -d "\$candidate" ] || continue
+  source=\$candidate
+  break
+done < <(ls -td "\$root"/*/ 2>/dev/null)
+[ -n "\$source" ] || exit 0
+copy_tree() {
+  from=\$1; to=\$2
+  mkdir -p "\$(dirname "\$to")" || return 1
+  case \$(uname -s) in
+    Darwin) cp -cR "\$from" "\$to" 2>/dev/null || { rm -rf "\$to"; cp -R "\$from" "\$to"; } ;;
+    *) cp -R --reflink=auto "\$from" "\$to" 2>/dev/null || { rm -rf "\$to"; cp -R "\$from" "\$to"; } ;;
+  esac
+}
+failed=0
+for relative in daemon/deps daemon/_build ui/node_modules; do
+  [ -d "\$source/\$relative" ] || continue
+  if ! copy_tree "\$source/\$relative" "\$target/\$relative"; then
+    echo "cache seed failed for \$relative; building cold" >&2
+    rm -rf "\$target/\$relative"
+    failed=1
+  fi
+done
+if [ -d "\$target/ui/node_modules" ]; then
+  if [ -f "\$source/ui/node_modules/.npm-ci-stamp" ] &&
+     cmp -s "\$source/ui/package-lock.json" "\$target/ui/package-lock.json"; then
+    touch "\$target/ui/node_modules/.npm-ci-stamp" || {
+      echo "cache seed failed for ui npm stamp; building cold" >&2
+      rm -f "\$target/ui/node_modules/.npm-ci-stamp"
+    }
+  else
+    rm -f "\$target/ui/node_modules/.npm-ci-stamp"
+  fi
+fi
+[ "\$failed" = 0 ] || exit 0
+printf 'seeded build caches from %s\\n' "\$source"
+SH
+}
+
 revision_checkout_cmd() {
   local checkout="$1"
   cat <<SH
 set -eu
 source=$(shell_quote "$checkout")
 commit=$(shell_quote "$TARGET_COMMIT")
-target="\$source.deploy/\$commit"
+common=\$(git -C "\$source" rev-parse --git-common-dir)
+case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
+common=\$(cd "\$common" && pwd -P)
+root="\$(dirname "\$common").deploy"
+target="\$root/\$commit"
 git -C "\$source" fetch --tags origin
 git -C "\$source" cat-file -e "\$commit^{commit}"
 if [ -e "\$target" ]; then
   [ "\$(git -C "\$target" rev-parse HEAD)" = "\$commit" ] || { echo "deployment worktree has the wrong revision: \$target" >&2; exit 1; }
   [ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ] || { echo "deployment worktree has local edits: \$target" >&2; exit 1; }
 else
-  mkdir -p "\$source.deploy"
+  mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
+  $(seed_deploy_cache_cmd "\$root" "\$target")
+fi
+SH
+}
+
+prune_deploy_cmd() {
+  local checkout="$1" current="$2"
+  cat <<SH
+set -u
+source=$(shell_quote "$checkout")
+current=$(shell_quote "$current")
+common=\$(git -C "\$source" rev-parse --git-common-dir 2>/dev/null) || exit 0
+case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
+common=\$(cd "\$common" 2>/dev/null && pwd -P) || exit 0
+root="\$(dirname "\$common").deploy"
+newest=
+while IFS= read -r candidate; do
+  candidate=\${candidate%/}
+  [ "\$candidate" = "\$current" ] && continue
+  [ -d "\$candidate" ] || continue
+  newest=\$candidate
+  break
+done < <(ls -td "\$root"/*/ 2>/dev/null)
+referenced() {
+  path=\$1
+  if ps -axo command= 2>/dev/null | grep -F -- "\$path" | grep -v 'grep -F' >/dev/null; then return 0; fi
+  if [ -d /proc ]; then
+    for proc in /proc/[0-9]*; do
+      [ -e "\$proc/cwd" ] || continue
+      cwd=\$(readlink "\$proc/cwd" 2>/dev/null) || continue
+      case "\$cwd" in *"\$path"*) return 0 ;; esac
+      cmd=\$(tr '\\000' ' ' < "\$proc/cmdline" 2>/dev/null)
+      case "\$cmd" in *grep*) continue ;; esac
+      case "\$cmd" in *"\$path"*) return 0 ;; esac
+    done
+  elif command -v lsof >/dev/null 2>&1; then
+    while IFS= read -r pid; do
+      cwd=\$(lsof -a -p "\$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)
+      case "\$cwd" in *"\$path"*) return 0 ;; esac
+    done < <(ps -axo pid= 2>/dev/null)
+  fi
+  for config in "\$HOME"/Library/LaunchAgents/*.plist "\$HOME"/.config/systemd/user/*.service; do
+    [ -f "\$config" ] || continue
+    grep -F -- "\$path" "\$config" >/dev/null && return 0
+  done
+  return 1
+}
+removed=
+for candidate in "\$root"/*; do
+  [ -d "\$candidate" ] || continue
+  [ "\$candidate" = "\$current" ] && continue
+  [ "\$candidate" = "\$newest" ] && continue
+  if referenced "\$candidate"; then continue; fi
+  status=\$(git -C "\$candidate" status --porcelain 2>/dev/null) || {
+    printf 'cannot inspect deploy worktree; keeping: %s\\n' "\$candidate" >&2
+    continue
+  }
+  if [ -n "\$status" ]; then
+    printf 'dirty deploy worktree kept: %s\\n' "\$candidate" >&2
+    continue
+  fi
+  if git -C "\$source" worktree remove "\$candidate"; then
+    removed="\$removed \$candidate"
+  else
+    printf 'could not remove deploy worktree: %s\\n' "\$candidate" >&2
+  fi
+done
+git -C "\$source" worktree prune
+if [ -n "\$removed" ]; then printf 'pruned deploy worktrees:%s\\n' "\$removed"; else printf 'pruned deploy worktrees: none\\n'; fi
+# Old lane-local roots are reported, never modified; operators can review the
+# shell-quoted commands before removing them.
+legacy="\$source.deploy"
+if [ -d "\$legacy" ] && [ "\$legacy" != "\$root" ]; then
+  legacy_rollback=
+  while IFS= read -r candidate; do
+    candidate=\${candidate%/}
+    [ "\$candidate" = "\$current" ] && continue
+    [ -d "\$candidate" ] || continue
+    legacy_rollback=\$candidate
+    break
+  done < <(ls -td "\$legacy"/*/ 2>/dev/null)
+  for candidate in "\$legacy"/*; do
+    [ -d "\$candidate" ] || continue
+    [ "\$candidate" = "\$current" ] && continue
+    [ "\$candidate" = "\$legacy_rollback" ] && continue
+    if referenced "\$candidate"; then continue; fi
+    status=\$(git -C "\$candidate" status --porcelain 2>/dev/null) || {
+      printf 'cannot inspect legacy deploy worktree; keeping: %s\\n' "\$candidate" >&2
+      continue
+    }
+    if [ -n "\$status" ]; then
+      printf 'dirty legacy deploy worktree kept: %s\\n' "\$candidate" >&2
+      continue
+    fi
+    source_q=\$(printf '%q' "\$source")
+    candidate_q=\$(printf '%q' "\$candidate")
+    printf 'legacy cleanup command: git -C %s worktree remove %s\\n' "\$source_q" "\$candidate_q"
+  done
 fi
 SH
 }
@@ -412,7 +574,8 @@ build_checkout_cmd() {
 BUILD_REPO="$REPO"
 if [ -n "$DEPLOY_REF" ]; then
   bash -lc "$(revision_checkout_cmd "$REPO")" || { bad "could not prepare the deploy revision"; exit 1; }
-  BUILD_REPO="$REPO.deploy/$TARGET_COMMIT"
+  BUILD_ROOT="$(bash -lc "$(deploy_root_cmd "$REPO")")" || { bad "could not resolve the deploy worktree root"; exit 1; }
+  BUILD_REPO="${BUILD_ROOT%/}/$TARGET_COMMIT"
 fi
 
 # Shell snippets reach the daemon at the address `shuttle host --json`
@@ -529,6 +692,13 @@ wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also
     fi
     sleep "$interval"
   done
+}
+
+verify_and_prune() { # $1 = host, $2 = checkout, $3 = deployed worktree
+  local host="$1" checkout="$2" deployed="$3"
+  wait_for_sha "$host" || return 1
+  [ -n "$DEPLOY_REF" ] || return 0
+  run_on "$host" "$(prune_deploy_cmd "$checkout" "$deployed")"
 }
 
 # A host marked `"build_ui": false` is served the deploy host's bundle, so the
@@ -787,14 +957,14 @@ deploy_local() {
     run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO")" \
       || { bad "could not install and restart the local respawn loop"; return 1; }
   fi
-  wait_for_sha "" || { bad "daemon did not come up on $TARGET_SHA"; return 1; }
+  verify_and_prune "" "$REPO" "$BUILD_REPO" || { bad "daemon did not verify or deploy worktrees could not be pruned"; return 1; }
   release_quarantine "" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
   return "$harness_failed"
 }
 
 deploy_remote() {
-  local host="$1" dir dest flags build_cmd
+  local host="$1" dir dest flags build_cmd remote_root=""
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
   ssh $flags "$dest" "true" 2>/dev/null \
@@ -803,7 +973,9 @@ deploy_remote() {
   if [ -n "$DEPLOY_REF" ]; then
     run_on "$host" "$(revision_checkout_cmd "$dir")" \
       || { bad "could not prepare the deploy revision"; return 1; }
-    dir="$dir.deploy/$TARGET_COMMIT"
+    remote_root="$(run_on "$host" "$(deploy_root_cmd "$dir")")" \
+      || { bad "could not resolve the deploy worktree root on $host"; return 1; }
+    dir="${remote_root%/}/$TARGET_COMMIT"
   fi
   # The bundle goes over BEFORE the build, so the release this build assembles
   # embeds it (see the bundle note at the top of this file).
@@ -841,8 +1013,8 @@ deploy_remote() {
     run_on "$host" "$(respawn_launcher_restart_cmd "$dir")" \
       || { bad "could not install and restart the respawn loop on $host"; return 1; }
   fi
-  wait_for_sha "$host" \
-    || { bad "daemon did not come up on $TARGET_SHA (slow boot? check tmux shuttle-daemon)"; return 1; }
+  verify_and_prune "$host" "$(fleet_dir "$host")" "$dir" \
+    || { bad "daemon did not verify or deploy worktrees could not be pruned on $host"; return 1; }
   release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
   return "$harness_failed"

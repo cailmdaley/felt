@@ -122,10 +122,11 @@ To deploy a release candidate across the configured fleet, pin its tag:
 bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
 ```
 
-The helper resolves the tag to one commit and builds it in a persistent detached Git worktree beside each configured checkout.
-The regular checkout's branch and local edits stay in place.
-Version tags stamp both CLIs and the daemon with the release version.
-Keep deployment worktrees while their releases or harness integrations are in use; the supervisor and plugin receipts refer to those paths.
+The helper resolves the tag to one commit and builds it in a detached Git worktree under `<main-worktree>.deploy/<commit>`. The main worktree is derived from Git's common directory, so deploys launched from linked worktrees share one per-repository root. The regular checkout's branch and local edits stay in place, and every exact-ref build gets its own immutable tree.
+
+Before building a new worktree, the helper copies `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the most recently modified deploy worktree in that root. It uses APFS clones (`cp -c`) on macOS and reflink copies where supported on Linux, with recursive-copy fallback. These are Mix dependencies and environment-specific build products, plus npm dependencies and the `.npm-ci-stamp` that lets `make ui` skip `npm ci`; they are copies, never links or moves. A seeding error is reported and the build proceeds cold.
+
+After the daemon reports the expected SHA, fresh boot, and ready state, the helper prunes clean deploy worktrees under the shared root, retaining the deployed tree, the newest other tree for rollback, and any tree referenced by a process, its working directory, or a launchd/systemd supervisor. Dirty trees are reported and left alone. Failed deployments do not prune. Worktrees in the old checkout-local `<checkout>.deploy/` location are never removed automatically; the helper prints shell-quoted removal commands for review. Version tags stamp both CLIs and the daemon with the release version.
 If Pi loads a Felt package from another revision, the helper reports the mismatch without replacing that package choice.
 Use Pi's native package commands to select the deployed source directory, then rerun the host's deployment check.
 Use `--hosts local,hub-a` to deploy a subset.
