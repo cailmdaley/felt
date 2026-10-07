@@ -181,6 +181,8 @@
 /* Meeting is a switch among the verbs. On, it shows the meeting's kind and
    its own verb, Start meeting, in place of New session and Resume. */
 .ws-dock .kbn-ctl-meet { display: contents; }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-stop { border-color: var(--ws-ink) !important; color: var(--ws-ink); }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-stop:disabled { opacity: .55; }
 .ws-dock .kbn-ctl-meet-switch { position: relative; display: inline-flex; align-items: center; gap: 7px; box-sizing: border-box; min-height: var(--ctl-h); padding: 0 8px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--ws-label-size)/1.4 var(--ws-serif); white-space: nowrap; cursor: pointer; margin-right: auto; }
 .ws-dock .kbn-ctl-meet-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 .ws-dock .kbn-ctl-meet-switch:has(input:disabled) { opacity: .55; cursor: default; }

@@ -4,7 +4,7 @@ import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../../forms/meetingApi.js'
-import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
+import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../../forms/executionSurface.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
@@ -71,6 +71,10 @@ export interface MeetingJoinControl {
   join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>): Promise<MeetingJoinResult>
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
+  /** Stop (or dismiss, once failed) the recording: the board's one stop path. */
+  stop?(meeting: MeetingRecord): void | Promise<void>
+  /** Whether a stop for `meeting` has been asked and not yet observed. */
+  stopRequested?(meeting: MeetingRecord): boolean
 }
 
 export interface SessionWindow {
@@ -1152,6 +1156,17 @@ export class Dock {
     input.addEventListener('change', () => arm(input.checked))
     this.meetingArmed = () => input.checked && !input.disabled
 
+    // The recording this constitution hosts can be stopped from here, by the
+    // board's own stop path.
+    const stop = ctlButton('Stop', 'kbn-ctl-meet-stop')
+    stop.hidden = true
+    stop.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const current = this.meeting?.current()
+      if (!current || this.meeting?.stopRequested?.(current)) return
+      void this.meeting?.stop?.(current)
+    })
+
     const paint = (): void => {
       const control = this.meeting
       if (!control) return
@@ -1162,6 +1177,13 @@ export class Dock {
       input.disabled = held
       modes.setDisabled(held)
       verb.disabled = held
+      const hosted = current !== null && meetingHostCard(current, [card]) !== null
+      const actions = current !== null && hosted && this.meeting?.stop ? meetingActions(current, control.stopRequested?.(current) ?? false) : null
+      stop.hidden = !actions
+      if (actions) {
+        stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
+        stop.disabled = actions.stopDisabled
+      }
       toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
       if (!control.canJoin() && input.checked && !starting) arm(false)
     }
@@ -1208,7 +1230,7 @@ export class Dock {
       start()
     })
 
-    wrap.append(toggle, modes.el, verb)
+    wrap.append(toggle, modes.el, verb, stop)
     paint()
     return wrap
   }

@@ -130,6 +130,35 @@ describe('anchored pickers', () => {
     meetingDock.reset()
   })
 
+  it('stops the recording this constitution hosts, by the shared stop path', async () => {
+    let recording: Record<string, unknown> | null = { title: 'Standup', state: 'live', fiber: 'a/task', tail: [] }
+    let requested = false
+    const stop = vi.fn(() => { requested = true })
+    const control = { canJoin: () => false, current: () => recording, join: vi.fn(), stop, stopRequested: () => requested }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const band = meetingDock.bandFor(task())
+    document.body.append(band.el)
+    const button = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-stop')!
+    expect([button.hidden, button.textContent, button.disabled]).toEqual([false, 'Stop', false])
+    button.click()
+    expect(stop).toHaveBeenCalledWith(recording)
+    meetingDock.syncMeeting()
+    expect(button.disabled).toBe(true)
+    button.click()
+    expect(stop).toHaveBeenCalledTimes(1)
+
+    recording = { ...recording, state: 'failed' }
+    requested = false
+    meetingDock.syncMeeting()
+    expect([button.hidden, button.textContent]).toEqual([false, 'Dismiss'])
+
+    // A recording another constitution hosts shows no Stop here.
+    recording = { title: 'Standup', state: 'live', fiber: 'other', tail: [] }
+    meetingDock.syncMeeting()
+    expect(button.hidden).toBe(true)
+    meetingDock.reset()
+  })
+
   it('keeps the switch on when a meeting fails to start', async () => {
     const control = { canJoin: () => true, current: () => null, join: vi.fn(async () => ({ error: 'hark unavailable', delivered: false })) }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })

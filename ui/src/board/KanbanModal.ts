@@ -351,6 +351,8 @@ export class KanbanModal {
           canJoin: () => meetingJoinable(this.meetingStatus),
           join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
           current: () => this.meetingStatus.meeting,
+          stop: (meeting) => this.stopCurrentMeeting(meeting),
+          stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
         },
         workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
       },
