@@ -138,7 +138,7 @@ describe('anchored pickers', () => {
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const band = meetingDock.bandFor(task())
     document.body.append(band.el)
-    const button = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-stop')!
+    const button = band.el.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
     expect([button.hidden, button.textContent, button.disabled]).toEqual([false, 'Stop', false])
     button.click()
     expect(stop).toHaveBeenCalledWith(recording)
@@ -155,7 +155,7 @@ describe('anchored pickers', () => {
     // A recording another constitution hosts shows no Stop here.
     recording = { title: 'Standup', state: 'live', fiber: 'other', tail: [] }
     meetingDock.syncMeeting()
-    expect(button.hidden).toBe(true)
+    expect(button.closest('section')!.hidden).toBe(true)
     meetingDock.reset()
   })
 

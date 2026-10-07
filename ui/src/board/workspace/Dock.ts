@@ -631,7 +631,16 @@ export class Dock {
     state.className = 'kbn-detail-transcript-state'
     const title = document.createElement('span')
     title.className = 'kbn-detail-transcript-title'
-    meta.append(dot, state, title)
+    const stop = document.createElement('button')
+    stop.type = 'button'
+    stop.className = 'kbn-detail-transcript-stop'
+    stop.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const current = this.meeting?.current()
+      if (!current || this.meeting?.stopRequested?.(current)) return
+      void this.meeting?.stop?.(current)
+    })
+    meta.append(dot, state, title, stop)
     const list = document.createElement('ol')
     list.className = 'kbn-detail-transcript-lines'
     list.setAttribute('aria-label', 'Transcript')
@@ -654,8 +663,16 @@ export class Dock {
     if (!pane || !card) return
     const meeting = this.meeting?.current() ?? null
     const hosted = meetingHostCard(meeting, [card]) !== null
-    pane.hidden = !hosted || meeting === null || meeting.tail.length === 0
+    pane.hidden = !hosted || meeting === null
     if (!meeting || !hosted) return
+    const actions = this.meeting?.stop ? meetingActions(meeting, this.meeting.stopRequested?.(meeting) ?? false) : null
+    const stop = pane.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
+    stop.hidden = !actions
+    if (actions) {
+      stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
+      stop.disabled = actions.stopDisabled
+    }
+    pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = meeting.tail.length === 0
     for (const st of ['starting', 'loading', 'live', 'stopping', 'failed']) {
       pane.classList.toggle(`kbn-detail-transcript-${st}`, meeting.state === st)
     }
@@ -1156,16 +1173,6 @@ export class Dock {
     input.addEventListener('change', () => arm(input.checked))
     this.meetingArmed = () => input.checked && !input.disabled
 
-    // The recording this constitution hosts can be stopped from here, by the
-    // board's own stop path.
-    const stop = ctlButton('Stop', 'kbn-ctl-meet-stop')
-    stop.hidden = true
-    stop.addEventListener('click', (e) => {
-      e.stopPropagation()
-      const current = this.meeting?.current()
-      if (!current || this.meeting?.stopRequested?.(current)) return
-      void this.meeting?.stop?.(current)
-    })
 
     const paint = (): void => {
       const control = this.meeting
@@ -1177,13 +1184,6 @@ export class Dock {
       input.disabled = held
       modes.setDisabled(held)
       verb.disabled = held
-      const hosted = current !== null && meetingHostCard(current, [card]) !== null
-      const actions = current !== null && hosted && this.meeting?.stop ? meetingActions(current, control.stopRequested?.(current) ?? false) : null
-      stop.hidden = !actions
-      if (actions) {
-        stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
-        stop.disabled = actions.stopDisabled
-      }
       toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
       if (!control.canJoin() && input.checked && !starting) arm(false)
     }
@@ -1230,7 +1230,7 @@ export class Dock {
       start()
     })
 
-    wrap.append(toggle, modes.el, verb, stop)
+    wrap.append(toggle, modes.el, verb)
     paint()
     return wrap
   }

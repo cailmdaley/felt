@@ -181,8 +181,6 @@
 /* Meeting is a switch among the verbs. On, it shows the meeting's kind and
    its own verb, Start meeting, in place of New session and Resume. */
 .ws-dock .kbn-ctl-meet { display: contents; }
-.ws-dock .kbn-ctl-composer .kbn-ctl-meet-stop { border-color: var(--ws-ink) !important; color: var(--ws-ink); }
-.ws-dock .kbn-ctl-composer .kbn-ctl-meet-stop:disabled { opacity: .55; }
 .ws-dock .kbn-ctl-meet-switch { position: relative; display: inline-flex; align-items: center; gap: 7px; box-sizing: border-box; min-height: var(--ctl-h); padding: 0 8px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--ws-label-size)/1.4 var(--ws-serif); white-space: nowrap; cursor: pointer; margin-right: auto; }
 .ws-dock .kbn-ctl-meet-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 .ws-dock .kbn-ctl-meet-switch:has(input:disabled) { opacity: .55; cursor: default; }
@@ -272,6 +270,8 @@
 .ws-dock .kbn-detail-transcript-live .kbn-detail-transcript-dot { background: var(--ws-ink); }
 .ws-dock .kbn-detail-transcript-failed .kbn-detail-transcript-dot { background: var(--ws-red); }
 .ws-dock .kbn-detail-transcript-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--ws-label-size)/1.2 var(--ws-serif); }
+.ws-dock button.kbn-detail-transcript-stop:not(.kbn-card-worker) { margin-left: auto; flex: none; padding: 2px 6px; border: 0; background: transparent; color: var(--kbn-error); font: var(--ws-small-size) var(--ws-mono); cursor: pointer; }
+.ws-dock .kbn-detail-transcript-stop:disabled { opacity: .55; cursor: default; }
 .ws-dock .kbn-detail-transcript-lines { margin: 0; padding: 0; list-style: none; max-height: 9em; overflow-y: auto; overscroll-behavior: contain; font: var(--ws-prose-size)/1.4 var(--ws-serif); overflow-wrap: anywhere; }
 .ws-dock .kbn-meeting-speaker { margin-right: 5px; color: var(--ws-ink-muted); font: var(--ws-label-size)/1.4 var(--ws-serif); }
 .ws-dock .kbn-ctl-history-toggle { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: var(--ctl-h); padding: 4px 0; border: none; background: transparent; color: var(--ws-ink-muted); }
