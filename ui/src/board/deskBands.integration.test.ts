@@ -69,14 +69,14 @@ describe('In flight bands', () => {
     document.body.append(root)
     const column = root.querySelector<HTMLElement>('[data-column="inFlight"]')!
     expect(flightOrder(column)).toEqual([
-      { band: 'needsYou', caption: 'Needs you', label: 'Needs you', ids: ['worker-3', 'worker-2', 'worker-1'] },
-      { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-4', 'worker-0'] },
+      { band: 'aloft', caption: 'Aloft', label: 'Aloft', ids: ['worker-4', 'worker-0'] },
+      { band: 'holding', caption: 'Holding', label: 'Holding', ids: ['worker-3', 'worker-2', 'worker-1'] },
     ])
     expect(column.querySelector('.kbn-col-count')?.textContent).toBe('5')
     expect(column.querySelectorAll('.kbn-col-list')).toHaveLength(1)
     expect(column.querySelectorAll('.kbn-empty')).toHaveLength(0)
-    expect(column.querySelector('[data-flight-band="needsYou"] .kbn-card[data-fiber-id="worker-3"]')).not.toBeNull()
-    expect(column.querySelector('[data-flight-band="working"] .kbn-card[data-fiber-id="worker-0"]')).not.toBeNull()
+    expect(column.querySelector('[data-flight-band="holding"] .kbn-card[data-fiber-id="worker-3"]')).not.toBeNull()
+    expect(column.querySelector('[data-flight-band="aloft"] .kbn-card[data-fiber-id="worker-0"]')).not.toBeNull()
     const waiting = column.querySelector<HTMLElement>('[data-fiber-id="worker-3"]')!
     expect(waiting.getAttribute('draggable')).toBe('true')
     waiting.click()
@@ -93,14 +93,14 @@ describe('In flight bands', () => {
   it('moves only a crossing card into its creation position in the other band', () => {
     const data = workerFeed(['working', 'attention', 'blocked', 'working', 'unobserved'])
     expect(flightOrder(renderer(data).renderNowSection(data.now, {}))).toEqual([
-      { band: 'needsYou', caption: 'Needs you', label: 'Needs you', ids: ['worker-2', 'worker-1'] },
-      { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-4', 'worker-3', 'worker-0'] },
+      { band: 'aloft', caption: 'Aloft', label: 'Aloft', ids: ['worker-4', 'worker-3', 'worker-0'] },
+      { band: 'holding', caption: 'Holding', label: 'Holding', ids: ['worker-2', 'worker-1'] },
     ])
   })
 
   it.each([
-    [['waiting', 'blocked'], 'Needs you'],
-    [['working', 'unobserved'], 'Working'],
+    [['waiting', 'blocked'], 'Holding'],
+    [['working', 'unobserved'], 'Aloft'],
   ])('shows only the populated band for %j', (phases, label) => {
     const data = workerFeed(phases)
     const root = renderer(data).renderNowSection(data.now, {})

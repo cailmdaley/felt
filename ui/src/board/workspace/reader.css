@@ -140,17 +140,26 @@
 /* The column travels as cards; the current slip reaches toward the reading stage. */
 .ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-corner-inset) var(--ws-inset) 0; position: relative; z-index: 2; }
 .ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
-/* The column starts on the toggle's row: its first heading sits beside the
-   toggle on its centre line; a field or card that leads starts below it. */
-.ws-sidebar:not(.ws-sidebar-flight) {
-  --ws-toggle-row: calc(var(--ws-control-height) + var(--ws-small-gap));
-  --ws-toggle-clear: calc(var(--ws-corner-inset) + var(--ws-control-height) + var(--ws-small-gap) - var(--ws-inset));
+/* The index strip holds the toggle's row, on its centre line: each group and
+   its count in mono caps, the open constitution's group in full ink. Its
+   entries are the J/K stops, and a click lands as J/K would. */
+.ws-sidebar-index {
+  flex: none; display: flex; align-items: center; min-width: 0; height: var(--ws-control-height);
+  margin-bottom: calc(-1 * var(--ws-small-gap));
+  padding-left: calc(var(--ws-corner-inset) + var(--ws-control-height) + var(--ws-small-gap) - var(--ws-inset));
+  overflow: hidden; white-space: nowrap;
 }
-.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-find { margin-top: var(--ws-toggle-row); }
-.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-list:first-child > .kbn-flight-caption:first-child {
-  display: flex; align-items: center; height: var(--ws-control-height); margin-top: 0; padding-left: var(--ws-toggle-clear);
+.ws-sidebar-index-entry {
+  display: inline-flex; align-items: center; gap: .45em; height: 100%; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .04em; text-transform: uppercase;
 }
-.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-list:first-child > :first-child:not(.kbn-flight-caption) { margin-top: var(--ws-toggle-row); }
+.ws-sidebar-index-entry + .ws-sidebar-index-entry { margin-left: .5em; }
+.ws-sidebar-index-entry + .ws-sidebar-index-entry::before { content: '·'; margin-right: .05em; color: var(--ws-ink-muted); }
+.ws-sidebar-index-count { font-variant-numeric: tabular-nums; }
+.ws-sidebar-index-entry:hover, .ws-sidebar-index-entry[aria-current='location'] { color: var(--ws-ink); }
+.ws-sidebar-index-entry[aria-current='location'] .ws-sidebar-index-name { text-decoration: underline; text-decoration-thickness: var(--ws-line-width); text-underline-offset: 4px; }
+.ws-sidebar-index-entry:focus { outline: none; }
+.ws-reader.ws-keyboard .ws-sidebar-index-entry:focus-visible { outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: 2px; }
 /* The sidebar's edge resizes it: a hairline that darkens under the pointer, the keyboard or a drag. */
 .ws-sidebar-handle {
   position: absolute; top: 0; bottom: 0; right: calc(var(--ws-sidebar-handle) / -2); z-index: 3; width: var(--ws-sidebar-handle);
@@ -169,12 +178,6 @@
   flex: 1; min-height: 0; width: calc(100% + var(--ws-sidebar-overflow)); margin-right: calc(-1 * var(--ws-sidebar-overflow));
   padding: 0 var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;
   scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent;
-}
-/* Scrolled, the list fades out across the toggle's row, so the cards pass
-   beneath the toggle instead of colliding with it. */
-.ws-sidebar:not(.ws-sidebar-flight) .ws-channel-list:first-child {
-  --ws-list-scroll: 0px;
-  mask-image: linear-gradient(to bottom, transparent, var(--ws-mask) min(var(--ws-list-scroll), var(--ws-toggle-row)));
 }
 .ws-sidebar .ws-constitution-card {
   width: 100%; margin-bottom: var(--ws-sidebar-card-gap); padding: var(--ws-inset); gap: var(--ws-small-gap);
@@ -198,7 +201,26 @@
   transform: translate(var(--ws-sidebar-pull), var(--ws-sidebar-lift));
   box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light);
 }
-.ws-sidebar .kbn-flight-caption { margin: var(--ws-inset) 0; }
+/* Each group's caption holds the top of the list while its cards pass beneath,
+   and a card scrolled into view keeps clear of it, so a landing shows both.
+   Its ground and the fade below it show only while it is stuck, where the
+   browser can tell; elsewhere they stay, so cards never run through its text. */
+.ws-sidebar .kbn-flight-caption {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: var(--ws-control-height);
+  margin: var(--ws-small-gap) 0;
+}
+.ws-sidebar .ws-channel-group:first-child > .kbn-flight-caption { margin-top: 0; }
+.ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { content: ''; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none; }
+.ws-sidebar .kbn-flight-caption::before { top: 0; bottom: 0; background: var(--ws-ground); }
+.ws-sidebar .kbn-flight-caption::after { top: 100%; height: var(--ws-small-gap); background: linear-gradient(var(--ws-ground), transparent); }
+@supports (container-type: scroll-state) {
+  .ws-sidebar .kbn-flight-caption { container-type: scroll-state; }
+  .ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { opacity: 0; }
+  @container scroll-state(stuck: top) {
+    .ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { opacity: 1; }
+  }
+}
+.ws-sidebar .ws-channel-row { scroll-margin-top: calc(var(--ws-control-height) + var(--ws-small-gap)); }
 .ws-sidebar-source, .ws-sidebar .ws-card-travelling { opacity: 0 !important; }
 .ws-sidebar.ws-sidebar-flight { display: block; position: fixed; inset: 0; width: auto; padding: 0; pointer-events: none; z-index: calc(var(--ws-reader-layer) + 1); }
 .ws-sidebar-flight .ws-constitution-card { overflow: hidden; pointer-events: none; transition: none; }

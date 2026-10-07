@@ -1,7 +1,7 @@
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
-import { fiberPageColumn, onDesk, verdictReachable } from './fiberPageState.js'
+import { fiberPageColumn, fiberPageKicker, onDesk, verdictReachable } from './fiberPageState.js'
 import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
@@ -58,7 +58,7 @@ const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chroni
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
-/** The sidebar's Read lately group holds this many constitutions. */
+/** The Board's Read lately shelf holds this many constitutions. */
 const READ_LATELY = 8
 
 /** Routes, owner-addressed sources and per-channel selection for one reader. */
@@ -107,6 +107,7 @@ export class Workspace {
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
       onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() },
       focusFind: () => opts.focusFind?.() ?? false,
+      readLately: () => this.readLatelyCards(),
     })
     const pickerOptions = {
       cards: () => {
@@ -211,9 +212,7 @@ export class Workspace {
     }
     this.origin = origin
     const id = cardIdentity(card)
-    // Entering the reader brings a constitution to the front of Read lately;
-    // stepping within it keeps the list still, so j and k walk a fixed order.
-    if (!this.isActive || !this.readLately.includes(id)) this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
+    this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin))
@@ -221,28 +220,34 @@ export class Workspace {
 
   /**
    * The sidebar is one grouped list wherever the reader was opened from:
-   * Awaiting review, then In flight's Needs you and Working bands, in the
-   * Desk's own order with each band whole even for cards the Desk left
-   * undrawn, then the constitutions read lately, most recent first. Its
-   * groups are also the reader's J/K stops.
+   * Drafts, then In flight's Aloft and Holding bands, then Awaiting review,
+   * each in the Desk's own order and whole even for cards the Desk left
+   * undrawn. Its groups are the reader's J/K stops and the index strip's entries.
    */
   private sidebarCards(): KanbanCard[] {
     const cards = this.opts.cards()
-    const review = cards.filter(card => fiberPageColumn(card) === 'awaitingReview')
     const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
-    const inFlight = IN_FLIGHT_BANDS.flatMap(([band]) => flight.filter(card => inFlightBand(card) === band))
-    const listed = new Set([...review, ...inFlight].map(cardIdentity))
-    const live = new Map(cards.map(card => [cardIdentity(card), card]))
-    const read = this.readLately.flatMap(id => {
-      const card = live.get(id) ?? this.channels.get(id)?.card
-      return card && !listed.has(id) ? [card] : []
-    }).slice(0, READ_LATELY)
-    return [...review, ...inFlight, ...read]
+    return [
+      ...cards.filter(card => fiberPageColumn(card) === 'drafts' && !card.foldedUnder),
+      ...IN_FLIGHT_BANDS.flatMap(([band]) => flight.filter(card => inFlightBand(card) === band)),
+      ...cards.filter(card => fiberPageColumn(card) === 'awaitingReview'),
+    ]
   }
+  /** A group's caption; the open constitution outside the four groups is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {
     const column = fiberPageColumn(card)
     if (column === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(card))![1]
-    return column === 'awaitingReview' ? 'Awaiting review' : 'Read lately'
+    if (column === 'drafts') return 'Drafts'
+    if (column === 'awaitingReview') return 'Awaiting review'
+    return fiberPageKicker(card) || 'Reading'
+  }
+  /** The constitutions opened in this session, most recent first, for the Board's Read lately shelf. */
+  private readLatelyCards(): KanbanCard[] {
+    const live = new Map(this.opts.cards().map(card => [cardIdentity(card), card]))
+    return this.readLately.flatMap(id => {
+      const card = live.get(id) ?? this.channels.get(id)?.card
+      return card ? [card] : []
+    }).slice(0, READ_LATELY)
   }
 
   mountOverview(host: HTMLElement): void {

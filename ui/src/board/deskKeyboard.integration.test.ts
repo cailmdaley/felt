@@ -28,7 +28,7 @@ const child = card({ id: 'child', uid: 'child-uid', dependsOn: ['head'], foldedU
 const data = () => response({
   now: {
     drafts: [card({ id: 'd1', uid: 'draft-uid' }), card({ id: 'd2' })],
-    inFlight: [head, card({ id: 'working', status: 'active', runtimePhase: 'working' })],
+    inFlight: [card({ id: 'working', status: 'active', runtimePhase: 'working' }), head],
     awaitingReview: [card({ id: 'review', status: 'closed' })],
   },
   folded: [child], pinned: [card({ id: 'pinned', shuttleKind: 'pinned' })],
@@ -110,11 +110,11 @@ describe('Desk keyboard selection', () => {
   })
   it('moves through both flight bands, the three columns, Pinned and Resting without wrapping', () => {
     press('j'); expect(selected()).toBe('review')
-    press('h'); expect(selected()).toBe('head-uid')
-    press('j'); expect(selected()).toBe('working')
-    press('j'); expect(selected()).toBe('working')
-    press('g'); expect(selected()).toBe('head-uid')
-    press('G'); expect(selected()).toBe('working')
+    press('h'); expect(selected()).toBe('working')
+    press('j'); expect(selected()).toBe('head-uid')
+    press('j'); expect(selected()).toBe('head-uid')
+    press('g'); expect(selected()).toBe('working')
+    press('G'); expect(selected()).toBe('head-uid')
     press('ArrowRight'); expect(selected()).toBe('review')
     press('l'); expect(selected()).toBe('pinned')
     press('l'); expect(selected()).toBe('resting')
@@ -124,29 +124,30 @@ describe('Desk keyboard selection', () => {
     press('Escape'); expect(selected()).toBeUndefined()
   })
   it('treats a folded queue as one stop and expanded members as stops', () => {
-    press('j'); press('h'); press('j'); expect(selected()).toBe('working')
-    press('k')
+    press('j'); press('h'); press('j'); expect(selected()).toBe('head-uid')
+    press('j'); expect(selected()).toBe('head-uid')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('j'); expect(selected()).toBe('child-uid')
-    press('j'); expect(selected()).toBe('working')
-    press('k'); press('Enter')
+    press('j'); expect(selected()).toBe('child-uid')
+    press('k'); expect(selected()).toBe('head-uid')
+    press('j'); press('Enter')
     expect(window.location.hash).toContain('child-uid')
   })
   it('opens the reader on one grouped sidebar, and keeps the flight column for the cards that fly', () => {
     press('j'); press('h'); press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['review', 'head-uid', 'working'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Awaiting review', 'Needs you', 'Working'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'working', 'head-uid', 'review'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Aloft', 'Holding', 'Awaiting review'])
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     expect(document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued-list')!.hidden).toBe(false)
     expect(inside.workspace.isActive).toBe(false)
-    expect(inside.workspaceColumn(head).map(entry => entry.card.uid ?? entry.card.id)).toEqual(['head-uid', 'child-uid', 'working'])
+    expect(inside.workspaceColumn(head).map(entry => entry.card.uid ?? entry.card.id)).toEqual(['working', 'head-uid', 'child-uid'])
   })
   it('keeps the grouped sidebar whether or not a queue is expanded on the Desk', () => {
     press('j'); press('h')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['review', 'head-uid', 'working'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'working', 'head-uid', 'review'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')

@@ -88,10 +88,10 @@ export interface KanbanCard {
   tmuxSession?: string
   /**
    * What the live worker is doing, for the chips and the In-flight sort:
-   * `working` (busy mid-tool — sinks to the bottom, no chip), `waiting`
-   * (paused at a stop — "waiting for you" once idle ≥60s), `attention` (raised
-   * its hand — "needs you", sorts top), or `blocked` (the worker is
-   * `workerState: 'blocked'` — in the Needs you band with `launchError`). Absent when there
+   * `working` (busy mid-tool — the Aloft band, no chip), `waiting` (paused at
+   * a stop — "waiting for you" once idle ≥60s), `attention` (raised its hand —
+   * "needs you"), or `blocked` (the worker is `workerState: 'blocked'`, with
+   * `launchError`); the last three sit in the Holding band, below Aloft. Absent when there
    * is no worker, or before a live worker's first activity event.
    */
   runtimePhase?: string

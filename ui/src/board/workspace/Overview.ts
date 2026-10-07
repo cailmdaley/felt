@@ -24,6 +24,8 @@ export interface OverviewOptions {
   onOrder?(cards: KanbanCard[]): void
   /** Summon the board bar's Find, which filters the sheet on the desktop; false leaves `/` to the sheet's own field. */
   focusFind?(): boolean
+  /** The constitutions read lately in this session, most recent first. */
+  readLately?(): KanbanCard[]
 }
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
@@ -185,7 +187,7 @@ interface ChangeRow {
   change: Change
 }
 const needsYou = (card: KanbanCard): number => fiberPageColumn(card) === 'awaitingReview' ? 0
-  : fiberPageColumn(card) === 'inFlight' && inFlightBand(card) === 'needsYou' ? 1 : 2
+  : fiberPageColumn(card) === 'inFlight' && inFlightBand(card) === 'holding' ? 1 : 2
 function changeSummary(change: Change): string {
   const parts = [change.review ? '→ awaiting review' : '', change.outcome ? 'outcome changed' : ''].filter(Boolean)
   const kinds = new Map<string, number>()
@@ -214,6 +216,9 @@ export class Overview {
   private readonly boundary = node('div', 'ws-overview-boundary')
   private readonly latest = node('details', 'ws-overview-latest')
   private readonly ribbon = node('div', 'ws-overview-ribbon')
+  private readonly read = node('section', 'ws-overview-read')
+  private readonly readList = node('div', 'ws-overview-read-list')
+  private readonly readItems = new Map<string, { el: HTMLButtonElement; name: HTMLElement; host: HTMLElement; card: KanbanCard }>()
   private readonly groupsEl = node('div', 'ws-overview-groups')
   private readonly status = node('p', 'ws-overview-status')
   private readonly find = node('input', 'ws-overview-find')
@@ -297,6 +302,8 @@ export class Overview {
     this.changesMore.addEventListener('click', () => this.groupsEl.scrollIntoView?.({
       block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
     }))
+    this.read.setAttribute('aria-label', 'Read lately')
+    this.read.append(node('h2', 'ws-overview-read-title', 'Read lately'), this.readList)
     const controls = node('div', 'ws-overview-controls')
     this.lensGroup.setAttribute('role', 'radiogroup')
     this.lensGroup.setAttribute('aria-label', 'Group documents')
@@ -323,7 +330,7 @@ export class Overview {
     this.find.addEventListener('input', () => this.render())
     controls.append(this.lensGroup, this.find)
     this.status.setAttribute('role', 'status')
-    this.inner.append(header, changes, this.latest, controls, this.groupsEl, this.status)
+    this.inner.append(header, changes, this.latest, this.read, controls, this.groupsEl, this.status)
     this.el.append(this.inner)
     this.el.setAttribute('aria-label', 'Document overview')
     this.el.addEventListener('scroll', this.schedule, { passive: true })
@@ -800,6 +807,7 @@ export class Overview {
     if (this.lens === 'recent' && this.previousVisit && !boundaryPlaced) shown.push(this.boundary)
     place(this.groupsEl, shown)
     this.renderRibbon()
+    this.renderRead(query)
     const newDocuments = [...this.folios.values()].flatMap(f => f.receipts.filter(r => r.timestamp > this.seen))
     const documentCount = new Set(newDocuments.map(r => r.key)).size
     const constitutionCount = new Set([...newDocuments.map(r => r.uid), ...changes.map(c => c.uid)]).size
@@ -882,6 +890,7 @@ export class Overview {
   private candidates(): HTMLButtonElement[] {
     return [...this.changesEl.querySelectorAll<HTMLButtonElement>('.ws-overview-change-open'),
       ...(this.latest.open ? this.ribbon.querySelectorAll<HTMLButtonElement>('.ws-overview-rib') : []),
+      ...this.readList.querySelectorAll<HTMLButtonElement>('.ws-overview-read-item'),
       ...this.groupsEl.querySelectorAll<HTMLButtonElement>('.ws-overview-folio')].filter(el => !el.closest('[hidden]'))
   }
   private paintSelection(): void {
@@ -959,6 +968,30 @@ export class Overview {
       item.el.title = `${receipt.fullPath} — ${this.folios.get(receipt.uid)?.card.name ?? 'Other'}`
     }
     place(this.ribbon, recent.map(r => this.ribbonItems.get(r.key)!.el))
+  }
+  /** One quiet line of the constitutions read lately, each opening in the reader. */
+  private renderRead(query: string): void {
+    const cards = (this.opts.readLately?.() ?? []).filter(card => !query || [card.name, card.path].some(v => v.toLowerCase().includes(query)))
+    const keyOf = (card: KanbanCard): string => JSON.stringify([card.originId, uidOf(card)])
+    const keep = new Set(cards.map(keyOf))
+    for (const [key, item] of this.readItems) if (!keep.has(key)) { item.el.remove(); this.readItems.delete(key) }
+    for (const card of cards) {
+      const key = keyOf(card)
+      let item = this.readItems.get(key)
+      if (!item) {
+        const el = button('ws-overview-read-item')
+        const name = node('span', 'ws-overview-read-name'), host = node('span', 'ws-overview-hostmark ws-overview-meta')
+        el.append(name, host)
+        item = { el, name, host, card }; this.readItems.set(key, item)
+        el.addEventListener('click', () => { const current = this.readItems.get(key); if (current) void this.open(current.card) })
+      }
+      item.card = card
+      text(item.name, card.name); text(item.host, this.marks.get(card.originId) ?? '○')
+      item.host.title = card.originId; item.host.setAttribute('aria-label', card.originId)
+      item.el.title = card.outcome ?? card.path
+    }
+    place(this.readList, cards.map(card => this.readItems.get(keyOf(card))!.el))
+    this.read.hidden = !cards.length
   }
   private async open(card: KanbanCard, key?: DocKey): Promise<void> {
     const navigation = ++this.navigation

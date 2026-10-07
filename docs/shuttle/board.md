@@ -47,6 +47,11 @@ evaluates in this order:
 | In flight | `active`, other kinds |
 | Drafts | anything left, including `open` |
 
+In flight draws two bands: **Aloft**, workers at work, then **Holding**, live
+workers stopped and waiting on you (a raised hand, a pause at a prompt, or a
+blocked launch). Within each band cards keep creation order, so a card moves
+only when it crosses between them.
+
 The cycle branch comes first on purpose. A [cycle](cycles.md) is an annotation
 on the calendar rather than work, so it leaves classification before any
 lifecycle question is asked — otherwise a stray "Autumn 2026" would sit in
@@ -151,6 +156,7 @@ data while Chronicle is closed.
 
 Hotkey `3` opens a contact sheet of constitutions with documents sent in the last 30 days.
 A ribbon shows the twelve latest documents across the fleet.
+Beneath it, **Read lately** names the constitutions opened in the reader this session, most recent first; each opens in the reader.
 Below it, each fiber has a folio with a live thumbnail, name, outcome, document count and host marks.
 Recent work, Projects and Hosts regroup the sheet; Find filters names, paths and filenames.
 Thumbnails load near the viewport under a shared budget and cannot run scripts.
@@ -165,9 +171,11 @@ The fiber header shows status alone. Agent, effort, cadence, host and project di
 Document label bars show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
 The Constitutions sidebar starts closed and remembers an explicit choice.
+It groups the Desk's live work as Drafts, Aloft, Holding and Awaiting review, in the Desk's order; each group's caption holds the top of the list while you scroll through it.
+An index strip at its top names each non-empty group with its count and marks the open constitution's; clicking an entry jumps there as J/K does.
 On phones, previous/next controls sit in a thumb bar, and browser Back returns to the originating view.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions in sidebar order; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions in sidebar order and J/K jump between its groups, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
 c (or .) opens the worker's conversation exactly as its pill does, on the Desk and in the reader; s (or ⌘\\) toggles the Constitutions sidebar.
 Alt-left/right step pages and Alt-down/up step constitutions, including while typing.

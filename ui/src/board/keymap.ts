@@ -19,7 +19,7 @@ const VERDICT_UNDO = `${VERDICT_DELAY_MS / 1000} s`
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
 /** Desk regions follow reading order: the three Now columns left-to-right,
- * then Pinned, then Resting. In flight's Needs you and Working bands form one
+ * then Pinned, then Resting. In flight's Aloft and Holding bands form one
  * column. Pinned and Resting each form one list in their drawn reading order.
  * Empty regions are skipped; movement stops at the ends, never wraps. */
 export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-pinned', '.kbn-section-stash'] as const

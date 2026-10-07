@@ -960,25 +960,25 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
   }
 }, undefined, 'false', reducedMotion)
 
-test('j/k step constitutions in the sidebar order from a Board-opened reader, the sidebar shut', async p => {
+test('j/k step constitutions in the sidebar order from a Board-opened reader, the sidebar shut; the Board shelves what was read', async p => {
   await barTab(p, 'shelf').click()
-  // Read a draft first, so the sidebar's last group has a member.
+  assert.ok(await p.locator('.ws-overview-read').isHidden(), 'nothing read yet, no shelf')
   await p.locator('.ws-overview-folio').filter({ hasText: 'Weekly shear summary' }).click()
   await p.locator('.ws-tab[aria-selected="true"]').waitFor()
   assert.equal(await activeBarView(p), 'shelf', 'the bar marks the Board as the origin')
   await leave(p)
   assert.equal(await activeBarView(p), 'shelf', 'the origin tab closes the reader back to the Board')
+  assert.deepEqual(await p.locator('.ws-overview-read-name').allTextContents(), ['Weekly shear summary'])
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await reportReady(p)
   await appFocus(p)
   await p.keyboard.press('s')
   const sidebar = p.locator('.ws-sidebar')
   await sidebar.waitFor()
-  // One grouped list wherever the reader opens: review, then work in flight, then what was read lately.
-  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Awaiting review', 'Working', 'Read lately'])
+  // One grouped list wherever the reader opens: drafts, work in flight, then review.
+  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Aloft', 'Awaiting review'])
   const rows = sidebar.locator('.ws-channel-row')
   const names = await rows.locator('.ws-channel-name').allTextContents()
-  assert.equal(names.at(-1), 'Weekly shear summary', 'what was read lately closes the list')
   await rows.first().click()
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[0])
   await p.keyboard.press('s')
@@ -989,32 +989,87 @@ test('j/k step constitutions in the sidebar order from a Board-opened reader, th
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[2])
   await p.keyboard.press('k')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
+  // The Board's shelf holds every constitution opened, most recent first, and opens one in the reader.
+  await leave(p)
+  assert.deepEqual(await p.locator('.ws-overview-read-name').allTextContents(), [names[1], names[2], names[0], name])
+  await p.locator('.ws-overview-read-item').nth(1).click()
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[2])
 })
+
+test('The sidebar strip names the J/K stops; every jump and strip click shows the landed card under its caption', async p => {
+  const deskNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-header .kbn-card-name`).allTextContents()
+  const drafts = await deskNames('drafts'), flight = await deskNames('inFlight'), review = await deskNames('awaitingReview')
+  await open(p)
+  const sidebar = p.locator('.ws-sidebar').first()
+  const strip = sidebar.locator('.ws-sidebar-index-entry')
+  assert.deepEqual(await strip.allTextContents(), [`Drafts${drafts.length}`, `Aloft${flight.length}`, `Review${review.length}`])
+  assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Review${review.length}`])
+  const list = sidebar.locator('.ws-channel-list')
+  assert.ok(await list.evaluate(el => el.scrollHeight > el.clientHeight + 100), 'the short viewport makes the list scroll')
+  // The landed card and its group's caption both sit inside the list's box, the card clear of the caption.
+  const landed = async (title, group) => {
+    await poll(p, title => document.querySelector('.ws-channel-title')?.textContent === title, title)
+    await p.waitForTimeout(60)
+    const view = await list.evaluate(el => {
+      const box = el.getBoundingClientRect()
+      const row = el.querySelector('.ws-channel-row[aria-current="true"]')
+      const caption = row.closest('.ws-channel-group').querySelector('.kbn-flight-caption')
+      const r = row.getBoundingClientRect(), c = caption.getBoundingClientRect()
+      return { group: caption.textContent, inside: c.top >= box.top - 0.5 && c.bottom <= r.top + 0.5 && r.bottom <= box.bottom + 0.5, scrolled: el.scrollTop }
+    })
+    assert.equal(view.group, group)
+    assert.ok(view.inside, `${title} and its caption ${group} are in view`)
+    return view
+  }
+  await appFocus(p)
+  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Aloft')
+  await p.keyboard.press('Shift+K'); await landed(drafts[0], 'Drafts')
+  await p.keyboard.press('j'); await landed(drafts[1], 'Drafts')
+  await p.keyboard.press('Shift+J'); await p.keyboard.press('Shift+J')
+  const atReview = await landed(name, 'Awaiting review')
+  assert.ok(atReview.scrolled > 0, 'the list scrolled down to reach review')
+  // Upward from review, K must bring Aloft's caption back into view, not just its card.
+  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Aloft')
+  await strip.filter({ hasText: 'Drafts' }).click(); await landed(drafts[1], 'Drafts')
+  assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Drafts${drafts.length}`])
+  await strip.filter({ hasText: 'Review' }).click(); await landed(name, 'Awaiting review')
+  // Mid-group, the group's caption holds the top of the list while its cards
+  // pass beneath; past its group, it leaves with it.
+  const stuck = scrollTop => list.evaluate((el, scrollTop) => {
+    el.scrollTop = scrollTop
+    const top = el.getBoundingClientRect().top
+    return [...el.querySelectorAll('.kbn-flight-caption')].filter(c => Math.abs(c.getBoundingClientRect().top - top) < 1)
+      .map(c => { const group = c.parentElement.getBoundingClientRect(); return { caption: c.textContent, holds: group.top <= top && group.bottom > c.getBoundingClientRect().bottom } })
+  }, scrollTop)
+  assert.deepEqual(await stuck(80), [{ caption: 'Drafts', holds: true }])
+  for (const scrollTop of [200, 400, 1e6]) for (const { caption, holds } of await stuck(scrollTop)) assert.ok(holds, `${caption} sticks only inside its own group`)
+}, { width: 1440, height: 560 }, null)
 
 test('Wide reader takes the Desk column as cards, steps visibly, and returns selection to the current card', async p => {
   const column = p.locator('[data-column="awaitingReview"]')
   const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-header .kbn-card-name`).allTextContents()
-  const review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
-  const names = [...review, ...flight]
+  const drafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
+  const names = [...drafts, ...flight, ...review]
   await open(p)
   const sidebar = p.locator('.ws-sidebar').first()
   assert.ok(await sidebar.isVisible(), 'wide desktop defaults open')
-  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Awaiting review', 'Working'], 'the sidebar groups review and work in flight')
+  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Aloft', 'Awaiting review'], 'the sidebar groups drafts, work in flight and review')
   assert.deepEqual(await sidebar.locator('.ws-channel-name').allTextContents(), names, 'in Desk order')
   assert.equal(await sidebar.locator('.kbn-card').count(), names.length, 'sidebar uses the Desk paper renderer')
   assert.equal(await column.locator('.ws-sidebar-source').count(), review.length, "the opened card's column flies its cards into their places")
   const raised = await p.locator('.kbn-desk').evaluate(e => ({ transform: getComputedStyle(e).transform, filter: getComputedStyle(e).filter }))
   assert.match(raised.transform, /0\.94/)
   assert.match(raised.filter, /saturate\(0\.25\)/)
+  const next = names[names.indexOf(name) + 1]
   await p.keyboard.press('j')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, names[1])
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
   const current = sidebar.locator('.ws-channel-row[aria-current="true"]')
-  assert.equal(await current.locator('.ws-channel-name').innerText(), names[1])
+  assert.equal(await current.locator('.ws-channel-name').innerText(), next)
   assert.ok(await current.evaluate(e => e.getBoundingClientRect().right > e.closest('.ws-sidebar').getBoundingClientRect().right), 'selected card reaches beyond the column')
   await p.keyboard.press('Escape')
   await poll(p, () => document.querySelectorAll('.ws-sidebar-source').length === 0)
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
-  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), names[1])
+  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next)
 }, undefined, null)
 
 test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p => {
@@ -2816,7 +2871,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
     await window.__harness.modal.fetchAndRender()
   }), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
-  await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
+  // A worker crossing between Aloft and Holding renames its strip entry; that is the strip's job.
+  await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control', '.ws-sidebar-index'], settle: 100 })
 }, viewport)
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Nothing moves when you touch the Desk and the Board (${device})`, async p => {
