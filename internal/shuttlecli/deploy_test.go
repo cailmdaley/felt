@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -440,9 +441,13 @@ func shellFunction(t *testing.T, script, name string) string {
 	if start < 0 {
 		t.Fatalf("function %s not found", name)
 	}
-	end := strings.Index(script[start:], "\n}")
+	end := strings.Index(script[start:], "\n}\n\n")
 	if end < 0 {
-		t.Fatalf("function %s is unterminated", name)
+		if strings.HasSuffix(script[start:], "\n}") {
+			end = len(script[start:]) - 2
+		} else {
+			t.Fatalf("function %s is unterminated", name)
+		}
 	}
 	return script[start:start+end+2] + "\n"
 }
@@ -487,16 +492,32 @@ func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
 	if err := os.WriteFile(tracked, []byte("my edits\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "revision_checkout_cmd") + "\nrevision_checkout_cmd \"$SOURCE\" | bash\n"
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + shellFunction(t, string(script), "revision_checkout_cmd") + "\nrevision_checkout_cmd \"$SOURCE\" | bash -eu\n"
 	run := func() ([]byte, error) {
 		cmd := exec.Command("bash", "-c", harness)
 		cmd.Env = append(os.Environ(), "SOURCE="+source, "TARGET_COMMIT="+commit)
 		return cmd.CombinedOutput()
 	}
-	for i := 0; i < 2; i++ {
-		if out, err := run(); err != nil {
-			t.Fatalf("prepare revision: %v\n%s", err, out)
-		}
+	if out, err := run(); err != nil {
+		t.Fatalf("first preparation: %v\n%s", err, out)
+	}
+	canonicalSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worktree := canonicalSource + ".deploy/" + commit
+	git(source, "config", "--local", "core.excludesfile", filepath.Join(source, ".git", "info", "exclude"))
+	if err := os.WriteFile(filepath.Join(source, ".git", "info", "exclude"), []byte("ignored-build-output\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "ignored-build-output"), []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(); err != nil {
+		t.Fatalf("repeat preparation: %v\n%s", err, out)
+	}
+	if got, err := os.ReadFile(filepath.Join(worktree, "ignored-build-output")); err != nil || string(got) != "stale" {
+		t.Fatalf("existing build cache was discarded: %q, %v", got, err)
 	}
 	if got := git(source, "branch", "--show-current"); got != "active-work" {
 		t.Fatalf("source branch changed to %q", got)
@@ -504,15 +525,8 @@ func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
 	if got, _ := os.ReadFile(tracked); string(got) != "my edits\n" {
 		t.Fatalf("source edits lost: %q", got)
 	}
-	worktree := source + ".deploy/" + commit
 	if got, _ := os.ReadFile(filepath.Join(worktree, "tracked")); string(got) != "release\n" {
 		t.Fatalf("worktree did not contain release: %q", got)
-	}
-	if err := os.WriteFile(filepath.Join(worktree, "tracked"), []byte("retained edits\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run(); err == nil || !strings.Contains(string(out), "local edits") {
-		t.Fatalf("dirty worktree was not refused: %v\n%s", err, out)
 	}
 }
 
@@ -582,6 +596,437 @@ func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
 	}
 	if calls[0][0] != "STORES_FILE="+options.StoresFile || calls[0][len(calls[0])-1] != "CODEX_HOME="+options.CodexHome {
 		t.Fatalf("supervisor environment not retained: %v", calls[0])
+	}
+}
+
+func TestDeployRootUsesMainWorktreeFromLinkedCheckout(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	main := filepath.Join(root, "main checkout")
+	linked := filepath.Join(root, "linked checkout")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(main, "init")
+	if err := os.WriteFile(filepath.Join(main, "tracked"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(main, "add", "tracked")
+	git(main, "commit", "-m", "initial")
+	git(main, "worktree", "add", "-b", "linked-lane", linked)
+	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + `deploy_root_cmd "$LINKED" | bash`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "LINKED="+linked)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("deploy root: %v\n%s", err, out)
+	}
+	want, err := filepath.EvalSymlinks(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want += ".deploy"
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Fatalf("deploy root = %q; want %q", got, want)
+	}
+}
+
+func TestDeployCacheSeedUsesPreviousLiveTreeAndCopies(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	previous := "1111111111111111111111111111111111111111"
+	source, target := filepath.Join(root, previous), filepath.Join(root, "target")
+	for relative, value := range map[string]string{
+		"daemon/deps/pkg/file": "known good", "daemon/_build/prod/file": "beam",
+		"ui/node_modules/.npm-ci-stamp": "stamp", "ui/package-lock.json": "same lock",
+	} {
+		path := filepath.Join(source, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	decoy := filepath.Join(root, "9999999999999999999999999999999999999999", "daemon/deps/pkg/file")
+	if err := os.MkdirAll(filepath.Dir(decoy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(decoy, []byte("mtime decoy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{filepath.Join(target, "daemon"), filepath.Join(target, "ui")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "ui/package-lock.json"), []byte("same lock"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := `target=$TARGET; export target
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cache seed: %v\n%s", err, out)
+	}
+	for relative, want := range map[string]string{
+		"daemon/deps/pkg/file": "known good", "daemon/_build/prod/file": "beam", "ui/node_modules/.npm-ci-stamp": "stamp",
+	} {
+		for _, dir := range []string{source, target} {
+			got, err := os.ReadFile(filepath.Join(dir, relative))
+			if err != nil || string(got) != want {
+				t.Errorf("%s = %q, %v; want %q", filepath.Join(dir, relative), got, err, want)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "daemon/deps/pkg/file"), []byte("edited target"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(filepath.Join(source, "daemon/deps/pkg/file")); err != nil || string(got) != "known good" {
+		t.Fatalf("seed changed source: %q, %v", got, err)
+	}
+}
+
+func TestDeployCacheSeedSkipsSymlinkedRoots(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	previous := "1111111111111111111111111111111111111111"
+	source, target, external := filepath.Join(root, previous), filepath.Join(root, "target"), filepath.Join(root, "external")
+	if err := os.MkdirAll(filepath.Join(source, "daemon"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(external, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "payload"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(source, "daemon/deps")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(target, "daemon"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := `target=$TARGET; export target
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "symlinked cache root") {
+		t.Fatalf("symlinked cache not skipped: %v\n%s", err, out)
+	}
+	if _, err := os.Lstat(filepath.Join(target, "daemon/deps")); !os.IsNotExist(err) {
+		t.Fatalf("target received cache symlink: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(external, "payload")); err != nil || string(got) != "keep" {
+		t.Fatalf("external cache changed: %q, %v", got, err)
+	}
+}
+
+func TestDeployCacheSeedFailureFallsBackUnderErrexit(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	previous := "1111111111111111111111111111111111111111"
+	source, target := filepath.Join(root, previous, "daemon/deps"), filepath.Join(root, "target")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "payload"), []byte("cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(target, "daemon"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fakeBin, "cp"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := `target=$TARGET; export target
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu; echo cold-build-continues`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target, "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "cache seeding failed; building cold") || !strings.Contains(string(out), "cold-build-continues") {
+		t.Fatalf("seed failure aborted preparation: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(target, "daemon/deps")); !os.IsNotExist(err) {
+		t.Fatalf("partial cache survived failure: %v", err)
+	}
+}
+
+func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	repo := filepath.Join(base, "repo with spaces")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo, err = filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init")
+	if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte("0"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "tracked")
+	git("commit", "-m", "zero")
+	commits := []string{git("rev-parse", "HEAD")}
+	for i := 1; i < 5; i++ {
+		if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte(strconv.Itoa(i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git("commit", "-am", strconv.Itoa(i))
+		commits = append(commits, git("rev-parse", "HEAD"))
+	}
+	deployRoot := repo + ".deploy"
+	paths := make([]string, len(commits))
+	if err := os.WriteFile(filepath.Join(repo, ".git/info/exclude"), []byte("build-output\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i, sha := range commits {
+		paths[i] = filepath.Join(deployRoot, sha)
+		git("worktree", "add", "--detach", paths[i], sha)
+		if err := os.WriteFile(filepath.Join(paths[i], "build-output"), []byte("generated"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(paths[1], "untracked"), []byte("dirty"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "pi"), []byte("#!/bin/sh\nprintf 'local package\\n    %s\\n' \"$PI_TREE\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "prune_deploy_cmd") + `prune_deploy_cmd "$REPO" "$PREVIOUS" | bash -eu`
+	cmd := exec.Command("bash", "-c", command)
+	cmd.Env = append(os.Environ(), "REPO="+repo, "PREVIOUS="+paths[3], "TARGET_COMMIT="+commits[4], "PI_TREE="+paths[2], "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("prune: %v\n%s", err, out)
+	}
+	for _, path := range paths[2:] {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("retained worktree %s missing: %v", path, err)
+		}
+	}
+	for _, path := range paths[:2] {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("obsolete worktree remains: %s (%v)", path, err)
+		}
+		if strings.Contains(git("worktree", "list", "--porcelain"), path) {
+			t.Errorf("removed worktree still registered: %s", path)
+		}
+	}
+}
+
+func TestDeployFinishDoesNotPruneOnHarnessOrReleaseFailure(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name                     string
+		harnessFailed, releaseOK bool
+	}{
+		{name: "harness failure", harnessFailed: true, releaseOK: true},
+		{name: "release failure", harnessFailed: false, releaseOK: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "prune")
+			harness := `release_quarantine() { [ "$RELEASE_OK" = 1 ]; }
+run_on_visible() { printf '%s\\n' "$2" >> "$MARKER"; }
+ok() { :; }
+bad() { :; }
+prune_deploy_cmd() { printf prune; }
+` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo "$HARNESS_FAILED"
+`
+			cmd := exec.Command("bash", "-c", harness)
+			release := "0"
+			if tc.releaseOK {
+				release = "1"
+			}
+			failed := "0"
+			if tc.harnessFailed {
+				failed = "1"
+			}
+			cmd.Env = append(os.Environ(), "DEPLOY_REF=sha", "TARGET_SHA=sha", "TARGET_COMMIT=sha", "RELEASE_OK="+release, "HARNESS_FAILED="+failed, "MARKER="+marker)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				t.Fatalf("failed deployment accepted: %s", out)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Fatalf("failure pruned a worktree: %v", err)
+			}
+		})
+	}
+}
+
+func TestDeployPrunesAfterRelease(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := filepath.Join(t.TempDir(), "events")
+	harness := `release_quarantine() { printf 'release\n' >> "$EVENTS"; }
+run_on_visible() { printf '%s\n' "$2" >> "$EVENTS"; }
+ok() { :; }
+bad() { :; }
+prune_deploy_cmd() { printf prune; }
+` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo 0`
+	cmd := exec.Command("bash", "-c", harness)
+	cmd.Env = append(os.Environ(), "DEPLOY_REF=sha", "TARGET_SHA=sha", "TARGET_COMMIT=sha", "EVENTS="+events)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("successful finish: %v\\n%s", err, out)
+	}
+	got, err := os.ReadFile(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "release\nprune\n" {
+		t.Fatalf("success events = %q, want release then prune", got)
+	}
+}
+
+func TestDeployRemotePullsWithBuiltOrShippedUI(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, buildUI := range []string{"0", "1"} {
+		t.Run("build_ui="+buildUI, func(t *testing.T) {
+			dir := t.TempDir()
+			events := filepath.Join(dir, "events")
+			harness := `fleet_dir() { printf '%s' "$CHECKOUT"; }
+fleet_ssh() { printf remote; }
+fleet_flags() { :; }
+builds_ui() { [ "$BUILD_UI" = 1 ]; }
+say() { :; }
+ok() { :; }
+bad() { echo "$1" >&2; }
+ship_ui() { printf 'ship\n' >> "$EVENTS"; }
+git() { printf 'git %s\n' "$*" >> "$EVENTS"; }
+make() { printf 'make %s\n' "$*" >> "$EVENTS"; }
+export -f git make
+ssh() { [ "$2" = true ] || bash -c "$2"; }
+run_on() { printf 1; }
+config_migration_cmd() { :; }
+refresh_harnesses() { :; }
+check_listen() { :; }
+supervisor_probe_cmd() { :; }
+daemon_kill() { :; }
+verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "deploy_remote") + `deploy_remote remote`
+			cmd := exec.Command("bash", "-c", harness)
+			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "EVENTS="+events, "BUILD_UI="+buildUI, "DEPLOY_REF=", "DEPLOY_VERSION=", "AGENTS_FILE="+filepath.Join(dir, "absent"))
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("remote deploy: %v\n%s", err, out)
+			}
+			got, err := os.ReadFile(events)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "git pull --ff-only -q\nmake build\nverified\n"
+			if buildUI == "0" {
+				want = "ship\ngit pull --ff-only -q\nmake build SKIP_UI=1\nverified\n"
+			}
+			if string(got) != want {
+				t.Fatalf("remote events = %q; want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestDeployPreviousTreeUsesLiveVersion(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `version_json() { printf '{"git_short_sha":"abc1234"}'; }
+deploy_root_cmd() { printf 'printf /repo.deploy'; }
+run_on() { bash -c "$2"; }
+git() { [ "$*" = '-C /repo rev-parse --verify abc1234^{commit}' ] || exit 2; printf abc123456789; }
+export -f git
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "previous_deploy") + `previous_deploy remote /repo`
+	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "/repo.deploy/abc123456789" {
+		t.Fatalf("previous live tree = %q, %v", out, err)
+	}
+}
+
+func TestDeployFailedVersionDoesNotPrune(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := `wait_for_sha() { return 1; }
+finish_verified_deploy() { echo should-not-finish; }
+` + shellFunction(t, string(script), "verify_and_finish") + `verify_and_finish remote /repo 0 /previous`
+	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
+	if err == nil || len(out) != 0 {
+		t.Fatalf("failed version check reached cleanup: %q, %v", out, err)
+	}
+}
+
+func TestDeployVisibleRunnerPreservesStderr(t *testing.T) {
+	t.Parallel()
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("bash", "-c", shellFunction(t, string(script), "run_on_visible")+`run_on_visible '' 'echo operator-diagnostic >&2'`)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "operator-diagnostic") {
+		t.Fatalf("stderr was hidden: %v\n%s", err, out)
 	}
 }
 

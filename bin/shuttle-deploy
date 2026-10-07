@@ -6,7 +6,7 @@
 #   bin/shuttle-deploy --hosts local,hub-a    # a subset
 #   bin/shuttle-deploy --list                 # show the host table
 #   bin/shuttle-deploy --no-push              # skip the git push (already pushed)
-#   bin/shuttle-deploy --ref v2.0.0-rc.1      # build an exact revision in retained worktrees
+#   bin/shuttle-deploy --ref v2.0.0-rc.1      # build an exact revision in immutable worktrees
 #   bin/shuttle-deploy --handshake            # bootstrap interactive ssh auth when
 #                                             # no live master — human must approve
 #
@@ -375,25 +375,117 @@ for h in $HOSTS; do
   break
 done
 
-# Retained worktrees are runtime roots: supervisors, the respawn loop and
-# plugin setup refer to them after this helper exits. Never reset a checkout
-# or discard edits to an existing worktree.
-revision_checkout_cmd() {
+# Exact-ref worktrees are immutable runtime roots. Build in a new path, seed
+# only disposable caches by copying, and prune old roots only after verification.
+deploy_root_cmd() {
   local checkout="$1"
   cat <<SH
 set -eu
 source=$(shell_quote "$checkout")
+common=\$(git -C "\$source" rev-parse --git-common-dir)
+case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
+common=\$(cd "\$common" && pwd -P)
+main=\$(dirname "\$common")
+printf '%s.deploy\\n' "\$main"
+SH
+}
+
+seed_deploy_cache_cmd() {
+  local source="$1" # The emitted snippet runs with the caller's target variable.
+  cat <<SH
+(
+  set +e
+  source=$(shell_quote "$source")
+  [ -d "\$source" ] || exit 0
+  for relative in daemon/deps daemon/_build ui/node_modules; do
+    if [ -L "\$source/\$relative" ] || [ -L "\$target/\$relative" ]; then
+      printf 'cache seeding skipped: symlinked cache root %s\\n' "\$relative" >&2
+      exit 0
+    fi
+  done
+  stage="\$target/.deploy-cache-seed.\$\$"
+  if ! mkdir -p "\$stage"; then
+    printf 'cache seeding failed; building cold\\n' >&2
+    exit 1
+  fi
+  failed=0
+  for relative in daemon/deps daemon/_build ui/node_modules; do
+    [ -d "\$source/\$relative" ] || continue
+    mkdir -p "\$stage/\$relative" || { failed=1; break; }
+    case \$(uname -s) in
+      Darwin)
+        cp -cR -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null ||
+          cp -R -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null || failed=1 ;;
+      *)
+        cp -R -P --reflink=auto "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null ||
+          cp -R -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null || failed=1 ;;
+    esac
+    [ "\$failed" = 0 ] || break
+  done
+  if [ -d "\$stage/ui/node_modules" ]; then
+    if [ -f "\$source/ui/node_modules/.npm-ci-stamp" ] &&
+       cmp -s "\$source/ui/package-lock.json" "\$target/ui/package-lock.json"; then
+      touch "\$stage/ui/node_modules/.npm-ci-stamp" || failed=1
+    else
+      rm -f "\$stage/ui/node_modules/.npm-ci-stamp" || failed=1
+    fi
+  fi
+  for relative in daemon/deps daemon/_build ui/node_modules; do
+    if [ -d "\$stage/\$relative" ] && [ -e "\$target/\$relative" ]; then failed=1; fi
+  done
+  published=
+  if [ "\$failed" = 0 ]; then
+    for relative in daemon/deps daemon/_build ui/node_modules; do
+      [ -d "\$stage/\$relative" ] || continue
+      if ! mv "\$stage/\$relative" "\$target/\$relative"; then failed=1; break; fi
+      published="\$published \$relative"
+    done
+  fi
+  if [ "\$failed" != 0 ]; then
+    for relative in \$published; do rm -rf "\$target/\$relative" 2>/dev/null || true; done
+    rm -rf "\$stage" 2>/dev/null || true
+    printf 'cache seeding failed; building cold\\n' >&2
+    exit 1
+  fi
+  rm -rf "\$stage" 2>/dev/null || true
+  printf 'seeded build caches from %s\\n' "\$source"
+) || { printf 'cache seeding failed; building cold\\n' >&2; }
+SH
+}
+
+revision_checkout_cmd() {
+  local checkout="$1" previous="${2:-}"
+  cat <<SH
+set -eu
+source=$(shell_quote "$checkout")
 commit=$(shell_quote "$TARGET_COMMIT")
-target="\$source.deploy/\$commit"
+root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
+target="\$root/\$commit"
 git -C "\$source" fetch --tags origin
 git -C "\$source" cat-file -e "\$commit^{commit}"
-if [ -e "\$target" ]; then
-  [ "\$(git -C "\$target" rev-parse HEAD)" = "\$commit" ] || { echo "deployment worktree has the wrong revision: \$target" >&2; exit 1; }
-  [ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ] || { echo "deployment worktree has local edits: \$target" >&2; exit 1; }
-else
-  mkdir -p "\$source.deploy"
+if [ ! -d "\$target" ]; then
+  mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
+  $(seed_deploy_cache_cmd "$previous")
 fi
+SH
+}
+
+prune_deploy_cmd() {
+  local checkout="$1" previous="${2:-}"
+  cat <<SH
+set -eu
+source=$(shell_quote "$checkout")
+root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
+previous=$(shell_quote "$previous")
+for candidate in "\$root"/*; do
+  [ -d "\$candidate" ] || continue
+  [ "\$candidate" = "\$root/$TARGET_COMMIT" ] && continue
+  [ "\$candidate" = "\$previous" ] && continue
+  pi list 2>/dev/null | grep -Fq "    \$candidate" && continue
+  git -C "\$source" worktree remove --force "\$candidate"
+done
+git -C "\$source" worktree prune
 SH
 }
 
@@ -410,10 +502,7 @@ build_checkout_cmd() {
 }
 
 BUILD_REPO="$REPO"
-if [ -n "$DEPLOY_REF" ]; then
-  bash -lc "$(revision_checkout_cmd "$REPO")" || { bad "could not prepare the deploy revision"; exit 1; }
-  BUILD_REPO="$REPO.deploy/$TARGET_COMMIT"
-fi
+PREVIOUS_LOCAL=""
 
 # Shell snippets reach the daemon at the address `shuttle host --json`
 # resolves: its unix socket on a shared or exposed host, loopback TCP
@@ -465,8 +554,20 @@ run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so both CL
   else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi 2>/dev/null
 }
 
+run_on_visible() { # Like run_on, preserving remote stderr for operator diagnostics.
+  if [ -z "$1" ]; then bash -lc "$2"
+  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi
+}
+
 version_json() { # $1 = "" (local) | host
   run_on "$1" "$(daemon_call "" /api/v1/version)"
+}
+
+previous_deploy() { # Capture the live commit before retargeting the host's launcher.
+  local host="$1" checkout="$2" sha
+  sha="$(version_json "$host" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [ -n "$sha" ] || return 0
+  run_on "$host" "root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")")); commit=\$(git -C $(shell_quote "$checkout") rev-parse --verify $(shell_quote "$sha^{commit}")) && printf '%s/%s\\n' \"\$root\" \"\$commit\""
 }
 
 version_ready() { # JSON response -> true only for an explicit ready:true
@@ -478,7 +579,7 @@ release_quarantine() { # $1 = "" | host
 }
 
 wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also ready
-  local host="$1" version sha booted ready mix_vsn started now elapsed next_notice
+  local host="$1" version="" sha="" booted="" ready="" mix_vsn="" started="" now="" elapsed="" next_notice=""
   local timeout="${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}"
   local interval="${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}"
 
@@ -531,6 +632,23 @@ wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also
   done
 }
 
+finish_verified_deploy() { # $1 = host, $2 = checkout, $3 = harness failure flag, $4 = previous live tree
+  local host="$1" checkout="$2" harness_failed="$3" previous="${4:-}"
+  release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
+    || { bad "quarantine release failed"; return 1; }
+  [ "$harness_failed" = 0 ] || { bad "harness setup failed"; return 1; }
+  [ -n "$DEPLOY_REF" ] || return 0
+  run_on_visible "$host" "$(prune_deploy_cmd "$checkout" "$previous")" || {
+    bad "could not prune deploy worktrees on ${host:-local}"
+    return 1
+  }
+}
+
+verify_and_finish() { # $1 = host, $2 = checkout, $3 = harness failure flag, $4 = previous live tree
+  wait_for_sha "$1" || return 1
+  finish_verified_deploy "$@"
+}
+
 # A host marked `"build_ui": false` is served the deploy host's bundle, so the
 # deploy host must hold a current one before the first such remote is reached.
 # `make ui` is cheap after the first call in a deploy — npm ci is stamped on the
@@ -574,8 +692,8 @@ ship_ui() { # $1 = host, $2 = ssh destination, $3 = checkout dir, $4 = ssh flags
 # build ("dev (<sha>-dirty)") names no fixed tree, so it is always set up
 # again. pi has no --source and no generation. Its GitHub package follows the
 # default branch, so `felt setup pi` runs only when that clone is not at HEAD.
-# A local felt package is never re-pointed: it is current when it is the
-# checkout or sits at its HEAD, and a mismatch otherwise.
+# A local felt package is never re-pointed. Exact-ref deploys pin a clean
+# GitHub clone to the deployed commit; ordinary deploys follow felt setup pi.
 # The snippet runs in the host's login shell, the PATH its harnesses' hooks
 # resolve felt through, and ends with one `harness-ok` or `harness-fail` line.
 harness_setup_cmd() { # $1 = checkout dir
@@ -721,8 +839,16 @@ if command -v pi >/dev/null 2>&1; then
     at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
     if [ "$at" = "$head" ]; then
       state="pi current"
+    elif [ -n "$exact_ref" ]; then
+      edits "$path"
+      [ -z "$changed" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
+      out=$(git -C "$path" fetch origin "$head" 2>&1) &&
+        out=$(git -C "$path" checkout --detach "$head" 2>&1) ||
+        fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
+      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
+      [ "$at" = "$head" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
+      state="pi pinned"
     else
-      [ -z "$exact_ref" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
       out=$(felt setup pi 2>&1) || fail "felt setup pi failed: $(tail_of "$out")"
       at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
       [ "$at" = "$head" ] || fail "pi's felt package is at ${at:0:7}, not ${head:0:7}; felt setup pi installs GitHub's default branch"
@@ -766,7 +892,7 @@ deploy_local() {
   # and the old BEAM keeps running the previous release. The booted_at check
   # in wait_for_sha verifies that the cycle actually happened.
   check_listen "" || return 1
-  local supervisor
+  local supervisor=""
   supervisor="$(run_on "" "$(supervisor_probe_cmd)")" || { bad "could not inspect the local supervisor"; return 1; }
   if [ "$supervisor" = 1 ]; then
     run_on "" "$(daemon_kill)"; sleep 2
@@ -779,33 +905,37 @@ deploy_local() {
     run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO")" \
       || { bad "could not install and restart the local respawn loop"; return 1; }
   fi
-  wait_for_sha "" || { bad "daemon did not come up on $TARGET_SHA"; return 1; }
-  release_quarantine "" && ok "live on $TARGET_SHA, quarantine released" \
-    || { bad "quarantine release failed"; return 1; }
-  return "$harness_failed"
+  verify_and_finish "" "$REPO" "$harness_failed" "$PREVIOUS_LOCAL" || {
+    bad "deployment did not complete successfully on the deploy host"
+    return 1
+  }
+  return 0
 }
 
 deploy_remote() {
-  local host="$1" dir dest flags build_cmd
+  local host="$1" dir="" dest="" flags="" build_cmd="" remote_root="" previous="" skip_ui=0
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
   ssh $flags "$dest" "true" 2>/dev/null \
     || try_handshake "$host" \
     || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
   if [ -n "$DEPLOY_REF" ]; then
-    run_on "$host" "$(revision_checkout_cmd "$dir")" \
+    previous="$(previous_deploy "$host" "$dir")"
+    run_on_visible "$host" "$(revision_checkout_cmd "$dir" "$previous")" \
       || { bad "could not prepare the deploy revision"; return 1; }
-    dir="$dir.deploy/$TARGET_COMMIT"
+    remote_root="$(run_on_visible "$host" "$(deploy_root_cmd "$dir")")" \
+      || { bad "could not resolve the deploy worktree root on $host"; return 1; }
+    dir="${remote_root%/}/$TARGET_COMMIT"
   fi
   # The bundle goes over BEFORE the build, so the release this build assembles
   # embeds it (see the bundle note at the top of this file).
-  build_cmd="$(build_checkout_cmd "$dir")"
-  if [ -z "$DEPLOY_REF" ]; then
-    build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
-  fi
   if ! builds_ui "$host"; then
     ship_ui "$host" "$dest" "$dir" "$flags" || return 1
-    build_cmd="$build_cmd SKIP_UI=1"
+    skip_ui=1
+  fi
+  build_cmd="$(build_checkout_cmd "$dir" "$skip_ui")"
+  if [ -z "$DEPLOY_REF" ]; then
+    build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
   fi
   ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
     || { bad "pull/build failed"; return 1; }
@@ -822,7 +952,7 @@ deploy_remote() {
   # Cycle through the installed supervisor, or replace the tmux loop when no
   # launchd/systemd unit owns this host.
   check_listen "$host" || return 1
-  local supervisor
+  local supervisor=""
   supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
   if [ "$supervisor" = 1 ]; then
     run_on "$host" "$(daemon_kill)"
@@ -833,12 +963,18 @@ deploy_remote() {
     run_on "$host" "$(respawn_launcher_restart_cmd "$dir")" \
       || { bad "could not install and restart the respawn loop on $host"; return 1; }
   fi
-  wait_for_sha "$host" \
-    || { bad "daemon did not come up on $TARGET_SHA (slow boot? check tmux shuttle-daemon)"; return 1; }
-  release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
-    || { bad "quarantine release failed"; return 1; }
-  return "$harness_failed"
+  verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" "$previous" \
+    || { bad "deployment did not complete successfully on $host"; return 1; }
+  return 0
 }
+
+if [ -n "$DEPLOY_REF" ]; then
+  PREVIOUS_LOCAL="$(previous_deploy "" "$REPO")"
+  run_on_visible "" "$(revision_checkout_cmd "$REPO" "$PREVIOUS_LOCAL")" \
+    || { bad "could not prepare the deploy revision"; exit 1; }
+  BUILD_ROOT="$(bash -lc "$(deploy_root_cmd "$REPO")")" || exit 1
+  BUILD_REPO="$BUILD_ROOT/$TARGET_COMMIT"
+fi
 
 FAILED=""
 for h in $HOSTS; do
