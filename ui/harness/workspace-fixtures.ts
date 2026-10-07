@@ -161,8 +161,9 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       age: 2,
       outcome: 'Check the covariance products on the remote host before the next run.',
       host: WORKSPACE_REMOTE,
-      // Two roles; the second names no role fiber, so it reads as plain text.
-      collaboration: { surveyor: [], archivist: [] },
+      // Two roles; the second names no role fiber, so it reads as plain text,
+      // and is long enough to need cutting at a phone's width.
+      collaboration: { surveyor: [], 'covariance-archivist-and-steward': [] },
     },
     {
       id: 'research/workspace/mask-validation',

@@ -567,11 +567,15 @@ export class Workspace {
         const entry = await (refresh ? inLane('slow', read) : read())
         if (entry) {
           // Body reads carry document metadata; the composite feed owns live workers.
-          const live = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner) ?? state.card
+          const feed = this.opts.cards().find(c => (c.uid ?? c.id) === state.channel.uid && c.originId === state.channel.owner)
+          const live = feed ?? state.card
           const metadata = cardFromCompositeEntry({ ...entry, origin: state.channel.owner })
           for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
             metadata[key] = live[key] as never
           }
+          // Every feed poll replaces the card, so a fiber the feed lists takes its
+          // roster from the feed too, and the roles never flicker between reads.
+          if (feed) metadata.roles = feed.roles
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
           state.card = metadata
           state.metadataKnown = true

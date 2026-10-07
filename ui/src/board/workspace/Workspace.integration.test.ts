@@ -113,6 +113,23 @@ beforeEach(() => {
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('names the roster the feed carries and repaints the page when it changes', async () => {
+    const original = cards[0]
+    const roles = (): string[] => [...document.querySelectorAll('.ws-fiber-role')].map(role => role.textContent ?? '')
+    try {
+      // The body read carries no roster; the feed's card does, and it holds across the read.
+      cards[0] = { ...original, roles: ['surveyor'] }
+      workspace.open(cards[0]); await flush(); await flush()
+      expect(roles()).toEqual(['surveyor'])
+      cards[0] = { ...original, roles: ['surveyor', 'scribe'] }
+      workspace.update(); await flush()
+      expect(roles()).toEqual(['surveyor', 'scribe'])
+      cards[0] = original
+      workspace.update(); await flush()
+      expect(roles()).toEqual([])
+    } finally { cards[0] = original }
+  })
+
   it('replaces key verdicts with clicks and commits only the live identity after a move', async () => {
     workspace.dispose()
     const reviewing = card({ id: 'work/review', uid: 'stable-review', name: 'Review', originId: 'host-a',

@@ -64,8 +64,8 @@ export function installBodyFileLinks(
 
 /**
  * The roster's roles for the status line, left of the worker pill: each role
- * is a wikilink to its fiber `roles/<slug>`, live when the index resolves it
- * and plain text when it does not.
+ * is a wikilink to its fiber `roles/<slug>`, live when the index names that
+ * exact id and plain text otherwise.
  */
 function rosterRoles(roles: string[], opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement | null {
   if (roles.length === 0) return null
@@ -85,7 +85,7 @@ function rosterRoles(roles: string[], opts: { shuttleBase: string; onFiber: (id:
     role.append(link)
     el.append(role)
   }
-  void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
+  void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, exact: true })
   return el
 }
 

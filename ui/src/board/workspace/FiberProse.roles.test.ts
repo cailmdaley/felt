@@ -54,6 +54,26 @@ describe('collaboration roster', () => {
     expect(inert.textContent).toBe('archivist')
   })
 
+  it('opens only the exact role fiber, never a suffix, case or title match', async () => {
+    // Each of these would satisfy a body wikilink's fuzzy fallbacks for `roles/scribe`.
+    const shuttleBase = daemon(['projects/roles/scribe', 'Roles/Scribe', 'scribe-notes'])
+    const pane = buildFiberProse({ ...card, roles: ['scribe'] }, channel, { shuttleBase, onFiber: vi.fn(), onFile: vi.fn() })
+    await settle()
+    const role = pane.querySelector('.ws-fiber-role')!
+    expect(role.querySelector('a')).toBeNull()
+    expect(role.textContent).toBe('scribe')
+  })
+
+  it('leaves every role plain text when the index cannot be read', async () => {
+    const shuttleBase = `http://roles-${++base}.invalid`
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
+    const pane = buildFiberProse({ ...card, roles: ['surveyor'] }, channel, { shuttleBase, onFiber: vi.fn(), onFile: vi.fn() })
+    await settle()
+    const role = pane.querySelector('.ws-fiber-role')!
+    expect(role.querySelector('a')).toBeNull()
+    expect(role.textContent).toBe('surveyor')
+  })
+
   it('draws nothing for a fiber without a roster', () => {
     const pane = buildFiberProse(card, channel, { shuttleBase: daemon([]), onFiber: vi.fn(), onFile: vi.fn() })
     expect(pane.querySelector('.ws-fiber-roles')).toBeNull()
