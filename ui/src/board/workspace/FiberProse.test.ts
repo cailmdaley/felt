@@ -45,6 +45,14 @@ describe('fiber prose', () => {
     expect(ledeHtml('')).toBe('')
   })
 
+  it('names no Desk column for a fiber without a shuttle block', () => {
+    for (const status of ['open', 'closed']) {
+      const note = { ...card, status, shuttleAgent: undefined, shuttleKind: undefined }
+      const pane = buildFiberProse(note, channel, { shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn() })
+      expect(pane.querySelector('.ws-prose-status')).toBeNull()
+    }
+  })
+
   it('shows status alone in the header and leaves documents to the tab strip', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
     const onFiber = vi.fn(), onFile = vi.fn()
