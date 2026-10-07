@@ -127,6 +127,22 @@ describe('Overview receipt membership and identity', () => {
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
   })
 
+  it('shelves the constitutions read lately, most recent first, each opening in the reader, and hides an empty shelf', async () => {
+    overview.dispose()
+    let read: KanbanCard[] = []
+    overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen, readLately: () => read })
+    document.body.append(overview.el)
+    await refresh()
+    const shelf = overview.el.querySelector<HTMLElement>('.ws-overview-read')!
+    expect(shelf.hidden).toBe(true)
+    read = [cards[1], cards[0]]
+    overview.opened(cards[1])
+    expect(shelf.hidden).toBe(false)
+    expect([...shelf.querySelectorAll('.ws-overview-read-name')].map(el => el.textContent)).toEqual(['Beta pipeline', 'Alpha result'])
+    shelf.querySelector<HTMLButtonElement>('.ws-overview-read-item')!.click(); await settle()
+    expect(onOpen).toHaveBeenCalledWith(cards[1], undefined)
+  })
+
   it('marks only receipts newer than the last time the sheet was left', async () => {
     overview.dispose()
     localStorage.setItem('shuttle.workspace.overview.seen', JSON.stringify(now() - 30000))

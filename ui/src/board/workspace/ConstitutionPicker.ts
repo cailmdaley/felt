@@ -11,6 +11,8 @@ export interface ConstitutionPickerOptions {
   /** The retained root, after placement and revision patching, on every refresh. */
   onRow?(el: HTMLElement, card: KanbanCard): void
   onRemove?(el: HTMLElement): void
+  /** After every refresh, once rows and captions are placed. */
+  onRefresh?(): void
   onOpen(card: KanbanCard): void
   /** A field the picker reads instead of its own (the board bar's Find), heard only while `active`. */
   find?: HTMLInputElement
@@ -30,7 +32,8 @@ export class ConstitutionPicker {
   private selected: string | null = null
   private revealed: string | null = null
   private readonly rows = new Map<string, { el: HTMLElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard; revision: string }>()
-  private readonly captions = new Map<string, HTMLElement>()
+  /** Each group's box: its caption, then its rows, so a sticky caption leaves with its group. */
+  private readonly groups = new Map<string, HTMLElement>()
   private readonly opts: ConstitutionPickerOptions
   constructor(opts: ConstitutionPickerOptions) {
     this.opts = opts
@@ -87,17 +90,26 @@ export class ConstitutionPicker {
     const visible = cards.filter(matches)
     const keys = new Set(visible.map(identity))
     for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.opts.onRemove?.(row.el); this.rows.delete(key) }
-    let cursor = this.list.firstChild
+    let listCursor = this.list.firstChild
+    let parent: HTMLElement = this.list
+    let cursor = listCursor
     let previousGroup: string | undefined
     const groups = new Set<string>()
     for (const card of visible) {
       const group = this.opts.group?.(card)
-      if (group && group !== previousGroup) {
-        let caption = this.captions.get(group)
-        if (!caption) { caption = document.createElement('h3'); caption.className = 'kbn-flight-caption'; caption.textContent = group; this.captions.set(group, caption) }
-        groups.add(group)
-        if (caption !== cursor) this.list.insertBefore(caption, cursor)
-        cursor = caption.nextSibling
+      if (group !== previousGroup) {
+        if (group) {
+          let box = this.groups.get(group)
+          if (!box) {
+            box = document.createElement('div'); box.className = 'ws-channel-group'
+            const caption = document.createElement('h3'); caption.className = 'kbn-flight-caption'; caption.textContent = group
+            box.append(caption); this.groups.set(group, box)
+          }
+          groups.add(group)
+          if (box !== listCursor) this.list.insertBefore(box, listCursor)
+          listCursor = box.nextSibling
+          parent = box; cursor = box.firstChild!.nextSibling
+        } else { parent = this.list; cursor = listCursor }
       }
       previousGroup = group
       const key = identity(card)
@@ -139,18 +151,21 @@ export class ConstitutionPicker {
       row.el.title = card.outcome ?? card.path
       if (row.name.textContent !== card.name) row.name.textContent = card.name
       if (!this.opts.renderCard && row.owner.textContent !== card.originId) row.owner.textContent = card.originId
-      if (row.el !== cursor) this.list.insertBefore(row.el, cursor)
+      if (row.el !== cursor) parent.insertBefore(row.el, cursor)
       cursor = row.el.nextSibling
+      if (parent === this.list) listCursor = cursor
       this.opts.onRow?.(row.el, card)
     }
-    for (const [group, caption] of this.captions) if (!groups.has(group)) { caption.remove(); this.captions.delete(group) }
-    if (reveal && selected && selected !== this.revealed) {
-      const row = this.rows.get(selected)
-      if (row) {
-        row.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
-        this.revealed = selected
-      }
-    }
+    for (const [group, box] of this.groups) if (!groups.has(group)) { box.remove(); this.groups.delete(group) }
+    if (reveal && selected && selected !== this.revealed) this.reveal()
+    this.opts.onRefresh?.()
+  }
+  /** Scroll the current row into view; its scroll margin keeps its group's caption in sight above it. */
+  reveal(): void {
+    const row = this.selected ? this.rows.get(this.selected) : undefined
+    if (!row) return
+    row.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+    this.revealed = this.selected
   }
   private readonly keydown = (event: KeyboardEvent): void => {
     const mine = this.el.contains(event.target as Node) || (event.target === this.find && this.listening)

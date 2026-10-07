@@ -17,7 +17,7 @@ import type { ChannelThemes } from './ChannelThemes.js'
 import { buildCardPaper } from '../KanbanSurfaces.js'
 import { overviewHostMarks } from './Overview.js'
 import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
-import { groupJump } from './groupJump.js'
+import { groupJump, groupStops, stopLanding } from './groupJump.js'
 import { workspaceMeasure } from './measures.js'
 import { workerPlate } from './workerPlate.js'
 import { markVerdictHost } from './Verdicts.js'
@@ -60,6 +60,9 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
+/** The index strip abbreviates a caption too wide for its row; the caption keeps its full name. */
+const INDEX_LABELS: Record<string, string> = { 'Awaiting review': 'Review' }
+
 function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
   const b = element('button', cls, text)
   b.type = 'button'
@@ -144,6 +147,9 @@ export class Reader {
   private menuRelease: Release | null = null
   private menuAnchor: HTMLElement | null = null
   private sidebar = element('aside', 'ws-sidebar')
+  /** One row naming each sidebar group with its count; its entries are the J/K stops. */
+  private readonly sidebarIndex = element('nav', 'ws-sidebar-index')
+  private readonly indexEntries = new Map<string, HTMLButtonElement>()
   private readonly sidebarPicker: ConstitutionPicker
   private readonly picker: ConstitutionPicker
   private readonly sidebarFlight: SidebarFlight
@@ -224,19 +230,14 @@ export class Reader {
     this.parallax.append(this.track)
     this.stage.append(this.parallax)
     this.sidebar.setAttribute('aria-label', 'Constitutions')
-    const withCurrent = (cards: KanbanCard[]): KanbanCard[] => {
-      const current = this.currentCard
-      return current && !cards.some(card => (card.uid ?? card.id) === (current.uid ?? current.id) && card.originId === current.originId) ? [...cards, current] : cards
-    }
-    const sidebarCards = (): KanbanCard[] => withCurrent(this.opts.switcherCards?.() ?? this.opts.cards())
     const pickerOptions = {
-      cards: () => withCurrent(this.opts.pickerCards?.() ?? sidebarCards()),
+      cards: () => this.withCurrent(this.opts.pickerCards?.() ?? this.sidebarCards()),
       files: opts.files,
       current: (card: KanbanCard) => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner,
       onOpen: (card: KanbanCard) => { this.closeMenu(); this.opts.onChannel(card) },
     }
     this.sidebarPicker = new ConstitutionPicker({
-      ...pickerOptions, cards: sidebarCards, revealCurrent: true,
+      ...pickerOptions, cards: () => this.sidebarCards(), revealCurrent: true,
       find: opts.find, active: () => this.active && this.sidebarShown,
       // Escape on a card leaves the reader, as it does anywhere else in it.
       onEscape: () => { this.handleIntent('back') },
@@ -247,6 +248,7 @@ export class Reader {
         else this.opts.themes?.unbind(el)
       },
       onRemove: el => { this.sidebarRows.delete(el); this.opts.themes?.unbind(el) },
+      onRefresh: () => this.renderIndex(),
     })
     this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
@@ -259,12 +261,8 @@ export class Reader {
     this.sidebarHandle.addEventListener('pointerdown', e => this.sidebarResizeStart(e))
     this.sidebarHandle.addEventListener('keydown', e => this.sidebarResizeKey(e))
     this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
-    this.sidebar.append(this.sidebarPicker.el, this.sidebarHandle)
-    // The list's scroll offset sets how far its top fades under the toggle.
-    this.sidebar.addEventListener('scroll', event => {
-      const list = event.target
-      if (list instanceof HTMLElement && list.classList.contains('ws-channel-list')) list.style.setProperty('--ws-list-scroll', `${list.scrollTop}px`)
-    }, { capture: true, passive: true })
+    this.sidebarIndex.setAttribute('aria-label', 'Constitution groups')
+    this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     column.append(this.stage)
     const main = element('div', 'ws-stage-row')
@@ -1066,12 +1064,12 @@ export class Reader {
     else if (intent === 'first' || intent === 'last') this.selectIndex(intent === 'first' ? 0 : (this.channel?.documents.length ?? 1) - 1)
     else if (intent === 'open') this.toggleExpand()
     else if (intent === 'prevChannel' || intent === 'nextChannel') {
-      const cards = this.opts.switcherCards?.() ?? this.opts.cards()
+      const cards = this.sidebarCards()
       const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
       const card = cards[index + (intent === 'prevChannel' ? -1 : 1)]
       if (index >= 0 && card) this.opts.onChannel(card)
     } else if (intent === 'prevGroup' || intent === 'nextGroup') {
-      const cards = this.opts.switcherCards?.() ?? this.opts.cards()
+      const cards = this.sidebarCards()
       const index = cards.findIndex(c => (c.uid ?? c.id) === this.channel?.uid && c.originId === this.channel?.owner)
       this.rememberStop()
       const card = groupJump(cards, index, intent === 'prevGroup' ? -1 : 1, this.stopOf, cardIdentity, this.groupMemory)
@@ -1084,6 +1082,46 @@ export class Reader {
   private readonly stopOf = (card: KanbanCard): string => this.opts.sidebarBand?.(card) ?? ''
   private rememberStop(): void {
     if (this.currentCard) this.groupMemory.set(this.stopOf(this.currentCard), cardIdentity(this.currentCard))
+  }
+  /** The open constitution joins the list it is missing from, at its end. */
+  private withCurrent(cards: KanbanCard[]): KanbanCard[] {
+    const current = this.currentCard
+    return current && !cards.some(card => cardIdentity(card) === cardIdentity(current)) ? [...cards, current] : cards
+  }
+  /** The sidebar's cards in drawn order, which j/k and J/K walk whether or not it is shown. */
+  private sidebarCards(): KanbanCard[] { return this.withCurrent(this.opts.switcherCards?.() ?? this.opts.cards()) }
+  /** The index strip names every group stop, unfiltered by Find, and marks the open constitution's. */
+  private renderIndex(): void {
+    const stops = this.opts.sidebarBand ? groupStops(this.sidebarCards(), this.stopOf).filter(stop => stop.key) : []
+    const current = this.currentCard && cardIdentity(this.currentCard)
+    const keys = new Set(stops.map(stop => stop.key))
+    for (const [key, entry] of this.indexEntries) if (!keys.has(key)) { entry.remove(); this.indexEntries.delete(key) }
+    stops.forEach((stop, i) => {
+      let entry = this.indexEntries.get(stop.key)
+      if (!entry) {
+        const key = stop.key
+        entry = button('ws-sidebar-index-entry', '', () => this.jumpToStop(key))
+        entry.append(element('span', 'ws-sidebar-index-name', INDEX_LABELS[key] ?? key), element('span', 'ws-sidebar-index-count'))
+        this.indexEntries.set(key, entry)
+      }
+      const count = String(stop.cards.length)
+      const tally = entry.lastElementChild as HTMLElement
+      if (tally.textContent !== count) tally.textContent = count
+      entry.setAttribute('aria-label', `${stop.key}, ${count}`)
+      entry.title = stop.key
+      if (stop.cards.some(card => cardIdentity(card) === current)) entry.setAttribute('aria-current', 'location')
+      else entry.removeAttribute('aria-current')
+      if (this.sidebarIndex.children[i] !== entry) this.sidebarIndex.insertBefore(entry, this.sidebarIndex.children[i] ?? null)
+    })
+  }
+  /** A strip entry lands as J/K would: on the stop's remembered card, else its first. */
+  private jumpToStop(key: string): void {
+    const stop = groupStops(this.sidebarCards(), this.stopOf).find(stop => stop.key === key)
+    if (!stop) return
+    this.rememberStop()
+    const card = stopLanding(stop, cardIdentity, this.groupMemory)
+    if (this.currentCard && cardIdentity(card) === cardIdentity(this.currentCard)) this.sidebarPicker.reveal()
+    else this.opts.onChannel(card)
   }
 
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
