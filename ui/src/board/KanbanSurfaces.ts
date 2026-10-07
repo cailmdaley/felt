@@ -1,5 +1,6 @@
 import { appWorkerLink, terminalWorkerPill, workerVariant } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
+import { markVerdictHost } from './workspace/Verdicts.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -1811,6 +1812,8 @@ export class KanbanSurfaceRenderer {
 
     const meta = document.createElement('div')
     meta.className = 'kbn-card-meta'
+    // A verdict given from the Desk waits out its undo window on this foot.
+    markVerdictHost(meta, card)
 
     const actor = document.createElement('span')
     actor.className = `kbn-card-actor ${isAgentCard(card) ? 'kbn-card-actor-agent' : 'kbn-card-actor-human'}`

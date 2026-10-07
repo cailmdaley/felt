@@ -285,22 +285,25 @@ export class Workspace {
   private deferVerdict(verdict: Verdict): void {
     const state = this.current
     if (!state?.metadataKnown || !verdictReachable(state.card)) return
-    this.queueVerdict(state.card, verdict)
+    // A key verdict given from another page waits where the verdict lives,
+    // on the constitution's status line, so the page comes forward to show it.
+    const prose = proseDocument(state.channel)?.key
+    if (this.queueVerdict(state.card, verdict) && prose && state.selected !== prose) this.select(prose)
   }
-  /** Desk, plates, act-zone buttons and keys authorize the same delayed write. */
-  queueVerdict(requested: KanbanCard, verdict: Verdict): void {
+  /** Desk, plates, act-zone buttons and keys authorize the same delayed write.
+   * Answers whether the verdict entered its undo window. */
+  queueVerdict(requested: KanbanCard, verdict: Verdict): boolean {
     const uid = requested.uid ?? requested.id, owner = requested.originId
     const state = this.channels.get(channelId(uid, owner))
     const resolve = (): KanbanCard | undefined => this.opts.cards().find(card => (card.uid ?? card.id) === uid && card.originId === owner)
     const indexed = resolve()
-    // Linked fibers can be outside the board index; cached metadata only labels the toast.
-    if (!indexed && !state?.metadataKnown) return
+    // Linked fibers can be outside the board index; cached metadata only labels the undo line.
+    if (!indexed && !state?.metadataKnown) return false
     const card = indexed ?? requested
     const review = fiberPageColumn(card) === 'awaitingReview'
     // Ask while the gesture is fresh; the undo window carries the answer to the write.
-    if (!confirmWorkerStop(card, verdict)) return
+    if (!confirmWorkerStop(card, verdict)) return false
     const workerStopConfirmed = hasWorkerToStop(card)
-    const material = this.current?.channel.uid === uid && this.current.channel.owner === owner ? this.themes.material(this.reader.el) : undefined
     this.verdicts.queue(card, verdict, async () => {
       let live = resolve()
       if (!live && !indexed) {
@@ -323,7 +326,8 @@ export class Workspace {
         return
       }
       this.dock.commitVerdict(live, verdict)
-    }, material)
+    })
+    return true
   }
   private focusComposer(): void {
     const state = this.current

@@ -90,7 +90,7 @@ export function scopeTheme(css: string, scope: string, namespace: string, defaul
   // An earliest layer lets even layered :scope declarations beat the defaults.
   const reset = aliases.size ? `@layer shuttle-theme-defaults {
     :where([data-ws-theme-boundary]) { ${resetDeclarations([...aliases.keys()])} }
-    :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) { ${resetDeclarations([...aliases.keys()].filter(name => name !== '--ws-paper' && name !== '--ws-ink'))} }
+    :where([data-ws-theme] [data-part="act"]) { ${resetDeclarations([...aliases.keys()].filter(name => name !== '--ws-paper' && name !== '--ws-ink'))} }
   }` : ''
   return [imports.allowed.join('\n'), reset, emit(sheet.cssRules, true)].join('\n')
 }

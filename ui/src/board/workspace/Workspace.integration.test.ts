@@ -156,7 +156,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-fiber-prose .ws-dock')).not.toBeNull()
   })
 
-  it('replaces key verdicts with clicks and commits only the live identity after a move', async () => {
+  it('draws a key verdict in place of the pair, takes a click verdict after undo, and commits only the live identity after a move', async () => {
     workspace.dispose()
     const reviewing = card({ id: 'work/review', uid: 'stable-review', name: 'Review', originId: 'host-a',
       path: 'work/review/review.md', fiberDir: '/notes/review', status: 'closed', shuttleKind: 'oneshot' })
@@ -167,12 +167,17 @@ describe('workspace reader integration', () => {
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(reviewing); await flush()
     vi.useFakeTimers()
+    const pair = document.querySelector<HTMLElement>('.ws-fiber-acts .kbn-ctl-verdict')!
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
+    expect(pair.dataset.verdictPending).toBe('discarded')
+    expect(pair.querySelector(':scope > .ws-verdict-undo')?.textContent).toBe('Discarded·undo z')
     vi.advanceTimersByTime(3000)
-    document.querySelector<HTMLButtonElement>('.ws-fiber-acts .kbn-ctl-verdict .kbn-ctl-temper')!.click()
+    pair.querySelector<HTMLButtonElement>('.ws-verdict-undo button')!.click()
+    expect(pair.hasAttribute('data-verdict-pending')).toBe(false)
+    pair.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
     expect(commit).not.toHaveBeenCalled()
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
-    expect(document.querySelector('.ws-verdict-toast')?.textContent).toMatch(/^Tempered/)
+    expect(document.querySelectorAll('.ws-fiber-acts .ws-verdict-undo')).toHaveLength(1)
+    expect(pair.querySelector('.ws-verdict-undo')?.textContent).toMatch(/^Tempered/)
     live = { ...reviewing, id: 'elsewhere/renamed', path: 'elsewhere/renamed/renamed.md', fiberDir: '/notes/renamed' }
     vi.advanceTimersByTime(3999)
     expect(commit).not.toHaveBeenCalled()
@@ -192,12 +197,12 @@ describe('workspace reader integration', () => {
     workspace.open(reviewing); await flush()
     vi.useFakeTimers()
     workspace.queueVerdict(reviewing, 'composted')
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
+    expect(document.querySelectorAll('.ws-fiber-acts .ws-verdict-undo')).toHaveLength(1)
     live = change === 'removed' ? [] : [{ ...reviewing,
       ...(change === 'replacement' ? { uid: 'UID-B' } : { originId: 'host-b' }) }]
     bodyCards = live
     vi.advanceTimersByTime(6000); await flush()
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
+    expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
     expect(commit).not.toHaveBeenCalled()
   })
   it('asks to stop a worker at gesture time and carries the answer to the delayed write', async () => {
@@ -214,7 +219,7 @@ describe('workspace reader integration', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     workspace.queueVerdict(app, 'composted')
     expect(confirm).toHaveBeenCalledOnce()
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
+    expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
     confirm.mockReturnValue(true)
     workspace.queueVerdict(app, 'composted')
     expect(confirm).toHaveBeenCalledTimes(2)

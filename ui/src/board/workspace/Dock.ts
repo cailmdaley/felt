@@ -1,5 +1,5 @@
 import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
-import { confirmWorkerStop } from './Verdicts.js'
+import { confirmWorkerStop, markVerdictHost } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
@@ -717,6 +717,7 @@ export class Dock {
   verdictControlsFor(card: KanbanCard): HTMLElement {
     const row = document.createElement('div')
     row.className = 'kbn-ctl-verdict'
+    markVerdictHost(row, card)
     for (const [label, cls, target] of [
       ['Temper', 'kbn-ctl-temper', 'tempered'],
       ['Discard', 'kbn-ctl-discard', 'composted'],
