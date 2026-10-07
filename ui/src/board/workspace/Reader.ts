@@ -44,8 +44,6 @@ export interface ReaderOptions {
   switcherCards?(): KanbanCard[]
   pickerCards?(): KanbanCard[]
   sidebarBand?(card: KanbanCard): string | undefined
-  /** The sidebar's group stops for J/K; In flight splits into its bands. Defaults to the band. */
-  sidebarStop?(card: KanbanCard): string
   files?(card: KanbanCard): string[]
   /** The board bar's Find field: on the desktop it filters the open sidebar. */
   find?: HTMLInputElement
@@ -1079,7 +1077,7 @@ export class Reader {
     return true
   }
 
-  private readonly stopOf = (card: KanbanCard): string => this.opts.sidebarStop?.(card) ?? this.opts.sidebarBand?.(card) ?? ''
+  private readonly stopOf = (card: KanbanCard): string => this.opts.sidebarBand?.(card) ?? ''
   private rememberStop(): void {
     if (this.currentCard) this.groupMemory.set(this.stopOf(this.currentCard), cardIdentity(this.currentCard))
   }

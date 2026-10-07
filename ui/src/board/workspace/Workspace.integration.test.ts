@@ -225,7 +225,7 @@ describe('workspace reader integration', () => {
     if (result === 'same identity') expect(commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: linked.uid, id: renamed.id, originId: linked.originId }), 'tempered')
     else expect(commit).not.toHaveBeenCalled()
   })
-  it('groups the sidebar as Awaiting review, Working and Read lately wherever it opens, stepping it with j/k', async () => {
+  it('groups the sidebar as Awaiting review, In flight\'s bands and Read lately wherever it opens, skipping an empty band, stepping it with j/k', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const returned = vi.fn()
@@ -243,7 +243,7 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(returned).toHaveBeenCalledWith(expect.objectContaining({ uid: 'beta', originId: 'host-b' }))
   })
-  it('draws Working with Needs you first even from an interleaved feed, so J/K stops match the drawn bands', async () => {
+  it('captions In flight as its Needs you and Working bands even from an interleaved feed, and J/K stops at each', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
@@ -253,6 +253,7 @@ describe('workspace reader integration', () => {
     workspace.open(feed[0], 'Desk'); await flush()
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['alpha', 'n1', 'n2', 'w1', 'w2'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Awaiting review', 'Needs you', 'Working'])
     const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
     await press('J'); expect(current()).toBe('n1')
     await press('j'); expect(current()).toBe('n2')

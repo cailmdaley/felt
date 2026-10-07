@@ -454,7 +454,7 @@ describe('Reader channel sidebar', () => {
     const delta = card({ id: 'work/delta', uid: 'delta', name: 'Delta', originId: 'host-d' })
     listedCards = [alpha, beta, gamma, delta]
     const stops = new Map([[alpha, 'review'], [beta, 'review'], [gamma, 'flight:working'], [delta, 'flight:working']])
-    const reader = makeReader(alpha, undefined, undefined, { sidebarStop: row => stops.get(row) ?? '' })
+    const reader = makeReader(alpha, undefined, undefined, { sidebarBand: row => stops.get(row) })
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: true, bubbles: true, cancelable: true })) }
     press('J')
     expect(onChannel).toHaveBeenLastCalledWith(gamma)
