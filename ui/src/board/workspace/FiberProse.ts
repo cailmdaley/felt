@@ -7,6 +7,7 @@ import '../prose.css'
 import './fiber-prose.css'
 import type { Channel } from './documents.js'
 import { fiberPageKicker } from './fiberPageState.js'
+import { buildRoleLedger, roleSlug } from './RolePage.js'
 
 /** The outcome as the reading surface's lede, including math and references. */
 export function ledeHtml(outcome: string): string {
@@ -99,6 +100,9 @@ export function buildFiberProse(
     acts?: HTMLElement
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
+    /** On a role page, the constitutions whose roster names the role, in Desk order. */
+    holds?: KanbanCard[]
+    onCard?: (card: KanbanCard) => void
   },
 ): HTMLElement {
   const scroller = document.createElement('div')
@@ -143,7 +147,9 @@ export function buildFiberProse(
   }
   installBodyFileLinks(body, opts.onFile)
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
-  article.append(header, title, outcome, ...(opts.controls ? [opts.controls] : []), body)
+  const slug = roleSlug(card)
+  const ledger = slug ? buildRoleLedger(slug, opts.holds ?? [], { shuttleBase: opts.shuttleBase, onFiber: opts.onFiber, onCard: opts.onCard ?? (() => {}) }) : null
+  article.append(header, title, outcome, ...(ledger ? [ledger] : []), ...(opts.controls ? [opts.controls] : []), body)
   scroller.append(article)
   return scroller
 }

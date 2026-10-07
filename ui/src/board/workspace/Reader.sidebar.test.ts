@@ -378,6 +378,19 @@ describe('Reader channel sidebar', () => {
     expect(onChannel).toHaveBeenCalledWith(alpha)
   })
 
+  it('marks only a fiber on the Desk lifecycle with its glyph', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const managed = { ...gamma, shuttleKind: 'oneshot' as const }
+    channels.splice(2, 1, managed)
+    listedCards = channels
+    try {
+      const reader = makeReader(alpha)
+      const glyph = (uid: string) => reader.el.querySelector(`.ws-sidebar [data-channel-uid="${uid}"] .kbn-card-glyph`)
+      expect(glyph('alpha')).toBeNull()
+      expect(glyph('gamma')?.textContent).toBe('◐')
+    } finally { channels.splice(2, 1, gamma) }
+  })
+
   it('refreshes sidebar rows without clearing the find text', () => {
     viewport.wide = true
     const reader = makeReader()

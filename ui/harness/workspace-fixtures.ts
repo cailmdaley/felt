@@ -101,14 +101,18 @@ export function installWorkspaceNativeURLs(example: WorkspaceExample): Workspace
   return { blobURLs, rewrites }
 }
 
-/** The role store's fibers the fixture rosters name: a role and its holder, each a plain note. */
-export const ROLE_NOTES = [
+/**
+ * Plain notes the fixture links to, none Shuttle-managed: two roles from the
+ * role store (one held by two holders and named by three rosters, one held
+ * by no one and named by none), the holder pages, and a note outside it.
+ */
+export const NOTE_FIBERS = [
   {
     id: 'roles/surveyor',
     uid: '01KVBR8P3JM2BTP4BB78T245T5',
     name: 'Surveyor',
     outcome: 'Walks a project end to end and maps what is there before anyone builds on it.',
-    body: 'The surveyor reads before it writes: the code, the data products and the open questions, in that order.\n\nHeld by [[roles/surveyor/opus]].',
+    body: 'The surveyor reads before it writes: the code, the data products and the open questions, in that order.\n\nIts working terms are in [[research/workspace/glossary]]; a role with no work yet is [[roles/scribe]].',
   },
   {
     id: 'roles/surveyor/opus',
@@ -116,6 +120,27 @@ export const ROLE_NOTES = [
     name: 'Surveyor: opus',
     outcome: 'Opus holds the surveyor role across the workspace projects.',
     body: 'Notes this holder keeps between surveys.',
+  },
+  {
+    id: 'roles/surveyor/sonnet',
+    uid: '01KVBRAR5MP4DWR6DD90W467W7',
+    name: 'Surveyor: sonnet',
+    outcome: 'Sonnet holds the surveyor role for quick passes.',
+    body: 'Notes this holder keeps between passes.',
+  },
+  {
+    id: 'roles/scribe',
+    uid: '01KVBRBS6NQ5EXS7EE01X578X8',
+    name: 'Scribe',
+    outcome: 'Keeps the record of what was decided and why.',
+    body: 'No roster names the scribe yet, and no one holds it.',
+  },
+  {
+    id: 'research/workspace/glossary',
+    uid: '01KVBRCT7PR6FYT8FF12Y689Y9',
+    name: 'Glossary',
+    outcome: 'The terms the workspace projects share.',
+    body: '**Transfer function**: the ratio of recovered to injected power, per scale.\n\n**Null test**: a difference map that should hold no signal.',
   },
 ]
 
@@ -152,6 +177,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       age: 1,
       outcome: 'Collect the latest validation results and note what remains uncertain.',
       host: WORKSPACE_HOST,
+      collaboration: { surveyor: ['sonnet'] },
     },
     {
       id: 'pipeline/spin/remote-review',
@@ -384,7 +410,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       return { id: String(fiber.id), name: String(fiber.name) }
     }),
     { id: 'research/workspace/method-note', name: 'Method note' },
-    ...ROLE_NOTES.map(({ id, name }) => ({ id, name })),
+    ...NOTE_FIBERS.map(({ id, name }) => ({ id, name })),
   ]
   const fileMap = new Map(files.map(item => [key(item.owner, item.path), item]))
   const fileResponse = (url: string, method: string, requestHeaders?: HeadersInit): Response => {
