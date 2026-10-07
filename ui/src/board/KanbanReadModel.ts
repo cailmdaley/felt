@@ -744,6 +744,9 @@ export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
 
 export type InFlightBand = 'needsYou' | 'working';
 
+/** In flight's bands in drawn order, with the caption each surface gives them. */
+export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['needsYou', 'Needs you'], ['working', 'Working']];
+
 export function inFlightBand(card: KanbanCard): InFlightBand {
   return card.runtimePhase === 'waiting' || card.runtimePhase === 'blocked' || card.runtimePhase === 'attention'
     ? 'needsYou'

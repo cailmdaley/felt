@@ -52,7 +52,7 @@ import type {
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
-import { byCreatedAtDesc, deriveCycleLens, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { byCreatedAtDesc, deriveCycleLens, IN_FLIGHT_BANDS, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
 import type { PhoneMeeting } from './phoneMeeting'
 import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
@@ -1476,7 +1476,7 @@ export class KanbanSurfaceRenderer {
       if (kind === 'inFlight') {
         // The read model owns order within each band. These captions expose
         // the one state change that can move a card across the seam.
-        for (const [key, label] of [['needsYou', 'Needs you'], ['working', 'Working']] as const) {
+        for (const [key, label] of IN_FLIGHT_BANDS) {
           const members = cards.filter((card) => inFlightBand(card) === key)
           if (members.length === 0) continue
           const band = document.createElement('div')

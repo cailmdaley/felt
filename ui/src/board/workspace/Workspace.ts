@@ -5,7 +5,7 @@ import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
-import { cardFromCompositeEntry } from '../KanbanReadModel.js'
+import { cardFromCompositeEntry, IN_FLIGHT_BANDS, inFlightBand } from '../KanbanReadModel.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
@@ -220,24 +220,28 @@ export class Workspace {
 
   /**
    * The sidebar is one grouped list wherever the reader was opened from:
-   * Awaiting review and Working in the Desk's own order, then the
-   * constitutions read lately, most recent first.
+   * Awaiting review, then In flight's Needs you and Working bands, in the
+   * Desk's own order with each band whole even for cards the Desk left
+   * undrawn, then the constitutions read lately, most recent first. Its
+   * groups are also the reader's J/K stops.
    */
   private sidebarCards(): KanbanCard[] {
     const cards = this.opts.cards()
     const review = cards.filter(card => fiberPageColumn(card) === 'awaitingReview')
-    const working = cards.filter(card => fiberPageColumn(card) === 'inFlight')
-    const listed = new Set([...review, ...working].map(cardIdentity))
+    const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const inFlight = IN_FLIGHT_BANDS.flatMap(([band]) => flight.filter(card => inFlightBand(card) === band))
+    const listed = new Set([...review, ...inFlight].map(cardIdentity))
     const live = new Map(cards.map(card => [cardIdentity(card), card]))
     const read = this.readLately.flatMap(id => {
       const card = live.get(id) ?? this.channels.get(id)?.card
       return card && !listed.has(id) ? [card] : []
     }).slice(0, READ_LATELY)
-    return [...review, ...working, ...read]
+    return [...review, ...inFlight, ...read]
   }
   private sidebarGroup(card: KanbanCard): string {
     const column = fiberPageColumn(card)
-    return column === 'awaitingReview' ? 'Awaiting review' : column === 'inFlight' ? 'Working' : 'Read lately'
+    if (column === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(card))![1]
+    return column === 'awaitingReview' ? 'Awaiting review' : 'Read lately'
   }
 
   mountOverview(host: HTMLElement): void {

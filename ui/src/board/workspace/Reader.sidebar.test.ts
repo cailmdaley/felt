@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
-import { Reader, SIDEBAR_MEDIA } from './Reader.js'
+import { Reader, SIDEBAR_MEDIA, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import type { Channel, DocKey } from './documents.js'
 
@@ -29,7 +29,7 @@ let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
 const channels = [alpha, beta, gamma]
 
-function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerPill?: (card: KanbanCard) => HTMLElement | null): Reader {
+function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerPill?: (card: KanbanCard) => HTMLElement | null, extra: Partial<ReaderOptions> = {}): Reader {
   const reader = new Reader({
     shuttleBase: '', themes, workerPill,
     buildProse: () => document.createElement('div'),
@@ -40,6 +40,7 @@ function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerP
     cards: () => channels,
     switcherCards: () => listedCards,
     files: card => card === beta ? ['unique-result.pdf'] : [],
+    ...extra,
   })
   document.body.append(reader.el)
   reader.show(channel(current), fiberKey(current), 'Board', current)
@@ -446,6 +447,25 @@ describe('Reader channel sidebar', () => {
     expect(onChannel).toHaveBeenLastCalledWith(beta)
     onChannel.mockClear()
     for (const key of ['J', 'K']) document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    expect(onChannel).not.toHaveBeenCalled()
+  })
+
+  it('jumps between sidebar group stops with J/K, landing on the constitution last open in each', () => {
+    const delta = card({ id: 'work/delta', uid: 'delta', name: 'Delta', originId: 'host-d' })
+    listedCards = [alpha, beta, gamma, delta]
+    const stops = new Map([[alpha, 'review'], [beta, 'review'], [gamma, 'flight:working'], [delta, 'flight:working']])
+    const reader = makeReader(alpha, undefined, undefined, { sidebarBand: row => stops.get(row) })
+    const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: true, bubbles: true, cancelable: true })) }
+    press('J')
+    expect(onChannel).toHaveBeenLastCalledWith(gamma)
+    reader.show(channel(delta), fiberKey(delta), 'Board', delta)
+    press('K')
+    expect(onChannel).toHaveBeenLastCalledWith(alpha)
+    reader.show(channel(beta), fiberKey(beta), 'Board', beta)
+    press('J')
+    expect(onChannel).toHaveBeenLastCalledWith(delta)
+    onChannel.mockClear()
+    press('K')
     expect(onChannel).not.toHaveBeenCalled()
   })
 
