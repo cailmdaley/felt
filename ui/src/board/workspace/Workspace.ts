@@ -14,6 +14,7 @@ import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
+import { sidebarQueue } from './sidebarQueue.js'
 import { WorkspaceDepth } from './Depth.js'
 import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
@@ -129,6 +130,7 @@ export class Workspace {
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
+      queueCards: () => opts.cards(),
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
       sidebarBand: card => this.sidebarGroup(card),
@@ -221,11 +223,13 @@ export class Workspace {
   /**
    * The sidebar is one grouped list wherever the reader was opened from:
    * Drafts, then In flight's Aloft and Holding bands, then Awaiting review,
-   * each in the Desk's own order and whole even for cards the Desk left
-   * undrawn. Its groups are the reader's J/K stops and the index strip's entries.
+   * each in the Desk's own order. Queued children are reached through their
+   * head's peek, not these groups or their J/K stops and index counts.
    */
   private sidebarCards(): KanbanCard[] {
-    const cards = this.opts.cards()
+    const all = this.opts.cards()
+    const queues = sidebarQueue(all)
+    const cards = all.filter(card => !queues.folded(card))
     const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
     return [
       ...cards.filter(card => fiberPageColumn(card) === 'drafts'),

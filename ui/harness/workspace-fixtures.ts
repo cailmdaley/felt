@@ -210,6 +210,15 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       host: WORKSPACE_REMOTE,
     },
     {
+      id: 'research/workspace/validation-follow-up',
+      uid: '01KVBRDV8QS7GZU9GG23Z790Z0',
+      name: 'Validate the summary against simulations',
+      status: 'open',
+      age: 0.5,
+      outcome: 'Run the summary’s null tests on independent simulations before closing the loop.',
+      host: WORKSPACE_HOST,
+    },
+    {
       id: 'research/workspace/method-note',
       uid: '01KVBR6M1GJ0ZRM29956V023R3',
       name: 'Method note',
@@ -252,6 +261,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
         modified_at: iso(-47 * minute),
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
         ...(fiber.id === 'research/workspace/weekly-summary' ? { depends_on: WORKSPACE_UID } : {}),
+        ...(fiber.id === 'research/workspace/validation-follow-up' ? { depends_on: '01KVBR2G7CXDWMG85592QW78M9' } : {}),
         ...(fiber.collaboration ? { collaboration: fiber.collaboration } : {}),
         shuttle: {
           kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
@@ -381,6 +391,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
     ].join('\n'),
     'research/workspace/method-note': 'The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.',
     'research/workspace/weekly-summary': 'Weekly summary body.',
+    'research/workspace/validation-follow-up': 'Compare the summary’s null tests against independent simulations.',
     'pipeline/spin/remote-review': 'The remote covariance review is running on the fixture host.',
     'research/workspace/mask-validation': 'The mask validation passed.',
     'pipeline/spin/transfer-check': 'Compare the transfer functions at both map resolutions.',

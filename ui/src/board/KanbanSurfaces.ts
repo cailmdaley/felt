@@ -1,5 +1,6 @@
 import { appWorkerLink, terminalWorkerPill, workerVariant } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
+import { queuedControl } from './QueuedControl.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
@@ -38,10 +39,8 @@ import {
   queueIsLinear,
   queueRowDetachPlan,
   queueRowDropWrites,
-  queueMemberNote,
   queueRowGesture,
   queuedBehind,
-  queuedChipLabel,
   reorderQueueWrites,
   stackClaimsDrop,
   stackDropVerdict,
@@ -2053,31 +2052,6 @@ export class KanbanSurfaceRenderer {
 
     const resp = this.o.getLastResponse()
     const members = queued.map((id) => findCardById(resp, id))
-    const names = members.map((m, i) => m?.name ?? queued[i])
-    const notes = members.map((m) => (m ? queueMemberNote(m) : null))
-
-    const chip = document.createElement('button')
-    chip.type = 'button'
-    // COMPACT is the same chip in a smaller room — a pinned launcher or a
-    // Resting row has no width for "+3 queued", so the words drop to `+3` and
-    // the count survives where it always has to: the tooltip and the aria
-    // label, both written below and both naming the number outright.
-    chip.className = opts.compact ? 'kbn-card-queued kbn-card-queued--compact' : 'kbn-card-queued'
-    chip.textContent = opts.compact ? `+${queued.length}` : queuedChipLabel(queued.length)
-    chip.setAttribute('aria-expanded', 'false')
-    chip.setAttribute(
-      'aria-label',
-      `${queued.length} card${queued.length === 1 ? '' : 's'} queued behind ${card.name} — show them`,
-    )
-    chip.title = `Waiting on this one, in order: ${names
-      .map((name, i) => (notes[i] ? `${name} (${notes[i]})` : name))
-      .join(' → ')}`
-
-    const list = document.createElement('ol')
-    list.className = opts.compact
-      ? 'kbn-card-queued-list kbn-card-queued-list--floating'
-      : 'kbn-card-queued-list'
-    list.hidden = true
     // Each row asks for itself. `chainAllScalar` is the only chain-wide fact in
     // play, and it gates REORDER alone — taking a row out is a fact about that
     // row's own fiber, so it stays offered even in a queue of one and even when
@@ -2093,6 +2067,7 @@ export class KanbanSurfaceRenderer {
     const gestures = members.map(gestureFor)
     const reorderable = gestures.some((g) => g.reorderable)
       && queueIsLinear(card.id, queued, members.filter((m): m is KanbanCard => !!m))
+    const { chip, list } = queuedControl(card, queued, members, member => this.o.openDetail(member), opts)
     // THE LIST IS ITS OWN DRAG BOUNDARY.
     //
     // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
@@ -2133,28 +2108,8 @@ export class KanbanSurfaceRenderer {
       list.classList.add('kbn-card-queued-list--reorderable')
       chip.title = `${chip.title}. Drag a row to reorder the queue.`
     }
-    names.forEach((name, i) => {
-      const li = document.createElement('li')
-      li.className = 'kbn-card-queued-row'
-      li.textContent = name
-      const note = notes[i]
-      if (note) {
-        // A closed member reads dimmer and says which closed state it is in —
-        // it is in the queue, but it is not what the queue is waiting on next.
-        // It also wears the state's OWN pigment: verdigris for awaiting review,
-        // the board's verdict colour, so a settled member is findable at a
-        // glance the moment the list is open.
-        li.classList.add('kbn-card-queued-row--settled')
-        li.classList.add(
-          note === 'awaiting review'
-            ? 'kbn-card-queued-row--review'
-            : 'kbn-card-queued-row--discarded',
-        )
-        const suffix = document.createElement('span')
-        suffix.className = 'kbn-card-queued-note'
-        suffix.textContent = ` · ${note}`
-        li.append(suffix)
-      }
+    Array.from(list.children).forEach((child, i) => {
+      const li = child as HTMLLIElement
       const gesture = gestures[i]
       const canReorder = reorderable && gesture.reorderable
       // The row SAYS what its drag can do — or, when it has none, why. A row
@@ -2162,31 +2117,11 @@ export class KanbanSurfaceRenderer {
       const hint = gesture.reorderable && !reorderable
         ? 'Drag out to move. This queue branches, so rows cannot be reordered.'
         : gesture.hint
-      li.title = `Open “${name}”${note ? ` (${note})` : ''}. ${hint}`
-      // A ROW IS THE FIBER IT NAMES. Without this the click bubbles to the
-      // card the list hangs off and opens the HEAD — you click "Euclid
-      // timetracker", you get the card you were reading. The row is the only
-      // place some of these fibers appear on the board at all (the fold draws
-      // them here and nowhere else), so it has to be a way in.
-      const member = members[i]
-      if (member) {
-        li.dataset.cardUid = member.uid ?? member.id
-        li.dataset.cardOrigin = member.originId
-      }
-      li.addEventListener('click', (e) => {
-        e.stopPropagation()
-        if (member) this.o.openDetail(member)
-      })
+      li.title += ` ${hint}`
       if (!gesture.draggable) li.classList.add('kbn-card-queued-row--fixed')
       if (gesture.draggable) {
         this.installQueueRowDrag(li, list, card.id, queued, i, canReorder)
       }
-      list.append(li)
-    })
-    chip.addEventListener('click', (e) => {
-      e.stopPropagation()
-      list.hidden = !list.hidden
-      chip.setAttribute('aria-expanded', String(!list.hidden))
     })
     host.append(chip)
     host.append(list)

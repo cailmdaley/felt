@@ -243,7 +243,7 @@ type AssembledSurfaces = {
  * so work queued behind finished work stands in its own column rather than
  * being tucked under something nobody is looking at.
  */
-const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
+export const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
   'drafts',
   'scheduled',
   'pinned',
