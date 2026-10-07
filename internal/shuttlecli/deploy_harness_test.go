@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -90,23 +91,27 @@ func fakeHarnessReceipt(t *testing.T, sealed string, bundles ...string) string {
 }
 
 type harnessDeployCase struct {
-	receipt    string // `felt setup receipt --json` before setup
-	receiptRC  string // its exit status before setup
-	afterRC    string // its exit status once a Claude/Codex setup has run
-	after      string // `felt setup receipt --json` once a Claude/Codex setup has run (default: receipt)
-	version    string // `felt --version`
-	piAt       string // pi's clone HEAD; empty = pi has no felt GitHub package
-	exactRef   string // deploy revision, empty for a branch deploy
-	piAfter    string // pi's clone HEAD once `felt setup pi` has run
-	piLocal    string // a local pi package: "checkout", a commit, "nogit", or "" for none
-	piLocalAs  string // its committed package.json name (default felt)
-	working    string // its working package.json name: "" = as committed, "deleted" = absent
-	piEdits    string // `git status --porcelain` of pi's GitHub clone
-	localEdits string // `git status --porcelain` of the local pi package
-	statusFail string // "clone" or "local": that package's `git status` exits 128
-	wantLine   string
-	wantFailed bool
-	wantCalls  []string
+	receipt          string // `felt setup receipt --json` before setup
+	receiptRC        string // its exit status before setup
+	afterRC          string // its exit status once a Claude/Codex setup has run
+	after            string // `felt setup receipt --json` once a Claude/Codex setup has run (default: receipt)
+	version          string // `felt --version`
+	piAt             string // pi's clone HEAD; empty = pi has no felt GitHub package
+	exactRef         string // deploy revision, empty for a branch deploy
+	piAfter          string // pi's clone HEAD once `felt setup pi` has run
+	piLocal          string // a local pi package: "checkout", a commit, "nogit", or "" for none
+	piLocalAs        string // its committed package.json name (default felt)
+	working          string // its working package.json name: "" = as committed, "deleted" = absent
+	piEdits          string // `git status --porcelain` of pi's GitHub clone
+	localEdits       string // `git status --porcelain` of the local pi package
+	statusFail       string // "clone" or "local": that package's `git status` exits 128
+	piFetchFail      bool
+	piCheckoutFail   bool
+	wantGitOps       []string
+	wantGitMutations []string
+	wantLine         string
+	wantFailed       bool
+	wantCalls        []string
 }
 
 // runHarnessDeploy runs deploy's harness snippet in bash against fake felt,
@@ -146,6 +151,12 @@ func runHarnessDeploy(t *testing.T, c harnessDeployCase) (string, []string, erro
 		write(filepath.Join(piClone, "STATUS"), c.piEdits, 0o644)
 		if c.statusFail == "clone" {
 			write(filepath.Join(piClone, "STATUS_FAIL"), "", 0o644)
+		}
+		if c.piFetchFail {
+			write(filepath.Join(fake, "FETCH_FAIL"), "", 0o644)
+		}
+		if c.piCheckoutFail {
+			write(filepath.Join(fake, "CHECKOUT_FAIL"), "", 0o644)
 		}
 		piList += "  git:github.com/cailmdaley/felt\n    " + piClone + "\n"
 	}
@@ -216,9 +227,13 @@ case "$3 $4 $5" in
     [ ! -f "$2/STATUS_FAIL" ] || { echo "fatal: index file corrupt" >&2; exit 128; }
     cat "$2/STATUS" 2>/dev/null ;;
   "fetch origin $5")
-    [ "$5" = "$HARNESS_HEAD" ] || { echo "could not fetch $5" >&2; exit 1; } ;;
+    echo "fetch $5" >> "$FAKE_DIR/git-ops"
+    [ "$5" = "$HARNESS_HEAD" ] && [ ! -f "$FAKE_DIR/FETCH_FAIL" ] || { echo "could not fetch $5" >&2; exit 1; }
+    echo "fetch $5" >> "$FAKE_DIR/git-mutations" ;;
   "checkout --detach $5")
-    [ "$5" = "$HARNESS_HEAD" ] || exit 1
+    echo "checkout $5" >> "$FAKE_DIR/git-ops"
+    [ "$5" = "$HARNESS_HEAD" ] && [ ! -f "$FAKE_DIR/CHECKOUT_FAIL" ] || exit 1
+    echo "checkout $5" >> "$FAKE_DIR/git-mutations"
     printf '%s' "$5" > "$2/HEAD_SHA" ;;
   *) exit 2 ;;
 esac
@@ -237,6 +252,19 @@ harness_setup_cmd "$CHECKOUT" | /bin/bash
 	var calls []string
 	if data, err := os.ReadFile(filepath.Join(fake, "calls")); err == nil {
 		calls = strings.Split(strings.TrimSpace(strings.ReplaceAll(string(data), checkout, "<checkout>")), "\n")
+	}
+	readLines := func(name string) []string {
+		data, err := os.ReadFile(filepath.Join(fake, name))
+		if err != nil {
+			return []string{}
+		}
+		return strings.Split(strings.TrimSpace(string(data)), "\n")
+	}
+	if c.wantGitOps != nil && !reflect.DeepEqual(readLines("git-ops"), c.wantGitOps) {
+		t.Errorf("git operations = %v, want %v", readLines("git-ops"), c.wantGitOps)
+	}
+	if c.wantGitMutations != nil && !reflect.DeepEqual(readLines("git-mutations"), c.wantGitMutations) {
+		t.Errorf("git mutations = %v, want %v", readLines("git-mutations"), c.wantGitMutations)
 	}
 	return string(out), calls, runErr
 }
@@ -311,6 +339,19 @@ func TestDeployHarnessSetup(t *testing.T) {
 			receipt: fakeHarnessReceipt(t, ""), receiptRC: "1", afterRC: "1",
 			version: "dev (111111111111)", piAt: harnessOld, exactRef: harnessHead,
 			wantLine: "harness-ok harness plugins: pi pinned",
+		},
+		"an exact-ref pi fetch failure does not check out or mutate the clone": {
+			receipt: fakeHarnessReceipt(t, ""), receiptRC: "1", afterRC: "1",
+			version: "dev (111111111111)", piAt: harnessOld, exactRef: harnessHead, piFetchFail: true,
+			wantLine: "harness-fail pi's felt package", wantFailed: true,
+			wantGitOps: []string{"fetch " + harnessHead}, wantGitMutations: []string{},
+		},
+		"an exact-ref pi checkout failure leaves the clone revision unchanged": {
+			receipt: fakeHarnessReceipt(t, ""), receiptRC: "1", afterRC: "1",
+			version: "dev (111111111111)", piAt: harnessOld, exactRef: harnessHead, piCheckoutFail: true,
+			wantLine: "harness-fail pi's felt package", wantFailed: true,
+			wantGitOps:       []string{"fetch " + harnessHead, "checkout " + harnessHead},
+			wantGitMutations: []string{"fetch " + harnessHead},
 		},
 		"an exact-ref pi clone with tracked edits is not pinned": {
 			receipt: fakeHarnessReceipt(t, ""), receiptRC: "1", afterRC: "1",
