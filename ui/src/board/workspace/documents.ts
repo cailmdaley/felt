@@ -150,26 +150,22 @@ function isReport(document: WorkspaceDocument): boolean {
   return document.name.toLowerCase() === 'report.html'
 }
 
-/**
- * True when the document runs left of the fiber page: the body declares it,
- * or it is a report.html. A report stands with the declarations whether or
- * not the body has loaded, so it never crosses the fiber page as reads land.
- */
+/** True when the document runs left of the fiber page: the body declares it. */
 export function runsLeft(document: WorkspaceDocument): boolean {
-  return isReport(document) || isDeclared(document)
+  return isDeclared(document)
 }
 
 /**
- * Each side's order outward from the fiber page. On the left, declared
- * reports come first, then reports only sent, then declarations in body order; on the right, documents run by
- * their latest receipt, newest first, then sends whose time is unknown, so a
- * re-send moves its document beside the fiber page. Identity breaks every
- * tie. `declared` maps a document to its position among the body's
- * declarations.
+ * Each side's order outward from the fiber page. On the left, a declared
+ * report comes first, then the other declarations in body order; on the
+ * right, documents run by their latest receipt, newest first, then sends
+ * whose time is unknown, so a re-send moves its document beside the fiber
+ * page. Identity breaks every tie. `declared` maps a document to its position
+ * among the body's declarations.
  */
 export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map()) {
   const rank = (doc: WorkspaceDocument): [number, number] => {
-    if (runsLeft(doc)) return [0, isReport(doc) ? (isDeclared(doc) ? -2 : -1) : declared.get(doc.key) ?? Infinity]
+    if (runsLeft(doc)) return [0, isReport(doc) ? -1 : declared.get(doc.key) ?? Infinity]
     const sent = lastSent(doc)
     if (sent !== undefined) return [1, -sent]
     return doc.provenance.some(p => p.kind === 'sent') ? [2, 0] : [3, 0]
@@ -181,8 +177,8 @@ export function compareDocuments(declared: ReadonlyMap<DocKey, number> = new Map
 }
 
 /**
- * A channel's run of pages with the fiber page at its centre: reports and
- * declared documents to its left, sent and routed ones to its right, each
+ * A channel's run of pages with the fiber page at its centre: declared
+ * documents to its left, sent and routed ones to its right, each
  * side ordered outward from it by `compareDocuments`.
  */
 export function arrangeDocuments(prose: WorkspaceDocument, others: Iterable<WorkspaceDocument>, declared: ReadonlyMap<DocKey, number> = new Map()): WorkspaceDocument[] {

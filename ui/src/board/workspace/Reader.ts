@@ -94,6 +94,8 @@ export class Reader {
   private readonly seen = new DocumentSeen()
   private readonly receipts = new ReceiptArrivals()
   private channelReady = false
+  /** Whether the channel's run is final: the strip, ticks, count and steps wait for it. */
+  private runSettled = true
   private readonly tabs: TabStrip
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
@@ -205,7 +207,7 @@ export class Reader {
     thumb.dataset.part = 'phone-bottom-bar'
     thumb.dataset.wsSwipe = 'on'
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
-    const pageChoice = button('ws-page-choice', '', () => { this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
+    const pageChoice = button('ws-page-choice', '', () => { if (!this.runSettled) return; this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
     pageChoice.setAttribute('aria-haspopup', 'dialog')
     pageChoice.setAttribute('aria-expanded', 'false')
     const pageMeta = element('span', 'ws-thumb-meta')
@@ -308,13 +310,21 @@ export class Reader {
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
-  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true): void {
+  /**
+   * `settled` says the channel's run is final (its body has been read, or the
+   * read has failed). Until then the selected page shows alone: the strip's
+   * tiles, the ticks, the count and the steps hold their room unseen, and
+   * stepping keys do nothing, so no page appears on one side of the § and
+   * then crosses it.
+   */
+  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
     if (switching) { this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
     const arrivals = this.receipts.observe(channel, ready)
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
+    this.settleRun(settled)
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
@@ -338,7 +348,7 @@ export class Reader {
     if (arriving) this.setSidebarVisible(this.sidebarShown)
     // A keyboard switch gives focus a home on the new channel: its selected tile
     // on the desktop, the top bar's back control on the phone.
-    if (switching && this.keyboardInput) (this.phone.matches ? this.returnButton : this.tabs.buttons.find(tab => tab.tabIndex === 0) ?? this.returnButton).focus({ preventScroll: true })
+    if (switching && this.keyboardInput) (this.phone.matches || !settled ? this.returnButton : this.tabs.buttons.find(tab => tab.tabIndex === 0) ?? this.returnButton).focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
 
@@ -404,7 +414,19 @@ export class Reader {
     })
   }
 
+  /** Hide the run's surfaces while it is provisional; they fade in once, when it lands. */
+  private settleRun(settled: boolean): void {
+    const landing = settled && !this.runSettled
+    this.runSettled = settled
+    for (const el of [this.tabs.el, this.barPosition, this.ticks, this.position, this.prev, this.next]) {
+      el.classList.toggle('ws-run-pending', !settled)
+      if (!settled || landing) el.classList.remove('ws-run-landing')
+      if (landing) el.classList.add('ws-run-landing')
+    }
+    if (!settled) this.pageSheet.hide()
+  }
   private selectIndex(index: number): void {
+    if (!this.runSettled) return
     const doc = this.channel?.documents[index]
     if (doc) this.opts.onSelect(doc.key)
   }
@@ -413,7 +435,7 @@ export class Reader {
   }
   private get swipeable(): boolean {
     return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
-      && (window.visualViewport?.scale ?? 1) <= 1.01 && (this.channel?.documents.length ?? 0) > 1
+      && this.runSettled && (window.visualViewport?.scale ?? 1) <= 1.01 && (this.channel?.documents.length ?? 0) > 1
   }
   /**
    * The track follows a latched page swipe, then settles on the page the

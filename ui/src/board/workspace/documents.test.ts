@@ -109,15 +109,16 @@ describe('buildChannel', () => {
       links: [{ path: 'report.html', title: 'linked report' }],
     })
     expect(channel.documents).toHaveLength(3)
-    expect(channel.documents[1]).toMatchObject({ owner: 'host-a', path: '/store/project/task/report.html' })
-    expect(channel.documents[1].provenance).toEqual([
+    expect(channel.documents[0]).toMatchObject({ owner: 'host-a', path: '/store/project/task/report.html' })
+    expect(channel.documents[0].provenance).toEqual([
       { kind: 'embed', title: 'Results' },
       { kind: 'sent', time: 10, session: 'session-1' },
       { kind: 'sent', time: 20, session: 'session-2', worker: 'sol' },
       { kind: 'link', title: 'linked report' },
     ])
-    expect(channel.documents[0]).toMatchObject({ owner: 'host-b', path: '/store/project/task/report.html' })
-    expect(channel.documents[0].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
+    expect(channel.documents[1].kind).toBe('fiber')
+    expect(channel.documents[2]).toMatchObject({ owner: 'host-b', path: '/store/project/task/report.html' })
+    expect(channel.documents[2].provenance).toEqual([{ kind: 'sent', time: 15, session: 'remote' }])
   })
 
   it('runs declarations leftward from the fiber page in body order and deliveries rightward, newest first, retaining receipt history', () => {

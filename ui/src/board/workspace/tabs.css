@@ -107,4 +107,9 @@
   .ws-page-tick { flex: 0 1 10px; min-width: 2px; height: 2px; border-radius: 1px; background: color-mix(in srgb, var(--ws-ink-muted) 32%, transparent); }
   .ws-page-tick-current { background: var(--ws-ink); }
 }
-@media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab .ws-tab-thumb { transition: none; } }
+/* Until a channel's body lands, its run is provisional: the tiles, ticks, count
+   and steps keep their room unseen, then fade in once on the final run. */
+.ws-run-pending { visibility: hidden; opacity: 0; }
+.ws-run-landing { animation: ws-run-land var(--ws-crossing) var(--ws-ease); }
+@keyframes ws-run-land { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab .ws-tab-thumb { transition: none; } .ws-run-landing { animation: none; } }

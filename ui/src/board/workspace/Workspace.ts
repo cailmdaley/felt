@@ -463,7 +463,7 @@ export class Workspace {
     const ch = state.channel
     const selected = this.shown(state)
     this.refreshProse(state)
-    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded)
+    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded, state.loaded || state.error !== undefined)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.dock.syncRuntime(state.card)
   }
@@ -555,6 +555,8 @@ export class Workspace {
       const controller = new AbortController()
       let timeout = 0
       const receiptRead = this.readReceipts(state)
+      let body: { body: string; outcome?: string } | undefined
+      let failure: string | undefined
       const read = () => {
         timeout = window.setTimeout(() => controller.abort(), 25000)
         return readFiber(this.opts.shuttleBase, state.card.id, state.channel.owner, controller.signal)
@@ -573,15 +575,19 @@ export class Workspace {
           state.metadataKnown = true
           this.overview.resolved(metadata)
         }
-        state.channel = { ...state.channel, body: entry.fiber.body ?? '', outcome: entry.fiber.outcome ?? state.card.outcome }
-        state.loaded = true
-        state.error = undefined
+        body = { body: entry.fiber.body ?? '', outcome: entry.fiber.outcome ?? state.card.outcome }
       } catch (error) {
-        state.error = error instanceof Error && /^(Fiber not found on |.+ is unreachable$)/.test(error.message)
+        failure = error instanceof Error && /^(Fiber not found on |.+ is unreachable$)/.test(error.message)
           ? error.message : `${state.card.originId} is unreachable`
       } finally { window.clearTimeout(timeout) }
       await receiptRead
       if (this.disposed) return
+      // The body and the receipts land together, so the run settles once, final.
+      if (body) {
+        state.channel = { ...state.channel, ...body }
+        state.loaded = true
+        state.error = undefined
+      } else state.error = failure
       this.rebuild(state)
       this.refreshProse(state)
       void this.readFileMetadata(state).then(changed => {

@@ -262,7 +262,7 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
   for (const [routed, landing] of [['the report the Board feed names', 'report.html'], ['a sent file opened by address', 'table.html']] as const) {
-    it(`keeps every page on its side of the fiber page while the body lands after ${routed}, and holds the selection`, async () => {
+    it(`shows only the selected page until the body lands after ${routed}, then the strip in its final order`, async () => {
       if (landing === 'report.html') await feedNamesReport()
       const original = vi.mocked(fetch).getMockImplementation()!
       let release!: () => void
@@ -273,22 +273,23 @@ describe('workspace reader integration', () => {
       })
       const key = docKey('host-a', `/notes/alpha/${landing}`, 'host-a')
       workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await flush()
-      const sides = (): Map<string, number> => {
-        const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')]
-        const anchor = tabs.findIndex(tab => tab.classList.contains('ws-tab-anchor'))
-        return new Map(tabs.map((tab, index) => [tab.dataset.tabKey!, Math.sign(index - anchor)]))
-      }
+      const run = [workspace.reader.el.querySelector('.ws-tabs')!, workspace.reader.barPosition, workspace.reader.el.querySelector('.ws-page-ticks')!]
+      const tabs = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.classList.contains('ws-tab-anchor') ? '§' : tab.dataset.tabKey!)
       const selected = (): string | undefined => document.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey
-      const before = sides()
-      // Before the body, the report already stands left of the fiber page and a sent file right of it.
-      expect(before.get(key)).toBe(landing === 'report.html' ? -1 : 1)
-      expect(selected()).toBe(key)
+      // Before the body, the selected page shows; the strip, ticks and count wait unseen, and stepping does nothing.
+      expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
+      for (const el of run) expect(el.classList.contains('ws-run-pending'), el.className).toBe(true)
+      for (const press of ['G', 'l', 'h']) document.dispatchEvent(new KeyboardEvent('keydown', { key: press, bubbles: true, cancelable: true }))
+      await flush()
+      expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
       release(); await flush(); await flush()
-      const after = sides()
-      // The body's own declarations join the left; nothing already shown crosses the fiber page.
-      expect(after.size).toBeGreaterThanOrEqual(before.size)
-      for (const [doc, side] of before) expect(after.get(doc), doc).toBe(side)
+      for (const el of run) expect(el.classList.contains('ws-run-pending'), el.className).toBe(false)
+      // The body declares the report, which runs left of the fiber page; the sent table runs right.
+      expect(tabs()).toEqual([docKey('host-a', '/notes/alpha/report.html', 'host-a'), '§', docKey('host-a', '/notes/alpha/table.html', 'host-a')])
       expect(selected()).toBe(key)
+      // Once the run lands, the same keys step through it.
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: landing === 'report.html' ? 'G' : 'g', bubbles: true, cancelable: true })); await flush()
+      expect(selected()).not.toBe(key)
     })
   }
   it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
