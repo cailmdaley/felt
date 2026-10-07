@@ -221,13 +221,15 @@ export class Workspace {
 
   /**
    * The sidebar is one grouped list wherever the reader was opened from:
-   * Awaiting review and Working in the Desk's own order, then the
-   * constitutions read lately, most recent first.
+   * Awaiting review and Working in the Desk's own order, Working's Needs you
+   * band ahead of the rest as the Desk draws it even for cards the Desk left
+   * undrawn, then the constitutions read lately, most recent first.
    */
   private sidebarCards(): KanbanCard[] {
     const cards = this.opts.cards()
     const review = cards.filter(card => fiberPageColumn(card) === 'awaitingReview')
-    const working = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const working = [...flight.filter(card => inFlightBand(card) === 'needsYou'), ...flight.filter(card => inFlightBand(card) === 'working')]
     const listed = new Set([...review, ...working].map(cardIdentity))
     const live = new Map(cards.map(card => [cardIdentity(card), card]))
     const read = this.readLately.flatMap(id => {
