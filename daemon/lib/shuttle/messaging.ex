@@ -3,6 +3,8 @@ defmodule Shuttle.Messaging do
 
   alias Shuttle.Messaging.SessionFiberCache
 
+  require Logger
+
   alias Shuttle.{
     CLI,
     Harnesses,
@@ -633,7 +635,27 @@ defmodule Shuttle.Messaging do
        )}
     else
       status = receipt_http_status(200, receipt)
+
+      if status in 200..299 and receipt["status"] in ~w(accepted context_added submitted queued) do
+        clear_worker_question(request.address)
+      end
+
       {:ok, status, Map.drop(receipt, ["_felt_error_code", "_felt_receipt_produced"])}
+    end
+  end
+
+  defp clear_worker_question(address) do
+    host = Poller.own_host_id()
+
+    with {:ok, %{native: native}} <- parse_address(address),
+         %{"fiber" => fiber} = pairing <-
+           Map.get(cached_session_fiber_index(host).fibers_by_session, native) do
+      identifier = pairing["fiber_uid"] || fiber
+
+      case Shuttle.LifecycleService.transition(:clear_ask, identifier) do
+        {:ok, _} -> :ok
+        error -> Logger.warning("Clearing worker question for #{fiber} failed: #{inspect(error)}")
+      end
     end
   end
 

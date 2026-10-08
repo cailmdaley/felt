@@ -1137,26 +1137,25 @@ defmodule Shuttle.Poller do
 
     # Every check, and the fiber's arm, before any session is cut.
     case prepare_forced_start(state, fiber_id, runtime_key, uid, opts) do
-      {:ok, state} -> dispatch_prepared(state, fiber_id, runtime_key, uid, opts)
-      {:error, reason, state} -> {:reply, {:error, reason}, state}
+      {:ok, state} ->
+        case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
+          {:reply, {:ok, _} = result, state} ->
+            {_, state} = write_lifecycle(state, :clear_ask, fiber_id)
+            {:reply, result, state}
+
+          other ->
+            other
+        end
+
+      {:error, reason, state} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:lifecycle_transition, verb, fiber_id}, _from, state) do
     {_runtime_key, slug} = resolve_identity(state, fiber_id)
 
-    result =
-      LifecycleService.write(verb, slug,
-        runner: state.runner,
-        felt_store: owning_store(slug, state)
-      )
-
-    state =
-      case result do
-        {:ok, _} when state.document_cache_ready -> refresh_document_entry(state, slug)
-        _ -> state
-      end
-
+    {result, state} = write_lifecycle(state, verb, slug)
     {:reply, result, state}
   end
 
@@ -2459,6 +2458,26 @@ defmodule Shuttle.Poller do
 
   # The dispatch once a forced start is prepared: a fresh start cuts any open
   # session, then the worker launches (or a live app turn resumes).
+  defp write_lifecycle(state, verb, slug) do
+    result =
+      LifecycleService.write(verb, slug,
+        runner: state.runner,
+        felt_store: owning_store(slug, state)
+      )
+
+    state =
+      case result do
+        {:ok, _} when state.document_cache_ready -> refresh_document_entry(state, slug)
+        _ -> state
+      end
+
+    if verb == :clear_ask and not match?({:ok, _}, result) do
+      Logger.warning("Clearing worker question for #{slug} failed: #{inspect(result)}")
+    end
+
+    {result, state}
+  end
+
   defp dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
     # "New session" on an OPEN session is a CUT, not a refusal: a forced fresh
     # dispatch (force + resume_mode:"fresh" — the kanban New-session button and

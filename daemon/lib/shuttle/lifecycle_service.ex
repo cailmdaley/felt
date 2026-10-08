@@ -1,6 +1,9 @@
 defmodule Shuttle.LifecycleService do
   @moduledoc """
-  The daemon's side of the role lifecycle verbs `accept` and `resume`.
+  The daemon's side of role lifecycle writes and worker-question clearing.
+
+  `:clear_ask` shells `shuttle ask <fiber> --clear` through the same serialized
+  write and document-cache refresh path as `accept` and `resume`.
 
   Shuttle is their writer: `shuttle -C <store> <verb> <fiber> --local` re-arms
   (or, for a pinned accept, re-parks) the role and concludes its run
@@ -20,11 +23,12 @@ defmodule Shuttle.LifecycleService do
 
   alias Shuttle.{FeltStores, Poller}
 
-  @type verb :: :accept | :resume
+  @type verb :: :accept | :resume | :clear_ask
 
   @spec transition(verb(), String.t()) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
-  def transition(verb, identifier) when verb in [:accept, :resume] and is_binary(identifier) do
+  def transition(verb, identifier)
+      when verb in [:accept, :resume, :clear_ask] and is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <-
            FeltStores.resolve_fiber_or_error(identifier) do
       if is_pid(Process.whereis(Poller)) do
@@ -40,6 +44,10 @@ defmodule Shuttle.LifecycleService do
   `Shuttle.CLI.run_lifecycle/4` (`:felt_store`, `:runner`).
   """
   @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()
+  def write(:clear_ask, fiber_id, opts) do
+    Shuttle.CLI.run_lifecycle("ask", fiber_id, ["--clear"], opts)
+  end
+
   def write(verb, fiber_id, opts) when verb in [:accept, :resume] do
     Shuttle.CLI.run_lifecycle(Atom.to_string(verb), fiber_id, [], opts)
   end
