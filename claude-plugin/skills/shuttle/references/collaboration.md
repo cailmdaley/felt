@@ -26,6 +26,8 @@ shuttle assign <task> --role editor --collaborator opus
 
 `assign` adds to the roster without replacing it; `--json-assignment '{"vizier":["fable","astra"],"editor":[]}'` replaces it exactly, and `--clear` removes it. A role with no collaborators (`editor: []`) is valid. The roster names identities only — `shuttle.agent` still decides what runs — and it is no lock: other sessions can work the same task, and it doesn't change how you exit. When the human wrote the roster and you add a role to it, say why in `## Status`.
 
+**A seat is a constitution that is the office itself**, not a task the office takes on: `shuttle.seat: <role>` (`shuttle seat <task> <role>`) marks it, and the board draws it at rest in the Roles band. Its playbooks, register and standing lessons belong in the charter; the seat keeps the lede, Desired State and Status. A role can have several seats — one per machine or stream — and a roster still names who holds it.
+
 ## Where notes go
 
 A role is the fiber `roles/<role>`, and its body is the charter. A collaborator page lives beneath its role and is named for the model that holds it — `roles/editor/opus` — so the next session of that model finds its own page by knowing what it is. A role may carry a name that emerged from its first real run; the name belongs to the office, every holder inherits it, and any holder may decline it with a note.

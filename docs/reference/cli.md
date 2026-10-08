@@ -146,6 +146,7 @@ untouched by any of this.
 | `shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |
 | `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
+| `shuttle seat <fiber> [role]` | Make the constitution a seat of a role (`shuttle.seat`), or `--clear` it. The role resolves like `assign --role` and must have a charter under `roles/`; the slug is stored. Lifecycle and roster are untouched; routes to the owning daemon like the other block writers |
 | `shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
 | `shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
 | `shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
