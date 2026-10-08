@@ -237,7 +237,7 @@ func (a *app) runStatusOneFiber(query string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("fiber %s has no shuttle: block (use 'shuttle install' / 'repeat' / 'pin' to create one)", query)
+		return fmt.Errorf("fiber %s has no shuttle: block (use 'shuttle install' / 'repeat' to create one)", query)
 	}
 
 	statusNow := f.Status
