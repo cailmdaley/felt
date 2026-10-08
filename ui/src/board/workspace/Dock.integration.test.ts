@@ -175,7 +175,7 @@ describe('state-shaped act zone', () => {
     expect(message.placeholder).toBe('What should the worker do next?')
   })
 
-  it('puts review verdicts first, retains a draft across runtime changes, and hides verdicts on drafts', () => {
+  it('puts review verdicts first, retains a draft across runtime changes, and keeps a draft's verdicts in its menu', () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
@@ -190,7 +190,8 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
     expect(band.el.querySelector('.kbn-ctl-verdict-menu')).not.toBeNull()
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
+    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
+    expect(band.el.querySelectorAll('.kbn-ctl-verdict-menu .kbn-ctl-temper,.kbn-ctl-verdict-menu .kbn-ctl-discard')).toHaveLength(2)
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
   })
   it.each([

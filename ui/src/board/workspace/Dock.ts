@@ -849,11 +849,8 @@ export class Dock {
         menu.remove()
       } else {
         verdict.remove()
-        if (column === 'drafts') { temper.remove(); discard.remove(); menu.remove() }
-        else {
-          if (temper.parentElement !== choices) choices.append(temper, discard)
-          if (menu.parentElement !== foot) foot.append(menu)
-        }
+        if (temper.parentElement !== choices) choices.append(temper, discard)
+        if (menu.parentElement !== foot) foot.append(menu)
       }
     }
     this.actPaint()
