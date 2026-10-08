@@ -88,11 +88,13 @@ export interface KanbanCard {
    * What the live worker is doing, for the chips and the In-flight sort:
    * `working` (busy mid-tool — sinks to the bottom, no chip), `waiting`
    * (paused at a stop — "waiting for you" once idle ≥60s), `attention` (raised
-   * its hand — "needs you", sorts top), or `blocked` (the worker is
-   * `workerState: 'blocked'` — in the Needs you band with `launchError`). Absent when there
+   * a harness attention signal — "stalled"), or `blocked` (the worker is
+   * `workerState: 'blocked'` — in the Stalled band with `launchError`). Absent when there
    * is no worker, or before a live worker's first activity event.
    */
   runtimePhase?: string
+  /** Non-blocking request for the human's view; the worker keeps working. */
+  ask?: { text: string; at: string }
   /** Durable explanation for a blocked app launch. */
   launchError?: string
   /**

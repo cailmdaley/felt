@@ -57,7 +57,7 @@ interface CompositeRuntime {
   agent?: string;
   sessionUuid?: string;
   /** Owner-served activity category — one of `"attention"` (raised its hand —
-   * "needs you", sorts top), `"waiting"` (paused at a stop — "waiting for you"
+   * "stalled"), `"waiting"` (paused at a stop — "waiting for you"
    * once idle ≥60s), `"working"` (mid-tool — busy, sinks to the bottom, no
    * chip). Absent until the worker's first hook event (or, for an app worker,
    * while its launch is not running). */

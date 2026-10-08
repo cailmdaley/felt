@@ -330,7 +330,7 @@ function assembleSurfaces(
   // order, just like drafts. Neither activity nor a renamed path moves them.
   pinned.sort(byCreatedAtDesc);
   drafts.sort(byCreatedAtDesc);
-  // A card moves only when it crosses the visible Needs you / Working seam.
+  // A card moves only when it crosses a Question / Stalled / Working seam.
   // Activity age and phase changes within a band do not change its position.
   inFlight.sort(byInFlightBand);
   awaitingReview.sort(byClosedAtDesc);
@@ -583,6 +583,7 @@ function toCard(
     held,
     heldSince,
     mirroredOrigins: entry.mirroredOrigins,
+    ask: f.shuttleAsk,
     dispatchedAt: f.shuttleDispatchedAt,
     handedOffAt: f.shuttleHandedOffAt,
     shuttleAgent: f.shuttleAgent,
@@ -741,18 +742,18 @@ export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
   return descByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || byCardIdentity(a, b);
 }
 
-export type InFlightBand = 'needsYou' | 'working';
+export type InFlightBand = 'question' | 'stalled' | 'working';
 
 export function inFlightBand(card: KanbanCard): InFlightBand {
+  if (card.ask) return 'question';
   return card.runtimePhase === 'waiting' || card.runtimePhase === 'blocked' || card.runtimePhase === 'attention'
-    ? 'needsYou'
+    ? 'stalled'
     : 'working';
 }
 
 export function byInFlightBand(a: KanbanCard, b: KanbanCard): number {
-  const aBand = inFlightBand(a);
-  const bBand = inFlightBand(b);
-  return (aBand === bBand ? 0 : aBand === 'needsYou' ? -1 : 1) || byCreatedAtDesc(a, b);
+  const order: Record<InFlightBand, number> = { question: 0, stalled: 1, working: 2 };
+  return order[inFlightBand(a)] - order[inFlightBand(b)] || byCreatedAtDesc(a, b);
 }
 
 export function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {
