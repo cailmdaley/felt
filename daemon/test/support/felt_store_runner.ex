@@ -48,6 +48,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
         fibers: %{},
         shuttle: %{},
         ls_stderr_warning: false,
+        listing_error: nil,
+        ids_from_aliases: %{},
         ls_delay_ms: 0,
         new_session_delay_ms: 0
       }
@@ -75,6 +77,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
         fibers: %{},
         shuttle: %{},
         ls_stderr_warning: false,
+        listing_error: nil,
+        ids_from_aliases: %{},
         ls_delay_ms: 0,
         new_session_delay_ms: 0
       }
@@ -217,6 +221,18 @@ defmodule Shuttle.Test.FeltStoreRunner do
   # a write path (e.g. the claim's frontmatter stamp) wrote to the real file.
   def fiber(id), do: Agent.get(server(), &Map.get(&1.fibers, id))
 
+  def delete_fiber(id) do
+    path = get_in(fiber(id) || %{}, ["path"])
+    if is_binary(path), do: File.rm(path)
+
+    Agent.update(server(), fn state ->
+      %{state | fibers: Map.delete(state.fibers, id), shuttle: Map.delete(state.shuttle, id)}
+    end)
+  end
+
+  def set_ids_from_alias(old_id, current_id),
+    do: Agent.update(server(), &put_in(&1.ids_from_aliases[old_id], current_id))
+
   # Absolute, symlink-resolved path of a written fiber file, computed with the
   # SAME resolver the poller uses for store ownership (Shuttle.Realpath). This
   # keeps both sides in agreement on every OS: on macOS `/tmp` → `/tmp`,
@@ -250,6 +266,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
   # poller's last-known-candidate retention path is exercised.
   def set_listing_timeout(enabled),
     do: Agent.update(server(), &Map.put(&1, :listing_timeout, enabled))
+
+  def set_listing_error(status) when is_integer(status),
+    do: Agent.update(server(), &Map.put(&1, :listing_error, status))
+
+  def clear_listing_error, do: Agent.update(server(), &Map.put(&1, :listing_error, nil))
 
   def set_ls_delay(ms),
     do: Agent.update(server(), &Map.put(&1, :ls_delay_ms, ms))
@@ -491,6 +512,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
           Agent.get(server(), &Map.get(&1, :listing_timeout, false)) ->
         {"#{command} #{full_args} timed out after 60000ms", :timeout}
 
+      command in ["felt", "shuttle"] and String.contains?(full_args, "ls") and
+          is_integer(Agent.get(server(), &Map.get(&1, :listing_error))) ->
+        {"simulated listing failure", Agent.get(server(), &Map.get(&1, :listing_error))}
+
       command in ["felt", "shuttle"] and String.contains?(full_args, "ls") ->
         case Agent.get_and_update(server(), &Map.pop(&1, :ls_hold)) do
           holder when is_pid(holder) ->
@@ -524,11 +549,17 @@ defmodule Shuttle.Test.FeltStoreRunner do
         fibers =
           Agent.get(server(), fn state ->
             entries = Map.values(state.fibers)
+            aliases = state.ids_from_aliases
 
             entries
             |> Enum.filter(fn fiber ->
-              (show_all or Map.get(fiber, "status") in ["open", "active"]) and
-                (is_nil(ids_from) or MapSet.member?(ids_from, Map.get(fiber, "id")))
+              id = Map.get(fiber, "id")
+
+              queried =
+                is_nil(ids_from) or MapSet.member?(ids_from, id) or
+                  Enum.any?(ids_from || [], &(Map.get(aliases, &1) == id))
+
+              (show_all or Map.get(fiber, "status") in ["open", "active"]) and queried
             end)
           end)
 
