@@ -46,8 +46,8 @@ defmodule Shuttle.Poller do
 
   @default_poll_interval_ms 30_000
   # A stuck felt/SSH read must not permanently stop reconciliation. The
-  # watchdog reaps the tracked read task before advancing the poller's clock;
-  # the per-cycle token makes a result already queued at that boundary inert.
+  # watchdog reaps the tracked task before advancing the poller's clock; the
+  # cycle token fences results and a phase reference fences stale watchdogs.
   @default_poll_stall_timeout_ms 300_000
   @default_full_scan_budget_ms 10_000
   @default_full_scan_min_interval_ms 600_000
@@ -130,6 +130,7 @@ defmodule Shuttle.Poller do
       :full_scan_min_interval_ms,
       :full_scan_timeout_ms,
       :poll_stall_timer_ref,
+      :poll_stall_phase_ref,
       :poll_token,
       :poll_task_pid,
       # List of felt store directories, in resolution-priority order.
@@ -901,16 +902,20 @@ defmodule Shuttle.Poller do
     poll_token = make_ref()
     state = %{state | stall_timeout_ms: state.stall_timeout_base_ms}
 
-    # The Task does only the slow, READ-ONLY work (felt-store walk + remote
-    # SSH discovery) and returns plain data — never a `%State{}`, never a
-    # mutation, never an armed timer. Keeping the slow I/O off the GenServer
-    # thread preserves daemon responsiveness; making it pure means there is
-    # only one mutable state (the GenServer's), so there is nothing to merge
-    # when the Task completes. See `poll_reads/1` and `apply_poll_cycle/2`.
+    # The planning Task refreshes the store list and fixes one immutable
+    # full/hot plan. The read Task performs the slow, READ-ONLY work and returns
+    # plain data — never a `%State{}`, mutation, or armed timer. Both stay off
+    # the GenServer thread; only `apply_poll_cycle/2` mutates Poller state.
+    phase_ref = make_ref()
+
     case start_poll_plan_task(parent, poll_token, state) do
       {:ok, task_pid} ->
         stall_timer_ref =
-          Process.send_after(self(), {:poll_stalled, poll_token}, state.stall_timeout_ms)
+          Process.send_after(
+            self(),
+            {:poll_stalled, poll_token, phase_ref},
+            state.stall_timeout_ms
+          )
 
         {:noreply,
          %{
@@ -918,7 +923,8 @@ defmodule Shuttle.Poller do
            | poll_check_in_progress: true,
              poll_token: poll_token,
              poll_task_pid: task_pid,
-             poll_stall_timer_ref: stall_timer_ref
+             poll_stall_timer_ref: stall_timer_ref,
+             poll_stall_phase_ref: phase_ref
          }}
 
       {:error, reason} ->
@@ -932,7 +938,7 @@ defmodule Shuttle.Poller do
         %{poll_check_in_progress: true, poll_token: poll_token} = state
       ) do
     case result do
-      {:ok, stores} ->
+      {:ok, %{stores: stores, discovery_plan: discovery_plan}} ->
         if stores != state.felt_stores do
           Logger.info(
             "felt_stores updated from env/config: #{inspect(state.felt_stores)} → #{inspect(stores)}"
@@ -940,20 +946,27 @@ defmodule Shuttle.Poller do
         end
 
         read_state = %{state | felt_stores: stores}
-        stall_timeout_ms = poll_stall_timeout(read_state)
+        stall_timeout_ms = poll_stall_timeout(read_state, discovery_plan)
         read_state = %{read_state | stall_timeout_ms: stall_timeout_ms}
         state = cancel_poll_stall_timer(state)
+        phase_ref = make_ref()
 
-        case start_poll_read_task(self(), poll_token, read_state) do
+        case start_poll_read_task(self(), poll_token, read_state, discovery_plan) do
           {:ok, task_pid} ->
-            timer_ref = Process.send_after(self(), {:poll_stalled, poll_token}, stall_timeout_ms)
+            timer_ref =
+              Process.send_after(
+                self(),
+                {:poll_stalled, poll_token, phase_ref},
+                stall_timeout_ms
+              )
 
             {:noreply,
              %{
                state
                | poll_task_pid: task_pid,
                  stall_timeout_ms: stall_timeout_ms,
-                 poll_stall_timer_ref: timer_ref
+                 poll_stall_timer_ref: timer_ref,
+                 poll_stall_phase_ref: phase_ref
              }}
 
           {:error, reason} ->
@@ -1015,12 +1028,15 @@ defmodule Shuttle.Poller do
   end
 
   # A slow read no longer owns the poller's clock forever. Reap its supervised,
-  # unlinked task first, then advance with a fresh token. The token fence below
-  # still matters for a result that crossed the mailbox boundary at the same
-  # instant as the watchdog.
+  # unlinked task first, then advance with a fresh cycle token. The phase
+  # reference keeps an already-queued timeout from an earlier phase inert.
   def handle_info(
-        {:poll_stalled, poll_token},
-        %{poll_check_in_progress: true, poll_token: poll_token} = state
+        {:poll_stalled, poll_token, phase_ref},
+        %{
+          poll_check_in_progress: true,
+          poll_token: poll_token,
+          poll_stall_phase_ref: phase_ref
+        } = state
       ) do
     Logger.error("Poll cycle stalled after #{state.stall_timeout_ms}ms; advancing poller")
 
@@ -1030,6 +1046,7 @@ defmodule Shuttle.Poller do
       |> Map.put(:poll_check_in_progress, false)
       |> Map.put(:poll_token, nil)
       |> Map.put(:poll_stall_timer_ref, nil)
+      |> Map.put(:poll_stall_phase_ref, nil)
       |> Map.update!(:poll_stalls, &(&1 + 1))
       |> Map.put(:last_poll_stalled_at, DateTime.utc_now())
       |> schedule_tick(state.poll_interval_ms)
@@ -1042,6 +1059,7 @@ defmodule Shuttle.Poller do
   # without it, a late world could overwrite current state and re-arm the tick.
   def handle_info({:poll_plan, _poll_token, _result}, state), do: {:noreply, state}
   def handle_info({:poll_world, _poll_token, _result}, state), do: {:noreply, state}
+  def handle_info({:poll_stalled, _poll_token, _phase_ref}, state), do: {:noreply, state}
   def handle_info({:poll_stalled, _poll_token}, state), do: {:noreply, state}
 
   def handle_info({:worker_exited, fiber_id, watcher, session, _reason}, state) do
@@ -1439,9 +1457,9 @@ defmodule Shuttle.Poller do
   # the live GenServer). The rescue/catch turns a felt/SSH explosion into a
   # logged `{:error, _}` rather than a crash that would take the linked poller
   # down with the Task.
-  defp poll_reads(%State{} = state) do
+  defp poll_reads(%State{} = state, discovery_plan) do
     {candidates, store_map, store_listings, full_listings, discovery} =
-      discover_candidates(state)
+      discover_candidates(state, discovery_plan)
 
     # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
     # cache itself stays on `State`. Entries are built directly from the candidate
@@ -1674,14 +1692,14 @@ defmodule Shuttle.Poller do
   # whose own `.felt/` is a symlink (case 1) owns nothing; the target store
   # enumerates it. Ownership is read from felt's path, never reverse-derived.
   @doc false
-  def discover_candidates(state) do
+  def discover_candidates(state, discovery_plan) do
     {all_fibers, store_map, store_listings, full_listings, discovery} =
       Enum.reduce(state.felt_stores, {[], %{}, %{}, %{}, %{}}, fn store,
                                                                   {all, stores, listings, fulls,
                                                                    modes} ->
         previous = Map.get(state.discovery, store, %{})
         now = System.system_time(:millisecond)
-        full? = full_scan_due?(previous, state, now)
+        full? = Map.fetch!(discovery_plan, store) == :full
         started = System.monotonic_time(:millisecond)
         hot_ids = hot_ids_for_store(store, previous, state)
 
@@ -1824,16 +1842,26 @@ defmodule Shuttle.Poller do
     end)
   end
 
-  defp poll_stall_timeout(state) do
+  @doc false
+  def discovery_plan(%State{} = state, stores, now_ms) do
+    Map.new(stores, fn store ->
+      mode =
+        if full_scan_due?(Map.get(state.discovery, store, %{}), state, now_ms),
+          do: :full,
+          else: :hot
+
+      {store, mode}
+    end)
+  end
+
+  defp poll_stall_timeout(state, discovery_plan) do
     cmd_timeout_ms = Shuttle.Env.app(:cmd_timeout_ms, 60_000)
-    now = System.system_time(:millisecond)
 
     planned_ms =
       Enum.reduce(state.felt_stores, 0, fn store, total ->
-        if full_scan_due?(Map.get(state.discovery, store, %{}), state, now) do
-          total + 3 * state.full_scan_timeout_ms
-        else
-          total + cmd_timeout_ms
+        case Map.fetch!(discovery_plan, store) do
+          :full -> total + 3 * state.full_scan_timeout_ms
+          :hot -> total + cmd_timeout_ms
         end
       end)
 
@@ -4258,10 +4286,10 @@ defmodule Shuttle.Poller do
   defp cancel_poll_stall_timer(%State{poll_stall_timer_ref: timer_ref} = state)
        when is_reference(timer_ref) do
     Process.cancel_timer(timer_ref)
-    %{state | poll_stall_timer_ref: nil}
+    %{state | poll_stall_timer_ref: nil, poll_stall_phase_ref: nil}
   end
 
-  defp cancel_poll_stall_timer(%State{} = state), do: state
+  defp cancel_poll_stall_timer(%State{} = state), do: %{state | poll_stall_phase_ref: nil}
 
   # The store-plan task refreshes the configured list before discovery. The
   # Poller sizes the read watchdog against the returned set and each store's
@@ -4270,7 +4298,9 @@ defmodule Shuttle.Poller do
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
       result =
         try do
-          {:ok, refreshed_felt_stores(state)}
+          stores = refreshed_felt_stores(state)
+          plan = discovery_plan(state, stores, System.system_time(:millisecond))
+          {:ok, %{stores: stores, discovery_plan: plan}}
         rescue
           error -> {:error, Exception.format(:error, error, __STACKTRACE__)}
         catch
@@ -4286,9 +4316,9 @@ defmodule Shuttle.Poller do
   # Poll reads are supervised but intentionally not linked to this GenServer:
   # the watchdog must be able to kill one wedged read without taking the
   # Poller down with it. Both the watchdog and terminate/2 reap the current phase.
-  defp start_poll_read_task(parent, poll_token, %State{} = state) do
+  defp start_poll_read_task(parent, poll_token, %State{} = state, discovery_plan) do
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      send(parent, {:poll_world, poll_token, poll_reads(state)})
+      send(parent, {:poll_world, poll_token, poll_reads(state, discovery_plan)})
     end)
   catch
     :exit, reason -> {:error, reason}

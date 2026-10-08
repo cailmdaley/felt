@@ -6329,6 +6329,100 @@ defmodule Shuttle.PollerTest do
   end
 
   @tag :adaptive_discovery
+  test "a store that becomes due during a cycle stays hot until the next plan" do
+    id = "tests/discovery-plan-fixed"
+    store = MockRunner.felt_root()
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_plan_fixed,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [store]
+      )
+
+    settle_poller!(poller)
+
+    state = :sys.get_state(poller, @state_timeout)
+    info = Map.fetch!(state.discovery, store)
+
+    info =
+      info
+      |> Map.put(:mode, :hot)
+      |> Map.put(:last_full_duration_ms, state.full_scan_budget_ms + 1)
+      |> Map.put(:next_full_due_at, 1)
+      |> Map.put(:last_full_timed_out, false)
+      |> Map.delete(:boot_seeded)
+
+    state = %{state | discovery: Map.put(state.discovery, store, info)}
+
+    :sys.replace_state(poller, fn _ -> state end)
+    state = :sys.get_state(poller, @state_timeout)
+    plan = Poller.discovery_plan(state, [store], 0)
+    assert plan[store] == :hot
+
+    before = length(MockRunner.commands())
+    Poller.discover_candidates(state, plan)
+    cycle_commands = Enum.drop(MockRunner.commands(), before)
+
+    assert Enum.any?(cycle_commands, fn {cmd, args} ->
+             cmd == "shuttle" and "--ids-from" in args
+           end)
+
+    refute Enum.any?(cycle_commands, fn {cmd, args} ->
+             cmd == "shuttle" and "ls" in args and "--ids-from" not in args
+           end)
+  end
+
+  @tag :adaptive_discovery
+  test "a queued planning watchdog cannot reap the read phase" do
+    id = "tests/discovery-phase-token"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_phase_token,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        stall_timeout_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    MockRunner.hold_ls()
+    send(poller, :run_poll_cycle)
+    assert_receive {:ls_held, reader}, 5_000
+
+    state = :sys.get_state(poller, @state_timeout)
+    assert state.poll_check_in_progress
+    assert is_reference(state.poll_stall_phase_ref)
+    phase_ref = state.poll_stall_phase_ref
+    cycle_ref = state.poll_token
+    task_pid = state.poll_task_pid
+
+    try do
+      send(poller, {:poll_stalled, cycle_ref, make_ref()})
+      send(poller, {:poll_stalled, cycle_ref})
+      after_stale_timeouts = :sys.get_state(poller, @state_timeout)
+
+      assert after_stale_timeouts.poll_check_in_progress
+      assert after_stale_timeouts.poll_stall_phase_ref == phase_ref
+      assert after_stale_timeouts.poll_task_pid == task_pid
+      assert Process.alive?(task_pid)
+      assert after_stale_timeouts.poll_stalls == state.poll_stalls
+    after
+      send(reader, :release_ls)
+    end
+
+    settle_poller!(poller)
+  end
+
+  @tag :adaptive_discovery
   test "the watchdog bound follows stores added after init" do
     {:ok, poller} =
       start_poller!(
@@ -6344,12 +6438,24 @@ defmodule Shuttle.PollerTest do
     settle_poller!(poller)
 
     :sys.replace_state(poller, fn state ->
-      %{state | felt_stores: ["/tmp/store-a", "/tmp/store-b"]}
+      hot_store =
+        Map.merge(Map.get(state.discovery, "/tmp/store-a", %{}), %{
+          mode: :hot,
+          last_full_duration_ms: state.full_scan_budget_ms + 1,
+          next_full_due_at: System.system_time(:millisecond) + 60_000,
+          last_full_timed_out: false
+        })
+
+      %{
+        state
+        | felt_stores: ["/tmp/store-a", "/tmp/store-b"],
+          discovery: Map.put(state.discovery, "/tmp/store-a", hot_store)
+      }
     end)
 
     sync_poll_cycle!(poller)
     state = :sys.get_state(poller, @state_timeout)
-    assert state.stall_timeout_ms == 3 * state.full_scan_timeout_ms * 2 + 1_000
+    assert state.stall_timeout_ms == 3 * state.full_scan_timeout_ms + 60_000 + 1_000
   end
 
   defp notify_worker_exit(poller, fiber_id) do
