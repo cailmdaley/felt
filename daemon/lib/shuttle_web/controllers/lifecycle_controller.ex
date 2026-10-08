@@ -73,8 +73,14 @@ defmodule ShuttleWeb.LifecycleController do
   # `active` launches a worker after it, and the Poller stops a live one.
   defp execute("rest", %{"fiber" => fiber}), do: lifecycle(:rest, fiber)
 
+  defp execute("seat", %{"fiber" => fiber} = params) do
+    with {:ok, ["seat", ^fiber | args]} <- args_for("seat", params) do
+      :seat |> LifecycleService.transition(fiber, args) |> clean_result()
+    end
+  end
+
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install repeat reshape pause close reopen set-model set-agent seat set-outcome uninstall) do
+       when action in ~w(install repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})

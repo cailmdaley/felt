@@ -390,6 +390,51 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\n--clear\n--local\n"
   end
 
+  defmodule SeatRunner do
+    @behaviour Shuttle.Runner
+
+    def cmd("shuttle", ["-C", _store, "seat" | _] = args, opts) do
+      send(Shuttle.Env.app(:seat_writer_observer), {:seat_writer, self(), args})
+      Shuttle.Runner.Default.cmd("shuttle", args, opts)
+    end
+
+    def cmd(command, args, opts) when command in ["felt", "shuttle"],
+      do: Shuttle.Runner.Default.cmd(command, args, opts)
+
+    def cmd(_command, _args, _opts), do: {"", 1}
+  end
+
+  test "seat set and clear execute in the Poller, serialized with lifecycle writes" do
+    store = fixture_store!("shuttle-seat-serialized", "tests/hub", "Hub")
+    install_fake_cli!()
+    Shuttle.Test.Env.put_app_env(:seat_writer_observer, self())
+    Shuttle.Test.Env.put_app_env(:felt_runner, SeatRunner)
+
+    {:ok, poller} =
+      Shuttle.Test.PollerHelpers.start_poller!(
+        runner: SeatRunner,
+        felt_stores: [store],
+        poll_interval_ms: 60_000
+      )
+
+    for {params, seat_args} <- [
+          {%{"role" => "cmbx-chair"}, ["cmbx-chair"]},
+          {%{"clear" => true}, ["--clear"]}
+        ] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(Map.merge(params, %{"action" => "seat", "fiber" => "tests/hub"}))
+        )
+
+      assert conn.status == 200
+      assert_receive {:seat_writer, writer, args}
+      assert writer == poller
+      assert args == ["-C", store, "seat", "tests/hub"] ++ seat_args ++ ["--local"]
+    end
+  end
+
   test "seat without a role or --clear is refused before shelling" do
     fixture_store!("shuttle-lifecycle-seat-bare", "tests/bare", "Bare")
     args_file = install_fake_cli!()
