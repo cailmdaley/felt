@@ -783,6 +783,39 @@ func TestShuttleRest_FromEachState(t *testing.T) {
 	}
 }
 
+// TestShuttleRest_RoutesThroughDaemon: rest on a fiber this host owns goes to
+// the daemon, which writes it inside its Poller and stops the worker; the CLI
+// writes nothing itself.
+func TestShuttleRest_RoutesThroughDaemon(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+
+	requests := make(chan map[string]any, 1)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/lifecycle" {
+			http.NotFound(w, r)
+			return
+		}
+		var got map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		requests <- got
+		fmt.Fprint(w, "rested by the daemon\n")
+	}))
+
+	out, err := runIn(t, env, dir, "rest", "f")
+	if err != nil || !strings.Contains(out, "rested by the daemon") {
+		t.Fatalf("routed rest: %v\n%s", err, out)
+	}
+	if got := <-requests; !reflect.DeepEqual(got, map[string]any{"action": "rest", "fiber": "f"}) {
+		t.Fatalf("lifecycle request = %v", got)
+	}
+	if status := mustRead(t, storage, "f").Status; status != felt.StatusActive {
+		t.Fatalf("a routed rest also wrote locally: status = %q", status)
+	}
+}
+
 // TestShuttleRest_LegacyPinnedRests: the stored legacy kind is no obstacle;
 // rest is how a former pinned constitution is put down.
 func TestShuttleRest_LegacyPinnedRests(t *testing.T) {

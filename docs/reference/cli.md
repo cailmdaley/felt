@@ -121,13 +121,13 @@ the daemon speaks directly, see the [HTTP API](api.md).
 | `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing constitution's schedule (`-s/--schedule`, `-z/--tz`) |
 | `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
 
-`install`, `pin`, and `repeat` are create-only: each refuses a fiber that
+`install` and `repeat` are create-only: each refuses a fiber that
 already carries a `shuttle:` block, pointing at `reshape` (kind/schedule),
 `set-model`/`set-agent` (agent), or `uninstall` (start over). A fresh create
-settles status (`install`/`repeat` arm to `active`, `pin` and `install
---disabled` park at `open`); an arming create refuses a closed fiber — arming
+settles status (`install`/`repeat` arm to `active`, `install --disabled`
+parks at `open`); an arming create refuses a closed fiber — arming
 something already reviewed needs an explicit `reopen`. `reshape` touches only the block's shape — `kind`, and a standing
-role's schedule — and leaves status and verdict fields exactly as found, so a
+constitution's schedule — and leaves status and verdict fields exactly as found, so a
 role in Awaiting review can be reshaped in place without being requeued; `kind`
 is optional, so `reshape <fiber> --schedule "0 7 * * *"` is a schedule-only
 edit. Lifecycle moves (`pause`/`resume`/`close`/`reopen`/`accept`) are
@@ -141,7 +141,7 @@ untouched by any of this.
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
 | `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
 | `shuttle accept <fiber>` | Resolve the human verdict on an untempered standing constitution, closed or still active: it re-arms and its run concludes (`handed_off_at`). The outcome is kept. A oneshot is refused. `--local` skips the daemon |
-| `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works from active, open and awaiting review; refuses standing and tempered/discarded. Routes through the owning daemon; `--local` skips it |
+| `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works from active, open and awaiting review; refuses standing and tempered/discarded. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its backend (tmux or an app interrupt); `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write and tmux kill |
 | `shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |

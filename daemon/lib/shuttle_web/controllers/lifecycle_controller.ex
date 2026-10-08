@@ -69,9 +69,12 @@ defmodule ShuttleWeb.LifecycleController do
   # Shuttle's writer inside the Poller, serialized with its state changes.
   defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
+  # rest, too: written inside the Poller, so no tick that read the fiber
+  # `active` launches a worker after it, and the Poller stops a live one.
+  defp execute("rest", %{"fiber" => fiber}), do: lifecycle(:rest, fiber)
 
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install repeat reshape pause rest close reopen set-model set-agent set-outcome uninstall) do
+       when action in ~w(install repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
@@ -107,8 +110,6 @@ defmodule ShuttleWeb.LifecycleController do
   defp args_for("pause", %{"fiber" => fiber} = params) do
     {:ok, ["pause", fiber] |> add_bool_flag("--no-kill", params["no_kill"])}
   end
-
-  defp args_for("rest", %{"fiber" => fiber}), do: {:ok, ["rest", fiber]}
 
   defp args_for("close", %{"fiber" => fiber} = params) do
     args = ["close", fiber]

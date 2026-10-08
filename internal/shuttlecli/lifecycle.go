@@ -171,6 +171,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 // ---- rest ------------------------------------------------------------------
 
 func (a *app) restCmd() *cobra.Command {
+	var restLocal bool
 	restCmd := &cobra.Command{
 		Use:   "rest <fiber>",
 		Short: "Put a constitution down in Resting, without review",
@@ -187,9 +188,22 @@ It works from In flight, Drafts and Awaiting review; a tempered or discarded
 card is refused. A future due: is kept, so the card wakes on that day; a due
 that is today or already past is cleared, because it would put the card
 straight back on the desk. A standing constitution is placed by its schedule,
-so it is refused here: use 'shuttle pause'.`,
+so it is refused here: use 'shuttle pause'.
+
+Routes to the owning daemon, which writes it with --local inside its Poller,
+serialized with dispatch, and then stops the worker through its backend — a
+tmux session, or an app conversation's interrupt. --local writes here and
+stops nothing: the daemon that shells it does the stop. A daemon that cannot
+be reached is bypassed: the document is written here and a tmux worker on
+this host is killed.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !restLocal {
+				anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
+				if routed, err := a.routeLifecycle("rest", args[0], anyBlock); routed {
+					return err
+				}
+			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
 			if err != nil {
 				return err
@@ -239,6 +253,9 @@ so it is refused here: use 'shuttle pause'.`,
 				fmt.Fprintf(a.env.Stdout, "  cleared: due %s (already arrived)\n", clearedDue)
 			}
 
+			if restLocal {
+				return nil
+			}
 			session, _ := a.liveWorkerSession(f)
 			if session == "" {
 				return nil
@@ -250,10 +267,9 @@ so it is refused here: use 'shuttle pause'.`,
 			return nil
 		},
 	}
-	restCmd.Flags().Bool("local", false, localFlagUsage)
+	restCmd.Flags().BoolVar(&restLocal, "local", false, localFlagUsage)
 	return restCmd
 }
-
 
 // ---- resume ----------------------------------------------------------------
 

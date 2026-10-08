@@ -6,45 +6,53 @@
 
 `pinned` is a retired kind: the CLI, the daemon and the board already read it
 as `oneshot`, and `shuttle check` warns about it. This script finds those
-warnings and settles each fiber where it belongs:
+warnings in the local store, then decides each fiber from its OWNER's view —
+the owning daemon's document and its live runtime, read off the local daemon's
+composite feed (`/api/v1/fibers/composite`):
 
-  - at rest (status open or absent, or active with no live worker anywhere in
-    the fleet) -> `shuttle rest`: status open + horizon stashed, in Resting;
-  - running (a live worker on its owning host) -> left active;
-  - closed -> left in Awaiting review, or wherever its verdict put it;
+  - a live worker on the owner           -> left as it is; kind rewritten
+  - closed on the owner                  -> left where its verdict put it;
+                                            kind rewritten
+  - anything else (open, active, absent) -> `shuttle rest` (status open +
+                                            horizon stashed), kind rewritten
 
-then `shuttle reshape <fiber> oneshot` stores the current kind. Both verbs
-route through the owning daemon for a fiber another host owns, so run this
-only once every daemon in the fleet understands `shuttle rest`.
+Liveness is checked first, whatever the documents say. If the feed cannot vouch
+for an owner — its origin is missing or stale, or it serves no row for the
+fiber — the script plans nothing at all and names the hosts to bring back.
+Both verbs route through the owning daemon, so run this only once every
+daemon in the fleet understands `shuttle rest`, and before
+`shuttle daemon release`.
 
 Dry run by default: it prints the plan and writes nothing. Pass --apply to
 write. Running it again finds nothing left to do.
 
     scripts/migrate-pinned.py ~/loom            # the plan
     scripts/migrate-pinned.py ~/loom --apply    # do it
+
+The daemon is read at $SHUTTLE_DAEMON_URL, else http://127.0.0.1:4000.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import urllib.request
 
 
-def shuttle(store: str, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["shuttle", "-C", store, *args],
-        capture_output=True,
-        text=True,
-        check=check,
-    )
+class Incomplete(Exception):
+    """The feed cannot vouch for every owner of a pinned fiber."""
+
+
+def shuttle(store: str, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["shuttle", "-C", store, *args], capture_output=True, text=True, check=False)
 
 
 def legacy_fibers(store: str) -> list[str]:
     """Fiber ids `shuttle check` reports as carrying the retired kind."""
-    out = shuttle(store, "check", "--json", check=False).stdout
-    issues = json.loads(out or "[]")
+    issues = json.loads(shuttle(store, "check", "--json").stdout or "[]")
     return sorted(
         {
             i["fiber_id"]
@@ -54,40 +62,63 @@ def legacy_fibers(store: str) -> list[str]:
     )
 
 
-def fleet_running(store: str) -> set[str] | None:
-    """Fiber ids with a live worker anywhere in the fleet, or None if unknown."""
-    done = shuttle(store, "status", "--all", "--json", check=False)
-    if done.returncode != 0:
-        return None
-    try:
-        rows = json.loads(done.stdout)
-    except json.JSONDecodeError:
-        return None
-    return {r["fiber_id"] for r in rows if r.get("running")}
+def composite_feed() -> dict:
+    base = os.environ.get("SHUTTLE_DAEMON_URL", "http://127.0.0.1:4000").rstrip("/")
+    with urllib.request.urlopen(f"{base}/api/v1/fibers/composite", timeout=30) as resp:
+        return json.load(resp)
 
 
-def fiber_status(store: str, fiber: str) -> str:
-    done = subprocess.run(
-        ["felt", "-C", store, "show", fiber, "--field", "status"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return done.stdout.strip() if done.returncode == 0 else ""
+def _slug(fiber: dict) -> str:
+    return fiber.get("slug") or fiber.get("id") or ""
 
 
-def plan(store: str, fiber: str, running: set[str] | None) -> tuple[list[list[str]], str]:
-    """The verbs to run for one fiber, and a one-line reason."""
-    status = fiber_status(store, fiber)
-    reshape = ["reshape", fiber, "oneshot"]
-    if status == "closed":
-        return [reshape], "closed: keeps its place, kind rewritten"
-    if status == "active":
-        if running is None:
-            return [], "active, fleet liveness unknown: skipped (rerun when every host answers)"
-        if fiber in running:
-            return [reshape], "running: stays active, kind rewritten"
-    return [["rest", fiber], reshape], f"{status or 'no status'}: rests in Resting, kind rewritten"
+def plans(fibers: list[str], feed: dict) -> list[tuple[str, list[list[str]], str]]:
+    """(fiber, verbs, reason) for each fiber, decided from its owner's row.
+
+    Raises Incomplete, naming every unvouched owner, before planning anything.
+    """
+    origins = feed.get("origins") or {}
+    rows: dict[str, list[dict]] = {}
+    for entry in feed.get("fibers") or []:
+        rows.setdefault(_slug(entry.get("fiber") or {}), []).append(entry)
+
+    owners: dict[str, dict] = {}
+    gaps: list[str] = []
+    for fiber in fibers:
+        mirrored = rows.get(fiber, [])
+        host = next(
+            ((e.get("fiber") or {}).get("shuttle", {}).get("host") for e in mirrored
+             if (e.get("fiber") or {}).get("shuttle", {}).get("host")),
+            None,
+        )
+        if not host:
+            gaps.append(f"{fiber}: no owning host on any row of the feed")
+            continue
+        origin = origins.get(host)
+        if origin is None or origin.get("stale"):
+            gaps.append(f"{fiber}: owner {host} is {'missing from' if origin is None else 'stale in'} the feed")
+            continue
+        owner = next((e for e in mirrored if e.get("origin") == host), None)
+        if owner is None:
+            gaps.append(f"{fiber}: owner {host} serves no row for it")
+            continue
+        owners[fiber] = owner
+    if gaps:
+        raise Incomplete("\n".join(gaps))
+
+    out = []
+    for fiber in fibers:
+        owner = owners[fiber]
+        reshape = ["reshape", fiber, "oneshot"]
+        if owner.get("runtime"):
+            out.append((fiber, [reshape], "a worker is live on its owner: left as it is, kind rewritten"))
+            continue
+        status = (owner.get("fiber") or {}).get("status") or ""
+        if status == "closed":
+            out.append((fiber, [reshape], "closed on its owner: keeps its place, kind rewritten"))
+        else:
+            out.append((fiber, [["rest", fiber], reshape], f"{status or 'no status'} on its owner: rests in Resting, kind rewritten"))
+    return out
 
 
 def main() -> int:
@@ -100,16 +131,19 @@ def main() -> int:
     if not fibers:
         print("no kind: pinned fibers; nothing to do")
         return 0
-    running = fleet_running(args.store)
+    try:
+        planned = plans(fibers, composite_feed())
+    except Incomplete as gaps:
+        print("refusing to plan: the fleet feed cannot vouch for every owner\n" + str(gaps), file=sys.stderr)
+        return 2
     failed = 0
-    for fiber in fibers:
-        steps, reason = plan(args.store, fiber, running)
+    for fiber, steps, reason in planned:
         print(f"{fiber}: {reason}")
         for step in steps:
             print(f"  shuttle {' '.join(step)}")
             if not args.apply:
                 continue
-            done = shuttle(args.store, *step, check=False)
+            done = shuttle(args.store, *step)
             if done.returncode != 0:
                 failed += 1
                 print(f"    failed: {(done.stderr or done.stdout).strip()}", file=sys.stderr)

@@ -979,6 +979,57 @@ defmodule Shuttle.PollerTest do
     assert {:ok, :no_session} = Poller.kill_session(poller, "tests/killme")
   end
 
+  # rest goes through the Poller like accept and resume: the --local write
+  # lands `status: open` first, then the worker is stopped through its
+  # backend and its runtime torn down, so no tick between the two can launch
+  # a successor.
+  test "a rest transition writes inside the Poller, then stops the live worker" do
+    fiber_id = "tests/restme"
+    store = MockRunner.felt_root()
+
+    MockRunner.set_fiber(
+      fiber_id,
+      make_fiber(fiber_id, %{"uid" => "01JZ00000000000000000000RS", "status" => "active"})
+    )
+
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nhost: candide\n", "active")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_rest_transition,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        felt_stores: [store]
+      )
+
+    sync_poll_cycle!(poller)
+
+    assert wait_until(fn ->
+             case Poller.cached_fiber_documents(poller) do
+               {:ok, %{fibers: [entry]}} -> Map.has_key?(entry, :runtime)
+               _ -> false
+             end
+           end)
+
+    assert {:ok, output} = Poller.lifecycle_transition(poller, :rest, fiber_id)
+    assert output =~ "worker: stopped"
+
+    commands = MockRunner.commands()
+
+    write =
+      Enum.find_index(commands, &(&1 == {"shuttle", ["-C", store, "rest", fiber_id, "--local"]}))
+
+    stop =
+      Enum.find_index(commands, fn {cmd, args} -> cmd == "tmux" and hd(args) == "kill-session" end)
+
+    assert write != nil and stop != nil and write < stop, "rest must disarm before it stops"
+
+    assert {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
+    refute Map.has_key?(entry, :runtime)
+    assert entry.fiber["status"] == "open"
+  end
+
   # The three tmux "already gone" phrasings session_already_gone? must treat as
   # success: the per-session "session not found" and "no such session", and a
   # whole-server-down "no server running". In every case tmux reports the

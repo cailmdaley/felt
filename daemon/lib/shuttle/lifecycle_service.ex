@@ -1,12 +1,14 @@
 defmodule Shuttle.LifecycleService do
   @moduledoc """
-  The daemon's side of the lifecycle verbs `accept` and `resume`.
+  The daemon's side of the lifecycle verbs `accept`, `resume` and `rest`.
 
   Shuttle is their writer: `shuttle -C <store> <verb> <fiber> --local` re-arms
-  the constitution and concludes its run
-  (`shuttle.runtime.handed_off_at = now`) in a single document write, so the
-  poller never reads a re-armed role without the stamp that keeps its
-  just-served occurrence from firing again.
+  the constitution (accept, resume) or puts it in Resting (rest), and
+  concludes its run (`shuttle.runtime.handed_off_at = now`) in a single
+  document write, so the poller never reads a re-armed constitution without
+  the stamp that keeps its just-served occurrence from firing again. A rest
+  then stops any live worker through the Poller's backend-aware stop, the one
+  `/kill` uses, so an app conversation is interrupted as a tmux worker is.
 
   `/api/v1/lifecycle` and the kanban's `accept-run` transition both come
   through `transition/2`. With the Poller running, the write happens inside it
@@ -20,11 +22,12 @@ defmodule Shuttle.LifecycleService do
 
   alias Shuttle.{FeltStores, Poller}
 
-  @type verb :: :accept | :resume
+  @type verb :: :accept | :resume | :rest
 
   @spec transition(verb(), String.t()) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
-  def transition(verb, identifier) when verb in [:accept, :resume] and is_binary(identifier) do
+  def transition(verb, identifier)
+      when verb in [:accept, :resume, :rest] and is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <-
            FeltStores.resolve_fiber_or_error(identifier) do
       if is_pid(GenServer.whereis(Shuttle.Env.server(Poller))) do
@@ -40,7 +43,7 @@ defmodule Shuttle.LifecycleService do
   `Shuttle.CLI.run_lifecycle/4` (`:felt_store`, `:runner`).
   """
   @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()
-  def write(verb, fiber_id, opts) when verb in [:accept, :resume] do
+  def write(verb, fiber_id, opts) when verb in [:accept, :resume, :rest] do
     Shuttle.CLI.run_lifecycle(Atom.to_string(verb), fiber_id, [], opts)
   end
 end

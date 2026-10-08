@@ -383,21 +383,21 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     expect(wire.calls).toEqual([])
   })
 
-  it('parks a non-open card as a draft BEFORE the horizon edit', async () => {
+  it('rests a non-open card BEFORE the horizon edit — the clean-exit marker rides rest', async () => {
     const c = card({ id: 'active-1', status: 'active', due: asStoredUtc(dayFromNow(30)) })
     asPrivate(makeBoard()).setSurface(c, 'stashed', {})
     await wire.settled()
 
     expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/transition`,
+      `${BASE}/api/v1/lifecycle`,
       `${BASE}/api/v1/felt-edit`,
     ])
-    expect(wire.bodiesTo('/api/v1/transition')[0]).toEqual({
-      fiber_id: 'active-1',
-      target: 'drafts',
+    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toEqual({
+      action: 'rest',
+      fiber: 'active-1',
       origin: 'local',
     })
-    // The park is a lifecycle move, not a date edit — the due still survives.
+    // The rest is a lifecycle move, not a date edit — the due still survives.
     expect(Object.keys(wire.bodiesTo('/api/v1/felt-edit')[0])).not.toContain('due')
   })
 
@@ -417,14 +417,14 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     asPrivate(makeBoard()).setSurface(c, 'stashed', {})
     await wire.settled()
 
+    // rest stops the worker in the owning Poller; the board sends no /kill.
     expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/kill`,
-      `${BASE}/api/v1/transition`,
+      `${BASE}/api/v1/lifecycle`,
       `${BASE}/api/v1/felt-edit`,
     ])
-    expect(wire.bodiesTo('/api/v1/transition')[0]).toEqual({
-      fiber_id: 'active-stashed-1',
-      target: 'drafts',
+    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toEqual({
+      action: 'rest',
+      fiber: 'active-stashed-1',
       origin: 'local',
     })
   })
@@ -446,16 +446,17 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     await new Promise((r) => setTimeout(r, 20))
 
     expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/kill`,
+      `${BASE}/api/v1/lifecycle`,
       `${BASE}/api/v1/felt-edit`,
     ])
-    expect(wire.bodiesTo('/api/v1/kill')[0]).toEqual({
-      fiber_id: 'open-stashed-live-1',
+    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toEqual({
+      action: 'rest',
+      fiber: 'open-stashed-live-1',
       origin: 'local',
     })
   })
 
-  it('stops a blocked app launch before parking its card', async () => {
+  it('rests a blocked app launch — the owner stops it through its backend', async () => {
     const c = card({
       id: 'app-blocked-1',
       status: 'open',
@@ -471,9 +472,21 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     await wire.settled()
 
     expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/kill`,
+      `${BASE}/api/v1/lifecycle`,
       `${BASE}/api/v1/felt-edit`,
     ])
+  })
+
+  it('reopens a card that carries a verdict as a draft — rest refuses one past review', async () => {
+    const c = card({ id: 'done-1', status: 'closed', tempered: true })
+    asPrivate(makeBoard()).setSurface(c, 'stashed', {})
+    await wire.settled()
+
+    expect(wire.writes().map((w) => w.url)).toEqual([
+      `${BASE}/api/v1/transition`,
+      `${BASE}/api/v1/felt-edit`,
+    ])
+    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([])
   })
 
   it('unsets horizon and cold on the way back to Now, touching no due', async () => {

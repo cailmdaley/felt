@@ -33,6 +33,7 @@ defmodule Shuttle.Dispatcher do
           {:ok, String.t()}
           | {:error, :not_found}
           | {:error, :closed}
+          | {:error, :not_active}
           | {:error, :already_running}
           | {:error, {:arm_refused, arm_refusal()}}
           | {:error, :missing_session_id}
@@ -98,7 +99,7 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
          {:ok, uid} <- check_uid(fiber_id, fiber),
-         :ok <- check_not_closed(fiber, force),
+         :ok <- check_dispatchable(fiber, force),
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_app_not_running(fiber_id, uid),
@@ -705,19 +706,20 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Reject closed fibers by default. Manual force-dispatch (the "New session"
-  # / "Resume" buttons) explicitly opts in to dispatching against closed
-  # fibers; `maybe_reopen_on_force/5` then reopens the YAML so the kanban
-  # view actually reclassifies the card.
-  defp check_not_closed(_fiber, true), do: :ok
+  # An unforced dispatch launches only what this fresh read still finds
+  # `active`. The tick that chose the fiber read it earlier, so a pause, rest
+  # or close landing in between must stop the launch here: `closed` and every
+  # other status alike. Manual force-dispatch (the "New session" / "Resume"
+  # buttons) explicitly opts in to dispatching a fiber that is not armed;
+  # `maybe_reopen_on_force/5` then reopens the YAML so the kanban view
+  # actually reclassifies the card.
+  defp check_dispatchable(_fiber, true), do: :ok
 
-  defp check_not_closed(fiber, _force) do
-    status = Map.get(fiber, "status", "")
-
-    if status == "closed" do
-      {:error, :closed}
-    else
-      :ok
+  defp check_dispatchable(fiber, _force) do
+    case Map.get(fiber, "status", "") do
+      "active" -> :ok
+      "closed" -> {:error, :closed}
+      _ -> {:error, :not_active}
     end
   end
 

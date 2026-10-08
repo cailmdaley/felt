@@ -75,9 +75,10 @@ relevant role and collaborator content locally. The request's top-level
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
 fields, and runs the matching `shuttle <action>` on the owning host:
 `install`, `repeat`, `reshape`, `pause`, `rest`, `resume`, `accept`, `close`, `reopen`,
-`set-model`, `set-agent`, `set-outcome` or `uninstall`. `accept` and `resume`
-run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
-owning daemon's Poller, serialized with its state changes, which then refreshes
+`set-model`, `set-agent`, `set-outcome` or `uninstall`. `accept`, `resume` and
+`rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
+owning daemon's Poller, serialized with its state changes — a rest then stops
+any live worker through its backend — which then refreshes
 that fiber's document cache; a poll read in flight sees the old document or
 the new one, whose status and `handed_off_at` land in one atomic write. The
 outcome is always kept. A success is 200 with the Shuttle CLI's output as

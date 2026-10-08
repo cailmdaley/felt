@@ -1077,40 +1077,8 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:kill_session, fiber_id}, _from, state) do
-    case running_key(state, fiber_id) do
-      nil ->
-        {:reply, {:ok, :no_session}, state}
-
-      runtime_key ->
-        meta = Map.get(state.running, runtime_key)
-        session = meta.session
-        # Stop the watcher BEFORE the kill so its has-session poll doesn't also
-        # report the exit and double-handle through handle_worker_exit.
-        stop_watcher(meta)
-
-        case Shuttle.WorkerBackend.stop(state.runner, session) do
-          {_output, 0} ->
-            # Pure runtime teardown — drop running entry + claim, no status write.
-            state = remove_running(state, runtime_key)
-            {:reply, {:ok, session}, state}
-
-          {output, status} ->
-            # A real failure: the worker is (or may still be) alive. Leave
-            # tracking in place — no teardown — so the board doesn't show a
-            # stopped card while a ghost worker keeps mutating the fiber.
-            # But the watcher we stopped above is now gone too, and nothing
-            # else will restart it — without re-arming it, a live session
-            # nobody observes is a second ghost-worker flavor, invisible
-            # until this daemon restarts. Re-start it against the same
-            # session so the exit still gets handled eventually.
-            Logger.error("kill_session #{fiber_id}: stop exited #{inspect(status)}: #{output}")
-
-            state = restart_watcher_after_failed_kill(state, fiber_id, runtime_key, meta)
-
-            {:reply, {:error, "stopping the worker failed (exit #{inspect(status)}): #{output}"},
-             state}
-        end
-    end
+    {reply, state} = stop_tracked_worker(state, fiber_id)
+    {:reply, reply, state}
   end
 
   def handle_call({:capture, yap, opts}, _from, state) do
@@ -1165,6 +1133,22 @@ defmodule Shuttle.Poller do
         runner: state.runner,
         felt_store: owning_store(slug, state)
       )
+
+    # A rest disarms first (the write above lands `status: open` before any
+    # stop), then stops the worker, so its exit cannot be read as a reason to
+    # relaunch. A failed stop is reported; the document is already at rest.
+    {result, state} =
+      case {verb, result} do
+        {:rest, {:ok, output}} ->
+          case stop_tracked_worker(state, slug) do
+            {{:ok, :no_session}, state} -> {{:ok, output}, state}
+            {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
+            {{:error, reason}, state} -> {{:error, reason}, state}
+          end
+
+        _ ->
+          {result, state}
+      end
 
     state =
       case result do
@@ -3181,6 +3165,45 @@ defmodule Shuttle.Poller do
     case Map.get(fiber, "shuttle") do
       shuttle when is_map(shuttle) -> block_kind(shuttle)
       _ -> "oneshot"
+    end
+  end
+
+  # Stop a fiber's tracked worker through its backend (tmux, or an app
+  # conversation's interrupt) and tear down its runtime entry. Writes no
+  # status. Shared by `/kill` and the rest transition.
+  defp stop_tracked_worker(state, fiber_id) do
+    case running_key(state, fiber_id) do
+      nil ->
+        {{:ok, :no_session}, state}
+
+      runtime_key ->
+        meta = Map.get(state.running, runtime_key)
+        session = meta.session
+        # Stop the watcher BEFORE the kill so its has-session poll doesn't also
+        # report the exit and double-handle through handle_worker_exit.
+        stop_watcher(meta)
+
+        case Shuttle.WorkerBackend.stop(state.runner, session) do
+          {_output, 0} ->
+            # Pure runtime teardown — drop running entry + claim, no status write.
+            state = remove_running(state, runtime_key)
+            {{:ok, session}, state}
+
+          {output, status} ->
+            # A real failure: the worker is (or may still be) alive. Leave
+            # tracking in place — no teardown — so the board doesn't show a
+            # stopped card while a ghost worker keeps mutating the fiber.
+            # But the watcher we stopped above is now gone too, and nothing
+            # else will restart it — without re-arming it, a live session
+            # nobody observes is a second ghost-worker flavor, invisible
+            # until this daemon restarts. Re-start it against the same
+            # session so the exit still gets handled eventually.
+            Logger.error("kill_session #{fiber_id}: stop exited #{inspect(status)}: #{output}")
+
+            state = restart_watcher_after_failed_kill(state, fiber_id, runtime_key, meta)
+
+            {{:error, "stopping the worker failed (exit #{inspect(status)}): #{output}"}, state}
+        end
     end
   end
 

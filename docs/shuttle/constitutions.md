@@ -224,7 +224,7 @@ list the daemon evaluates.
   hostname — consulted once and then written to that file, so the name cannot
   drift. shuttle offers no `"local"`
   default and no wildcard. An absent host leaves the fiber unowned and
-  ineligible on every daemon. `install`, `repeat`, and `pin` stamp it by
+  ineligible on every daemon. `install` and `repeat` stamp it by
   default.
 - **`status: active`** — the sole dispatch gate. `open` marks a draft or a
   pause. `closed` marks awaiting review or a terminus.

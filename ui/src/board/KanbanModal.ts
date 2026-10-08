@@ -1832,22 +1832,35 @@ export class KanbanModal {
     opts: { cold?: boolean; due?: string | null; dropsStaleDue?: boolean },
   ): Promise<void> {
     try {
-      // Parking a running card on a planning surface (stash / future date) stops
-      // its worker — alive only while in-flight.
-      await this.killWorkerIfRunning(card)
-      // A planning surface holds DRAFTS. A card that isn't one yet is parked as
-      // one first via `/transition target=drafts`: a closed card reopens as a
-      // deferred draft (daemon: reopen --as-draft → status:open, verdict
-      // cleared — NOT active, so it is not auto-dispatched; the slides
-      // snap-back fix), an armed/active card pauses (otherwise an active
-      // oneshot reclassifies straight back to In flight after the refetch).
-      // setSurface's guards already bannered the states where this verb is
-      // wrong (standing). Every card on
-      // a Desk column carries a shuttle block, so the lifecycle verbs always
-      // apply — see `shouldIncludeInKanban`.
-      if (card.status !== 'open') {
-        await this.postTransition(card, 'drafts', 'Park-as-draft failed')
+      // Into Resting is `shuttle rest`, the worker's own exit said by hand: the
+      // owning daemon writes `status: open` + `horizon: stashed` inside its
+      // Poller, clears the verdict, stamps the clean-exit marker, and stops a
+      // live worker through its backend (tmux or an app conversation). A card
+      // that already carries a verdict is past review, which rest refuses, so
+      // it reopens as a draft first, as every other planning drop does.
+      // setSurface's guards already bannered the states where neither verb
+      // applies (standing). Every card on a Desk column carries a shuttle
+      // block, so the lifecycle verbs always apply — see `shouldIncludeInKanban`.
+      const hasVerdict = card.status === 'closed' && card.tempered !== undefined
+      if (horizon === 'stashed' && !hasVerdict) {
+        await this.postJson('/api/v1/lifecycle', {
+          action: 'rest', fiber: card.id, origin: card.originId,
+        }, 'Rest failed')
+      } else {
+        // Any other planning surface (a future date, or back onto the desk)
+        // holds DRAFTS. Parking a running card there stops its worker — alive
+        // only while in-flight — and a card that isn't a draft yet is parked as
+        // one via `/transition target=drafts`: a closed card reopens as a
+        // deferred draft (reopen --as-draft → status:open, verdict cleared,
+        // not armed), an armed card pauses (otherwise an active oneshot
+        // reclassifies straight back to In flight after the refetch).
+        await this.killWorkerIfRunning(card)
+        if (card.status !== 'open') {
+          await this.postTransition(card, 'drafts', 'Park-as-draft failed')
+        }
       }
+      // What rest does not write — `cold`, and a date the drop names — rides
+      // the horizon edit below; the horizon itself is restated, harmlessly.
       // The horizon "surface" is not stored verbatim — Now is absence (clear
       // `horizon`+`cold`), future placement is `due:`, and only `stashed`
       // writes a stored horizon. The daemon `/api/v1/felt-edit` is a raw
