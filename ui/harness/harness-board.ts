@@ -206,7 +206,11 @@ interface MockFiber {
    *  frontmatter felt preserves and re-emits; `KanbanFiber` reads it as
    *  `Fiber.start` and the read model turns it into `cycleStart`. */
   start?: string
-  shuttle?: ReturnType<typeof shuttleBlock> & { surface?: string }
+  shuttle?: ReturnType<typeof shuttleBlock> & {
+    surface?: string
+    seat?: string
+    schedule?: { expr: string; tz: string }
+  }
 }
 
 const fiber = (f: MockFiber) => ({
@@ -402,19 +406,20 @@ const ROLE_SEATS: MockFiber[] = [
   { id: 'science/survey/south', name: 'Survey chair · south', seat: 'chief-of-staff' },
   { id: 'life/vizier', name: 'Vizier', seat: 'vizier' },
   { id: 'life/music', name: 'Music — the composer\'s desk', seat: 'composer' },
-].map(({ id, name, seat }) => ({
+].map(({ id, name, seat }): MockFiber => ({
   id,
   name,
   status: 'open',
   outcome: `${name}: at rest.`,
   shuttle: { ...shuttleBlock('oneshot'), seat },
-})).concat([{
+}))
+ROLE_SEATS.push({
   id: 'loom/morning-post',
   name: 'Morning post',
   status: 'active',
   outcome: 'Morning post: sleeping until tomorrow.',
   shuttle: { ...shuttleBlock('standing'), seat: 'vizier', schedule: { expr: '0 7 * * *', tz: 'Europe/Paris' } },
-}])
+})
 
 /**
  * RESTING — constitutions put down between sessions (`status: open` +
