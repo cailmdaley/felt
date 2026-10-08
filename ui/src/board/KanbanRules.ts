@@ -16,7 +16,6 @@ export type KanbanHorizon = 'now' | 'stashed';
 export type KanbanColumn =
   | 'drafts'
   | 'scheduled'
-  | 'pinned'
   | 'inFlight'
   | 'awaitingReview'
   | 'tempered'
@@ -212,20 +211,15 @@ export function lensCycles(
  *      tempered absent → awaitingReview (worker exited; the agent handed off
  *      and the human hasn't ruled yet). This closed-state IS the
  *      don't-re-fire / anti-oscillation gate, and it is awaiting-review for
- *      BOTH kinds — a standing role's awaiting run is `status:closed`, not an
+ *      BOTH kinds — a standing constitution's awaiting run is `status:closed`, not an
  *      `active` role carrying a review field.
  *
  *   2. A live worker overrides the open/active branch — the user dragging a
  *      card and seeing it stay in drafts is the dissonance we're avoiding.
  *      Liveness is the owning daemon's observation (never stored), for a
  *      terminal and an app worker alike; only shuttle fibers have workers. A
- *      running pinned or standing role is caught here too, so it shows as live
- *      work in Now rather than at rest on the Pinned strip or the timeline.
- *
- *   2b. A resting `kind:pinned` umbrella role (shuttle block, status:active,
- *      no live worker) → `pinned`. Schedule-less and never auto-dispatched;
- *      the strip holds it until someone force-dispatches it. Checked after the
- *      liveness override.
+ *      running standing constitution is caught here too, so it shows as live
+ *      work in Now rather than waiting on the timeline.
  *
  *   3. The open/active branch, on the document alone:
  *        - no shuttle block      → drafts   (human due-date card; visible,
@@ -237,7 +231,7 @@ export function lensCycles(
  *                                            it fires on its own cron, so it
  *                                            belongs on the timeline at its
  *                                            next launch, not in the Now nav. A
- *                                            *running* standing role returned
+ *                                            *running* standing constitution returned
  *                                            inFlight at the liveness branch
  *                                            above — live work shows in Now.)
  *      `depends_on:` is not consulted anywhere in here, or anywhere downstream
@@ -245,7 +239,7 @@ export function lensCycles(
  *      a card is DRAWN (`foldHeadId`), never what it is.
  *
  * The kanban response splits classifyFiber's output across the
- * surfaces: now, timeline, stash, and the pinned strip. The classifier
+ * surfaces: now, timeline and stash. The classifier
  * itself doesn't care which surface — it produces a flat label that the
  * handler routes.
  */
@@ -273,31 +267,16 @@ export function classifyFiber(
     return 'inFlight';
   }
 
-  // A resting pinned umbrella role: schedule-less, never auto-dispatched. It
-  // gets its own strip rather than reading as an armed oneshot in the
-  // Now/in-flight lane. A pinned role belongs on the strip whenever it is
-  // neither closed (handled above) nor actively running (the running-worker
-  // override above sends a live pinned worker to Now), so both resting
-  // statuses — parked `status:open` and armed-at-rest `status:active` — land
-  // here.
-  if (
-    f.hasShuttleBlock === true &&
-    f.shuttleKind === 'pinned' &&
-    (f.status === 'active' || f.status === 'open')
-  ) {
-    return 'pinned';
-  }
-
   // Everything still here carries a shuttle block: `shouldIncludeInKanban`
   // admits nothing else onto a Desk column, and the one block-less kind it does
   // admit — a cycle — left at the top of this function. A block-less row that
   // somehow reached this far falls through to `drafts` at the bottom, which is
   // where it would have been sent anyway.
   if (f.status === 'active') {
-    // An armed standing role between firings needs no action now — it fires on
+    // An armed standing constitution between firings needs no action now — it fires on
     // its own cron. Route it to `scheduled` (→ timeline, placed by the card's
     // `nextLaunchAt`) so the Now / in-flight surface stays action-needed only.
-    // A *running* standing role already returned 'inFlight' above: a live worker
+    // A *running* standing constitution already returned 'inFlight' above: a live worker
     // is activity worth showing in Now, not a waiting-on-the-clock card.
     if (f.shuttleKind === 'standing') return 'scheduled';
     return 'inFlight';
@@ -432,8 +411,8 @@ export function humanizeCron(expr: string | undefined): string | undefined {
 }
 
 /**
- * The next cron occurrence for an *armed* standing role, for timeline
- * placement. A standing role is armed iff `status:active` — the sole
+ * The next cron occurrence for an *armed* standing constitution, for timeline
+ * placement. A standing constitution is armed iff `status:active` — the sole
  * dispatch gate under the frozen contract. A paused role (`status:open`) or
  * a role awaiting/finished review (`status:closed`) has no next launch: an
  * open role isn't dispatched, and a closed one waits on a human verdict
@@ -490,8 +469,8 @@ export function unresolvedDependencies(
 /**
  * One node as the fold walk sees it: who it waits on, and whether a card
  * folded under it would actually be reachable — `foldable` is true for the
- * surfaces that draw a head with its queue (the desk columns, the pinned
- * strip, Resting) and false for everything else (the past lane, cycles, and
+ * surfaces that draw a head with its queue (the desk columns, Resting) and
+ * false for everything else (the past lane, cycles, and
  * any id the board is not drawing at all).
  */
 export interface FoldNode {
@@ -745,7 +724,7 @@ export function stackClaimsDrop(
 export function stackZoneOffered(cardHeight: number, visibleHeight: number): boolean {
   if (visibleHeight <= 0 || cardHeight <= 0) return false;
   // The pixel floor guards against SLIVERS, so it is capped at the card's own
-  // height: a 22px Resting row or pinned chip that is entirely on screen is not
+  // height: a 22px Resting row that is entirely on screen is not
   // a sliver of anything, and refusing it would make every compact surface
   // un-stackable.
   return visibleHeight >= Math.max(cardHeight * 0.4, Math.min(cardHeight, MIN_STACK_ZONE_PX));
@@ -1053,9 +1032,9 @@ export type StackRefusal = 'alreadyQueued';
  * The gesture writes exactly one scalar `depends_on:`, so it declines every
  * case where one edge is not the whole truth — and only those. What the cards
  * have DONE, and what KIND they are, is none of its business: a queue is
- * ordering, so a tempered card or a pinned role is a perfectly good thing to
- * file work behind, and a standing role filed after something is still just
- * filed after it.
+ * ordering, so a tempered card or a resting hub is a perfectly good thing to
+ * file work behind, and a standing constitution filed after something is still
+ * just filed after it.
  *
  *   • a hand-written LIST on the source — a fan-in someone assembled on
  *     purpose; a drag cannot know which of those edges it was meant to replace.
@@ -1082,9 +1061,9 @@ export function stackDropVerdict(
   // be queued behind another. An awaiting-review or composted source means "if
   // this reopens, it reopens behind that one". Nor is the TARGET's: a queue is
   // ordering for the eye, so queuing behind finished work says exactly what it
-  // says — "this comes after that" — and a pinned hub is the canonical thing
+  // says — "this comes after that" — and a resting hub is the canonical thing
   // to file a pile of related work under.
-  // Nor the source's KIND: a standing or pinned role filed after something is
+  // Nor the source's KIND: a standing constitution filed after something is
   // still just filed after it — the daemon reads neither the edge nor this
   // gesture, so there is nothing to protect.
   // The cycle test runs against the TAIL, because the tail is what the edge is

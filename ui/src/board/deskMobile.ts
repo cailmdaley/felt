@@ -7,7 +7,7 @@
  * own `scrollLeft` rather than tracked as separate state — the scroll position
  * IS the state, and momentum scrolling means nothing else can stay honest.
  *
- * The two stacked bands (Pinned, Resting) remember whether they are open. That
+ * The stacked band (Resting) remembers whether it is open. That
  * lives in localStorage, which throws outright in some privacy modes, so every
  * touch of it is wrapped and a failure degrades to the defaults.
  */
@@ -37,16 +37,15 @@ export function folioScrollTarget(index: number, pageWidth: number, count: numbe
   return Math.min(count - 1, Math.max(0, Math.trunc(index))) * pageWidth
 }
 
-export type BandId = 'pinned' | 'resting'
+export type BandId = 'resting'
 
 export interface BandState {
-  pinned: boolean
   resting: boolean
 }
 
-/** Pinned is a launcher you reach for; Resting is an archive you go looking
- *  for. So Pinned opens and Resting stays folded until asked. */
-export const DEFAULT_BAND_STATE: BandState = { pinned: true, resting: false }
+/** Resting holds the constitutions you come back to and start by hand, so it
+ *  opens until you fold it. */
+export const DEFAULT_BAND_STATE: BandState = { resting: true }
 
 /** Coerce whatever came back out of storage into a BandState. Anything absent
  *  or malformed falls back per-key, so one corrupt field can't lose the other. */
@@ -61,7 +60,6 @@ export function parseBandState(raw: string | null): BandState {
   if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_BAND_STATE }
   const obj = parsed as Record<string, unknown>
   return {
-    pinned: typeof obj.pinned === 'boolean' ? obj.pinned : DEFAULT_BAND_STATE.pinned,
     resting: typeof obj.resting === 'boolean' ? obj.resting : DEFAULT_BAND_STATE.resting,
   }
 }

@@ -82,10 +82,10 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
     }), { nowMs: 1_790_727_600_000 })
   const inFlightIds = (resp: ReturnType<typeof board>) => resp.now.inFlight.map((c) => c.id)
 
-  // Every role kind against every runtime shape the daemon serves. Any
-  // runtime puts the card in flight, whatever its kind; with none, a pinned
-  // role rests on the strip, a standing role waits on the timeline, and an
-  // active one-shot stays in flight. The card carries the runtime's own fields.
+  // Every kind against every runtime shape the daemon serves. Any runtime
+  // puts the card in flight, whatever its kind; with none, a standing
+  // constitution waits on the timeline and an active one-shot stays in flight
+  // — the retired `pinned` included, which reads as a one-shot. The card carries the runtime's own fields.
   const runtimes: [shape: string, runtime: unknown, fields: Record<string, unknown> | null][] = [
     ['no worker', undefined, null],
     ['a running app worker', appRuntime('running'),
@@ -97,16 +97,15 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
       { workerState: 'running', tmuxSession: 'role-shuttle', workerSurface: 'cli', runtimePhase: 'working' }],
     ['a runtime without a state', { tmux_session: 'role-shuttle' }, { workerState: 'running', tmuxSession: 'role-shuttle' }],
   ]
-  const restingPlace = { pinned: 'pinned', standing: 'timeline', oneshot: 'inFlight' } as const
+  const restingPlace = { pinned: 'inFlight', standing: 'timeline', oneshot: 'inFlight' } as const
   // Each surface's whole id list, so a card on two surfaces, or twice on one,
   // is as wrong as a card on the wrong one.
   const placeOf = (resp: ReturnType<typeof board>) => ({
     inFlight: inFlightIds(resp),
-    pinned: resp.pinned.map((c) => c.id),
     timeline: resp.timeline.futureDated.map((c) => c.id),
   })
   const only = (surface: keyof ReturnType<typeof placeOf>) => ({
-    inFlight: [], pinned: [], timeline: [], [surface]: ['role'],
+    inFlight: [], timeline: [], [surface]: ['role'],
   })
 
   it('places each kind by the daemon runtime and carries that runtime onto the card', () => {
@@ -116,7 +115,7 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
         const resp = board(kind, runtime)
         const expected = fields ? 'inFlight' : restingPlace[kind]
         const place = placeOf(resp)
-        const card = [...resp.now.inFlight, ...resp.pinned].find((c) => c.id === 'role')
+        const card = resp.now.inFlight.find((c) => c.id === 'role')
         const got = card && Object.fromEntries(Object.keys(fields ?? { workerState: 0 }).map((k) => [k, card[k as keyof typeof card]]))
         if (JSON.stringify(place) !== JSON.stringify(only(expected))) wrong.push({ kind, shape, expected, place })
         else if (card && JSON.stringify(got) !== JSON.stringify(fields ?? { workerState: undefined })) wrong.push({ kind, shape, fields, got })

@@ -6,7 +6,7 @@
  * back to the board's own wire calls through the `MoveBroker`.
  *
  * A ROW IS A PLACE NAME AND NOTHING ELSE. The heading says "Move to" and the
- * items say Drafts, In flight, Awaiting review, Resting, Pinned — the same
+ * items say Drafts, In flight, Awaiting review, Resting — the same
  * words the board prints over those regions, with a rule between the Now
  * columns and the rest. Prose under a row was there to explain verbs, and the
  * places need no explaining; which card is being moved is carried by the

@@ -3,7 +3,7 @@
  *
  * The board is three full-page views behind one hotkey row:
  *
- *   1  desk       the kanban page (Now board + Pinned + Resting). Owned by
+ *   1  desk       the kanban page (Now board + Resting). Owned by
  *                 KanbanModal itself, NOT a TemporalView.
  *   2  chronicle  ┐ registered views — each mounts into a full-width host
  *   3  board      ┘ where the Desk surfaces would otherwise be.
@@ -259,7 +259,7 @@ export function settingsHotkey(e: HotkeyLike): SettingsHotkey | null {
 /**
  * Flatten a board response into one card list — the `cards` a ViewContext
  * carries. Surface order is the page's own top-to-bottom reading order
- * (timeline, then the Now lanes, then pinned, then stash); a card that
+ * (timeline, then the Now lanes, then stash); a card that
  * projects onto two surfaces appears once, at its first.
  */
 export function collectCards(response: KanbanResponse): KanbanCard[] {
@@ -277,7 +277,6 @@ export function collectCards(response: KanbanResponse): KanbanCard[] {
   take(response.now.drafts)
   take(response.now.inFlight)
   take(response.now.awaitingReview)
-  take(response.pinned)
   take(response.stash)
   // FOLDED CARDS BELONG ON A CALENDAR even though the Desk draws them under
   // their head. The fold is about how the Desk reads — one queue instead of six

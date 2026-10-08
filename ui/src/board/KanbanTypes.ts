@@ -1,10 +1,10 @@
 /** Column identifier within the Now surface — also doubles as the API target. */
-export type ColumnKind = 'drafts' | 'inFlight' | 'awaitingReview' | 'tempered' | 'composted' | 'pinned'
+export type ColumnKind = 'drafts' | 'inFlight' | 'awaitingReview' | 'tempered' | 'composted'
 export type HorizonKind = 'now' | 'stashed'
 
-/** The three shapes a shuttle block can take — the values `shuttle
+/** The two shapes a shuttle block can take — the values `shuttle
  *  reshape` accepts and the daemon's lifecycle controller allows. */
-export type ShuttleKind = 'oneshot' | 'standing' | 'pinned'
+export type ShuttleKind = 'oneshot' | 'standing'
 
 /** A `shuttle.project_dir` read off an ancestor fiber: the directory and the
  *  ancestor it came from. */
@@ -52,8 +52,7 @@ export interface KanbanCard {
   createdAt: string
   closedAt?: string
   /** File mtime the owning daemon reports (`modified_at`). Tracks last activity
-   * — a launch/accept/edit rewrites the frontmatter — so it orders the Pinned
-   * strip by most-recently-used. */
+   * — a launch/accept/edit rewrites the frontmatter. */
   modifiedAt?: string
   tempered?: boolean
   dependsOn?: string[]
@@ -65,7 +64,7 @@ export interface KanbanCard {
   dependsOnUnresolved?: string[]
   /**
    * The card this one is FOLDED UNDER — the head of its chain, wherever that
-   * head is drawn (a desk column, the pinned strip, Resting). Set only on the
+   * head is drawn (a desk column, Resting). Set only on the
    * cards in `KanbanResponse.folded`, which no surface draws directly: they are
    * reached through the head's "+N queued" chip. Derived fresh on every poll
    * (`foldHeadId`), never stored — clear the edge and the card is simply drawn
@@ -178,15 +177,14 @@ export interface KanbanCard {
    */
   shuttleHost?: string
   /**
-   * `shuttle.kind` — `oneshot` (default), `standing`, or `pinned`. Present
-   * iff the fiber has a shuttle block. Drives the kind segmented control in
-   * the fiber page and reveals the schedule/tz row when standing. A
-   * resting (`status:active`, not running) pinned fiber classifies onto the
-   * Pinned strip; a running one shows live in Now via the worker override.
+   * `shuttle.kind` — `oneshot` (default) or `standing`; a stored legacy
+   * `pinned` arrives as `oneshot`. Present iff the fiber has a shuttle block.
+   * Drives the kind segmented control in the fiber page and reveals the
+   * schedule/tz row when standing.
    */
   shuttleKind?: ShuttleKind
   /**
-   * `shuttle.schedule.expr` — 5-field cron expression for standing roles.
+   * `shuttle.schedule.expr` — 5-field cron expression for standing constitutions.
    * Absent on one-shot fibers and on fibers without a shuttle block.
    */
   shuttleSchedule?: string
@@ -210,11 +208,11 @@ export interface KanbanCard {
   inheritedProjectDir?: InheritedProjectDir
   /**
    * ISO timestamp of the next cron occurrence, server-computed from
-   * `shuttleSchedule` + `shuttleTz`. Present only for armed standing roles
+   * `shuttleSchedule` + `shuttleTz`. Present only for armed standing constitutions
    * (kind=standing, `status: active`, not awaiting); absent in every other
    * case.
    *
-   * The backend routing layer uses this to lift dormant standing roles
+   * The backend routing layer uses this to lift dormant standing constitutions
    * onto the timeline surface. The strip placement reads
    * `card.nextLaunchAt ?? card.due` for day-column lookup. A standing
    * role is a commitment with a date, not a draft.
@@ -305,7 +303,7 @@ export interface KanbanResponse {
     inFlight: KanbanCard[]
     awaitingReview: KanbanCard[]
   }
-  /** Timeline surface — closed work in `past`, and every armed standing role
+  /** Timeline surface — closed work in `past`, and every armed standing constitution
    *  between runs in `futureDated`, ordered by next launch. One list: how far
    *  off a role's next firing is changes nothing about how it is drawn. */
   timeline: {
@@ -314,10 +312,6 @@ export interface KanbanResponse {
   }
   /** Stash surface — dateless deferred work; frontend clusters by containment path. */
   stash: KanbanCard[]
-  /** Pinned strip — at-rest (`status:active`, not running) `kind:pinned`
-   * umbrella roles. Dispatchable on demand; the poller never auto-fires them.
-   * A *running* pinned role shows live in `now.inFlight` instead. */
-  pinned: KanbanCard[]
   /**
    * Cards FOLDED under the head of their chain — queued behind a card that is
    * drawn somewhere on this board, so they are drawn there and not in a column
@@ -348,7 +342,6 @@ export interface KanbanResponse {
     past: number
     futureDated: number
     stash: number
-    pinned: number
   }
   /**
    * Per-origin freshness, keyed by `originId`. Always includes `local`

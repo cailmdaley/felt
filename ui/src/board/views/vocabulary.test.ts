@@ -25,13 +25,13 @@ describe('cardState', () => {
 
   it('asks closed FIRST — a finished fiber keeps the block that ran it', () => {
     // Every field below would otherwise claim the card: a live worker, a
-    // pinned kind, a stash. None of them outranks a verdict.
+    // standing kind, a stash. None of them outranks a verdict.
     expect(
       cardState({
         status: 'closed',
         tempered: true,
         workerState: 'running',
-        shuttleKind: 'pinned',
+        shuttleKind: 'standing',
         effectiveHorizon: 'stashed',
       }),
     ).toBe('tempered')
@@ -39,18 +39,15 @@ describe('cardState', () => {
 
   it('calls a live worker in flight, whatever the fiber does at rest', () => {
     expect(cardState(card({ workerState: 'running' }))).toBe('inFlight')
-    expect(cardState(card({ workerState: 'running', shuttleKind: 'pinned' }))).toBe('inFlight')
     expect(cardState(card({ workerState: 'running', shuttleKind: 'standing' }))).toBe('inFlight')
     expect(cardState(card({ workerState: 'running', effectiveHorizon: 'stashed' }))).toBe(
       'inFlight',
     )
   })
 
-  it('folds the three ways of being off the desk into resting', () => {
+  it('folds the two ways of being off the desk into resting', () => {
     expect(cardState(card({ effectiveHorizon: 'stashed' }))).toBe('resting')
-    expect(cardState(card({ status: 'active', shuttleKind: 'pinned' }))).toBe('resting')
-    expect(cardState(card({ shuttleKind: 'pinned' }))).toBe('resting')
-    // An armed standing role fires on its own cron — nothing owed until it does.
+    // An armed standing constitution fires on its own cron — nothing owed until it does.
     expect(cardState(card({ status: 'active', shuttleKind: 'standing' }))).toBe('resting')
   })
 

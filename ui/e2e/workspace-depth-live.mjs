@@ -28,7 +28,7 @@ async function pageFor(viewport) {
 async function redact(page) {
   // Private fibers keep their silhouette without copying their content into evidence.
   await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('.kbn-card,.kbn-pin-chip,.kbn-cluster-item,.ws-overview-folio,.ws-channel-row')]
+    const rows = [...document.querySelectorAll('.kbn-card,.kbn-cluster-item,.ws-overview-folio,.ws-channel-row')]
     const privateUids = new Set(window.__workspacePrivateUids || [])
     for (const el of rows) {
       const path = el.dataset.fiberId || el.querySelector('.kbn-card-id')?.textContent || el.title

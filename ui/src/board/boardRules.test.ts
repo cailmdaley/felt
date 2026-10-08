@@ -7,7 +7,7 @@
 // hardcoded `2026-08-12` would name a different day either side of the
 // Atlantic, so the file holds in whatever zone it runs.
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import {
   buildDependents,
@@ -46,7 +46,6 @@ import {
   clusterStashCards,
   findCardById,
   formatLaunchDay,
-  KanbanSurfaceRenderer,
   phasePillLabel,
   sortDatedByReturn,
   splitStashByReturn,
@@ -463,7 +462,6 @@ describe('what the board admits — a shuttle block, or a cycle', () => {
     ...board.timeline.past,
     ...board.timeline.futureDated,
     ...board.stash,
-    ...board.pinned,
   ]
 
   it('turns away an open fiber whose only claim is a due date', () => {
@@ -613,7 +611,7 @@ describe('Resting clusters split when they overflow', () => {
       expect(dated.map((c) => c.id)).toEqual(['project/snoozed'])
     })
 
-    it('counts a standing role asleep on its cron as dated even with no due', () => {
+    it('counts a standing constitution asleep on its cron as dated even with no due', () => {
       const sleeping: KanbanCard = {
         ...restingCard('roles/sleeper'),
         shuttleKind: 'standing',
@@ -652,182 +650,6 @@ describe('Resting clusters split when they overflow', () => {
       const clusters = sortDatedByReturn(clusterStashCards(withinCluster))
       expect(clusters[0].cards.map((c) => c.id)).toEqual(['proj/b', 'proj/a'])
     })
-  })
-})
-
-describe('renderPinnedSection — the launcher band never pages', () => {
-  // THE BUG THIS PINS: the band used to cap itself to two rows and hide the
-  // rest of a busy pinned set behind a "+N more" cycler. A launcher's whole
-  // point is muscle memory — a role should sit in the same place every visit
-  // — and a click tax to reach page 2 broke exactly that. The row cap is now
-  // on the person doing the pinning, not on the strip: every pinned role
-  // renders, however many rows that takes.
-  //
-  // No jsdom in this repo, so a minimal fake element stands in — just enough
-  // of the DOM surface (className/classList, append, querySelector[All]) for
-  // `renderPinnedSection` and `renderPinnedChip` to run and be inspected.
-  class FakeEl {
-    readonly tagName: string
-    private _className = ''
-    readonly children: FakeEl[] = []
-    readonly dataset: Record<string, string> = {}
-    readonly style: Record<string, string> = {}
-    textContent = ''
-    title = ''
-    draggable = false
-    tabIndex = -1
-
-    constructor(tagName: string) {
-      this.tagName = tagName
-    }
-
-    get className(): string {
-      return this._className
-    }
-    set className(value: string) {
-      this._className = value
-    }
-
-    readonly classList = {
-      add: (...names: string[]): void => {
-        const set = new Set(this._className.split(' ').filter(Boolean))
-        for (const n of names) set.add(n)
-        this._className = [...set].join(' ')
-      },
-      remove: (...names: string[]): void => {
-        const set = new Set(this._className.split(' ').filter(Boolean))
-        for (const n of names) set.delete(n)
-        this._className = [...set].join(' ')
-      },
-      contains: (name: string): boolean => this._className.split(' ').includes(name),
-      toggle: (name: string, force?: boolean): boolean => {
-        const on = force ?? !this.classList.contains(name)
-        if (on) this.classList.add(name)
-        else this.classList.remove(name)
-        return on
-      },
-    }
-
-    readonly attrs: Record<string, string> = {}
-    setAttribute(name: string, value: string): void {
-      this.attrs[name] = value
-    }
-    getAttribute(name: string): string | null {
-      return this.attrs[name] ?? null
-    }
-    addEventListener(): void {}
-    append(...nodes: FakeEl[]): void {
-      this.children.push(...nodes)
-    }
-
-    private matches(selector: string): boolean {
-      return selector.startsWith('.') ? this.classList.contains(selector.slice(1)) : this.tagName === selector
-    }
-    querySelectorAll(selector: string): FakeEl[] {
-      const out: FakeEl[] = []
-      const walk = (el: FakeEl): void => {
-        for (const child of el.children) {
-          if (child.matches(selector)) out.push(child)
-          walk(child)
-        }
-      }
-      walk(this)
-      return out
-    }
-    querySelector(selector: string): FakeEl | null {
-      return this.querySelectorAll(selector)[0] ?? null
-    }
-  }
-
-  afterEach(() => vi.unstubAllGlobals())
-
-  const renderer = (lastResponse: KanbanResponse | null = null): KanbanSurfaceRenderer => {
-    vi.stubGlobal('document', { createElement: (tag: string) => new FakeEl(tag) })
-    // The surfaces ask the viewport two questions while building (mobile.ts:
-    // is this a phone-width layout, is the pointer a finger). There is no
-    // jsdom here, so answer both "no" — this suite is about the wide board.
-    vi.stubGlobal('window', {
-      matchMedia: () => ({ matches: false }),
-      // The surfaces schedule post-layout work (the folio pager restores its
-      // leaf in a frame; dwell timers arm on a tick). Run both inline so a
-      // failing assertion is the failure, not a missing global.
-      requestAnimationFrame: (fn: FrameRequestCallback) => {
-        fn(0)
-        return 0
-      },
-      cancelAnimationFrame: () => {},
-      setTimeout: (fn: () => void) => {
-        fn()
-        return 0
-      },
-      clearTimeout: () => {},
-    })
-    return new KanbanSurfaceRenderer({
-      getDragSourceId: () => null,
-      setDragSourceId: () => {},
-      getLastResponse: () => lastResponse,
-      stopDragAutoScroll: () => {},
-      transition: () => {},
-      setSurface: () => {},
-      pin: () => {},
-      openDetail: () => {},
-      onRefresh: () => {},
-    })
-  }
-
-  const pinnedCard = (id: string): KanbanCard => ({
-    id,
-    name: id.split('/').pop() ?? id,
-    path: `.felt/${id}.md`,
-    originId: 'local',
-    status: 'active',
-    createdAt: new Date(NOW).toISOString(),
-    effectiveHorizon: 'now',
-    drifted: false,
-    isCycle: false,
-    cycleStart: null,
-    shuttleKind: 'pinned',
-  })
-
-  it('renders every pinned chip — no pager, however many roles', () => {
-    const cards = Array.from({ length: 14 }, (_, i) => pinnedCard(`roles/role-${i}`))
-    const section = renderer().renderPinnedSection(cards, {})
-    const row = section.querySelector('.kbn-pinned-row')
-    expect(row).not.toBeNull()
-    expect(row!.querySelectorAll('.kbn-pin-chip')).toHaveLength(14)
-    expect(row!.querySelector('.kbn-pin-more')).toBeNull()
-    expect(section.querySelector('.kbn-tl-pager')).toBeNull()
-  })
-
-  it('wears "+N queued" for the work folded under it — the cmbx case', () => {
-    // A pinned hub is the only surface its queue can be seen from, and for as
-    // long as the chip drew no count that pile was invisible from the strip.
-    const hub = pinnedCard('science/cmbx')
-    const queued = {
-      ...pinnedCard('science/mocks'),
-      shuttleKind: 'oneshot' as const,
-      status: 'open',
-      dependsOn: ['science/cmbx'],
-      dependsOnShape: 'scalar' as const,
-      foldedUnder: 'science/cmbx',
-    }
-    const resp = response({ pinned: [hub], folded: [queued] })
-    const section = renderer(resp).renderPinnedSection([hub], {})
-    const chip = section.querySelector('.kbn-card-queued')
-    expect(chip).not.toBeNull()
-    expect(chip!.textContent).toBe('+1')
-    // The words the compact chip has no room for live where a reader can still
-    // get at them: the tooltip and the aria label both name the count.
-    expect(chip!.getAttribute('aria-label')).toContain('1 card queued behind cmbx')
-    expect((chip as unknown as { title: string }).title).toContain('mocks')
-    expect(section.querySelectorAll('.kbn-card-queued-row')).toHaveLength(1)
-  })
-
-  it('leaves an unqueued role as a bare chip', () => {
-    const hub = pinnedCard('science/cmbx')
-    const section = renderer(response({ pinned: [hub] })).renderPinnedSection([hub], {})
-    expect(section.querySelector('.kbn-card-queued')).toBeNull()
-    expect(section.querySelector('.kbn-pin-chip-wrap')).toBeNull()
   })
 })
 
@@ -873,7 +695,7 @@ describe('cycles — a named span of time, not work', () => {
           status: fc.constantFrom('open', 'active', 'closed'),
           tempered: fc.constantFrom(undefined, true, false),
           hasShuttleBlock: fc.boolean(),
-          shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing', 'pinned'),
+          shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing'),
           due: fc.constantFrom(undefined, -30, 0, 30).map(days => days === undefined ? undefined : asFeltWrites(dayFromNow(days))),
         }, { requiredKeys: ['status'] }),
         fc.boolean(),
@@ -1062,7 +884,7 @@ describe('cycles — a named span of time, not work', () => {
       const everywhereElse = [
         ...resp.now.drafts, ...resp.now.inFlight, ...resp.now.awaitingReview,
         ...resp.timeline.past, ...resp.timeline.futureDated,
-        ...resp.stash, ...resp.pinned,
+        ...resp.stash,
       ]
       expect(everywhereElse.some((c) => c.isCycle)).toBe(false)
       expect(everywhereElse.map((c) => c.id)).toEqual(['work/thing'])
@@ -1221,16 +1043,14 @@ describe('stripFacts — the drawer strip as a reading of the card', () => {
       shuttleSchedule: '0 9 * * 1-5', shuttleTz: 'Europe/Paris', due: dayFromNow(2),
     }), NOW)
     expect(f.cadence).toEqual({ text: 'weekdays 9:00', title: 'cron: 0 9 * * 1-5 (Europe/Paris)' })
-    // A standing role is placed by its cron — its due is never read.
+    // A standing constitution is placed by its cron — its due is never read.
     expect(f.due).toBeUndefined()
   })
 
-  it('names a pinned role, and drops the due an active one never reads', () => {
-    const f = stripFacts(card({ shuttleKind: 'pinned', shuttleAgent: 'claude-opus', due: dayFromNow(2) }), NOW)
-    expect(f.cadence).toEqual({ text: 'pinned' })
-    expect(f.due).toBeUndefined()
-    const parked = stripFacts(card({ shuttleKind: 'pinned', shuttleAgent: 'claude-opus', status: 'closed', due: dayFromNow(2) }), NOW)
-    expect(parked.due).toBeDefined()
+  it('says nothing of a one-shot\'s cadence, and keeps its due', () => {
+    const f = stripFacts(card({ shuttleKind: 'oneshot', shuttleAgent: 'claude-opus', due: dayFromNow(2) }), NOW)
+    expect(f.cadence).toBeUndefined()
+    expect(f.due).toBeDefined()
   })
 
   it('carries the chrome flag only when it is on', () => {
@@ -1405,8 +1225,8 @@ describe('the cycle lens — membership is derived, never assigned', () => {
   })
 })
 
-describe('Resting holds standing roles asleep between runs', () => {
-  // `classifyFiber` calls an armed standing role `scheduled` and the read model
+describe('Resting holds standing constitutions asleep between runs', () => {
+  // `classifyFiber` calls an armed standing constitution `scheduled` and the read model
   // files it on the timeline surface, which the Desk does not draw; without the
   // Resting join `ops/monthly-report` — armed, monthly, perfectly healthy —
   // would be on no surface a human could see.
@@ -1431,7 +1251,7 @@ describe('Resting holds standing roles asleep between runs', () => {
       { nowMs: NOW },
     )
 
-  it('draws an armed standing role in Resting, with a next launch to show', () => {
+  it('draws an armed standing constitution in Resting, with a next launch to show', () => {
     const resp = boardOf([role()])
     const resting = restingCards(resp)
     expect(resting.map((c) => c.id)).toEqual(['ops/monthly-report'])
@@ -1462,7 +1282,7 @@ describe('Resting holds standing roles asleep between runs', () => {
     expect(bySleep).toEqual({ 'ops/monthly-report': true, 'work/later': false })
   })
 
-  it('sends a RUNNING standing role to In flight, not to Resting', () => {
+  it('sends a RUNNING standing constitution to In flight, not to Resting', () => {
     // Live work is activity worth showing on the desk; the liveness branch of
     // classifyFiber already owns this and Resting must not double-claim it.
     const resp = buildKanbanResponseFromComposite(
@@ -1477,9 +1297,9 @@ describe('Resting holds standing roles asleep between runs', () => {
     expect(restingCards(resp)).toEqual([])
   })
 
-  it('leaves a CLOSED standing role in Awaiting review — it wants a verdict, not a nap', () => {
+  it('leaves a CLOSED standing constitution in Awaiting review — it wants a verdict, not a nap', () => {
     // What the daemon actually does (shuttle standing-roles reference): a
-    // standing role's run ends `status:closed` + untempered, which IS the
+    // standing constitution's run ends `status:closed` + untempered, which IS the
     // awaiting-review state, and `shuttle accept` re-arms it to `active`.
     // So a closed role is not parked — it is holding a work product for you —
     // and drawing it asleep in Resting would hide the one thing it needs.
@@ -1488,7 +1308,7 @@ describe('Resting holds standing roles asleep between runs', () => {
     expect(restingCards(resp)).toEqual([])
   })
 
-  it('leaves a PAUSED standing role in Drafts, where pause put it', () => {
+  it('leaves a PAUSED standing constitution in Drafts, where pause put it', () => {
     // `shuttle pause` writes status:open and preserves the schedule. An
     // open role is not armed, so it has no next launch to sleep until.
     const resp = boardOf([role({ status: 'open' })])
@@ -1561,14 +1381,14 @@ describe('the fold', () => {
     expect(resp.folded[0].foldedUnder).toBe('a')
   })
 
-  it('folds under the head wherever the head is drawn — the PINNED strip included', () => {
-    // The cmbx case: a pile of work filed under an umbrella role. The strip is
-    // the only place that role appears, so the queue has to be visible from it.
+  it('folds under a resting hub — the cmbx case', () => {
+    // A pile of work filed under a hub that rests between sessions: the hub
+    // is drawn in Resting, so its queue folds under it there.
     const resp = board(
-      step('hub', { shuttleKind: 'pinned' }),
+      step('hub', { horizon: 'stashed' }),
       step('b', { dependsOn: ['hub'] }),
     )
-    expect(resp.pinned.map((c) => c.id)).toEqual(['hub'])
+    expect(resp.stash.map((c) => c.id)).toEqual(['hub'])
     expect(resp.folded.map((c) => c.id)).toEqual(['b'])
     expect(resp.folded[0].foldedUnder).toBe('hub')
   })
@@ -1801,13 +1621,13 @@ describe('who may be stacked, and behind what', () => {
   // Lifecycle and kind on either end are ordering for the eye: a draft may
   // queue behind finished work, an awaiting-review source queues for when it
   // reopens, a tempered tail is ordering rather than a promise to wait, and a
-  // pinned hub is the canonical thing to file work under. Only the graph
+  // resting hub is the canonical thing to file work under. Only the graph
   // decides, so a fresh source lands on the target's chain tail whatever
   // either card's status, verdict or kind.
   const lifecycle = fc.record({
     status: fc.constantFrom('open', 'active', 'closed'),
     tempered: fc.constantFrom(undefined, true, false),
-    shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing', 'pinned'),
+    shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing'),
   })
   it('stacks any lifecycle or kind onto the chain tail', () => {
     const graphs: [string, Map<string, string[]>, string][] = [
@@ -2078,7 +1898,7 @@ describe('a card must be substantially on screen to be aimed at', () => {
   })
 
   it('offers a zone on a compact row that is entirely on screen', () => {
-    // A 22px Resting cluster item or pinned chip is not a sliver of anything;
+    // A 22px Resting cluster item is not a sliver of anything;
     // the pixel floor is capped at the card's own height so compact surfaces
     // are stackable at all. Half of one is still refused.
     expect(stackZoneOffered(22, 22)).toBe(true)

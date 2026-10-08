@@ -18,7 +18,6 @@ function surfaces(getFleetDefaultAgent?: (origin: string) => string): KanbanSurf
     stopDragAutoScroll: () => {},
     transition: () => {},
     setSurface: () => {},
-    pin: () => {},
     stack: () => {},
     reorderQueue: () => {},
     unqueueRow: () => {},
@@ -81,15 +80,6 @@ describe('agent names follow each owning fleet default', () => {
     expect(now.querySelector<HTMLElement>('[data-fiber-id="default"] .kbn-card-actor')?.hidden).toBe(true)
     expect(now.querySelector<HTMLElement>('[data-fiber-id="custom"] .kbn-card-actor')?.textContent).toBe('claude-opus')
     expect(now.querySelector<HTMLElement>('[data-fiber-id="implicit"] .kbn-card-actor')?.hidden).toBe(true)
-
-    const pinned = renderer.renderPinnedSection([
-      card({ id: 'pin-default', originId: 'alpha', status: 'active', shuttleKind: 'pinned', shuttleAgent: 'claude-opus' }),
-      card({ id: 'pin-default-beta', originId: 'beta', status: 'active', shuttleKind: 'pinned', shuttleAgent: 'claude-fable' }),
-      card({ id: 'pin-custom', originId: 'beta', status: 'active', shuttleKind: 'pinned', shuttleAgent: 'claude-opus' }),
-    ], {})
-    expect(pinned.querySelector<HTMLElement>('[data-fiber-id="pin-default"] .kbn-pin-chip-hint')?.hidden).toBe(true)
-    expect(pinned.querySelector<HTMLElement>('[data-fiber-id="pin-default-beta"] .kbn-pin-chip-hint')?.hidden).toBe(true)
-    expect(pinned.querySelector<HTMLElement>('[data-fiber-id="pin-custom"] .kbn-pin-chip-hint')?.textContent).toBe('claude-opus')
 
     const resting = renderer.renderStashSection([
       card({ id: 'rest-default', originId: 'alpha', effectiveHorizon: 'stashed', shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }),

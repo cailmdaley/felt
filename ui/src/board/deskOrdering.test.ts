@@ -60,7 +60,7 @@ function surfaceOrder(r: KanbanResponse): unknown {
   return {
     drafts: identities(r.now.drafts), inFlight: identities(r.now.inFlight), review: identities(r.now.awaitingReview),
     past: identities(r.timeline.past), future: identities(r.timeline.futureDated),
-    pinned: identities(r.pinned), stash: identities(r.stash), folded: identities(r.folded),
+    stash: identities(r.stash), folded: identities(r.folded),
   }
 }
 
@@ -160,7 +160,7 @@ describe('Desk comparators', () => {
 
 describe('the composite Desk is independent of entry and origin order', () => {
   const dates = [NEW, SAME, OLD, '', 'not a date', '2026-02-30T09:00:00Z']
-  const entries = ['draft', 'review', 'tempered', 'discarded', 'pinned', 'rest', 'flight'].flatMap((lane) =>
+  const entries = ['draft', 'review', 'tempered', 'discarded', 'rest', 'flight'].flatMap((lane) =>
     dates.map((createdAt, i) => {
       const origin = i % 2 ? 'beta' : 'alpha'
       const e = entry(`${lane}/${i}`, {
@@ -168,7 +168,7 @@ describe('the composite Desk is independent of entry and origin order', () => {
         status: ['review', 'tempered', 'discarded'].includes(lane) ? 'closed' : lane === 'flight' ? 'active' : 'open',
         tempered: lane === 'tempered' ? true : lane === 'discarded' ? false : undefined,
         closedAt: ['review', 'tempered', 'discarded'].includes(lane) ? createdAt : undefined,
-        shuttleKind: lane === 'pinned' ? 'pinned' : 'oneshot',
+        shuttleKind: 'oneshot',
         horizon: lane === 'rest' ? 'stashed' : undefined,
       }, origin)
       if (lane === 'flight') e.runtime = { state: 'running', phase: i % 2 ? 'working' : 'waiting', lastActivityAt: NOW - i * 1000 }
@@ -191,7 +191,6 @@ describe('the composite Desk is independent of entry and origin order', () => {
     const baseline = buildKanbanResponseFromComposite(feed(entries), { nowMs: NOW })
     expect(baseline.now.drafts.filter((c) => c.id === 'shared/local-id')).toHaveLength(2)
     expect(baseline.now.drafts.filter((c) => c.id === 'old/local-id')).toHaveLength(2)
-    expect(ids(baseline.pinned)).toEqual(['pinned/0', 'pinned/1', 'pinned/2', 'pinned/3', 'pinned/4', 'pinned/5'])
     expect(ids(baseline.timeline.futureDated)).toEqual(['future/late', 'future/early'])
     for (let seed = 1; seed <= 40; seed++) {
       const result = buildKanbanResponseFromComposite(feed(entries, seed), { nowMs: NOW })

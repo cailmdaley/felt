@@ -31,7 +31,7 @@ const data = () => response({
     inFlight: [card({ id: 'working', status: 'active', runtimePhase: 'working' }), head],
     awaitingReview: [card({ id: 'review', status: 'closed' })],
   },
-  folded: [child], pinned: [card({ id: 'pinned', shuttleKind: 'pinned' })],
+  folded: [child],
   stash: [card({ id: 'resting', effectiveHorizon: 'stashed' })],
 })
 function draw(value: KanbanResponse): void { inside.lastResponse = value; inside.render(value) }
@@ -108,7 +108,7 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector('.ws-switcher')).toBeNull()
     expect(press('/', {}, input).defaultPrevented).toBe(false)
   })
-  it('moves through both flight bands, the three columns, Pinned and Resting without wrapping', () => {
+  it('moves through both flight bands, the three columns and Resting without wrapping', () => {
     press('j'); expect(selected()).toBe('review')
     press('h'); expect(selected()).toBe('working')
     press('j'); expect(selected()).toBe('head-uid')
@@ -116,11 +116,10 @@ describe('Desk keyboard selection', () => {
     press('g'); expect(selected()).toBe('working')
     press('G'); expect(selected()).toBe('head-uid')
     press('ArrowRight'); expect(selected()).toBe('review')
-    press('l'); expect(selected()).toBe('pinned')
     press('l'); expect(selected()).toBe('resting')
     press('l'); expect(selected()).toBe('resting')
-    press('h'); expect(selected()).toBe('pinned')
-    press('u'); expect(selected()).toBe('pinned')
+    press('h'); expect(selected()).toBe('review')
+    press('u'); expect(selected()).toBe('review')
     press('Escape'); expect(selected()).toBeUndefined()
   })
   it('treats a folded queue as one stop and expanded members as stops', () => {

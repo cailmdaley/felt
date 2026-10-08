@@ -45,7 +45,6 @@ export function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
     now: { drafts: [], inFlight: [], awaitingReview: [] },
     timeline: { past: [], futureDated: [] },
     stash: [],
-    pinned: [],
     folded: [],
     cycles: [],
     staleness: {},

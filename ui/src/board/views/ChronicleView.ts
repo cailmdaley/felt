@@ -952,8 +952,8 @@ function buildFiberRow(
  * after a working directory teaches the page's unit wrong.
  *
  * The fiber set is "anything with activity in the window" ∪ "anything still
- * open" — the three Now lanes, the pinned strip, the two future timeline
- * pools, AND Resting ({@link restingCards}: snoozed work plus a standing role
+ * open" — the three Now lanes, the two future timeline
+ * pools, AND Resting ({@link restingCards}: snoozed work plus a standing constitution
  * asleep on its cron). So an idle-but-open fiber still shows its lifeline, a
  * scheduled one still shows its ◴/◐ in the future region, a snoozed one keeps
  * its promise on the calendar even while parked off the Desk, and a closed one
@@ -1019,10 +1019,9 @@ export function buildRows(
     ...response.now.drafts,
     ...response.now.inFlight,
     ...response.now.awaitingReview,
-    ...response.pinned,
     ...response.timeline.futureDated,
     // Resting — see the doc comment above this function. `restingCards`
-    // already carries `timeline.futureDated` too (a standing role asleep on
+    // already carries `timeline.futureDated` too (a standing constitution asleep on
     // its cron); re-adding those ids here is a harmless no-op on the Set, and
     // calling the one shared function is what keeps this list from drifting
     // out of step with the Desk's own Resting region.
@@ -1659,7 +1658,6 @@ class ChronicleView implements TemporalView {
       response.now.drafts,
       response.now.inFlight,
       response.now.awaitingReview,
-      response.pinned,
       response.timeline.futureDated,
       // Folding and unfolding move a card between `folded` and a column, so a
       // poll whose only change is one of those has to repaint.
