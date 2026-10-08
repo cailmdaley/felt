@@ -200,9 +200,8 @@ defmodule Shuttle.Dispatcher do
       previous one when it ended without a handoff.
     * `"continue"` — a message delivered to a fiber with no live worker
       (`Shuttle.Delivery`): the no-handoff rule below, for any kind of fiber.
-    * absent — the autonomous loop: the no-handoff rule for oneshots; pinned
-      and standing roles start fresh (a pinned role only redispatches itself
-      after a clean handoff, and standing roles run discrete occurrences).
+    * absent — the autonomous loop: the no-handoff rule for oneshots; a
+      standing constitution starts fresh, since it runs discrete occurrences.
 
   The no-handoff rule: with no session, or a clean handoff since dispatch
   (`handed_off_at >= dispatched_at`), start fresh. A `surface: app`
@@ -1919,7 +1918,7 @@ defmodule Shuttle.Dispatcher do
     # lands in ~300-500ms. The 10s timeout is the safety net for the rare
     # cases where that auto-attach can't run — kitty isn't running, or the
     # daemon was dispatched with no human in the loop (CLI, scheduled
-    # standing role). After the timeout the harness proceeds at the
+    # standing constitution). After the timeout the harness proceeds at the
     # default-size.
     wait_for_client_block =
       if session != "" and not headless, do: wait_for_client_block(session), else: ""

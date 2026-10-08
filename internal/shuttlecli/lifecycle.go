@@ -342,7 +342,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				if err := st.Write(f); err != nil {
 					return fmt.Errorf("writing fiber: %w", err)
 				}
-				fmt.Fprintf(a.env.Stdout, "resumed %s%s (standing role re-armed; next run on the schedule's next tick)\n", args[0], ref.Location())
+				fmt.Fprintf(a.env.Stdout, "resumed %s%s (standing constitution re-armed; next run on the schedule's next tick)\n", args[0], ref.Location())
 				return nil
 			}
 
@@ -370,13 +370,13 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 	return resumeCmd
 }
 
-// standingAwaiting reports whether f is a standing role awaiting review:
+// standingAwaiting reports whether f is a standing constitution awaiting review:
 // status: closed with no verdict (tempered unset).
 func standingAwaiting(f *felt.Felt, block *shuttle.Block) bool {
 	return block.Kind == "standing" && f.Status == felt.StatusClosed && readTempered(f) == nil
 }
 
-// rearmStanding re-arms a standing role (status: active, verdict and
+// rearmStanding re-arms a standing constitution (status: active, verdict and
 // closed-at cleared) and concludes its run by stamping
 // shuttle.runtime.handed_off_at = now in the same document write. A human
 // accept or resume ends the run the way a worker handoff does: the poller's
@@ -510,7 +510,7 @@ field is missing. Use:
   shuttle close <fiber> --tempered=false  # discarded
 
 The shuttle block stays installed; closed fibers are ignored by the daemon
-until reopen or accept moves them (resume also re-arms a standing role
+until reopen or accept moves them (resume also re-arms a standing constitution
 awaiting review).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -656,7 +656,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 				}
 			}
 			statusBefore := f.Status
-			// --conclude-run is the daemon's forced start: a standing role it
+			// --conclude-run is the daemon's forced start: a standing constitution it
 			// re-arms concludes the run it stood on in the same write, as the
 			// daemon's own re-arm does, so a start refused after this write leaves
 			// the role armed rather than looking like a dirty exit.
@@ -683,7 +683,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 	}
 	reopenCmd.Flags().BoolVar(&reopenAsDraft, "as-draft", false, "reopen to status: open (a paused draft, not auto-dispatched) instead of status: active")
 	reopenCmd.Flags().StringVar(&reopenProjectDir, "project-dir", "", "Set the worker cwd as it reopens (required to arm when the block has none)")
-	reopenCmd.Flags().BoolVar(&reopenConcludeRun, "conclude-run", false, "Conclude a standing role's run (shuttle.runtime.handed_off_at = now) in the same write")
+	reopenCmd.Flags().BoolVar(&reopenConcludeRun, "conclude-run", false, "Conclude a standing constitution's run (shuttle.runtime.handed_off_at = now) in the same write")
 	_ = reopenCmd.Flags().MarkHidden("conclude-run")
 	reopenCmd.Flags().StringVar(&reopenMessage, "message", "", "Launch directive for a remote worker (the From User prompt block)")
 	reopenCmd.Flags().StringVar(&reopenMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")

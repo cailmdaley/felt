@@ -502,7 +502,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "role and surface metadata select the skill's exit semantics" do
-    assert Dispatcher.render_prompt("tests/a", kind: "pinned") =~ "Kind: pinned"
+    assert Dispatcher.render_prompt("tests/a", kind: "standing") =~ "Kind: standing"
     assert Dispatcher.render_prompt("tests/a", surface: "app") =~ "surface: app"
     assert Dispatcher.render_prompt("tests/a") =~ "Kind: oneshot"
   end
@@ -1589,7 +1589,7 @@ defmodule Shuttle.DispatcherTest do
       cond do
         mode == "previous" and session != nil -> {{:previous, session}, false}
         mode == "previous" -> {{:error, :missing_session_id}, false}
-        mode == nil and kind != "oneshot" -> {:fresh, false}
+        mode == nil and kind == "standing" -> {:fresh, false}
         session == nil or clean? -> {:fresh, false}
         surface == "app" and mode == "fresh" -> {:fresh, false}
         surface == "app" -> {{:previous, session}, false}

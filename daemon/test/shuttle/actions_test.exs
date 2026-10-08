@@ -258,21 +258,15 @@ defmodule Shuttle.ActionsTest do
     end
   end
 
-  describe "pinned re-park (unified lifecycle)" do
-    test "a tempered/composted pinned role is a terminus, NOT accept-run" do
-      # A pinned role that already carries a verdict (accepted/composted) is
-      # terminal — accept-run is reserved for the untempered awaiting state. It
-      # falls through to the generic closed clauses.
-      for verdict <- [true, false] do
-        fiber = %{
-          "id" => "work/pinned",
-          "status" => "closed",
-          "tempered" => verdict,
-          "shuttle" => %{"kind" => "pinned"}
-        }
+  describe "legacy kind: pinned" do
+    test "a closed legacy pinned card resolves exactly as a closed oneshot" do
+      for target <- @kanban_targets do
+        pinned = %{"id" => "work/hub", "status" => "closed", "shuttle" => %{"kind" => "pinned"}}
+        oneshot = put_in(pinned, ["shuttle", "kind"], "oneshot")
 
-        available = Actions.actions_for(fiber) |> Enum.map(& &1.id)
-        refute "accept-run" in available
+        assert Actions.resolve_transition(pinned, target) ==
+                 Actions.resolve_transition(oneshot, target),
+               "legacy pinned dragged to #{target} must resolve as a oneshot"
       end
     end
   end
@@ -282,9 +276,8 @@ defmodule Shuttle.ActionsTest do
     # Every column a card can be dropped on has the meaning of that column, and
     # accept is the one kind-aware verb: a STANDING role re-arms (accept-run →
     # active) from the accept gestures (inFlight/tempered), and drafts parks it
-    # as a paused draft — stopping a role for now is not composting it. A
-    # PINNED role re-parks to the strip, so dragging the card back there
-    # (drafts) is an accept gesture too. For both, composted rejects the run
+    # as a paused draft — stopping a role for now is not composting it.
+    # Composted rejects the run
     # and the same-column awaitingReview drop is non-destructive: it stays in
     # review, never silently composting the pending run. No awaiting role
     # collapses to the generic reopen a closed oneshot gets, nor offers a
@@ -296,13 +289,6 @@ defmodule Shuttle.ActionsTest do
     @awaiting_resolutions %{
       "standing" => %{
         "drafts" => {"reopen-draft", %{verb: "reopen", as_draft: true}},
-        "inFlight" => @accept_run,
-        "awaitingReview" => @stay_in_review,
-        "tempered" => @accept_run,
-        "composted" => @compost
-      },
-      "pinned" => %{
-        "drafts" => @accept_run,
         "inFlight" => @accept_run,
         "awaitingReview" => @stay_in_review,
         "tempered" => @accept_run,

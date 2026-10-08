@@ -73,7 +73,7 @@ func (r *AgentRegistry) NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAg
 
 // ResolveBlock computes the resolved view of a block: the agent name (or the
 // registry default when unnamed) → base record + effective axes, and — for a
-// standing role — the next scheduled occurrence strictly after `now`. Returns an
+// standing constitution — the next scheduled occurrence strictly after `now`. Returns an
 // error on a structurally invalid block (unknown agent, dangling alias, axis
 // violation, unparseable cron); a read-path caller that has not pre-validated
 // can treat that as "emit the flat block without a resolved sub-key".
@@ -102,7 +102,7 @@ func ResolveBlock(b *Block, reg *AgentRegistry, now time.Time) (*Resolved, error
 		// robfig's Next returns the zero time (not an error) for a grammatical
 		// but unsatisfiable schedule (e.g. Feb 30: "0 0 30 2 *"). Treat that as
 		// "no occurrence" — emit neither boundary — so the daemon sees an
-		// unschedulable standing role (invalid) rather than a year-0001 next_due.
+		// unschedulable standing constitution (invalid) rather than a year-0001 next_due.
 		if !next.IsZero() {
 			res.NextDue = &next
 

@@ -1,9 +1,9 @@
 defmodule Shuttle.LifecycleService do
   @moduledoc """
-  The daemon's side of the role lifecycle verbs `accept` and `resume`.
+  The daemon's side of the lifecycle verbs `accept` and `resume`.
 
   Shuttle is their writer: `shuttle -C <store> <verb> <fiber> --local` re-arms
-  (or, for a pinned accept, re-parks) the role and concludes its run
+  the constitution and concludes its run
   (`shuttle.runtime.handed_off_at = now`) in a single document write, so the
   poller never reads a re-armed role without the stamp that keeps its
   just-served occurrence from firing again.

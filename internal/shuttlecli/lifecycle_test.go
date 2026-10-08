@@ -247,7 +247,7 @@ func TestShuttleReopen_RequiresProjectDir(t *testing.T) {
 }
 
 // TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen: reopening a closed
-// standing role with --project-dir sets the directory and arms the role in one
+// standing constitution with --project-dir sets the directory and arms the role in one
 // write, and leaves shuttle.runtime alone — the reopened role re-fires the
 // occurrence it stood on.
 func TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen(t *testing.T) {
@@ -274,7 +274,7 @@ func TestShuttleReopen_StandingWithDirectoryLeavesItsRunOpen(t *testing.T) {
 		t.Fatalf("decoding shuttle: block: %v", err)
 	}
 	if rt, ok := block["runtime"].(map[string]any); ok && rt["handed_off_at"] != nil {
-		t.Fatalf("reopen must not conclude a standing role's run, got handed_off_at=%v", rt["handed_off_at"])
+		t.Fatalf("reopen must not conclude a standing constitution's run, got handed_off_at=%v", rt["handed_off_at"])
 	}
 }
 
@@ -590,7 +590,7 @@ func TestShuttleAccept_ActiveStandingRoleConcludesRun(t *testing.T) {
 	}, nil)
 
 	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err != nil {
-		t.Fatalf("accept on an active standing role: %v\n%s", err, out)
+		t.Fatalf("accept on an active standing constitution: %v\n%s", err, out)
 	}
 	got := mustRead(t, storage, "f")
 	if got.Status != felt.StatusActive {
@@ -1098,7 +1098,7 @@ func TestShuttleOwnershipGuard_WritesOwnedHere(t *testing.T) {
 }
 
 // TestShuttleRetiredAgent_AcceptRefuses covers accept's arming gate: a
-// standing role awaiting review with a retired agent must refuse rather than
+// standing constitution awaiting review with a retired agent must refuse rather than
 // silently re-arm.
 func TestShuttleRetiredAgent_AcceptRefuses(t *testing.T) {
 	t.Parallel()

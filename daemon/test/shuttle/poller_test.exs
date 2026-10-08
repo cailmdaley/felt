@@ -1513,103 +1513,17 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "poller does NOT auto-dispatch a status:active pinned role with a DIRTY dispatch marker" do
-    # The anti-hollow-relaunch invariant. A pinned role that was dispatched but
-    # never handed off cleanly (dispatched_at present, no newer handed_off_at —
-    # a mid-flight or dirty-dead marker) is NOT eligible for the autonomous tick:
-    # tick_kind_eligible? gates pinned on deliberate_handoff_since_dispatch?,
-    # which is false here. This is what severs the old shapepipe redispatch loop
-    # (survey, find nothing, exit, re-dispatch). Force-dispatch still launches
-    # it (below).
-    fiber = make_fiber("tests/pinned-active", %{"status" => "active"})
-    MockRunner.set_fiber("tests/pinned-active", fiber)
-    MockRunner.set_shuttle("tests/pinned-active", "kind: pinned\nagent: claude-opus\n", "active")
-    # A dirty marker: dispatched, never handed off → clean_handoff? is false.
-    write_dispatch_marker("tests/pinned-active", "sess-pinned-active")
+  test "a legacy kind:pinned active fiber dispatches as a oneshot" do
+    # `pinned` is a retired kind read as oneshot (`Poller.block_kind/1`, the
+    # CLI's `shuttle.NormalizeKind`): an armed one dispatches on the tick like
+    # any oneshot, with no kind-specific gate.
+    fiber = make_fiber("tests/legacy-pinned", %{"status" => "active"})
+    MockRunner.set_fiber("tests/legacy-pinned", fiber)
+    MockRunner.set_shuttle("tests/legacy-pinned", "kind: pinned\nagent: claude-opus\n", "active")
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_pinned_active,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    sync_poll_cycle!(poller)
-
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session"
-           end),
-           "the autonomous tick must not spawn a fresh worker for a dirty-marker pinned role"
-
-    # But an explicit force-dispatch (the strip's "start"/"Resume" gesture) DOES
-    # launch it — pinned roles are human-dispatch-startable, not never-dispatch.
-    assert {:ok, _session} =
-             Poller.dispatch_fiber(poller, "tests/pinned-active", force: true, ad_hoc: true)
-
-    assert wait_until(fn ->
-             Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-               cmd == "tmux" and hd(args) == "new-session"
-             end)
-           end)
-  end
-
-  test "poller does NOT auto-dispatch a status:active pinned role with NO runtime markers" do
-    # The strict-predicate case. deliberate_handoff_since_dispatch? demands a
-    # POSITIVE signal (both markers, handoff >= dispatch); a marker-less
-    # `status: active` pinned fiber (hand-edited active, legacy pre-marker, or
-    # runtime keys wiped) must sit idle until a human Resumes it — exactly the
-    # old blanket-exclusion behavior. The lenient clean_handoff_since_dispatch?
-    # defaults TRUE here (a resume-vs-fresh safety), so gating on it would
-    # auto-dispatch a role no worker asked to relaunch.
-    fiber = make_fiber("tests/pinned-markerless", %{"status" => "active"})
-    MockRunner.set_fiber("tests/pinned-markerless", fiber)
-
-    MockRunner.set_shuttle(
-      "tests/pinned-markerless",
-      "kind: pinned\nagent: claude-opus\n",
-      "active"
-    )
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_pinned_markerless,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    sync_poll_cycle!(poller)
-
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session"
-           end),
-           "the autonomous tick must not spawn a worker for a marker-less pinned role"
-  end
-
-  test "poller DOES auto-redispatch a status:active pinned role after a CLEAN handoff" do
-    # The unified-lifecycle other half: a pinned worker in a long autonomous arc
-    # that ran `shuttle handoff` (stamping handed_off_at >= dispatched_at)
-    # is deliberately asking for a fresh session. tick_kind_eligible? sees the
-    # clean handoff and the tick re-dispatches a fresh worker — the arc continues
-    # across clean sessions instead of going dark.
-    fiber = make_fiber("tests/pinned-clean-handoff", %{"status" => "active"})
-    MockRunner.set_fiber("tests/pinned-clean-handoff", fiber)
-
-    MockRunner.set_shuttle(
-      "tests/pinned-clean-handoff",
-      "kind: pinned\nagent: claude-opus\n",
-      "active"
-    )
-
-    # Dispatched, then a strictly-later clean handoff → clean_handoff? is true.
-    base = DateTime.utc_now()
-    write_dispatch_marker("tests/pinned-clean-handoff", "sess-clean", base)
-    write_handoff_marker("tests/pinned-clean-handoff", DateTime.add(base, 60, :second))
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_pinned_clean_handoff,
+        name: :test_poller_legacy_pinned,
         runner: MockRunner,
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
@@ -1623,33 +1537,7 @@ defmodule Shuttle.PollerTest do
                cmd == "tmux" and hd(args) == "new-session"
              end)
            end),
-           "a cleanly-handed-off pinned role must auto-redispatch a fresh worker"
-  end
-
-  test "poller does NOT auto-dispatch a PARKED (status:open) pinned role" do
-    # Option D: status:open is the parked rest state on the strip. The existing
-    # `status != "active"` gate skips it — no bespoke pinned branch. This is the
-    # park half of the loop: dragging In-flight → strip writes active → open, and
-    # the role stops looping.
-    fiber = make_fiber("tests/pinned-parked", %{"status" => "open"})
-    MockRunner.set_fiber("tests/pinned-parked", fiber)
-    MockRunner.set_shuttle("tests/pinned-parked", "kind: pinned\n", "open")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_pinned_parked,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    sync_poll_cycle!(poller)
-
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session"
-           end)
-
-    refute Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == "tests/pinned-parked"))
+           "an armed legacy pinned fiber must dispatch as a oneshot"
   end
 
   test "poller never stats a pure-ineligible fiber's project_dir (iCloud/TCC guard)" do
@@ -1660,7 +1548,7 @@ defmodule Shuttle.PollerTest do
     # un-grantable TCC "access data from other apps" prompt. `filter_eligible/2`
     # and `eligible?/2` must run every cheap, pure, in-memory gate BEFORE
     # touching that stat, so a fiber a pure predicate already rejects (here: a
-    # pinned role with no deliberate-handoff marker) never reaches it. This
+    # paused oneshot, status: open) never reaches it. This
     # test proves that by tracing real calls to `File.dir?/1` inside the
     # poller process across a poll tick and asserting the sentinel
     # project_dir path is never among the args — a regression that
@@ -1670,18 +1558,18 @@ defmodule Shuttle.PollerTest do
     sentinel_dir = "/tmp/felt-icloud-sentinel-#{System.unique_integer([:positive])}"
     refute File.exists?(sentinel_dir)
 
-    fiber = make_fiber("tests/pinned-icloud-sentinel", %{"status" => "active"})
-    MockRunner.set_fiber("tests/pinned-icloud-sentinel", fiber)
+    fiber = make_fiber("tests/paused-icloud-sentinel", %{"status" => "open"})
+    MockRunner.set_fiber("tests/paused-icloud-sentinel", fiber)
 
     MockRunner.set_shuttle(
-      "tests/pinned-icloud-sentinel",
-      "kind: pinned\nagent: claude-opus\nproject_dir: #{sentinel_dir}\n",
-      "active"
+      "tests/paused-icloud-sentinel",
+      "kind: oneshot\nagent: claude-opus\nproject_dir: #{sentinel_dir}\n",
+      "open"
     )
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_pinned_icloud_sentinel,
+        name: :test_poller_paused_icloud_sentinel,
         runner: MockRunner,
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
@@ -1726,124 +1614,17 @@ defmodule Shuttle.PollerTest do
              {:trace, _pid, :call, {File, :dir?, [^sentinel_dir]}} -> true
              _ -> false
            end),
-           "poller must not stat a pinned-without-handoff fiber's project_dir " <>
-             "(tick_kind_eligible?/1 must run before the filesystem gate)"
+           "poller must not stat a paused fiber's project_dir " <>
+             "(the status gate must run before the filesystem gate)"
 
     refute Enum.any?(
              Poller.snapshot(poller).eligible,
-             &(&1.fiber_id == "tests/pinned-icloud-sentinel")
+             &(&1.fiber_id == "tests/paused-icloud-sentinel")
            )
   end
 
-  test "a pinned worker exit parks the role back to the strip (status:open), no re-dispatch" do
-    # A pinned worker's session ending (human killed it, crash, or clean exit)
-    # PARKS the role back to the strip by writing active → open — it must NOT
-    # stay stuck `active` with no live worker in In-flight, and must NOT relaunch.
-    # This is the symmetric counterpart of a standing exit writing closed.
-    # Reverting LifecycleStore.park / the handle_worker_exit pinned branch leaves
-    # it active-but-dead; reverting filter_eligible's guard re-arms the loop.
-    #
-    # The exit handler routes through felt (LifecycleStore → FeltStores.resolve_
-    # fiber), so the mock fiber must be felt-resolvable: point SHUTTLE_STORES at the
-    # mock store the factory wrote to (/tmp/.felt). Without this a
-    # park regression would silently no-op — masking whether the gate even fired.
-    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    fiber_id = "tests/pinned-exit-parks"
-    leaf = fiber_id |> String.split("/") |> List.last()
-    session = FiberUid.session(fiber_id)
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
-    MockRunner.set_shuttle(fiber_id, "kind: pinned\nagent: claude-opus\n", "active")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_pinned_exit_parks,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    new_sessions = fn ->
-      Enum.count(MockRunner.commands(), fn {cmd, args} ->
-        cmd == "tmux" and hd(args) == "new-session" and session in args
-      end)
-    end
-
-    # First dispatch (a force-dispatch is how the strip's "start" gesture fires).
-    assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
-    assert new_sessions.() == 1
-
-    # Worker session ends while the document is still active (it did NOT self-close).
-    end_worker_session(poller, fiber_id)
-    # Flush the GenServer mailbox so the exit write lands before the disk read.
-    _ = Poller.snapshot(poller)
-
-    # The on-disk document is parked: active → open (back to the strip), and NOT
-    # marked closed/awaiting (that's the standing closer, not the pinned one).
-    doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
-    assert doc =~ ~r/status:\s*open/
-    refute doc =~ ~r/status:\s*closed/
-    refute doc =~ "closed-at"
-
-    # No loop: the next poll does NOT re-dispatch (now status:open anyway, and
-    # filter_eligible would exclude it even if active). Session count stays at 1.
-    # it explicitly. (Reverting the pinned guard flips this to a second launch.)
-    sync_poll_cycle!(poller)
-    assert new_sessions.() == 1
-  end
-
-  test "a pinned worker CLEAN handoff leaves the role active and redispatches (no park)" do
-    # The clean-handoff counterpart of the park test: a pinned worker that stamps
-    # handed_off_at and exits is asking for a fresh session (long autonomous arc).
-    # handle_worker_exit's pinned branch leaves the document `active` (does NOT
-    # park to open), and the next tick re-dispatches a fresh worker.
-    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    fiber_id = "tests/pinned-clean-exit"
-    leaf = fiber_id |> String.split("/") |> List.last()
-    session = FiberUid.session(fiber_id)
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"status" => "active"}))
-    MockRunner.set_shuttle(fiber_id, "kind: pinned\nagent: claude-opus\n", "active")
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_pinned_clean_exit,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    new_sessions = fn ->
-      Enum.count(MockRunner.commands(), fn {cmd, args} ->
-        cmd == "tmux" and hd(args) == "new-session" and session in args
-      end)
-    end
-
-    assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
-    assert new_sessions.() == 1
-
-    # The worker hands off cleanly (stamps handed_off_at strictly after dispatch),
-    # then its session ends.
-    write_handoff_marker(fiber_id, DateTime.add(DateTime.utc_now(), 60, :second))
-    end_worker_session(poller, fiber_id)
-    _ = Poller.snapshot(poller)
-
-    # The document stays active — NOT parked to open (that's the dirty-exit path).
-    doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
-    assert doc =~ ~r/status:\s*active/
-    refute doc =~ ~r/status:\s*open/
-
-    # And the next autonomous tick re-dispatches a fresh worker (clean handoff →
-    # tick_kind_eligible?), so the session count climbs to 2.
-    sync_poll_cycle!(poller)
-
-    assert wait_until(fn -> new_sessions.() == 2 end),
-           "a cleanly-handed-off pinned role must redispatch on the next tick"
-  end
-
   test "a standing worker exit DOES close the role to awaiting-review (status:closed)" do
-    # The complement of the pinned carve-out: a STANDING (cron) worker's exit
-    # still marks the role awaiting, so the cron does not re-fire it this cycle.
+    # A STANDING (cron) worker's exit marks it awaiting, so the cron does not re-fire it this cycle.
     # This is what guards the gate against being broadened to skip standing too.
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
@@ -2733,8 +2514,7 @@ defmodule Shuttle.PollerTest do
     # the auto-release must not become a back door into dispatching under one.
     # It names itself over the quarantine it rides on: the more actionable fix.
     {"a contract skew",
-     runner: [contract_skew: true],
-     expect: [reason: ~r/\Acontract skew — /, contract_ok: false]}
+     runner: [contract_skew: true], expect: [reason: ~r/\Acontract skew — /, contract_ok: false]}
   ]
 
   for {{label, row}, index} <- Enum.with_index(@unreleasable_boots) do
@@ -4412,7 +4192,7 @@ defmodule Shuttle.PollerTest do
      uid: "01KTHDNZS287ZSSG8X8V59XKWB"},
     {"uid workers when Shuttle listing warnings go to stderr", "life/french/daily-practice",
      uid: "01KTHDNZS287ZSSG8X8V59XKWB",
-     shuttle: "kind: pinned\nagent: claude-opus\n",
+     shuttle: "kind: oneshot\nagent: claude-opus\n",
      ls_stderr_warning: true},
     {"a literal hyphenated fiber id", "ai-futures/shuttle/constitution-shuttle-standalone",
      shuttle: "enabled: true\nkind: oneshot\nagent: claude-sonnet\n"}
@@ -4500,7 +4280,7 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  test "poller adopts a live orphan session for a looping pinned role (no duplicate dispatch)" do
+  test "poller adopts a live orphan session for an armed oneshot (no duplicate dispatch)" do
     # Regression for the daemon-restart-drops-all-adoptions bug. After a restart,
     # `candidate_session_lookup` must record the fiber_id for a session name seen
     # exactly once — every uid-keyed name is unique to one fiber. A `Map.update/4`
@@ -4508,20 +4288,20 @@ defmodule Shuttle.PollerTest do
     # applied to the default), so a single-occurrence session kept empty sets,
     # resolved to nil, and the live worker was never adopted.
     #
-    # A looping pinned role (Option D: status:active dispatches) with a live
-    # worker must be adopted as running — NOT duplicate-dispatched by the loop —
+    # An armed oneshot (status:active dispatches) with a live worker must be
+    # adopted as running — NOT duplicate-dispatched by the loop —
     # whether via `candidate_session_lookup` or the dispatch→:already_running
     # adopt. The field symptom this guards: operator/morning-post showing at-rest
     # on the board while a live worker existed.
-    fiber_id = "tests/pinned-orphan"
+    fiber_id = "tests/armed-orphan"
     uid = "01KTHDNZS287ZSSG8X8V59XKWD"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
-    MockRunner.set_shuttle(fiber_id, "kind: pinned\n", "active")
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\n", "active")
     MockRunner.add_tmux_session(Dispatcher.session_name(fiber_id, uid))
 
     {:ok, poller} =
       start_poller!(
-        name: :test_poller_pinned_orphan,
+        name: :test_poller_armed_orphan,
         runner: MockRunner,
         poll_interval_ms: 60_000,
         felt_stores: [MockRunner.felt_root()]
@@ -4531,7 +4311,7 @@ defmodule Shuttle.PollerTest do
       snap = Poller.snapshot(poller)
 
       assert Enum.any?(snap.eligible, &(&1.fiber_id == fiber_id and &1.state == "running")),
-             "a resting pinned role with a live orphan session must be adopted as running"
+             "an armed oneshot with a live orphan session must be adopted as running"
     end)
   end
 
@@ -4785,58 +4565,6 @@ defmodule Shuttle.PollerTest do
     refute File.read!(doc_path) =~ "status: closed"
 
     # No worker was spawned.
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session"
-           end)
-  end
-
-  test "poller PARKS (never self-heals) a dead pinned role whose markers are time-inverted" do
-    # Regression for the pinned relaunch loop: an inverted pair (handed_off_at
-    # earlier than dispatched_at) is NOT corrupt — it is the ordinary shape of
-    # any re-dispatched role, because the PREVIOUS run's handoff stamp persists
-    # under the new dispatch's newer dispatched_at. The standing-only self-heal
-    # (stamp handed_off_at=now) applied to a pinned dirty death MANUFACTURES the
-    # pinned autonomous relaunch trigger (deliberate_handoff_since_dispatch?),
-    # looping the role forever: heal → dispatch → dirty death → heal → …
-    # A dead pinned role must fall through to the park branch (status: open),
-    # with no handoff stamp and no fresh dispatch.
-    fiber_id = "tests/pinned-inverted-markers"
-
-    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
-
-    MockRunner.set_shuttle(fiber_id, """
-    kind: pinned
-    agent: claude-sonnet
-    """)
-
-    # A prior run's handoff, then a newer dispatch that died dirty (no live
-    # session): handed_off_at < dispatched_at.
-    dispatched = DateTime.utc_now()
-    write_dispatch_marker(fiber_id, "pinned-inverted-uuid", dispatched)
-    write_handoff_marker(fiber_id, DateTime.add(dispatched, -3600, :second))
-
-    doc_path = "#{MockRunner.felt_dir()}/#{fiber_id}/pinned-inverted-markers.md"
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_pinned_inverted,
-        runner: MockRunner,
-        poll_interval_ms: 60_000,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    sync_poll_cycle!(poller)
-
-    # Parked back to the strip.
-    assert wait_until(fn -> File.read!(doc_path) =~ "status: open" end)
-
-    # No self-heal write: stamping handed_off_at would arm the relaunch trigger.
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
-               "--handed-off-at" in args
-           end)
-
-    # And no fresh worker was spawned.
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
@@ -5246,7 +4974,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    # Same :dbg setup as the pinned-sentinel test above — runtime_tools is on
+    # Same :dbg setup as the paused-sentinel test above — runtime_tools is on
     # disk but not on this project's code path, and :dbg is reached through
     # apply/3 so the compiler never sees an unavailable module.
     [runtime_tools_ebin] =

@@ -2,7 +2,7 @@ defmodule Shuttle.StandingRole do
   @moduledoc """
   Parses and classifies `shuttle.kind: standing` fiber declarations.
 
-  Standing roles are still felt fibers. Shuttle interprets the `shuttle:` block
+  Standing constitutions are still felt fibers. Shuttle interprets the `shuttle:` block
   plus the document's `status`/`tempered` to decide whether a role is sleeping,
   due, or running. "Awaiting review" and "accepted/composted" are document facts
   (`status:closed` + untempered / `tempered`), not a `review.state` axis — there
@@ -142,7 +142,7 @@ defmodule Shuttle.StandingRole do
 
   def due_by_cron?(_, _, _), do: false
 
-  # Dispatch-path validity: a standing role for which Shuttle resolved a schedule
+  # Dispatch-path validity: a standing constitution for which Shuttle resolved a schedule
   # (next_due_at present ⟺ the cron parsed and a future tick exists). Both the
   # dispatch and display paths gate on this alone — there are no review/next_due
   # validations: the document, not a review overlay, is the truth.
@@ -198,7 +198,7 @@ defmodule Shuttle.StandingRole do
     }
   end
 
-  # Validity is the document's intrinsic shape: a standing role for which
+  # Validity is the document's intrinsic shape: a standing constitution for which
   # Shuttle resolved a schedule (next_due_at present). There are no
   # review/next_due validations — the document (status + tempered) is the truth,
   # and an unparseable schedule produces no resolved occurrence.
@@ -213,7 +213,7 @@ defmodule Shuttle.StandingRole do
   defp validate_kind(%__MODULE__{kind: "standing"}), do: nil
   defp validate_kind(%__MODULE__{kind: kind}), do: "kind must be standing, got #{inspect(kind)}"
 
-  # A standing role is well-formed iff Shuttle resolved a next occurrence for
+  # A standing constitution is well-formed iff Shuttle resolved a next occurrence for
   # it. Shuttle emits next_due only when the cron parsed, so its presence IS the
   # parseable-schedule signal — the daemon never re-validates the expression.
   defp validate_schedule(%__MODULE__{next_due_at: %DateTime{}}), do: nil

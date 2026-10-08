@@ -211,14 +211,14 @@ func (a *app) repeatCmd() *cobra.Command {
 	repeatCmd := &cobra.Command{
 		Use:   "repeat <fiber>",
 		Short: "Install a fiber as a standing (recurring) role",
-		Long: `Install the fiber as a standing role on a recurring cron schedule.
+		Long: `Install the fiber as a standing constitution on a recurring cron schedule.
 
 The cron expression uses standard 5-field syntax: minute hour dom month dow.
 The --tz flag must be an IANA timezone name (e.g. Europe/Paris, UTC).
 
   shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
 
-The running daemon picks it up on its next poll; a fresh standing role is born
+The running daemon picks it up on its next poll; a fresh standing constitution is born
 armed (status:active), and a closed fiber is refused — reopen it first.
 
 repeat creates; it never rewrites. A fiber that already has a shuttle: block is
@@ -282,7 +282,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 				return fmt.Errorf("computing next occurrence: %w", err)
 			}
 
-			// A fresh standing role is born armed; a closed fiber needs an explicit
+			// A fresh standing constitution is born armed; a closed fiber needs an explicit
 			// reopen before it can be armed again.
 			statusBefore := f.Status
 			statusChanged := false
@@ -301,7 +301,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
-			fmt.Fprintf(a.env.Stdout, "installed %s as standing role\n", args[0])
+			fmt.Fprintf(a.env.Stdout, "installed %s as standing constitution\n", args[0])
 			fmt.Fprintf(a.env.Stdout, "  host:     %s\n", block.Host)
 			fmt.Fprintf(a.env.Stdout, "  schedule: %s (%s)\n", repeatSchedule, repeatTZ)
 			if block.Agent != "" {

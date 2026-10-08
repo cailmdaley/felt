@@ -169,7 +169,7 @@ func TestShuttleRepeat_Standing(t *testing.T) {
 	}
 	f := mustRead(t, storage, "role")
 	if f.Status != felt.StatusActive {
-		t.Fatalf("standing role should be born active, got %q", f.Status)
+		t.Fatalf("standing constitution should be born active, got %q", f.Status)
 	}
 	b, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok {

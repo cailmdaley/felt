@@ -190,28 +190,6 @@ defmodule Shuttle.Continuation do
     end
   end
 
-  @doc """
-  True iff there is a POSITIVE deliberate-handoff signal: both markers present
-  and `handed_off_at >= dispatched_at`.
-
-  The strict sibling of `clean_handoff_since_dispatch?/1`, for decisions whose
-  safe default points the other way. That predicate defaults to clean (true)
-  when `dispatched_at` is absent — right for resume-vs-fresh, where uncertainty
-  must never force a surprising mid-transcript resume. Here the question is
-  dispatch-vs-don't (the pinned autonomous-tick gate), where absent markers must
-  read as "no worker asked for a relaunch" — a hand-edited-active or
-  marker-wiped pinned role sits idle until a human Resumes it.
-  """
-  @spec deliberate_handoff_since_dispatch?(map()) :: boolean()
-  def deliberate_handoff_since_dispatch?(fiber) do
-    with dispatch_dt when not is_nil(dispatch_dt) <- dispatched_at(fiber),
-         handoff_dt when not is_nil(handoff_dt) <- handed_off_at(fiber) do
-      DateTime.compare(handoff_dt, dispatch_dt) != :lt
-    else
-      _ -> false
-    end
-  end
-
   # Nested-only. A non-map `runtime:` (degenerate/null) reads as absent —
   # no flat fallback (see the moduledoc's "Reading: nested only" section).
   defp runtime_field(shuttle, key) do
@@ -279,7 +257,7 @@ defmodule Shuttle.Continuation do
   signal — by shelling `shuttle mark-runtime --handed-off-at`
   (`-C felt_store`). The worker's own exit uses `shuttle handoff`; this is the
   daemon-side entry point (the `LifecycleStore` conclude after a force-dispatch
-  rearm or a self-healed standing role, and tests).
+  rearm or a self-healed standing constitution, and tests).
   """
   @spec mark_handed_off(module(), String.t(), String.t()) :: :ok | {:error, term()}
   def mark_handed_off(runner, felt_store, fiber_id)

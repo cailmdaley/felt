@@ -669,7 +669,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
   defp apply_lifecycle_write(verb, id, conclude? \\ true) do
     fiber = fiber(id) || %{"id" => id, "shuttle" => %{}}
     kind = get_in(fiber, ["shuttle", "kind"])
-    status = if verb == "accept" and kind == "pinned", do: "open", else: "active"
+    status = "active"
 
     if conclude? and kind == "standing",
       do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})

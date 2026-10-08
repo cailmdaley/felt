@@ -1442,7 +1442,7 @@ defmodule Shuttle.Poller do
           state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores)
     }
 
-    # Downtime recovery: a standing role whose tmux session is gone but whose
+    # Downtime recovery: a standing constitution whose tmux session is gone but whose
     # document is still armed (status:active, no verdict) never fired
     # `handle_worker_exit` (the daemon was down across the exit). Mark such
     # roles awaiting (status:closed) so the armed document does not re-fire.
@@ -1920,49 +1920,10 @@ defmodule Shuttle.Poller do
     ])
   end
 
-  # The autonomous-tick eligibility filter. Beyond the shared `eligible?`
-  # predicate, it gates pinned roles on the clean-handoff signal — the one place
-  # the unified lifecycle diverges by kind on the tick.
-  #
-  # A pinned role rests as an INTERACTIVE INTERFACE a human drives: the human
-  # starts it (drag-to-in-flight / New session / Resume — all force-dispatch),
-  # the worker stays attached as the interface, and the session ends when the
-  # human ends it. But a pinned worker deep in a long autonomous arc can
-  # deliberately ask for a fresh session by running `shuttle handoff` (which
-  # stamps `handed_off_at` newer than its `dispatched_at`) — that is the worker
-  # saying "keep going in a clean session," and the tick honors it by
-  # re-dispatching next poll. Any other exit — a dirty death, an idle exit with
-  # no handoff marker, a human kill — leaves no fresh marker, so the role is NOT
-  # eligible here; it parks back to the strip (see handle_worker_exit) and waits
-  # for the human to re-attach. So a pinned `active` role never loops
-  # (re-dispatching every tick, surveying, finding nothing, exiting), while a
-  # genuine long-running pinned arc still continues across sessions.
-  #
-  # oneshot/standing are unconditionally eligible here (their own gates live in
-  # `eligible?`). Force-dispatch bypasses this filter entirely, and a plain
-  # `shuttle dispatch <id>` routes through `eligible?` (no pinned gate), so
-  # a human can always start or continue a pinned role by hand: a pinned role
-  # is an interface a human drives, not a loop.
+  # The autonomous-tick eligibility filter: the shared `eligible?` predicate,
+  # uniform across kinds. Force-dispatch bypasses it entirely.
   defp filter_eligible(candidates, state) do
-    Enum.filter(candidates, fn fiber ->
-      tick_kind_eligible?(fiber) and eligible?(fiber, state)
-    end)
-  end
-
-  # Kind-specific autonomous-tick gate layered on top of `eligible?`. Pinned is
-  # eligible iff the worker DELIBERATELY handed off since the last dispatch (a
-  # positive "relaunch me fresh" — both markers present, handoff >= dispatch);
-  # every other kind is unconditionally eligible (their gates are in
-  # `eligible?`). The STRICT predicate, not `clean_handoff_since_dispatch?`:
-  # that one defaults to clean when `dispatched_at` is absent (right for
-  # resume-vs-fresh, wrong here — it would auto-dispatch a hand-edited-active
-  # or marker-wiped pinned role that no worker asked to relaunch).
-  defp tick_kind_eligible?(fiber) do
-    if pinned_role?(fiber) do
-      Shuttle.Continuation.deliberate_handoff_since_dispatch?(fiber)
-    else
-      true
-    end
+    Enum.filter(candidates, &eligible?(&1, state))
   end
 
   # Boot quarantine gate on the autonomous tick (see the State field comment):
@@ -1993,7 +1954,7 @@ defmodule Shuttle.Poller do
   defp park_autonomous_launches(dispatchable, %State{} = state) do
     now = DateTime.utc_now()
 
-    # A due standing role also flows through the boot quarantine: its cron
+    # A due standing constitution also flows through the boot quarantine: its cron
     # occurrence is a fixed-time authorization the human already gave, and a
     # restart that happens to straddle 09:00 must not silently eat the run
     # (the schedule is bounded — one occurrence, never a stale backlog).
@@ -2017,15 +1978,11 @@ defmodule Shuttle.Poller do
     {resume, %{state | parked_launches: parked}}
   end
 
-  defp pinned_role?(fiber), do: fiber_kind(fiber) == "pinned"
-
-  # Does this role's worker exit close it to awaiting-review? Only STANDING
-  # (cron-driven) roles do. Marking a role awaiting on exit is an anti-re-fire
-  # gate — `status: closed` is what stops the cron from re-dispatching the role
-  # again this cycle. A PINNED role's session end splits on the clean-handoff
-  # signal instead (see `handle_worker_exit/2`), and a pinned worker that is
-  # genuinely done self-closes to `status: closed`.
-  defp standing_role?(fiber), do: fiber_kind(fiber) == "standing"
+  # Does this constitution's worker exit close it to awaiting-review? Only a
+  # STANDING (cron-driven) one does. Marking it awaiting on exit is an
+  # anti-re-fire gate — `status: closed` is what stops the cron from
+  # re-dispatching it again this cycle.
+  defp standing?(fiber), do: fiber_kind(fiber) == "standing"
 
   # PURE — fiber frontmatter and in-memory runtime maps only. Every gate that
   # needs the filesystem (only one: does the project_dir exist) lives in
@@ -2051,7 +2008,7 @@ defmodule Shuttle.Poller do
       # iff it carries a shuttle: block;
       # it dispatches iff status is active. `open` is a draft/paused (not
       # dispatched); `closed` is the awaiting-review / anti-oscillation gate —
-      # a oneshot terminus, or a standing role that ran this cycle and is
+      # a oneshot terminus, or a standing constitution that ran this cycle and is
       # `status: closed` + untempered pending a human verdict. Re-arming is an
       # explicit accept that writes `status: active`. This keeps tempered
       # fibers from ever oscillating back to dispatching on a later poll (the
@@ -2078,22 +2035,11 @@ defmodule Shuttle.Poller do
       preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) ->
         false
 
-      # Pinned roles need no bespoke branch HERE: this predicate also serves
-      # the explicit-dispatch path (`shuttle dispatch`, plain POST
-      # /dispatch), where a pinned role IS eligible — it's a human asking for
-      # it. The autonomous tick applies its own kind gate in
-      # `tick_kind_eligible?/1` (`filter_eligible/2`, the tick's only caller):
-      # a pinned role auto-redispatches only when its worker handed off cleanly
-      # since the last dispatch. A pinned `active` role that died dirty (or was
-      # parked to the strip on session end) is not active-with-a-fresh-marker,
-      # so it sits idle until the human re-attaches, instead of re-dispatching
-      # every poll.
-
-      # Standing roles have additional preconditions; a oneshot that reaches
+      # Standing constitutions have additional preconditions; a oneshot that reaches
       # here has passed every gate. `depends_on` has no dispatch meaning — it
       # is a board-only ordering annotation ("filed after that"), read solely
       # by the UI fold and by `shuttle check`'s shape validation.
-      role_kind(shuttle) == "standing" ->
+      block_kind(shuttle) == "standing" ->
         StandingRoles.standing_role_due?(fiber)
 
       true ->
@@ -2554,10 +2500,10 @@ defmodule Shuttle.Poller do
   #   3. the arm: a confirmed directory rides `shuttle reopen --project-dir
   #      --conclude-run` — the same raw input `resolve-dir` checked, so the CLI
   #      expands it to the same path — which saves it and arms the fiber in one
-  #      write, concluding a standing role's run as the re-arm below does, so a
-  #      start refused after the write leaves the role armed. Without one, a
-  #      closed or parked
-  #      perennial role is re-armed (`LifecycleStore.rearm`) and a closed
+  #      write, concluding a standing constitution's run as the re-arm below does, so a
+  #      start refused after the write leaves it armed. Without one, a closed
+  #      or paused standing constitution is re-armed (`LifecycleStore.rearm`)
+  #      and a closed
   #      oneshot reopened (`shuttle reopen`).
   #
   # A refusal is `{:arm_refused, %{message, needs}}`. `needs: "project_dir"` is
@@ -2662,8 +2608,8 @@ defmodule Shuttle.Poller do
       status == "active" ->
         :ok
 
-      Map.get(Map.get(fiber, "shuttle") || %{}, "kind") in ["standing", "pinned"] ->
-        rearm_perennial(state, fiber_id)
+      fiber_kind(fiber) == "standing" ->
+        rearm_standing(state, fiber_id)
 
       status == "closed" ->
         cli_reopen(state, fiber_id, [])
@@ -2674,10 +2620,10 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Re-arm a closed or parked perennial role (standing or pinned) so the
-  # board's start both spawns it now AND leaves a pinned role looping
-  # (open → active). A failed re-arm is logged and the start proceeds.
-  defp rearm_perennial(state, fiber_id) do
+  # Re-arm a closed or paused standing constitution so the board's start both
+  # spawns it now and leaves it armed for its schedule. A failed re-arm is
+  # logged and the start proceeds.
+  defp rearm_standing(state, fiber_id) do
     case LifecycleStore.rearm(fiber_id, runner: state.runner, felt_stores: state.felt_stores) do
       {:ok, msg} -> Logger.info("force-dispatch re-arm #{fiber_id}: #{String.trim(msg)}")
       {:error, reason} -> Logger.warning("force-dispatch re-arm #{fiber_id} failed: #{reason}")
@@ -3172,7 +3118,7 @@ defmodule Shuttle.Poller do
     # Daemon-down analog of handle_worker_exit's standing branch. The caller —
     # `reconcile_missing_running_sessions` (the watcher missed the exit) —
     # lands here for a running entry whose tmux session is gone. For an
-    # ordinary oneshot that's just an orphan to record; for a standing role it
+    # ordinary oneshot that's just an orphan to record; for a standing constitution it
     # is the exit that `handle_worker_exit` never got to run, so the armed
     # document would re-fire on the next poll. Mark it awaiting (status:closed,
     # untempered) here, keyed on the running-worker entry — a role with no
@@ -3190,13 +3136,12 @@ defmodule Shuttle.Poller do
     %{state | orphans: [orphan | state.orphans]}
   end
 
-  # Write `status: closed` (untempered) to a standing role's document when its
+  # Write `status: closed` (untempered) to a standing constitution's document when its
   # worker died unobserved and the document is still armed. Only an owned,
-  # armed (status:active, no verdict) STANDING role is touched: an armed
+  # armed (status:active, no verdict) STANDING constitution is touched: an armed
   # standing document would re-fire on the next cron tick, so it must be
-  # closed. Oneshots and pinned roles (a dead pinned worker is parked on its
-  # own path), roles this daemon doesn't own, and already-closed/tempered roles
-  # are left alone. The mark is
+  # closed. Oneshots, constitutions this daemon doesn't own, and
+  # already-closed/tempered ones are left alone. The mark is
   # idempotent: once status flips to closed the running entry is gone (the
   # caller removes it) and the `status == "active"` guard short-circuits any
   # later pass.
@@ -3204,11 +3149,11 @@ defmodule Shuttle.Poller do
     with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
          shuttle when is_map(shuttle) <- Map.get(fiber, "shuttle"),
          true <- host_owned?(shuttle, state.own_host_id),
-         true <- standing_role?(fiber),
+         true <- standing?(fiber),
          "active" <- Map.get(fiber, "status", ""),
          true <- is_nil(Map.get(fiber, "tempered")) do
       Logger.info(
-        "Standing role #{fiber_id} worker died unobserved (daemon-down or unwatched " <>
+        "Standing constitution #{fiber_id} worker died unobserved (daemon-down or unwatched " <>
           "exit); marking awaiting (status:closed) so the armed document does not re-fire"
       )
 
@@ -3218,15 +3163,23 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # A shuttle block's dispatch kind: `kind:`, else "oneshot".
+  # A shuttle block's dispatch kind: `kind:`, else "oneshot". A retired kind
+  # reads as the kind it stands for (`pinned` → "oneshot"), matching the CLI's
+  # `shuttle.NormalizeKind`, so a document a daemon reads raw behaves the same
+  # as one the CLI resolved.
   @doc false
-  def role_kind(shuttle), do: Map.get(shuttle, "kind", "oneshot")
+  def block_kind(shuttle) do
+    case Map.get(shuttle, "kind", "oneshot") do
+      "pinned" -> "oneshot"
+      kind -> kind
+    end
+  end
 
   # A fiber's dispatch kind; "oneshot" when it carries no shuttle block.
   @doc false
   def fiber_kind(fiber) do
     case Map.get(fiber, "shuttle") do
-      shuttle when is_map(shuttle) -> role_kind(shuttle)
+      shuttle when is_map(shuttle) -> block_kind(shuttle)
       _ -> "oneshot"
     end
   end
@@ -3259,7 +3212,7 @@ defmodule Shuttle.Poller do
               status == "closed" ->
                 state
 
-              standing_role?(fiber) ->
+              standing?(fiber) ->
                 # A STANDING (cron) worker's exit makes the role awaiting
                 # review by writing `status: closed` (untempered) to the felt
                 # document — the don't-re-fire gate and the human's accept
@@ -3267,30 +3220,6 @@ defmodule Shuttle.Poller do
                 # itself, so a re-poll racing this exit reads `status: closed`
                 # and skips re-dispatch.
                 StandingRoles.mark_standing_awaiting(fiber_id)
-
-                state
-
-              pinned_role?(fiber) ->
-                # A PINNED role's session ended. Two cases, split by the
-                # deliberate-handoff signal (STRICT predicate — positive
-                # markers only, so a marker-less exit parks instead of
-                # staying `active` in a state the tick gate can never pick
-                # up):
-                #
-                #  • DELIBERATE handoff since dispatch (the worker ran `shuttle
-                #    handoff`, stamping a fresh marker) → a deliberate ask for a
-                #    fresh session in a long autonomous arc. Leave the document
-                #    `active` and write nothing; `filter_eligible`'s
-                #    `tick_kind_eligible?` sees the fresh marker next tick and
-                #    re-dispatches a fresh worker.
-                #  • DIRTY death / idle exit with no fresh marker / human kill →
-                #    the interface went dark. Park it back to the strip
-                #    (`active → open`) so it neither sits stuck `active` with no
-                #    live worker in In-flight nor auto-relaunches; the human
-                #    re-attaches with Resume (force-dispatch → rearm).
-                unless Shuttle.Continuation.deliberate_handoff_since_dispatch?(fiber) do
-                  StandingRoles.mark_pinned_parked(fiber_id)
-                end
 
                 state
 
@@ -3811,7 +3740,7 @@ defmodule Shuttle.Poller do
   # wedged tmux), an exec failure, an unrecognized error, or an empty tmux
   # answer the process scan could not check — returns `{:error, :unknown}`:
   # the world is UNCERTAIN, not empty. Conflating the two is how a single
-  # wedged `tmux ls` mass-marked every live standing role dead
+  # wedged `tmux ls` mass-marked every live standing constitution dead
   # (reconcile_dead_standing_roles writes status flips to their fibers!) and
   # made boot adoption adopt nothing. Callers whose action on an empty list is
   # destructive or reconciling MUST skip the pass on `:unknown` — uncertainty

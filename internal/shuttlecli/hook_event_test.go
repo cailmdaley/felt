@@ -158,12 +158,12 @@ func TestEventMachinePrompt(t *testing.T) {
 		},
 		{
 			"dispatched for an ad-hoc role run",
-			"The orchestration system Shuttle dispatched you for an ad-hoc run of this standing role — right-now work",
+			"The orchestration system Shuttle dispatched you for an ad-hoc run of this standing constitution — right-now work",
 			true,
 		},
 		{
 			"dispatched for a scheduled role run",
-			"The orchestration system Shuttle dispatched you for a scheduled run of this standing role.",
+			"The orchestration system Shuttle dispatched you for a scheduled run of this standing constitution.",
 			true,
 		},
 		// One keystroke, one spine: a slash command expands into up to three
