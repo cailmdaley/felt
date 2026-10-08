@@ -70,8 +70,14 @@ defmodule Shuttle.DispatchIntegrationTest do
           do: opts,
           else: Keyword.put_new(opts, :cd, felt_store)
 
-      # Run as the test's scope sees it: scoped PATH and env reach the real CLIs.
-      Shuttle.Env.cmd(command, args, opts)
+      # The integration adapter exercises lifecycle commands against the real
+      # CLI, while the daemon/CLI contract level is supplied by the test build.
+      if command == "shuttle" and List.last(args) == "contract" do
+        {Integer.to_string(Shuttle.Contract.expected_level()), 0}
+      else
+        # Run as the test's scope sees it: scoped PATH and env reach the real CLIs.
+        Shuttle.Env.cmd(command, args, Keyword.delete(opts, :timeout_ms))
+      end
     end
 
     def cmd("tmux", ["has-session", "-t", session], _opts) do

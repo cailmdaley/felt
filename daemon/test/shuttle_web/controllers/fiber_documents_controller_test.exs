@@ -1626,6 +1626,10 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         state
         | felt_stores: stores,
           own_host_id: "test-host",
+          full_scan_budget_ms: max(state.full_scan_budget_ms, 60_000),
+          last_known_listings: %{},
+          last_full_listings: %{},
+          discovery: %{},
           document_cache_ready: false,
           document_cache: %{}
       }
