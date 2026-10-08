@@ -31,15 +31,11 @@ renderer.codespan = ({ text }: { text: string }) => {
   return `<code class="md-inline-code">${escapeHtml(text)}</code>`
 }
 
-renderer.link = ({ href, text }: { href: string; text: string }) => {
-  return `<a href="${escapeHtml(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
-}
+renderer.link = ({ href, text }: { href: string; text: string }) => renderLink(href, text)
+renderer.html = ({ text }: { text: string }) => untrustedEnabled ? escapeHtml(text) : text
 
 // Strip KaTeX HTML from image alt text (the math extension renders $…$ inside alt)
-renderer.image = ({ href, text: alt }: { href: string; text?: string }) => {
-  const cleanAlt = (alt || '').replace(/<[^>]*>/g, '')
-  return `<img src="${escapeHtml(href)}" alt="${escapeHtml(cleanAlt)}" loading="lazy" />`
-}
+renderer.image = ({ href, text: alt }: { href: string; text?: string }) => renderImage(href, alt)
 
 marked.use({ renderer })
 
@@ -163,6 +159,27 @@ export function escapeHtml(text: string): string {
 // outcomes render without one and leave relative paths untouched.
 const FILE_ROUTE = `/api/v1/file`
 
+/** Set for one synchronous render, like the wikilink option below. */
+let untrustedEnabled = false
+
+function safeTranscriptHref(href: string): boolean {
+  return /^(https?:|mailto:|#)/i.test(href)
+}
+
+function renderLink(href: string, text: string): string {
+  if (untrustedEnabled) {
+    if (!safeTranscriptHref(href)) return text
+    return `<a href="${escapeAttr(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
+  }
+  return `<a href="${escapeHtml(href)}" class="md-link" target="_blank" rel="noopener">${text}</a>`
+}
+
+function renderImage(href: string, alt: string | undefined): string {
+  const cleanAlt = (alt || '').replace(/<[^>]*>/g, '')
+  if (untrustedEnabled) return `[image: ${escapeHtml(cleanAlt)}]`
+  return `<img src="${escapeHtml(href)}" alt="${escapeHtml(cleanAlt)}" loading="lazy" />`
+}
+
 interface RenderMarkdownOptions {
   /** Base directory for resolving relative image paths (e.g. city path) */
   basePath?: string
@@ -182,6 +199,8 @@ interface RenderMarkdownOptions {
    * that cannot open a reference must not dress one up as a link.
    */
   wikilinks?: boolean
+  /** Treat content as worker-authored: escape HTML, restrict links, and disable images. */
+  untrusted?: boolean
 }
 
 /**
@@ -190,6 +209,7 @@ interface RenderMarkdownOptions {
  */
 export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): string {
   wikilinksEnabled = opts?.wikilinks === true
+  untrustedEnabled = opts?.untrusted === true
   try {
     // Use a per-call renderer to handle image path resolution
     if (opts?.basePath) {
@@ -197,6 +217,7 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
       // Inherit code/codespan from the global renderer
       localRenderer.code = renderer.code
       localRenderer.codespan = renderer.codespan
+      localRenderer.html = renderer.html
       // LINKS resolve like images do. Inheriting the global link renderer left
       // `[AGENTS.md](AGENTS.md)` pointing at the page origin, so every relative
       // link in a fiber body opened a 404 on `localhost:4000/AGENTS.md` — the
@@ -208,6 +229,7 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
       // reader can intercept the click and open the target as a document.
       // Without such a host the href alone is already a working URL.
       localRenderer.link = ({ href, text }: { href: string; text: string }) => {
+        if (untrustedEnabled) return renderLink(href, text)
         const external = /^(https?:|mailto:|data:)/i.test(href) || href.startsWith('#')
         const resolved = external ? null : fileUrl(href, opts)
         if (resolved === null) return renderer.link({ href, text } as never)
@@ -236,6 +258,7 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
         )
       }
       localRenderer.image = ({ href, text: alt }: { href: string; text?: string }) => {
+        if (untrustedEnabled) return renderImage(href, alt)
         // Relative/absolute local paths resolve through /file; http(s)/data
         // URLs (and an unresolvable relative path) pass through unchanged.
         const src = fileUrl(href, opts) ?? href
@@ -250,6 +273,7 @@ export function renderMarkdown(text: string, opts?: RenderMarkdownOptions): stri
     return escapeHtml(text)
   } finally {
     wikilinksEnabled = false
+    untrustedEnabled = false
   }
 }
 
