@@ -10,6 +10,7 @@ import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, p
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
 import { buildSessionHistory } from '../sessionHistory.js'
+import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptBand.js'
 import { coarsePointer } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
@@ -33,6 +34,16 @@ interface ComposerSend {
 function workerIdentity(card: KanbanCard): string {
   return JSON.stringify([card.workerState, card.workerSurface, card.sessionUuid, card.tmuxSession, card.runtimePhase])
 }
+function latestTarget(card: KanbanCard): TranscriptTarget | null {
+  return card.sessionUuid ? {
+    session: card.sessionUuid,
+    host: card.shuttleHost,
+    agent: card.workerAgent ?? card.shuttleAgent,
+    live: hasLiveWorker(card),
+    at: instantMs(card.dispatchedAt),
+  } : null
+}
+
 function clockTime(ms: number): string {
   // 24-hour regardless of locale: the line is a mono strip where two times sit
   // side by side, and `11:59 AM · 03:35 PM` is both wider and harder to subtract
@@ -402,6 +413,7 @@ export class Dock {
   private pendingStartPrompt: { cardId: string; body: DispatchFailureBody } | null = null
   private transcriptCard: KanbanCard | null = null
   private transcriptPane: HTMLElement | null = null
+  private transcriptBand: TranscriptBand | null = null
   private meetingPaint: (() => void) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
@@ -539,6 +551,8 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.workerPillCard = this.transcriptCard = null
+    this.transcriptBand?.dispose()
+    this.transcriptBand = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -712,6 +726,7 @@ export class Dock {
       this.composerPaint?.()
     }
     this.workerPillCard = card
+    this.transcriptBand?.follow(latestTarget(card))
     this.paintGuidance(card)
   }
 
@@ -738,7 +753,11 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    if (shuttleManaged) body.append(this.buildComposer(card))
+    if (shuttleManaged) {
+      this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase })
+      body.append(this.transcriptBand.el)
+      body.append(this.buildComposer(card))
+    }
     body.append(this.buildTranscriptPane(card))
 
     const settings = document.createElement('div')
@@ -798,6 +817,18 @@ export class Dock {
         shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
         liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession,
         desktop: atDesktop(navigator.userAgent, coarsePointer()),
+        onRead: this.transcriptBand ? record => {
+          const transcript = this.transcriptBand
+          if (!transcript) return
+          transcript.read({
+            session: record.session,
+            host: record.host ?? undefined,
+            agent: record.agent ?? record.harness ?? undefined,
+            live: record.session === (hasLiveWorker(card) ? card.sessionUuid : undefined),
+            at: record.at,
+          })
+          transcript.el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        } : undefined,
         onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
       })
       history?.replaceWith(next)
@@ -844,7 +875,9 @@ export class Dock {
       this.el.dataset.column = column
       const review = column === 'awaitingReview'
       if (review) {
-        if (verdict.parentElement !== body) body.prepend(verdict)
+        if (this.transcriptBand?.el.parentElement === body) {
+          if (verdict.previousElementSibling !== this.transcriptBand.el) this.transcriptBand.el.after(verdict)
+        } else if (verdict.parentElement !== body) body.prepend(verdict)
         if (temper.parentElement !== verdict) verdict.append(temper, discard)
         menu.remove()
       } else {

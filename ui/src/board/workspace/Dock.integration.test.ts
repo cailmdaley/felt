@@ -175,12 +175,14 @@ describe('state-shaped act zone', () => {
     expect(message.placeholder).toBe('What should the worker do next?')
   })
 
-  it('puts review verdicts first, retains a draft across runtime changes, and keeps a draft's verdicts in its menu', () => {
+  it("puts the transcript before review verdicts, retains a draft across runtime changes, and keeps a draft's verdicts in its menu", () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
-    expect(band.el.querySelector('.ws-dock-body')?.firstElementChild?.className).toBe('kbn-ctl-verdict')
+    const children = [...band.el.querySelector('.ws-dock-body')!.children]
+    expect(children[0].classList.contains('ws-transcript')).toBe(true)
+    expect(children[1].classList.contains('kbn-ctl-verdict')).toBe(true)
     expect(band.el.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
     expect(message.placeholder).toBe('Reply and resume…')
