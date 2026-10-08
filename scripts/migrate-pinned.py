@@ -98,6 +98,12 @@ def plans(fibers: list[str], feed: dict) -> list[tuple[str, list[list[str]], str
         if origin is None or origin.get("stale"):
             gaps.append(f"{fiber}: owner {host} is {'missing from' if origin is None else 'stale in'} the feed")
             continue
+        # A reachable owner can still serve old rows: its document cache must
+        # be fresh, not cold or partial.
+        cache = (origin.get("cache") or {}).get("state")
+        if cache != "fresh":
+            gaps.append(f"{fiber}: owner {host}'s cache is {cache or 'unreported'}, not fresh")
+            continue
         owner = next((e for e in mirrored if e.get("origin") == host), None)
         if owner is None:
             gaps.append(f"{fiber}: owner {host} serves no row for it")

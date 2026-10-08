@@ -20,8 +20,9 @@ def row(slug, origin, host, status, runtime=None):
     return entry
 
 
-def feed(*rows, stale=()):
-    origins = {h: {"stale": h in stale} for h in ("laptop", "cluster")}
+def feed(*rows, stale=(), cache=None):
+    cache = cache or {}
+    origins = {h: {"stale": h in stale, "cache": {"state": cache.get(h, "fresh")}} for h in ("laptop", "cluster")}
     return {"host": "laptop", "origins": origins, "fibers": list(rows)}
 
 
@@ -64,12 +65,20 @@ class Plans(unittest.TestCase):
         self.assertIn("cluster", str(caught.exception))
 
     def test_a_missing_owner_origin_or_row_refuses(self):
-        missing_origin = {"origins": {"laptop": {"stale": False}}, "fibers": [row("x", "laptop", "nibi", "open")]}
+        missing_origin = {"origins": {"laptop": {"stale": False, "cache": {"state": "fresh"}}}, "fibers": [row("x", "laptop", "nibi", "open")]}
         with self.assertRaises(mp.Incomplete):
             mp.plans(["x"], missing_origin)
         missing_row = feed(row("y", "laptop", "cluster", "open"))
         with self.assertRaises(mp.Incomplete):
             mp.plans(["y"], missing_row)
+
+    def test_a_cold_or_partial_owner_cache_refuses(self):
+        # Reachable (stale: false) yet serving old rows: no plan at all.
+        for state in ("cold", "partial", None):
+            f = feed(row("seat", "cluster", "cluster", "open"), cache={"cluster": state})
+            with self.assertRaises(mp.Incomplete) as caught:
+                mp.plans(["seat"], f)
+            self.assertIn("cluster", str(caught.exception))
 
 
 if __name__ == "__main__":

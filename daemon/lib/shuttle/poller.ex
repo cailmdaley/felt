@@ -3168,13 +3168,43 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Stop a fiber's tracked worker through its backend (tmux, or an app
-  # conversation's interrupt) and tear down its runtime entry. Writes no
+  # A worker nothing tracks — its watcher failed to start, or a restart has
+  # not adopted it yet — is still a worker. Look for it where a launch would
+  # have put it, the app conversation the fiber owns or its canonical tmux
+  # session, and stop whatever is live there. `:no_session` only when nothing is.
+  defp stop_untracked_worker(state, fiber_id) do
+    uid =
+      case fetch_fiber_full(fiber_id, state) do
+        {:ok, fiber} -> Map.get(fiber, "uid")
+        _ -> nil
+      end
+
+    case live_session_for_fiber(state, fiber_id, uid) do
+      nil ->
+        {:ok, :no_session}
+
+      session ->
+        case Shuttle.WorkerBackend.stop(state.runner, session) do
+          {_output, 0} ->
+            {:ok, session}
+
+          {output, status} ->
+            Logger.error(
+              "stopping untracked #{fiber_id}: stop exited #{inspect(status)}: #{output}"
+            )
+
+            {:error, "stopping the worker failed (exit #{inspect(status)}): #{output}"}
+        end
+    end
+  end
+
+  # Stop a fiber's worker through its backend (tmux, or an app conversation's
+  # interrupt) and tear down its runtime entry, tracked or not. Writes no
   # status. Shared by `/kill` and the rest transition.
   defp stop_tracked_worker(state, fiber_id) do
     case running_key(state, fiber_id) do
       nil ->
-        {{:ok, :no_session}, state}
+        {stop_untracked_worker(state, fiber_id), state}
 
       runtime_key ->
         meta = Map.get(state.running, runtime_key)

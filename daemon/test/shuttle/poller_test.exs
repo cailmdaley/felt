@@ -1030,6 +1030,40 @@ defmodule Shuttle.PollerTest do
     assert entry.fiber["status"] == "open"
   end
 
+  # A live worker nothing tracks — its watcher never started, or no restart
+  # has adopted it yet — must not survive a rest (or a /kill): the stop looks
+  # for it under the fiber's canonical session name before it reports that
+  # nothing was running.
+  test "a rest stops a live tmux worker the Poller does not track" do
+    fiber_id = "tests/untracked"
+    uid = "01JZ00000000000000000000WT"
+    store = MockRunner.felt_root()
+
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "open"}))
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nhost: candide\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_rest_untracked,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        felt_stores: [store]
+      )
+
+    sync_poll_cycle!(poller)
+    session = Dispatcher.session_name(fiber_id, uid)
+    MockRunner.add_tmux_session(session)
+
+    refute Enum.any?(:sys.get_state(poller, @state_timeout).running, fn {_k, m} ->
+             m.session == session
+           end)
+
+    assert {:ok, output} = Poller.lifecycle_transition(poller, :rest, fiber_id)
+    assert output =~ "worker: stopped #{session}"
+    assert {"tmux", ["kill-session", "-t", session]} in MockRunner.commands()
+  end
+
   # The three tmux "already gone" phrasings session_already_gone? must treat as
   # success: the per-session "session not found" and "no such session", and a
   # whole-server-down "no server running". In every case tmux reports the
