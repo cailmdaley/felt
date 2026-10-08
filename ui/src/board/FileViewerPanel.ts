@@ -465,6 +465,7 @@ function buildHtmlViewer(
     frame.className = 'kbn-fileview-frame'
     frame.title = basename(fullPath)
     frame.setAttribute('sandbox', DOCUMENT_SANDBOX)
+    frame.allowFullscreen = true
     let announced = false
     let charged = 0
     let resolved = new Set<string>()
