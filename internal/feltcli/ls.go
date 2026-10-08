@@ -3,6 +3,7 @@ package feltcli
 import (
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"regexp"
 	"sort"
@@ -16,6 +17,14 @@ import (
 // listForOutput lists fibers the way the active output mode needs them: --json
 // carries mod times, and a --has filter that only names frontmatter keys is
 // pushed into the walk so unrelated fibers skip a full YAML parse.
+func frontmatterFieldsForOutput(hasFields []string) []string {
+	frontmatterFields, canPrefilter := frontmatterPrefilterFields(hasFields)
+	if canPrefilter {
+		return frontmatterFields
+	}
+	return nil
+}
+
 func listForOutput(storage *felt.Storage, hasFields []string, jsonMode bool) ([]*felt.Felt, error) {
 	frontmatterFields, canPrefilter := frontmatterPrefilterFields(hasFields)
 	prefilter := canPrefilter && len(frontmatterFields) > 0
@@ -42,6 +51,7 @@ func NewLsCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var lsExact bool
 	var lsRegex bool
 	var lsHasFields []string
+	var lsIDsFrom string
 	var lsJSONFields []string
 	var lsVerbose bool
 	command := &cobra.Command{
@@ -53,7 +63,7 @@ in the name, outcome, extra frontmatter text, or id; exact matches on name, id,
 or basename sort first. --body also searches bodies. -r matches the whole query
 as one regular expression, which is how to ask for a literal phrase.
 
-A filter (query, -t, --has-field) widens to every status and counts closed
+A filter (query, -t, --has-field, --ids-from) widens to every status and counts closed
 matches in a trailing hint instead of printing them, unless -s names the
 statuses.
 
@@ -83,7 +93,16 @@ felt find searches the rest of it.`,
 				return fmt.Errorf("--json-field requires --json")
 			}
 
-			felts, err := listForOutput(storage, hasFields, view.jsonOutput())
+			var felts []*felt.Felt
+			if lsIDsFrom == "" {
+				felts, err = listForOutput(storage, hasFields, view.jsonOutput())
+			} else {
+				data, readErr := os.ReadFile(lsIDsFrom)
+				if readErr != nil {
+					return fmt.Errorf("reading ids from %s: %w", lsIDsFrom, readErr)
+				}
+				felts, err = storage.ListMetadataByIDs(strings.Split(string(data), "\n"), frontmatterFieldsForOutput(hasFields), view.jsonOutput())
+			}
 			if err != nil {
 				return err
 			}
@@ -219,6 +238,7 @@ felt find searches the rest of it.`,
 	command.Flags().BoolVarP(&lsExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
 	command.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
 	command.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
+	command.Flags().StringVar(&lsIDsFrom, "ids-from", "", "Read fiber ids from a file (one id per line) without walking the store")
 	command.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only these top-level fields (repeatable or comma-separated)")
 	command.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 	if view.Binary != "" && view.Binary != "felt" {

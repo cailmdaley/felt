@@ -73,6 +73,83 @@ func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
 	}
 }
 
+func TestLsIDsFromMatchesFullRows(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	for _, id := range []string{"alpha", "nested/beta", "nested/gamma", "nested-z"} {
+		if err := storage.Write(&felt.Felt{ID: id, Name: id, Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
+			t.Fatalf("Write(%s): %v", id, err)
+		}
+	}
+	innerRoot := filepath.Join(t.TempDir(), ".felt")
+	if err := os.MkdirAll(innerRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	inner := felt.NewStorage(filepath.Dir(innerRoot))
+	if err := inner.Write(&felt.Felt{ID: "guest", Name: "Guest entry", Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
+		t.Fatal(err)
+	}
+	mount := filepath.Join(dir, ".felt", "mounts", "guest")
+	if err := os.MkdirAll(filepath.Dir(mount), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(innerRoot, mount); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := runCommand(t, dir, "ls", "--json", "-s", "all")
+	if err != nil {
+		t.Fatalf("full listing: %v\n%s", err, full)
+	}
+	idsPath := filepath.Join(t.TempDir(), "ids")
+	if err := os.WriteFile(idsPath, []byte("mounts/guest\nnested/gamma\nmissing\nalpha\nnested/beta\nnested-z\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := runCommand(t, dir, "ls", "--json", "-s", "all", "--ids-from", idsPath)
+	if err != nil {
+		t.Fatalf("ids listing: %v\n%s", err, selected)
+	}
+	var allRows, selectedRows []json.RawMessage
+	if err := json.Unmarshal([]byte(full), &allRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(selected), &selectedRows); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"alpha": true, "nested/beta": true, "nested/gamma": true, "nested-z": true, "mounts/guest": true}
+	var expected []json.RawMessage
+	for _, raw := range allRows {
+		var row struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &row); err != nil {
+			t.Fatal(err)
+		}
+		if want[row.ID] {
+			expected = append(expected, raw)
+		}
+	}
+	if string(mustJSON(t, selectedRows)) != string(mustJSON(t, expected)) {
+		t.Fatalf("ids rows differ from full listing\nselected: %s\nexpected: %s", selected, mustJSON(t, expected))
+	}
+	if err := os.WriteFile(idsPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := runCommand(t, dir, "ls", "--json", "--ids-from", idsPath)
+	if err != nil || strings.TrimSpace(empty) != "[]" {
+		t.Fatalf("empty ids: %v, %q", err, empty)
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func TestLsBodySearchScansMarkdown(t *testing.T) {
 	t.Parallel()
 	dir, storage := newStore(t)
