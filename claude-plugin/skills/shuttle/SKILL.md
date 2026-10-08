@@ -95,9 +95,9 @@ If you arrive to find the work already done, update the outcome and run `shuttle
 
 **When the human names the exit, take it literally.** "Hand off" means hand off. "Close out", "wrap it up" or "I'm done for now" means close, even when you can see more to do — unfinished is often exactly why they want it back on their desk.
 
-**Stay interactive** instead, still `active`, when the direction isn't settled: the directive or constitution says a human will attach (a "stay interactive", a 2FA step, a message to send in their voice), or open taste calls make their input the clear next move. In a **headless** run (`headless: true` in the launch metadata) nobody can attach, so record the question and take case 2.
+**Close by default.** When an arc ends, take an exit verb, even with the human present. The transcript stays readable from the board, and talking again is resuming the session, so an open session is never needed for the conversation to continue. Stay interactive, still `active`, only when the human asked for it ("let's chat", "stay open"), or the constitution says a human will attach (a 2FA step, a message to send in their voice). Open taste calls are a close with the questions in the outcome, not a reason to wait. In a **headless** run (`headless: true` in the launch metadata) nobody can attach, so record the question and take case 2.
 
-A human drives a **pinned** role: while they are present, wait for their next message rather than exiting; close when they leave; hand off only on a long autonomous arc. A **standing** role always hands off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
+A human drives a **pinned** role only while they are present and talking: when they go quiet at the end of an exchange, close, or rest if there is nothing to review; hand off only on a long autonomous arc. A **standing** role always hands off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
 
 Only the human sets `tempered`. Leave the shuttle block in place when you close; it is the record.
 

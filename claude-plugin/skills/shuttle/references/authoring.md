@@ -44,7 +44,7 @@ An `active` fiber dispatches on the next poll; `--disabled` (`status: open`) lan
 
 ## The human in the loop
 
-Every dispatch runs autonomously; there is no interactive mode. When a particular run needs the human, say so in its launch directive ("stay interactive", "talk to me first"); the next dispatch starts clean. Workers also stay alive on their own judgment when open taste calls make the human's input the clear next move.
+Every dispatch runs autonomously; there is no interactive mode. When a particular run needs the human, say so in its launch directive ("stay interactive", "talk to me first"); the next dispatch starts clean. Otherwise a worker closes at the end of its arc and puts open taste calls in the outcome; the human answers by resuming it.
 
 Put **structural gates** in the constitution itself: a final send in the user's voice, a 2FA step only they can complete, any draft-and-stage shape where the human commits — "The user will be present; drive to the send and wait for them." Work in a real browser usually carries one. Headless work writes no gate and runs to exit.
 
