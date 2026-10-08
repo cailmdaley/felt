@@ -1774,22 +1774,26 @@ type storeWalk struct {
 	loose []looseFile
 }
 
-func readTierDirectories(root string) (map[string][]os.DirEntry, error) {
-	entriesByDir := make(map[string][]os.DirEntry)
+type tierDirectory struct {
+	entries []os.DirEntry
+	err     error
+}
+
+func readTierDirectories(root string) map[string]tierDirectory {
+	byDir := make(map[string]tierDirectory)
 	level := []string{root}
 	for len(level) > 0 {
-		results := make([][]os.DirEntry, len(level))
-		errorsByDir := make([]error, len(level))
+		results := make([]tierDirectory, len(level))
 		parallelFileWork(len(level), func(i int) {
-			results[i], errorsByDir[i] = os.ReadDir(level[i])
+			results[i].entries, results[i].err = os.ReadDir(level[i])
 		})
 		var next []string
-		for i, entries := range results {
-			if errorsByDir[i] != nil {
-				return nil, errorsByDir[i]
+		for i, result := range results {
+			byDir[level[i]] = result
+			if result.err != nil {
+				continue
 			}
-			entriesByDir[level[i]] = entries
-			for _, entry := range entries {
+			for _, entry := range result.entries {
 				if entry.IsDir() {
 					next = append(next, filepath.Join(level[i], entry.Name()))
 				}
@@ -1797,7 +1801,7 @@ func readTierDirectories(root string) (map[string][]os.DirEntry, error) {
 		}
 		level = next
 	}
-	return entriesByDir, nil
+	return byDir
 }
 
 func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
@@ -1828,12 +1832,16 @@ func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
 	// walkDirFn flattens one tier's concurrently read directory snapshots in
 	// sequential DFS order. Each snapshot keeps sibling entries together, so
 	// report.html detection reuses the listing rather than statting each fiber.
-	var walkDirFn func(dir, walkBaseResolved, idPrefix string, entriesByDir map[string][]os.DirEntry) error
-	walkDirFn = func(dir, walkBaseResolved, idPrefix string, entriesByDir map[string][]os.DirEntry) error {
-		entries, ok := entriesByDir[dir]
+	var walkDirFn func(dir, walkBaseResolved, idPrefix string, entriesByDir map[string]tierDirectory) error
+	walkDirFn = func(dir, walkBaseResolved, idPrefix string, entriesByDir map[string]tierDirectory) error {
+		directory, ok := entriesByDir[dir]
 		if !ok {
 			return fmt.Errorf("directory %s was not read", dir)
 		}
+		if directory.err != nil {
+			return directory.err
+		}
+		entries := directory.entries
 		hasReportHTML := false
 		for _, e := range entries {
 			if !e.IsDir() && e.Name() == "report.html" {
@@ -1918,10 +1926,7 @@ func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
 			return nil
 		}
 		visited[walkBaseResolved] = struct{}{}
-		entriesByDir, err := readTierDirectories(walkBaseResolved)
-		if err != nil {
-			return err
-		}
+		entriesByDir := readTierDirectories(walkBaseResolved)
 		return walkDirFn(walkBaseResolved, walkBaseResolved, idPrefix, entriesByDir)
 	}
 	if err := walkFn(rootResolved, ""); err != nil {
