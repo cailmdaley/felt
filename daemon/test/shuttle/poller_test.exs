@@ -1155,6 +1155,40 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(after_calls, fn {cmd, _} -> cmd == "tmux" end)
   end
 
+  # The other half of the app-only guard: a TERMINAL fiber is probed even when
+  # tmux is not on the daemon's PATH, because its worker can outlive the
+  # daemon that lost tmux. A stop that cannot reach it fails; it never reports
+  # nothing running while the worker lives on.
+  test "on a host without tmux, kill of a terminal fiber's live worker fails closed" do
+    fiber_id = "tests/cli-no-tmux"
+    uid = "01JZ00000000000000000000WC"
+
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "open"}))
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nhost: candide\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_cli_no_tmux,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    sync_poll_cycle!(poller)
+    session = Dispatcher.session_name(fiber_id, uid)
+    MockRunner.add_tmux_session(session)
+    no_tmux = Path.join(System.tmp_dir!(), "no-tmux-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(no_tmux)
+    on_exit(fn -> File.rm_rf(no_tmux) end)
+    Env.put_env("PATH", no_tmux)
+    MockRunner.set_kill_session_failure(true)
+
+    assert {:error, reason} = Poller.kill_session(poller, fiber_id)
+    assert reason =~ "stopping the worker failed"
+    assert {"tmux", ["kill-session", "-t", session]} in MockRunner.commands()
+  end
+
   # The three tmux "already gone" phrasings session_already_gone? must treat as
   # success: the per-session "session not found" and "no such session", and a
   # whole-server-down "no server running". In every case tmux reports the

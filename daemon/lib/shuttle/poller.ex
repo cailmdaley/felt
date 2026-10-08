@@ -3186,7 +3186,7 @@ defmodule Shuttle.Poller do
       {:ok, fiber} ->
         case Map.get(fiber, "uid") do
           uid when is_binary(uid) and uid != "" ->
-            stop_live_session(state, slug, untracked_session(state, slug, uid))
+            stop_live_session(state, slug, untracked_session(state, fiber, slug, uid))
 
           _ ->
             {:ok, :no_session}
@@ -3198,20 +3198,27 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp untracked_session(state, slug, uid) do
+  defp untracked_session(state, fiber, slug, uid) do
     case Enum.find(Shuttle.AppWorkers.active(), &(&1["uid"] == uid)) do
       %{"session_uuid" => id} when is_binary(id) ->
         Shuttle.AppWorkers.ref(id)
 
       _ ->
-        # A host without tmux runs no terminal worker, so there is nothing to
-        # probe; asking tmux there reads as "unknown" and a stop would fail on
-        # a missing binary instead of being the no-op it is (an app-only host).
+        # An app fiber on a host without tmux has no terminal session to
+        # probe: asking tmux there reads as "unknown" and a stop would fail on
+        # the missing binary instead of being the no-op it is (an app-only
+        # host), the guard `live_session_for_fiber/3` keeps too. A terminal
+        # fiber is always probed, even where tmux is not on PATH: its worker
+        # can outlive the daemon that lost tmux, and a stop that cannot reach
+        # it must fail rather than report nothing running.
+        app_without_tmux? =
+          get_in(fiber, ["shuttle", "surface"]) == "app" and
+            Shuttle.Env.find_executable("tmux") == nil
+
         session = Dispatcher.session_name(slug, uid)
 
-        if session && Shuttle.Env.find_executable("tmux") != nil &&
-             already_running_session?(state, session),
-           do: session
+        if session && not app_without_tmux? && already_running_session?(state, session),
+          do: session
     end
   end
 
