@@ -1064,6 +1064,57 @@ defmodule Shuttle.PollerTest do
     assert {"tmux", ["kill-session", "-t", session]} in MockRunner.commands()
   end
 
+  # /kill may name a fiber by its uid. The untracked lookup resolves the
+  # canonical slug first, so it finds `<slug>-<uid>-shuttle`, not a
+  # `<uid>-<uid>-shuttle` that names nothing.
+  test "a kill by uid stops an untracked worker under the canonical session" do
+    fiber_id = "tests/untracked-by-uid"
+    uid = "01JZ00000000000000000000WK"
+
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "open"}))
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nhost: candide\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_kill_untracked_uid,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    sync_poll_cycle!(poller)
+    session = Dispatcher.session_name(fiber_id, uid)
+    MockRunner.add_tmux_session(session)
+
+    assert {:ok, ^session} = Poller.kill_session(poller, uid)
+    assert {"tmux", ["kill-session", "-t", session]} in MockRunner.commands()
+  end
+
+  # Fail closed: a fiber the Poller cannot read has no verified identity, so the
+  # untracked stop touches nothing — not even a live session that a lookup by
+  # its name alone would have found.
+  test "an untracked stop refuses when the fiber's identity cannot be verified" do
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_kill_unverified,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    sync_poll_cycle!(poller)
+    MockRunner.add_tmux_session("ghost-01JZ00000000000000000000WG-shuttle")
+
+    assert {:error, reason} = Poller.kill_session(poller, "tests/ghost")
+    assert reason =~ "could not verify the identity of tests/ghost"
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "kill-session"
+           end)
+  end
+
   # The three tmux "already gone" phrasings session_already_gone? must treat as
   # success: the per-session "session not found" and "no such session", and a
   # whole-server-down "no server running". In every case tmux reports the

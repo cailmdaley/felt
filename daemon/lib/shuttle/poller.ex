@@ -3170,31 +3170,55 @@ defmodule Shuttle.Poller do
 
   # A worker nothing tracks — its watcher failed to start, or a restart has
   # not adopted it yet — is still a worker. Look for it where a launch would
-  # have put it, the app conversation the fiber owns or its canonical tmux
-  # session, and stop whatever is live there. `:no_session` only when nothing is.
-  defp stop_untracked_worker(state, fiber_id) do
-    uid =
-      case fetch_fiber_full(fiber_id, state) do
-        {:ok, fiber} -> Map.get(fiber, "uid")
-        _ -> nil
-      end
+  # have put it and stop whatever is live there: the app conversation whose
+  # durable record carries this fiber's uid, or the tmux session named for its
+  # canonical slug and uid.
+  #
+  # Identity first, and fail closed. The identifier (slug or uid) is resolved
+  # to the canonical slug, then the fiber is read; a read that fails stops
+  # nothing, because a lookup by slug alone could reach another fiber's worker
+  # (an app record that kept a renamed fiber's old slug). A fiber with no uid
+  # was never dispatchable, so nothing of its own can be live.
+  defp stop_untracked_worker(state, identifier) do
+    {_runtime_key, slug} = resolve_identity(state, identifier)
 
-    case live_session_for_fiber(state, fiber_id, uid) do
-      nil ->
-        {:ok, :no_session}
+    case fetch_fiber_full(slug, state) do
+      {:ok, fiber} ->
+        case Map.get(fiber, "uid") do
+          uid when is_binary(uid) and uid != "" ->
+            stop_live_session(state, slug, untracked_session(state, slug, uid))
 
-      session ->
-        case Shuttle.WorkerBackend.stop(state.runner, session) do
-          {_output, 0} ->
-            {:ok, session}
-
-          {output, status} ->
-            Logger.error(
-              "stopping untracked #{fiber_id}: stop exited #{inspect(status)}: #{output}"
-            )
-
-            {:error, "stopping the worker failed (exit #{inspect(status)}): #{output}"}
+          _ ->
+            {:ok, :no_session}
         end
+
+      _ ->
+        {:error,
+         "could not verify the identity of #{identifier}; no untracked worker was stopped"}
+    end
+  end
+
+  defp untracked_session(state, slug, uid) do
+    case Enum.find(Shuttle.AppWorkers.active(), &(&1["uid"] == uid)) do
+      %{"session_uuid" => id} when is_binary(id) ->
+        Shuttle.AppWorkers.ref(id)
+
+      _ ->
+        session = Dispatcher.session_name(slug, uid)
+        if session && already_running_session?(state, session), do: session
+    end
+  end
+
+  defp stop_live_session(_state, _slug, nil), do: {:ok, :no_session}
+
+  defp stop_live_session(state, slug, session) do
+    case Shuttle.WorkerBackend.stop(state.runner, session) do
+      {_output, 0} ->
+        {:ok, session}
+
+      {output, status} ->
+        Logger.error("stopping untracked #{slug}: stop exited #{inspect(status)}: #{output}")
+        {:error, "stopping the worker failed (exit #{inspect(status)}): #{output}"}
     end
   end
 
