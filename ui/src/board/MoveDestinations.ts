@@ -98,6 +98,10 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   const out: MoveDestination[] = []
   // A cycle is a band of time on the calendar, not work. Nothing here applies.
   if (card.isCycle) return out
+  // A seat at rest is already where every parking gesture would put it: a
+  // draft, the desk or Resting all land it back among the Roles. What it can
+  // do is start, or be sent for review.
+  const restingSeat = seatAtRest(card)
 
   // ── The Now columns ────────────────────────────────────────────────────
   // Offered in the board's own left-to-right order, each omitted only when the
@@ -108,6 +112,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   // drop — it closes the card with the verdict cleared and stops the worker.
   for (const target of ['drafts', 'inFlight', 'awaitingReview'] as const) {
     if (column === target) continue
+    if (restingSeat && target === 'drafts') continue
     out.push({
       id: target,
       label: COLUMN_TITLES[target],
@@ -118,7 +123,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
 
   // ── Surfaces ───────────────────────────────────────────────────────────
   // Onto the desk.
-  if (!planningIgnored(card)) {
+  if (!planningIgnored(card) && !card.shuttleSeat) {
     const alreadyOnDesk = card.status !== 'closed' && card.effectiveHorizon === 'now'
     if (!alreadyOnDesk) {
       out.push({
@@ -129,12 +134,12 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
       })
     }
   }
-  // Into Resting.
-  if (!planningIgnored(card)) {
+  // Into Resting — for a seat, back among the Roles.
+  if (!planningIgnored(card) && !restingSeat) {
     if (card.status === 'closed' || !restingNow(card)) {
       out.push({
         id: 'stashed',
-        label: SURFACE_TITLE.stashed,
+        label: card.shuttleSeat ? 'Roles' : SURFACE_TITLE.stashed,
         group: 'other',
         action: { kind: 'surface', horizon: 'stashed' },
       })
@@ -167,6 +172,17 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
   }
 
   return out
+}
+
+/** A seat at rest — the cards the Roles band draws: `classifyFiber`'s `roles`
+ *  branch, read off the card. */
+export function seatAtRest(card: KanbanCard): boolean {
+  return (
+    !!card.shuttleSeat &&
+    card.status !== 'closed' &&
+    !hasLiveWorker(card) &&
+    (card.status !== 'active' || card.shuttleKind === 'standing')
+  )
 }
 
 export interface QueueTarget {

@@ -2252,7 +2252,8 @@ export class KanbanModal {
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
 
-    // Two surfaces, top to bottom: the Now board, then Resting. The day axis is only the drag-reveal horizon under
+    // Three surfaces, top to bottom: the Now board, the Roles band (when any
+    // seat is at rest), then Resting. The day axis is only the drag-reveal horizon under
     // the tab strip (see `syncDragHorizon`).
     // The cycle lens: a row of chips above the columns, and — when one is
     // engaged — a lens the Now board is drawn through. Derived fresh from the
@@ -2271,6 +2272,9 @@ export class KanbanModal {
     }
 
     this.deskEl.append(this.surfaces.renderNowSection(now, staleness, lens))
+    // Seats at rest sit in their own band between Now and Resting.
+    const rolesBand = this.surfaces.renderRolesSection(data.roles, staleness)
+    if (rolesBand) this.deskEl.append(rolesBand)
     // Resting draws everything at rest — snoozed work AND standing constitutions asleep
     // between runs, which classify as `scheduled`; see `restingCards`.
     this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
@@ -2883,6 +2887,7 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
   now: KanbanResponse['now']
   timeline: KanbanResponse['timeline']
   stash: KanbanCard[]
+  roles: KanbanCard[]
   folded: KanbanCard[]
 } {
   let card: KanbanCard | null = null
@@ -2904,6 +2909,7 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
       futureDated: drop(resp.timeline.futureDated),
     },
     stash: drop(resp.stash),
+    roles: drop(resp.roles),
     // FOLDED IS A SURFACE for lifting purposes: a card drawn only as a row in
     // its head's peek list is still a card every gesture can start from, and a
     // relocator that could not find it would paint nothing at all.
@@ -2933,7 +2939,7 @@ export function clearQueueEdge(
   cardId: string,
 ): KanbanResponse | null {
   if (!resp) return null
-  const { card, now, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, roles, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
   const released: KanbanCard = {
     ...card,
@@ -2966,6 +2972,7 @@ export function clearQueueEdge(
       futureDated: restore(timeline.futureDated, resp.timeline.futureDated),
     },
     stash: restore(stash, resp.stash),
+    roles: restore(roles, resp.roles),
     folded,
   })
 }
@@ -2989,16 +2996,19 @@ function withSurfaces(
     now: KanbanResponse['now']
     timeline: KanbanResponse['timeline']
     stash: KanbanCard[]
+    roles?: KanbanCard[]
     folded?: KanbanCard[]
   },
 ): KanbanResponse {
+  const roles = s.roles ?? resp.roles
   return {
     ...resp,
     now: s.now,
     timeline: s.timeline,
     stash: s.stash,
+    roles,
     folded: s.folded ?? resp.folded,
-    totals: surfaceTotals(s),
+    totals: surfaceTotals({ ...s, roles }),
   }
 }
 
@@ -3050,7 +3060,7 @@ function applyOptimisticTransition(
 ): KanbanResponse | null {
   if (!resp) return null
   const nowIso = new Date().toISOString()
-  const { card, now, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, roles, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
   // Unfolding is implicit in every lifecycle drop: the card is being drawn in a
@@ -3084,8 +3094,10 @@ function applyOptimisticTransition(
       },
       nowMs,
     )
+    // A standing seat re-armed between runs rests among the Roles.
+    if (moved.shuttleSeat) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
     timeline.futureDated = [...timeline.futureDated, moved]
-    return withSurfaces(resp, { now, timeline, stash, folded })
+    return withSurfaces(resp, { now, timeline, stash, roles, folded })
   }
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'
@@ -3122,10 +3134,20 @@ function applyOptimisticTransition(
       moved.tempered = undefined
       moved.closedAt = undefined
     }
+    // A seat parked as a draft is a seat at rest: it goes back to its role.
+    if (target === 'drafts' && moved.shuttleSeat) {
+      return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
+    }
     now[target] = [...now[target], moved]
   }
 
-  return withSurfaces(resp, { now, timeline, stash, folded })
+  return withSurfaces(resp, { now, timeline, stash, roles, folded })
+}
+
+/** `roles` with `seat` placed where the read model's name order puts it. */
+function withSeat(roles: KanbanCard[], seat: KanbanCard): KanbanCard[] {
+  const at = roles.findIndex((c) => c.name.localeCompare(seat.name) > 0)
+  return at < 0 ? [...roles, seat] : [...roles.slice(0, at), seat, ...roles.slice(at)]
 }
 
 /**
@@ -3167,7 +3189,8 @@ function applyOptimisticSurface(
 
 /**
  * The skeleton of the stash relocator above: lift the card off whichever
- * surface holds it, patch it, and put it back at the head of Resting.
+ * surface holds it, patch it, and put it back at the head of Resting (a seat
+ * among the Roles).
  * Returns a fresh response (the input is never mutated), or null when there is
  * no response or the card is absent from it.
  */
@@ -3177,8 +3200,10 @@ function placeOptimistically(
   patch: (card: KanbanCard) => Partial<KanbanCard>,
 ): KanbanResponse | null {
   if (!resp) return null
-  const { card, now, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, roles, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
   const moved: KanbanCard = { ...card, foldedUnder: undefined, ...patch(card) }
-  return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], folded })
+  // Resting a seat keeps it a seat: it comes to rest among the Roles.
+  if (moved.shuttleSeat) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
+  return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles, folded })
 }

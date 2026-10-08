@@ -392,10 +392,35 @@ const STANDING: MockFiber[] = [
 ]
 
 /**
- * SEATS — constitutions you come back to and start by hand, resting between
- * sessions (`status: open` + `horizon: stashed`). Enough of them to fill
- * several Resting clusters. None carry a `uid` — Resting never joins a row to
- * the activity plane, only Chronicle does.
+ * ROLE SEATS — constitutions carrying `shuttle.seat`, drawn in the Roles band
+ * while they rest. Two share an office (chief of staff on two machines), and
+ * one is a standing seat asleep on its cron, so the band shows both hints.
+ */
+const ROLE_SEATS: MockFiber[] = [
+  { id: 'science/cmbx', name: 'cmbx chair', seat: 'cmbx-chair' },
+  { id: 'science/unions/candide', name: 'Candide UNIONS chair', seat: 'chief-of-staff' },
+  { id: 'science/unions/nibi', name: 'Nibi UNIONS chair', seat: 'chief-of-staff' },
+  { id: 'life/vizier', name: 'Vizier', seat: 'vizier' },
+  { id: 'life/music', name: 'Music — the composer\'s desk', seat: 'composer' },
+].map(({ id, name, seat }) => ({
+  id,
+  name,
+  status: 'open',
+  outcome: `${name}: at rest.`,
+  shuttle: { ...shuttleBlock('oneshot'), seat },
+})).concat([{
+  id: 'loom/morning-post',
+  name: 'Morning post',
+  status: 'active',
+  outcome: 'Morning post: sleeping until tomorrow.',
+  shuttle: { ...shuttleBlock('standing'), seat: 'vizier', schedule: { expr: '0 7 * * *', tz: 'Europe/Paris' } },
+}])
+
+/**
+ * RESTING — constitutions put down between sessions (`status: open` +
+ * `horizon: stashed`). Enough of them to fill several Resting clusters. None
+ * carry a `uid` — Resting never joins a row to the activity plane, only
+ * Chronicle does.
  */
 const SEATS: MockFiber[] = [
   'null-suite/quick launch',
@@ -573,6 +598,7 @@ const MOCK_FEED = {
     },
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
+    ...ROLE_SEATS.map(fiber),
     ...SEATS.map(fiber),
     // An older seat with a live Codex app worker that raised its hand.
     // It sits BELOW the newer waiting reimbursement inside Needs you, not at

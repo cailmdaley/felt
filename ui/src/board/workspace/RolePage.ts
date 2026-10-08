@@ -12,19 +12,22 @@ export function roleSlug(card: KanbanCard): string | null {
 
 type HoldColumn = ReturnType<typeof fiberPageColumn>
 /** The Desk's reading order: work awaiting review, in flight, drafts, then the rest. */
-const HOLD_ORDER: HoldColumn[] = ['awaitingReview', 'inFlight', 'drafts', 'scheduled', 'resting', 'cycles', 'tempered', 'composted']
+const HOLD_ORDER: HoldColumn[] = ['awaitingReview', 'inFlight', 'roles', 'drafts', 'scheduled', 'resting', 'cycles', 'tempered', 'composted']
 const LIVE: ReadonlySet<HoldColumn> = new Set(['awaitingReview', 'inFlight', 'drafts'])
 const HOLD_LABELS: Record<HoldColumn, string> = {
-  awaitingReview: 'Review', inFlight: 'In flight', drafts: 'Draft', scheduled: 'Resting',
+  awaitingReview: 'Review', inFlight: 'In flight', roles: 'Seat', drafts: 'Draft', scheduled: 'Resting',
   resting: 'Resting', cycles: 'Cycle', tempered: 'Tempered', composted: 'Discarded',
 }
 /** Rows shown before the rest fold behind "more"; live work is always shown whole. */
 const HOLDS_SHOWN = 5
 
-/** The feed's constitutions whose roster names this role, in Desk order. */
+/** The feed's constitutions that are this role's seats or whose roster names
+ *  it, in Desk order. */
 export function roleHolds(cards: KanbanCard[], slug: string): KanbanCard[] {
   const rank = (card: KanbanCard) => HOLD_ORDER.indexOf(fiberPageColumn(card))
-  return cards.filter(card => card.roles?.includes(slug)).sort((a, b) => rank(a) - rank(b))
+  return cards
+    .filter(card => card.shuttleSeat === slug || card.roles?.includes(slug))
+    .sort((a, b) => rank(a) - rank(b))
 }
 
 /** What the page shows of each hold, so a feed poll that changes none of it leaves the page alone. */

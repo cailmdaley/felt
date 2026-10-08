@@ -738,6 +738,99 @@
   outline: 1px dashed var(--kbn-owed);
   outline-offset: 2px;
 }
+/* Roles — seats at rest (`shuttle.seat`), a slim launcher band between the Now
+   board and Resting. A launcher, not a monitor: you arrive meaning to sit in
+   an office, so it reads as a dense row of chips on the section substrate, not
+   a lane competing with the board. The head sits at the left of the row with
+   the column head's hairline rule turned ninety degrees to follow the band. */
+.kbn-section-roles {
+  --kbn-type-scale: 1;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
+  background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
+  border-radius: 3px;
+  padding: 5px 10px;
+  gap: 10px;
+}
+.kbn-section-roles .kbn-bandhead {
+  flex: 0 0 auto;
+  align-self: stretch;
+  align-items: center;
+  flex-wrap: nowrap;
+  padding-right: 10px;
+  border-right: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 32%, transparent);
+}
+/* Every seat shows: chips wrap to as many rows as there are seats, in name
+   order, with no pager. */
+.kbn-roles-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 1px 0;
+}
+/* The chip wears `.kbn-card`'s plate — a seat is the same object as a card on
+   the board, standing still — in one dense row: dot · name · hint. */
+.kbn-role-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  margin: 0;
+  padding: 3px 8px;
+  background: var(--kbn-paper);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent);
+  border-radius: 3px;
+  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  color: var(--kbn-ink);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
+}
+.kbn-role-chip:hover {
+  background: var(--kbn-paper-bright);
+  border-color: color-mix(in srgb, var(--kbn-ink) 22%, transparent);
+  transform: translateY(-1px);
+}
+.kbn-role-chip:focus-visible {
+  outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
+  outline-offset: -2px;
+}
+.kbn-role-chip.kbn-card-dragging { opacity: 0.4; }
+.kbn-role-chip.kbn-card--stale { opacity: 0.5; cursor: default; }
+.kbn-role-chip-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--kbn-ink-muted) 40%, transparent);
+}
+.kbn-role-chip-dot-held { background: var(--kbn-owed-bright); }
+.kbn-role-chip-dot-stale { background: color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent); }
+.kbn-role-chip-name {
+  /* A notch under `.kbn-card-name` (14.5px): the same object, quieter. */
+  font-size: calc(13px * var(--kbn-type-scale, 1));
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kbn-role-chip-hint {
+  flex: 0 0 auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(9px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: color-mix(in srgb, var(--kbn-ink-muted) 75%, transparent);
+}
+
 /* Resting (the surface stored as `horizon: stashed`) — the board's section
    substrate itself, which is what makes it read as standing furniture rather
    than another lane: no shadow, no lift. The head names what the bottom of the page
@@ -1396,7 +1489,7 @@
 }
 .kbn-card:active { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) {
-  .kbn-card:hover:not(.kbn-longpress-held) { transform: none; }
+  .kbn-card:hover:not(.kbn-longpress-held), .kbn-role-chip:hover { transform: none; }
 }
 /* The long press, while it is being held: the card settles a little, the way a
    physical thing does under a thumb. It is the only feedback touch gets that
@@ -2351,11 +2444,12 @@
   }
   .kbn-card-meta-spacer { flex: 0 1 auto; }
 
-  /* ── The band, folded ──────────────────────────────────────────────────
-     Resting stops being furniture beside the board and becomes a gathering
-     under it: a full-width head you tap, and everything else shown or shut.
-     `installBandCollapse` only wires the head on a mobile viewport, which is
-     why nothing below has a desktop twin. */
+  /* ── The bands, folded ─────────────────────────────────────────────────
+     Roles and Resting stop being furniture beside the board and become
+     gatherings under it: a full-width head you tap, and everything else
+     shown or shut. `installBandCollapse` only wires the head on a mobile
+     viewport, which is why nothing below has a desktop twin. */
+  .kbn-section-roles,
   .kbn-section-stash {
     flex-direction: column;
     align-items: stretch;
@@ -2365,6 +2459,7 @@
     background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
     border-radius: 3px;
   }
+  .kbn-section-roles .kbn-bandhead,
   .kbn-section-stash .kbn-bandhead {
     flex: 0 0 auto;
     align-items: center;
@@ -2375,6 +2470,7 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
+  .kbn-section-roles .kbn-bandhead:focus-visible,
   .kbn-section-stash .kbn-bandhead:focus-visible {
     outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
     outline-offset: -3px;
@@ -2415,6 +2511,10 @@
     align-content: center;
   }
   .kbn-cluster-item { padding: 0 4px; }
+  /* A launcher chip capped at 260px becomes a stub on a phone: each seat is
+     its own thumb-sized line, and the band reads as a list of offices. */
+  .kbn-roles-row { flex-direction: column; align-items: stretch; padding: 0 8px 8px; }
+  .kbn-role-chip { max-width: none; width: 100%; min-height: 44px; box-sizing: border-box; }
 }
 
 /* ── Touch, wherever it happens ────────────────────────────────────────────

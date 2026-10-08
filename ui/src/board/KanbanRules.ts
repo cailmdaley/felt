@@ -20,7 +20,8 @@ export type KanbanColumn =
   | 'awaitingReview'
   | 'tempered'
   | 'composted'
-  | 'cycles';
+  | 'cycles'
+  | 'roles';
 
 /** The tag that makes a fiber a cycle. Matched case-insensitively on a trimmed
  *  tag so `Cycle` and ` cycle ` are the same declaration. */
@@ -221,6 +222,9 @@ export function lensCycles(
  *      running standing constitution is caught here too, so it shows as live
  *      work in Now rather than waiting on the timeline.
  *
+ *   2b. A seat at rest (`shuttle.seat`; open, statusless, or an armed
+ *      standing constitution between runs) → `roles`, the Roles band.
+ *
  *   3. The open/active branch, on the document alone:
  *        - no shuttle block      → drafts   (human due-date card; visible,
  *                                            not dispatchable)
@@ -239,7 +243,7 @@ export function lensCycles(
  *      a card is DRAWN (`foldHeadId`), never what it is.
  *
  * The kanban response splits classifyFiber's output across the
- * surfaces: now, timeline and stash. The classifier
+ * surfaces: now, timeline, stash and roles. The classifier
  * itself doesn't care which surface — it produces a flat label that the
  * handler routes.
  */
@@ -265,6 +269,18 @@ export function classifyFiber(
 
   if (opts.liveWorker && f.hasShuttleBlock === true) {
     return 'inFlight';
+  }
+
+  // A SEAT AT REST belongs to its role, not to a project's drafts or to
+  // Resting: open (whatever its horizon), or a standing seat asleep on its
+  // cron. An armed oneshot seat falls through to In flight, where the daemon
+  // is about to start it.
+  if (
+    f.hasShuttleBlock === true &&
+    f.shuttleSeat &&
+    (f.status !== 'active' || f.shuttleKind === 'standing')
+  ) {
+    return 'roles';
   }
 
   // Everything still here carries a shuttle block: `shouldIncludeInKanban`

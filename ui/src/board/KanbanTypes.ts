@@ -184,6 +184,13 @@ export interface KanbanCard {
    */
   shuttleKind?: ShuttleKind
   /**
+   * `shuttle.seat` — the slug of the role (`roles/<slug>`) this constitution is
+   * a seat of. A seat at rest (not running, not closed) is drawn in the Roles
+   * band rather than Drafts or Resting; its lifecycle is a oneshot's or a
+   * standing constitution's like any other.
+   */
+  shuttleSeat?: string
+  /**
    * `shuttle.schedule.expr` — 5-field cron expression for standing constitutions.
    * Absent on one-shot fibers and on fibers without a shuttle block.
    */
@@ -312,6 +319,11 @@ export interface KanbanResponse {
   }
   /** Stash surface — dateless deferred work; frontend clusters by containment path. */
   stash: KanbanCard[]
+  /** Roles surface — seats at rest (`shuttle.seat`, not running, not closed),
+   *  of any kind: drawn as launcher chips in the Roles band above Resting. A
+   *  running seat is in `now.inFlight`; a closed one awaits review like any
+   *  other card. */
+  roles: KanbanCard[]
   /**
    * Cards FOLDED under the head of their chain — queued behind a card that is
    * drawn somewhere on this board, so they are drawn there and not in a column
@@ -342,6 +354,7 @@ export interface KanbanResponse {
     past: number
     futureDated: number
     stash: number
+    roles: number
   }
   /**
    * Per-origin freshness, keyed by `originId`. Always includes `local`
