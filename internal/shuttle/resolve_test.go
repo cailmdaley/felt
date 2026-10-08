@@ -99,7 +99,7 @@ func TestResolveBlock_StandingNextDue(t *testing.T) {
 		t.Fatalf("ResolveBlock: %v", err)
 	}
 	if res.NextDue == nil {
-		t.Fatal("standing role should have a next_due")
+		t.Fatal("standing constitution should have a next_due")
 	}
 	nd := *res.NextDue
 	if !nd.After(now) {
@@ -114,7 +114,7 @@ func TestResolveBlock_StandingNextDue(t *testing.T) {
 }
 
 // TestResolveBlock_StandingPrevDue locks the field the daemon's catch-up
-// dispatch decision reads: a standing role resolves a prev_due (most recent tick
+// dispatch decision reads: a standing constitution resolves a prev_due (most recent tick
 // ≤ now) that brackets now with next_due. A oneshot has neither.
 func TestResolveBlock_StandingPrevDue(t *testing.T) {
 	t.Parallel()
@@ -126,10 +126,10 @@ func TestResolveBlock_StandingPrevDue(t *testing.T) {
 		t.Fatalf("ResolveBlock: %v", err)
 	}
 	if res.PrevDue == nil {
-		t.Fatal("standing role should have a prev_due")
+		t.Fatal("standing constitution should have a prev_due")
 	}
 	if res.NextDue == nil {
-		t.Fatal("standing role should have a next_due")
+		t.Fatal("standing constitution should have a next_due")
 	}
 	if res.PrevDue.After(now) {
 		t.Fatalf("prev_due %v must be <= now %v", *res.PrevDue, now)
@@ -151,7 +151,7 @@ func TestResolveBlock_StandingPrevDue(t *testing.T) {
 // TestResolveBlock_ImpossibleSchedule: a grammatical but unsatisfiable schedule
 // (Feb 30) resolves no occurrence — robfig's Next returns the zero time, which
 // ResolveBlock must drop rather than emit as a year-0001 next_due. The daemon
-// then sees an unschedulable (invalid) standing role, matching the old behavior.
+// then sees an unschedulable (invalid) standing constitution, matching the old behavior.
 func TestResolveBlock_ImpossibleSchedule(t *testing.T) {
 	t.Parallel()
 	reg := builtinReg(t)

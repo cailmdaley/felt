@@ -259,7 +259,7 @@ try {
     }
   })
   const kindGroup = page.getByRole('radiogroup', { name: 'Kind', exact: true })
-  await kindGroup.getByRole('radio', { name: 'Pinned', exact: true }).click()
+  await kindGroup.getByRole('radio', { name: 'One-shot', exact: true }).click()
   await page.waitForTimeout(200)
   assert.equal(await kindGroup.getByRole('radio', { name: 'Standing', exact: true }).getAttribute('aria-checked'), 'true', 'a refused reshape rolls the kind back')
   assert.ok(await page.getByText('reshape refused').isVisible(), 'the refusal is shown')

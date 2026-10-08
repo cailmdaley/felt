@@ -58,10 +58,8 @@ export interface Fiber {
    * shuttle-managed iff it carries this block; `status` alone decides whether
    * it dispatches (the felt-native cutover — no `shuttle.enabled`). */
   hasShuttleBlock?: boolean;
-  /** `shuttle.kind` — `oneshot` (default), `standing`, or `pinned` (a
-   * schedule-less umbrella role the poller never auto-dispatches; only the
-   * explicit force-dispatch verb launches it). */
-  shuttleKind?: 'oneshot' | 'standing' | 'pinned';
+  /** `shuttle.kind` — `oneshot` (default) or `standing`. */
+  shuttleKind?: 'oneshot' | 'standing';
   /** `shuttle.runtime.session_uuid` — the harness session UUID of the worker the
    * daemon most recently launched for this fiber. Machine-managed, and the ONLY
    * value on the row that changes when a fresh dispatch replaces one session with
@@ -85,7 +83,7 @@ export interface Fiber {
    * surfaced when explicitly true. */
   shuttleChrome?: boolean;
   shuttleSurface?: 'cli' | 'app';
-  /** `shuttle.schedule` — cron expression + IANA timezone for standing roles. */
+  /** `shuttle.schedule` — cron expression + IANA timezone for standing constitutions. */
   shuttleSchedule?: { expr: string; tz: string };
   /** `shuttle.project_dir` — the worker's cwd on the owning host. Echoed back
    * on kind/schedule reshapes (uninstall + reinstall) so the block survives
@@ -166,7 +164,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   const hasShuttleBlock =
     !!shuttleRaw && typeof shuttleRaw === 'object' && !Array.isArray(shuttleRaw);
 
-  let shuttleKind: 'oneshot' | 'standing' | 'pinned' | undefined;
+  let shuttleKind: 'oneshot' | 'standing' | undefined;
   let shuttleSessionUuid: string | undefined;
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
@@ -180,8 +178,9 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
 
   if (hasShuttleBlock) {
     const s = shuttleRaw as Record<string, unknown>;
-    shuttleKind =
-      s.kind === 'standing' ? 'standing' : s.kind === 'pinned' ? 'pinned' : 'oneshot';
+    // Every other value, the retired `pinned` included, reads as a oneshot —
+    // the CLI's `shuttle.NormalizeKind` and the daemon's `Poller.block_kind`.
+    shuttleKind = s.kind === 'standing' ? 'standing' : 'oneshot';
     if (typeof s.host === 'string' && s.host.trim()) shuttleHost = s.host.trim();
 
 
@@ -209,7 +208,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     if (s.chrome === true) shuttleChrome = true;
     if (s.surface === 'app' || s.surface === 'cli') shuttleSurface = s.surface;
 
-    // shuttle.schedule = { expr, tz } for standing roles. Pre-CLI fibers may
+    // shuttle.schedule = { expr, tz } for standing constitutions. Pre-CLI fibers may
     // carry the legacy `timezone` key; read either. Absent tz falls back to UTC.
     const sched = s.schedule;
     if (sched && typeof sched === 'object' && !Array.isArray(sched)) {

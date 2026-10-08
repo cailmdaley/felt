@@ -20,7 +20,7 @@ import (
 //   - Remote rows have Origin == "<remote name>" — the name from the fleet file.
 //
 // A remote daemon's snapshot only enumerates what is running or a
-// standing role — not idle/scheduled one-shot fibers. Cross-host rows therefore
+// standing constitution — not idle/scheduled one-shot fibers. Cross-host rows therefore
 // reflect runtime state, not the full installed-fiber inventory; the local table
 // (felt-native, this machine's full inventory) is unchanged, so the laptop's
 // installed fibers stay visible alongside remote runtime.
@@ -116,7 +116,7 @@ func snapshotToRows(origin string, snap *Snapshot, stale bool) []FiberStatus {
 		if state == "" {
 			state = "scheduled"
 		}
-		// Standing roles don't carry agent in the snapshot — frontmatter is the
+		// Standing constitutions don't carry agent in the snapshot — frontmatter is the
 		// source. The local-only `status` path reads it from felt; the cross-host
 		// path leaves it empty (renders as `(default)`).
 		row := FiberStatus{

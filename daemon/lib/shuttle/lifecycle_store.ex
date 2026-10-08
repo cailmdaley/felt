@@ -1,11 +1,10 @@
 defmodule Shuttle.LifecycleStore do
   @moduledoc """
-  The daemon's worker-exit and force-dispatch document writers for perennial
-  roles, written straight to the felt document: `mark_awaiting` (a standing
-  role's exit closes it to Awaiting review), `park` (a pinned role's dirty exit
-  returns it to the strip), and `rearm` (a force-dispatch opens a standing or
-  pinned role to `status: active`). The human verdicts `accept` and `resume` are
-  Shuttle's (`Shuttle.LifecycleService`).
+  The daemon's worker-exit and force-dispatch document writers for standing
+  constitutions, written straight to the felt document: `mark_awaiting` (a
+  standing run's exit closes it to Awaiting review) and `rearm` (a
+  force-dispatch opens it to `status: active`). The human verdicts `accept` and
+  `resume` are Shuttle's (`Shuttle.LifecycleService`).
 
   The document is the single source of truth: `status`, `tempered`, `outcome`,
   the cron `schedule`, `agent`, `host`. There is no runtime store and no review
@@ -57,15 +56,15 @@ defmodule Shuttle.LifecycleStore do
   end
 
   @doc """
-  Re-arm a PERENNIAL role (standing or pinned) to `status: active` regardless of
-  its current verdict.
+  Re-arm a standing constitution to `status: active` regardless of its current
+  verdict.
 
   This is the **force-dispatch** re-arm: an explicit human "go" from the board
   (force-dispatch) is the verdict, so unlike Shuttle's `accept`/`resume` it does
-  not require the awaiting precondition — it reopens a closed role whether it was
-  awaiting, tempered, or composted, and starts a parked pinned role by writing
-  `open → active` so the board's strip → In-flight "start" gesture both spawns
-  the worker now AND arms the role for the unified lifecycle. Clears
+  not require the awaiting precondition — it reopens a closed run whether it was
+  awaiting, tempered, or composted, and arms a paused one (`open → active`), so
+  the board's start both spawns the worker now and leaves it armed for its
+  schedule. Clears
   `tempered`/`closed-at`, keeps the outcome, and wipes daemon-owned runtime keys.
   A no-op `{:ok, ...}` for a role already active, and an `{:error, _}` for a
   oneshot or unreadable fiber (a force-dispatched oneshot runs once and stays
@@ -77,7 +76,7 @@ defmodule Shuttle.LifecycleStore do
   def rearm(fiber_id, opts \\ []) when is_binary(fiber_id) do
     with {:ok, path, raw_fm, frontmatter, body} <- FiberDoc.read(fiber_id),
          {:ok, shuttle} <- shuttle_block(frontmatter),
-         :ok <- require_perennial(shuttle) do
+         :ok <- require_standing(shuttle) do
       if Map.get(frontmatter, "status") == "active" do
         {:ok, "#{fiber_id} already active\n"}
       else
@@ -88,70 +87,21 @@ defmodule Shuttle.LifecycleStore do
     end
   end
 
-  @doc """
-  Pinned-worker exit writer: park an interactive role back to its rest state by
-  writing `status: open` straight to the felt document — the strip resting state.
-
-  Called on a DIRTY pinned exit (crash, idle exit without a handoff marker, human
-  kill): the interface went dark with no fresh-session request, so the role
-  returns to the **pinned strip** (`status: open`) rather than staying stuck
-  `active` with no live worker in In-flight. Resume from the strip (force-dispatch
-  → `rearm`) re-attaches. A CLEAN handoff takes the other branch in
-  `handle_worker_exit` — the document is left `active` and the tick redispatches a
-  fresh worker, so `park` is never called there.
-
-  Mirror of `mark_awaiting/1` (the standing-role closer, which writes
-  `status: closed`): this is the pinned closer. Pinned-only — a no-op-shaped
-  `{:error, _}` for any other kind so the exit path can log without crashing.
-  Idempotent: `{:ok, ...}` if already parked.
-  """
-  @spec park(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def park(fiber_id) when is_binary(fiber_id) do
-    with {:ok, path, raw_fm, frontmatter, body} <- FiberDoc.read(fiber_id),
-         {:ok, shuttle} <- shuttle_block(frontmatter),
-         :ok <- require_pinned(shuttle) do
-      if Map.get(frontmatter, "status") == "open" do
-        {:ok, "#{fiber_id} already parked\n"}
-      else
-        ops = [{:put, "status", "open"}, {:delete, "closed-at"}] ++ evict_runtime_ops()
-        FiberDoc.write!(path, raw_fm, body, ops)
-        {:ok, "parked #{fiber_id} (status: open) on session end\n"}
-      end
-    end
-  end
-
   defp shuttle_block(%{"shuttle" => shuttle}) when is_map(shuttle), do: {:ok, shuttle}
   defp shuttle_block(_), do: {:error, "fiber has no shuttle: block"}
 
   # Standing = the cron-driven active→closed→active lifecycle `mark_awaiting`
-  # closes (a run closes to awaiting-review; accept advances the recurrence).
-  # Pinned is NOT standing: it redispatches on clean handoff and is parked, not
-  # closed, when its session ends — so `mark_awaiting` rejects it along with
-  # oneshots and non-shuttle fibers.
+  # closes (a run closes to awaiting-review; accept advances the recurrence) and
+  # `rearm` opens. A oneshot is rejected by both: force-dispatching one runs it
+  # once and leaves its status put, with no loop to revive.
   defp require_standing(%{"kind" => "standing"}), do: :ok
 
   defp require_standing(shuttle),
     do:
       {:error,
-       "mark-awaiting only applies to standing roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}
+       "only applies to standing constitutions (kind=#{inspect(Map.get(shuttle, "kind"))})"}
 
-  # Perennial = standing OR pinned: roles whose `active` state means perennial
-  # dispatch (a cron loop, or the Option-D poll loop). `rearm` (the force-dispatch
-  # re-arm) writes them to `active`; a oneshot is rejected — force-dispatching a
-  # oneshot runs it once and leaves its status put, with no loop to revive.
-  defp require_perennial(%{"kind" => kind}) when kind in ["standing", "pinned"], do: :ok
-
-  defp require_perennial(shuttle),
-    do:
-      {:error,
-       "rearm only applies to standing or pinned roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}
-
-  defp require_pinned(%{"kind" => "pinned"}), do: :ok
-
-  defp require_pinned(shuttle),
-    do: {:error, "park only applies to pinned roles (kind=#{inspect(Map.get(shuttle, "kind"))})"}
-
-  # rearm opens a role by writing `status: active` back to the document — the
+  # rearm opens a standing constitution by writing `status: active` back to the document — the
   # sole dispatch gate (there is no enabled flag, no review block). tempered and
   # closed-at are deleted so the card leaves the Awaiting/Tempered/Composted
   # columns. Emitted as surgical edits against the

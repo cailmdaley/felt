@@ -36,7 +36,7 @@ function bucket(day: string, over: Partial<ActivityBucket> = {}): ActivityBucket
 }
 
 const emptyResponse = (cards: readonly KanbanCard[]): KanbanResponse =>
-  response({ pinned: [...cards] })
+  response({ stash: [...cards] })
 
 /** Runs `buildRows` with the fixed window and no origins, keyed for lookup. */
 function orderedIds(cards: KanbanCard[], attribution: Map<string, ActivityBucket[]>): string[] {

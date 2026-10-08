@@ -3,18 +3,19 @@
  *
  * Drag-and-drop has always been the board's only way to move a card, and it
  * has no touch backend: on a phone the whole vocabulary of the desk — the
- * columns, Resting, the Pinned strip, the queue — is simply unreachable. This
+ * columns, Resting, the queue — is simply unreachable. This
  * module is that vocabulary written down, so a menu can offer it.
  *
  * A DESTINATION IS A PLACE, not a verb about one. The label is the column or
  * surface title the board already prints (`COLUMN_TITLES`, `SURFACE_TITLE`),
  * so the menu reads as the drag said out loud and needs no gloss under it.
- * Several legality branches can share one place name — the two ways a pinned
- * role comes back to rest on the strip are both, to the reader, "Pinned".
+ * Resting is the board's one way to put a card down without a verdict, from
+ * In flight and from Awaiting review alike — the worker's `shuttle rest`, said
+ * by hand.
  *
  * THE RULE THIS FILE FOLLOWS: it does not decide anything the drag does not
  * already decide. Every entry below mirrors a guard that already lives in
- * `KanbanModal.setSurface` / `transition` / `pinRole`, or in
+ * `KanbanModal.setSurface` / `transition`, or in
  * `stackDropVerdict` (KanbanRules). Where a guard would banner "that is not a
  * thing this card does", the destination is simply not offered — a menu can
  * be honest about legality in a way a drop target cannot, because it is
@@ -42,10 +43,6 @@ export type MoveAction =
   | { kind: 'transition'; target: ColumnKind }
   /** `KanbanModal.setSurface(card, horizon)` — the planning drop. */
   | { kind: 'surface'; horizon: 'now' | 'stashed' }
-  /** `KanbanModal.pinRole(card)` — the drop onto the Pinned strip. */
-  | { kind: 'pin' }
-  /** Reshape back to a one-shot: the strip's only exit that isn't a verdict. */
-  | { kind: 'unpin' }
   /** `KanbanModal.unstack(card)` — leave the queue. */
   | { kind: 'unstack' }
   /** Not a move by itself: opens the picker of cards this one may queue
@@ -64,15 +61,10 @@ export interface MoveDestination {
 }
 
 /** A card is UNPLANNABLE when a horizon write on it would be ignored by the
- *  classifier and the card would snap back. The three cases are exactly
- *  `setSurface`'s three banner guards, in its order. */
+ *  classifier and the card would snap back: a standing constitution, placed by
+ *  its schedule — exactly `setSurface`'s banner guard. */
 function planningIgnored(card: KanbanCard): boolean {
-  if (card.shuttleKind === 'standing') return true
-  if (card.shuttleKind === 'pinned' && card.status === 'active') return true
-  if (card.status === 'closed' && card.tempered === undefined && card.shuttleKind === 'pinned') {
-    return true
-  }
-  return false
+  return card.shuttleKind === 'standing'
 }
 
 /**
@@ -100,8 +92,7 @@ function restingNow(card: KanbanCard): boolean {
  * `column` is the board's own placement (`findCardColumn`), not a re-derivation
  * — the same source of truth `transition` consults, for the same reason: local
  * reclassification drifts and turns a move into a silent no-op. `null` means
- * the card is on a surface rather than in a Now column (Resting, the timeline,
- * the strip).
+ * the card is on a surface rather than in a Now column (Resting, the timeline).
  */
 export function moveDestinations(card: KanbanCard, column: ColumnKind | null): MoveDestination[] {
   const out: MoveDestination[] = []
@@ -150,32 +141,12 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
     }
   }
 
-  // ── The Pinned strip ───────────────────────────────────────────────────
-  // `pinRole` turns away a block-less card before the network is touched: a
-  // bare draft has no host and no project_dir to install from.
-  if (card.shuttleKind !== undefined) {
-    if (card.shuttleKind !== 'pinned') {
-      out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })
-    } else if (hasLiveWorker(card)) {
-      // The drag's own reading of "back to the strip" for a live pinned role:
-      // stop it, so it comes to rest.
-      out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })
-    } else if (card.status === 'closed' || (card.dependsOn?.length ?? 0) > 0) {
-      // A closed role lives off the strip; a queued role lives beneath its
-      // predecessor. pinRole reopens/reshapes/parks either back onto Pinned.
-      out.push({ id: 'pin', label: COLUMN_TITLES.pinned, group: 'other', action: { kind: 'pin' } })
-    }
-    if (card.shuttleKind === 'pinned') {
-      out.push({ id: 'unpin', label: 'Unpin', group: 'other', action: { kind: 'unpin' } })
-    }
-  }
-
   // ── The queue ──────────────────────────────────────────────────────────
   // A hand-written `depends_on:` LIST is a fan-in someone assembled on
   // purpose; neither the drag nor this menu may collapse it.
   if (card.dependsOnShape !== 'list') {
     // Any kind may be queued: the edge is ordering for the eye, so a standing
-    // or pinned role filed after something is exactly that and nothing more.
+    // constitution filed after something is exactly that and nothing more.
     out.push({
       id: 'queue',
       label: 'Queue behind…',

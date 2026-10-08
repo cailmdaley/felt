@@ -14,7 +14,6 @@ function renderer(data: KanbanResponse, openDetail = vi.fn()): KanbanSurfaceRend
     stopDragAutoScroll: () => {},
     transition: () => {},
     setSurface: () => {},
-    pin: () => {},
     stack: () => {},
     reorderQueue: () => {},
     unqueueRow: () => {},
@@ -129,15 +128,7 @@ describe('In flight bands', () => {
   })
 })
 
-describe('Pinned and Resting rendering follows the ordering contract', () => {
-  it('does not override pinned creation order with path or modification order', () => {
-    const data = response({ pinned: [
-      card({ id: 'z-new', createdAt: '2026-10-04T12:00:00Z', modifiedAt: '2026-10-01T12:00:00Z', shuttleKind: 'pinned' }),
-      card({ id: 'a-old', createdAt: '2026-10-01T12:00:00Z', modifiedAt: '2026-10-04T12:00:00Z', shuttleKind: 'pinned' }),
-    ] })
-    expect(renderedIds(renderer(data).renderPinnedSection(data.pinned, {}))).toEqual(['z-new', 'a-old'])
-  })
-
+describe('Resting rendering follows the ordering contract', () => {
   it('draws undated before dated, warm before cold in both halves, and return then creation order', () => {
     const data = response({ stash: [
       card({ id: 'cold/undated', cold: true }),

@@ -129,6 +129,11 @@ defmodule Shuttle.DispatcherTest do
         tags: ["constitution"],
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
+      "tests/resting" => %{
+        status: "open",
+        tags: ["constitution"],
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
       "tests/reopen-fails" => %{
         # Closed fiber whose `shuttle reopen` shell-out fails (see the
         # reopen branch in handle_felt/1) — exercises the authoritative-reopen
@@ -502,7 +507,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "role and surface metadata select the skill's exit semantics" do
-    assert Dispatcher.render_prompt("tests/a", kind: "pinned") =~ "Kind: pinned"
+    assert Dispatcher.render_prompt("tests/a", kind: "standing") =~ "Kind: standing"
     assert Dispatcher.render_prompt("tests/a", surface: "app") =~ "surface: app"
     assert Dispatcher.render_prompt("tests/a") =~ "Kind: oneshot"
   end
@@ -1032,6 +1037,17 @@ defmodule Shuttle.DispatcherTest do
   test "dispatch refuses closed fiber" do
     result = Dispatcher.dispatch("tests/closed", runner: MockRunner)
     assert {:error, :closed} = result
+  end
+
+  # The tick chose its fibers from an earlier read; a pause or rest that lands
+  # before the launch leaves the fiber `open`, and the launch's fresh read must
+  # refuse it rather than start a worker on work just put down.
+  test "an unforced dispatch refuses any fiber its fresh read finds not active" do
+    assert {:error, :not_active} = Dispatcher.dispatch("tests/resting", runner: MockRunner)
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
   end
 
   test "dispatch with force: true on a closed fiber shells out to shuttle reopen" do
@@ -1589,7 +1605,7 @@ defmodule Shuttle.DispatcherTest do
       cond do
         mode == "previous" and session != nil -> {{:previous, session}, false}
         mode == "previous" -> {{:error, :missing_session_id}, false}
-        mode == nil and kind != "oneshot" -> {:fresh, false}
+        mode == nil and kind == "standing" -> {:fresh, false}
         session == nil or clean? -> {:fresh, false}
         surface == "app" and mode == "fresh" -> {:fresh, false}
         surface == "app" -> {{:previous, session}, false}

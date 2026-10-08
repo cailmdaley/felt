@@ -30,41 +30,41 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\ninstall\ntests/interactive\n--project-dir\n/tmp/project\n"
   end
 
-  # pin CREATES a schedule-less kind:pinned block on a fiber that has none —
-  # the board's drag-onto-the-Pinned-strip gesture for an unmanaged card (an
-  # already-managed one reshapes instead). The controller forwards model /
-  # project / host to `shuttle pin`; no schedule (a pinned block has none).
-  #
-  # `--host` here is the cross-host INSTALL TARGET, unrelated to `-C`
-  # (which names the store the id resolves against). Both ride the same argv;
-  # this locks in that they stay distinct.
-  test "pin delegates to shuttle with model, project_dir and host" do
-    store = fixture_store!("shuttle-lifecycle-pin", "tests/operator", "Operator")
+  # rest puts a card in Resting without review; the controller forwards it to
+  # `shuttle rest` with --local, like pause.
+  test "rest delegates to shuttle with --local" do
+    store = fixture_store!("shuttle-lifecycle-rest", "tests/operator", "Operator")
     args_file = install_fake_cli!()
 
     conn =
       post(
         api_conn(),
         "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "pin",
-          "fiber" => "tests/operator",
-          "model" => "claude-fable",
-          "project_dir" => "/tmp/loom",
-          "host" => "dapmcw68"
-        })
+        Jason.encode!(%{"action" => "rest", "fiber" => "tests/operator"})
       )
 
     assert conn.status == 200
+    assert File.read!(args_file) == "-C\n#{store}\nrest\ntests/operator\n--local\n"
+  end
 
-    assert File.read!(args_file) ==
-             "-C\n#{store}\npin\ntests/operator\n--model\nclaude-fable\n" <>
-               "--project-dir\n/tmp/loom\n--host\ndapmcw68\n"
+  test "pin is no longer a lifecycle action" do
+    fixture_store!("shuttle-lifecycle-nopin", "tests/operator", "Operator")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "pin", "fiber" => "tests/operator"})
+      )
+
+    assert conn.status == 400
+    refute File.exists?(args_file)
   end
 
   # `reshape` is the surgical shape edit on an existing block: the kind rides as
   # an optional POSITIONAL right after the fiber, then the schedule flags. It
-  # rides the same id-resolution clause as `install` and `pin`, so the store
+  # rides the same id-resolution clause as `install`, so the store
   # flag still lands ahead of the verb.
   test "reshape delegates to shuttle with kind as a positional" do
     store = fixture_store!("shuttle-lifecycle-reshape", "tests/nightly", "Nightly")
@@ -115,9 +115,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n--local\n"
   end
 
-  # Only the three legal kinds reach the CLI — an arbitrary string is rejected
-  # here rather than forwarded as a positional felt would have to argue with.
-  test "reshape rejects a kind outside oneshot/standing/pinned" do
+  # Only the legal kinds reach the CLI — an arbitrary string, or the retired
+  # `pinned`, is rejected here rather than forwarded as a positional felt would
+  # have to argue with.
+  test "reshape rejects a kind outside oneshot/standing" do
     fixture_store!("shuttle-lifecycle-reshape-badkind", "tests/badkind", "Bad kind")
     args_file = install_fake_cli!()
 
@@ -140,12 +141,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # Regression: a project whose `.felt` symlinks INTO a subtree of the loom sees
   # its fibers under project-relative ids (`lightcone/desk`), while the loom that
   # actually owns the file sees `ai-futures/lightcone/lightcone/desk`. The board
-  # sends whichever id served the card's row. Before the fix, the pin-to-the-
-  # strip write forwarded that id raw against the default store and died with
-  # `no fiber found matching "lightcone/desk"`, stranding a de-pinned fiber in
-  # Awaiting review. The controller must resolve to the OWNING store and rewrite
-  # the id owner-relative — the gesture now posts `reshape pinned`, so the
-  # id-rewrite guard rides that verb.
+  # sends whichever id served the card's row. A write that forwarded that id raw
+  # against the default store would die with `no fiber found matching
+  # "lightcone/desk"`. The controller must resolve to the OWNING store and
+  # rewrite the id owner-relative; reshape carries the guard here.
   test "reshape rewrites a project-relative id to its owning store" do
     root =
       System.tmp_dir!()
@@ -174,14 +173,14 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         Jason.encode!(%{
           "action" => "reshape",
           "fiber" => "lightcone/desk",
-          "kind" => "pinned"
+          "kind" => "oneshot"
         })
       )
 
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "-C\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n--local\n"
+             "-C\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\noneshot\n--local\n"
   end
 
   test "close and reopen delegate through the existing lifecycle endpoint" do

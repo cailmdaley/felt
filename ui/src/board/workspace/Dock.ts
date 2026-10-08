@@ -158,24 +158,24 @@ export function sessionWindow(
 }
 
 /**
- * Whether the board places this card by its `due:` day. A standing role is
- * placed by its cron and an active pinned role rests on the Pinned strip —
- * neither is ever sorted by due, so neither shows or edits one.
+ * Whether the board places this card by its `due:` day. A standing
+ * constitution is placed by its cron and is never sorted by due, so it
+ * neither shows nor edits one.
  */
-function placedByDue(card: Pick<KanbanCard, 'shuttleKind' | 'status'>): boolean {
-  return !(card.shuttleKind === 'standing' || (card.shuttleKind === 'pinned' && card.status === 'active'))
+function placedByDue(card: Pick<KanbanCard, 'shuttleKind'>): boolean {
+  return card.shuttleKind !== 'standing'
 }
 
 /**
  * What the folded settings strip says about a card, as data — the strip is a
  * reading of the fiber, not a label for the controls under it.
  *
- *   claude-fable medium · pinned · ada-workstation:~/dev/felt   Sep 26 01:38 → 02:40 · 1h 2m ✓
+ *   claude-fable medium · weekdays 9:00 · ada-workstation:~/dev/felt   Sep 26 01:38 → 02:40 · 1h 2m ✓
  *
  * `actor` is the agent id (cobalt) on a shuttle card and `me` (cinnabar) on a
  * human one, the same word the board card prints. `cadence` is said only when
- * it isn't the default: a pinned role says so, a standing one speaks its cron,
- * a one-shot says nothing. `place` is `host:dir` with the home directory
+ * it isn't the default: a standing constitution speaks its cron, a one-shot
+ * says nothing. `place` is `host:dir` with the home directory
  * folded to `~`. `due` is dropped where the board never reads it
  * ({@link placedByDue}).
  */
@@ -197,8 +197,6 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
     cadence = spoken
       ? { text: spoken, title: `cron: ${card.shuttleSchedule}${card.shuttleTz ? ` (${card.shuttleTz})` : ''}` }
       : { text: card.shuttleSchedule }
-  } else if (card.shuttleKind === 'pinned') {
-    cadence = { text: 'pinned' }
   }
   const dir = card.shuttleProjectDir?.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~')
   const placeText = [card.shuttleHost, dir].filter(Boolean).join(':')
@@ -1352,7 +1350,7 @@ export class Dock {
 
     // ── Kind + cron ──────────────────────────────────────────────────────
     // The card's kind is read straight through — an absent block reads as
-    // one-shot — so a pinned card shows Pinned and One-shot unpins it.
+    // one-shot.
     const baseline = {
       kind: (card.shuttleKind ?? 'oneshot') as ShuttleKind,
       schedule: card.shuttleSchedule ?? '',
@@ -1360,7 +1358,7 @@ export class Dock {
     }
     const kind = segmented<ShuttleKind>(
       'Kind',
-      [['oneshot', 'One-shot'], ['standing', 'Standing'], ['pinned', 'Pinned']],
+      [['oneshot', 'One-shot'], ['standing', 'Standing']],
       baseline.kind,
     )
 
@@ -1415,9 +1413,8 @@ export class Dock {
       })
     }
 
-    // One-shot and Pinned commit on the click: neither needs anything the
-    // user hasn't given, and neither throws away what a re-toggle can't
-    // restore.
+    // One-shot commits on the click: it needs nothing the user hasn't given,
+    // and throws away nothing a re-toggle can't restore.
     //
     // PROMOTING to Standing does NOT commit on the click. The toggle reveals
     // and seeds the cron (`0 9 * * 1-5`, Europe/Paris) — seeding is not
@@ -1425,12 +1422,6 @@ export class Dock {
     // blur or Enter (`commitSchedule`). A promotion abandoned mid-toggle stays
     // one-shot on the wire: a schedule is something you state, never
     // something you're given.
-    //
-    // PINNING HERE IS SHAPE-ONLY, unlike the board's drag onto the Pinned
-    // strip, which kills a live worker, reshapes, then pauses. The drag
-    // targets a surface where things are at rest; this control edits a field
-    // and says nothing about now. So it posts the reshape alone, and the read
-    // model places the card.
     let kindRevision = 0
     const commitKind = (value: ShuttleKind, revision: number): void => {
       if (value === baseline.kind && !this.savesPending) return
@@ -1486,6 +1477,13 @@ export class Dock {
         abandoningPromotion = false
       })
     }
+    // The keyboard twin of that mousedown: an arrow off a staged Standing
+    // moves focus to the next segment before it picks it, and that focus move
+    // is the cron field's blur. Captured ahead of the group's own handler.
+    kind.el.addEventListener('keydown', (e) => {
+      const arrow = e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+      if (arrow && kind.value === 'standing' && baseline.kind !== 'standing') abandoningPromotion = true
+    }, true)
 
     // Schedule + tz commit on blur and Enter — `input` would patch mid-typed
     // cron fragments. This is ALSO where a promotion to Standing lands, which
@@ -1503,7 +1501,7 @@ export class Dock {
       const promoting = baseline.kind !== 'standing'
       if (!promoting && schedule === baseline.schedule && tz === baseline.tz) return
       if (!schedule) {
-        errorEl.textContent = 'A standing role needs a cron expression.'
+        errorEl.textContent = 'A standing constitution needs a cron expression.'
         errorEl.style.display = ''
         return
       }
@@ -1535,9 +1533,8 @@ export class Dock {
    * timeline renders `DRAG_HORIZON_DAYS` (14) ahead — and the way a resting
    * card gets a day to come back on, so on a resting card the field is named
    * for that: Returns. A cycle's due is its band's closing edge: Ends. A
-   * standing role (placed by its cron) and a resting pinned role (on the
-   * Pinned strip) are never sorted by `due:`, so the field is absent while
-   * the card is either.
+   * standing constitution (placed by its cron) is never sorted by `due:`, so
+   * the field is absent on one.
    */
   private buildCardFields(
     card: KanbanCard,
@@ -2374,7 +2371,7 @@ export class Dock {
           // one), so it takes the create path — `install`/`repeat`, no reshape
           // flag. Current block state comes from the card.
           // The fallback PRESERVES the card's current kind — a schedule/tz-only
-          // patch must never quietly unpin a pinned role on its way past.
+          // patch must never quietly change the kind on its way past.
           const targetKind: ShuttleKind = changes.shuttleKind ?? card.shuttleKind ?? 'oneshot'
 
           const schedule =
@@ -2399,10 +2396,7 @@ export class Dock {
             )
           } else if (targetKind === 'standing') {
             // Below here the card has NO block yet, so there is nothing to
-            // reshape and the create verbs take over. `pinned` never reaches
-            // this arm: the kind control is hidden until the card is
-            // shuttle-managed, and pinning a block-less card is refused on the
-            // board too (`pinRole` banners "promote it first").
+            // reshape and the create verbs take over.
             await this.postJson('/api/v1/lifecycle', {
               action: 'repeat', origin, fiber: fiberId,
               // Undefined when the block carries none, which a paused install

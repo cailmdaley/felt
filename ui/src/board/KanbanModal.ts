@@ -5,14 +5,13 @@
  *
  *   Now     — three lifecycle columns (Drafts | In flight | Awaiting review).
  *             The dense workflow board for what is actively being worked.
- *   Pinned  — a slim launcher band of at-rest `kind:pinned` umbrella roles.
  *   Resting — deliberately paused work, clustered on the containment path's
  *             first meaningful project token. Held-open clusters (cold:true)
  *             sit below warm ones in a dimmer style. Stored as
  *             `horizon: stashed`; "Resting" is the human name.
  *
  * TIME IS NOT A DESK SURFACE. The chronicle tells the story of past landings
- * and future-dated work, so the Desk's height goes to Pinned and Resting.
+ * and future-dated work, so the Desk's height goes to Now and Resting.
  * What the Desk needs from a day axis is the gesture — "this one on Tuesday"
  * — so it has the drag-reveal horizon: a slim row of future days that appears
  * under the tab strip while a card is in the air and vanishes on drop. See
@@ -209,7 +208,7 @@ export class KanbanModal {
   /** The bar's right end while the reader is open: its page count, before Settings. */
   private positionSlotEl: HTMLDivElement | null = null
   /**
-   * Wrapper around the three Desk surfaces (Now + Pinned + Resting).
+   * Wrapper around the Desk surfaces (Now + Resting).
    * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
    * layout box — the sections participate in `.kbn-body`'s flex column as if
    * they were its direct children. Switching to a
@@ -364,7 +363,6 @@ export class KanbanModal {
       stopDragAutoScroll: () => this.stopDragAutoScroll(),
       transition: (card, target) => this.transition(card, target),
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
-      pin: (card) => this.pinRole(card),
       stack: (card, tailId) => this.stackBehind(card, tailId),
       stackQueueRow: (fiberId, plan) => this.stackQueueRow(fiberId, plan),
       reorderQueue: (writes) => this.reorderQueue(writes),
@@ -1149,7 +1147,7 @@ export class KanbanModal {
    *
    * Drag-from-timeline-or-stash composes the park-on-desk write with the
    * lifecycle verb rather than writing the surface alone and trusting
-   * classifyFiber to redirect: standing roles always re-classify back to the
+   * classifyFiber to redirect: standing constitutions always re-classify back to the
    * timeline (their lifecycle column is `scheduled`, horizon-independent),
    * and tempered/closed past cards never leave timeline.past. Composing both
    * writes makes the drag take precedence: the gesture lands the card where
@@ -1300,8 +1298,7 @@ export class KanbanModal {
       } else {
         // Dragging a running card off in-flight stops its worker first — the
         // board's "alive only while in-flight" invariant. inFlight is the one
-        // target that doesn't kill (it's a (re)dispatch, and a pinned card
-        // dragged here is at rest, not running).
+        // target that doesn't kill (it's a (re)dispatch).
         await this.killWorkerIfRunning(card)
         await this.postTransition(card, target, 'Transition failed')
       }
@@ -1776,7 +1773,7 @@ export class KanbanModal {
       void this.unstack(card)
       return
     }
-    // A standing role is placed on the timeline by its schedule
+    // A standing constitution is placed on the timeline by its schedule
     // (`nextStandingLaunch`), not by hand — a horizon/due write here is
     // silently ignored by the read model and just leaves dead frontmatter.
     // Reject the planning gesture with an explanation rather than no-op. The
@@ -1785,35 +1782,10 @@ export class KanbanModal {
     // close it.
     if (card.shuttleKind === 'standing') {
       this.showBanner(
-        `“${card.name}” is a standing role — it runs on its schedule. Edit the schedule to change when it runs, or drag it to In flight to run it now.`,
+        `“${card.name}” is a standing constitution — it runs on its schedule. Edit the schedule to change when it runs, or drag it to In flight to run it now.`,
         'info',
       )
       this.announce(`${card.name} runs on its schedule; drag it to In flight to run it now.`)
-      return
-    }
-    // A resting pinned role lives on the strip, not the planner — a horizon/due
-    // write would be ignored by the classifier (pinned+active always reads
-    // `pinned`) and the card would snap back. Same family as the standing guard.
-    if (card.shuttleKind === 'pinned' && card.status === 'active') {
-      this.showBanner(
-        `“${card.name}” is a pinned role — it rests on the Pinned strip. Drag it to In flight to run it, or unpin it to plan it.`,
-        'info',
-      )
-      this.announce(`${card.name} is pinned; drag it to In flight to run it.`)
-      return
-    }
-    // The awaiting run of a cyclical pinned role (closed untempered) takes
-    // verdict gestures — accept (drag to Tempered / In flight) or compost — not
-    // planning ones; a planning write would leave it classified awaiting and
-    // snap back. (Standing roles already returned above, so only `pinned`
-    // reaches here — a closed oneshot awaiting review CAN be stashed, via the
-    // reopen-as-draft compose in commitSurface.)
-    if (card.status === 'closed' && card.tempered === undefined && card.shuttleKind === 'pinned') {
-      this.showBanner(
-        `“${card.name}” is a pinned role awaiting review — accept it (drag to Tempered) or discard it first.`,
-        'info',
-      )
-      this.announce(`${card.name} awaits a verdict; accept or discard it first.`)
       return
     }
     const wantsCold = horizon === 'stashed' ? (opts.cold ?? false) : undefined
@@ -1860,22 +1832,35 @@ export class KanbanModal {
     opts: { cold?: boolean; due?: string | null; dropsStaleDue?: boolean },
   ): Promise<void> {
     try {
-      // Parking a running card on a planning surface (stash / future date) stops
-      // its worker — alive only while in-flight.
-      await this.killWorkerIfRunning(card)
-      // A planning surface holds DRAFTS. A card that isn't one yet is parked as
-      // one first via `/transition target=drafts`: a closed card reopens as a
-      // deferred draft (daemon: reopen --as-draft → status:open, verdict
-      // cleared — NOT active, so it is not auto-dispatched; the slides
-      // snap-back fix), an armed/active card pauses (otherwise an active
-      // oneshot reclassifies straight back to In flight after the refetch).
-      // setSurface's guards already bannered the states where this verb is
-      // wrong (standing, resting pinned, cyclical awaiting run). Every card on
-      // a Desk column carries a shuttle block, so the lifecycle verbs always
-      // apply — see `shouldIncludeInKanban`.
-      if (card.status !== 'open') {
-        await this.postTransition(card, 'drafts', 'Park-as-draft failed')
+      // Into Resting is `shuttle rest`, the worker's own exit said by hand: the
+      // owning daemon writes `status: open` + `horizon: stashed` inside its
+      // Poller, clears the verdict, stamps the clean-exit marker, and stops a
+      // live worker through its backend (tmux or an app conversation). A card
+      // that already carries a verdict is past review, which rest refuses, so
+      // it reopens as a draft first, as every other planning drop does.
+      // setSurface's guards already bannered the states where neither verb
+      // applies (standing). Every card on a Desk column carries a shuttle
+      // block, so the lifecycle verbs always apply — see `shouldIncludeInKanban`.
+      const hasVerdict = card.status === 'closed' && card.tempered !== undefined
+      if (horizon === 'stashed' && !hasVerdict) {
+        await this.postJson('/api/v1/lifecycle', {
+          action: 'rest', fiber: card.id, origin: card.originId,
+        }, 'Rest failed')
+      } else {
+        // Any other planning surface (a future date, or back onto the desk)
+        // holds DRAFTS. Parking a running card there stops its worker — alive
+        // only while in-flight — and a card that isn't a draft yet is parked as
+        // one via `/transition target=drafts`: a closed card reopens as a
+        // deferred draft (reopen --as-draft → status:open, verdict cleared,
+        // not armed), an armed card pauses (otherwise an active oneshot
+        // reclassifies straight back to In flight after the refetch).
+        await this.killWorkerIfRunning(card)
+        if (card.status !== 'open') {
+          await this.postTransition(card, 'drafts', 'Park-as-draft failed')
+        }
       }
+      // What rest does not write — `cold`, and a date the drop names — rides
+      // the horizon edit below; the horizon itself is restated, harmlessly.
       // The horizon "surface" is not stored verbatim — Now is absence (clear
       // `horizon`+`cold`), future placement is `due:`, and only `stashed`
       // writes a stored horizon. The daemon `/api/v1/felt-edit` is a raw
@@ -1948,67 +1933,6 @@ export class KanbanModal {
         ? `“${card.name}” is resting until ${formatDue(wakes)}, when it returns to the desk.`
         : `Moved “${card.name}” to ${SURFACE_TITLE[horizon]}.`,
     )
-  }
-
-  /** A strip drop means "be a pinned role, at rest, outside any queue". */
-  private pinRole(card: KanbanCard): void {
-    if (card.shuttleKind === undefined) {
-      this.showBanner(`“${card.name}” has no shuttle block — promote it before pinning.`, 'error')
-      return
-    }
-    if (this.refusesHandwrittenList(card)) return
-    if (card.shuttleKind === 'pinned' && card.status !== 'closed' &&
-        !hasWorkerToStop(card) && !card.dependsOn?.length && !card.foldedUnder) {
-      this.showBanner(`“${card.name}” is already pinned — it's resting on the strip.`, 'info')
-      this.announce(`${card.name} is already pinned.`)
-      return
-    }
-    const optimistic = applyOptimisticPin(this.lastResponse, card.id)
-    if (optimistic) this.applyResponse(optimistic)
-    void this.commitPin(card)
-  }
-
-  /**
-   * Clear the queue before parking: a live card stands outside its queue, but
-   * an open card folds back under its predecessor unless that edge is removed.
-   * Pause disarms dispatch before the runtime kill. The daemon then removes
-   * its worker tracking synchronously, so the reconcile sees a resting card.
-   * Reshape only when needed; propagate either failure rather than announcing
-   * a stop that never happened.
-   */
-  private async commitPin(card: KanbanCard): Promise<void> {
-    this.gestureDepth += 1
-    try {
-      if (card.dependsOn?.length || card.foldedUnder) {
-        await this.postFeltEdit({
-          fiber_id: card.id, origin: card.originId, unset: ['depends_on'],
-        }, 'Unstack failed')
-      }
-      if (card.shuttleKind !== 'pinned') {
-        await this.postLifecycle({
-          action: 'reshape', kind: 'pinned', fiber: card.id, origin: card.originId,
-        })
-      }
-      await this.postLifecycle({ action: 'pause', fiber: card.id, origin: card.originId, no_kill: true })
-      await this.postJson('/api/v1/kill', {
-        fiber_id: card.id, origin: card.shuttleHost ?? card.originId,
-      }, 'Stop worker failed')
-      this.announce(`Pinned “${card.name}”.`)
-    } catch (err: unknown) {
-      const msg = errText(err)
-      this.showBanner(`Couldn't pin “${card.name}”: ${msg}`, 'error')
-      this.announce(`Pin failed: ${msg}`)
-    }
-    try {
-      await this.fetchAndRender()
-    } finally {
-      this.gestureDepth -= 1
-    }
-  }
-
-  /** POST one lifecycle verb, throwing the daemon's error text on non-2xx. */
-  private async postLifecycle(body: Record<string, unknown>): Promise<void> {
-    await this.postJson('/api/v1/lifecycle', body, 'Lifecycle action failed')
   }
 
   private announce(msg: string): void {
@@ -2204,7 +2128,6 @@ export class KanbanModal {
       n: data.now,
       tl: data.timeline,
       s: data.stash,
-      p: data.pinned,
       st: data.staleness,
     })
   }
@@ -2324,13 +2247,12 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
-    const { now, pinned, staleness } = data
+    const { now, staleness } = data
 
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
 
-    // Three surfaces, top to bottom: the Now board, the pinned-role launcher
-    // band, then Resting. The day axis is only the drag-reveal horizon under
+    // Two surfaces, top to bottom: the Now board, then Resting. The day axis is only the drag-reveal horizon under
     // the tab strip (see `syncDragHorizon`).
     // The cycle lens: a row of chips above the columns, and — when one is
     // engaged — a lens the Now board is drawn through. Derived fresh from the
@@ -2349,10 +2271,7 @@ export class KanbanModal {
     }
 
     this.deskEl.append(this.surfaces.renderNowSection(now, staleness, lens))
-    // The Pinned strip always renders (a permanent park/drop target) — see
-    // renderPinnedSection; no null guard needed.
-    this.deskEl.append(this.surfaces.renderPinnedSection(pinned, staleness))
-    // Resting draws everything at rest — snoozed work AND standing roles asleep
+    // Resting draws everything at rest — snoozed work AND standing constitutions asleep
     // between runs, which classify as `scheduled`; see `restingCards`.
     this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
 
@@ -2938,12 +2857,6 @@ export class KanbanModal {
       case 'surface':
         this.setSurface(card, action.horizon)
         return
-      case 'pin':
-        this.pinRole(card)
-        return
-      case 'unpin':
-        void this.unpinRole(card)
-        return
       case 'unstack':
         void this.unstack(card)
         return
@@ -2952,27 +2865,6 @@ export class KanbanModal {
         // written. The broker's `queueBehind` is where it lands.
         return
     }
-  }
-
-  /**
-   * Off the strip: reshape a pinned role back to a one-shot so it can be
-   * planned again. The exact write the dock's kind segmented control
-   * makes — `reshape` rewrites the shape keys alone, leaving agent, host and
-   * project_dir where they are. The strip's only exit that is not a verdict,
-   * and the inverse of {@link commitPin}'s first call.
-   */
-  private async unpinRole(card: KanbanCard): Promise<void> {
-    try {
-      await this.postLifecycle({
-        action: 'reshape', kind: 'oneshot', fiber: card.id, origin: card.originId,
-      })
-      this.announce(`Unpinned “${card.name}”.`)
-    } catch (err: unknown) {
-      const msg = errText(err)
-      this.showBanner(`Couldn't unpin “${card.name}”: ${msg}`, 'error')
-      this.announce(`Unpin failed: ${msg}`)
-    }
-    await this.fetchAndRender()
   }
 
 }
@@ -2989,7 +2881,6 @@ export class KanbanModal {
 function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
   card: KanbanCard | null
   now: KanbanResponse['now']
-  pinned: KanbanCard[]
   timeline: KanbanResponse['timeline']
   stash: KanbanCard[]
   folded: KanbanCard[]
@@ -3007,7 +2898,6 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
       inFlight: drop(resp.now.inFlight),
       awaitingReview: drop(resp.now.awaitingReview),
     },
-    pinned: drop(resp.pinned),
     timeline: {
       ...resp.timeline,
       past: drop(resp.timeline.past),
@@ -3043,7 +2933,7 @@ export function clearQueueEdge(
   cardId: string,
 ): KanbanResponse | null {
   if (!resp) return null
-  const { card, now, pinned, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
   const released: KanbanCard = {
     ...card,
@@ -3070,7 +2960,6 @@ export function clearQueueEdge(
       inFlight: place(now.inFlight, resp.now.inFlight, 'inFlight'),
       awaitingReview: place(now.awaitingReview, resp.now.awaitingReview, 'awaitingReview'),
     },
-    pinned: restore(pinned, resp.pinned),
     timeline: {
       ...timeline,
       past: restore(timeline.past, resp.timeline.past),
@@ -3098,7 +2987,6 @@ function withSurfaces(
   resp: KanbanResponse,
   s: {
     now: KanbanResponse['now']
-    pinned: KanbanCard[]
     timeline: KanbanResponse['timeline']
     stash: KanbanCard[]
     folded?: KanbanCard[]
@@ -3107,7 +2995,6 @@ function withSurfaces(
   return {
     ...resp,
     now: s.now,
-    pinned: s.pinned,
     timeline: s.timeline,
     stash: s.stash,
     folded: s.folded ?? resp.folded,
@@ -3163,7 +3050,7 @@ function applyOptimisticTransition(
 ): KanbanResponse | null {
   if (!resp) return null
   const nowIso = new Date().toISOString()
-  const { card, now, pinned, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
   // Unfolding is implicit in every lifecycle drop: the card is being drawn in a
@@ -3173,14 +3060,13 @@ function applyOptimisticTransition(
   // Temper can land while the run is still status:active (worker alive or just
   // killed, exit writer not yet run) and the daemon resolves it to accept
   // there too. Mirrors the daemon's lifecycle actions.
-  const isCyclicalAwaiting =
-    card.status !== 'open' && card.tempered === undefined &&
-    (card.shuttleKind === 'standing' || card.shuttleKind === 'pinned')
-  if (target === 'tempered' && isCyclicalAwaiting) {
-    // Dropping the awaiting run of a cyclical role on Tempered is ACCEPT —
-    // the daemon re-arms the role (status:active, verdict cleared) rather
-    // than terminating it, so the card's home is the strip (pinned) or the
-    // timeline at its next launch (standing), NOT the past lane. Honoring
+  const isStandingAwaiting =
+    card.status !== 'open' && card.tempered === undefined && card.shuttleKind === 'standing'
+  if (target === 'tempered' && isStandingAwaiting) {
+    // Dropping the awaiting run of a standing constitution on Tempered is
+    // ACCEPT — the daemon re-arms it (status:active, verdict cleared) rather
+    // than terminating it, so the card's home is the timeline at its next
+    // launch, NOT the past lane. Honoring
     // the re-arm here keeps optimism equal to the committed reclassify
     // (the no-snap-back invariant).
     moved.status = 'active'
@@ -3189,9 +3075,6 @@ function applyOptimisticTransition(
     moved.workerState = undefined
     moved.tmuxSession = undefined
     moved.runtimePhase = undefined
-    if (card.shuttleKind === 'pinned') {
-      return withSurfaces(resp, { now, pinned: [moved, ...pinned], timeline, stash, folded })
-    }
     const nowMs = Date.parse(nowIso)
     moved.nextLaunchAt = nextStandingLaunch(
       {
@@ -3202,7 +3085,7 @@ function applyOptimisticTransition(
       nowMs,
     )
     timeline.futureDated = [...timeline.futureDated, moved]
-    return withSurfaces(resp, { now, pinned, timeline, stash, folded })
+    return withSurfaces(resp, { now, timeline, stash, folded })
   }
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'
@@ -3211,11 +3094,7 @@ function applyOptimisticTransition(
     moved.tmuxSession = undefined
     moved.closedAt = card.closedAt ?? nowIso  // past lane skips cards with no closedAt day-column
     timeline.past = [moved, ...timeline.past] // past renders recency-desc — freshest first
-  } else if (target !== 'pinned') {
-    // `pinned` is never a drag/optimistic target — pinned cards dispatch *out*
-    // (pinned → inFlight), never *in*. The guard keeps `now[target]` indexed by
-    // the three Now columns only.
-    //
+  } else {
     // Patch the fields the destination's own rendering + the next classify
     // read, mirroring the committed verbs: drafts = reopen-as-draft/pause +
     // park-on-desk; awaitingReview = close with the verdict cleared; inFlight
@@ -3246,7 +3125,7 @@ function applyOptimisticTransition(
     now[target] = [...now[target], moved]
   }
 
-  return withSurfaces(resp, { now, pinned, timeline, stash, folded })
+  return withSurfaces(resp, { now, timeline, stash, folded })
 }
 
 /**
@@ -3266,7 +3145,7 @@ function applyOptimisticSurface(
   // cleared, active pauses to open, and the kill strips the worker pill —
   // mirrored here so the optimistic card matches the committed reclassify
   // (the no-snap-back invariant).
-  return placeOptimistically(resp, cardId, 'stash', (card) => ({
+  return placeOptimistically(resp, cardId, (card) => ({
     status: 'open',
     tempered: undefined,
     closedAt: undefined,
@@ -3287,54 +3166,19 @@ function applyOptimisticSurface(
 }
 
 /**
- * The shared skeleton of the two relocators above: lift the card off whichever
- * surface holds it, patch it, and put it back at the head of `surface`.
+ * The skeleton of the stash relocator above: lift the card off whichever
+ * surface holds it, patch it, and put it back at the head of Resting.
  * Returns a fresh response (the input is never mutated), or null when there is
  * no response or the card is absent from it.
  */
 function placeOptimistically(
   resp: KanbanResponse | null,
   cardId: string,
-  surface: 'stash' | 'pinned',
   patch: (card: KanbanCard) => Partial<KanbanCard>,
 ): KanbanResponse | null {
   if (!resp) return null
-  const { card, now, pinned, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, folded } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
   const moved: KanbanCard = { ...card, foldedUnder: undefined, ...patch(card) }
-  return withSurfaces(resp, {
-    now,
-    timeline,
-    pinned: surface === 'pinned' ? [moved, ...pinned] : pinned,
-    stash: surface === 'stash' ? [moved, ...stash] : stash,
-    folded,
-  })
-}
-
-/**
- * Optimistic relocation of one card onto the Pinned strip — the "onto the
- * shelf" twin of {@link applyOptimisticSurface}. Patches the minimal fields the
- * strip + classifier read: `kind:pinned`, resting `status:open`, and the
- * schedule cleared (a pinned block has none). Returns null when the card is
- * absent. The trailing refetch reconciles against the daemon's reshape.
- */
-function applyOptimisticPin(
-  resp: KanbanResponse | null,
-  cardId: string,
-): KanbanResponse | null {
-  return placeOptimistically(resp, cardId, 'pinned', () => ({
-    shuttleKind: 'pinned',
-    status: 'open',
-    workerState: undefined,
-    tmuxSession: undefined,
-    runtimePhase: undefined,
-    tempered: undefined,
-    closedAt: undefined,
-    dependsOn: undefined,
-    dependsOnShape: undefined,
-    dependsOnUnresolved: undefined,
-    shuttleSchedule: undefined,
-    shuttleTz: undefined,
-    nextLaunchAt: undefined,
-  }))
+  return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], folded })
 }

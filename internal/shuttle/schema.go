@@ -39,7 +39,7 @@ type Block struct {
 	Schedule *Schedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 }
 
-// Schedule holds the recurrence definition for a standing role.
+// Schedule holds the recurrence definition for a standing constitution.
 type Schedule struct {
 	Expr string `json:"expr" yaml:"expr"`
 	TZ   string `json:"tz" yaml:"tz"`
@@ -70,19 +70,25 @@ func (s *Schedule) UnmarshalYAML(value *yaml.Node) error {
 
 // ValidKinds enumerates the allowed kind values.
 //
-//   - oneshot  — one-time dispatch, picked up on the next poll when status:active.
-//   - standing — recurring; the cron `schedule` decides when the poller dispatches.
-//   - pinned   — schedule-less interactive role that rests PARKED on the board's
-//     pinned strip (status:open). A human starts it (Resume / strip → In-flight,
-//     which force-dispatches and flips it active). It then joins the unified
-//     lifecycle: a worker that hands off cleanly (`shuttle handoff`) is
-//     redispatched fresh next tick — a long autonomous arc across clean sessions
-//     — while a dirty death or idle exit parks it back to the strip
-//     (active → open). When the arc is done it closes to Awaiting review, and a
-//     human accept re-parks it to the strip. See Poller.filter_eligible /
-//     tick_kind_eligible?, handle_worker_exit's pinned branch,
-//     LifecycleStore.park, and `shuttle accept`.
-var ValidKinds = []string{"oneshot", "standing", "pinned"}
+//   - oneshot  — dispatched on the next poll whenever status is active. A
+//     constitution at rest is `status: open` (in Resting when it also carries
+//     `horizon: stashed`); a human or a worker's `shuttle rest` puts it there.
+//   - standing — recurring; the cron `schedule` decides when the poller
+//     dispatches, and a human accept re-arms it after each run.
+var ValidKinds = []string{"oneshot", "standing"}
+
+// LegacyKinds maps retired kind values to the kind they are read as. A stored
+// legacy value still parses, so no fiber stops dispatching; `shuttle check`
+// warns about it, and the next config write stores the current kind.
+var LegacyKinds = map[string]string{"pinned": "oneshot"}
+
+// NormalizeKind returns the kind a stored value is read as.
+func NormalizeKind(kind string) string {
+	if current, ok := LegacyKinds[kind]; ok {
+		return current
+	}
+	return kind
+}
 
 // ---- Validation ------------------------------------------------------------
 
@@ -115,7 +121,7 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		errs = append(errs, ValidationError{Field: field, Message: msg})
 	}
 
-	if !slices.Contains(ValidKinds, b.Kind) {
+	if !slices.Contains(ValidKinds, NormalizeKind(b.Kind)) {
 		add("kind", fmt.Sprintf("must be one of %v, got %q", ValidKinds, b.Kind))
 	}
 
@@ -139,15 +145,6 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		} else if b.Surface == "app" && base.CLI != "codex" {
 			add("surface", fmt.Sprintf("app is supported only by Codex agents, got %q", base.ID))
 		}
-	}
-
-	// A pinned role has no cron recurrence — its arming source is human, not the
-	// clock: the human starts it (Resume/force-dispatch), and it continues only
-	// by clean handoff (autonomous arc) or parks to the strip on a dirty exit. A
-	// schedule would be meaningless (and misleading on the board). Reject the
-	// combination loudly rather than silently ignoring it.
-	if b.Kind == "pinned" && b.Schedule != nil {
-		add("schedule", "not allowed for kind=pinned (pinned roles are human-driven, not cron-driven)")
 	}
 
 	if b.Kind == "standing" {

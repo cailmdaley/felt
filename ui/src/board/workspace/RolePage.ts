@@ -12,10 +12,10 @@ export function roleSlug(card: KanbanCard): string | null {
 
 type HoldColumn = ReturnType<typeof fiberPageColumn>
 /** The Desk's reading order: work awaiting review, in flight, drafts, then the rest. */
-const HOLD_ORDER: HoldColumn[] = ['awaitingReview', 'inFlight', 'drafts', 'pinned', 'scheduled', 'resting', 'cycles', 'tempered', 'composted']
+const HOLD_ORDER: HoldColumn[] = ['awaitingReview', 'inFlight', 'drafts', 'scheduled', 'resting', 'cycles', 'tempered', 'composted']
 const LIVE: ReadonlySet<HoldColumn> = new Set(['awaitingReview', 'inFlight', 'drafts'])
 const HOLD_LABELS: Record<HoldColumn, string> = {
-  awaitingReview: 'Review', inFlight: 'In flight', drafts: 'Draft', pinned: 'Pinned', scheduled: 'Resting',
+  awaitingReview: 'Review', inFlight: 'In flight', drafts: 'Draft', scheduled: 'Resting',
   resting: 'Resting', cycles: 'Cycle', tempered: 'Tempered', composted: 'Discarded',
 }
 /** Rows shown before the rest fold behind "more"; live work is always shown whole. */

@@ -46,6 +46,9 @@ jobs:
       - name: Bootstrap login shell and failure handling
         run: bash scripts/test-bootstrap.sh
 
+      - name: Pinned-kind migration planning
+        run: make migrate-test
+
       # The two plugin manifests ship as one plugin; .goreleaser.yml refuses to
       # release when they disagree. Catch the drift at PR time instead.
       - name: Plugin manifests agree on version

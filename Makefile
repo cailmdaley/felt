@@ -82,7 +82,7 @@ MIX := env -u ROOTDIR -u BINDIR -u PROGNAME -u EMU PATH='$(MIX_PATH)' mix
 AGENT_STORES ?=
 AGENT_PATH ?=
 
-.PHONY: build cli cli-install ui daemon test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test \
+.PHONY: build cli cli-install ui daemon test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test \
         all start stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
@@ -201,7 +201,7 @@ endif
 	mv bin/rel.next bin/rel
 
 # ── test ─────────────────────────────────────────────────────────────────
-test: go-test mix-test js-test plugin-hooks-test bootstrap-test
+test: go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test
 
 go-test:
 	go test ./...
@@ -218,6 +218,11 @@ mix-test:
 # properties inside it cover every other zone.
 js-test:
 	cd ui && npm test
+
+# scripts/migrate-pinned.py's planning: liveness first, the owner's state,
+# and no plan when an owner cannot be vouched for.
+migrate-test:
+	python3 scripts/test-migrate-pinned.py
 
 # scripts/bootstrap.sh's login-PATH handling and fail-fast boundaries, with
 # every tool it would run stubbed: nothing is installed, registered, or

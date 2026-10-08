@@ -286,9 +286,9 @@
   .kbn-desk { transition: none; }
 }
 
-/* ── Section layout: Now → Pinned → Resting ──────────────────────────────── */
-/* Only Pinned and Resting carry a section head (the layout reads on its own;
-   those two name a surface whose meaning isn't self-evident). */
+/* ── Section layout: Now → Resting ──────────────────────────────────────── */
+/* Only Resting carries a section head (the layout reads on its own; Resting
+   names a surface whose meaning isn't self-evident). */
 .kbn-section {
   position: relative;
   display: flex;
@@ -304,12 +304,12 @@
   outline-offset: -2px;
 }
 .kbn-section-now {
-  /* Now claims most of the height and the other two sit under it: 260px is
-     enough for the Pinned band plus a full row of Resting clusters, so the
-     whole Desk fits on a normal viewport and Resting is never a place you
-     scroll to find. Falls back to plain `flex: 1` on a short viewport. */
+  /* Now claims most of the height and Resting sits under it: 220px is
+     enough for a full row of Resting clusters, so the whole Desk fits on a
+     normal viewport and Resting is never a place you scroll to find. Falls
+     back to plain `flex: 1` on a short viewport. */
   flex: 1 1 auto;
-  min-height: min(64vh, calc(100% - 260px));
+  min-height: min(64vh, calc(100% - 220px));
 }
 .kbn-now-board {
   display: grid;
@@ -320,7 +320,7 @@
 }
 
 /* ── Band head ────────────────────────────────────────────────────────────
-   The one heading voice for the Desk's two named bands, Pinned and Resting.
+   The heading voice for the Desk's named band, Resting.
    Same hand as `.kbn-col-title` and `.kbn-view-title` — EB Garamond small
    caps carrying the layered F2/F1 dropcap on its leading letter — a size
    down again, because a band label sits beside its own contents rather than
@@ -358,166 +358,9 @@
   font-size: calc(12px * var(--kbn-type-scale, 1));
   color: var(--kbn-ink-muted);
 }
-/* Pinned band — schedule-less umbrella roles, dispatchable on demand. A slim
-   launcher strip above the Now board. Pinned is a *launcher*, not a monitor:
-   the user arrives with intent and scans for a role, so this reads as a dense
-   band of chips, not a section competing with the board.
-
-   Ground and hairline are the board's section substrate — the same recipe
-   `.kbn-view-page` lays a whole view on. The live columns are the brighter
-   rag sheets set ON that substrate; Pinned and Resting are the substrate
-   itself, which is what makes them read as standing furniture rather than
-   two more lanes. Deliberately flatter than a column: no shadow, no lift.
-
-   The head sits at the left of the row with the column head's own hairline
-   rule turned ninety degrees to follow the band. */
-.kbn-section-pinned {
-  /* Desk furniture renders at design size, like `.kbn-col` — see the note
-     there. Without this the bands inherited the root 1.18 and ran LARGER
-     than the columns they bracket, which reads backwards for a minimized
-     register. */
-  --kbn-type-scale: 1;
-  flex: 0 0 auto;
-  flex-direction: row;
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
-  background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
-  border-radius: 3px;
-  padding: 5px 10px;
-  gap: 10px;
-}
-.kbn-section-pinned .kbn-bandhead {
-  flex: 0 0 auto;
-  align-self: stretch;
-  align-items: center;
-  flex-wrap: nowrap;
-  padding-right: 10px;
-  border-right: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 32%, transparent);
-}
-/* Dense wrap — chips fill the available width and wrap to as many rows as the
-   pinned set needs; no cap, no scrollbar, no pager. Stable left-to-right order
-   (newest-created first, with identity ties) is independent of activity,
-   file timestamps and path renames. */
-.kbn-pinned-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  align-content: flex-start;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 auto;
-  padding: 1px 0;
-}
-/* Launcher chip: dot · glyph · name · agent/host hint. Wears `.kbn-card`'s
-   plate — same rag ground, same ink hairline, same 3px radius, same hover
-   (brighter ground, firmer edge, one-pixel lift) — because a parked role is
-   the same object as a card on the board, only standing still.
-
-   The systematic variation for "standing interface": one dense row instead
-   of a stacked block, and no outcome text (that's on the title tooltip). It
-   is a thing you click to *go*, not a card you read. */
-.kbn-pin-chip {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 260px;
-  margin: 0;
-  padding: 3px 8px;
-  background: var(--kbn-paper);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent);
-  border-radius: 3px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  color: var(--kbn-ink);
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
-}
-.kbn-pin-chip:hover {
-  background: var(--kbn-paper-bright);
-  border-color: color-mix(in srgb, var(--kbn-ink) 22%, transparent);
-  transform: translateY(-1px);
-}
-.kbn-pin-chip:focus-visible {
-  outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
-  outline-offset: -2px;
-}
-.kbn-pin-chip.kbn-card-dragging { opacity: 0.4; }
-.kbn-pin-chip-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--kbn-ink-muted) 40%, transparent);
-}
-/* A role that is UP is agent work running, so it takes the agent's cobalt —
-   beside `-held` in gold (owed) and `-stale` in iron gall (machinery), the
-   three dots now read on the board's own three axes rather than on a stoplight. */
-.kbn-pin-chip-dot-live {
-  background: var(--kbn-agent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-agent) 20%, transparent);
-}
-.kbn-pin-chip-dot-held { background: var(--kbn-owed-bright); }
-.kbn-pin-chip-dot-stale { background: color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent); }
-.kbn-pin-chip-glyph {
-  flex: 0 0 auto;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  line-height: 1;
-}
-/* A role YOU drive, against the agent's cobalt below — the board's one pair
-   for who acted. */
-.kbn-pin-chip-human .kbn-pin-chip-glyph { color: var(--kbn-you); }
-.kbn-pin-chip-agent .kbn-pin-chip-glyph { color: var(--kbn-agent); }
-.kbn-pin-chip-name {
-  /* A notch under `.kbn-card-name` (14.5px): a parked role is the same object
-     as a card, held in a quieter register. */
-  font-size: calc(13px * var(--kbn-type-scale, 1));
-  line-height: 1.1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kbn-pin-chip-hint {
-  flex: 0 0 auto;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  color: color-mix(in srgb, var(--kbn-ink-muted) 75%, transparent);
-}
-/* Attention marker — the one override to "launcher, not monitor." A parked
-   role calling for the human wears a small manicule/pause chip. */
-.kbn-pin-chip-attn {
-  flex: 0 0 auto;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-variant-emoji: text;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  line-height: 1;
-}
-.kbn-pin-chip-attn-attention { color: var(--kbn-you); }
-.kbn-pin-chip-attn-waiting { color: var(--kbn-owed-bright); }
-.kbn-pin-chip.kbn-card--stale { opacity: 0.5; cursor: default; }
-/* Empty band: a slim, dashed "drop a role here" target. The band ALWAYS
-   renders (it's the park/drop target), so when nothing is parked it shows this
-   hint rather than vanishing. Dashed edge is `.kbn-col-drafts`'s mark for a
-   surface that is not yet holding anything; the hint itself is the board's
-   marginal line (italic serif, fleuron grey) like `.kbn-cluster-empty`. */
-.kbn-section-pinned-empty {
-  border-style: dashed;
-}
-.kbn-pinned-empty-hint {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-style: italic;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: var(--kbn-ink-faint);
-  padding: 2px;
-}
-
 /* ── Drag-reveal horizon ─────────────────────────────────────────────────────
    The Desk keeps no permanent time axis: the chronicle tells the
-   past-and-future story, and the room goes to Pinned and Resting. What the
+   past-and-future story, and the room goes to Resting. What the
    Desk needs from a day axis is the GESTURE — dropping a card on a date — so
    the axis appears for exactly as long as a card is in the air.
 
@@ -868,8 +711,7 @@
 
 /* Pager chip — the resting-cluster overflow control (.kbn-cluster-more). A
    slim gold-leaf pill that reads as a manuscript catchword rather than a UI
-   scrollbar; click cycles pages. The Pinned band has no pager: it always
-   shows every pinned role. */
+   scrollbar; click cycles pages. */
 .kbn-tl-pager {
   align-self: start;
   justify-self: start;
@@ -896,13 +738,13 @@
   outline: 1px dashed var(--kbn-owed);
   outline-offset: 2px;
 }
-/* Resting (the surface stored as `horizon: stashed`) — the same section
-   substrate Pinned sits on, so the two bands bracketing the Now board read as
-   one pair of standing surfaces. The head names what the bottom of the page
+/* Resting (the surface stored as `horizon: stashed`) — the board's section
+   substrate itself, which is what makes it read as standing furniture rather
+   than another lane: no shadow, no lift. The head names what the bottom of the page
    means; the gloss is there so a card down here doesn't read as one that
    failed. Under the head, the column head's own hairline rule. */
 .kbn-section-stash {
-  /* Design size, like `.kbn-col` and the Pinned band. */
+  /* Design size, like `.kbn-col`. */
   --kbn-type-scale: 1;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
@@ -1023,8 +865,8 @@
   gap: 6px;
   padding: 3px 2px;
   font-family: var(--font-serif, 'EB Garamond', serif);
-  /* Same minimized register as `.kbn-pin-chip-name` — under the column
-     card's 14.5px title. */
+  /* A notch under the column card's 14.5px title: the same object in a
+     quieter register. */
   font-size: calc(13px * var(--kbn-type-scale, 1));
   color: var(--kbn-ink-sepia);
   cursor: pointer;
@@ -1081,7 +923,7 @@
   white-space: nowrap;
 }
 .kbn-cluster-cold .kbn-cluster-item-wakes { color: color-mix(in srgb, var(--kbn-ink-muted) 60%, transparent); }
-/* A standing role asleep on its cron. Cool slate against the snooze chip's
+/* A standing constitution asleep on its cron. Cool slate against the snooze chip's
    warm ochre — the two states are both "at rest" and must never be misread for
    each other: one you put down, the other put itself down and will get up
    without you. */
@@ -1554,7 +1396,7 @@
 }
 .kbn-card:active { cursor: grabbing; }
 @media (prefers-reduced-motion: reduce) {
-  .kbn-card:hover:not(.kbn-longpress-held), .kbn-pin-chip:hover { transform: none; }
+  .kbn-card:hover:not(.kbn-longpress-held) { transform: none; }
 }
 /* The long press, while it is being held: the card settles a little, the way a
    physical thing does under a thumb. It is the only feedback touch gets that
@@ -1849,39 +1691,6 @@
   flex-shrink: 0;
 }
 .kbn-card-queued:hover { background: color-mix(in srgb, var(--kbn-queue) 18%, transparent); }
-/* THE SAME CHIP IN A SMALLER ROOM — the pinned strip only. A launcher chip is a
-   single tight row with no line to spare, so the compact chip drops to "+3" and
-   tightens its padding; the word it is short of lives in the tooltip and the
-   aria label, which both spell out the count. A Resting row wraps, so it takes
-   the full chip. */
-.kbn-card-queued--compact {
-  font-size: calc(9px * var(--kbn-type-scale, 1));
-  padding: 1px 3px;
-  height: auto;
-  line-height: 1.25;
-  margin-left: 4px;
-}
-/* The pinned strip lays out chips in a row, so the peek list cannot take a line
-   of its own the way it does on a card: it floats under the chip that opened
-   it. The wrapper is the positioning context and the only reason it exists. */
-.kbn-pin-chip-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-.kbn-card-queued-list--floating {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 6;
-  min-width: 180px;
-  max-width: 280px;
-  background: var(--kbn-rag);
-  border: 1px solid color-mix(in srgb, var(--kbn-queue) 28%, transparent);
-  border-radius: 2px;
-  padding: 4px 6px;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--kbn-shade) 16%, transparent);
-}
 .kbn-card-queued-list {
   /* Full row: the peek drops below the meta line instead of wedging into it.
      `max-width` keeps it inside a narrow host (a Resting cluster item is much
@@ -2271,7 +2080,7 @@
 
 /* Same story as the folio strip: `installBandCollapse` appends the fold mark
    to every band head so one DOM serves both shapes, and the wide board — where
-   Pinned and Resting never fold — simply gives it no box. */
+   Resting never folds — simply gives it no box. */
 .kbn-bandhead-fold {
   display: none;
 }
@@ -2542,12 +2351,11 @@
   }
   .kbn-card-meta-spacer { flex: 0 1 auto; }
 
-  /* ── The two bands, folded ─────────────────────────────────────────────
-     Pinned and Resting stop being furniture beside the board and become
-     gatherings under it: a full-width head you tap, and everything else
-     shown or shut. `installBandCollapse` only wires the head on a mobile
-     viewport, which is why nothing below has a desktop twin. */
-  .kbn-section-pinned,
+  /* ── The band, folded ──────────────────────────────────────────────────
+     Resting stops being furniture beside the board and becomes a gathering
+     under it: a full-width head you tap, and everything else shown or shut.
+     `installBandCollapse` only wires the head on a mobile viewport, which is
+     why nothing below has a desktop twin. */
   .kbn-section-stash {
     flex-direction: column;
     align-items: stretch;
@@ -2557,7 +2365,6 @@
     background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
     border-radius: 3px;
   }
-  .kbn-section-pinned .kbn-bandhead,
   .kbn-section-stash .kbn-bandhead {
     flex: 0 0 auto;
     align-items: center;
@@ -2568,7 +2375,6 @@
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .kbn-section-pinned .kbn-bandhead:focus-visible,
   .kbn-section-stash .kbn-bandhead:focus-visible {
     outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
     outline-offset: -3px;
@@ -2588,7 +2394,6 @@
   .kbn-bandhead-fold::before { content: '▾'; }
   .kbn-band-folded .kbn-bandhead-fold { transform: rotate(-90deg); }
   .kbn-band-folded > *:not(.kbn-bandhead) { display: none; }
-  .kbn-pinned-row,
   .kbn-cluster-grid {
     padding: 0 8px 8px;
   }
@@ -2598,10 +2403,7 @@
      foot of every cluster, so they go — the row's own height is the spacing. */
   .kbn-cluster { padding: 4px 8px 3px; }
   .kbn-cluster-head { margin-bottom: 2px; padding-bottom: 2px; }
-  /* Full-width rows, thumb-sized. A launcher chip capped at 260px in a
-     three-across band becomes a stub on a phone; here each one is its own
-     line and reads as a list of roles. */
-  .kbn-pin-chip,
+  /* Full-width rows, thumb-sized: each one is its own line. */
   .kbn-cluster-item {
     max-width: none;
     width: 100%;
@@ -2613,8 +2415,6 @@
     align-content: center;
   }
   .kbn-cluster-item { padding: 0 4px; }
-  .kbn-pin-chip { padding: 4px 8px; }
-  .kbn-pinned-row { display: flex; flex-direction: column; align-items: stretch; }
 }
 
 /* ── Touch, wherever it happens ────────────────────────────────────────────
@@ -2633,7 +2433,6 @@
      cursor and the lift-on-press would be promising a gesture that isn't
      there. */
   .kbn-card,
-  .kbn-pin-chip,
   .kbn-cluster-item { cursor: pointer; }
 }
 
@@ -2651,7 +2450,7 @@
    before a single card. So the strip and the tabs give up their air — not
    their targets, they stay tappable — and the leaf claims every pixel they
    release: it stops being a fixed 58vh block on a scrolling page and becomes
-   the page, with Pinned and Resting waiting just below the fold exactly where
+   the page, with Resting waiting just below the fold exactly where
    a thumb expects to find them.
 
    Note the leaf is now WIDE — one column across 874px is a generous measure,
@@ -2702,7 +2501,7 @@
      `dvh` rather than `vh` because mobile Safari collapses its toolbars as
      you scroll and `vh` keeps sizing to the tall state, stranding the leaf's
      foot under the chrome. The leaf is a fixed box on purpose: the list
-     inside scrolls, and Pinned and Resting land exactly one fold below, which
+     inside scrolls, and Resting lands exactly one fold below, which
      is what makes the swipe-down gesture mean something. */
   .kbn-section-now { min-height: 0; }
   .kbn-now-board { align-items: stretch; }

@@ -48,7 +48,7 @@ export interface DayRange {
 }
 
 /** How far the timeline may reach. A year of history is more than anyone
- *  scrolls; eight weeks ahead is past every standing role's next firing. */
+ *  scrolls; eight weeks ahead is past every standing constitution's next firing. */
 export const MAX_PAST_DAYS = 365
 export const MAX_FUTURE_DAYS = 56
 

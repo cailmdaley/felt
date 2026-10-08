@@ -110,7 +110,7 @@ func TestShuttleInstall_RequiresProjectDirWhenArmed(t *testing.T) {
 	}
 }
 
-// TestShuttleCreate_RefusesExistingBlock is the one policy the three create
+// TestShuttleCreate_RefusesExistingBlock is the one policy the create
 // verbs share: they CREATE, so a fiber that already carries a block is a
 // refusal — and the refusal routes the caller to the verb that edits in place.
 // `shuttle status <fiber>` is the report on an existing block.
@@ -122,7 +122,6 @@ func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
 	}{
 		{"install", []string{"install", "task"}},
 		{"repeat", []string{"repeat", "task", "--schedule", "0 9 * * 1-5"}},
-		{"pin", []string{"pin", "task"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -170,7 +169,7 @@ func TestShuttleRepeat_Standing(t *testing.T) {
 	}
 	f := mustRead(t, storage, "role")
 	if f.Status != felt.StatusActive {
-		t.Fatalf("standing role should be born active, got %q", f.Status)
+		t.Fatalf("standing constitution should be born active, got %q", f.Status)
 	}
 	b, ok, err := shuttle.BlockOf(f)
 	if err != nil || !ok {
@@ -197,36 +196,13 @@ func TestShuttleRepeat_RejectsBadCron(t *testing.T) {
 	}
 }
 
-// ---- pin -------------------------------------------------------------------
-
-func TestShuttlePin_Parked(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	dir, storage := newStore(t)
-	seedPlainFiber(t, storage, "hub", "")
-	pdir := t.TempDir()
-
-	out, err := runIn(t, env, dir, "pin", "hub", "--host", "testhost", "--project-dir", pdir)
-	if err != nil {
-		t.Fatalf("pin: %v\n%s", err, out)
-	}
-	f := mustRead(t, storage, "hub")
-	if f.Status != felt.StatusOpen {
-		t.Fatalf("pinned role rests at status: open, got %q", f.Status)
-	}
-	b, _, _ := shuttle.BlockOf(f)
-	if b == nil || b.Kind != "pinned" {
-		t.Fatalf("pinned block: %+v", b)
-	}
-}
-
 // ---- regressions from adversarial verification ----------------------------
 
 // repeat never rewrites an existing block, so it has no daemon-owned runtime
 // keys to preserve; TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber
 // asserts they survive a kind change.
 
-// TestShuttleCreate_MalformedBlockErrors proves install/repeat/pin surface a
+// TestShuttleCreate_MalformedBlockErrors proves install/repeat surface a
 // clean error (not a nil-deref panic) on a shuttle: value that is a mapping but
 // fails the typed decode — e.g. a hand-edited schedule written as a scalar.
 func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
@@ -241,7 +217,6 @@ func TestShuttleCreate_MalformedBlockErrors(t *testing.T) {
 	cases := [][]string{
 		{"install", "bad"},
 		{"repeat", "bad", "--host", "testhost", "--schedule", "0 9 * * 1-5", "--project-dir", pdir},
-		{"pin", "bad", "--host", "testhost", "--project-dir", pdir},
 	}
 	for _, args := range cases {
 		if _, err := runIn(t, env, dir, args...); err == nil {

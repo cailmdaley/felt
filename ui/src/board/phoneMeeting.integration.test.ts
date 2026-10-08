@@ -259,7 +259,7 @@ describe('board phone meeting card wiring', () => {
     const terminal = vi.fn()
     const renderer = new KanbanSurfaceRenderer({
       getDragSourceId: () => null, setDragSourceId: vi.fn(), getLastResponse: () => state.lastResponse,
-      stopDragAutoScroll: vi.fn(), transition: vi.fn(), setSurface: vi.fn(), pin: vi.fn(), openDetail: vi.fn(),
+      stopDragAutoScroll: vi.fn(), transition: vi.fn(), setSurface: vi.fn(), openDetail: vi.fn(),
       getMeeting: () => row({ phone: false }), getPhoneMeeting: () => board.phoneAudio,
       onMeetingStop: vi.fn(), onMeetingTerminal: terminal, onRefresh: vi.fn(),
     })

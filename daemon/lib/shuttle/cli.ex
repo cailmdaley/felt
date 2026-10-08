@@ -16,7 +16,7 @@ defmodule Shuttle.CLI do
           | {:command_error, non_neg_integer() | :timeout, String.t()}
           | {:error, String.t()}
 
-  @local_verbs ~w(pause resume close reopen accept set-outcome set-model set-agent reshape uninstall)
+  @local_verbs ~w(pause rest resume close reopen accept set-outcome set-model set-agent reshape uninstall)
 
   @doc "Run the `shuttle` executable with raw argv."
   @spec run([String.t()], keyword()) :: result()

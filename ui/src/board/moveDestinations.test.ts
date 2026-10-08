@@ -25,7 +25,6 @@ describe('moveDestinations', () => {
       'inFlight',
       'awaitingReview',
       'stashed',
-      'pin',
       'queue',
     ])
   })
@@ -37,13 +36,12 @@ describe('moveDestinations', () => {
     expect(labels.get('inFlight')).toBe('In flight')
     expect(labels.get('awaitingReview')).toBe('Awaiting review')
     expect(labels.get('stashed')).toBe('Resting')
-    expect(labels.get('pin')).toBe('Pinned')
   })
 
   it('puts the Now columns in one group and everything else in the other', () => {
     const d = moveDestinations(card({ status: 'open', shuttleKind: 'oneshot' }), 'drafts')
     expect(d.filter((x) => x.group === 'column').map((x) => x.id)).toEqual(['inFlight', 'awaitingReview'])
-    expect(d.filter((x) => x.group === 'other').map((x) => x.id)).toEqual(['stashed', 'pin', 'queue'])
+    expect(d.filter((x) => x.group === 'other').map((x) => x.id)).toEqual(['stashed', 'queue'])
   })
 
   // One row per guard the menu mirrors: the card's state, where the board has
@@ -53,16 +51,19 @@ describe('moveDestinations', () => {
     // `transition`'s one no-op guard, `fromKind === target`; the desk is
     // likewise withheld from a card already on it.
     ['a one-shot in In flight is not offered In flight or the desk', { shuttleKind: 'oneshot' }, 'inFlight',
-      ['drafts', 'awaitingReview', 'stashed', 'pin', 'queue']],
-    // pinRole: a block-less draft has no host or project_dir to install from.
-    ['a block-less draft is not offered Drafts or the strip', { status: 'open' }, 'drafts',
+      ['drafts', 'awaitingReview', 'stashed', 'queue']],
+    // Resting from In flight: the board's rest, the worker's `shuttle rest`
+    // said by hand.
+    ['a live one-shot is offered Resting — put down without review', { shuttleKind: 'oneshot', workerState: 'running', tmuxSession: 'w' }, 'inFlight',
+      ['drafts', 'awaitingReview', 'stashed', 'queue']],
+    ['a block-less draft is not offered Drafts', { status: 'open' }, 'drafts',
       ['inFlight', 'awaitingReview', 'stashed', 'queue']],
     // Awaiting review is a plain lifecycle drop with no gate of its own, so it
     // is offered from every column but its own; a closed card is off the desk.
     ['an awaiting card is offered every other column and the desk', { status: 'closed' }, 'awaitingReview',
       ['drafts', 'inFlight', 'now', 'stashed', 'queue']],
     ['a closed card that still carries the now horizon is offered the desk', { status: 'closed', effectiveHorizon: 'now', shuttleKind: 'oneshot' }, 'awaitingReview',
-      ['drafts', 'inFlight', 'now', 'stashed', 'pin', 'queue']],
+      ['drafts', 'inFlight', 'now', 'stashed', 'queue']],
     ['a tempered card is offered Awaiting review and both surfaces', { status: 'closed', tempered: true }, 'tempered',
       ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed', 'queue']],
     ['a resting card is not offered Resting', { status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed' }, null,
@@ -73,25 +74,12 @@ describe('moveDestinations', () => {
       ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed', 'queue']],
     // setSurface's standing guard: "it runs on its schedule". Drag-to-In-flight
     // still runs it now.
-    ['a standing role is withheld both surfaces', { shuttleKind: 'standing', effectiveHorizon: 'stashed' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'pin', 'queue']],
-    // setSurface's pinned-at-rest guard, and pinRole's "already pinned".
-    ['a resting pinned role is offered lifecycle moves, the queue and Unpin', { shuttleKind: 'pinned', status: 'active' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'unpin', 'queue']],
-    // pinRole: refusing this was a bug; a once-pinned card left closed could
-    // never be re-rested from the board.
-    ['an awaiting pinned role comes back to the strip', { shuttleKind: 'pinned', status: 'closed' }, 'awaitingReview',
-      ['drafts', 'inFlight', 'pin', 'unpin', 'queue']],
-    ['a composted pinned role comes back to the strip', { shuttleKind: 'pinned', status: 'closed', tempered: false }, 'composted',
-      ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed', 'pin', 'unpin', 'queue']],
-    ['a live pinned role is offered a stop back onto the strip', { shuttleKind: 'pinned', status: 'active', workerState: 'running', tmuxSession: 'w' }, 'inFlight',
-      ['drafts', 'awaitingReview', 'pin', 'unpin', 'queue']],
+    ['a standing constitution is withheld both surfaces', { shuttleKind: 'standing', effectiveHorizon: 'stashed' }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'queue']],
     // The queue exit is offered on the EDGE: a card that names a predecessor is
     // in a queue whether or not the fold happens to be drawing it under one.
-    ['an open queued pinned role is offered the strip and the queue exit', { shuttleKind: 'pinned', status: 'open', dependsOn: ['work/b'], dependsOnShape: 'scalar' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'stashed', 'pin', 'unpin', 'queue', 'unstack']],
-    ['an active queued pinned role is offered the strip and the queue exit', { shuttleKind: 'pinned', status: 'active', dependsOn: ['work/b'], dependsOnShape: 'scalar' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'pin', 'unpin', 'queue', 'unstack']],
+    ['an active queued card is offered the queue exit', { shuttleKind: 'oneshot', status: 'active', dependsOn: ['work/b'], dependsOnShape: 'scalar' }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'stashed', 'queue', 'unstack']],
     ['a card on a scalar edge is offered the queue exit', { dependsOn: ['work/b'], dependsOnShape: 'scalar', foldedUnder: 'work/b' }, null,
       ['drafts', 'inFlight', 'awaitingReview', 'stashed', 'queue', 'unstack']],
     // stackDropVerdict: a hand-written list is a fan-in nobody may collapse.

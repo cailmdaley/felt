@@ -54,8 +54,8 @@ The B-mode null test in [[bmodes/paper]] needs a covariance we trust at large sc
 The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validate/offdiag.py`: the mock loader works, the plotting doesn't. The patch count is settled at 150 ([[jackknife-patches]]); don't reopen it.
 ```
 
-- **`shuttle:`** — the block that makes this fiber a constitution. With `kind: oneshot`, workers keep coming until the work is done; a `standing` fiber fires on a cron `schedule`, and a `pinned` one waits for a human to start it. `agent` picks the harness and model each worker runs as (`shuttle agents` lists them), `host` says which machine's daemon dispatches it, and `project_dir` where the worker starts. `shuttle install` writes the block and checks it.
-- **status** — tells the daemon what to do: `active` asks for a worker, `open` keeps the card in drafts, and `closed` parks it for the human.
+- **`shuttle:`** — the block that makes this fiber a constitution. With `kind: oneshot`, workers keep coming until a worker or the human closes it or puts it to rest; a `standing` fiber fires on a cron `schedule`. `agent` picks the harness and model each worker runs as (`shuttle agents` lists them), `host` says which machine's daemon dispatches it, and `project_dir` where the worker starts. `shuttle install` writes the block and checks it.
+- **status** — tells the daemon what to do: `active` asks for a worker, `open` keeps the card in Drafts (or in Resting, with `horizon: stashed`), and `closed` parks it for the human.
 - **outcome** — the headline on the card. Each worker rewrites it to say where the work stands and what the reader should do next, and starts it with "Blocked: …" when stuck.
 - **the lede** — the unheaded first paragraph tells a human skimming the card, and a worker arriving cold, what this is and why it matters.
 - **`## Desired State`** — the one fixed heading, and the contract. Its author writes done-conditions in checkable terms and fences off what to leave alone. It describes the world when the work is right, never the steps: each worker surveys the gap and picks the most valuable slice itself. Add further sections only when the fiber earns them, and name them for what they hold.
@@ -67,9 +67,9 @@ The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validat
 
 To put a todo on the board, give it a shuttle block; the board shows nothing else. `shuttle install <id> --disabled` adds the block and a card in **Drafts**, and dispatches nothing. When you arm it (`shuttle resume`, or `install` without `--disabled`), status becomes `active`, and on its next poll the daemon launches a worker: a terminal session in tmux, or a Codex app conversation for `surface: app`.
 
-A worker leaves in one of two ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. Or it **closes**, moving the card to **Awaiting review**, and nobody is launched. The human then tempers the card (accepts it), discards it, or resumes it. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times.
+A worker leaves in one of three ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. It **closes**, moving the card to **Awaiting review**, and nobody is launched; the human then tempers the card (accepts it), discards it, or resumes it. Or it **rests**, putting the card in **Resting** with no review, to be started again by hand. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times. Not every constitution has a finish line: a hub or a seat the human comes back to — a chair, a practice, a debug intake — is a oneshot that rests between sessions.
 
-The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, Scheduled, Pinned, In flight, Awaiting review, Tempered and Discarded. **Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
+The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. **Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
 
 ## Working a constitution
 
@@ -89,15 +89,16 @@ First commit, run `felt -C <store> sync --push`, and resolve any conflicts. Then
 
 1. **Is the desired state realized?** Close: make `shuttle close <id>` your final action, then do nothing more; the daemon reaps your session. Substantive work — code, configs, the product, not the fiber's own surfaces — needs fresh eyes first: have a subagent review the diff against the constitution and close once it comes back clean, or hand off so the next worker reviews it.
 2. **Blocked on something only the human can answer?** Run `shuttle close <id>`, and start the outcome with "Blocked: …" so the human reads the card as a question rather than a review. Put questions in the outcome and `## Status`, where the human will see them; a `question` fiber sediments.
-3. **More to do?** Hand off: make `shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX shuttle -C <store> handoff <id>` and end your turn.
+3. **Did the human drive this session, and is it over with nothing to review?** Rest: make `shuttle rest <id>` your final action. The card goes back to Resting with your outcome as the session's report.
+4. **More to do?** Hand off: make `shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX shuttle -C <store> handoff <id>` and end your turn.
 
-If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation, include the store selector on the exit verb: `shuttle -C <store> close <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
+If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation, include the store selector on the exit verb: `shuttle -C <store> close <id>`, `shuttle -C <store> rest <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
 
-**When the human names the exit, take it literally: it means the command.** "Hand off" means sweep, commit, sync, then run `shuttle handoff <id>`. "Close out", "wrap it up" or "I'm done for now" means the same sequence ending in `shuttle close <id>`, even when you can see more to do — unfinished is often exactly why they want it back on their desk. Neither is a request for a summary in chat.
+**When the human names the exit, take it literally: it means the command.** "Hand off" means sweep, commit, sync, then run `shuttle handoff <id>`. "Close out", "wrap it up" or "I'm done for now" means the same sequence ending in `shuttle close <id>`, even when you can see more to do — unfinished is often exactly why they want it back on their desk. "Put it to rest" or "rest it" means the sequence ending in `shuttle rest <id>`. None of them is a request for a summary in chat.
 
 **Stay interactive** instead, still `active`, when the direction isn't settled: the directive or constitution says a human will attach (a "stay interactive", a 2FA step, a message to send in their voice), or open taste calls make their input the clear next move. In a **headless** run (`headless: true` in the launch metadata) nobody can attach, so record the question and take case 2.
 
-A human drives a **pinned** role: while they are present, wait for their next message rather than exiting; close when they leave; hand off only on a long autonomous arc. A **standing** role always hands off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
+When a human drives the session — a hub or a seat they started by hand — wait for their next message rather than exiting while they are present; rest when they leave, unless there is something for them to review or a question to answer, which is a close; hand off only on a long autonomous arc. A **standing** constitution always hands off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
 
 Only the human sets `tempered`. Leave the shuttle block in place when you close; it is the record.
 
@@ -124,6 +125,6 @@ To put a finished file in front of the human, use your harness's own file tool (
 | A meeting (`Meeting mode`, captured or joined to your constitution), a transcript to write up, or a predecessor's session to read | [references/meeting.md](references/meeting.md) |
 | Writing a constitution — the spec craft, install, drafts vs dispatch, agent choice, human gates | [references/authoring.md](references/authoring.md) |
 | Choosing, creating or assigning a role; where notes go | [references/collaboration.md](references/collaboration.md) |
-| A standing role's runs, schedule and accept | [references/standing-roles.md](references/standing-roles.md) |
+| A standing constitution's runs, schedule and accept | [references/standing-roles.md](references/standing-roles.md) |
 | Operating the system — dispatch, columns, verbs, claiming a fiber into your session, remote hosts, triage | [references/operating.md](references/operating.md) |
 | Writing `report.html` | [references/report.md](references/report.md) |

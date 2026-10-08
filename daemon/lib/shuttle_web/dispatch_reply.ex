@@ -55,6 +55,13 @@ defmodule ShuttleWeb.DispatchReply do
 
   def render(fiber_id, {:error, :already_running}), do: {409, already_running_body(fiber_id)}
 
+  def render(fiber_id, {:error, reason}) when reason in [:closed, :not_active],
+    do:
+      render(
+        fiber_id,
+        {:error, {:not_eligible, if(reason == :closed, do: :closed, else: :disabled)}}
+      )
+
   def render(fiber_id, {:error, :not_eligible}),
     do: {422, %{dispatched: false, reason: "not_eligible", fiber_id: fiber_id}}
 

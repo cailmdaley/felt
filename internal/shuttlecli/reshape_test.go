@@ -178,7 +178,7 @@ func TestShuttleReshapeVerb_TZDefaultIsTheBlocks(t *testing.T) {
 // target must not be handed a recurrence it would silently ignore.
 func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{"oneshot", "pinned"} {
+	for _, kind := range []string{"oneshot"} {
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
@@ -214,7 +214,7 @@ func TestShuttleReshapeVerb_RequiresExistingBlock(t *testing.T) {
 	if err == nil {
 		t.Fatalf("reshape on a block-less fiber must fail; out=%s", out)
 	}
-	for _, verb := range []string{"install", "repeat", "pin"} {
+	for _, verb := range []string{"install", "repeat"} {
 		if !strings.Contains(err.Error(), verb) {
 			t.Fatalf("error should point at %s; err=%v", verb, err)
 		}

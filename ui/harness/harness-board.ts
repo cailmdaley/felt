@@ -143,7 +143,7 @@ const shuttleBlockWithRun = (dispatchedMsAgo: number, ranForMs: number) => ({
   },
 })
 
-/** A standing role's block — the chip trail renders its cron humanized. */
+/** A standing constitution's block — the chip trail renders its cron humanized. */
 const standingBlock = (expr: string) => ({
   ...shuttleBlock('standing'),
   schedule: { expr, tz: 'Europe/Paris' },
@@ -378,7 +378,7 @@ const RESTING: MockFiber[] = [
   })),
 ]
 
-// A standing role, for the humanized-cron summary in the fiber controls.
+// A standing constitution, for the humanized-cron summary in the fiber controls.
 const STANDING: MockFiber[] = [
   {
     id: 'loom/email/morning-post/run',
@@ -392,13 +392,12 @@ const STANDING: MockFiber[] = [
 ]
 
 /**
- * PINNED — resting `kind:pinned` umbrella roles, parked on the Desk's launcher
- * band. Enough of them to wrap the band several rows deep, because the band
- * has no row cap and no "+N more" pager (a role you reach for daily should
- * never be on page 2). None carry a `uid` — the band never joins a pinned chip
- * to the activity plane, only Chronicle does.
+ * SEATS — constitutions you come back to and start by hand, resting between
+ * sessions (`status: open` + `horizon: stashed`). Enough of them to fill
+ * several Resting clusters. None carry a `uid` — Resting never joins a row to
+ * the activity plane, only Chronicle does.
  */
-const PINNED: MockFiber[] = [
+const SEATS: MockFiber[] = [
   'null-suite/quick launch',
   'euclid triage',
   'photo-z recalibrate',
@@ -414,12 +413,12 @@ const PINNED: MockFiber[] = [
   'cluster richness',
   'mask audit',
 ].map((name, i) => ({
-  id: `roles/pinned-${i}`,
+  id: `seats/seat-${i}`,
   name,
-  status: 'active',
-  outcome: `Launcher role: ${name}.`,
-  tags: ['pinned'],
-  shuttle: shuttleBlock('pinned'),
+  status: 'open',
+  horizon: 'stashed',
+  outcome: `Resting seat: ${name}.`,
+  shuttle: shuttleBlock('oneshot'),
 }))
 
 /**
@@ -574,19 +573,18 @@ const MOCK_FEED = {
     },
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
-    ...PINNED.map(fiber),
-    // An older pinned role with a live Codex app worker that raised its hand.
+    ...SEATS.map(fiber),
+    // An older seat with a live Codex app worker that raised its hand.
     // It sits BELOW the newer waiting reimbursement inside Needs you, not at
     // the top by urgency. No tmux session: liveness and the app link are native.
     {
       ...fiber({
-        id: 'roles/pinned-app',
-        name: 'codex app role',
+        id: 'seats/seat-app',
+        name: 'codex app seat',
         status: 'active',
         created_at: iso(-7 * 86_400_000),
         outcome: 'The app worker needs a decision about the next run.',
-        tags: ['pinned'],
-        shuttle: { ...shuttleBlock('pinned'), agent: 'codex-sol', surface: 'app' },
+        shuttle: { ...shuttleBlock('oneshot'), agent: 'codex-sol', surface: 'app' },
       }),
       origin: 'ada-workstation',
       runtime: {

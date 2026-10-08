@@ -89,7 +89,7 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 			return nil
 		},
 	}
-	shuttleDispatchCmd.Flags().Bool("ad-hoc", false, "For standing roles, dispatch an ad-hoc run without consuming the scheduled occurrence")
+	shuttleDispatchCmd.Flags().Bool("ad-hoc", false, "For standing constitutions, dispatch an ad-hoc run without consuming the scheduled occurrence")
 	shuttleDispatchCmd.Flags().StringVar(&dispatchMessage, "message", "", "Launch directive for the worker (the From User prompt block)")
 	shuttleDispatchCmd.Flags().StringVar(&dispatchMessageFile, "message-file", "", "Read the launch directive from a file, or - for stdin")
 	return shuttleDispatchCmd

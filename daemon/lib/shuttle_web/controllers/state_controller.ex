@@ -3,7 +3,7 @@ defmodule ShuttleWeb.StateController do
   Agent-API endpoints for orchestrator state.
 
   * `GET /api/v1/state` — full local state (running workers, blocked and
-    parked dispatches, standing roles).
+    parked dispatches, standing constitutions).
 
   * `GET /api/v1/state/composite` — local state plus per-origin remote
     snapshots, for a hub's cross-host view.

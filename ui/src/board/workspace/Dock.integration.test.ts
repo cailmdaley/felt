@@ -272,7 +272,7 @@ describe('state-shaped act zone', () => {
   })
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
-    ['pinned with a session', { status: 'active', shuttleKind: 'pinned', sessionUuid: 's' }, ['New session ↵', 'Resume']],
+    ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
     ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session ↵', 'Resume']],
     ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
     ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
@@ -333,26 +333,30 @@ describe('state-shaped act zone', () => {
 
 describe('Dock settings queue', () => {
   it('serializes agent, shape and due writes and keeps the last selected values', async () => {
+    // A standing card, so One-shot is a real shape write.
+    band.el.remove()
+    band = dock.bandFor(task({ id: 'a/standing', uid: 'standing-uid', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', shuttleTz: 'UTC' }))
+    document.body.append(band.el)
+    await flush()
     const pending: Array<ReturnType<typeof deferred<Response>>> = []
     vi.mocked(fetch).mockImplementation(async () => {
       const write = deferred<Response>(); pending.push(write); return write.promise
     })
     change('Effort', 'low')
-    button('Pinned').click()
-    change('Effort', 'high')
     button('One-shot').click()
+    change('Effort', 'high')
     const due = band.el.querySelector<HTMLInputElement>('input[type="date"]')!
     due.value = '2026-10-15'; due.dispatchEvent(new Event('change'))
     due.value = '2026-10-16'; due.dispatchEvent(new Event('change'))
     await flush()
     expect(writes()).toHaveLength(1)
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 5; i++) {
       pending[i].resolve(response())
       await flush()
-      expect(writes()).toHaveLength(Math.min(i + 2, 6))
+      expect(writes()).toHaveLength(Math.min(i + 2, 5))
     }
     expect(writes().map(write => write.effort ?? write.kind ?? write.due)).toEqual([
-      'low', 'pinned', 'high', 'oneshot', '2026-10-15', '2026-10-16',
+      'low', 'oneshot', 'high', '2026-10-15', '2026-10-16',
     ])
     expect(select('Effort').value).toBe('high')
     expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('One-shot')
@@ -366,7 +370,7 @@ describe('Dock settings queue', () => {
       return JSON.parse(String(options?.body)).fiber === 'a/task' ? first.promise : response()
     })
     change('Effort', 'low')
-    button('Pinned').click()
+    change('Effort', 'high')
     const other = dock.bandFor(task({ id: 'a/other', uid: 'other-uid' }))
     await flush()
     const effort = other.el.querySelector<HTMLSelectElement>('[aria-label="Effort"]')!
@@ -378,7 +382,7 @@ describe('Dock settings queue', () => {
     first.resolve(response())
     await flush()
     expect(writes()).toHaveLength(2)
-    expect(writes().some(write => write.action === 'reshape')).toBe(false)
+    expect(writes().some(write => write.fiber === 'a/task' && write.effort === 'high')).toBe(false)
   })
 
   it('queues a rapid agent reversal and does not roll back newer intent when an earlier write fails', async () => {
@@ -481,6 +485,7 @@ describe('Dock settings queue', () => {
     expect(writes()).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(200)
     expect(writes().at(-1)).toEqual({ action: 'set-agent', origin: 'owner', fiber: 'a/task', effort: 'high' })
+    // Through a staged Standing and back: an abandoned promotion writes nothing.
     step('Kind', 'ArrowLeft'); step('Kind', 'ArrowRight')
     expect(writes()).toHaveLength(2)
     await vi.advanceTimersByTimeAsync(200)
@@ -538,10 +543,10 @@ describe('Dock poll reconciliation', () => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     draft.value = 'unsent'
     dock.syncRuntime(task({ id: 'b/task', shuttleAgent: 'codex-luna', shuttleEffort: 'low',
-      shuttleKind: 'pinned', shuttleSurface: 'app', due: '2026-10-12' }))
+      shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', shuttleTz: 'UTC', shuttleSurface: 'app', due: '2026-10-12' }))
     expect(select('Agent').value).toBe('codex-luna')
     expect(select('Effort').value).toBe('low')
-    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Pinned')
+    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Standing')
     expect(band.el.querySelector('[aria-label="Session"] [aria-checked="true"]')?.textContent).toBe('App')
     expect(band.el.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-10-12')
     expect(band.el.querySelector('.kbn-ctl-parent')?.textContent).toBe('b')
@@ -560,13 +565,13 @@ describe('Dock poll reconciliation', () => {
     const cron = band.el.querySelector<HTMLInputElement>('[aria-label="Cron"]')!
     button('Standing').click()
     cron.value = 'my half typed expression'
-    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'pinned' }))
+    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *' }))
     expect(cron.value).toBe('my half typed expression')
     expect(select('Agent').value).toBe('codex-sol')
     band.el.querySelector<HTMLTextAreaElement>('textarea')!.focus()
     await flush()
-    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'pinned' }))
+    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *' }))
     expect(select('Agent').value).toBe('codex-luna')
-    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Pinned')
+    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Standing')
   })
 })

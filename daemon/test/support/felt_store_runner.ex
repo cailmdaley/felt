@@ -661,7 +661,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
     do: Regex.replace(~r/\$(\w+)/, raw, fn _, name -> Shuttle.Env.get(name, "") end)
 
   defp lifecycle_write?(args),
-    do: match?([verb, _id, "--local"] when verb in ["accept", "resume"], drop_cli_store(args))
+    do:
+      match?(
+        [verb, _id, "--local"] when verb in ["accept", "resume", "rest"],
+        drop_cli_store(args)
+      )
 
   defp drop_cli_store(["-C", _store | rest]), do: rest
   defp drop_cli_store(args), do: args
@@ -669,7 +673,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
   defp apply_lifecycle_write(verb, id, conclude? \\ true) do
     fiber = fiber(id) || %{"id" => id, "shuttle" => %{}}
     kind = get_in(fiber, ["shuttle", "kind"])
-    status = if verb == "accept" and kind == "pinned", do: "open", else: "active"
+    status = if verb == "rest", do: "open", else: "active"
+
+    if verb == "rest",
+      do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
 
     if conclude? and kind == "standing",
       do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})

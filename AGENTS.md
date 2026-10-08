@@ -128,6 +128,13 @@ lives in the docs site (`docs/`, published to
   daemon. `shuttle install` and `shuttle repeat` stamp `host` by default. The
   same predicate gates orphan resurrection, so a remote restart can't
   re-grab another host's fiber.
+- **Two kinds; one resting place.** `shuttle.kind` is `oneshot` or
+  `standing` (which carries a cron `schedule:`). A retired `pinned` still
+  reads as `oneshot` in the CLI (`shuttle.NormalizeKind`), the daemon
+  (`Poller.block_kind`) and the board, and `shuttle check` warns about it. A
+  constitution at rest is `status: open` + `horizon: stashed`, drawn in
+  Resting; `shuttle rest` puts it there without review. "Role" names only an
+  identity under `roles/`, never a kind of constitution.
 - **`shuttle.project_dir` is required for armed installs.** `shuttle install`
   and `shuttle repeat` require `--project-dir`; workers start there instead of
   falling back to the felt store.
@@ -143,7 +150,7 @@ lives in the docs site (`docs/`, published to
   daemon restart parks every dispatchable candidate — fresh launches and
   dirty-death resumes alike — in `pending_launch` until
   `shuttle daemon release`; only work the daemon observed running and
-  cron-due standing roles pass through. The one exception is opt-in per host
+  cron-due standing constitutions pass through. The one exception is opt-in per host
   (`~/.config/shuttle/host.json` has `"quarantine_auto_release": true`): a
   daemon killed hard and back within the heartbeat window, on the same
   machine, with every recorded worker re-adopted and no churn, releases
@@ -233,7 +240,7 @@ receipt` still fails afterwards fails, naming each unhealthy component and
 its repair.
 **Every deploy and operator restart arms the boot quarantine**
 — the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
-oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing roles
+oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing constitutions
 still fire). Only on a host that opted in does a hard-killed, previously
 released daemon back within seconds, workers intact and no churn, release
 itself. A daemon

@@ -7,19 +7,18 @@ export function queuedControl(
   ids: readonly string[],
   members: readonly (KanbanCard | null | undefined)[],
   open: (card: KanbanCard) => void,
-  opts: { compact?: boolean } = {},
 ): { chip: HTMLButtonElement; list: HTMLOListElement } {
   const names = members.map((member, i) => member?.name ?? ids[i])
   const notes = members.map(member => member ? queueMemberNote(member) : null)
   const chip = document.createElement('button')
   chip.type = 'button'
-  chip.className = opts.compact ? 'kbn-card-queued kbn-card-queued--compact' : 'kbn-card-queued'
-  chip.textContent = opts.compact ? `+${ids.length}` : queuedChipLabel(ids.length)
+  chip.className = 'kbn-card-queued'
+  chip.textContent = queuedChipLabel(ids.length)
   chip.setAttribute('aria-expanded', 'false')
   chip.setAttribute('aria-label', `${ids.length} card${ids.length === 1 ? '' : 's'} queued behind ${card.name} — show them`)
   chip.title = `Waiting on this one, in order: ${names.map((name, i) => notes[i] ? `${name} (${notes[i]})` : name).join(' → ')}`
   const list = document.createElement('ol')
-  list.className = opts.compact ? 'kbn-card-queued-list kbn-card-queued-list--floating' : 'kbn-card-queued-list'
+  list.className = 'kbn-card-queued-list'
   list.hidden = true
   names.forEach((name, i) => {
     const row = document.createElement('li')

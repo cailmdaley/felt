@@ -370,7 +370,7 @@ func TestSetConfig_PreservesRuntimeKeys(t *testing.T) {
 		"session_uuid": "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
 	})
 
-	// Redefine as a standing role with a new agent and no effort.
+	// Redefine as a standing constitution with a new agent and no effort.
 	newBlock := &Block{
 		Kind: "standing", Host: "h", ProjectDir: "/tmp/x", Agent: "claude-sonnet",
 		Schedule: &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"},
@@ -481,10 +481,10 @@ func TestResolve_StandingNextDue(t *testing.T) {
 	sh := out["shuttle"].(map[string]any)
 	resolved, ok := sh["resolved"].(map[string]any)
 	if !ok {
-		t.Fatalf("resolved missing for standing role: %v", sh)
+		t.Fatalf("resolved missing for standing constitution: %v", sh)
 	}
 	if _, ok := resolved["next_due"]; !ok {
-		t.Fatalf("standing role must carry resolved.next_due, got: %v", resolved)
+		t.Fatalf("standing constitution must carry resolved.next_due, got: %v", resolved)
 	}
 }
 

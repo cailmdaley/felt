@@ -61,7 +61,7 @@ func (a *app) statusCmd() *cobra.Command {
 		Long: `With no argument, prints a table of every fiber with a shuttle: block in the
 stores this machine dispatches (-C when set, else SHUTTLE_STORES, else the
 ~/.config/shuttle/stores.json registry). State is running (read from tmux), idle,
-scheduled (a standing role), paused (a draft), or closed. next_due_at comes
+scheduled (a standing constitution), paused (a draft), or closed. next_due_at comes
 from the daemon, so only the cross-host table (--all, --remote) fills it.
 
 With a fiber, prints the block's key fields, any running worker, and whether
@@ -237,7 +237,7 @@ func (a *app) runStatusOneFiber(query string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("fiber %s has no shuttle: block (use 'shuttle install' / 'repeat' / 'pin' to create one)", query)
+		return fmt.Errorf("fiber %s has no shuttle: block (use 'shuttle install' / 'repeat' to create one)", query)
 	}
 
 	statusNow := f.Status
