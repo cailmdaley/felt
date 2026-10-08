@@ -2293,7 +2293,7 @@ try {
       if (sidebarChoice !== null) await page.addInitScript(choice => {
         if (window === window.top) localStorage.setItem('shuttle:workspace:sidebar', choice)
       }, sidebarChoice)
-      await page.goto(url)
+      await page.goto(url, { timeout: 10_000 })
       await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor()
       await run(page)
     } catch (error) { failure = error }
