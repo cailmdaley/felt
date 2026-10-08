@@ -505,3 +505,37 @@ func TestDecodePiReplyShape(t *testing.T) {
 		}
 	}
 }
+
+// Confer keeps one record per job at <workspace>/jobs/<job>.json beside the
+// job's own state directory. Discovery reads only that level: a JSON file
+// deeper in a job's state, even one shaped like a job record, is not a job.
+func TestPiDiscoveryReadsOnlyWorkspaceJobRecords(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root, sock := piFixture(t, "")
+	env.Set("SHUTTLE_CONFER_STATE_DIR", root)
+	nested := filepath.Join(root, "project", "jobs", "job-1", "session", "jobs")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]any{"id": "job-nested", "socketPath": sock})
+	if err := os.WriteFile(filepath.Join(nested, "job-nested.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stray.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ss, err := (piAdapter{}).discover(context.Background(), env, "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ss) != 1 || ss[0].ID != "job-1" || ss[0].State != "idle" || ss[0].Title != "worker" {
+		t.Fatalf("sessions = %#v", ss)
+	}
+	if _, err := findPi(context.Background(), env, "job-nested"); err == nil {
+		t.Fatal("findPi resolved a record nested inside a job's state")
+	}
+	if j, err := findPi(context.Background(), env, "job-1"); err != nil || j.SocketPath != sock {
+		t.Fatalf("findPi(job-1) = %#v, %v", j, err)
+	}
+}

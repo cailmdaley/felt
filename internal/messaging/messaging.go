@@ -17,6 +17,12 @@ func adapters() map[string]adapter {
 	}
 }
 
+// adapterDiscoveryTimeout caps each harness's discovery. It sits well inside
+// the daemon's 10s cap on `shuttle sessions --local` and a peer's 12s cap on
+// `/api/v1/peers`, so on a loaded host a slow harness comes back as that
+// harness's gap while the other harnesses' sessions still reach the fleet.
+const adapterDiscoveryTimeout = 5 * time.Second
+
 func Discover(ctx context.Context, env *sysenv.Env, host string) Directory {
 	d := Directory{Host: host, Sessions: []Session{}, Gaps: []Gap{}}
 	if validatePart("host", host) != nil {
@@ -34,7 +40,7 @@ func Discover(ctx context.Context, env *sysenv.Env, host string) Directory {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			child, cancel := context.WithTimeout(ctx, 8*time.Second)
+			child, cancel := context.WithTimeout(ctx, adapterDiscoveryTimeout)
 			defer cancel()
 			ss, err := a.discover(child, env, host)
 			ch <- result{name, ss, err}
