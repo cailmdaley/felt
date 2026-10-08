@@ -508,17 +508,28 @@ defmodule Shuttle.Test.FeltStoreRunner do
             idx -> Enum.at(args, idx + 1) == "all"
           end
 
+        ids_from =
+          case Enum.find_index(args, &(&1 == "--ids-from")) do
+            nil ->
+              nil
+
+            index ->
+              args
+              |> Enum.at(index + 1)
+              |> File.read!()
+              |> String.split("\n", trim: true)
+              |> MapSet.new()
+          end
+
         fibers =
           Agent.get(server(), fn state ->
             entries = Map.values(state.fibers)
 
-            if show_all do
-              entries
-            else
-              Enum.filter(entries, fn fiber ->
-                Map.get(fiber, "status") in ["open", "active"]
-              end)
-            end
+            entries
+            |> Enum.filter(fn fiber ->
+              (show_all or Map.get(fiber, "status") in ["open", "active"]) and
+                (is_nil(ids_from) or MapSet.member?(ids_from, Map.get(fiber, "id")))
+            end)
           end)
 
         json = Jason.encode!(Enum.map(fibers, &for_cli(command, &1)))

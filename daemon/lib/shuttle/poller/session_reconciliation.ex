@@ -202,7 +202,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # (a copied file): it resolves to `:ambiguous` and is skipped rather than
   # mis-adopted. A candidate without a uid has no worker name and no entry.
   defp candidate_session_lookup(%State{} = state) do
-    {candidates, _store_map, _store_listings} = Poller.discover_candidates(state)
+    {candidates, _store_map, _store_listings, _discovery} = Poller.discover_candidates(state)
 
     candidates
     |> Enum.reduce(%{}, fn fiber, acc ->

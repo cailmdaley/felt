@@ -49,6 +49,10 @@ defmodule Shuttle.Poller do
   # watchdog reaps the tracked read task before advancing the poller's clock;
   # the per-cycle token makes a result already queued at that boundary inert.
   @default_poll_stall_timeout_ms 300_000
+  @default_full_scan_budget_ms 10_000
+  @default_full_scan_min_interval_ms 600_000
+  @default_full_scan_timeout_ms 900_000
+  @poll_stall_margin_ms 1_000
   @default_max_concurrent_workers 10
   @default_heartbeat_interval_ms 5_000
   # THE boot-quarantine default: a freshly (re)started daemon parks every
@@ -121,6 +125,9 @@ defmodule Shuttle.Poller do
       :tick_timer_ref,
       :tick_token,
       :stall_timeout_ms,
+      :full_scan_budget_ms,
+      :full_scan_min_interval_ms,
+      :full_scan_timeout_ms,
       :poll_stall_timer_ref,
       :poll_token,
       :poll_task_pid,
@@ -320,7 +327,10 @@ defmodule Shuttle.Poller do
       # listing that omits a fiber is deletion evidence). Safe because these
       # rows only nominate candidates — `Dispatcher.dispatch` re-fetches the
       # fiber and re-verifies status before any launch.
-      last_known_listings: %{}
+      last_known_listings: %{},
+      # Per-store full-scan cadence and the ids learned through daemon actions.
+      discovery: %{},
+      touched_fiber_ids: %{}
     ]
   end
 
@@ -636,7 +646,38 @@ defmodule Shuttle.Poller do
       own_host_id: own_host_id,
       auto_discover_felt_stores: auto_discover,
       runner: runner,
-      stall_timeout_ms: Keyword.get(opts, :stall_timeout_ms, @default_poll_stall_timeout_ms),
+      full_scan_budget_ms:
+        Keyword.get(
+          opts,
+          :full_scan_budget_ms,
+          Shuttle.Env.app(:full_scan_budget_ms, @default_full_scan_budget_ms)
+        ),
+      full_scan_min_interval_ms:
+        Keyword.get(
+          opts,
+          :full_scan_min_interval_ms,
+          Shuttle.Env.app(:full_scan_min_interval_ms, @default_full_scan_min_interval_ms)
+        ),
+      full_scan_timeout_ms:
+        Keyword.get(
+          opts,
+          :full_scan_timeout_ms,
+          Shuttle.Env.app(:full_scan_timeout_ms, @default_full_scan_timeout_ms)
+        ),
+      stall_timeout_ms:
+        max(
+          Keyword.get(
+            opts,
+            :stall_timeout_ms,
+            Shuttle.Env.app(:stall_timeout_ms, @default_poll_stall_timeout_ms)
+          ),
+          3 *
+            Keyword.get(
+              opts,
+              :full_scan_timeout_ms,
+              Shuttle.Env.app(:full_scan_timeout_ms, @default_full_scan_timeout_ms)
+            ) * max(length(felt_stores), 1) + @poll_stall_margin_ms
+        ),
       # Restart is not dispatch authority: quarantine every autonomous
       # dispatch until a human releases the hold (see the State field
       # comment). Opt wins over app config so tests can exercise the
@@ -1024,6 +1065,8 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:refresh_document, fiber_id}, _from, state) do
+    state = touch_fiber_id(state, fiber_id)
+
     # A cold cache means no poll has populated it yet; the first poll will read
     # disk fresh, so there is nothing to patch. Once warm, re-read this one fiber.
     if state.document_cache_ready do
@@ -1120,6 +1163,7 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:dispatch, fiber_id, opts}, _from, state) do
+    state = touch_fiber_id(state, fiber_id)
     {runtime_key, fiber_id} = resolve_identity(state, fiber_id)
     state = reconcile_running_fiber(state, fiber_id)
     uid = resolved_uid(state, fiber_id, runtime_key)
@@ -1132,6 +1176,7 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
+    state = touch_fiber_id(state, fiber_id)
     {_runtime_key, slug} = resolve_identity(state, fiber_id)
 
     result =
@@ -1338,7 +1383,7 @@ defmodule Shuttle.Poller do
   # down with the Task.
   defp poll_reads(%State{} = state) do
     state = refresh_felt_stores(state)
-    {candidates, store_map, store_listings} = discover_candidates(state)
+    {candidates, store_map, store_listings, discovery} = discover_candidates(state)
 
     # The poll-cycle document cache lives in `Shuttle.Poller.DocumentCache`; the
     # cache itself stays on `State`. Entries are built directly from the candidate
@@ -1353,6 +1398,7 @@ defmodule Shuttle.Poller do
        candidates: candidates,
        store_map: store_map,
        store_listings: store_listings,
+       discovery: discovery,
        document_cache: document_cache,
        document_cache_stats: document_cache_stats,
        document_cache_refresh_ms: div(refresh_us, 1000)
@@ -1376,10 +1422,12 @@ defmodule Shuttle.Poller do
          candidates: candidates,
          store_map: new_store_map,
          store_listings: store_listings,
+         discovery: discovery,
          document_cache: document_cache,
          document_cache_stats: document_cache_stats,
          document_cache_refresh_ms: document_cache_refresh_ms
        }) do
+    log_discovery_mode_changes(state.discovery, discovery)
     log_document_cache_refresh(state, document_cache_stats, document_cache_refresh_ms)
 
     # The Task built `document_cache` from a PRE-mutation snapshot. A
@@ -1430,7 +1478,9 @@ defmodule Shuttle.Poller do
         # Fold this poll's SUCCESSFUL listings over the retained map (a failed
         # store keeps its previous rows), pruned to the current store set.
         last_known_listings:
-          state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores)
+          state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores),
+        discovery: discovery,
+        touched_fiber_ids: Map.take(state.touched_fiber_ids, felt_stores)
     }
 
     # Downtime recovery: a standing constitution whose tmux session is gone but whose
@@ -1519,13 +1569,14 @@ defmodule Shuttle.Poller do
   # No tag predicate — the shuttle: block is the source of truth, matching the
   # same contract every other surface reads.
   #
-  # Returns {:ok, fibers, store_map, store_listings} where:
+  # Returns {fibers, store_map, store_listings, discovery} where:
   #   fibers        — [%{"id" => id, "uid" => uid, "status" => status, "path" => …}] across all stores
   #   store_map     — %{fiber_id => felt_store} for store resolution
-  #   store_listings — %{store => rows} for the stores whose listing SUCCEEDED
-  #                   this poll (verbatim rows; `apply_poll_cycle/2` folds them
-  #                   into `state.last_known_listings`). A failed store is
-  #                   absent, so its retained rows survive untouched.
+  #   store_listings — %{store => rows} for stores successfully listed this poll.
+  #                   Hot listings are merged with retained rows; full listings
+  #                   replace them. A failed store is absent.
+  #   discovery     — updated per-store mode and full-scan cadence, returned as
+  #                   plain data for `apply_poll_cycle/2` to install.
   #
   # Each fiber row carries its own "uid", so callers that need the intrinsic
   # identity read it off the candidate directly — no separate uid map.
@@ -1557,13 +1608,49 @@ defmodule Shuttle.Poller do
   # enumerates it. Ownership is read from felt's path, never reverse-derived.
   @doc false
   def discover_candidates(state) do
-    {all_fibers, store_map, store_listings} =
-      Enum.reduce(state.felt_stores, {[], %{}, %{}}, fn store,
-                                                        {acc_fibers, acc_map, acc_listings} ->
-        {fibers, acc_listings} =
-          case list_shuttle_fibers(store, state) do
-            {:ok, fibers} ->
-              {fibers, Map.put(acc_listings, store, fibers)}
+    {all_fibers, store_map, store_listings, discovery} =
+      Enum.reduce(state.felt_stores, {[], %{}, %{}, %{}}, fn store,
+                                                             {acc_fibers, acc_map, acc_listings,
+                                                              acc_discovery} ->
+        previous = Map.get(state.discovery, store, %{})
+        now = System.system_time(:millisecond)
+        full? = full_scan_due?(previous, state, now)
+        started = System.monotonic_time(:millisecond)
+        hot_ids = hot_ids_for_store(store, previous, state)
+
+        result =
+          if full? do
+            list_shuttle_fibers(store, state, nil, state.full_scan_timeout_ms)
+          else
+            list_shuttle_fibers(store, state, hot_ids, nil)
+          end
+
+        duration = System.monotonic_time(:millisecond) - started
+
+        {fibers, acc_listings, discovery_info} =
+          case result do
+            {:ok, listed} ->
+              merged =
+                if full?,
+                  do: listed,
+                  else: merge_hot_rows(Map.get(state.last_known_listings, store, []), listed)
+
+              listing = %{
+                mode: if(duration > state.full_scan_budget_ms, do: :hot, else: :full),
+                last_full_duration_ms:
+                  if(full?, do: duration, else: Map.get(previous, :last_full_duration_ms)),
+                last_full_completed_at:
+                  if(full?, do: now + duration, else: Map.get(previous, :last_full_completed_at)),
+                next_full_due_at:
+                  if(full? and duration > state.full_scan_budget_ms,
+                    do: now + max(state.full_scan_min_interval_ms, 5 * duration),
+                    else: if(full?, do: nil, else: Map.get(previous, :next_full_due_at))
+                  ),
+                last_full_timed_out: false
+              }
+
+              listing = if full?, do: listing, else: %{listing | mode: :hot}
+              {merged, Map.put(acc_listings, store, merged), listing}
 
             {:error, reason} ->
               # A failed listing — felt timing out on an overloaded login
@@ -1585,15 +1672,74 @@ defmodule Shuttle.Poller do
                   "carrying #{length(retained)} last-known fiber(s) for this tick"
               )
 
-              {retained, acc_listings}
+              failed_info =
+                if full? do
+                  due = now + max(state.full_scan_min_interval_ms, 5 * max(duration, 1))
+
+                  %{
+                    mode: :hot,
+                    last_full_duration_ms: duration,
+                    last_full_completed_at: Map.get(previous, :last_full_completed_at),
+                    next_full_due_at: due,
+                    last_full_timed_out: true
+                  }
+                else
+                  previous
+                end
+
+              {retained, acc_listings, failed_info}
           end
+
+        discovery_info =
+          Map.put(
+            discovery_info,
+            :hot_size,
+            MapSet.size(MapSet.new(Enum.map(fibers, &Map.get(&1, "id"))))
+          )
 
         new_map = Map.new(fibers, &{Map.get(&1, "id", ""), store})
         merged_map = Map.merge(new_map, acc_map)
-        {acc_fibers ++ fibers, merged_map, acc_listings}
+
+        {acc_fibers ++ fibers, merged_map, acc_listings,
+         Map.put(acc_discovery, store, discovery_info)}
       end)
 
-    {all_fibers, store_map, store_listings}
+    {all_fibers, store_map, store_listings, discovery}
+  end
+
+  defp log_discovery_mode_changes(previous, current) do
+    Enum.each(current, fn {store, info} ->
+      old_mode = get_in(previous, [store, :mode]) || :full
+      new_mode = Map.get(info, :mode, :full)
+
+      if old_mode != new_mode do
+        Logger.info("fiber discovery mode for #{store}: #{new_mode}")
+      end
+    end)
+  end
+
+  defp full_scan_due?(previous, state, now) do
+    due = Map.get(previous, :next_full_due_at)
+
+    cond do
+      is_nil(Map.get(previous, :last_full_duration_ms)) -> true
+      Map.get(previous, :last_full_timed_out, false) -> is_nil(due) or now >= due
+      Map.get(previous, :last_full_duration_ms) <= state.full_scan_budget_ms -> true
+      true -> is_nil(due) or now >= due
+    end
+  end
+
+  defp hot_ids_for_store(store, _previous, state) do
+    rows = Map.get(state.last_known_listings, store, [])
+    ids = Enum.map(rows, &Map.get(&1, "id"))
+    touched = state.touched_fiber_ids |> Map.get(store, MapSet.new()) |> MapSet.to_list()
+    Enum.uniq(Enum.filter(ids ++ touched, &is_binary/1))
+  end
+
+  defp merge_hot_rows(previous, listed) do
+    by_id = Map.new(previous, &{Map.get(&1, "id"), &1})
+    listed_by_id = Map.new(listed, &{Map.get(&1, "id"), &1})
+    by_id |> Map.merge(listed_by_id) |> Map.values()
   end
 
   # Owner-only feed gate for a cached document entry: keep it iff its
@@ -1745,6 +1891,27 @@ defmodule Shuttle.Poller do
   # any prior entries for this fiber id under a different key are dropped first
   # so a re-key can't leave a duplicate card. The mtime is carried so the next
   # poll's `DocumentCache.reusable_entry?/2` reuses this entry.
+  defp touch_fiber_id(%State{} = state, fiber_id) do
+    store =
+      Map.get(state.fiber_store_cache, fiber_id) ||
+        case Shuttle.FeltStores.store_for_fiber(fiber_id, state.felt_stores) do
+          {:ok, store} -> store
+          _ -> nil
+        end
+
+    if store do
+      touched = Map.get(state.touched_fiber_ids, store, MapSet.new())
+
+      %{
+        state
+        | touched_fiber_ids:
+            Map.put(state.touched_fiber_ids, store, MapSet.put(touched, fiber_id))
+      }
+    else
+      state
+    end
+  end
+
   defp refresh_document_entry(%State{} = state, fiber_id) do
     # A document's `id` is the fiber's uid, so a slug-addressed refresh matches
     # on the carried `slug` too.
@@ -1797,7 +1964,7 @@ defmodule Shuttle.Poller do
   # physically roots it, read from the CLI response, never reverse-derived. A store
   # whose own `.felt/` is a symlink owns nothing here: the target store
   # enumerates it canonically.
-  defp list_shuttle_fibers(store, state) do
+  defp list_shuttle_fibers(store, state, ids_from, timeout_ms) do
     felt_dir = Path.join(store, ".felt")
 
     case File.lstat(felt_dir) do
@@ -1811,7 +1978,7 @@ defmodule Shuttle.Poller do
         if empty_dir?(felt_dir) do
           {:ok, []}
         else
-          run_shuttle_listing(store, state)
+          run_shuttle_listing(store, state, ids_from, timeout_ms)
         end
 
       _ ->
@@ -1826,8 +1993,8 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp run_shuttle_listing(store, state) do
-    case run_shuttle_ls_for_shuttle(store, state) do
+  defp run_shuttle_listing(store, state, ids_from, timeout_ms) do
+    case run_shuttle_ls_for_shuttle(store, state, ids_from, timeout_ms) do
       {:ok, output} ->
         with {:ok, fibers} when is_list(fibers) <- Jason.decode(output) do
           owned_prefix = Shuttle.FeltStores.store_felt_realpath(store) <> "/"
@@ -1843,7 +2010,12 @@ defmodule Shuttle.Poller do
                 owned_by_store?(fiber, owned_prefix)
             end)
 
-          {:ok, Shuttle.FiberDocuments.union_by_id(kept, aux_rows(store, state, owned_prefix))}
+          aux =
+            if is_nil(ids_from),
+              do: aux_rows(store, state, owned_prefix, timeout_ms),
+              else: []
+
+          {:ok, Shuttle.FiberDocuments.union_by_id(kept, aux)}
         else
           _ -> {:error, :invalid_json}
         end
@@ -1871,16 +2043,18 @@ defmodule Shuttle.Poller do
   # Fails SOFT, per walk: an aux filter that errors or times out logs and
   # contributes nothing, leaving the primary listing — and therefore every
   # dispatchable fiber — untouched. Only the primary walk can fail a store.
-  defp aux_rows(store, state, owned_prefix) do
+  defp aux_rows(store, state, owned_prefix, timeout_ms) do
     [_primary | aux] = Shuttle.FiberDocuments.kanban_walks()
-    Enum.flat_map(aux, &aux_walk_rows(store, state, owned_prefix, &1))
+    Enum.flat_map(aux, &aux_walk_rows(store, state, owned_prefix, &1, timeout_ms))
   end
 
-  defp aux_walk_rows(store, state, owned_prefix, filter) do
+  defp aux_walk_rows(store, state, owned_prefix, filter, timeout_ms) do
     fields = Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
     args = ["ls", "--json"] ++ filter ++ ["--json-field", fields]
 
-    with {:ok, output} <- run_felt(store, state.runner, args),
+    opts = if timeout_ms, do: [timeout_ms: timeout_ms], else: []
+
+    with {:ok, output} <- run_felt(store, state.runner, args, opts),
          {:ok, rows} when is_list(rows) <- Jason.decode(output) do
       Enum.filter(rows, &(is_map(&1) and owned_by_store?(&1, owned_prefix)))
     else
@@ -1893,7 +2067,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp run_shuttle_ls_for_shuttle(store, state) do
+  defp run_shuttle_ls_for_shuttle(store, state, ids_from, timeout_ms) do
     # Widened projection: shuttle filters by raw top-level frontmatter first,
     # then emits the FULL kanban field set (`FiberDocuments.kanban_fields/0` — a
     # superset of the fields the poller needs for eligibility, ownership, and
@@ -1901,14 +2075,20 @@ defmodule Shuttle.Poller do
     # from its candidate row (no per-miss `show`, no stat), so a poll tick costs
     # one `shuttle ls` per store. A failure degrades `discover_candidates/1` to
     # the store's last-known rows; the boot contract probe checks CLI parity.
-    run_shuttle(store, state.runner, [
+    args = [
       "ls",
       "--json",
       "--has-field",
       "shuttle",
       "--json-field",
       Enum.join(Shuttle.FiberDocuments.kanban_fields(), ",")
-    ])
+    ]
+
+    with_ids_file(ids_from, fn ids_path ->
+      args = if ids_path, do: args ++ ["--ids-from", ids_path], else: args
+      opts = if timeout_ms, do: [timeout_ms: timeout_ms], else: []
+      run_shuttle(store, state.runner, args, opts)
+    end)
   end
 
   # The autonomous-tick eligibility filter: the shared `eligible?` predicate,
@@ -2654,6 +2834,7 @@ defmodule Shuttle.Poller do
 
   defp do_dispatch_fiber(%State{} = state, fiber, opts \\ []) do
     fiber_id = Map.get(fiber, "id", "")
+    state = touch_fiber_id(state, fiber_id)
 
     case project_dir_for_dispatch(fiber) do
       {:error, reason} ->
@@ -2868,6 +3049,8 @@ defmodule Shuttle.Poller do
   end
 
   defp register_claimed_session(%State{} = state, fiber_id, fiber, tmux_session, opts) do
+    state = touch_fiber_id(state, fiber_id)
+
     # The session is already live; we only need a label for the running-state
     # entry. Prefer the claim's explicit `:agent` (the worker names itself),
     # else Shuttle's resolved id, else the raw name / "unknown" — a best-effort
@@ -3284,6 +3467,8 @@ defmodule Shuttle.Poller do
   # ── Worker Exit Handling ──
 
   defp handle_worker_exit(%State{} = state, fiber_id) do
+    state = touch_fiber_id(state, fiber_id)
+
     case running_key(state, fiber_id) do
       nil ->
         state
@@ -3788,24 +3973,46 @@ defmodule Shuttle.Poller do
   # Run either CLI against an explicit store. Felt reads run from the store
   # directory; Shuttle receives its root `-C` flag. JSON consumers keep stderr
   # separate because a successful listing can warn about an unreadable fiber.
-  defp run_felt(store, runner, args), do: run_cli(:felt, store, runner, args)
-  defp run_shuttle(store, runner, args), do: run_cli(:shuttle, store, runner, args)
+  defp run_felt(store, runner, args, opts), do: run_cli(:felt, store, runner, args, opts)
 
-  defp run_cli(_tool, nil, _runner, _args), do: {:error, :no_felt_store}
+  defp run_shuttle(store, runner, args, opts \\ []),
+    do: run_cli(:shuttle, store, runner, args, opts)
 
-  defp run_cli(tool, store, runner, args) when is_binary(store) do
+  defp with_ids_file(nil, fun), do: fun.(nil)
+
+  defp with_ids_file(ids, fun) do
+    path =
+      Path.join(System.tmp_dir!(), "shuttle-discovery-#{System.unique_integer([:positive])}.ids")
+
+    try do
+      case File.write(path, Enum.join(ids, "\n") <> if(ids == [], do: "", else: "\n"), [
+             :exclusive
+           ]) do
+        :ok -> fun.(path)
+        {:error, reason} -> {:error, {:ids_file, reason}}
+      end
+    after
+      File.rm(path)
+    end
+  end
+
+  defp run_cli(_tool, nil, _runner, _args, _opts), do: {:error, :no_felt_store}
+
+  defp run_cli(tool, store, runner, args, opts) when is_binary(store) do
     {result, scope} =
       case tool do
         :felt ->
-          {Shuttle.CLI.run_felt(args,
-             runner: runner,
-             cd: store,
-             stderr_to_stdout: false
+          {Shuttle.CLI.run_felt(
+             args,
+             Keyword.merge([runner: runner, cd: store, stderr_to_stdout: false], opts)
            ), "cd #{store}"}
 
         :shuttle ->
-          {Shuttle.CLI.run_in_store(store, args, runner: runner, stderr_to_stdout: false),
-           "-C #{store}"}
+          {Shuttle.CLI.run_in_store(
+             store,
+             args,
+             Keyword.merge([runner: runner, stderr_to_stdout: false], opts)
+           ), "-C #{store}"}
       end
 
     case result do
@@ -3924,10 +4131,32 @@ defmodule Shuttle.Poller do
     Map.put(snapshot, :poll_health, %{
       state: if(state.poll_check_in_progress, do: "reading", else: "idle"),
       stall_timeout_ms: state.stall_timeout_ms,
+      discovery: discovery_snapshot(state),
       stalls: state.poll_stalls,
       last_stalled_at: iso8601_or_nil(state.last_poll_stalled_at)
     })
   end
+
+  defp discovery_snapshot(state) do
+    Map.new(state.felt_stores, fn store ->
+      info = Map.get(state.discovery, store, %{})
+
+      {store,
+       %{
+         mode: Map.get(info, :mode, :full),
+         last_full_duration_ms: Map.get(info, :last_full_duration_ms),
+         last_full_completed_at: epoch_iso(Map.get(info, :last_full_completed_at)),
+         next_full_due_at: epoch_iso(Map.get(info, :next_full_due_at)),
+         hot_set_size: Map.get(info, :hot_size, 0)
+       }}
+    end)
+  end
+
+  defp epoch_iso(ms) when is_integer(ms) do
+    ms |> DateTime.from_unix!(:millisecond) |> DateTime.to_iso8601()
+  end
+
+  defp epoch_iso(_), do: nil
 
   defp schedule_poll_cycle do
     # Small delay to let any pending messages settle

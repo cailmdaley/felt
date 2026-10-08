@@ -1576,19 +1576,20 @@ defmodule Shuttle.PollerTest do
     assert state.poll_task_pid == nil
     assert state.poll_stall_timer_ref == nil
 
-    assert Poller.snapshot(poller).poll_health == %{
-             state: "idle",
-             stall_timeout_ms: 600_000,
-             stalls: 0,
-             last_stalled_at: nil
-           }
+    health = Poller.snapshot(poller).poll_health
+    assert health.state == "idle"
+    assert health.stall_timeout_ms == 2_701_000
+    assert health.stall_timeout_ms > :sys.get_state(poller, @state_timeout).full_scan_timeout_ms
+    assert health.discovery[MockRunner.felt_root()].mode == :full
+    assert health.stalls == 0
+    assert health.last_stalled_at == nil
   end
 
   test "repeated stalled reads advance the poller and supersede late replies" do
     fiber = make_fiber("tests/stalled-read")
     MockRunner.set_fiber("tests/stalled-read", fiber)
     MockRunner.set_shuttle("tests/stalled-read", oneshot_shuttle())
-    MockRunner.set_ls_delay(200)
+    MockRunner.set_ls_delay(2_000)
 
     {:ok, poller} =
       start_poller!(
@@ -1596,6 +1597,7 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 20,
         stall_timeout_ms: 30,
+        full_scan_timeout_ms: 1,
         felt_stores: [MockRunner.felt_root()]
       )
 
@@ -5993,6 +5995,157 @@ defmodule Shuttle.PollerTest do
 
       assert Poller.sort_candidates([real, junk, missing]) == [junk, missing, real]
     end
+  end
+
+  @tag :adaptive_discovery
+  test "fast stores keep doing a full projection each poll" do
+    id = "tests/discovery-fast"
+    MockRunner.set_fiber(id, make_fiber(id, %{"status" => "open"}))
+    MockRunner.set_shuttle(id, "enabled: true\nhost: another-host\nkind: oneshot\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_fast,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    sync_poll_cycle!(poller)
+
+    listings =
+      Enum.filter(MockRunner.commands(), fn
+        {"shuttle", args} -> "ls" in args and "--has-field" in args
+        _ -> false
+      end)
+
+    assert length(listings) >= 2
+    refute Enum.any?(listings, fn {_cmd, args} -> "--ids-from" in args end)
+    assert Poller.snapshot(poller).poll_health.discovery[MockRunner.felt_root()].mode == :full
+  end
+
+  @tag :adaptive_discovery
+  test "slow stores use an ids-from hot set and include daemon-touched fibers" do
+    original = "tests/discovery-hot-original"
+    touched = "tests/discovery-hot-touched"
+    MockRunner.set_fiber(original, make_fiber(original, %{"status" => "open"}))
+    MockRunner.set_shuttle(original, "enabled: true\nhost: another-host\nkind: oneshot\n", "open")
+    MockRunner.set_ls_delay(15)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_hot,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        full_scan_budget_ms: 1,
+        full_scan_min_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    assert Poller.snapshot(poller).poll_health.discovery[MockRunner.felt_root()].mode == :hot
+
+    MockRunner.set_fiber(touched, make_fiber(touched, %{"status" => "open"}))
+    MockRunner.set_shuttle(touched, "enabled: true\nhost: another-host\nkind: oneshot\n", "open")
+    assert :ok = Poller.refresh_document(poller, touched)
+    sync_poll_cycle!(poller)
+
+    assert Enum.any?(MockRunner.commands(), fn
+             {"shuttle", args} -> "--ids-from" in args
+             _ -> false
+           end)
+
+    known = :sys.get_state(poller, @state_timeout).last_known_listings[MockRunner.felt_root()]
+    assert Enum.any?(known, &(Map.get(&1, "id") == original))
+    assert Enum.any?(known, &(Map.get(&1, "id") == touched))
+
+    MockRunner.set_shuttle(
+      original,
+      "enabled: true\nhost: another-host\nkind: oneshot\n",
+      "active"
+    )
+
+    sync_poll_cycle!(poller)
+    refreshed = :sys.get_state(poller, @state_timeout).last_known_listings[MockRunner.felt_root()]
+    assert Enum.find(refreshed, &(Map.get(&1, "id") == original))["status"] == "active"
+
+    MockRunner.set_shuttle(
+      original,
+      "enabled: true\nhost: another-host\nkind: oneshot\n",
+      "closed"
+    )
+
+    sync_poll_cycle!(poller)
+    retained = :sys.get_state(poller, @state_timeout).last_known_listings[MockRunner.felt_root()]
+    assert Enum.find(retained, &(Map.get(&1, "id") == original))["status"] == "active"
+
+    :sys.replace_state(poller, fn state ->
+      info = Map.fetch!(state.discovery, MockRunner.felt_root())
+
+      %{
+        state
+        | discovery:
+            Map.put(state.discovery, MockRunner.felt_root(), %{info | next_full_due_at: 0})
+      }
+    end)
+
+    sync_poll_cycle!(poller)
+    settled = :sys.get_state(poller, @state_timeout).last_known_listings[MockRunner.felt_root()]
+    refute Enum.any?(settled, &(Map.get(&1, "id") == original))
+
+    {_command, args} =
+      Enum.find(Enum.reverse(MockRunner.commands()), fn {cmd, args} ->
+        cmd == "shuttle" and "--ids-from" in args
+      end)
+
+    ids_path = Enum.at(args, Enum.find_index(args, &(&1 == "--ids-from")) + 1)
+    refute File.exists?(ids_path)
+  end
+
+  @tag :adaptive_discovery
+  test "a timed-out full scan enters hot mode and waits until its next due time" do
+    id = "tests/discovery-timeout"
+    MockRunner.set_fiber(id, make_fiber(id, %{"status" => "open"}))
+    MockRunner.set_shuttle(id, "enabled: true\nhost: another-host\nkind: oneshot\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_timeout,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        full_scan_timeout_ms: 50,
+        full_scan_budget_ms: 1,
+        full_scan_min_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+
+    :sys.replace_state(poller, fn state ->
+      slow = %{mode: :hot, last_full_duration_ms: 100, next_full_due_at: 0}
+      %{state | discovery: Map.put(state.discovery, MockRunner.felt_root(), slow)}
+    end)
+
+    MockRunner.set_listing_timeout(true)
+    sync_poll_cycle!(poller)
+
+    info = :sys.get_state(poller, @state_timeout).discovery[MockRunner.felt_root()]
+    assert info.mode == :hot
+    assert is_integer(info.next_full_due_at)
+    assert info.next_full_due_at > System.system_time(:millisecond)
+
+    commands_before = MockRunner.commands()
+    sync_poll_cycle!(poller)
+    later = MockRunner.commands() -- commands_before
+    assert Enum.any?(later, fn {cmd, args} -> cmd == "shuttle" and "--ids-from" in args end)
+
+    refute Enum.any?(later, fn {cmd, args} ->
+             cmd == "shuttle" and "--ids-from" not in args and "ls" in args
+           end)
   end
 
   defp notify_worker_exit(poller, fiber_id) do
