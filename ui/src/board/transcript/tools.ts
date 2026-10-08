@@ -37,11 +37,18 @@ function jsString(source: string): string {
   try {
     return JSON.parse(`"${source}"`) as string
   } catch {
-    return source
-      .replace(/\\([\\'"`])/g, '$1')
-      .replace(/\\n/g, '\n')
-      .replace(/\\r/g, '\r')
-      .replace(/\\t/g, '\t')
+    return source.replace(/\\(u\{[\da-f]+\}|u[\da-f]{4}|x[\da-f]{2}|[\s\S])/gi, (_match, escape: string) => {
+      if (escape.startsWith('u{')) {
+        const point = Number.parseInt(escape.slice(2, -1), 16)
+        return point <= 0x10ffff ? String.fromCodePoint(point) : `\\${escape}`
+      }
+      if (escape.startsWith('u')) return String.fromCharCode(Number.parseInt(escape.slice(1), 16))
+      if (escape.startsWith('x')) return String.fromCharCode(Number.parseInt(escape.slice(1), 16))
+      const simple: Record<string, string> = { n: '\n', r: '\r', t: '\t', b: '\b', f: '\f', v: '\v' }
+      if (escape in simple) return simple[escape]
+      if (escape === '\n' || escape === '\r') return ''
+      return escape
+    })
   }
 }
 
@@ -54,7 +61,7 @@ function codexCommand(input: unknown): string {
   }
   visit(input)
   for (const source of sources) {
-    const match = /\bcmd\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)/s.exec(source)
+    const match = /(?:\bcmd\b|["']cmd["'])\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)/s.exec(source)
     if (match) return jsString(match[1] ?? match[2] ?? match[3] ?? '')
   }
   return ''

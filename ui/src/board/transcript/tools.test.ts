@@ -19,6 +19,15 @@ describe('toolLabel', () => {
     expect(toolLabel('exec', { code: 'no command here' })).toEqual({ name: 'Exec', summary: '' })
   })
 
+  it('decodes quoted Codex command fields without throwing on invalid code points', () => {
+    expect(toolLabel('exec', { code: String.raw`await tools.exec_command({"cmd": 'printf \x41\nline'})` })).toEqual({
+      name: 'Exec', summary: 'printf A …',
+    })
+    expect(toolLabel('exec', { code: String.raw`await tools.exec_command({cmd: 'printf \u{110000}'})` })).toEqual({
+      name: 'Exec', summary: String.raw`printf \u{110000}`,
+    })
+  })
+
   it('shortens file paths and gives search tools their useful query', () => {
     expect(toolLabel('Read', { file_path: '/home/cail/project/src/response.py' })).toEqual({ name: 'Read', summary: 'src/response.py' })
     expect(toolLabel('Edit', { path: 'src/response.py' })).toEqual({ name: 'Edit', summary: 'src/response.py' })
