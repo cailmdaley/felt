@@ -94,6 +94,7 @@ felt find searches the rest of it.`,
 			}
 
 			var felts []*felt.Felt
+			idOrder := map[string]int(nil)
 			if lsIDsFrom == "" {
 				felts, err = listForOutput(storage, hasFields, view.jsonOutput())
 			} else {
@@ -101,7 +102,17 @@ felt find searches the rest of it.`,
 				if readErr != nil {
 					return fmt.Errorf("reading ids from %s: %w", lsIDsFrom, readErr)
 				}
-				felts, err = storage.ListMetadataByIDs(strings.Split(string(data), "\n"), frontmatterFieldsForOutput(hasFields), view.jsonOutput())
+				ids := strings.Split(string(data), "\n")
+				idOrder = make(map[string]int, len(ids))
+				for _, id := range ids {
+					id = strings.TrimSuffix(id, "\r")
+					if strings.TrimSpace(id) != "" {
+						if _, exists := idOrder[id]; !exists {
+							idOrder[id] = len(idOrder)
+						}
+					}
+				}
+				felts, err = storage.ListMetadataByIDs(ids, frontmatterFieldsForOutput(hasFields), view.jsonOutput())
 			}
 			if err != nil {
 				return err
@@ -110,7 +121,7 @@ felt find searches the rest of it.`,
 			// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
 			// widen to all statuses. Bare `ls` stays open+active (actionable view).
 			statusExplicit := cmd.Flags().Changed("status")
-			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || query != "" || lsRecent > 0
+			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || query != "" || lsRecent > 0 || lsIDsFrom != ""
 
 			// A search widens past open+active so untracked fibers can match, but a
 			// store accumulates far more closed work than live work and the closed
@@ -118,7 +129,7 @@ felt find searches the rest of it.`,
 			// printed. -n is exempt: it sorts by closed-at precisely to surface
 			// what was recently finished.
 			suppressClosed := !statusExplicit && lsRecent == 0 &&
-				(query != "" || len(lsTags) > 0 || len(hasFields) > 0)
+				(query != "" || len(lsTags) > 0 || len(hasFields) > 0 || lsIDsFrom != "")
 
 			search, err := compileSearch(query, lsStatus, !statusExplicit && hasFilters,
 				lsTags, hasFields, lsExact, lsRegex, lsBody, lsVerbose)
@@ -147,10 +158,15 @@ felt find searches the rest of it.`,
 				if len(filtered) > lsRecent {
 					filtered = filtered[:lsRecent]
 				}
-			} else if query == "" {
+			} else if query == "" && lsIDsFrom == "" {
 				// Default: sort by creation time (skip for search results to preserve relevance)
 				sort.Slice(filtered, func(i, j int) bool {
 					return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+				})
+			}
+			if idOrder != nil {
+				sort.SliceStable(filtered, func(i, j int) bool {
+					return idOrder[filtered[i].ID] < idOrder[filtered[j].ID]
 				})
 			}
 

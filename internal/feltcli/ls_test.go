@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"gopkg.in/yaml.v3"
 )
 
 func TestTreeDisplayID(t *testing.T) {
@@ -73,23 +74,42 @@ func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
 	}
 }
 
-func TestLsIDsFromMatchesFullRows(t *testing.T) {
+func TestLsIDsFromMatchesFullRowsAndInputOrder(t *testing.T) {
 	t.Parallel()
 	dir, storage := newStore(t)
-	for _, id := range []string{"alpha", "nested/beta", "nested/gamma", "nested-z"} {
-		if err := storage.Write(&felt.Felt{ID: id, Name: id, Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
-			t.Fatalf("Write(%s): %v", id, err)
+	shuttle := map[string]*yaml.Node{"shuttle": {Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}}
+	for _, fiber := range []*felt.Felt{
+		{ID: "parent", Name: "Parent", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "parent/aaa", Name: "Child", Status: felt.StatusActive, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "closed", Name: "Closed", Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "untracked/fiber", Name: "Untracked", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "nested-z", Name: "Nested Z", Status: felt.StatusActive, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s): %v", fiber.ID, err)
 		}
 	}
+	// This bare root file is the store's entry-point fiber.
+	if err := os.WriteFile(filepath.Join(storage.Root(), "overview.md"), []byte("---\nname: Overview\nstatus: open\ncreated-at: 2026-04-10T09:00:00Z\nshuttle: null\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	parentDir := filepath.Join(storage.Root(), "parent")
+	reportTarget := filepath.Join(t.TempDir(), "report.html")
+	if err := os.WriteFile(reportTarget, []byte("report"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(reportTarget, filepath.Join(parentDir, "report.html")); err != nil {
+		t.Fatal(err)
+	}
+
 	innerRoot := filepath.Join(t.TempDir(), ".felt")
-	if err := os.MkdirAll(innerRoot, 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(innerRoot, "guest"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	inner := felt.NewStorage(filepath.Dir(innerRoot))
-	if err := inner.Write(&felt.Felt{ID: "guest", Name: "Guest entry", Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")}); err != nil {
+	if err := os.WriteFile(filepath.Join(innerRoot, "guest.md"), []byte("---\nname: Guest entry\nstatus: closed\ncreated-at: 2026-04-10T09:00:00Z\nshuttle: null\n---\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	mount := filepath.Join(dir, ".felt", "mounts", "guest")
+	mount := filepath.Join(storage.Root(), "mounts", "guest")
 	if err := os.MkdirAll(filepath.Dir(mount), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -97,41 +117,101 @@ func TestLsIDsFromMatchesFullRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	full, err := runCommand(t, dir, "ls", "--json", "-s", "all")
+	// The field filter widens the full baseline to every status, including the
+	// statusless fiber; ids-from must do the same without -s all.
+	full, err := runCommand(t, dir, "ls", "--json", "--has-field", "shuttle")
 	if err != nil {
 		t.Fatalf("full listing: %v\n%s", err, full)
 	}
-	idsPath := filepath.Join(t.TempDir(), "ids")
-	if err := os.WriteFile(idsPath, []byte("mounts/guest\nnested/gamma\nmissing\nalpha\nnested/beta\nnested-z\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	selected, err := runCommand(t, dir, "ls", "--json", "-s", "all", "--ids-from", idsPath)
-	if err != nil {
-		t.Fatalf("ids listing: %v\n%s", err, selected)
-	}
-	var allRows, selectedRows []json.RawMessage
+	var allRows []json.RawMessage
 	if err := json.Unmarshal([]byte(full), &allRows); err != nil {
 		t.Fatal(err)
 	}
+	fullByID := make(map[string]json.RawMessage, len(allRows))
+	for _, row := range allRows {
+		var fields struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(row, &fields); err != nil {
+			t.Fatal(err)
+		}
+		fullByID[fields.ID] = row
+	}
+	requested := []string{"nested-z", "mounts/guest/guest", "parent/aaa", "overview", "closed", "untracked/fiber", "parent", "PARENT", "missing", "closed", "active-does-not-exist"}
+	for _, id := range []string{"nested-z", "mounts/guest/guest", "parent/aaa", "overview", "closed", "untracked/fiber", "parent"} {
+		if _, ok := fullByID[id]; !ok {
+			t.Fatalf("fixture id %q absent from full listing:\n%s", id, full)
+		}
+	}
+	idsPath := filepath.Join(t.TempDir(), "ids")
+	if err := os.WriteFile(idsPath, []byte(strings.Join(requested, "\n")+"\n\nclosed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := runCommand(t, dir, "ls", "--json", "--has-field", "shuttle", "--ids-from", idsPath)
+	if err != nil {
+		t.Fatalf("ids listing: %v\n%s", err, selected)
+	}
+	var selectedRows []json.RawMessage
 	if err := json.Unmarshal([]byte(selected), &selectedRows); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"alpha": true, "nested/beta": true, "nested/gamma": true, "nested-z": true, "mounts/guest": true}
-	var expected []json.RawMessage
-	for _, raw := range allRows {
-		var row struct {
+	wantOrder := []string{"nested-z", "mounts/guest/guest", "parent/aaa", "overview", "closed", "untracked/fiber", "parent"}
+	if len(selectedRows) != len(wantOrder) {
+		t.Fatalf("selected %d rows, want %d: %s", len(selectedRows), len(wantOrder), selected)
+	}
+	for i, row := range selectedRows {
+		var fields struct {
 			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(raw, &row); err != nil {
+		if err := json.Unmarshal(row, &fields); err != nil {
 			t.Fatal(err)
 		}
-		if want[row.ID] {
-			expected = append(expected, raw)
+		if fields.ID != wantOrder[i] {
+			t.Errorf("row %d id = %q, want %q", i, fields.ID, wantOrder[i])
+		}
+		if string(row) != string(fullByID[fields.ID]) {
+			t.Errorf("row %q differs from full listing\n got: %s\nwant: %s", fields.ID, row, fullByID[fields.ID])
 		}
 	}
-	if string(mustJSON(t, selectedRows)) != string(mustJSON(t, expected)) {
-		t.Fatalf("ids rows differ from full listing\nselected: %s\nexpected: %s", selected, mustJSON(t, expected))
+	var parentRow struct {
+		ReportPath string `json:"report_path"`
 	}
+	if err := json.Unmarshal(selectedRows[len(selectedRows)-1], &parentRow); err != nil {
+		t.Fatal(err)
+	}
+	resolvedParentDir, err := filepath.EvalSymlinks(parentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReport := filepath.Join(resolvedParentDir, "report.html")
+	if parentRow.ReportPath != wantReport {
+		t.Fatalf("report_path = %q, want unresolved sibling path %q", parentRow.ReportPath, wantReport)
+	}
+
+	idsOnly, err := runCommand(t, dir, "ls", "--json", "--ids-from", idsPath)
+	if err != nil {
+		t.Fatalf("ids-only listing: %v\n%s", err, idsOnly)
+	}
+	var idsOnlyRows []json.RawMessage
+	if err := json.Unmarshal([]byte(idsOnly), &idsOnlyRows); err != nil {
+		t.Fatal(err)
+	}
+	idsOnlySet := make(map[string]bool, len(idsOnlyRows))
+	for _, row := range idsOnlyRows {
+		var fields struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(row, &fields); err != nil {
+			t.Fatal(err)
+		}
+		idsOnlySet[fields.ID] = true
+	}
+	for _, id := range []string{"closed", "untracked/fiber"} {
+		if !idsOnlySet[id] {
+			t.Errorf("ids-only listing omitted %s:\n%s", id, idsOnly)
+		}
+	}
+
 	if err := os.WriteFile(idsPath, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -139,15 +219,6 @@ func TestLsIDsFromMatchesFullRows(t *testing.T) {
 	if err != nil || strings.TrimSpace(empty) != "[]" {
 		t.Fatalf("empty ids: %v, %q", err, empty)
 	}
-}
-
-func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
 }
 
 func TestLsBodySearchScansMarkdown(t *testing.T) {

@@ -32,8 +32,8 @@ var cobraOutputs = map[string]bool{"OutOrStdout": true, "OutOrStderr": true}
 // reads the live process on purpose, keyed "file func ident" (file relative to
 // internal/, func the enclosing function or method, "-" at package level).
 var processReadAllowlist = map[string]string{
-	"felt/storage.go Storage.BackfillIntrinsicIDs os.Stderr":                "a store walk's warning about a file it could not backfill is a diagnostic on the process stderr, never command output",
-	"felt/storage.go Storage.listFilesWithMode os.Stderr": "a store walk's warnings about unparseable or unhydrated files are diagnostics on the process stderr, never command output",
+	"felt/storage.go Storage.BackfillIntrinsicIDs os.Stderr": "a store walk's warning about a file it could not backfill is a diagnostic on the process stderr, never command output",
+	"felt/storage.go Storage.listFilesWithMode os.Stderr":    "a store walk's warnings about unparseable or unhydrated files are diagnostics on the process stderr, never command output",
 }
 
 // TestProductionReadsTheProcessOnlyThroughEnv fails when non-test code under

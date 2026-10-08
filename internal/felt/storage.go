@@ -1360,51 +1360,101 @@ func (s *Storage) ListMetadataWithModTimeHavingFrontmatterFields(fields []string
 }
 
 // ListMetadataByIDs reads named fibers directly, without walking the store.
-// Results follow the store walk's lexical DFS order, independent of input order.
+// Results retain first appearance in ids; duplicate ids are read once.
 func (s *Storage) ListMetadataByIDs(ids, fields []string, includeModTime bool) ([]*Felt, error) {
-	ordered := append([]string(nil), ids...)
-	sort.Slice(ordered, func(i, j int) bool {
-		a, b := strings.Split(filepath.ToSlash(ordered[i]), "/"), strings.Split(filepath.ToSlash(ordered[j]), "/")
-		for k := 0; k < min(len(a), len(b)); k++ {
-			if a[k] != b[k] {
-				return a[k] < b[k]
-			}
-		}
-		return len(a) < len(b)
-	})
-	files := make([]fiberFile, 0, len(ordered))
-	seen := make(map[string]struct{}, len(ordered))
-	for _, id := range ordered {
-		id = path.Clean(filepath.ToSlash(strings.TrimSpace(id)))
-		if id == "." || !validLookupID(id) {
+	files := make([]fiberFile, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, rawID := range ids {
+		id := strings.TrimSuffix(rawID, "\r")
+		if strings.TrimSpace(id) == "" || id == "." || filepath.IsAbs(id) || path.IsAbs(id) || id != path.Clean(id) || !validLookupID(id) {
 			continue
 		}
 		if _, ok := seen[id]; ok {
 			continue
 		}
 		seen[id] = struct{}{}
-		filePath := s.Path(id)
-		info, err := os.Stat(filePath)
-		if err != nil || info.IsDir() {
+		filePath, entryPoint, ok := s.exactFiberPath(id)
+		if !ok {
 			continue
 		}
-		if _, err := filepath.EvalSymlinks(filepath.Dir(filePath)); err != nil {
+		if _, err := filepath.EvalSymlinks(filePath); err != nil {
+			continue
+		}
+		reportDir, err := filepath.EvalSymlinks(filepath.Dir(filePath))
+		if err != nil {
 			continue
 		}
 		var reportPath string
-		report := filepath.Join(filepath.Dir(filePath), "report.html")
-		if info, err := os.Stat(report); err == nil && !info.IsDir() {
-			reportPath, _ = filepath.EvalSymlinks(report)
-		}
-		entryPoint := filepath.Dir(filePath) == s.root
-		if !entryPoint {
-			if info, err := os.Lstat(filepath.Dir(filePath)); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				entryPoint = path.Base(id) == filepath.Base(filepath.Dir(filePath))
+		if entries, err := os.ReadDir(reportDir); err == nil {
+			for _, entry := range entries {
+				if entry.Name() == "report.html" {
+					report := filepath.Join(reportDir, entry.Name())
+					if _, err := os.Lstat(report); err == nil {
+						reportPath = report
+					}
+					break
+				}
 			}
 		}
 		files = append(files, fiberFile{id: id, path: filePath, entryPoint: entryPoint, reportPath: reportPath})
 	}
 	return s.listFilesWithMode(ParseMetadataOnly, includeModTime, fields, files)
+}
+
+// exactFiberPath resolves a canonical fiber id by matching every path segment
+// against its parent's directory entries. It preserves the walk's file-shape
+// precedence without accepting case-folded paths on case-insensitive filesystems.
+func (s *Storage) exactFiberPath(id string) (string, bool, bool) {
+	slug := path.Base(id)
+	if !strings.Contains(id, "/") {
+		if file, ok := exactPathFrom(s.root, slug+FileExt); ok && regularFile(file) {
+			return file, true, true
+		}
+	}
+	directoryForm := filepath.Join(filepath.FromSlash(id), slug+FileExt)
+	if file, ok := exactPathFrom(s.root, directoryForm); ok && regularFile(file) {
+		return file, false, true
+	}
+	if strings.Contains(id, "/") {
+		parent := path.Dir(id)
+		mount, ok := exactPathFrom(s.root, filepath.FromSlash(parent))
+		if ok {
+			if info, err := os.Lstat(mount); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				bare := filepath.Join(filepath.FromSlash(parent), slug+FileExt)
+				if file, ok := exactPathFrom(s.root, bare); ok && regularFile(file) {
+					return file, false, true
+				}
+			}
+		}
+	}
+	return "", false, false
+}
+
+func exactPathFrom(root, rel string) (string, bool) {
+	current := root
+	for _, segment := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
+		entries, err := os.ReadDir(current)
+		if err != nil {
+			return "", false
+		}
+		found := false
+		for _, entry := range entries {
+			if entry.Name() == segment {
+				current = filepath.Join(current, entry.Name())
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", false
+		}
+	}
+	return current, true
+}
+
+func regularFile(file string) bool {
+	info, err := os.Stat(file)
+	return err == nil && !info.IsDir()
 }
 
 func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeModTime bool, fields []string) ([]*Felt, error) {
