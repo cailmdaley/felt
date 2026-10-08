@@ -3204,8 +3204,14 @@ defmodule Shuttle.Poller do
         Shuttle.AppWorkers.ref(id)
 
       _ ->
+        # A host without tmux runs no terminal worker, so there is nothing to
+        # probe; asking tmux there reads as "unknown" and a stop would fail on
+        # a missing binary instead of being the no-op it is (an app-only host).
         session = Dispatcher.session_name(slug, uid)
-        if session && already_running_session?(state, session), do: session
+
+        if session && Shuttle.Env.find_executable("tmux") != nil &&
+             already_running_session?(state, session),
+           do: session
     end
   end
 

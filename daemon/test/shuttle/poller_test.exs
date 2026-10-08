@@ -1115,6 +1115,46 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
+  # An app-only host has no tmux. A readable `surface: app` fiber with no live
+  # worker must make /kill and rest clean no-ops there: nothing probes tmux,
+  # nothing tries a terminal stop.
+  test "on a host without tmux, kill and rest of an idle app fiber are no-ops" do
+    fiber_id = "tests/app-no-tmux"
+    uid = "01JZ00000000000000000000WA"
+
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      "kind: oneshot\nhost: candide\nsurface: app\nagent: codex-sol\n",
+      "active"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_app_no_tmux,
+        runner: MockRunner,
+        own_host_id: "candide",
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    sync_poll_cycle!(poller)
+    no_tmux = Path.join(System.tmp_dir!(), "no-tmux-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(no_tmux)
+    on_exit(fn -> File.rm_rf(no_tmux) end)
+    Env.put_env("PATH", no_tmux)
+    before = length(MockRunner.commands())
+
+    assert {:ok, :no_session} = Poller.kill_session(poller, fiber_id)
+    assert {:ok, output} = Poller.lifecycle_transition(poller, :rest, fiber_id)
+    refute output =~ "worker: stopped"
+
+    after_calls = Enum.drop(MockRunner.commands(), before)
+    refute Enum.any?(after_calls, fn {cmd, _} -> cmd == "tmux" end)
+  end
+
   # The three tmux "already gone" phrasings session_already_gone? must treat as
   # success: the per-session "session not found" and "no such session", and a
   # whole-server-down "no server running". In every case tmux reports the
