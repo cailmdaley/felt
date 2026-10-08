@@ -33,9 +33,9 @@ From there the worker:
    what "done" looks like; the worker sequences the steps.
 3. **Writes back** — rewrites `outcome:`, rewrites `## Status`, corrects the
    spec if the session sharpened it, files findings as sub-fibers, commits.
-4. **Exits** — with exactly one Shuttle lifecycle verb: to continue, runs
-   `shuttle handoff <fiber>` as its final action; to stop, runs
-   `shuttle close <fiber>` and does nothing else.
+4. **Exits** — with exactly one Shuttle lifecycle verb as its final action:
+   `shuttle handoff <fiber>` to continue, `shuttle close <fiber>` to stop for
+   review, or `shuttle rest <fiber>` to stop with nothing to review.
 
 To continue, app workers run `env -u TMUX shuttle -C <felt-store> handoff
 <fiber>`, then finish the turn; to stop, they run
@@ -52,7 +52,7 @@ constitution recovers most of a warm world-model on the next dispatch.
 
 ## Exit semantics
 
-The worker asks three questions, in order. The answer sets `status`, and
+The worker asks four questions, in order. The answer sets `status`, and
 `status` decides what happens next.
 
 **1. Is the desired state realized?** Run `shuttle close <fiber>` and exit.
@@ -68,7 +68,13 @@ product, and never block a close.
 `shuttle close <fiber>`, and lead the outcome with `Blocked: …` so the card
 reads as a question.
 
-**3. More work, not blocked?** Leave the fiber active and just hand off. The
+**3. A session the human drove, now over, with nothing to review?** Run
+`shuttle rest <fiber>`. It writes `status: open` and `horizon: stashed`, clears
+any verdict, concludes the run and stops the worker: the card goes back to
+Resting, its outcome the session's report, and starts again by hand. This is
+how a hub or a seat — a constitution with no finish line — ends a session.
+
+**4. More work, not blocked?** Leave the fiber active and just hand off. The
 daemon starts a fresh worker next tick, and it lands on your `## Status`.
 
 ### Closing parks the work
@@ -79,6 +85,7 @@ shuttle obeys the vocabulary literally. Know which word does what.
 |---|---|---|
 | "hand off" | case 3 — `status` stays `active`, then handoff | Daemon redispatches |
 | "close it out" | Run `shuttle close <fiber>`; it sets `status: closed` — never handoff | Card waits for you; no new worker |
+| "put it to rest" | Run `shuttle rest <fiber>`; `status: open`, `horizon: stashed` | Card goes to Resting; no new worker |
 
 Closing puts the work back on a human's desk. It claims nothing about
 completion. A worker should never upgrade a close-out into a continuation
@@ -169,7 +176,7 @@ as `blocked`. A healthy run or a force-dispatch clears it.
 parks every candidate it has never observed running into `pending_launch` and
 dispatches nothing fresh. Work it *did* observe alive under its own uptime —
 adopted at boot, or dispatched since — resumes normally. That counts as
-continuation, not a fresh launch. A **due standing role** also passes through:
+continuation, not a fresh launch. A **due standing constitution** also passes through:
 its cron occurrence is a fixed-time "go" the human already gave, bounded to one
 run, so a restart that straddles 09:00 does not eat the run. (Under CLI/daemon
 contract skew it holds like everything else.)
@@ -298,7 +305,7 @@ earns its keep in four cases:
 3. **Archiving** — a closed fiber's card leaves the board entirely.
 4. **Handing ownership** to a different dispatcher.
 
-Never uninstall to end a worker session. Use the ordinary exit — `shuttle handoff` to continue, `shuttle close` to stop.
+Never uninstall to end a worker session. Use the ordinary exit — `shuttle handoff` to continue, `shuttle close` to stop for review, `shuttle rest` to put it down.
 
 ## Diagnosing a missing card
 

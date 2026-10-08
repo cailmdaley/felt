@@ -20,9 +20,9 @@ shuttle status --remote <name>            # single remote
 shuttle ps                                # live tmux workers only
 shuttle install <fiber> --project-dir "$PWD" [-m <agent-id>] [--disabled]
 shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
-shuttle pin <fiber> --project-dir "$PWD"    # pinned, schedule-less perennial role
 shuttle reshape <fiber> [kind] [-s <schedule>] [-z <tz>]  # change an existing block's kind/schedule in place
 shuttle pause <fiber>                       # park in drafts + kill live worker; --no-kill preserves it
+shuttle rest <fiber>                        # put down in Resting without review; stops a live worker
 shuttle resume / accept / reopen <fiber>
 shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]
 shuttle snapshot                            # the daemon's state snapshot

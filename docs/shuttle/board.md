@@ -17,9 +17,9 @@ A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to 
 
 ## Desk — the kanban
 
-Three surfaces: the **Now** board of cards that need something, a **Pinned**
-strip of perennial roles, and **Resting**, where snoozed work and standing
-roles between runs wait.
+Two surfaces: the **Now** board of cards that need something, and
+**Resting**, where everything put down waits — paused and snoozed work, the
+hubs and seats you start by hand, and standing constitutions between runs.
 
 ![The Desk with fictional workshop tasks: lunch options and speaker bios in Drafts, the participant guide and venue access In Flight, and the programme and venue decision Awaiting Review.](../assets/board-desk.jpg)
 
@@ -42,9 +42,8 @@ evaluates in this order:
 | Discarded | `closed` + `tempered: false` |
 | Awaiting review | `closed`, `tempered` absent |
 | In flight | live tmux worker with a shuttle block — liveness wins over everything below |
-| Pinned | resting `kind: pinned` (`open` or `active`) |
 | Scheduled | `active` + `kind: standing` — drawn in Resting, wearing its next launch |
-| In flight | `active`, other kinds |
+| In flight | `active` oneshot |
 | Drafts | anything left, including `open` |
 
 In flight draws two bands: **Aloft**, workers at work, then **Holding**, live
@@ -67,6 +66,8 @@ Column says *which lane*; horizon says *desk or Resting*. It is computed by
 `effectiveHorizon` from two frontmatter keys:
 
 - `horizon: stashed` takes a card off the Now board and puts it in Resting.
+  Dragging a card there from In flight or Awaiting review stops its worker and
+  parks it with no verdict — the board's spelling of `shuttle rest`.
   (The wire format and the API still say `stashed` everywhere; "Resting" is
   what the human is told, because that is what the surface means — deliberately
   paused work, not a bin of failures.)
@@ -88,9 +89,8 @@ Two gestures carry different meanings. **Drag-and-drop** advances the card's
 state.
 **The fiber page's controls** give you another worker on the same run.
 
-Drag-to-tempered acts by kind: on a standing role it accepts and re-arms, on a
-pinned role it accepts and re-parks to the strip, on a oneshot it writes the
-terminus. The outcome stays: the last run's digest is the card's headline until
+Drag-to-tempered acts by kind: on a standing constitution it accepts and
+re-arms, on a oneshot it writes the terminus. The outcome stays: the last run's digest is the card's headline until
 the next run writes its own.
 
 Opening a Desk card enters its constitution's documents.
