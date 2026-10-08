@@ -223,6 +223,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.acceptCmd(),
 		a.setModelCmd(),
 		a.setAgentCmd(),
+		a.seatCmd(),
 		a.reshapeCmd(),
 		a.uninstallShuttleCmd(),
 		a.markRuntimeCmd(),

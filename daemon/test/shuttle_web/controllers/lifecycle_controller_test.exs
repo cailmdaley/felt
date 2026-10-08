@@ -360,6 +360,51 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n--local\n"
   end
 
+  test "seat forwards the role, or --clear, to shuttle" do
+    store = fixture_store!("shuttle-lifecycle-seat", "tests/hub", "Hub")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "seat",
+          "fiber" => "tests/hub",
+          "role" => "cmbx-chair",
+          "clear" => false
+        })
+      )
+
+    assert conn.status == 200
+    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\ncmbx-chair\n--local\n"
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "seat", "fiber" => "tests/hub", "clear" => true})
+      )
+
+    assert conn.status == 200
+    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\n--clear\n--local\n"
+  end
+
+  test "seat without a role or --clear is refused before shelling" do
+    fixture_store!("shuttle-lifecycle-seat-bare", "tests/bare", "Bare")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "seat", "fiber" => "tests/bare", "clear" => false})
+      )
+
+    assert conn.status in 400..499
+    refute File.exists?(args_file)
+  end
+
   test "set-model shells shuttle in the resolved owning store" do
     store =
       fixture_store!(

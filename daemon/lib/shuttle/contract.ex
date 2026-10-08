@@ -24,7 +24,8 @@ defmodule Shuttle.Contract do
   # Level 6: the daemon shells `shuttle resolve-dir <path>` and
   # `shuttle reopen <fiber> --project-dir <dir> --conclude-run --local`.
   # Level 7: the daemon shells `shuttle rest <fiber>`; `shuttle pin` is gone.
-  @expected_level 7
+  # Level 8: the daemon shells `shuttle seat <fiber> <role>|--clear`.
+  @expected_level 8
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()
