@@ -29,8 +29,9 @@ func HasFacet(f *felt.Felt) bool {
 	return ok
 }
 
-// BlockOf decodes the fiber's Shuttle facet. It returns false when the fiber
-// has no mapping-valued facet.
+// BlockOf decodes the fiber's Shuttle facet, reading a legacy kind as the kind
+// it stands for (see LegacyKinds). It returns false when the fiber has no
+// mapping-valued facet.
 func BlockOf(f *felt.Felt) (*Block, bool, error) {
 	node, ok := facetNode(f)
 	if !ok {
@@ -40,7 +41,22 @@ func BlockOf(f *felt.Felt) (*Block, bool, error) {
 	if err := node.Decode(&block); err != nil {
 		return nil, true, fmt.Errorf("shuttle: block is malformed: %w", err)
 	}
+	block.Kind = NormalizeKind(block.Kind)
 	return &block, true, nil
+}
+
+// StoredKind returns the kind exactly as the fiber's facet stores it, before
+// any legacy value is normalized. Empty when there is no facet or no kind.
+func StoredKind(f *felt.Felt) string {
+	node, ok := facetNode(f)
+	if !ok {
+		return ""
+	}
+	kind := felt.MappingValueNode(node, "kind")
+	if kind == nil || kind.Kind != yaml.ScalarNode {
+		return ""
+	}
+	return strings.TrimSpace(kind.Value)
 }
 
 // SetField replaces one string-valued key inside the existing Shuttle facet.
@@ -158,6 +174,10 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 	var flat map[string]interface{}
 	if err := node.Decode(&flat); err != nil || flat == nil {
 		return nil
+	}
+	// Readers of the resolved view see the kind a legacy value is read as.
+	if kind, ok := flat["kind"].(string); ok {
+		flat["kind"] = NormalizeKind(kind)
 	}
 	var block Block
 	if err := node.Decode(&block); err == nil {

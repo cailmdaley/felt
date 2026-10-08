@@ -168,6 +168,93 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 	return pauseCmd
 }
 
+// ---- rest ------------------------------------------------------------------
+
+func (a *app) restCmd() *cobra.Command {
+	restCmd := &cobra.Command{
+		Use:   "rest <fiber>",
+		Short: "Put a constitution down in Resting, without review",
+		Long: `Puts the constitution at rest: status: open with horizon: stashed, so the
+board shows it in Resting and the daemon never dispatches it. Any verdict and
+closed-at are cleared, the run is concluded (shuttle.runtime.handed_off_at =
+now) so the next start is a fresh session, and a live worker is stopped.
+
+  shuttle rest <fiber>     # a worker's last call when the human was here
+                           # and there is nothing left to review
+
+Rest is the third exit beside handoff (keep going) and close (review me).
+It works from In flight, Drafts and Awaiting review; a tempered or discarded
+card is refused. A future due: is kept, so the card wakes on that day; a due
+that is today or already past is cleared, because it would put the card
+straight back on the desk. A standing constitution is placed by its schedule,
+so it is refused here: use 'shuttle pause'.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
+			if err != nil {
+				return err
+			}
+			defer unlock()
+
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "rest", f, nil); routed || err != nil {
+				return err
+			}
+			if block.Kind == "standing" {
+				return fmt.Errorf("fiber %s is a standing constitution, placed by its schedule; use 'shuttle pause %s' to stop it", args[0], args[0])
+			}
+			if f.Status == felt.StatusClosed && readTempered(f) != nil {
+				return fmt.Errorf("fiber %s already has a verdict (tempered=%v); use 'shuttle reopen %s --as-draft' first", args[0], *readTempered(f), args[0])
+			}
+
+			statusBefore := f.Status
+			if err := unclose(f, felt.StatusOpen); err != nil {
+				return err
+			}
+			if err := f.SetExtraField("horizon", "stashed"); err != nil {
+				return fmt.Errorf("setting horizon: %w", err)
+			}
+			clearedDue := ""
+			if f.Due != nil && f.Due.Format("2006-01-02") <= time.Now().Format("2006-01-02") {
+				clearedDue = f.Due.Format("2006-01-02")
+				f.Due = nil
+			}
+			if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+				return fmt.Errorf("stamping handed_off_at: %w", err)
+			}
+			if err := st.Write(f); err != nil {
+				return fmt.Errorf("writing fiber: %w", err)
+			}
+			fmt.Fprintf(a.env.Stdout, "rested %s%s (status: open, horizon: stashed)\n", args[0], ref.Location())
+			if statusBefore != felt.StatusOpen {
+				fmt.Fprintf(a.env.Stdout, "  status: %s → open\n", shuttleNonEmpty(statusBefore, "(missing)"))
+			}
+			if statusBefore == felt.StatusClosed {
+				fmt.Fprintln(a.env.Stdout, "  cleared: tempered, closed-at")
+			}
+			if clearedDue != "" {
+				fmt.Fprintf(a.env.Stdout, "  cleared: due %s (already arrived)\n", clearedDue)
+			}
+
+			session, _ := a.liveWorkerSession(f)
+			if session == "" {
+				return nil
+			}
+			if err := a.killTmuxSession(session); err != nil {
+				return fmt.Errorf("killing tmux session %q: %w", session, err)
+			}
+			fmt.Fprintf(a.env.Stdout, "  worker: stopped %s\n", session)
+			return nil
+		},
+	}
+	restCmd.Flags().Bool("local", false, localFlagUsage)
+	return restCmd
+}
+
+
 // ---- resume ----------------------------------------------------------------
 
 func (a *app) resumeCmd() *cobra.Command {
@@ -180,7 +267,7 @@ func (a *app) resumeCmd() *cobra.Command {
 the owning daemon dispatches it on its next poll (after a daemon restart, once
 the boot quarantine is released).
 
-For a standing role awaiting review (status: closed + untempered), resume re-arms
+For a standing constitution awaiting review (status: closed + untempered), resume re-arms
 it and concludes the run it reviewed (shuttle.runtime.handed_off_at = now), so
 the role runs at its schedule's next tick. That write routes through the owning
 daemon, which applies it with --local inside its Poller, serialized with the
@@ -192,7 +279,7 @@ transition may still apply there. A draft (status: open) is armed
 straight to active. A remote-owned fiber routes through the local daemon to
 its owner, and the CLI never writes its Git mirror; a normal resume may stay
 pending while the owner is in boot quarantine. Every other closed fiber — a
-oneshot or pinned role, or any accepted or discarded close — is refused; use
+oneshot awaiting review, or any accepted or discarded close — is refused; use
 'shuttle reopen' to requeue it.
 
 Arming needs what an armed install needs: an agent the registry resolves and a
@@ -679,18 +766,15 @@ func (a *app) acceptCmd() *cobra.Command {
 	var acceptLocal bool
 	acceptCmd := &cobra.Command{
 		Use:   "accept <fiber>",
-		Short: "Accept a completed standing or pinned run (re-arm / re-park)",
-		Long: `Resolves the human verdict on an untempered role (status: closed, or
-status: active while its run is still in flight), kind-aware:
+		Short: "Accept a standing constitution's run and re-arm it",
+		Long: `Resolves the human verdict on an untempered standing constitution
+(status: closed, or status: active while its run is still in flight): re-arms
+it (status: active), clearing closed-at / tempered, and concludes the run
+(shuttle.runtime.handed_off_at = now) so the next dispatch is the schedule's
+next tick. Due-ness is recomputed by the daemon from the schedule.
 
-  standing → re-arms it (status: active), clearing closed-at / tempered, and
-             concludes the run (shuttle.runtime.handed_off_at = now) so the
-             next dispatch is the schedule's next tick. Due-ness is recomputed
-             by the daemon from the schedule (no stored next_due_at, no review
-             block).
-  pinned   → re-parks it back to the strip (status: open), clearing
-             closed-at / tempered. A human Resume (force-dispatch) starts it
-             again.
+A oneshot has no run to re-arm: temper it with 'shuttle close --tempered=true',
+or put it down with 'shuttle rest'.
 
 The outcome is kept: the last run's digest stays the card's headline until the
 next run writes its own.
@@ -704,7 +788,7 @@ bypassed: the accept may still apply there.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !acceptLocal {
-				if routed, err := a.routeLifecycle("accept", args[0], perennialRole); routed {
+				if routed, err := a.routeLifecycle("accept", args[0], standingBlock); routed {
 					return err
 				}
 			}
@@ -713,8 +797,8 @@ bypassed: the accept may still apply there.`,
 				return err
 			}
 			defer unlock()
-			if !perennialRole(f, block) {
-				return fmt.Errorf("accept only applies to standing or pinned roles (fiber has kind=%s)", block.Kind)
+			if !standingBlock(f, block) {
+				return fmt.Errorf("accept only applies to standing constitutions (fiber has kind=%s); temper a oneshot with 'shuttle close %s --tempered=true' or put it down with 'shuttle rest %s'", block.Kind, args[0], args[0])
 			}
 			// Acceptable: untempered, and closed (awaiting review) or still active —
 			// the board's Temper gesture can land while the run is in flight, before
@@ -732,25 +816,11 @@ bypassed: the accept may still apply there.`,
 				return err
 			}
 
-			// PINNED accept RE-PARKS the finished arc back to the strip (status: open,
-			// verdict cleared) — the kind-aware other half of accept (standing re-arms
-			// active, pinned re-parks open). No schedule, no recurrence to advance.
-			if block.Kind == "pinned" {
-				if err := unclose(f, felt.StatusOpen); err != nil {
-					return err
-				}
-				if err := st.Write(f); err != nil {
-					return fmt.Errorf("writing fiber: %w", err)
-				}
-				fmt.Fprintf(a.env.Stdout, "accepted pinned role %s%s (re-parked to the strip: status: open)\n", args[0], ref.Location())
-				return nil
-			}
-
 			if block.Schedule == nil {
 				return fmt.Errorf("fiber %s has no schedule", args[0])
 			}
-			// Arming a closed role holds it to the armed-install gate; accepting a
-			// role that is already active arms nothing.
+			// Arming a closed run holds it to the armed-install gate; accepting a
+			// run that is still active arms nothing.
 			if f.Status != felt.StatusActive {
 				if err := a.checkArmable(args[0], "resume", block); err != nil {
 					return err
@@ -775,10 +845,10 @@ bypassed: the accept may still apply there.`,
 	return acceptCmd
 }
 
-// perennialRole reports whether block is a standing or pinned role — the kinds
-// accept resolves a verdict on.
-func perennialRole(_ *felt.Felt, block *shuttle.Block) bool {
-	return block.Kind == "standing" || block.Kind == "pinned"
+// standingBlock reports whether block is a standing constitution — the one
+// kind accept resolves a verdict on.
+func standingBlock(_ *felt.Felt, block *shuttle.Block) bool {
+	return block.Kind == "standing"
 }
 
 // ---- set-model -------------------------------------------------------------
@@ -1005,13 +1075,13 @@ func axisValue(s string) any {
 
 // reshape is the surgical setter for `kind`. The create verbs rebuild the
 // whole block (re-resolving project_dir and host) and refuse a closed fiber,
-// so they cannot re-shape a role in Awaiting review; here kind (and, for a
-// standing role, the schedule) is set exactly the way set-model sets agent:
+// so they cannot re-shape a constitution in Awaiting review; here kind (and,
+// for a standing constitution, the schedule) is set exactly the way set-model sets agent:
 // shuttle.SetField on the live node, so the daemon-owned runtime: keys ride
 // through and nothing else on the block or the fiber is disturbed.
 //
 // Like every other config verb, it NEVER touches felt status / closed_at /
-// tempered / outcome: a role sitting in Awaiting review is reshaped in place and
+// tempered / outcome: a constitution sitting in Awaiting review is reshaped in place and
 // stays exactly there. Also like every other config verb, there is no
 // live/dispatched guard — set-model on a running worker has always been legal,
 // and reshape deliberately matches that.
@@ -1020,8 +1090,8 @@ func (a *app) reshapeCmd() *cobra.Command {
 	var reshapeTZ string
 	reshapeCmd := &cobra.Command{
 		Use:   "reshape <fiber> [kind]",
-		Short: "Change a role's kind (and standing schedule) in place",
-		Long: `Surgically rewrites the shuttle: block's kind — and, for a standing role, its
+		Short: "Change a constitution's kind (and standing schedule) in place",
+		Long: `Surgically rewrites the shuttle: block's kind — and, for a standing constitution, its
 schedule — leaving every other key (agent, host, project_dir, the daemon-owned
 runtime keys) and the fiber's whole lifecycle (status, tempered, closed-at,
 outcome) untouched.
@@ -1032,17 +1102,17 @@ outcome) untouched.
 
 The kind argument is optional: omit it to keep the current kind (a schedule-only
 edit). A standing target needs a schedule — from --schedule, or echoed from the
-block being reshaped. A oneshot or pinned target DROPS the schedule key, so a
-schedule-less kind never carries a stale recurrence; passing --schedule or --tz
-with one is an error.
+block being reshaped. A oneshot target DROPS the schedule key, so a oneshot
+never carries a stale recurrence; passing --schedule or --tz with one is an
+error.
 
-Requires an existing shuttle: block — use install / repeat / pin to create one.
+Requires an existing shuttle: block — use install / repeat to create one.
 This is a config edit, not a lifecycle move: it never changes status, so use
 pause / resume / close / reopen for that.`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0],
-				"use 'shuttle install' / 'repeat' / 'pin' to create one first")
+				"use 'shuttle install' / 'repeat' to create one first")
 			if err != nil {
 				return err
 			}
@@ -1092,7 +1162,7 @@ pause / resume / close / reopen for that.`,
 					expr = block.Schedule.Expr
 				}
 				if strings.TrimSpace(expr) == "" {
-					return fmt.Errorf("--schedule is required to reshape %s to a standing role (the block being reshaped has none to echo)", args[0])
+					return fmt.Errorf("--schedule is required to reshape %s to a standing constitution (the block being reshaped has none to echo)", args[0])
 				}
 				tz := reshapeTZ
 				if tz == "" && block.Schedule != nil {
@@ -1162,7 +1232,7 @@ pause / resume / close / reopen for that.`,
 
 // printPreservedStatus reports that a reshape left status exactly as it found
 // it: a closed fiber stays in Awaiting review with its verdict fields intact, a
-// draft stays parked, an armed role stays armed. Lifecycle verbs
+// draft stays parked, an armed constitution stays armed. Lifecycle verbs
 // (pause/resume/close/reopen) are the only way to move status; changing standing
 // → oneshot is not one of them.
 func (a *app) printPreservedStatus(status string) {

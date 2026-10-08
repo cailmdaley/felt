@@ -36,6 +36,14 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 						Message: err.Error(),
 					})
 				}
+				if stored := shuttle.StoredKind(fiber); shuttle.LegacyKinds[stored] != "" {
+					issues = append(issues, felt.CheckIssue{
+						Level:   felt.CheckLevelWarning,
+						FiberID: fiber.ID,
+						Path:    shuttle.FacetKey + ".kind",
+						Message: fmt.Sprintf("kind %q is retired and read as %q; scripts/migrate-pinned.py rewrites it", stored, shuttle.LegacyKinds[stored]),
+					})
+				}
 			}
 			issues = append(issues, a.checkHostDrift(fibers)...)
 			errors := 0

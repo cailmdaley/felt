@@ -9,16 +9,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// The create verbs — install (oneshot), repeat (standing), pin (pinned) — build a
+// The create verbs — install (oneshot) and repeat (standing) — build a
 // shuttle: block from scratch and attach it to an existing fiber. Because they
 // CREATE the block (no daemon-owned runtime keys to preserve yet), they use
 // felt's whole-key SetExtraField("shuttle", block) rather than the surgical
 // setters the lifecycle config verbs use. The block is born owned: resolveOwnHost
 // stamps an explicit host so the daemon's strict dispatch predicate (block.host
 // == own_host_id) has a value to match. status (the sole dispatch gate) is set
-// felt-native: install/repeat arm to active, pin parks at open.
+// felt-native: install and repeat arm to active (install --disabled leaves a
+// draft at open).
 
-// refuseExistingBlock is the one policy the three create verbs share: they
+// refuseExistingBlock is the one policy the create verbs share: they
 // CREATE, so a fiber that already carries a shuttle: block is a refusal, and the
 // refusal routes the caller to the surgical verb for what they were trying to
 // change. Nothing here rewrites a block — every in-place edit has its own verb,
@@ -36,7 +37,7 @@ func (a *app) refuseExistingBlock(fiberID string, f *felt.Felt, b *shuttle.Block
   kind or schedule:  shuttle reshape %s [kind] [--schedule ...]
   agent:             shuttle set-model %s <agent>   (set-agent for effort/chrome)
   inspect it:        shuttle status %s
-  start over:        shuttle uninstall %s, then install / repeat / pin`,
+  start over:        shuttle uninstall %s, then install / repeat`,
 		fiberID, shuttleNonEmpty(b.Kind, "(unset)"), fiberID, fiberID, fiberID, fiberID)
 }
 
@@ -326,119 +327,6 @@ set-model / set-agent for the agent, uninstall to start over.`,
 	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 	_ = repeatCmd.MarkFlagRequired("schedule")
 	return repeatCmd
-}
-
-// ---- pin -------------------------------------------------------------------
-
-func (a *app) pinCmd() *cobra.Command {
-	var pinModel string
-	var pinProjectDir string
-	var pinHost string
-	var pinSurface string
-	pinCmd := &cobra.Command{
-		Use:   "pin <fiber>",
-		Short: "Install a fiber as a pinned, schedule-less perennial role",
-		Long: `Install the fiber as a pinned role: a schedule-less umbrella concern that
-rests PARKED on the board's pinned strip (status:open) until you start it.
-
-  shuttle pin <fiber> --project-dir "$PWD"                      # parked, default agent
-  shuttle pin <fiber> --project-dir "$PWD" --model claude-opus  # explicit agent
-
-Started (status:active, via Resume / strip → In-flight) a worker attaches as an
-interactive interface. From there it joins the unified lifecycle: a worker that
-hands off cleanly (` + "`shuttle handoff`" + `) is relaunched fresh — a long autonomous
-arc across clean sessions — while a dirty exit parks it back to the strip. When
-the arc is done it closes to Awaiting review, and accepting it re-parks it to the
-strip. Perennial: you park it, you don't delete it.
-
-pin creates; it never rewrites. A fiber that already has a shuttle: block is
-refused — use 'shuttle reshape <fiber> pinned' to convert an existing role
-in place, set-model / set-agent for the agent, uninstall to start over.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			reg, err := shuttle.LoadAgentRegistry(a.env)
-			if err != nil {
-				return fmt.Errorf("loading agent registry: %w", err)
-			}
-			f, st, err := a.shuttleResolveFiber(args[0], true)
-			if err != nil {
-				return err
-			}
-			f, unlock, err := lockAndReloadFiber(st, f)
-			if err != nil {
-				return err
-			}
-			defer unlock()
-
-			// A block already on the fiber is a refusal, not a rewrite.
-			existing, ok, err := shuttle.BlockOf(f)
-			if err != nil {
-				return err
-			}
-			if ok {
-				return a.refuseExistingBlock(args[0], f, existing)
-			}
-
-			host, err := a.resolveOwnHost(pinHost)
-			if err != nil {
-				return err
-			}
-			projectDir, err := a.resolveProjectDirFlag(pinProjectDir)
-			if err != nil {
-				return err
-			}
-
-			block := &shuttle.Block{Kind: "pinned", Host: host, ProjectDir: projectDir}
-			if pinModel != "" {
-				block.Agent = pinModel
-			}
-			if surface, serr := newBlockSurface(block, pinSurface, reg); serr != nil {
-				return serr
-			} else {
-				block.Surface = surface
-			}
-
-			if errs := shuttle.Validate(block, reg); len(errs) > 0 {
-				return a.printShuttleValidationErrors(errs)
-			}
-
-			// Pinned rest is status:open "parked on the strip", so a pin settles any
-			// prior status — including closed (revive as a parked role) — to open.
-			statusBefore := f.Status
-			statusChanged := false
-			if statusBefore != felt.StatusOpen {
-				f.Status, f.ClosedAt = felt.StatusOpen, nil
-				statusChanged = true
-			}
-
-			if err := shuttle.SetConfig(f, block); err != nil {
-				return fmt.Errorf("attaching shuttle block: %w", err)
-			}
-			if err := st.Write(f); err != nil {
-				return fmt.Errorf("writing fiber: %w", err)
-			}
-
-			fmt.Fprintf(a.env.Stdout, "pinned %s (parked on the strip; Resume to start it — it then relaunches on clean handoff, parks on dirty exit)\n", args[0])
-			fmt.Fprintf(a.env.Stdout, "  host: %s\n", block.Host)
-			if block.Agent != "" {
-				fmt.Fprintf(a.env.Stdout, "  agent: %s\n", block.Agent)
-			}
-			fmt.Fprintf(a.env.Stdout, "  project_dir: %s\n", block.ProjectDir)
-			if statusChanged {
-				if statusBefore == "" {
-					fmt.Fprintln(a.env.Stdout, "  status: open (set; was missing)")
-				} else {
-					fmt.Fprintf(a.env.Stdout, "  status: %s → open\n", statusBefore)
-				}
-			}
-			return nil
-		},
-	}
-	pinCmd.Flags().StringVarP(&pinModel, "model", "m", "", "Agent ID (default: registry default)")
-	pinCmd.Flags().StringVar(&pinProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
-	pinCmd.Flags().StringVar(&pinHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
-	pinCmd.Flags().StringVar(&pinSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
-	return pinCmd
 }
 
 // newBlockSurface applies the creation-only transport default. Absence remains

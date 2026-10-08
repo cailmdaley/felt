@@ -295,7 +295,8 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				t.Fatalf("close payload = %#v", body)
 			}
 		}},
-		{"accept", felt.StatusClosed, map[string]any{"kind": "pinned", "host": "worker", "agent": "claude-opus", "project_dir": project}, []string{"accept", "accept"}, "accept", nil},
+		{"accept", felt.StatusClosed, map[string]any{"kind": "standing", "host": "worker", "agent": "claude-opus", "project_dir": project, "schedule": map[string]any{"expr": "0 9 * * *", "tz": "UTC"}}, []string{"accept", "accept"}, "accept", nil},
+		{"rest", felt.StatusActive, remoteShuttleBlock(project), []string{"rest", "rest"}, "rest", nil},
 		{"outcome", felt.StatusActive, remoteShuttleBlock(project), []string{"set-outcome", "outcome", "--outcome", "new outcome"}, "set-outcome", func(t *testing.T, body map[string]any) {
 			if body["outcome"] != "new outcome" {
 				t.Fatalf("set-outcome payload = %#v", body)
@@ -467,7 +468,8 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 	env := remoteLifecycleEnv(t)
 	dir, storage := newStore(t)
 	block := remoteShuttleBlock(t.TempDir())
-	block["kind"] = "pinned"
+	block["kind"] = "standing"
+	block["schedule"] = map[string]any{"expr": "0 9 * * *", "tz": "UTC"}
 	seedShuttleRole(t, storage, "work/task", felt.StatusActive, block, nil)
 	before, _ := os.ReadFile(storage.Path("work/task"))
 
@@ -476,7 +478,7 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 	}))
 
 	for _, verb := range [][]string{
-		{"pause"}, {"resume"}, {"close"}, {"reopen"}, {"accept"}, {"set-outcome", "--outcome", "x"},
+		{"pause"}, {"rest"}, {"resume"}, {"close"}, {"reopen"}, {"accept"}, {"set-outcome", "--outcome", "x"},
 		{"set-model", "claude-opus"}, {"set-agent", "claude-opus"}, {"reshape", "oneshot"}, {"uninstall"},
 	} {
 		argv := append([]string{verb[0], "work/task"}, verb[1:]...)

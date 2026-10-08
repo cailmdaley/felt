@@ -730,40 +730,131 @@ func TestShuttleAccept_RejectsOneshot(t *testing.T) {
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
 
 	if _, err := runIn(t, env, dir, "accept", "f", "--local"); err == nil {
-		t.Fatal("accept on a oneshot must refuse (standing/pinned only)")
+		t.Fatal("accept on a oneshot must refuse (standing only)")
 	}
 }
 
-func TestShuttleAccept_PinnedReParks(t *testing.T) {
+// TestShuttleAccept_RejectsLegacyPinned: a stored `pinned` reads as a
+// oneshot, so its accept is refused like any oneshot's and points at temper
+// and rest.
+func TestShuttleAccept_RejectsLegacyPinned(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
-	// Awaiting review: pinned, closed, untempered — the arc finished and is
-	// pending the human verdict. Accept RE-PARKS it to the strip (status: open),
-	// the kind-aware other half of accept (standing re-arms active).
-	closedAt := mustParseTime(t, "2026-07-10T09:00:00Z")
-	f := &felt.Felt{ID: "f", Name: "f", Status: felt.StatusClosed, ClosedAt: &closedAt}
-	if err := f.SetExtraField("shuttle", map[string]any{
-		"kind": "pinned", "agent": "claude-opus",
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if err := storage.Write(f); err != nil {
-		t.Fatalf("write: %v", err)
-	}
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, map[string]any{"kind": "pinned", "agent": "claude-opus"}, nil)
 
-	if out, err := runIn(t, env, dir, "accept", "f", "--local"); err != nil {
-		t.Fatalf("accept pinned --local: %v\n%s", err, out)
+	_, err := runIn(t, env, dir, "accept", "f", "--local")
+	if err == nil || !strings.Contains(err.Error(), "shuttle rest") {
+		t.Fatalf("accept on a legacy pinned fiber must refuse and name rest; err=%v", err)
 	}
-	got := mustRead(t, storage, "f")
-	if got.Status != felt.StatusOpen {
-		t.Fatalf("status = %q, want open (re-parked to the strip)", got.Status)
+}
+
+// ---- rest ------------------------------------------------------------------
+
+// TestShuttleRest_FromEachState: rest puts a constitution in Resting — open,
+// stashed, no verdict, run concluded — from In flight, Drafts and Awaiting
+// review alike.
+func TestShuttleRest_FromEachState(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{felt.StatusActive, felt.StatusOpen, felt.StatusClosed} {
+		t.Run(status, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "f", status, oneshot(), nil)
+
+			if out, err := runIn(t, env, dir, "rest", "f", "--local"); err != nil {
+				t.Fatalf("rest: %v\n%s", err, out)
+			}
+			got := mustRead(t, storage, "f")
+			if got.Status != felt.StatusOpen {
+				t.Fatalf("status = %q, want open", got.Status)
+			}
+			if got.ClosedAt != nil || readTempered(got) != nil {
+				t.Fatalf("rest must clear closed-at and the verdict: closed-at=%v tempered=%v", got.ClosedAt, readTempered(got))
+			}
+			raw, _ := os.ReadFile(storage.Path(got.ID))
+			for _, want := range []string{"horizon: stashed", "handed_off_at:"} {
+				if !strings.Contains(string(raw), want) {
+					t.Fatalf("rest wrote no %q:\n%s", want, raw)
+				}
+			}
+		})
 	}
-	if readTempered(got) != nil {
-		t.Fatalf("accept should clear tempered, got %v", readTempered(got))
+}
+
+// TestShuttleRest_LegacyPinnedRests: the stored legacy kind is no obstacle;
+// rest is how a former pinned constitution is put down.
+func TestShuttleRest_LegacyPinnedRests(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "hub", felt.StatusActive, map[string]any{"kind": "pinned", "agent": "claude-opus"}, nil)
+	if out, err := runIn(t, env, dir, "rest", "hub", "--local"); err != nil {
+		t.Fatalf("rest: %v\n%s", err, out)
 	}
-	if got.ClosedAt != nil {
-		t.Fatalf("accept should clear closed-at, got %v", got.ClosedAt)
+	if got := mustRead(t, storage, "hub"); got.Status != felt.StatusOpen {
+		t.Fatalf("status = %q, want open", got.Status)
+	}
+}
+
+// TestShuttleRest_Refusals: a standing constitution is placed by its schedule
+// and a card with a verdict is past review; rest refuses both and leaves the
+// document alone.
+func TestShuttleRest_Refusals(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "standing", felt.StatusActive, standingRole(t.TempDir()), nil)
+	tempered := &felt.Felt{ID: "done", Name: "done", Status: felt.StatusClosed}
+	if err := tempered.SetExtraField("shuttle", oneshot()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tempered.SetExtraField("tempered", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Write(tempered); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"standing", "done"} {
+		before, _ := os.ReadFile(storage.Path(id))
+		if _, err := runIn(t, env, dir, "rest", id, "--local"); err == nil {
+			t.Fatalf("rest on %s must refuse", id)
+		}
+		after, _ := os.ReadFile(storage.Path(id))
+		if string(before) != string(after) {
+			t.Fatalf("refused rest modified %s", id)
+		}
+	}
+}
+
+// TestShuttleRest_ClearsArrivedDue: a due that has arrived would put the card
+// straight back on the desk, so rest clears it; a future due stays and wakes
+// the card on its day.
+func TestShuttleRest_ClearsArrivedDue(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	past := time.Now().AddDate(0, 0, -2)
+	future := time.Now().AddDate(0, 0, 9)
+	for id, due := range map[string]time.Time{"past": past, "future": future} {
+		d := due
+		f := &felt.Felt{ID: id, Name: id, Status: felt.StatusActive, Due: &d}
+		if err := f.SetExtraField("shuttle", oneshot()); err != nil {
+			t.Fatal(err)
+		}
+		if err := storage.Write(f); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := runIn(t, env, dir, "rest", id, "--local"); err != nil {
+			t.Fatalf("rest %s: %v\n%s", id, err, out)
+		}
+	}
+	if got := mustRead(t, storage, "past"); got.Due != nil {
+		t.Fatalf("an arrived due must be cleared, got %v", got.Due)
+	}
+	if got := mustRead(t, storage, "future"); got.Due == nil {
+		t.Fatal("a future due must be kept")
 	}
 }
 

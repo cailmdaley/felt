@@ -1,6 +1,7 @@
 package shuttle
 
 import (
+	"github.com/cailmdaley/felt/internal/felt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,37 +96,27 @@ func TestValidate_BadKind(t *testing.T) {
 	}
 }
 
-func TestValidate_ValidPinned(t *testing.T) {
+func TestValidate_LegacyPinnedReadsAsOneshot(t *testing.T) {
 	t.Parallel()
-	// A pinned role is schedule-less and valid without a schedule.
+	// A stored `pinned` is retired but still read, as a oneshot, so a fiber
+	// that carries it keeps parsing and validating.
+	if got := NormalizeKind("pinned"); got != "oneshot" {
+		t.Fatalf("NormalizeKind(pinned) = %q, want oneshot", got)
+	}
 	b := &Block{Kind: "pinned", ProjectDir: "/tmp/project", Host: "test-host"}
 	if errs := Validate(b, nil); len(errs) != 0 {
-		t.Fatalf("expected no errors for valid pinned block, got: %v", errs)
+		t.Fatalf("a legacy pinned block must validate, got: %v", errs)
 	}
-}
-
-func TestValidate_PinnedRejectsSchedule(t *testing.T) {
-	t.Parallel()
-	// A schedule on a pinned role is contradictory (pinned never auto-dispatches)
-	// and must be rejected loudly.
-	b := &Block{
-		Kind:       "pinned",
-		ProjectDir: "/tmp/project",
-		Host:       "test-host",
-		Schedule:   &Schedule{Expr: "0 9 * * 1-5", TZ: "UTC"},
+	f := &felt.Felt{ID: "hub", Name: "hub"}
+	if err := f.SetExtraField(FacetKey, map[string]any{"kind": "pinned", "host": "h"}); err != nil {
+		t.Fatal(err)
 	}
-	errs := Validate(b, nil)
-	if len(errs) == 0 {
-		t.Fatal("expected error: schedule not allowed for kind=pinned")
+	block, ok, err := BlockOf(f)
+	if err != nil || !ok || block.Kind != "oneshot" {
+		t.Fatalf("BlockOf = %+v, %v, %v; want kind oneshot", block, ok, err)
 	}
-	found := false
-	for _, e := range errs {
-		if e.Field == "schedule" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected a schedule field error, got: %v", errs)
+	if got := StoredKind(f); got != "pinned" {
+		t.Fatalf("StoredKind = %q, want the stored pinned", got)
 	}
 }
 
