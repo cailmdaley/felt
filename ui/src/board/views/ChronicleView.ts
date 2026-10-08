@@ -1026,6 +1026,8 @@ export function buildRows(
     // calling the one shared function is what keeps this list from drifting
     // out of step with the Desk's own Resting region.
     ...restingCards(response),
+    // Seats at rest have their own Desk band, but keep their calendar rows.
+    ...response.roles,
     // FOLDED cards. The Desk draws them under their head rather than in a
     // column of their own, and that is a Desk reading, not a claim that the
     // work is gone: a never-run draft filed behind something else still belongs

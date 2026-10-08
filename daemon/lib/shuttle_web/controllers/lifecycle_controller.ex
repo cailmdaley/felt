@@ -8,7 +8,7 @@ defmodule ShuttleWeb.LifecycleController do
   identical `/lifecycle` (origin stripped) and relayed verbatim. The local
   branch delegates to Shuttle CLI verbs, so the validated offline frontmatter
   writer remains the single implementation of
-  install/pause/rest/resume/repeat/accept/close/reopen/set-model/set-agent/set-outcome/uninstall.
+  install/pause/rest/resume/repeat/accept/close/reopen/set-model/set-agent/seat/set-outcome/uninstall.
 
   `install`/`repeat` are CREATE verbs — they refuse a fiber that already
   carries a shuttle block. Changing the SHAPE of an existing block (its kind,
@@ -25,7 +25,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
-  @allowed ~w(install pause rest resume repeat reshape accept close reopen set-model set-agent set-outcome uninstall)
+  @allowed ~w(install pause rest resume repeat reshape accept close reopen set-model set-agent seat set-outcome uninstall)
 
   @kinds ~w(oneshot standing)
 
@@ -72,6 +72,12 @@ defmodule ShuttleWeb.LifecycleController do
   # rest, too: written inside the Poller, so no tick that read the fiber
   # `active` launches a worker after it, and the Poller stops a live one.
   defp execute("rest", %{"fiber" => fiber}), do: lifecycle(:rest, fiber)
+
+  defp execute("seat", %{"fiber" => fiber} = params) do
+    with {:ok, ["seat", ^fiber | args]} <- args_for("seat", params) do
+      :seat |> LifecycleService.transition(fiber, args) |> clean_result()
+    end
+  end
 
   defp execute(action, %{"fiber" => fiber} = params)
        when action in ~w(install repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
@@ -189,6 +195,14 @@ defmodule ShuttleWeb.LifecycleController do
 
     {:ok, add_string_flag(args, "--project-dir", params["project_dir"])}
   end
+
+  # seat names the role a constitution is a seat of, or clears it. The role
+  # resolves on this host's CLI, against the roles/ charters in its store.
+  defp args_for("seat", %{"fiber" => fiber, "clear" => true}),
+    do: {:ok, ["seat", fiber, "--clear"]}
+
+  defp args_for("seat", %{"fiber" => fiber, "role" => role}) when is_binary(role) and role != "",
+    do: {:ok, ["seat", fiber, role]}
 
   # The outcome string round-trips as a single argv element, so multi-line
   # values (block scalars) survive without stdin piping. set-outcome refuses a

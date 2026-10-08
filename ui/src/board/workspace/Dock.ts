@@ -173,7 +173,8 @@ function placedByDue(card: Pick<KanbanCard, 'shuttleKind'>): boolean {
  *   claude-fable medium · weekdays 9:00 · ada-workstation:~/dev/felt   Sep 26 01:38 → 02:40 · 1h 2m ✓
  *
  * `actor` is the agent id (cobalt) on a shuttle card and `me` (cinnabar) on a
- * human one, the same word the board card prints. `cadence` is said only when
+ * human one, the same word the board card prints. `seat` names the role a
+ * seat belongs to (`seat of vizier`). `cadence` is said only when
  * it isn't the default: a standing constitution speaks its cron, a one-shot
  * says nothing. `place` is `host:dir` with the home directory
  * folded to `~`. `due` is dropped where the board never reads it
@@ -183,6 +184,7 @@ export interface StripFacts {
   actor: { text: string; agent: boolean }
   effort?: string
   chrome: boolean
+  seat?: { text: string; title: string }
   cadence?: { text: string; title?: string }
   place?: { text: string; title: string }
   due?: string
@@ -207,6 +209,9 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
     actor: { text: agent ? (card.shuttleAgent ?? 'agent') : 'me', agent },
     effort: agent ? card.shuttleEffort : undefined,
     chrome: agent && card.shuttleChrome === true,
+    seat: card.shuttleSeat
+      ? { text: `seat of ${card.shuttleSeat}`, title: `A seat of roles/${card.shuttleSeat}: a worker here sits in that office.` }
+      : undefined,
     cadence,
     place,
     due: card.due && placedByDue(card) ? formatDue(card.due) : undefined,
@@ -245,6 +250,7 @@ function buildStrip(card: KanbanCard): HTMLElement {
     who.append(el)
   }
   line.append(who)
+  if (facts.seat) put('kbn-ctl-cadence kbn-ctl-seat', facts.seat.text, facts.seat.title)
   if (facts.cadence) put('kbn-ctl-cadence', facts.cadence.text, facts.cadence.title)
   if (facts.place) put('kbn-ctl-place', facts.place.text, facts.place.title)
   if (facts.due) put('kbn-ctl-due', `due ${facts.due}`)

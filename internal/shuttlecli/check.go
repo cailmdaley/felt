@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -24,6 +25,7 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 				return err
 			}
 			issues := make([]felt.CheckIssue, 0)
+			var roles map[string]bool
 			for _, fiber := range fibers {
 				if !shuttle.HasFacet(fiber) {
 					continue
@@ -43,6 +45,19 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 						Path:    shuttle.FacetKey + ".kind",
 						Message: fmt.Sprintf("kind %q is retired and read as %q; scripts/migrate-pinned.py rewrites it", stored, shuttle.LegacyKinds[stored]),
 					})
+				}
+				if block, ok, err := shuttle.BlockOf(fiber); err == nil && ok && block.Seat != "" && shuttle.ValidSeat(block.Seat) {
+					if roles == nil {
+						roles = roleRoots(storage)
+					}
+					if !roles[block.Seat] {
+						issues = append(issues, felt.CheckIssue{
+							Level:   felt.CheckLevelWarning,
+							FiberID: fiber.ID,
+							Path:    shuttle.FacetKey + ".seat",
+							Message: fmt.Sprintf("seat %q names no role: there is no roles/%s fiber", block.Seat, block.Seat),
+						})
+					}
 				}
 			}
 			issues = append(issues, a.checkHostDrift(fibers)...)
@@ -70,4 +85,21 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 		},
 	}
 	return shuttleCheckCmd
+}
+
+// roleRoots is the set of role slugs with a charter at roles/<slug> in the
+// store that owns the roles. An unreadable store yields an empty set, so every
+// seat is reported rather than none.
+func roleRoots(st *felt.Storage) map[string]bool {
+	out := map[string]bool{}
+	profiles, err := listRoleProfiles(st)
+	if err != nil {
+		return out
+	}
+	for _, f := range profiles {
+		if isRoleRoot(f.ID) {
+			out[strings.TrimPrefix(f.ID, "roles/")] = true
+		}
+	}
+	return out
 }

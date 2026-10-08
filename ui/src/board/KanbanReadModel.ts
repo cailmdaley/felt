@@ -113,6 +113,7 @@ export function buildKanbanResponseFromComposite(
     now: surfaces.now,
     timeline: surfaces.timeline,
     stash: surfaces.stash,
+    roles: surfaces.roles,
     folded: surfaces.folded,
     cycles: surfaces.cycles,
     totals: surfaceTotals(surfaces),
@@ -230,6 +231,7 @@ type AssembledSurfaces = {
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
+  roles: KanbanCard[];
   folded: KanbanCard[];
   cycles: KanbanCard[];
 };
@@ -267,9 +269,10 @@ function assembleSurfaces(
   const tempered: KanbanCard[] = [];
   const composted: KanbanCard[] = [];
   const cycles: KanbanCard[] = [];
+  const roles: KanbanCard[] = [];
 
   const buckets: Record<KanbanColumn, KanbanCard[]> = {
-    drafts, scheduled, inFlight, awaitingReview, tempered, composted, cycles,
+    drafts, scheduled, inFlight, awaitingReview, tempered, composted, cycles, roles,
   };
   // THE FOLD. A card queued behind another is not a card of its own on this
   // board: it is drawn under its head, wherever the head is drawn, reachable
@@ -325,6 +328,9 @@ function assembleSurfaces(
   // Desk has no persisted human arrangement; drafts use creation order.
   // Neither activity nor a renamed path moves them.
   drafts.sort(byCreatedAtDesc);
+  // Seats read like a shelf of offices: alphabetical, so a launcher stays
+  // where the hand expects it whatever was used last.
+  roles.sort(byNameAsc);
   // A card moves only when it crosses the visible Aloft / Holding seam.
   // Activity age and phase changes within a band do not change its position.
   inFlight.sort(byInFlightBand);
@@ -361,9 +367,14 @@ function assembleSurfaces(
     now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
     timeline: { past, futureDated },
     stash,
+    roles,
     folded,
     cycles,
   };
+}
+
+function byNameAsc(a: KanbanCard, b: KanbanCard): number {
+  return a.name.localeCompare(b.name) || byCardIdentity(a, b);
 }
 
 /**
@@ -437,7 +448,7 @@ export interface CycleLens {
  * Membership is `cycleMembership` — derived, never assigned: `due:` inside the
  * span, or "in flight right now".
  *
- * GHOSTS come from Resting. A resting card is off the desk by choice, but if it
+ * GHOSTS come from Resting and Roles. A resting card is off the desk by choice, but if it
  * is due inside the cycle you are looking at, it is part of that chapter's
  * work and hiding it would make the lens lie about its own count.
  */
@@ -461,12 +472,11 @@ export function deriveCycleLens(
     }
   }
 
-  // Ghosts are drawn from the same set the Resting region draws, so the lens and
-  // the region can never disagree about who is at rest. A standing constitution joins a
+  // Both resting bands contribute ghosts. A standing constitution joins a
   // cycle only if it carries a `due:` of its own — a cron is a cadence, not a
   // commitment to a chapter.
   const ghosts: CycleLensGhost[] = [];
-  for (const card of restingCards(resp)) {
+  for (const card of [...restingCards(resp), ...resp.roles]) {
     // A resting card is never in flight — that is what resting means — so only
     // the `due:` rung can admit it.
     if (!cycleMembership({ due: card.due }, span, nowMs)) continue;
@@ -586,6 +596,7 @@ function toCard(
     shuttleSurface: f.shuttleSurface,
     shuttleHost: f.shuttleHost,
     shuttleKind: f.shuttleKind,
+    shuttleSeat: f.shuttleSeat,
     shuttleSchedule: f.shuttleSchedule?.expr,
     shuttleTz: f.shuttleSchedule?.tz,
     shuttleProjectDir: f.shuttleProjectDir,
@@ -671,6 +682,7 @@ export function surfaceTotals(s: {
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
+  roles: KanbanCard[];
 }): KanbanResponse['totals'] {
   return {
     drafts: s.now.drafts.length,
@@ -679,6 +691,7 @@ export function surfaceTotals(s: {
     past: s.timeline.past.length,
     futureDated: s.timeline.futureDated.length,
     stash: s.stash.length,
+    roles: s.roles.length,
   };
 }
 

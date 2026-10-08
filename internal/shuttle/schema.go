@@ -5,6 +5,7 @@ package shuttle
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -37,6 +38,11 @@ type Block struct {
 	Effort   string    `json:"effort,omitempty" yaml:"effort,omitempty"`
 	Chrome   bool      `json:"chrome,omitempty" yaml:"chrome,omitempty"`
 	Schedule *Schedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	// Seat names the role this constitution is a seat of: the slug of a charter
+	// under roles/. A worker here sits in that office, and the board draws the
+	// constitution at rest among the Roles rather than in Resting. It changes
+	// nothing about the lifecycle.
+	Seat string `json:"seat,omitempty" yaml:"seat,omitempty"`
 }
 
 // Schedule holds the recurrence definition for a standing constitution.
@@ -89,6 +95,12 @@ func NormalizeKind(kind string) string {
 	}
 	return kind
 }
+
+// seatPattern is the shape of a role slug: the leaf of roles/<slug>.
+var seatPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// ValidSeat reports whether seat has the shape of a role slug.
+func ValidSeat(seat string) bool { return seatPattern.MatchString(seat) }
 
 // ---- Validation ------------------------------------------------------------
 
@@ -145,6 +157,10 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		} else if b.Surface == "app" && base.CLI != "codex" {
 			add("surface", fmt.Sprintf("app is supported only by Codex agents, got %q", base.ID))
 		}
+	}
+
+	if b.Seat != "" && !ValidSeat(b.Seat) {
+		add("seat", fmt.Sprintf("must be a role slug (the leaf of roles/<slug>), got %q", b.Seat))
 	}
 
 	if b.Kind == "standing" {

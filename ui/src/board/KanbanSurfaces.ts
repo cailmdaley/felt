@@ -774,6 +774,89 @@ export class KanbanSurfaceRenderer {
     return section
   }
 
+  /**
+   * The Roles band: every seat at rest (`shuttle.seat`), as a dense wrap of
+   * launcher chips above Resting. A seat is an office you return to, so the
+   * chip carries only what finds and starts it: a dot, the constitution's name,
+   * and its agent, or its next firing for a standing seat. Every seat renders —
+   * no "+N more", because a launcher you reach for daily must never be on page
+   * two. Click opens the fiber; drag it to In flight to start it.
+   *
+   * Rendered only when there is a seat to show. The band is not a drop target:
+   * a card becomes a seat through `shuttle seat`, and a seat dragged into
+   * Resting rests and comes back here.
+   */
+  renderRolesSection(
+    roles: KanbanCard[],
+    staleness: Record<string, KanbanOriginStaleness>,
+  ): HTMLElement | null {
+    if (roles.length === 0) return null
+    const section = document.createElement('section')
+    section.className = 'kbn-section kbn-section-roles'
+    section.setAttribute('role', 'region')
+    section.setAttribute('aria-label', `Roles (${roles.length}) — seats at rest; drag one to In flight to start it`)
+
+    const head = renderBandHead('Roles', roles.length)
+    section.append(head)
+    this.installBandCollapse(section, head, 'roles')
+
+    const row = document.createElement('div')
+    row.className = 'kbn-roles-row'
+    row.setAttribute('role', 'list')
+    for (const card of roles) row.append(this.renderRoleChip(card, staleness[card.originId]))
+    section.append(row)
+    return section
+  }
+
+  private renderRoleChip(
+    card: KanbanCard,
+    originStaleness: KanbanOriginStaleness | undefined,
+  ): HTMLElement {
+    const isStale = originStaleness?.status === 'stale'
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = `kbn-role-chip${isStale ? ' kbn-card--stale' : ''}`
+    el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
+    el.setAttribute('role', 'listitem')
+    el.draggable = !isStale && !coarsePointer()
+    if (!isStale) this.installDraggable(el, card, true)
+    this.installLongPressMove(el, card)
+
+    const dot = document.createElement('span')
+    dot.className = `kbn-role-chip-dot kbn-role-chip-dot-${isStale ? 'stale' : card.held ? 'held' : 'rest'}`
+    dot.setAttribute('aria-hidden', 'true')
+
+    const name = document.createElement('span')
+    name.className = 'kbn-role-chip-name'
+    name.textContent = card.name
+
+    const hint = document.createElement('span')
+    hint.className = 'kbn-role-chip-hint'
+    let detail = ''
+    if (isSleepingOnSchedule(card)) {
+      const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
+      hint.textContent = returns ? `↻ ${returns}` : '↻'
+      const schedule = humanizeCron(card.shuttleSchedule) ?? card.shuttleSchedule
+      detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
+    } else {
+      hint.textContent = this.agentName(card) ?? ''
+    }
+    hint.hidden = hint.textContent === ''
+
+    el.append(dot, name, hint)
+    const seat = card.shuttleSeat ? `seat of roles/${card.shuttleSeat}` : ''
+    el.title = [card.name, seat, detail, card.outcome].filter(Boolean).join(' — ')
+    el.setAttribute('aria-label', `${card.name}${seat ? `, ${seat}` : ''}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
+
+    el.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a')) return
+      this.o.openDetail(card)
+    })
+    return el
+  }
+
   /** Warm-then-held-open rendering of one Resting half (the undated watch
    *  list or the dated returns), shared so the group split in
    *  `renderStashSection` doesn't have to duplicate the cold divider logic. */
@@ -2763,6 +2846,7 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
     resp.timeline.past,
     resp.timeline.futureDated,
     resp.stash,
+    resp.roles,
     resp.folded,
   ]) {
     for (const card of list) {
@@ -2798,7 +2882,8 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     if (hit) return hit
   }
   // ANYTHING DRAWN MUST BE FINDABLE. Every list below reaches the screen —
-  // `restingCards` joins `stash` and `timeline.futureDated`, the past lane draws
+  // `restingCards` joins `stash` and `timeline.futureDated`, the Roles band
+  // draws `roles`, the past lane draws
   // itself — and a card that renders but resolves to
   // null here is a card whose every drag silently no-ops. Add a list to what the
   // board draws, add it here.
@@ -2806,6 +2891,7 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     resp.timeline.past,
     resp.timeline.futureDated,
     resp.stash,
+    resp.roles,
     // FOLDED CARDS ARE NOT DRAWN, but they are on screen: every one of them is
     // a row in some head's peek list, and every row opens, drags and reorders
     // through this lookup. A folded card that did not resolve here would be a

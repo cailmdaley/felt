@@ -546,16 +546,22 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Run Shuttle's `accept` / `resume` writer (`Shuttle.LifecycleService.write/3`)
+  Run Shuttle's `accept` / `resume` / `rest` / `seat` writer (`Shuttle.LifecycleService.write/3`)
   inside the Poller, serialized with its state changes, then refresh the
   fiber's document-cache entry so the board reads the transition at once. A
   poll read in flight sees the old document or the new one, whose status and
   `handed_off_at` land in one atomic write.
   """
-  @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t()) ::
+  @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t(), [
+          String.t()
+        ]) ::
           Shuttle.Felt.result()
-  def lifecycle_transition(server \\ Shuttle.Env.server(__MODULE__), verb, fiber_id) do
-    GenServer.call(server, {:lifecycle_transition, verb, fiber_id}, dispatch_call_timeout_ms())
+  def lifecycle_transition(server \\ Shuttle.Env.server(__MODULE__), verb, fiber_id, args \\ []) do
+    GenServer.call(
+      server,
+      {:lifecycle_transition, verb, fiber_id, args},
+      dispatch_call_timeout_ms()
+    )
   end
 
   @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()
@@ -1125,13 +1131,14 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_call({:lifecycle_transition, verb, fiber_id}, _from, state) do
+  def handle_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
     {_runtime_key, slug} = resolve_identity(state, fiber_id)
 
     result =
       LifecycleService.write(verb, slug,
         runner: state.runner,
-        felt_store: owning_store(slug, state)
+        felt_store: owning_store(slug, state),
+        args: args
       )
 
     # A rest disarms first (the write above lands `status: open` before any

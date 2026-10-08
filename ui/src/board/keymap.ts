@@ -19,10 +19,10 @@ const VERDICT_UNDO = `${VERDICT_DELAY_MS / 1000} s`
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
 /** Desk regions follow reading order: the three Now columns left-to-right,
- * then Resting. In flight's Aloft and Holding bands form one column. Resting
- * forms one list in its drawn reading order.
+ * then Roles, then Resting. In flight's Aloft and Holding bands form one
+ * column. Roles and Resting each form one list in their drawn reading order.
  * Empty regions are skipped; movement stops at the ends, never wraps. */
-export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-stash'] as const
+export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-roles', '.kbn-section-stash'] as const
 
 /** The binding table is also the help overlay's source; surfaces consume intents,
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */

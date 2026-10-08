@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseCompositeFeed } from './KanbanComposite.js'
-import { buildKanbanResponseFromComposite } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens } from './KanbanReadModel.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import type { KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
@@ -58,6 +58,32 @@ function renderedIds(root: HTMLElement): string[] {
 afterEach(() => {
   document.body.replaceChildren()
   vi.restoreAllMocks()
+})
+
+describe('cycle members at rest', () => {
+  it('renders a due-dated seat like a resting member without moving it out of Roles', () => {
+    const now = Date.parse('2026-10-05T12:00:00Z')
+    const seat = card({ id: 'seats/vizier', shuttleSeat: 'vizier', due: '2026-10-07', effectiveHorizon: 'stashed' })
+    const resting = card({ id: 'work/resting', due: seat.due, effectiveHorizon: 'stashed' })
+    const data = response({
+      roles: [seat], stash: [resting],
+      cycles: [card({ id: 'cycle', isCycle: true, cycleStart: '2026-10-01', due: '2026-10-10' })],
+    })
+    const lens = deriveCycleLens(data, 'cycle', now)
+    const openDetail = vi.fn()
+    const surfaces = renderer(data, openDetail)
+    const root = surfaces.renderNowSection(data.now, {}, lens)
+    const drafts = root.querySelector('[data-column="drafts"]')!
+    const ghosts = [...drafts.querySelectorAll<HTMLElement>('.kbn-card--lens-ghost')]
+    expect(ghosts.map((el) => el.dataset.fiberId).sort()).toEqual([seat.id, resting.id].sort())
+    expect(drafts.querySelector('.kbn-col-count')?.textContent).toBe('2')
+    const seatGhost = ghosts.find((el) => el.dataset.fiberId === seat.id)!
+    expect(seatGhost.getAttribute('aria-label')).toContain('resting, shown for this cycle')
+    seatGhost.click()
+    expect(openDetail).toHaveBeenCalledWith(seat)
+    expect(renderedIds(surfaces.renderRolesSection(data.roles, {})!)).toContain(seat.id)
+    expect(data.roles).toEqual([seat])
+  })
 })
 
 describe('In flight bands', () => {

@@ -134,7 +134,9 @@ lives in the docs site (`docs/`, published to
   (`Poller.block_kind`) and the board, and `shuttle check` warns about it. A
   constitution at rest is `status: open` + `horizon: stashed`, drawn in
   Resting; `shuttle rest` puts it there without review. "Role" names only an
-  identity under `roles/`, never a kind of constitution.
+  identity under `roles/`, never a kind of constitution. A constitution with
+  `shuttle.seat: <role>` is a seat of that office (`shuttle seat`); at rest
+  the board draws it in the Roles band, and its lifecycle is unchanged.
 - **`shuttle.project_dir` is required for armed installs.** `shuttle install`
   and `shuttle repeat` require `--project-dir`; workers start there instead of
   falling back to the felt store.
