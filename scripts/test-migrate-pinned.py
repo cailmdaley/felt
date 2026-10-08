@@ -54,6 +54,21 @@ class Plans(unittest.TestCase):
         f = feed(row("a", "laptop", "laptop", "active"), row("b", "laptop", "laptop", ""))
         self.assertEqual(self.verbs(mp.plans(["a", "b"], f)), {"a": ["rest", "reshape"], "b": ["rest", "reshape"]})
 
+    def test_a_deferred_owner_is_skipped_and_the_rest_still_planned(self):
+        # cluster's cache is partial; deferring it lets laptop's fiber migrate
+        # while cluster's fiber gets no verbs at all.
+        f = feed(
+            row("ok", "laptop", "laptop", "open"),
+            row("far", "cluster", "cluster", "active"),
+            cache={"cluster": "partial"},
+        )
+        with self.assertRaises(mp.Incomplete):
+            mp.plans(["far", "ok"], f)
+        self.assertEqual(
+            self.verbs(mp.plans(["far", "ok"], f, frozenset({"cluster"}))),
+            {"far": [], "ok": ["rest", "reshape"]},
+        )
+
     def test_a_stale_owner_refuses_the_whole_plan(self):
         f = feed(
             row("ok", "laptop", "laptop", "open"),

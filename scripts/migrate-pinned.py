@@ -72,10 +72,14 @@ def _slug(fiber: dict) -> str:
     return fiber.get("slug") or fiber.get("id") or ""
 
 
-def plans(fibers: list[str], feed: dict) -> list[tuple[str, list[list[str]], str]]:
+def plans(
+    fibers: list[str], feed: dict, defer: frozenset[str] = frozenset()
+) -> list[tuple[str, list[list[str]], str]]:
     """(fiber, verbs, reason) for each fiber, decided from its owner's row.
 
-    Raises Incomplete, naming every unvouched owner, before planning anything.
+    A fiber owned by a host in `defer` is planned with no verbs, left for a
+    later run. Raises Incomplete, naming every unvouched owner, before
+    planning anything.
     """
     origins = feed.get("origins") or {}
     rows: dict[str, list[dict]] = {}
@@ -93,6 +97,8 @@ def plans(fibers: list[str], feed: dict) -> list[tuple[str, list[list[str]], str
         )
         if not host:
             gaps.append(f"{fiber}: no owning host on any row of the feed")
+            continue
+        if host in defer:
             continue
         origin = origins.get(host)
         if origin is None or origin.get("stale"):
@@ -114,6 +120,9 @@ def plans(fibers: list[str], feed: dict) -> list[tuple[str, list[list[str]], str
 
     out = []
     for fiber in fibers:
+        if fiber not in owners:
+            out.append((fiber, [], "owner deferred: left for a later run"))
+            continue
         owner = owners[fiber]
         reshape = ["reshape", fiber, "oneshot"]
         if owner.get("runtime"):
@@ -131,6 +140,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("store", help="felt store root (the directory holding .felt/)")
     parser.add_argument("--apply", action="store_true", help="write; without it, print the plan only")
+    parser.add_argument(
+        "--defer-host",
+        action="append",
+        default=[],
+        metavar="HOST",
+        help="leave fibers this host owns for a later run (repeatable); the rest still need a fresh owner",
+    )
     args = parser.parse_args()
 
     fibers = legacy_fibers(args.store)
@@ -138,7 +154,7 @@ def main() -> int:
         print("no kind: pinned fibers; nothing to do")
         return 0
     try:
-        planned = plans(fibers, composite_feed())
+        planned = plans(fibers, composite_feed(), frozenset(args.defer_host))
     except Incomplete as gaps:
         print("refusing to plan: the fleet feed cannot vouch for every owner\n" + str(gaps), file=sys.stderr)
         return 2
