@@ -448,7 +448,7 @@ export interface CycleLens {
  * Membership is `cycleMembership` — derived, never assigned: `due:` inside the
  * span, or "in flight right now".
  *
- * GHOSTS come from Resting. A resting card is off the desk by choice, but if it
+ * GHOSTS come from Resting and Roles. A resting card is off the desk by choice, but if it
  * is due inside the cycle you are looking at, it is part of that chapter's
  * work and hiding it would make the lens lie about its own count.
  */
@@ -472,12 +472,11 @@ export function deriveCycleLens(
     }
   }
 
-  // Ghosts are drawn from the same set the Resting region draws, so the lens and
-  // the region can never disagree about who is at rest. A standing constitution joins a
+  // Both resting bands contribute ghosts. A standing constitution joins a
   // cycle only if it carries a `due:` of its own — a cron is a cadence, not a
   // commitment to a chapter.
   const ghosts: CycleLensGhost[] = [];
-  for (const card of restingCards(resp)) {
+  for (const card of [...restingCards(resp), ...resp.roles]) {
     // A resting card is never in flight — that is what resting means — so only
     // the `due:` rung can admit it.
     if (!cycleMembership({ due: card.due }, span, nowMs)) continue;

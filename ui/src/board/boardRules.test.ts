@@ -1202,6 +1202,22 @@ describe('the cycle lens — membership is derived, never assigned', () => {
       expect(lens.count).toBe(1)
     })
 
+    it('claims due-dated resting seats as ghosts, not seats with only a cadence', () => {
+      const due = card({
+        id: 'seats/due', shuttleSeat: 'vizier', status: 'open',
+        effectiveHorizon: 'stashed', due: asFeltWrites(dayFromNow(5)),
+      })
+      const standing = card({
+        id: 'seats/standing', shuttleSeat: 'vizier', shuttleKind: 'standing',
+        status: 'active', nextLaunchAt: dayFromNow(2),
+      })
+      const far = card({ ...due, id: 'seats/far', due: asFeltWrites(dayFromNow(90)) })
+      const lens = deriveCycleLens(board({ roles: [due, standing, far] }), 'cycles/now', NOW)!
+      expect([...lens.memberIds]).toEqual([due.id])
+      expect(lens.ghosts.map((g) => [g.card.id, g.column])).toEqual([[due.id, 'drafts']])
+      expect(lens.count).toBe(1)
+    })
+
     it('leaves a resting card that is due outside the span alone', () => {
       const lens = deriveCycleLens(board({
         stash: [card({ id: 'work/far', effectiveHorizon: 'stashed', due: asFeltWrites(dayFromNow(90)) })],
