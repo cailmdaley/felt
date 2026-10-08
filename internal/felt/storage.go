@@ -1362,7 +1362,11 @@ func (s *Storage) ListMetadataWithModTimeHavingFrontmatterFields(fields []string
 // ListMetadataByIDs reads named fibers directly, without walking the store.
 // Results retain first appearance in ids; duplicate ids are read once.
 func (s *Storage) ListMetadataByIDs(ids, fields []string, includeModTime bool) ([]*Felt, error) {
-	files := make([]fiberFile, 0, len(ids))
+	return s.listMetadataByIDs(ids, fields, includeModTime, os.ReadDir)
+}
+
+func (s *Storage) listMetadataByIDs(ids, fields []string, includeModTime bool, readDir func(string) ([]os.DirEntry, error)) ([]*Felt, error) {
+	unique := make([]string, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, rawID := range ids {
 		id := strings.TrimSuffix(rawID, "\r")
@@ -1373,88 +1377,130 @@ func (s *Storage) ListMetadataByIDs(ids, fields []string, includeModTime bool) (
 			continue
 		}
 		seen[id] = struct{}{}
-		filePath, entryPoint, ok := s.exactFiberPath(id)
-		if !ok {
-			continue
+		unique = append(unique, id)
+	}
+
+	cache := &directoryEntriesCache{dirs: make(map[string]*directoryEntriesResult), readDir: readDir}
+	filesByID := make([]fiberFile, len(unique))
+	found := make([]bool, len(unique))
+	parallelFileWork(len(unique), func(i int) {
+		file, ok := s.resolveFiberFile(unique[i], cache)
+		filesByID[i], found[i] = file, ok
+	})
+	files := make([]fiberFile, 0, len(unique))
+	for i, file := range filesByID {
+		if found[i] {
+			files = append(files, file)
 		}
-		if _, err := filepath.EvalSymlinks(filePath); err != nil {
-			continue
-		}
-		reportDir, err := filepath.EvalSymlinks(filepath.Dir(filePath))
-		if err != nil {
-			continue
-		}
-		var reportPath string
-		if entries, err := os.ReadDir(reportDir); err == nil {
-			for _, entry := range entries {
-				if entry.Name() == "report.html" {
-					report := filepath.Join(reportDir, entry.Name())
-					if _, err := os.Lstat(report); err == nil {
-						reportPath = report
-					}
-					break
-				}
-			}
-		}
-		files = append(files, fiberFile{id: id, path: filePath, entryPoint: entryPoint, reportPath: reportPath})
 	}
 	return s.listFilesWithMode(ParseMetadataOnly, includeModTime, fields, files)
 }
 
-// exactFiberPath resolves a canonical fiber id by matching every path segment
-// against its parent's directory entries. It preserves the walk's file-shape
-// precedence without accepting case-folded paths on case-insensitive filesystems.
-func (s *Storage) exactFiberPath(id string) (string, bool, bool) {
+type directoryEntriesResult struct {
+	ready chan struct{}
+	names map[string]struct{}
+	err   error
+}
+
+type directoryEntriesCache struct {
+	mu      sync.Mutex
+	dirs    map[string]*directoryEntriesResult
+	readDir func(string) ([]os.DirEntry, error)
+}
+
+// hasEntry shares each parent listing across concurrent ID resolutions.
+func (c *directoryEntriesCache) hasEntry(dir, name string) bool {
+	key := filepath.Clean(dir)
+	c.mu.Lock()
+	result, ok := c.dirs[key]
+	if !ok {
+		result = &directoryEntriesResult{ready: make(chan struct{})}
+		c.dirs[key] = result
+	}
+	c.mu.Unlock()
+	if !ok {
+		entries, err := c.readDir(key)
+		result.err = err
+		if err == nil {
+			result.names = make(map[string]struct{}, len(entries))
+			for _, entry := range entries {
+				result.names[entry.Name()] = struct{}{}
+			}
+		}
+		close(result.ready)
+	} else {
+		<-result.ready
+	}
+	if result.err != nil {
+		return false
+	}
+	_, exists := result.names[name]
+	return exists
+}
+
+func (s *Storage) resolveFiberFile(id string, cache *directoryEntriesCache) (fiberFile, bool) {
 	slug := path.Base(id)
 	if !strings.Contains(id, "/") {
-		if file, ok := exactPathFrom(s.root, slug+FileExt); ok && regularFile(file) {
-			return file, true, true
+		if file, ok := existingExactFile(s.root, slug+FileExt, cache); ok {
+			return s.fiberFileWithReport(id, file, true, cache)
 		}
 	}
 	directoryForm := filepath.Join(filepath.FromSlash(id), slug+FileExt)
-	if file, ok := exactPathFrom(s.root, directoryForm); ok && regularFile(file) {
-		return file, false, true
+	if file, ok := existingExactFile(s.root, directoryForm, cache); ok {
+		return s.fiberFileWithReport(id, file, false, cache)
 	}
 	if strings.Contains(id, "/") {
-		parent := path.Dir(id)
-		mount, ok := exactPathFrom(s.root, filepath.FromSlash(parent))
-		if ok {
-			if info, err := os.Lstat(mount); err == nil && info.Mode()&os.ModeSymlink != 0 {
-				bare := filepath.Join(filepath.FromSlash(parent), slug+FileExt)
-				if file, ok := exactPathFrom(s.root, bare); ok && regularFile(file) {
-					return file, false, true
-				}
+		parent := filepath.FromSlash(path.Dir(id))
+		bare := filepath.Join(parent, slug+FileExt)
+		if file, ok := existingExactFile(s.root, bare, cache); ok {
+			mount := filepath.Join(s.root, parent)
+			if info, err := os.Lstat(mount); err == nil && info.Mode()&os.ModeSymlink != 0 && exactPathFrom(s.root, parent, cache) {
+				return s.fiberFileWithReport(id, file, false, cache)
 			}
 		}
 	}
-	return "", false, false
+	return fiberFile{}, false
 }
 
-func exactPathFrom(root, rel string) (string, bool) {
+func (s *Storage) fiberFileWithReport(id, filePath string, entryPoint bool, cache *directoryEntriesCache) (fiberFile, bool) {
+	if _, err := filepath.EvalSymlinks(filePath); err != nil {
+		return fiberFile{}, false
+	}
+	reportDir, err := filepath.EvalSymlinks(filepath.Dir(filePath))
+	if err != nil {
+		return fiberFile{}, false
+	}
+	reportPath := filepath.Join(reportDir, "report.html")
+	if _, err := os.Lstat(reportPath); err != nil || !cache.hasEntry(reportDir, "report.html") {
+		reportPath = ""
+	}
+	return fiberFile{id: id, path: filePath, entryPoint: entryPoint, reportPath: reportPath}, true
+}
+
+func existingExactFile(root, rel string, cache *directoryEntriesCache) (string, bool) {
+	candidate := filepath.Join(root, rel)
+	if info, err := os.Lstat(candidate); err != nil || info.IsDir() {
+		return "", false
+	}
+	if !exactPathFrom(root, rel, cache) {
+		return "", false
+	}
+	info, err := os.Stat(candidate)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	return candidate, true
+}
+
+func exactPathFrom(root, rel string, cache *directoryEntriesCache) bool {
 	current := root
 	for _, segment := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
-		entries, err := os.ReadDir(current)
-		if err != nil {
-			return "", false
+		if !cache.hasEntry(current, segment) {
+			return false
 		}
-		found := false
-		for _, entry := range entries {
-			if entry.Name() == segment {
-				current = filepath.Join(current, entry.Name())
-				found = true
-				break
-			}
-		}
-		if !found {
-			return "", false
-		}
+		current = filepath.Join(current, segment)
 	}
-	return current, true
-}
-
-func regularFile(file string) bool {
-	info, err := os.Stat(file)
-	return err == nil && !info.IsDir()
+	return true
 }
 
 func (s *Storage) listWithModeHavingFrontmatterFields(mode ParseMode, includeModTime bool, fields []string) ([]*Felt, error) {

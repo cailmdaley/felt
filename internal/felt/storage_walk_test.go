@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"path"
@@ -67,6 +68,43 @@ func TestWalkStoreMatchesSerialReference(t *testing.T) {
 
 // TestWalkStoreMatchesSerialReferenceRandomized varies tree shape with a
 // fixed seed. Each sample includes enough sibling directories to overlap reads.
+func TestListMetadataByIDsReadsSharedDirectoriesOnce(t *testing.T) {
+	t.Parallel()
+	_, store := newStore(t)
+	const count = 64
+	ids := make([]string, count)
+	for i := range count {
+		ids[i] = fmt.Sprintf("shared/deep/fiber-%02d", i)
+		writeRawFiber(t, store.root, ids[i])
+	}
+
+	var mu sync.Mutex
+	reads := make(map[string]int)
+	readDir := func(dir string) ([]os.DirEntry, error) {
+		mu.Lock()
+		reads[dir]++
+		mu.Unlock()
+		return os.ReadDir(dir)
+	}
+	felts, err := store.listMetadataByIDs(ids, nil, false, readDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(felts) != count {
+		t.Fatalf("got %d fibers, want %d", len(felts), count)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reads) != count+3 {
+		t.Fatalf("read %d distinct directories, want shared root/ancestors and one leaf directory per id (%d): %#v", len(reads), count+3, reads)
+	}
+	for dir, n := range reads {
+		if n != 1 {
+			t.Errorf("ReadDir(%s) called %d times, want exactly once", dir, n)
+		}
+	}
+}
+
 func TestWalkStoreMatchesSerialReferenceRandomized(t *testing.T) {
 	t.Parallel()
 	for seed := int64(0); seed < 50; seed++ {
