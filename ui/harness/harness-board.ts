@@ -398,8 +398,8 @@ const STANDING: MockFiber[] = [
  */
 const ROLE_SEATS: MockFiber[] = [
   { id: 'science/cmbx', name: 'cmbx chair', seat: 'cmbx-chair' },
-  { id: 'science/unions/candide', name: 'Candide UNIONS chair', seat: 'chief-of-staff' },
-  { id: 'science/unions/nibi', name: 'Nibi UNIONS chair', seat: 'chief-of-staff' },
+  { id: 'science/survey/north', name: 'Survey chair · north', seat: 'chief-of-staff' },
+  { id: 'science/survey/south', name: 'Survey chair · south', seat: 'chief-of-staff' },
   { id: 'life/vizier', name: 'Vizier', seat: 'vizier' },
   { id: 'life/music', name: 'Music — the composer\'s desk', seat: 'composer' },
 ].map(({ id, name, seat }) => ({
