@@ -10,7 +10,9 @@
  * session), `live` (a capture not yet claimed, on its own card) or `failed`;
  * leave it unset to exercise the idle board. Add `?capture=meeting` to open
  * Capture with the daemon reporting meeting support.
- * `?example=workshop` selects the fictional, single-machine documentation example.
+ * `?example=workspace` selects the fictional documentation example; add
+ * `?transcript=live` to watch a synthetic worker append records or
+ * `?transcript=large` to exercise lazy reading of thousands of turns.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -35,6 +37,7 @@ import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
 import { installWorkspaceNativeURLs, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
+import { WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION, workspaceTranscriptBytes, type TranscriptScenario } from './transcript-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
@@ -55,9 +58,11 @@ import type {
 //   • status:closed + no `tempered`          → Awaiting review
 const FOREIGN_HOST = 'basalt-login-02'
 const now = Date.now()
-const example = new URLSearchParams(window.location.search).get('example')
+const search = new URLSearchParams(window.location.search)
+const example = search.get('example')
+const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'workspace' ? workspaceExample(now) : null
+const workspaceFixture = example === 'workspace' ? workspaceExample(now, transcriptScenario) : null
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
@@ -1008,10 +1013,11 @@ function mockSessionLinks(url: string) {
   const host = params.get('host') || LOCAL_HOST
   const ids = (params.get('sessions') ?? '').split(',').filter(Boolean)
   const unbridged = 'b69296a4-1023-4231-b372-270d7b3c4a9b'
+  const sessionRecords = workspaceFixture?.sessions ?? docsExample?.sessions ?? APP_SESSIONS
   return {
     host,
     links: ids.map((session) => {
-      const record = APP_SESSIONS.find((r) => r.session === session)
+      const record = sessionRecords.find((r) => r.session === session)
       const harness = record?.harness ?? null
       return {
         session,
@@ -1235,6 +1241,7 @@ const realFetch = (window as unknown as { __harnessNativeFetch?: typeof fetch })
 const mockRequests: Array<Record<string, unknown>> = []
 const mockHandlers: Array<Record<string, unknown>> = []
 const harnessEvents: Array<Record<string, unknown>> = []
+let liveTranscriptReads = 0
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const method = (init?.method ?? 'GET').toUpperCase()
@@ -1455,6 +1462,37 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     await new Promise((resolve) => setTimeout(resolve, 300))
     return json({ attached: true })
   }
+  if (url.includes('/api/v1/transcript/raw')) {
+    const query = new URL(url, 'http://harness').searchParams
+    const session = query.get('session') ?? ''
+    if (!workspaceFixture) return json({ session, availability: 'transcript_missing' }, 404)
+    const isLatest = session === WORKSPACE_LATEST_SESSION
+    const isEarlier = session === WORKSPACE_EARLIER_SESSION
+    if (!isLatest && !isEarlier) return json({ session, availability: 'transcript_missing' }, 404)
+    const host = query.get('host')
+    if (host && host !== workspaceFixture.host) return json({ session, availability: 'host_unreachable', host }, 503)
+    const offsetText = query.get('offset')
+    if (offsetText !== null && !/^\d+$/.test(offsetText)) {
+      return json({ error: 'offset must be a non-negative integer' }, 400)
+    }
+    const offset = offsetText === null ? 0 : Number(offsetText)
+    if (!Number.isSafeInteger(offset)) return json({ error: 'offset must be a non-negative integer' }, 400)
+    const mode: TranscriptScenario = isLatest && transcriptScenario === 'live'
+      ? 'live'
+      : isLatest && transcriptScenario === 'large' ? 'large' : 'normal'
+    const updates = mode === 'live' ? liveTranscriptReads++ : 0
+    const bytes = workspaceTranscriptBytes(mode, now, { earlier: isEarlier, updates })
+    if (offset > bytes.byteLength) return json({ session, availability: 'available_local', byte_count: bytes.byteLength }, 416)
+    const headers = new Headers({
+      'Content-Type': 'application/x-ndjson',
+      'x-transcript-byte-count': String(bytes.byteLength),
+    })
+    if (offsetText !== null) headers.set('x-transcript-offset', String(offset))
+    const responseBody = new ArrayBuffer(bytes.byteLength - offset)
+    new Uint8Array(responseBody).set(bytes.subarray(offset))
+    return new Response(responseBody, { headers })
+  }
+
   if (url.includes('/api/v1/sessions/composite')) {
     if (workspaceFixture) {
       const uid = new URL(url, 'http://harness').searchParams.get('uid')

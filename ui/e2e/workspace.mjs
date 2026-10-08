@@ -29,6 +29,41 @@ async function open(p, expected = 'calibration-report') {
   await tab(p, 'calibration-report').waitFor({ state: 'attached' })
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(expected))
 }
+
+test('The Dock follows a live transcript by byte offset', async p => {
+  await p.goto(`${url}&transcript=live`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Constitution')
+  const band = p.locator('.ws-transcript')
+  await band.waitFor()
+  await p.locator('.ws-transcript-live-label').waitFor({ state: 'visible' })
+  await p.getByText(/The literal tag stays text/).waitFor()
+  const first = await p.evaluate(() => window.__harness.requests.find(request => request.url.includes('/api/v1/transcript/raw')))
+  const firstUrl = new URL(first.url, 'file:///')
+  assert.equal(firstUrl.searchParams.get('session'), 'c1a5e0d2-5b8f-4c1e-9a7e-2f3d4b5c6a71')
+  assert.equal(firstUrl.searchParams.get('offset'), '0')
+  assert.equal(firstUrl.searchParams.get('host'), 'umber-workstation')
+
+  await p.clock.fastForward(3100)
+  const transcriptRequests = await p.evaluate(() => window.__harness.requests.filter(request => request.url.includes('/api/v1/transcript/raw')))
+  assert.ok(transcriptRequests.length >= 2, `live poll requests: ${JSON.stringify(transcriptRequests)}`)
+  await p.getByText('Live worker update 1: the next fictional validation batch is in progress.').waitFor()
+  assert.ok(Number(new URL(transcriptRequests.at(-1).url, 'file:///').searchParams.get('offset')) > 0, 'the second read requests only the appended bytes')
+})
+
+test('The large transcript initially renders only its last turn', async p => {
+  await p.goto(`${url}&transcript=large`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Constitution')
+  const band = p.locator('.ws-transcript')
+  await band.waitFor()
+  await p.getByText('Fixture bin 3000 is within the review tolerance; retain the measured value and continue.').waitFor()
+  assert.equal(await band.locator('.ws-transcript-turn').count(), 1)
+  const earlier = band.locator('.ws-transcript-earlier')
+  assert.match(await earlier.innerText(), /earlier turns/i)
+  await earlier.click()
+  assert.equal(await band.locator('.ws-transcript-turn').count(), 13)
+})
 async function choose(p, label) {
   if (await p.locator('.ws-page-choice').isVisible()) {
     await p.locator('.ws-page-choice').click()

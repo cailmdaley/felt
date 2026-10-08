@@ -222,6 +222,7 @@ export class TranscriptBand {
   private measureFrame: number | null = null
   private pendingEntries: Entry[] = []
   private hasInitialRender = false
+  private initialReadyPending = false
   private hasReadCurrent = false
   private visibleStart = -1
   private intersecting = true
@@ -508,7 +509,10 @@ export class TranscriptBand {
     this.clearLoadingTimer()
     this.paintHead()
     if (status === 'ready') {
-      if (!this.hasInitialRender) this.renderInitialTurns()
+      if (!this.hasInitialRender) {
+        this.initialReadyPending = true
+        this.renderInitialTurnsWhenDrained()
+      }
       const empty = this.model.turns.length === 0
       this.setNote(empty && this.target?.live ? 'empty-live' : null)
       return
@@ -550,7 +554,10 @@ export class TranscriptBand {
       this.pendingEntries = []
       const changes = this.model.takeChanges()
       if (changes.reset) this.clearView()
-      if (!this.hasInitialRender) return
+      if (!this.hasInitialRender) {
+        this.renderInitialTurnsWhenDrained()
+        return
+      }
       const after = this.model.turns.length
       if (before === 0 && after > 0) this.visibleStart = after - 1
       for (const index of changes.turns) {
@@ -579,8 +586,16 @@ export class TranscriptBand {
     this.setNote(null)
   }
 
+  private renderInitialTurnsWhenDrained(): void {
+    if (!this.initialReadyPending || this.hasInitialRender || this.pendingEntries.length || this.renderFrame !== null) return
+    this.initialReadyPending = false
+    this.renderInitialTurns()
+    this.setNote(this.model.turns.length === 0 && this.target?.live ? 'empty-live' : null)
+  }
+
   private renderInitialTurns(): void {
     if (this.hasInitialRender) return
+    this.initialReadyPending = false
     this.hasInitialRender = true
     const turns = this.model.turns
     this.visibleStart = turns.length ? turns.length - 1 : -1
@@ -594,6 +609,7 @@ export class TranscriptBand {
 
   private cancelPendingRender(): void {
     this.pendingEntries = []
+    this.initialReadyPending = false
     if (this.renderFrame !== null) cancelAnimationFrame(this.renderFrame)
     this.renderFrame = null
   }
