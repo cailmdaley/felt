@@ -259,7 +259,7 @@ export function settingsHotkey(e: HotkeyLike): SettingsHotkey | null {
 /**
  * Flatten a board response into one card list — the `cards` a ViewContext
  * carries. Surface order is the page's own top-to-bottom reading order
- * (timeline, then the Now lanes, then stash); a card that
+ * (timeline, then the Now lanes, Roles, then stash); a card that
  * projects onto two surfaces appears once, at its first.
  */
 export function collectCards(response: KanbanResponse): KanbanCard[] {
@@ -277,6 +277,7 @@ export function collectCards(response: KanbanResponse): KanbanCard[] {
   take(response.now.drafts)
   take(response.now.inFlight)
   take(response.now.awaitingReview)
+  take(response.roles)
   take(response.stash)
   // FOLDED CARDS BELONG ON A CALENDAR even though the Desk draws them under
   // their head. The fold is about how the Desk reads — one queue instead of six
