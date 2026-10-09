@@ -246,14 +246,14 @@ describe('state-shaped act zone', () => {
     band = dock.bandFor(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
   })
-  it("keeps review and live verdicts on the status line, the transcript above the composer, and draft verdicts in its menu", () => {
+  it("keeps review and live verdicts on the status line, the transcript below the controls, and draft verdicts in its menu", () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
     const children = [...band.el.querySelector('.ws-dock-body')!.children]
-    expect(children[0].classList.contains('ws-transcript')).toBe(true)
-    expect(children[1].classList.contains('kbn-ctl-compose')).toBe(true)
+    expect(children[0].classList.contains('kbn-ctl-compose')).toBe(true)
+    expect(children.at(-1)?.classList.contains('ws-transcript')).toBe(true)
     expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
     expect(band.head.dataset.column).toBe('awaitingReview')
     expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
