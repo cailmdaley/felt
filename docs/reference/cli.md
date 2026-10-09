@@ -33,7 +33,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 | Command | Purpose |
 |---|---|
 | `felt ls [query]` | List and search fibers; `--any field:<name>` / `--any tag:<tag>` (repeatable) admits fibers matching at least one any-filter, ANDed with every other filter; a query, tag, field, any-filter, or id-file filter searches every status but closed. `--ids-from <file>` reads canonical ids without a walk and preserves input order. `--json-field` projects JSON output; `-v` expands matches folded under a matching ancestor |
-| `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `nest`, `rm`, `tree`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `--has-field`, `--any`, `-v`, `--limit`, `-j`) |
+| `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `nest`, `rm`, `tree`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `--has-field`, `-v`, `--limit`, `-j`) |
 | `felt session` | Print the SessionStart context as plain text |
 | `felt tree [id]` | Show the containment tree, every status included (`-L`/`--depth` caps depth; elided branches show how much is below) |
 

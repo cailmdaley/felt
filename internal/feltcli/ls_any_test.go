@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -32,16 +31,16 @@ func TestLsAnyMatchesUnionOfFieldAndTagWalks(t *testing.T) {
 		{ID: "shuttle-only", Name: "Shuttle", Status: felt.StatusActive, CreatedAt: mustParseTime(t, "2026-01-01T00:00:00Z"), ExtraFields: fields("shuttle")},
 		{ID: "due-only", Name: "Due", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-01-02T00:00:00Z"), ExtraFields: fields("due")},
 		{ID: "cycle-only", Name: "Cycle", Status: felt.StatusClosed, Tags: []string{"cycle"}, CreatedAt: mustParseTime(t, "2026-01-03T00:00:00Z")},
-		{ID: "overlap", Name: "Overlap", Status: felt.StatusActive, Tags: []string{"cycle"}, CreatedAt: mustParseTime(t, "2026-01-04T00:00:00Z"), ExtraFields: fields("shuttle", "due")},
+		{ID: "overlap", Name: "Overlap", Status: felt.StatusActive, Tags: []string{"cycle"}, CreatedAt: mustParseTime(t, "2026-01-01T00:00:00Z"), ExtraFields: fields("shuttle", "due")},
 		{ID: "none", Name: "None", Status: felt.StatusActive, CreatedAt: mustParseTime(t, "2026-01-05T00:00:00Z")},
 	} {
 		if err := store.Write(fiber); err != nil {
 			t.Fatal(err)
 		}
 	}
-	projection := "id,name,status,tags,due,shuttle"
+	projection := "id,created_at,name,status,tags,due,shuttle"
 	oldRows := map[string][]byte{}
-	var oldOrder []string
+	var oldTimestampOrder []string
 	for _, filter := range [][]string{{"--has-field", "shuttle"}, {"--has-field", "due"}, {"-t", "cycle"}} {
 		args := append([]string{"ls", "--json"}, filter...)
 		args = append(args, "--json-field", projection)
@@ -54,18 +53,21 @@ func TestLsAnyMatchesUnionOfFieldAndTagWalks(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, row := range rows {
-			var id string
+			var id, createdAt string
 			_ = json.Unmarshal(row["id"], &id)
+			_ = json.Unmarshal(row["created_at"], &createdAt)
 			encoded, _ := json.Marshal(row)
-			if _, seen := oldRows[id]; !seen {
-				oldOrder = append(oldOrder, id)
+			if _, seen := oldRows[id]; !seen &&
+				(len(oldTimestampOrder) == 0 || oldTimestampOrder[len(oldTimestampOrder)-1] != createdAt) {
+				oldTimestampOrder = append(oldTimestampOrder, createdAt)
 			}
 			oldRows[id] = encoded
 		}
 	}
 	want := oldRows
-	// Compare by id because the old union's order is defined by its first-seen walk order.
-	rowsFor := func(args ...string) map[string][]byte {
+	// Compare row sets and distinct-timestamp order. sort.Slice did not define
+	// tie order for equal or missing CreatedAt values, so that is not legacy API.
+	rowsFor := func(args ...string) (map[string][]byte, []string, []string) {
 		out, err := runCommand(t, dir, append([]string{"ls", "--json"}, args...)...)
 		if err != nil {
 			t.Fatalf("ls %v: %v\n%s", args, err, out)
@@ -75,32 +77,41 @@ func TestLsAnyMatchesUnionOfFieldAndTagWalks(t *testing.T) {
 			t.Fatal(err)
 		}
 		byID := make(map[string][]byte, len(rows))
-		var order []string
+		var ids, timestamps []string
 		for _, row := range rows {
-			var id string
+			var id, createdAt string
 			_ = json.Unmarshal(row["id"], &id)
-			var decoded any
+			_ = json.Unmarshal(row["created_at"], &createdAt)
 			encodedRow, _ := json.Marshal(row)
-			_ = json.Unmarshal(encodedRow, &decoded)
-			byID[id], _ = json.Marshal(decoded)
-			order = append(order, id)
+			byID[id] = encodedRow
+			ids = append(ids, id)
+			if len(timestamps) == 0 || timestamps[len(timestamps)-1] != createdAt {
+				timestamps = append(timestamps, createdAt)
+			}
 		}
-		if len(args) > 0 && args[0] == "--any" && !slices.Contains(args, "--ids-from") && !reflect.DeepEqual(order, oldOrder) {
-			t.Fatalf("--any order = %v, want legacy union order %v", order, oldOrder)
-		}
-		return byID
+		return byID, ids, timestamps
 	}
 	anyArgs := []string{"--any", "field:shuttle", "--any", "field:due", "--any", "tag:cycle", "--json-field", projection}
-	if got := rowsFor(anyArgs...); !reflect.DeepEqual(got, want) {
+	got, firstIDs, gotTimestampOrder := rowsFor(anyArgs...)
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("--any rows differ from legacy union: got=%v want=%v", got, want)
+	}
+	if !reflect.DeepEqual(gotTimestampOrder, oldTimestampOrder) {
+		t.Fatalf("--any distinct-timestamp order = %v, want %v", gotTimestampOrder, oldTimestampOrder)
+	}
+	for run := 0; run < 5; run++ {
+		_, ids, _ := rowsFor(anyArgs...)
+		if !reflect.DeepEqual(ids, firstIDs) {
+			t.Fatalf("--any order changed across runs: first=%v run %d=%v", firstIDs, run, ids)
+		}
 	}
 	idsPath := filepath.Join(t.TempDir(), "ids")
 	if err := os.WriteFile(idsPath, []byte("shuttle-only\ndue-only\ncycle-only\noverlap\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	anyIDs := append(append([]string{}, anyArgs...), "--ids-from", idsPath)
-	full := rowsFor(anyArgs...)
-	hot := rowsFor(anyIDs...)
+	full, _, _ := rowsFor(anyArgs...)
+	hot, _, _ := rowsFor(anyIDs...)
 	if !reflect.DeepEqual(hot, full) {
 		t.Fatalf("--any with --ids-from differs: got=%v want=%v", hot, full)
 	}
