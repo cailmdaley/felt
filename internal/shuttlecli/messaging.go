@@ -232,7 +232,13 @@ exit 1 means rejected, unknown, or another command error.`,
 		} else {
 			fmt.Printf("%s %s (%s)\n", receipt.Status, receipt.Address, receipt.MessageID)
 		}
-		return messageReceiptError(id, receipt, err)
+		if deliveryErr := messageReceiptError(id, receipt, err); deliveryErr != nil {
+			return deliveryErr
+		}
+		if !messageRequestJSON && len(args) > 0 {
+			return clearMessagedFiberAsk(args[0])
+		}
+		return nil
 	},
 }
 

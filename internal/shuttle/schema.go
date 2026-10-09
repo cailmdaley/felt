@@ -37,6 +37,13 @@ type Block struct {
 	Effort   string    `json:"effort,omitempty" yaml:"effort,omitempty"`
 	Chrome   bool      `json:"chrome,omitempty" yaml:"chrome,omitempty"`
 	Schedule *Schedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Ask      *Ask      `json:"ask,omitempty" yaml:"ask,omitempty"`
+}
+
+// Ask is a worker's outstanding question to the human.
+type Ask struct {
+	Text string `json:"text" yaml:"text"`
+	At   string `json:"at" yaml:"at"`
 }
 
 // Schedule holds the recurrence definition for a standing role.
@@ -113,6 +120,15 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 	var errs ValidationErrors
 	add := func(field, msg string) {
 		errs = append(errs, ValidationError{Field: field, Message: msg})
+	}
+
+	if b.Ask != nil {
+		if strings.TrimSpace(b.Ask.Text) == "" || strings.ContainsAny(b.Ask.Text, "\r\n") {
+			add("ask.text", "must be a non-empty single line")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, b.Ask.At); err != nil {
+			add("ask.at", "must be an RFC3339 timestamp")
+		}
 	}
 
 	if !slices.Contains(ValidKinds, b.Kind) {

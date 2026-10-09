@@ -525,6 +525,25 @@ defmodule Shuttle.PollerTest do
     assert {:ok, refreshed} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid} = refreshed_fiber}] = refreshed.fibers
     assert get_in(refreshed_fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-opus"
+
+    MockRunner.set_shuttle(id, """
+    kind: oneshot
+    agent: claude-opus
+    ask:
+      text: Which cut?
+      at: "2026-06-01T12:00:00Z"
+    """)
+
+    assert :ok = Poller.refresh_document(poller, id)
+    assert {:ok, asked} = Poller.cached_fiber_documents(poller)
+    assert [%{fiber: asked_fiber}] = asked.fibers
+    assert get_in(asked_fiber, ["shuttle", "ask", "text"]) == "Which cut?"
+
+    assert {:ok, _} = Poller.lifecycle_transition(poller, :clear_ask, id)
+    assert {:ok, cleared} = Poller.cached_fiber_documents(poller)
+    assert [%{fiber: cleared_fiber}] = cleared.fibers
+    refute get_in(cleared_fiber, ["shuttle", "ask"])
+    assert get_in(cleared_fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-opus"
   end
 
   # The incident this guards: on an overloaded login node one failed `shuttle ls`
@@ -3895,8 +3914,34 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
+    assert wait_until(fn ->
+             get_in(Poller.snapshot(poller), [:document_cache, "entries"]) == 1
+           end)
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      """
+      kind: oneshot
+      agent: claude-sonnet
+      ask:
+        text: Which cut?
+        at: "2026-06-01T12:00:00Z"
+      """,
+      "open"
+    )
+
+    Poller.refresh_document(poller, fiber_id)
+
     assert {:error, {:not_eligible, :disabled}} = Poller.dispatch_fiber(poller, fiber_id, [])
+    assert MockRunner.fiber(fiber_id)["shuttle"]["ask"] != nil
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true)
+    refute Map.has_key?(MockRunner.fiber(fiber_id)["shuttle"], "ask")
+
+    assert {"shuttle", ["-C", MockRunner.felt_root(), "ask", fiber_id, "--clear"]} in MockRunner.commands()
+
+    assert {:ok, documents} = Poller.cached_fiber_documents(poller)
+    assert [%{fiber: refreshed}] = documents.fibers
+    refute get_in(refreshed, ["shuttle", "ask"])
   end
 
   test "force-dispatch still refuses fibers pinned to a different host" do

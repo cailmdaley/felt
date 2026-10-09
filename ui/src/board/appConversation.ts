@@ -46,7 +46,7 @@ export function appConversationTarget(
 
 export function workerStatusLabel(phase?: string, launchError?: string): string {
   if (launchError || phase === 'blocked') return 'Blocked'
-  if (phase === 'attention') return 'Needs you'
+  if (phase === 'attention') return 'Stalled'
   if (phase === 'waiting') return 'Waiting'
   return 'Aloft'
 }

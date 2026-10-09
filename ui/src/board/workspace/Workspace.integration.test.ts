@@ -204,11 +204,11 @@ describe('workspace reader integration', () => {
     const returned = vi.fn()
     workspace = new Workspace(document.body, {
       shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility,
-      deskColumn: () => [{ card: cards[0], band: 'Needs you' }, { card: cards[1], band: 'Working' }],
+      deskColumn: () => [{ card: cards[0], band: 'Stalled' }, { card: cards[1], band: 'Working' }],
       onReturnCard: returned, dock: new Dock('', changed),
     })
     workspace.open(cards[0]); await flush()
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Needs you', 'Working'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Stalled', 'Working'])
     expect(document.querySelectorAll('.ws-sidebar .kbn-card')).toHaveLength(2)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
     expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')

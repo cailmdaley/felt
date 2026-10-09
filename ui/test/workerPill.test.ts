@@ -127,7 +127,7 @@ describe('the terminal worker pill under a finger', () => {
   for (const [deviceName, device] of [['phone', PHONE_PORTRAIT], ['iPad', IPAD_PORTRAIT]] as const) describe(deviceName, () => {
     beforeEach(() => useDevice(device))
     for (const [surface, options] of SURFACES) {
-      it.each([['working', 'Aloft'], ['waiting', 'Waiting'], ['attention', 'Needs you']])(
+      it.each([['working', 'Aloft'], ['waiting', 'Waiting'], ['attention', 'Stalled']])(
         `${deviceName}, ${surface}: a bridged %s worker is a tappable link to its session`,
         (phase, label) => {
           const pill = terminalWorkerPill(worker(phase, LINK), options) as unknown as FakeElement

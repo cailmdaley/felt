@@ -147,6 +147,7 @@ untouched by any of this.
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |
 | `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
 | `shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
+| `shuttle ask <fiber> "<one-line question>"` | Raise a non-blocking question for the human in `shuttle.ask: {text, at}`; the worker keeps working and its In flight card appears in **Question** above **Stalled** and **Working**. `--clear` removes it. Resume, reopen, and messaging the fiber's worker clear it too. Works offline and accepts `-C <store>` |
 | `shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
 | `shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends |
 

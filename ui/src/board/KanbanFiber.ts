@@ -73,6 +73,8 @@ export interface Fiber {
    * to tell this run's handoff from a leftover stamp of the previous one: only
    * `handed_off_at >= dispatched_at` concluded the run in hand. */
   shuttleHandedOffAt?: string;
+  /** Non-blocking question raised by the worker for the human. */
+  shuttleAsk?: { text: string; at: string };
   /** `shuttle.agent` — the agent identifier to dispatch with (e.g. `claude-opus`). */
   shuttleAgent?: string;
   /** `shuttle.effort` — reasoning-effort axis (harness-native token, e.g.
@@ -166,6 +168,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleSessionUuid: string | undefined;
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
+  let shuttleAsk: Fiber['shuttleAsk'];
   let shuttleAgent: string | undefined;
   let shuttleEffort: string | undefined;
   let shuttleSchedule: { expr: string; tz: string } | undefined;
@@ -176,6 +179,12 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
 
   if (hasShuttleBlock) {
     const s = shuttleRaw as Record<string, unknown>;
+    if (s.ask && typeof s.ask === 'object' && !Array.isArray(s.ask)) {
+      const ask = s.ask as Record<string, unknown>;
+      if (typeof ask.text === 'string' && ask.text.trim() && typeof ask.at === 'string') {
+        shuttleAsk = { text: ask.text, at: ask.at };
+      }
+    }
     shuttleKind =
       s.kind === 'standing' ? 'standing' : s.kind === 'pinned' ? 'pinned' : 'oneshot';
     if (typeof s.host === 'string' && s.host.trim()) shuttleHost = s.host.trim();
@@ -254,6 +263,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleSessionUuid,
     shuttleDispatchedAt,
     shuttleHandedOffAt,
+    shuttleAsk,
     shuttleAgent,
     shuttleEffort,
     shuttleSchedule,

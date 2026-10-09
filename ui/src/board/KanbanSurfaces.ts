@@ -83,6 +83,11 @@ export function buildCardPaper(card: KanbanCard): HTMLElement {
   header.append(glyph, name)
   const id = document.createElement('div'); id.className = 'kbn-card-id'; id.textContent = card.id
   el.append(header, id)
+  if (card.ask && card.status === 'active') {
+    const question = document.createElement('div'); question.className = 'kbn-card-outcome kbn-card-question'
+    question.textContent = card.ask.text
+    el.append(question)
+  }
   if (card.outcome) {
     const outcome = document.createElement('div'); outcome.className = 'kbn-card-outcome'
     outcome.innerHTML = renderMarkdown(card.outcome)
@@ -130,7 +135,7 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   // The manicule (U+261E) followed by the U+FE0E text variation selector forces
   // a serif text glyph, not a color emoji — paired with `font-variant-emoji:
   // text` and the EB Garamond stack in CSS.
-  attention: { label: '☞︎ needs you', title: 'The worker raised its hand (Notification) — it needs you. Open it to respond.' },
+  attention: { label: '☞︎ stalled', title: 'The harness reports that the worker needs human input. Open it to respond.' },
   waiting: { label: '⏸ waiting', title: 'The worker is paused at a prompt waiting for human input — open it to respond.' },
   retrying: { label: '⟳ retrying', title: 'Dispatch failed — daemon is retrying with backoff. No live worker right now.' },
   due: { label: '◴ due', title: 'Scheduled tick elapsed — awaiting dispatch.' },
@@ -1469,7 +1474,7 @@ export class KanbanSurfaceRenderer {
       if (kind === 'inFlight') {
         // The read model owns order within each band. These captions expose
         // the one state change that can move a card across the seam.
-        for (const [key, label] of [['needsYou', 'Needs you'], ['working', 'Working']] as const) {
+        for (const [key, label] of [['question', 'Question'], ['stalled', 'Stalled'], ['working', 'Working']] as const) {
           const members = cards.filter((card) => inFlightBand(card) === key)
           if (members.length === 0) continue
           const band = document.createElement('div')
