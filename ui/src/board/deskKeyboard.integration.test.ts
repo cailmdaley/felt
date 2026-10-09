@@ -15,6 +15,8 @@ interface BoardInternals {
   deskEl: HTMLElement
   lensCycleId: string | null
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
+  setView(view: 'desk' | 'chronicle'): void
+  openDocumentChannel(card: typeof head): void
 }
 let board: KanbanModal
 let inside: BoardInternals
@@ -63,6 +65,33 @@ beforeEach(() => {
   draw(data())
 })
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+describe('Reader Rest lifecycle', () => {
+  it.each([
+    { view: 'desk', tempered: true }, { view: 'desk', tempered: false },
+    { view: 'chronicle', tempered: true }, { view: 'chronicle', tempered: false },
+  ] as const)('s rests a constitution opened from $view with tempered=$tempered', async ({ view, tempered }) => {
+    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot' })
+    draw(response({ timeline: { past: [finished], futureDated: [] } }))
+    inside.setView(view)
+    // The same entry point receives Desk and Chronicle's original card, even
+    // when it isn't present in any drawn Desk region.
+    inside.openDocumentChannel(finished)
+    for (let i = 0; i < 200; i++) await Promise.resolve()
+    const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
+    expect(target).not.toBeNull()
+    target.focus()
+    press('s', {}, target)
+    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover input')!
+    expect(input).not.toBeNull()
+    press('Enter', {}, input)
+    await Promise.resolve(); await Promise.resolve()
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
+    expect(calls).toHaveLength(1)
+    expect(calls[0][1]?.method).toBe('POST')
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '' })
+  })
+})
 
 describe('Desk keyboard selection', () => {
   it.each(['', '2099-06-12'])('s on the focused constitution rests with date %j through lifecycle', async until => {
