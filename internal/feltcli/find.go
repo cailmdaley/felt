@@ -60,7 +60,7 @@ included; --limit caps it only when given.`,
 			}
 
 			search, err := compileSearch(query, findStatus, !statusExplicit && hasFilters,
-				findTags, hasFields, findExact, findRegex, findBody, findVerbose)
+				findTags, hasFields, nil, findExact, findRegex, findBody, findVerbose)
 			if err != nil {
 				return err
 			}

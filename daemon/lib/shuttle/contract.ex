@@ -27,7 +27,8 @@ defmodule Shuttle.Contract do
   # Level 8: the daemon shells `shuttle seat <fiber> <role>|--clear`.
   # Level 9: discovery uses `shuttle ls --ids-from` for hot-set reads.
   # Level 10: the daemon clears worker questions with `shuttle ask <fiber> --clear`.
-  @expected_level 10
+  # Level 11: discovery uses `shuttle ls --any` for the kanban union.
+  @expected_level 11
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()
