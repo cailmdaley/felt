@@ -331,7 +331,7 @@ function assembleSurfaces(
   // Seats read like a shelf of offices: alphabetical, so a launcher stays
   // where the hand expects it whatever was used last.
   roles.sort(byNameAsc);
-  // A card moves only when it crosses a Question / Stalled / Working seam.
+  // A card moves only when it crosses a Question / Working seam.
   // Activity age and phase changes within a band do not change its position.
   inFlight.sort(byInFlightBand);
   awaitingReview.sort(byClosedAtDesc);
@@ -748,20 +748,20 @@ export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
   return descByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || byCardIdentity(a, b);
 }
 
-export type InFlightBand = 'question' | 'stalled' | 'working';
+export type InFlightBand = 'question' | 'working';
 
 /** In flight's bands in drawn order, with the caption each surface gives them. */
-export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['question', 'Question'], ['stalled', 'Stalled'], ['working', 'Working']];
+export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['question', 'Question'], ['working', 'Working']];
 
 export function inFlightBand(card: KanbanCard): InFlightBand {
   if (card.ask) return 'question';
   return card.runtimePhase === 'waiting' || card.runtimePhase === 'blocked' || card.runtimePhase === 'attention'
-    ? 'stalled'
+    ? 'question'
     : 'working';
 }
 
 export function byInFlightBand(a: KanbanCard, b: KanbanCard): number {
-  const order: Record<InFlightBand, number> = { question: 0, stalled: 1, working: 2 };
+  const order: Record<InFlightBand, number> = { question: 0, working: 1 };
   return order[inFlightBand(a)] - order[inFlightBand(b)] || byCreatedAtDesc(a, b);
 }
 

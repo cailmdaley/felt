@@ -124,7 +124,7 @@ defmodule Shuttle.Tmux do
              runner.cmd("tmux", ["paste-buffer", "-p", "-d", "-b", buffer, "-t", session],
                stderr_to_stdout: true
              ),
-           :ok <- Process.sleep(Application.get_env(:shuttle, :paste_submit_delay_ms, 400)),
+           :ok <- Process.sleep(Shuttle.Env.app(:paste_submit_delay_ms, 400)),
            {_, 0} <-
              runner.cmd("tmux", ["send-keys", "-t", session, "Enter"], stderr_to_stdout: true) do
         :ok

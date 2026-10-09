@@ -90,12 +90,14 @@ describe('shared keyboard table', () => {
       expect(keyIntent(event(key, init), 'reader')).toBeNull()
     }
   })
-  it('c opens the conversation (dot is its alias), s toggles the sidebar, and no report can ask for the conversation', () => {
+  it('c opens the conversation (dot is its alias), s rests the constitution, and no report can ask for the conversation', () => {
     for (const surface of ['desk', 'reader'] as KeySurface[]) {
       expect(keyIntent(event('c'), surface)).toBe('conversation')
       expect(keyIntent(event('.'), surface)).toBe('conversation')
     }
-    expect(keyIntent(event('s'), 'reader')).toBe('sidebar')
+    expect(keyIntent(event('s'), 'reader')).toBe('rest')
+    expect(keyIntent(event('s'), 'desk')).toBe('rest')
+    expect(DOCUMENT_KEY_INTENTS).not.toContain('rest')
     expect(keyIntent(event('\\', { metaKey: true }), 'reader')).toBe('sidebar')
     expect(DOCUMENT_KEY_INTENTS).not.toContain('conversation')
   })

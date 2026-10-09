@@ -6,7 +6,10 @@ Not every constitution wants one (see SKILL.md, "The fiber's surfaces"). When on
 
 ## Who reads it
 
-**Primary reader: the human, cold, days later.** Deep domain knowledge, near-zero memory of the last session — they don't remember which run is which. **Secondary: the next worker,** arriving with no context at all. Both want the same thing, in this order: state of play, what's established and how firmly, what's genuinely open.
+**Primary reader: the human.** Pitch background at what they know since their last engagement.
+If days have passed, bridge that gap; if you just discussed the work, don't re-explain the conversation.
+**Secondary: the next worker,** arriving with no context at all.
+Keep the supporting detail self-contained below the opening, rather than making the human reread what they already know.
 
 Neither wants the trench narrative. What you tried Tuesday and abandoned Wednesday is not a finding — the *conclusion* is, if it survived.
 
@@ -39,7 +42,18 @@ The second is shorter, tells the reader what to do, and stays true next month. T
 
 ## Shape
 
-Structure follows content, but the default skeleton:
+**Before `shuttle ask`, rewrite `report.html` to lead with the question.**
+Nothing goes above this opening, including a title, as-of stamp, status panel or executive summary:
+
+1. **Short background** — pitched at what the human knows since their last engagement, only enough to frame the question.
+2. **Question and options/tradeoffs** — what their view would help with, the alternatives and their costs when there are alternatives.
+A loose, nonblocking request for a view is welcome; don't manufacture fixed choices.
+3. **Executive summary** — below the question, followed by evidence and depth.
+
+The Question band's card opens the report when one is present.
+Keep working after raising the ask, and clear it when it becomes moot.
+
+Without an outstanding ask, the default skeleton is:
 
 1. **Headline state** — a few sentences, verdict-bearing. Where the work stands, and the action the human takes next if any. Not "we worked on the covariance" but "the cut-sky Gaussian covariance under-covers by 20–35% at low z, so every σ below uses the 200-seed ensemble instead. Nothing needs your decision."
 2. **Standing findings, grouped by meaning** — one heading per thing that is true, named for the claim, evidence attached. Group by what they are about, never by when they landed. A finding without its evidence is an assertion. Every claim carries its receipt — the number, the plot, the command, the sub-fiber — so the reader can challenge it cheaply. A finding that has its own sub-fiber carries the verdict, the number and the link, **not the argument**. If a finding needs more than a short paragraph, that is the signal it wants a sub-fiber, not more report.
@@ -56,7 +70,9 @@ Structure follows content, but the default skeleton:
 
 ## Open questions are worked, then written
 
-**Attempt to close each open question before it enters — or survives in — the report.** The section is not a parking lot; it is the residue of questions you tried this session and could not settle.
+**Work questions you can settle yourself before carrying them forward.**
+Requests for the human's view needn't be blockers or failed attempts at a fixed decision.
+Make clear what their response would inform, and what you can keep doing without it.
 
 Each surviving item **names what would resolve it**: the run, the check, the person, the decision. "Is the low-z excess real?" is a shrug. "The low-z excess is +1.9σ against the ensemble covariance; a 200-seed run at lmax 700 separates real signal from the noise floor — 40 node-minutes, not yet run" is an open question.
 

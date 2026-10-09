@@ -38,6 +38,7 @@ export interface WorkspaceOptions {
   focusFind?(): boolean
   /** Expand has taken, or given back, the whole window. */
   onExpand?(expanded: boolean): void
+  onRest?(card: KanbanCard, anchor: HTMLElement): void
 }
 interface ChannelState {
   card: KanbanCard
@@ -47,6 +48,7 @@ interface ChannelState {
   /** The owner file-time reads in flight, at most one per channel. */
   metadataRead?: Promise<boolean>
   selected?: DocKey
+  questionLanding?: boolean
   routedFile?: DocKey
   loaded: boolean
   /** The run is final: body and receipts are both in, or the body read failed. The strip waits for it. */
@@ -145,6 +147,7 @@ export class Workspace {
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
       onConversation: card => { this.dock.openConversation(card) },
+      onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),
@@ -205,6 +208,14 @@ export class Workspace {
     this.open(card, this.opts.origin(), proseDocument(this.ensure(card).channel)?.key)
   }
 
+  /** A Question card leads with its report, even after a previous visit to prose. */
+  openQuestion(card: KanbanCard): void {
+    const state = this.ensure(card)
+    state.questionLanding = true
+    state.selected = undefined
+    this.open(card)
+  }
+
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
     const outsideColumn = this.isActive && this.column && !this.column.some(entry => cardIdentity(entry.card) === cardIdentity(card))
     if (!this.isActive || origin !== this.origin || outsideColumn || !fromDeskColumn) {
@@ -222,7 +233,7 @@ export class Workspace {
 
   /**
    * The sidebar is one grouped list wherever the reader was opened from:
-   * Drafts, then In flight's Question, Stalled and Working bands, then Awaiting review,
+   * Drafts, then In flight's Question and Working bands, then Awaiting review,
    * each in the Desk's own order. Queued children are reached through their
    * head's peek, not these groups or their J/K stops and index counts.
    */
@@ -466,6 +477,11 @@ export class Workspace {
     }
     await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
+    if (state.questionLanding) {
+      state.questionLanding = false
+      const report = state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'report.html')
+      state.selected = report?.key ?? proseDocument(state.channel)?.key
+    }
     this.show(state, loadedBefore)
     this.history.select(this.shown(state))
     this.startTimer()

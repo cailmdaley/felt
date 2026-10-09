@@ -69,7 +69,9 @@ To put a todo on the board, give it a shuttle block; the board shows nothing els
 
 A worker leaves in one of three ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. It **closes**, moving the card to **Awaiting review**, and nobody is launched; the human then tempers the card (accepts it), discards it, or resumes it. Or it **rests**, putting the card in **Resting** with no review, to be started again by hand. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times. Not every constitution has a finish line: a hub or a seat the human comes back to — a chair, a practice, a debug intake — is a oneshot that rests between sessions.
 
-The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. **Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
+The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. In flight has two bands, **Question** then **Working**.
+Questions include agent-raised asks and workers needing human input; a harness attention signal reads **at a prompt** on the card.
+**Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
 
 ## Working a constitution
 
@@ -79,8 +81,11 @@ The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts
 
 **Work.** Sit with the whole shape of the problem before deciding. Before you commit to a constraint or stop to ask, try this test: would the constraint surprise the human? If so, you haven't sat long enough. Most decisions that look like they need the human follow from what the system is for, and genuine taste questions are narrower than they feel. You have authority, so make ambitious moves even when they span sessions; shuttle will send the next worker. When a choice is load-bearing — a model, a pivot that removes a capability — do the work and set out the alternatives in the artifact, rather than stopping to ask. Give sub-goals their own context: hand bulk reading, sweeps and verification to subagents, and on long runs have a fresh-context subagent check the work against Desired State every few substantial changes. Stream long jobs with `Monitor` or background Bash, and see them through before you exit.
 
-**Ask without stopping.** When your work from here would go better with the human's view, run `shuttle -C <store> ask <id> "<one-line question>"` and keep working.
-Point the question at the report section that frames the choice; it appears in the board's **Question** band without pausing your worker.
+**Ask without stopping.** When your work would go better with the human's view, rewrite `report.html` **before** running `shuttle -C <store> ask <id> "<one-line question>"`, then keep working.
+The report must lead with short background pitched at what the human knows since their last engagement: bridge the gap, without re-explaining a conversation you just had.
+Follow with the question and its options and tradeoffs; put the executive summary below them, with nothing above this opening.
+A question can be a loose, nonblocking request for a view, not only a decision between fixed options.
+The card appears in **Question** without pausing your worker and opens the report on click when one is present.
 In Claude Code, also send a PushNotification with the question.
 Clear it with `shuttle -C <store> ask <id> --clear` when it becomes moot; resuming or messaging the worker also clears it.
 

@@ -172,6 +172,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 
 func (a *app) restCmd() *cobra.Command {
 	var restLocal bool
+	var until string
 	restCmd := &cobra.Command{
 		Use:   "rest <fiber>",
 		Short: "Put a constitution down in Resting, without review",
@@ -184,11 +185,10 @@ now) so the next start is a fresh session, and a live worker is stopped.
                            # and there is nothing left to review
 
 Rest is the third exit beside handoff (keep going) and close (review me).
-It works from In flight, Drafts and Awaiting review; a tempered or discarded
-card is refused. A future due: is kept, so the card wakes on that day; a due
+It works on a constitution in any state, including one with a verdict. A future due: is kept, so the card wakes on that day; a due
 that is today or already past is cleared, because it would put the card
-straight back on the desk. A standing constitution is placed by its schedule,
-so it is refused here: use 'shuttle pause'.
+straight back on the desk. --until YYYY-MM-DD sets a return date;
+--until '' clears the date for an undated rest.
 
 Routes to the owning daemon, which writes it with --local inside its Poller,
 serialized with dispatch, and then stops the worker through its backend — a
@@ -198,9 +198,18 @@ be reached is bypassed: the document is written here and a tmux worker on
 this host is killed.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fields := map[string]any{}
+			if cmd.Flags().Changed("until") {
+				if until != "" {
+					if _, err := time.Parse("2006-01-02", until); err != nil {
+						return fmt.Errorf("invalid --until: use YYYY-MM-DD")
+					}
+				}
+				fields["until"] = until
+			}
 			if !restLocal {
 				anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
-				if routed, err := a.routeLifecycle("rest", args[0], anyBlock); routed {
+				if routed, err := a.routeLifecycle("rest", args[0], anyBlock, fields); routed {
 					return err
 				}
 			}
@@ -214,14 +223,8 @@ this host is killed.`,
 			if err != nil {
 				return err
 			}
-			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "rest", f, nil); routed || err != nil {
+			if routed, err := a.forwardLifecycleAction(cmd, args, owner, "rest", f, fields); routed || err != nil {
 				return err
-			}
-			if block.Kind == "standing" {
-				return fmt.Errorf("fiber %s is a standing constitution, placed by its schedule; use 'shuttle pause %s' to stop it", args[0], args[0])
-			}
-			if f.Status == felt.StatusClosed && readTempered(f) != nil {
-				return fmt.Errorf("fiber %s already has a verdict (tempered=%v); use 'shuttle reopen %s --as-draft' first", args[0], *readTempered(f), args[0])
 			}
 
 			statusBefore := f.Status
@@ -231,8 +234,15 @@ this host is killed.`,
 			if err := f.SetExtraField("horizon", "stashed"); err != nil {
 				return fmt.Errorf("setting horizon: %w", err)
 			}
+			if cmd.Flags().Changed("until") {
+				f.Due = nil
+				if until != "" {
+					date, _ := time.Parse("2006-01-02", until)
+					f.Due = &date
+				}
+			}
 			clearedDue := ""
-			if f.Due != nil && f.Due.Format("2006-01-02") <= time.Now().Format("2006-01-02") {
+			if !cmd.Flags().Changed("until") && f.Due != nil && f.Due.Format("2006-01-02") <= time.Now().Format("2006-01-02") {
 				clearedDue = f.Due.Format("2006-01-02")
 				f.Due = nil
 			}
@@ -268,6 +278,7 @@ this host is killed.`,
 		},
 	}
 	restCmd.Flags().BoolVar(&restLocal, "local", false, localFlagUsage)
+	restCmd.Flags().StringVar(&until, "until", "", "Return date (YYYY-MM-DD); empty clears the date")
 	return restCmd
 }
 
@@ -426,7 +437,7 @@ func rearmStanding(f *felt.Felt) error {
 // locally, where every refusal is reported. A daemon refusal, an owner-check
 // failure, or a request the daemon received but did not answer is routed, with
 // its error — the last because the transition may still apply there.
-func (a *app) routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool) (routed bool, err error) {
+func (a *app) routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
 	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
@@ -435,7 +446,7 @@ func (a *app) routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shu
 	if err != nil || !ok || !qualifies(f, block) || a.ensureOwnedHere(f, query) != nil {
 		return false, nil
 	}
-	output, err := a.postLifecycle(verb, f.ID)
+	output, err := a.postLifecycle(verb, f.ID, fields...)
 	if err == nil {
 		fmt.Fprint(a.env.Stdout, output)
 		return true, nil

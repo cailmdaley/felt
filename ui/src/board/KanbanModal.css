@@ -836,6 +836,22 @@
    than another lane: no shadow, no lift. The head names what the bottom of the page
    means; the gloss is there so a card down here doesn't read as one that
    failed. Under the head, the column head's own hairline rule. */
+.kbn-rest-popover {
+  position: fixed;
+  z-index: 1000;
+  width: 260px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: var(--kbn-parchment);
+  color: var(--kbn-ink);
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--kbn-shade) 20%, transparent);
+}
+.kbn-rest-popover label { display: grid; gap: 8px; }
+.kbn-rest-popover small { opacity: .65; }
+
 .kbn-section-stash {
   /* Design size, like `.kbn-col`. */
   --kbn-type-scale: 1;
@@ -1287,15 +1303,13 @@
   letter-spacing: 0.06em;
   color: var(--kbn-ink-muted);
 }
-.kbn-flight-band[data-flight-band="question"] .kbn-flight-caption,
-.kbn-flight-band[data-flight-band="stalled"] .kbn-flight-caption {
+.kbn-flight-band[data-flight-band="question"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
 /* The gold edge is painted inside the card's own 1 px border, so a card
    crossing into the band changes colour, never size. A background layer
    leaves the card's shadows to whichever surface draws it. */
-.kbn-flight-band[data-flight-band="question"] .kbn-card,
-.kbn-flight-band[data-flight-band="stalled"] .kbn-card {
+.kbn-flight-band[data-flight-band="question"] .kbn-card {
   border-left-color: var(--kbn-owed);
   background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
 }

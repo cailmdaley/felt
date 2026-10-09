@@ -330,9 +330,9 @@ describe('Reader channel sidebar', () => {
     expect(storedTrue.el.classList.contains('ws-with-sidebar')).toBe(true)
   })
 
-  it('toggles with s as well as the command alias', () => {
+  it('toggles with the command alias', () => {
     const reader = makeReader()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', ctrlKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)

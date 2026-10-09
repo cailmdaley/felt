@@ -148,7 +148,7 @@ describe('Desk comparators', () => {
       expect(ids(shuffled(workers, seed).sort(byInFlightBand))).toEqual(expected)
       const changed = workers.map((c) => ({
         ...c, lastActivityAt: seed * 100,
-        runtimePhase: inFlightBand(c) === 'stalled' ? (seed % 2 ? 'blocked' : 'waiting') : 'retrying',
+        runtimePhase: inFlightBand(c) === 'question' ? (seed % 2 ? 'blocked' : 'waiting') : 'retrying',
       }))
       expect(ids(shuffled(changed, seed).sort(byInFlightBand))).toEqual(expected)
     }
