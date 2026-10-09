@@ -93,6 +93,39 @@ describe('Reader Rest lifecycle', () => {
   })
 })
 
+describe('Rest controls', () => {
+  it.each([true, false])('the constitution page offers Rest for a card with tempered=%s and posts rest from the popover', async tempered => {
+    const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot' })
+    draw(response({ timeline: { past: [finished], futureDated: [] } }))
+    inside.setView('chronicle')
+    inside.openDocumentChannel(finished)
+    for (let i = 0; i < 200; i++) await Promise.resolve()
+    const rest = document.querySelector<HTMLButtonElement>('.ws-reader .kbn-ctl-rest')!
+    expect(rest).not.toBeNull()
+    expect(rest.hidden).toBe(false)
+    expect(rest.closest('.kbn-ctl-verdict')!.hasAttribute('hidden')).toBe(false)
+    expect(rest.title).toContain('s')
+    expect(document.querySelector<HTMLElement>('.ws-reader .kbn-ctl-temper')!.hidden).toBe(true)
+    rest.click()
+    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover input')!
+    expect(input).not.toBeNull()
+    press('Enter', {}, input)
+    await Promise.resolve(); await Promise.resolve()
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '' })
+  })
+
+  it('a Desk card carries a Rest affordance that opens the same popover', () => {
+    draw(response({ now: { drafts: [], inFlight: [], awaitingReview: [card({ id: 'review', uid: 'review', status: 'closed', shuttleKind: 'oneshot' }), card({ id: 'note', uid: 'note', status: 'closed' })] } }))
+    expect(document.querySelector('[data-card-uid="note"] .kbn-card-rest')).toBeNull()
+    const button = document.querySelector<HTMLButtonElement>('[data-card-uid="review"] .kbn-card-rest')!
+    expect(button).not.toBeNull()
+    button.click()
+    expect(document.querySelector('.kbn-rest-popover input')).not.toBeNull()
+  })
+})
+
 describe('Desk keyboard selection', () => {
   it.each(['', '2099-06-12'])('s on the focused constitution rests with date %j through lifecycle', async until => {
     press('j')
