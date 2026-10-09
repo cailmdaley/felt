@@ -39,8 +39,14 @@ describe('fictional workspace transcripts', () => {
       .split('\n')
       .map(value => JSON.parse(value) as unknown)
     expect(added.flatMap(normalizeRecord)).toEqual([
-      { kind: 'prompt', text: 'Append live fixture update 1; do not replace the prior result.', images: 0, dispatch: false, at: NOW },
-      { kind: 'text', text: 'Live worker update 1: the next fictional validation batch is in progress.', model: 'claude-opus-4-1', at: NOW + 500 },
+      { kind: 'tool', id: 'fixture-live-1', name: 'Bash', input: { command: 'python validate.py --batch 1' }, at: NOW },
+      { kind: 'result', id: 'fixture-live-1', text: 'batch 1: 12 bins, max deviation 0.1%', isError: false, images: 0, at: NOW + 200 },
+      {
+        kind: 'text',
+        text: 'Live worker update 1: the next fictional validation batch is in progress.\n\nBatch 1 covers twelve more fixture bins; the largest deviation is 0.1%, inside the stated tolerance, so the measured values stand.',
+        model: 'claude-opus-4-1',
+        at: NOW + 500,
+      },
     ])
   })
 
