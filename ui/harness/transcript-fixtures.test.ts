@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { normalizeRecord } from '../src/board/transcript/records.js'
+import { TranscriptModel } from '../src/board/transcript/model.js'
 import { workspaceExample, WORKSPACE_UID, WORKSPACE_ID } from './workspace-fixtures.js'
 import {
   WORKSPACE_EARLIER_SESSION,
@@ -48,6 +49,20 @@ describe('fictional workspace transcripts', () => {
         at: NOW + 500,
       },
     ])
+  })
+
+  it('stages warm, cold and recorded-window head facts for offline screenshots', () => {
+    const facts = (scenario: 'warm' | 'cold' | 'context' | 'normal') => {
+      const source = new TextDecoder().decode(workspaceTranscriptBytes(scenario, NOW))
+      const model = new TranscriptModel()
+      model.append(source.trim().split('\n').flatMap((line) => normalizeRecord(JSON.parse(line))))
+      return model.stats()
+    }
+    expect(facts('warm').cacheUntil).toBe(NOW + 3_540_000)
+    expect(facts('cold').cacheUntil).toBe(NOW - 3_600_000)
+    expect(facts('warm').context).toBe(53327)
+    expect(facts('context')).toMatchObject({ context: 20915, window: 258400 })
+    expect(facts('normal').context).toBeUndefined()
   })
 
   it('stages a multi-megabyte transcript with thousands of prompt-bounded turns', () => {

@@ -13,6 +13,7 @@
  * `?example=workspace` selects the fictional documentation example; add
  * `?transcript=live` to watch a synthetic worker append records or
  * `?transcript=large` to exercise lazy reading of thousands of turns.
+ * `?transcript=warm|cold|context` stages captured usage facts with a shifted timestamp.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -1516,9 +1517,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     const offset = offsetText === null ? 0 : Number(offsetText)
     if (!Number.isSafeInteger(offset)) return json({ error: 'offset must be a non-negative integer' }, 400)
-    const mode: TranscriptScenario = isLatest && transcriptScenario === 'live'
-      ? 'live'
-      : isLatest && transcriptScenario === 'large' ? 'large' : isLatest && transcriptScenario === 'long-outcome' ? 'long-outcome' : 'normal'
+    const mode: TranscriptScenario = isLatest && ['live', 'large', 'long-outcome', 'warm', 'cold', 'context'].includes(transcriptScenario ?? '')
+      ? transcriptScenario as TranscriptScenario : 'normal'
     const updates = mode === 'live' ? liveTranscriptReads++ : 0
     const bytes = workspaceTranscriptBytes(mode, now, { earlier: isEarlier, updates })
     if (offset > bytes.byteLength) return json({ session, availability: 'available_local', byte_count: bytes.byteLength }, 416)

@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TranscriptBand, type TranscriptTarget } from './TranscriptBand.js'
+import claudeUsage from './fixtures/claude-usage.jsonl?raw'
+import codexUsage from './fixtures/codex-usage.jsonl?raw'
+import piUsage from './fixtures/pi-usage.jsonl?raw'
+import codexResetUsage from './fixtures/codex-compaction-reset.jsonl?raw'
+
+const captured = (source: string): unknown[] => source.trim().split('\n').map((line) => JSON.parse(line))
 
 const latestId = 'a3edf873-cb1c-40ab-a891-f26f5333b320'
 const earlierId = 'b4edf873-cb1c-40ab-a891-f26f5333b321'
@@ -155,6 +161,90 @@ describe('TranscriptBand', () => {
     expect(scroller.scrollTop).toBeGreaterThan(250)
     expect(band.el.querySelector('.ws-transcript-pane')?.textContent).toContain('Delayed outcome')
     expect(band.el.querySelector('.ws-transcript-outcome')).toBeNull()
+  })
+
+  it('shows stopped-session warmth and context, and expires while folded without polling', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(new Date('2026-10-09T13:52:00Z'))
+    const fetcher = fixtureFetch({ [latestId]: [captured(claudeUsage)[0]] })
+    const band = makeBand(fetcher)
+    band.follow(target(latestId))
+    await settle()
+    const cache = band.el.querySelector<HTMLElement>('.ws-transcript-cache')!
+    expect(cache.hidden).toBe(false)
+    expect(cache.textContent).toMatch(/^Cache warm until \d\d:\d\d$/)
+    expect(cache.classList.contains('ws-transcript-cache-cold')).toBe(false)
+    expect(band.el.querySelector('.ws-transcript-context')?.textContent).toBe('Context 53.3k')
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-head')!.click()
+    vi.advanceTimersByTime(3_600_000)
+    expect(cache.textContent).toBe('Cache cold')
+    expect(cache.classList.contains('ws-transcript-cache-cold')).toBe(true)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows already cold cache, resets facts on target change and clears expiry on dispose', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(new Date('2026-10-09T16:00:00Z'))
+    const band = makeBand(fixtureFetch({ [latestId]: [captured(claudeUsage)[0]], [earlierId]: records('Hello', 'Hi') }))
+    band.follow(target(latestId))
+    await settle()
+    expect(band.el.querySelector('.ws-transcript-cache')?.textContent).toBe('Cache cold')
+    band.read(target(earlierId))
+    await settle()
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-cache')!.hidden).toBe(true)
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-context')!.hidden).toBe(true)
+    vi.setSystemTime(new Date('2026-10-09T13:52:00Z'))
+    band.read(target(latestId))
+    await settle()
+    expect(vi.getTimerCount()).toBe(1)
+    band.follow(null)
+    // A pinned read survives follow(null); disposal still owns its expiry timer.
+    band.dispose()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('shows Codex recorded context/window and Pi context without cache or an invented window', async () => {
+    const band = makeBand(fixtureFetch({ [latestId]: [captured(codexUsage)[0]], [earlierId]: [captured(piUsage)[0]] }))
+    band.follow(target(latestId))
+    await settle()
+    expect(band.el.querySelector('.ws-transcript-context')?.textContent).toBe('Context 20.9k / 258.4k')
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-cache')!.hidden).toBe(true)
+    band.read(target(earlierId))
+    await settle()
+    expect(band.el.querySelector('.ws-transcript-context')?.textContent).toBe('Context 16.8k')
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-cache')!.hidden).toBe(true)
+  })
+
+  it('keeps Context hidden through a streamed Codex reset placeholder until genuine usage arrives', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    const [compacted, placeholder, genuine] = captured(codexResetUsage)
+    const items = [captured(codexUsage)[0], compacted]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId, { live: true }))
+    await settle()
+    const context = band.el.querySelector<HTMLElement>('.ws-transcript-context')!
+    expect(context.hidden).toBe(true)
+    items.push(placeholder)
+    vi.advanceTimersByTime(3000)
+    await settle()
+    expect(context.hidden).toBe(true)
+    expect(context.textContent).toBe('')
+    items.push(genuine)
+    vi.advanceTimersByTime(3000)
+    await settle()
+    expect(context.hidden).toBe(false)
+    expect(context.textContent).toBe('Context 43k / 258.4k')
+  })
+
+  it('omits stale context after compaction without post usage and omits both facts without usage', async () => {
+    const band = makeBand(fixtureFetch({ [latestId]: captured(piUsage), [earlierId]: records('Hello', 'Hi') }))
+    band.follow(target(latestId))
+    await settle()
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-context')!.hidden).toBe(true)
+    band.read(target(earlierId))
+    await settle()
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-context')!.hidden).toBe(true)
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-cache')!.hidden).toBe(true)
   })
 
   it('shows the last exchange as words only: the prompt and every agent message since, no tools or thinking', async () => {
