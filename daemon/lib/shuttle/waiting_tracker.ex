@@ -19,11 +19,11 @@ defmodule Shuttle.WaitingTracker do
   serves. No new cross-host channel — the signal rides the same per-host
   runtime stamping that `tmux_session` liveness already does.
 
-  ## Last-event-wins (no state machine)
+  ## Session activity and live children
 
-  Each tracked session holds exactly one record — `%{type: String.t(), at: ms}`
-  — the **raw type and real timestamp of its most recent event**. Every event
-  unconditionally overwrites it; there is no sticky/kind state machine.
+  Each tracked session holds the raw type and real timestamp of its most
+  recent parent event, plus the background work it left running.
+  Codex child tool events refresh a held stop without replacing its type.
   Explicit permission and elicitation notifications signal attention. An idle
   reminder remains waiting; elapsed idle time alone does not require action.
 
@@ -48,32 +48,51 @@ defmodule Shuttle.WaitingTracker do
 
   ## Waiting on itself, not on you
 
-  A session that ends its turn with detached shells still running (`Bash` with
-  `run_in_background`) is idle in the harness's sense and NOT idle in the sense
+  An idle session is the human's move only when nothing it started is still
+  running. A session that ends its turn with background shells or background
+  subagents in flight is idle in the harness's sense and NOT idle in the sense
   the board cares about: nobody needs to do anything, the work is running. Left
-  alone it read as `"waiting"`, and a minute later Claude Code's idle timer
-  fired a `notification` and it read as `"attention"` — the board asking for a
-  hand on a worker that was watching its own build.
+  alone it would read as `"waiting"`: the board asking for a hand on a
+  worker that is watching its own build.
 
-  Two fields the harness volunteers settle it, so nothing here is inferred:
+  Each harness reports its live children in its own way, and each fact is read
+  as the harness states it:
 
-    * `stop` carries `background_tasks` — what the turn is leaving running. The count is remembered on the session (`bg`) and
-      carried forward until the session is resumed by a prompt or restarted, at
-      which point it is zero again and the next stop restamps the truth.
+    * **Claude Code** — `stop` carries `background_tasks`, the harness's whole
+      background registry: detached shells and background subagents.
+      The hook writer emits its size as `backgroundTasks`.
+      The count is remembered on the session (`bg`) and carried forward until
+      the session is resumed by a prompt or restarted, at which point it is zero
+      again and the next stop restamps the truth.
+    * **Codex** — `stop` names nothing outstanding, but the parent's stream
+      carries each `spawn_agent` / `followup_task` call (`post_tool_use`) and
+      each child's `subagent_stop`, and the children's own tool events land on
+      the parent's session too. Starts minus stops is the live-child count
+      (`kids`). A stop over live children HOLDS: the children's tool events
+      refresh its time without overwriting it, and the `subagent_stop` that
+      takes the count to zero is the moment the session becomes the human's
+      move. A prompt does not clear `kids`, because no later stop restates it;
+      a session start or end does. Counts are scoped to the Codex session id:
+      a nested probe or another harness in the same tmux pane cannot inherit
+      them. Hooks don't identify individual children, so this is a bounded
+      count rather than an authoritative per-child registry.
     * `notification` carries `notification_type`. Only `idle_prompt` means
       "nobody has typed in a while"; `permission_prompt` and the elicitation
       kinds mean the agent is genuinely blocked ON A HUMAN and stay
       `"attention"` no matter what else is running.
 
-  So an idle-looking session with `bg > 0` categorizes as `"working"` — which is
-  exactly what it is. A harness that sends neither field (Codex, and any line
-  written before this) behaves precisely as before: `bg` is zero and an
-  unnamed notification is attention.
+  So an idle-looking session with `bg > 0` or `kids > 0` categorizes as
+  `"working"`, which is exactly what it is. A harness that sends none of these
+  (Pi, and any line written before them) has both at zero: its idle session
+  reads `"waiting"`, the human's turn, which is the safe default for a worker
+  that forgot to signal.
 
   ### The suppression is BOUNDED, and that is the point
 
   Nothing decrements `bg` when a task finishes: work that ends triggers a
-  follow-up turn whose stop restates the count, which is the ordinary path. The task that
+  follow-up turn whose stop restates the count, which is the ordinary path. A
+  Codex child that dies without its `subagent_stop` leaves `kids` too high in
+  the same way. The task that
   never returns — a dev server, a tail, a shell nobody killed — has no such
   path, and left unbounded it would silence its worker forever. That is a worse
   failure than the one this fixes: a false "needs you" is noise a person
@@ -82,7 +101,7 @@ defmodule Shuttle.WaitingTracker do
   So the suppression expires — and that bound is doing all of the safety work,
   which is why the writer does not also try to guess which task kinds are
   long-lived. Past `@bg_suppress_ms` of silence the session is
-  categorized as if `bg` were zero — it has been quiet a long time with nothing
+  categorized as if `bg` and `kids` were zero — it has been quiet a long time with nothing
   to show for it, and the board should say so rather than keep vouching for work
   it can no longer confirm is happening. The bound is generous (an hour) because
   a long build is precisely what this is for.
@@ -93,8 +112,9 @@ defmodule Shuttle.WaitingTracker do
 
   ## A subagent's stop is not the session's
 
-  `subagent_stop` says a subagent finished, not what the session around it is
-  doing, so it leaves the record alone, as a `file_sent` delivery does. It
+  Outside Codex child tracking, `subagent_stop` says a subagent finished, not
+  what the session around it is doing, so it leaves the record alone, as a
+  `file_sent` delivery does. It
   fires mid-turn (a foreground `Agent` call returning), while the parent sits
   idle on a background subagent it will wake to digest, and while the session
   is idle with no subagent of its own in flight (apparently Claude Code's away
@@ -131,9 +151,9 @@ defmodule Shuttle.WaitingTracker do
   @max_age_ms 48 * 60 * 60 * 1_000
 
   @typedoc """
-  `session => %{type, at, kind, bg}` — the raw type, real timestamp,
-  notification kind and carried background-task count of each tracked
-  session's most recent hook event (last-event-wins).
+  Each session record holds `type`, `at`, `kind`, `bg`, `kids`, `harness`,
+  and `session_id`: parent activity and live-child facts, scoped to their
+  harness session identity.
   """
   @type sessions :: %{optional(String.t()) => map()}
 
@@ -149,21 +169,22 @@ defmodule Shuttle.WaitingTracker do
           %{optional(String.t()) => %{last_event_at: integer(), phase: String.t()}}
   def phases(sessions, now) do
     Map.new(sessions, fn {session, %{type: type, at: at} = rec} ->
-      bg = if now - at >= @bg_suppress_ms, do: 0, else: rec.bg
-      {session, %{last_event_at: at, phase: category(type, rec.kind, bg)}}
+      live = if now - at >= @bg_suppress_ms, do: 0, else: rec.bg + Map.get(rec, :kids, 0)
+      {session, %{last_event_at: at, phase: category(type, rec.kind, live)}}
     end)
   end
 
   # The phase category of the most-recent event type, read against the two
-  # facts the harness volunteers: which notification this is, and how much
-  # detached work the last `stop` left running.
+  # facts the harnesses volunteer: which notification this is, and how much
+  # work the session left running under it (background tasks plus live
+  # spawned agents).
   #
   # The catch-all is the long-tool guard: anything that isn't an explicit
   # idle/escalation signal (pre_tool_use, post_tool_use, user_prompt_submit,
   # session_start, …) is "working", so a mid-tool worker sinks to the bottom
   # regardless of wall-clock.
   #
-  # A session with background shells in flight is working by the same logic one
+  # A session with background work in flight is working by the same logic one
   # foreground tool call away: the difference between the two is only where the
   # harness parked the process, and nobody is being asked for anything either
   # way. A permission prompt or an elicitation is the exception that proves it —
@@ -177,36 +198,66 @@ defmodule Shuttle.WaitingTracker do
 
   @doc """
   One decoded event folded onto `sessions`. Last-event-wins: every event for a
-  `*-shuttle` session unconditionally overwrites its record with the event's
-  own type and real timestamp. The `"timestamp"` field is on every hook line;
-  `now` is only a fallback for a line missing it (we never invent a
-  worse-than-now age). A `file_sent` event is a delivery and a
-  `subagent_stop` belongs to a subagent; neither is the session's own activity,
-  and both leave the record alone.
+  `*-shuttle` session overwrites its record with the event's own type and real
+  timestamp. The `"timestamp"` field is on every hook line; `now` is only a
+  fallback for a line missing it (we never invent a worse-than-now age). A
+  `file_sent` event is a delivery and a `subagent_stop` belongs to a subagent;
+  neither is the session's own activity, and both leave the record alone,
+  except that a `subagent_stop` retires one live Codex child. While a stop
+  holds over live children, their tool events refresh its time and keep its
+  type (see "Waiting on itself" above).
 
   The strings kept are copied out of the event, so the map never pins the
   buffer a line was read from.
   """
   @spec apply_event(sessions(), map(), integer()) :: sessions()
-  def apply_event(sessions, %{"type" => type}, _now)
-      when type in ["file_sent", "subagent_stop"],
-      do: sessions
+  def apply_event(sessions, %{"type" => "file_sent"}, _now), do: sessions
+
+  def apply_event(sessions, %{"type" => "subagent_stop", "tmuxSession" => session} = ev, now)
+      when is_binary(session) do
+    case Map.get(sessions, session) do
+      %{kids: kids, harness: "codex", session_id: id} = rec
+      when kids > 0 and id == :erlang.map_get("sessionId", ev) ->
+        rec = %{rec | kids: kids - 1}
+        # The last child of a held stop returning is when the turn passes to
+        # the human; its time is the start of that wait.
+        rec =
+          if rec.kids == 0 and rec.type in ["stop", "notification"],
+            do: %{rec | at: event_at(ev, now)},
+            else: rec
+
+        Map.put(sessions, session, rec)
+
+      _ ->
+        sessions
+    end
+  end
+
+  def apply_event(sessions, %{"type" => "subagent_stop"}, _now), do: sessions
 
   def apply_event(sessions, %{"type" => type, "tmuxSession" => session} = ev, now)
       when is_binary(type) and is_binary(session) and session != "" do
     if Shuttle.Dispatcher.shuttle_session?(session) do
-      at =
-        case Map.get(ev, "timestamp") do
-          ts when is_integer(ts) -> ts
-          _ -> now
+      prev = Map.get(sessions, session)
+      at = event_at(ev, now)
+      kids = live_children(type, ev, prev)
+
+      record =
+        if held?(prev, ev) and kids > 0 and type in ["pre_tool_use", "post_tool_use"] do
+          %{prev | at: at, kids: kids}
+        else
+          %{
+            type: :binary.copy(type),
+            at: at,
+            kind: notification_kind(ev),
+            bg: background_tasks(type, ev, prev),
+            kids: kids,
+            harness: Map.get(ev, "harness"),
+            session_id: Map.get(ev, "sessionId")
+          }
         end
 
-      Map.put(sessions, :binary.copy(session), %{
-        type: :binary.copy(type),
-        at: at,
-        kind: notification_kind(ev),
-        bg: background_tasks(type, ev, Map.get(sessions, session))
-      })
+      Map.put(sessions, :binary.copy(session), record)
     else
       sessions
     end
@@ -230,6 +281,50 @@ defmodule Shuttle.WaitingTracker do
   def merge_known(known, rebuilt) do
     Map.merge(known, rebuilt, fn _session, old, new -> if new.at >= old.at, do: new, else: old end)
   end
+
+  defp event_at(ev, now) do
+    case Map.get(ev, "timestamp") do
+      ts when is_integer(ts) -> ts
+      _ -> now
+    end
+  end
+
+  # A stop whose session still has live spawned agents: the turn ended, and
+  # the tool events that follow are the children's, not a new parent turn.
+  defp held?(
+         %{type: type, kids: kids, harness: harness, session_id: id},
+         %{"harness" => harness, "sessionId" => id}
+       )
+       when kids > 0 and type in ["stop", "notification"],
+       do: true
+
+  defp held?(_prev, _event), do: false
+
+  # How many spawned agents this session has running, as of this event. A
+  # Codex `spawn_agent` or `followup_task` that returned starts a child turn,
+  # and its `subagent_stop` (handled above) ends one. A session start or end
+  # clears the count. Everything else, a prompt included, carries it forward:
+  # no later event restates it.
+  defp live_children(type, _ev, _prev) when type in ["session_start", "session_end"], do: 0
+
+  defp live_children(type, %{"harness" => "codex"} = ev, prev) do
+    carried =
+      case prev do
+        %{harness: "codex", session_id: id, kids: kids}
+        when id == :erlang.map_get("sessionId", ev) ->
+          kids
+
+        _ ->
+          0
+      end
+
+    if type == "post_tool_use" and
+         ev["tool"] in ["collaborationspawn_agent", "collaborationfollowup_task"],
+       do: carried + 1,
+       else: carried
+  end
+
+  defp live_children(_type, _ev, _prev), do: 0
 
   defp notification_kind(%{"notificationKind" => kind}) when is_binary(kind),
     do: :binary.copy(kind)

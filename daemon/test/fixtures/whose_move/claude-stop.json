@@ -1,0 +1,8 @@
+{
+  "timestamp": 1791558981894,
+  "type": "stop",
+  "harness": "claude-code",
+  "backgroundTasks": 2,
+  "sessionId": "probe-parent",
+  "tmuxSession": "probe-01J00000000000000000000000-shuttle"
+}

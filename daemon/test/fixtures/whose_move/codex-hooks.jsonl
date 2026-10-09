@@ -1,0 +1,11 @@
+{"timestamp":1791558182069,"type":"session_start","harness":"codex","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558182485,"type":"user_prompt_submit","harness":"codex","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558185731,"type":"pre_tool_use","harness":"codex","tool":"Bash","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558186380,"type":"post_tool_use","harness":"codex","tool":"Bash","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558187981,"type":"pre_tool_use","harness":"codex","tool":"collaborationspawn_agent","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558188084,"type":"post_tool_use","harness":"codex","tool":"collaborationspawn_agent","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558189010,"type":"stop","harness":"codex","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558192000,"type":"pre_tool_use","harness":"codex","tool":"Bash","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558224978,"type":"pre_tool_use","harness":"codex","tool":"Bash","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558315056,"type":"post_tool_use","harness":"codex","tool":"Bash","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}
+{"timestamp":1791558315912,"type":"subagent_stop","harness":"codex","sessionId":"probe-parent","tmuxSession":"probe-01J00000000000000000000000-shuttle"}

@@ -31,8 +31,12 @@ defmodule Shuttle.WaitingTrackerTest do
 
   # Append an event carrying its own real timestamp (defaults to @base).
   defp append(events, type, session, ts \\ @base) do
-    line = Jason.encode!(%{type: type, tmuxSession: session, timestamp: ts})
-    File.write!(events, line <> "\n", [:append])
+    extra =
+      if String.starts_with?(session, "cx-"),
+        do: %{harness: "codex", sessionId: "parent"},
+        else: %{}
+
+    append_ev(events, type, session, Map.put(extra, :timestamp, ts))
   end
 
   # Write a line directly to disk BEFORE boot, to seed from a pre-existing file.
@@ -302,6 +306,195 @@ defmodule Shuttle.WaitingTrackerTest do
 
     assert phase(name, "foo-01J00000000000000000000000-shuttle") == "waiting"
     assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == @base - 120_000
+  end
+
+  # ── Codex: live spawned agents hold the turn ──
+
+  @codex "cx-01J00000000000000000000000-shuttle"
+
+  defp tool(events, type, tool, ts) do
+    append_ev(events, type, @codex, %{
+      tool: tool,
+      timestamp: ts,
+      harness: "codex",
+      sessionId: "parent"
+    })
+  end
+
+  test "a Codex stop over a live spawned agent stays working until the agent returns",
+       %{events: events} do
+    name = start(events)
+    tool(events, "pre_tool_use", "collaborationspawn_agent", @base)
+    tool(events, "post_tool_use", "collaborationspawn_agent", @base + 100)
+    append(events, "stop", @codex, @base + 1_000)
+    assert wait_until(fn -> last_event_at(name, @codex) == @base + 1_000 end)
+    assert phase(name, @codex) == "working"
+
+    # The child's own tool calls land on the parent's session; they refresh the
+    # time without turning the parent's ended turn back into a running one.
+    tool(events, "pre_tool_use", "Bash", @base + 2_000)
+    tool(events, "post_tool_use", "Bash", @base + 3_000)
+    assert wait_until(fn -> last_event_at(name, @codex) == @base + 3_000 end)
+    assert phase(name, @codex) == "working"
+
+    append(events, "subagent_stop", @codex, @base + 4_000)
+    assert wait_until(fn -> phase(name, @codex) == "waiting" end)
+    assert last_event_at(name, @codex) == @base + 4_000
+  end
+
+  test "a Codex parent that waits on its child in-turn reads working throughout",
+       %{events: events} do
+    name = start(events)
+    tool(events, "post_tool_use", "collaborationspawn_agent", @base)
+    tool(events, "pre_tool_use", "collaborationwait_agent", @base + 100)
+    append(events, "subagent_stop", @codex, @base + 1_000)
+    tool(events, "post_tool_use", "collaborationwait_agent", @base + 1_100)
+    assert wait_until(fn -> last_event_at(name, @codex) == @base + 1_100 end)
+    assert phase(name, @codex) == "working"
+
+    append(events, "stop", @codex, @base + 2_000)
+    assert wait_until(fn -> phase(name, @codex) == "waiting" end)
+  end
+
+  test "a prompt does not forget a Codex child still running", %{events: events} do
+    name = start(events)
+    tool(events, "post_tool_use", "collaborationspawn_agent", @base)
+    append(events, "stop", @codex, @base + 100)
+    append(events, "user_prompt_submit", @codex, @base + 200)
+    append(events, "stop", @codex, @base + 300)
+    assert wait_until(fn -> last_event_at(name, @codex) == @base + 300 end)
+    assert phase(name, @codex) == "working"
+  end
+
+  test "a Codex child that never reports back cannot hold the turn past the bound",
+       %{events: events} do
+    tool(events, "post_tool_use", "collaborationspawn_agent", @base - 2 * @hour_ms)
+    append(events, "stop", @codex, @base - 2 * @hour_ms + 100)
+    name = start(events)
+    assert phase(name, @codex) == "waiting"
+  end
+
+  test "idle reminders hold through child tools and the last of two children passes the turn" do
+    alias Shuttle.WaitingTracker, as: Tracker
+
+    spawn = %{
+      "type" => "post_tool_use",
+      "tool" => "collaborationspawn_agent",
+      "harness" => "codex",
+      "sessionId" => "parent",
+      "tmuxSession" => @codex,
+      "timestamp" => @base
+    }
+
+    sessions = %{} |> Tracker.apply_event(spawn, @base) |> Tracker.apply_event(spawn, @base)
+    sessions = Tracker.apply_event(sessions, Map.put(spawn, "type", "stop"), @base)
+    idle = spawn |> Map.put("type", "notification") |> Map.put("notificationKind", "idle_prompt")
+    sessions = Tracker.apply_event(sessions, idle, @base)
+    sessions = Tracker.apply_event(sessions, Map.put(spawn, "tool", "Bash"), @base)
+    assert %{phase: "working"} = Tracker.phases(sessions, @base)[@codex]
+    done = Map.put(spawn, "type", "subagent_stop")
+    sessions = Tracker.apply_event(sessions, done, @base)
+    assert %{phase: "working"} = Tracker.phases(sessions, @base)[@codex]
+    sessions = Tracker.apply_event(sessions, done, @base)
+    assert %{phase: "waiting"} = Tracker.phases(sessions, @base)[@codex]
+  end
+
+  test "real Codex hooks hold an idle parent through child tools and release on child stop" do
+    events =
+      Path.expand("../fixtures/whose_move/codex-hooks.jsonl", __DIR__)
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
+
+    Enum.reduce(events, %{}, fn ev, sessions ->
+      sessions = Shuttle.WaitingTracker.apply_event(sessions, ev, ev["timestamp"])
+      phase = Shuttle.WaitingTracker.phases(sessions, ev["timestamp"])[ev["tmuxSession"]].phase
+      assert phase == if(ev["type"] == "subagent_stop", do: "waiting", else: "working")
+      sessions
+    end)
+  end
+
+  test "a real Claude stop includes live background agents" do
+    ev =
+      Path.expand("../fixtures/whose_move/claude-stop.json", __DIR__)
+      |> File.read!()
+      |> Jason.decode!()
+
+    sessions = Shuttle.WaitingTracker.apply_event(%{}, ev, ev["timestamp"])
+
+    assert %{phase: "working"} =
+             Shuttle.WaitingTracker.phases(sessions, ev["timestamp"])[ev["tmuxSession"]]
+  end
+
+  test "another harness or Codex session cannot inherit or retire live children" do
+    alias Shuttle.WaitingTracker, as: Tracker
+
+    spawn = %{
+      "type" => "post_tool_use",
+      "tool" => "collaborationspawn_agent",
+      "harness" => "codex",
+      "sessionId" => "parent",
+      "tmuxSession" => @codex,
+      "timestamp" => @base
+    }
+
+    stop = Map.put(spawn, "type", "stop")
+    sessions = %{} |> Tracker.apply_event(spawn, @base) |> Tracker.apply_event(stop, @base)
+    foreign_stop = stop |> Map.put("type", "subagent_stop") |> Map.put("sessionId", "nested")
+
+    assert %{phase: "working"} =
+             sessions
+             |> Tracker.apply_event(foreign_stop, @base)
+             |> Tracker.phases(@base)
+             |> Map.fetch!(@codex)
+
+    foreign_spawn = Map.put(spawn, "sessionId", "nested")
+    replaced = Tracker.apply_event(sessions, foreign_spawn, @base)
+    assert %{type: "post_tool_use", session_id: "nested", kids: 1} = replaced[@codex]
+    # A stop from the old parent cannot retire the replacement's child.
+    assert %{phase: "working"} =
+             replaced
+             |> Tracker.apply_event(Map.put(spawn, "type", "subagent_stop"), @base)
+             |> Tracker.phases(@base)
+             |> Map.fetch!(@codex)
+
+    for ev <- [
+          Map.put(stop, "sessionId", "other"),
+          Map.put(stop, "harness", "claude-code"),
+          Map.put(stop, "harness", "pi")
+        ] do
+      assert %{phase: "waiting"} =
+               sessions
+               |> Tracker.apply_event(ev, @base)
+               |> Tracker.phases(@base)
+               |> Map.fetch!(@codex)
+    end
+  end
+
+  test "Codex permission prompts override live children and completion stays mid-turn" do
+    alias Shuttle.WaitingTracker, as: Tracker
+
+    spawn = %{
+      "type" => "post_tool_use",
+      "tool" => "collaborationspawn_agent",
+      "harness" => "codex",
+      "sessionId" => "parent",
+      "tmuxSession" => @codex,
+      "timestamp" => @base
+    }
+
+    sessions = Tracker.apply_event(%{}, spawn, @base)
+
+    prompt =
+      spawn |> Map.put("type", "notification") |> Map.put("notificationKind", "permission_prompt")
+
+    sessions = Tracker.apply_event(sessions, prompt, @base)
+    sessions = Tracker.apply_event(sessions, Map.put(spawn, "tool", "Bash"), @base)
+    assert %{phase: "attention"} = Tracker.phases(sessions, @base)[@codex]
+    sessions = Tracker.apply_event(sessions, Map.put(spawn, "type", "subagent_stop"), @base)
+    assert %{phase: "attention"} = Tracker.phases(sessions, @base)[@codex]
+    sessions = Tracker.apply_event(sessions, Map.put(spawn, "type", "user_prompt_submit"), @base)
+    assert %{phase: "working"} = Tracker.phases(sessions, @base)[@codex]
   end
 
   test "the suppression expires: an endless task cannot silence a worker forever",
