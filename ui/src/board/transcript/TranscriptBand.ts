@@ -1292,7 +1292,7 @@ export class TranscriptBand {
       if (this.fullOpen && this.messageToReveal !== null) {
         const source = this.messageToReveal
         let match: Message | undefined
-        for (let turnIndex = this.model.turns.length - 1; turnIndex >= 0 && !match; turnIndex--) {
+        for (let turnIndex = this.model.turns.length - 1; this.hasInitialRender && turnIndex >= 0 && !match; turnIndex--) {
           const turn = this.model.turns[turnIndex]
           const stepIndex = turn.steps.findIndex(step => step.kind === 'text' && step.text.trim() === source)
           if (stepIndex < 0) continue

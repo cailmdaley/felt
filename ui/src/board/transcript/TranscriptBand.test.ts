@@ -85,6 +85,24 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelector('.ws-transcript-pane')).toBeNull()
   })
 
+  it('waits for initial streaming decode to finish before consuming a native match', async () => {
+    let stream!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({ start(controller) { stream = controller } })
+    const band = makeBand(vi.fn<typeof fetch>(async () => new Response(body)))
+    band.follow(target(latestId))
+    band.openAtMessage('Early outcome')
+    stream.enqueue(encoded(records('First prompt', 'Early outcome')))
+    await settle()
+    await tick()
+    expect(band.el.querySelector('.ws-transcript-outcome')?.textContent).toContain('Early outcome')
+    stream.enqueue(encoded(Array.from({ length: 6 }, (_, index) => records(`Later prompt ${index}`, `Later answer ${index}`)).flat()))
+    stream.close()
+    await settle()
+    await tick()
+    expect(band.el.querySelector('.ws-transcript-outcome')).toBeNull()
+    expect(band.el.querySelector('.ws-transcript-pane [data-turn="0"]')?.textContent).toContain('Early outcome')
+  })
+
   it.each([404, 202, 503])('reads the full outcome even when the initial transcript response is %s', async (status) => {
     const band = makeBand(vi.fn<typeof fetch>(async () => new Response('', { status })))
     band.follow(target(latestId))
