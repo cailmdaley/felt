@@ -104,10 +104,10 @@ describe('In flight bands', () => {
     expect(question.ask).toEqual({ text: 'Your view on the cut would help — report §2', at: '2026-10-05T12:00:00Z' })
     data.now.inFlight.push(...workerFeed(['waiting', 'working']).now.inFlight)
     data.now.inFlight.reverse().sort(byInFlightBand)
-    expect(data.now.inFlight.map(card => card.id)).toEqual(['question', 'worker-0', 'worker-1'])
+    expect(data.now.inFlight.map(card => card.id)).toEqual(['worker-0', 'question', 'worker-1'])
     const root = renderer(data).renderNowSection(data.now, {})
     expect(flightOrder(root)).toEqual([
-      { band: 'question', caption: 'Question', label: 'Question', ids: ['question', 'worker-0'] },
+      { band: 'question', caption: 'Question', label: 'Question', ids: ['worker-0', 'question'] },
       { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-1'] },
     ])
     expect(root.querySelector('.kbn-card-question')?.textContent).toBe(question.ask!.text)

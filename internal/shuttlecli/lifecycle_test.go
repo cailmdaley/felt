@@ -831,11 +831,11 @@ func TestShuttleRest_LegacyPinnedRests(t *testing.T) {
 	}
 }
 
-// TestShuttleRest_Refusals: a standing constitution is placed by its schedule
-// and a card with a verdict can both be rested.
+// A standing constitution and a card with a verdict can both be rested.
 func TestShuttleRest_StandingAndVerdict(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "standing", felt.StatusActive, standingRole(t.TempDir()), nil)
 	tempered := &felt.Felt{ID: "done", Name: "done", Status: felt.StatusClosed}

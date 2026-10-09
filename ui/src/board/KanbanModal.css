@@ -847,7 +847,7 @@
   color: var(--kbn-ink);
   border: 1px solid currentColor;
   border-radius: 8px;
-  box-shadow: 0 6px 24px #0003;
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--kbn-shade) 20%, transparent);
 }
 .kbn-rest-popover label { display: grid; gap: 8px; }
 .kbn-rest-popover small { opacity: .65; }

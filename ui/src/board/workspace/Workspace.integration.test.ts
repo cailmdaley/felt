@@ -113,11 +113,18 @@ beforeEach(() => {
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('s on the constitution page requests rest, not the sidebar', async () => {
+    workspace.dispose()
+    const onRest = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
+    workspace.open(cards[0]); await flush(); await flush()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
+    expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
+  })
   it('a Question opens its report rather than the previously selected prose', async () => {
     workspace.open(cards[0]); await flush(); await flush()
     const prose = document.querySelector<HTMLElement>('[data-key="fiber:host-a:alpha"]')!
     prose.click(); await flush()
-    workspace.returnToOrigin(); await flush()
     workspace.openQuestion(cards[0]); await flush(); await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key'))
       .toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))

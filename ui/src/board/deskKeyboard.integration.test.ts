@@ -65,6 +65,20 @@ beforeEach(() => {
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Desk keyboard selection', () => {
+  it.each(['', '2099-06-12'])('s on the focused constitution rests with date %j through lifecycle', async until => {
+    press('j')
+    press('s')
+    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover input')!
+    expect(input).not.toBeNull()
+    input.value = until
+    press('Enter', {}, input)
+    await Promise.resolve(); await Promise.resolve()
+    const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'review', origin: 'local', until })
+    expect(document.querySelector('.kbn-rest-popover')).toBeNull()
+  })
+
   it('gives Escape in the bar\'s Find to the field before releasing an engaged lens', () => {
     inside.lensCycleId = 'season'
     const find = document.querySelector<HTMLInputElement>('.kbn-viewtabs-find input')!
