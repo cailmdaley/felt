@@ -1289,7 +1289,7 @@ export class TranscriptBand {
         this.previewAnchor = this.previewScroll = anchorLatest(this.preview)
       }
       this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
-      if (this.fullOpen && this.messageToReveal !== null && this.hasInitialRender) {
+      if (this.fullOpen && this.messageToReveal !== null) {
         const source = this.messageToReveal
         let match: Message | undefined
         for (let turnIndex = this.model.turns.length - 1; turnIndex >= 0 && !match; turnIndex--) {

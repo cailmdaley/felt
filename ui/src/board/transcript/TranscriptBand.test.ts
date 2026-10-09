@@ -85,6 +85,16 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelector('.ws-transcript-pane')).toBeNull()
   })
 
+  it.each([404, 202, 503])('reads the full outcome even when the initial transcript response is %s', async (status) => {
+    const band = makeBand(vi.fn<typeof fetch>(async () => new Response('', { status })))
+    band.follow(target(latestId))
+    band.openAtMessage('Independently authored **outcome**.')
+    await settle()
+    await tick()
+    expect(band.el.querySelector('.ws-transcript-outcome')?.textContent).toContain('Independently authored outcome.')
+    expect(band.el.querySelector('.ws-transcript-outcome strong')?.textContent).toBe('outcome')
+  })
+
   it('retains a requested outcome until an in-flight read delivers its message', async () => {
     let deliver!: (response: Response) => void
     const bytes = encoded(records('Initial prompt', 'Initial answer'))
