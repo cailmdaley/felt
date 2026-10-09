@@ -397,8 +397,12 @@ defmodule Shuttle.PollerTest do
                    MockRunner.felt_root(),
                    "ls",
                    "--json",
-                   "--has-field",
-                   "shuttle",
+                   "--any",
+                   "field:shuttle",
+                   "--any",
+                   "field:due",
+                   "--any",
+                   "tag:cycle",
                    "--json-field",
                    projection
                  ]
@@ -1598,6 +1602,7 @@ defmodule Shuttle.PollerTest do
     health = Poller.snapshot(poller).poll_health
     assert health.state == "idle"
     assert health.stall_timeout_ms == 600_000
+    assert health.full_scan_budget_ms == 10_000
     assert health.stall_timeout_ms < :sys.get_state(poller, @state_timeout).full_scan_timeout_ms
     assert health.discovery[MockRunner.felt_root()].mode == :full
     assert health.stalls == 0
@@ -6063,11 +6068,11 @@ defmodule Shuttle.PollerTest do
 
     listings =
       Enum.filter(MockRunner.commands(), fn
-        {"shuttle", args} -> "ls" in args and "--has-field" in args
+        {"shuttle", args} -> "ls" in args and "--any" in args
         _ -> false
       end)
 
-    assert length(listings) >= 3
+    assert length(listings) == 3
     assert Enum.count(listings, fn {_cmd, args} -> "--ids-from" in args end) == 1
     assert Poller.snapshot(poller).poll_health.discovery[MockRunner.felt_root()].mode == :full
   end
@@ -6314,7 +6319,7 @@ defmodule Shuttle.PollerTest do
     cycle_commands = Enum.drop(MockRunner.commands(), before)
 
     assert Enum.count(cycle_commands, fn
-             {"shuttle", args} -> "--has-field" in args
+             {"shuttle", args} -> "--any" in args
              _ -> false
            end) == 1
 
@@ -6341,7 +6346,7 @@ defmodule Shuttle.PollerTest do
 
     shuttle_ls =
       Enum.filter(MockRunner.commands(), fn
-        {"shuttle", args} -> "--has-field" in args
+        {"shuttle", args} -> "--any" in args
         _ -> false
       end)
 
@@ -6374,11 +6379,11 @@ defmodule Shuttle.PollerTest do
     info = state.discovery[MockRunner.felt_root()]
     assert info.mode == :hot
     assert info.next_full_due_at <= System.system_time(:millisecond)
-    assert state.stall_timeout_ms == 3 * 120_000 + 1_000
+    assert state.stall_timeout_ms == 120_000 + 1_000
 
     listings =
       Enum.filter(MockRunner.commands(), fn
-        {"shuttle", args} -> "--has-field" in args
+        {"shuttle", args} -> "--any" in args
         _ -> false
       end)
 
@@ -6391,7 +6396,7 @@ defmodule Shuttle.PollerTest do
     sync_poll_cycle!(poller)
     retry = Enum.drop(MockRunner.commands(), commands_before)
 
-    assert Enum.any?(retry, fn {cmd, args} -> cmd == "shuttle" and "--has-field" in args end)
+    assert Enum.any?(retry, fn {cmd, args} -> cmd == "shuttle" and "--any" in args end)
 
     refute Enum.any?(retry, fn {cmd, args} ->
              cmd == "shuttle" and "--ids-from" in args
@@ -6423,6 +6428,34 @@ defmodule Shuttle.PollerTest do
     assert info.mode == :full
     assert info.last_full_duration_ms <= state.full_scan_budget_ms
     assert state.stall_timeout_ms == 300_000
+  end
+
+  @tag :adaptive_discovery
+  test "a zero full-scan budget spaces scans at the configured minimum interval" do
+    id = "tests/discovery-zero-budget"
+    store = MockRunner.felt_root()
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\\n", "open")
+    min_interval = 60_000
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_zero_budget,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        full_scan_budget_ms: 0,
+        full_scan_min_interval_ms: min_interval,
+        felt_stores: [store]
+      )
+
+    settle_poller!(poller)
+
+    info = :sys.get_state(poller, @state_timeout).discovery[store]
+    assert info.mode == :hot
+
+    assert info.next_full_due_at + info.last_full_duration_ms ==
+             info.last_full_completed_at + min_interval
   end
 
   @tag :adaptive_discovery
@@ -6552,7 +6585,7 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
     state = :sys.get_state(poller, @state_timeout)
-    assert state.stall_timeout_ms == 4 * 60_000 + 1_000
+    assert state.stall_timeout_ms == 2 * 60_000 + 1_000
   end
 
   defp notify_worker_exit(poller, fiber_id) do

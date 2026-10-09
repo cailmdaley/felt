@@ -245,8 +245,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ]
 
     # shuttle=true: the rows this daemon owns (shuttle block + host == own),
-    # PLUS the host-less kinds the aux walks admit. "Plain todo" is a human
-    # `due:` card with no shuttle block — it rides the `--has-field due` walk.
+    # plus ownerless `due:` cards and `cycle` fibers admitted by the union.
     # "Owned elsewhere" and "Unowned draft" name an owner (a peer, and nobody)
     # so they stay out. Served from the poller's warm document cache.
     warm_poller!(store)
@@ -1197,7 +1196,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     Body.
     """)
 
-    # shuttle block + due + cycle tag: matched by all three walks, served once.
+    # shuttle block + due + cycle tag: matches all three union arms, served once.
     write_fiber!(store, "tests/triple", """
     ---
     name: Triple match
@@ -1222,8 +1221,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert cycle, "cycle fiber was not admitted to the owner feed"
     assert "cycle" in cycle["fiber"]["tags"]
 
-    # It carries a due AND the cycle tag, so BOTH aux walks return it. The union
-    # dedupes across aux walks, not just against the shuttle walk.
+    # It carries a due AND the cycle tag, so it matches multiple union arms
+    # but appears only once in the feed.
     assert Enum.count(fibers, &(&1["fiber"]["name"] == "Autumn cycle")) == 1
 
     # felt normalizes a bare `YYYY-MM-DD` to a full instant on the way out —

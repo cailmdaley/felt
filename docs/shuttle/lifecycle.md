@@ -214,8 +214,10 @@ marker. Only such a host needs the exception, so it is off unless the host opts
 in, in `~/.config/shuttle/host.json` (or `$SHUTTLE_HOST_CONFIG_FILE`):
 
 ```json
-{"class": "shared-multi-user", "quarantine_auto_release": true}
+{"class": "shared-multi-user", "quarantine_auto_release": true, "full_scan_budget_ms": 0}
 ```
+
+`full_scan_budget_ms` is an optional non-negative integer read once at daemon boot. It overrides the 10,000 ms default that selects adaptive discovery: after a full listing, a scan slower than this budget puts the store in hot mode until its next scheduled full scan. Set it to `0` to keep the store hot after its first full listing; full scans still run at `full_scan_min_interval_ms` cadence. The effective value is reported in `poll_health`. This is useful on shared login nodes where repeated full scans should be paced even when a scan happens to finish quickly.
 
 On any other host a SIGKILL is an out-of-memory kill or a person's `kill -9`,
 and holding is the right answer. With the key absent or anything but `true`,
