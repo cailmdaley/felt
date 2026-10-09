@@ -707,6 +707,22 @@ const origins = {
   shelf: { other: 'desk', open: async p => { await barTab(p, 'shelf').click(); await p.locator('.ws-overview-folio').filter({ hasText: name }).click() } },
   chronicle: { other: 'shelf', open: async p => { await barTab(p, 'chronicle').click(); await p.locator('.chr-name').filter({ hasText: name }).click() } },
 }
+for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the reader opened from ${origin}`, async p => {
+  await origins[origin].open(p)
+  await choose(p, 'Constitution')
+  await appFocus(p)
+  await p.keyboard.press('s')
+  const panel = p.locator('.kbn-rest-popover')
+  await panel.waitFor()
+  assert.equal(await panel.evaluate(el => el.matches(':popover-open')), true, 'Rest escapes the reader stacking context into the top layer')
+  assert.equal(await panel.evaluate(el => {
+    const rect = el.getBoundingClientRect()
+    return el.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))
+  }), true, 'Rest is visible and receives pointer input above the reader')
+  await panel.getByRole('button', { name: 'Rest', exact: true }).click()
+  await panel.waitFor({ state: 'detached' })
+})
+
 for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(`The bar marks the reader's origin (${origin}): its tab and key close back to it, another tab switches and closes`, async p => {
   const state = () => p.evaluate(() => ({ open: !!document.querySelector('.kbn-reader-open'), view: document.querySelector('.kbn-viewtabs .kbn-viewtab-active')?.dataset.view,
     selected: [...document.querySelectorAll('.kbn-viewtabs .kbn-viewtab[aria-selected="true"]')].map(t => t.dataset.view) }))

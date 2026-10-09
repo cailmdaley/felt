@@ -117,7 +117,9 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     const onRest = vi.fn()
     workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
-    workspace.open(cards[0]); await flush(); await flush()
+    const constitution = { ...cards[0], shuttleKind: 'oneshot' as const }
+    bodyCards = [constitution]
+    workspace.open(constitution); await flush(); await flush()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
   })

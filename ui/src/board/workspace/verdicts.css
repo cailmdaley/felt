@@ -74,12 +74,21 @@
 .ws-fiber-acts .ws-fiber-worker[hidden] { display: none; }
 .ws-fiber-acts .kbn-ctl-verdict { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .ws-fiber-acts .kbn-ctl-verdict[hidden] { display: none; }
-.ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+.ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) {
   min-height: var(--ws-control-height); padding: 0 10px; border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius);
   background: transparent; font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; cursor: pointer;
 }
 .ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) { background: transparent; border-color: transparent !important; }
 .ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); border-color: transparent !important; }
+/* Rest is calm and frequent: muted ink, plated only under the pointer, and
+   unpigmented because it is no verdict. Discard, the rare verb, steps back
+   toward it until the review it belongs to. */
+.ws-fiber-acts .kbn-ctl-btn.kbn-ctl-rest { color: var(--ws-ink-muted); background: transparent; border-color: transparent; }
+.ws-fiber-acts .kbn-ctl-btn.kbn-ctl-rest:hover:not(:disabled) { color: var(--ws-ink); background: var(--ws-hover); }
+.ws-fiber-acts .kbn-ctl-btn.kbn-ctl-rest:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: 2px; }
+.ws-reader .ws-fiber-acts:not([data-column='awaitingReview']) .kbn-ctl-btn.kbn-ctl-discard:not(:hover, :focus-visible) {
+  color: color-mix(in srgb, var(--verdict-ink) 55%, var(--ws-ink-muted));
+}
 .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-verdict { gap: 8px; }
 .ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
   min-height: 36px; padding: 0 16px; background: var(--verdict-tint); border-color: var(--verdict-edge) !important;
@@ -93,6 +102,7 @@
   .ws-fiber-prose .ws-prose-header { flex-wrap: wrap; }
   .ws-fiber-prose .ws-fiber-acts { flex: 1 1 auto; }
   .ws-fiber-acts .ws-fiber-worker { display: none; }
+  .ws-fiber-acts .kbn-ctl-btn.kbn-ctl-rest { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px; }
   .ws-reader .ws-fiber-acts[data-column] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
     min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px; border-color: var(--verdict-edge) !important;
   }

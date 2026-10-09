@@ -2119,6 +2119,32 @@
 .kbn-review-meta-btn:hover {
   opacity: 1;
 }
+/* Rest at the card's foot: a quiet word, seen under the pointer or focus and
+   on the key-selected card, never plated. Touch leaves it to the reader. */
+.kbn-card-rest {
+  flex-shrink: 0;
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--kbn-ink-muted);
+  font: inherit;
+  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.kbn-card:hover .kbn-card-rest,
+.kbn-card:focus-within .kbn-card-rest,
+.kbn-card.kbn-key-selected .kbn-card-rest {
+  opacity: 0.75;
+  pointer-events: auto;
+}
+.kbn-card .kbn-card-rest:is(:hover, :focus-visible) { opacity: 1; color: var(--kbn-ink); }
+.kbn-card .kbn-card-rest:focus-visible { outline: 1px dashed var(--kbn-ink-muted); outline-offset: 1px; }
+@media (hover: none) {
+  .kbn-card-rest { display: none; }
+}
 @media (hover: none) {
   /* Without hover only awaiting review shows its verdicts; work in flight
      keeps its card to the worker, and the reader's head carries the pair. */

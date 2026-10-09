@@ -17,6 +17,10 @@ export function fiberPageColumn(card: KanbanCard) {
 export function onDesk(card: KanbanCard): boolean {
   return isAgentCard(card) || card.isCycle
 }
+/** Rest reaches every Shuttle-managed constitution, including one with a verdict. */
+export function restReachable(card: KanbanCard): boolean {
+  return isAgentCard(card)
+}
 /** Temper and Discard reach every fiber on the Desk's lifecycle that has no
  *  verdict yet: a draft, work in flight, or work awaiting review. */
 export function verdictReachable(card: KanbanCard): boolean {

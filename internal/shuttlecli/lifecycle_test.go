@@ -831,30 +831,30 @@ func TestShuttleRest_LegacyPinnedRests(t *testing.T) {
 	}
 }
 
-// A standing constitution and a card with a verdict can both be rested.
+// Standing, tempered and discarded constitutions all rest with no verdict.
 func TestShuttleRest_StandingAndVerdict(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "standing", felt.StatusActive, standingRole(t.TempDir()), nil)
-	tempered := &felt.Felt{ID: "done", Name: "done", Status: felt.StatusClosed}
-	if err := tempered.SetExtraField("shuttle", oneshot()); err != nil {
-		t.Fatal(err)
+	for id, verdict := range map[string]bool{"done": true, "discarded": false} {
+		seedShuttleRole(t, storage, id, felt.StatusClosed, oneshot(), &verdict)
 	}
-	if err := tempered.SetExtraField("tempered", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := storage.Write(tempered); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"standing", "done"} {
+	for _, id := range []string{"standing", "done", "discarded"} {
 		if out, err := runIn(t, env, dir, "rest", id, "--local"); err != nil {
 			t.Fatalf("rest on %s: %v\n%s", id, err, out)
 		}
-		got, _ := storage.Read(id)
-		if got.Status != felt.StatusOpen || readTempered(got) != nil {
-			t.Fatalf("rest did not clear the verdict for %s", id)
+		got := mustRead(t, storage, id)
+		if got.Status != felt.StatusOpen || got.ClosedAt != nil || readTempered(got) != nil {
+			t.Fatalf("rest did not reopen and clear the verdict for %s", id)
+		}
+		raw, err := os.ReadFile(storage.Path(got.ID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), "horizon: stashed") || strings.Contains(string(raw), "tempered:") {
+			t.Fatalf("rest must stash %s without a stored verdict:\n%s", id, raw)
 		}
 	}
 }

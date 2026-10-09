@@ -16,7 +16,7 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
+import { fiberPageColumn, restReachable, verdictReachable } from './fiberPageState.js'
 import { workerPlate } from './workerPlate.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
@@ -409,6 +409,8 @@ export interface DockOptions {
   meeting?: MeetingJoinControl
   /** Whether the Desk draws this card's worker phase (it does in flight). */
   workerPhase?: (card: KanbanCard) => boolean
+  /** Opens the Rest popover on the button that asked for it. */
+  onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 }
 
 /**
@@ -458,6 +460,7 @@ export class Dock {
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
   private readonly workerPhase: (card: KanbanCard) => boolean
+  private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 
   constructor(
     shuttleBase: string,
@@ -472,6 +475,7 @@ export class Dock {
     this.onOpenWorker = onWorkerOpen
     this.meeting = opts.meeting ?? null
     this.workerPhase = opts.workerPhase ?? (() => true)
+    this.onRest = opts.onRest
   }
 
   /** The dock's element, built on first use so controls can be exercised without a page. */
@@ -551,7 +555,7 @@ export class Dock {
     let band = this.bands.get(key)
     if (!band) {
       band = new Dock(this.shuttleBase, this.onSaved, this.onTransition, this.onOpenWorker,
-        { meeting: this.meeting ?? undefined, workerPhase: this.workerPhase })
+        { meeting: this.meeting ?? undefined, workerPhase: this.workerPhase, onRest: this.onRest })
       band.setVerdictQueue(this.queueVerdict)
       this.bands.set(key, band)
     }
@@ -766,6 +770,13 @@ export class Dock {
     const row = document.createElement('div')
     row.className = 'kbn-ctl-verdict'
     markVerdictHost(row, card)
+    if (this.onRest) {
+      const rest = ctlButton('Rest', 'kbn-ctl-rest')
+      rest.title = 'Rest (s)'
+      rest.setAttribute('aria-label', `Rest ${card.name} (s)`)
+      rest.addEventListener('click', () => this.onRest?.(card, rest))
+      row.append(rest)
+    }
     for (const [label, cls, target] of [
       ['Temper', 'kbn-ctl-temper', 'tempered'],
       ['Discard', 'kbn-ctl-discard', 'composted'],
@@ -936,6 +947,7 @@ export class Dock {
     const worker = document.createElement('span')
     worker.className = 'ws-fiber-worker'
     this.head.replaceChildren(worker, verdict)
+    const rest = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-rest')
     const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
     const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
     const menu = document.createElement('details')
@@ -962,15 +974,18 @@ export class Dock {
       this.el.dataset.column = column
       this.head.dataset.column = column
       const reachable = verdictReachable(card)
-      verdict.hidden = !reachable
+      const restable = !!this.onRest && restReachable(card)
+      verdict.hidden = !reachable && !restable
+      if (rest) rest.hidden = !restable
+      temper.hidden = discard.hidden = !reachable
       this.paintHeadWorker(card, worker)
       if (reachable && column !== 'inFlight' && column !== 'awaitingReview') {
         verdict.remove()
-        if (temper.parentElement !== choices) choices.append(temper, discard)
+        if (temper.parentElement !== choices) choices.append(...(rest ? [rest] : []), temper, discard)
         if (menu.parentElement !== foot) foot.append(menu)
       } else {
         if (verdict.parentElement !== this.head) this.head.append(verdict)
-        if (temper.parentElement !== verdict) verdict.append(temper, discard)
+        if (temper.parentElement !== verdict) verdict.append(...(rest ? [rest] : []), temper, discard)
         menu.remove()
       }
     }

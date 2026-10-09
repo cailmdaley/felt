@@ -250,6 +250,8 @@ interface KanbanSurfaceRendererOptions {
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
+  /** Opens the Rest popover on the card's own Rest affordance. */
+  onRest?: (card: KanbanCard, anchor: HTMLElement) => void
   /** Resolve the owning host's registry default for agent labels. */
   getFleetDefaultAgent?: (origin: string) => string
   /** A card held still under the thumb — the touch reading of the drag. The
@@ -1910,13 +1912,30 @@ export class KanbanSurfaceRenderer {
       after.className = 'kbn-card-meta-spacer'
       meta.append(...(kind === 'inFlight' ? [] : [before]), reviewMetaActions, after)
     }
-    if (rightChip) {
+    // Rest reaches every Shuttle-managed card (restReachable); a hover or
+    // focus affordance at the foot, left to the reader's button on touch.
+    let restBtn: HTMLButtonElement | undefined
+    if (this.o.onRest && isAgentCard(card) && !isStale) {
+      restBtn = document.createElement('button')
+      restBtn.type = 'button'
+      restBtn.className = 'kbn-card-rest'
+      restBtn.textContent = 'rest'
+      restBtn.title = 'Rest (s)'
+      restBtn.setAttribute('aria-label', `Rest fiber: ${card.name} (s)`)
+      const button = restBtn
+      restBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.o.onRest?.(card, button)
+      })
+    }
+    if (rightChip || restBtn) {
       if (!reviewMetaActions) {
         const spacer = document.createElement('div')
         spacer.className = 'kbn-card-meta-spacer'
         meta.append(spacer)
       }
-      meta.append(rightChip)
+      if (restBtn) meta.append(restBtn)
+      if (rightChip) meta.append(rightChip)
     }
     el.append(meta)
 
