@@ -214,14 +214,36 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
       links = references(document, candidates => send('references', { candidates: candidates.filter(candidate => candidate.length <= limits.length).slice(0, limits.count) }),
         (type, candidate) => { if (active) send(type, { candidate }) })
       links.scan()
-      // Report handlers installed at load get first refusal.
+      const sendKey = (event: KeyboardEvent): void => {
+        event.preventDefault()
+        send('key', { key: event.key, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
+          shiftKey: event.shiftKey, repeat: event.repeat })
+      }
+      window.addEventListener('keydown', event => {
+        if (!event.isTrusted || event.isComposing || event.keyCode === 229 || event.key !== 'Escape') return
+        // Browsers normally consume native fullscreen Escape. If delivered, it
+        // belongs only to fullscreen, before any deck handler or board message.
+        if (document.fullscreenElement) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+          void document.exitFullscreen().catch(() => {})
+          return
+        }
+        // Reveal consumes Escape to OPEN overview even on an ordinary slide.
+        // In the reader that key backs out instead. Existing deck layers and
+        // editable targets keep their Escape; held keys cannot open overview.
+        if (!active || event.altKey || event.ctrlKey || event.metaKey || !forward(event)
+          || !document.querySelector('.reveal') || document.querySelector('.reveal.overview, .reveal .overlay')) return
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        if (!event.repeat) sendKey(event)
+      }, true)
+      // Report handlers installed at load get first refusal for other keys.
       window.addEventListener('keydown', event => {
         if (!event.isTrusted || !forward(event)) return
         const action = intent(event, 'reader', bindings, target => !forward({ target, defaultPrevented: false } as KeyboardEvent))
         if (!action || !allowed.includes(action)) return
-        event.preventDefault()
-        send('key', { key: event.key, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
-          shiftKey: event.shiftKey, repeat: event.repeat })
+        sendKey(event)
       })
     }, 0)
   }, { once: true })
