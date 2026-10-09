@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeRecord } from './records.js'
+import { normalizeRecord, promptParts, type Entry } from './records.js'
 
 describe('normalizeRecord', () => {
   it('reads Claude assistant blocks in order and skips empty thinking and sidechains', () => {
@@ -107,5 +107,43 @@ describe('normalizeRecord', () => {
     expect(normalizeRecord({ type: 'message', message: null })).toEqual([])
     expect(normalizeRecord({ type: 'response_item', payload: [] })).toEqual([])
     expect(normalizeRecord({ type: 'system', subtype: 'warning', message: { content: 'ignored' } })).toEqual([])
+  })
+})
+
+describe('harness wrappers in Claude Code user text', () => {
+  const user = (content: string): Entry[] => normalizeRecord({ type: 'user', message: { content } })
+
+  it('reads a relayed session message under its preamble line as an event, not a prompt', () => {
+    expect(user('Another Claude session sent a message:\n<teammate-message teammate_id="strip-b" color="green">\nDone.\n</teammate-message>'))
+      .toEqual([{ kind: 'event', label: 'Teammate', detail: 'strip-b', text: 'Done.' }])
+  })
+
+  it('reads shell escapes and command stderr as events', () => {
+    expect(user('<bash-input>git status</bash-input>')).toEqual([{ kind: 'event', label: 'Shell', detail: 'git status', text: 'git status' }])
+    expect(user('<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>')).toEqual([{ kind: 'event', label: 'Shell output', text: 'clean' }])
+    expect(user('<local-command-stderr>nope</local-command-stderr>')).toEqual([{ kind: 'event', label: 'Command output', text: 'nope' }])
+  })
+
+  it('marks any Shuttle worker brief as a dispatch', () => {
+    expect(user('You are a Shuttle capture worker. Activate the felt skill.')[0]).toMatchObject({ kind: 'prompt', dispatch: true })
+  })
+})
+
+describe('promptParts', () => {
+  it('splits pasted blocks out of the prompt, unwrapped', () => {
+    expect(promptParts('Look:\n\n<pasted_content id="6629">\nline one\nline two\n</pasted_content>\n\nThoughts?')).toEqual([
+      { kind: 'text', text: 'Look:' },
+      { kind: 'pasted', text: 'line one\nline two' },
+      { kind: 'text', text: 'Thoughts?' },
+    ])
+    expect(promptParts('<pasted_content id="a">only paste</pasted_content>')).toEqual([{ kind: 'pasted', text: 'only paste' }])
+    expect(promptParts('plain words')).toEqual([{ kind: 'text', text: 'plain words' }])
+  })
+
+  it('runs an unclosed paste to the end of the prompt', () => {
+    expect(promptParts('Before <pasted_content id="x">\ncut off')).toEqual([
+      { kind: 'text', text: 'Before' },
+      { kind: 'pasted', text: 'cut off' },
+    ])
   })
 })

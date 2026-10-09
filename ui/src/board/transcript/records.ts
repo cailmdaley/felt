@@ -65,7 +65,11 @@ function event(label: string, fields: { detail?: string; text?: string } = {}, t
 }
 
 function classifiedClaudeText(raw: string, isMeta: boolean, time?: number): Entry | null {
-  const text = raw.replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, '').trim()
+  const text = raw
+    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, '')
+    // Claude Code heads a relayed session message with a line of its own.
+    .replace(/^\s*Another Claude session sent a message:\s*(?=<)/, '')
+    .trim()
   if (!text) return null
 
   if (isMeta && text.startsWith('Base directory for this skill:')) {
@@ -93,9 +97,18 @@ function classifiedClaudeText(raw: string, isMeta: boolean, time?: number): Entr
   if (text.startsWith('<local-command-stdout>')) {
     return event('Command output', { text: innerText(text) }, time)
   }
+  if (text.startsWith('<local-command-stderr>')) {
+    return event('Command output', { text: innerText(text) }, time)
+  }
   if (text.startsWith('<local-command-caveat>')) return null
+  if (text.startsWith('<bash-input>')) {
+    return event('Shell', { detail: firstLine(innerText(text)), text: innerText(text) }, time)
+  }
+  if (/^<bash-(stdout|stderr)>/.test(text)) {
+    return event('Shell output', { text: text.replace(/<\/?bash-(stdout|stderr)>/g, '').trim() || undefined }, time)
+  }
 
-  return at({ kind: 'prompt' as const, text, images: 0, dispatch: /^You are a Shuttle worker\b/.test(text) }, time)
+  return at({ kind: 'prompt' as const, text, images: 0, dispatch: /^You are a Shuttle (?:[\w-]+ )?worker\b/.test(text) }, time)
 }
 
 function innerText(text: string): string {
@@ -296,4 +309,32 @@ export function normalizeRecord(raw: unknown): Entry[] {
   } catch {
     return []
   }
+}
+
+export type PromptPart = { kind: 'text' | 'pasted'; text: string }
+
+/**
+ * Split a prompt around the `<pasted_content>` blocks Claude Code wraps
+ * pasted text in, so the reader shows the paste as a quoted block rather
+ * than as markup. An unclosed block runs to the end of the prompt.
+ */
+export function promptParts(text: string): PromptPart[] {
+  const parts: PromptPart[] = []
+  const open = /<pasted_content\b[^>]*>/gi
+  let rest = 0
+  let match: RegExpExecArray | null
+  while ((match = open.exec(text))) {
+    const before = text.slice(rest, match.index).trim()
+    if (before) parts.push({ kind: 'text', text: before })
+    const start = match.index + match[0].length
+    const close = /<\/pasted_content\s*>/i.exec(text.slice(start))
+    const end = close ? start + close.index : text.length
+    const pasted = text.slice(start, end).replace(/^\n+|\s+$/g, '')
+    if (pasted) parts.push({ kind: 'pasted', text: pasted })
+    rest = close ? end + close[0].length : text.length
+    open.lastIndex = rest
+  }
+  const after = text.slice(rest).trim()
+  if (after) parts.push({ kind: 'text', text: after })
+  return parts
 }
