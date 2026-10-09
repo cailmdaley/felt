@@ -40,7 +40,7 @@ describe('normalizeRecord', () => {
     })).toEqual([{ kind: 'event', label: 'Task', detail: 'Mask split completed', text: '<task-notification><summary>Mask split completed</summary><task-id>7</task-id></task-notification>' }])
     expect(normalizeRecord({ type: 'user', message: { content: '<local-command-caveat>not a prompt</local-command-caveat>' } })).toEqual([])
     expect(normalizeRecord({ type: 'user', message: { content: 'You are a Shuttle worker for shear calibration.' } })[0]).toMatchObject({ kind: 'prompt', dispatch: true })
-    expect(normalizeRecord({ type: 'system', subtype: 'compact_boundary' })).toEqual([{ kind: 'event', label: 'Compacted' }])
+    expect(normalizeRecord({ type: 'system', subtype: 'compact_boundary' })).toEqual([{ kind: 'event', label: 'Compacted', contextReset: true, context: undefined }])
   })
 
   it('counts Claude prompt and tool-result images without emitting their payloads', () => {

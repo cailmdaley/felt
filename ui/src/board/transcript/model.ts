@@ -28,6 +28,9 @@ export interface TranscriptStats {
   startedAt?: number
   endedAt?: number
   model?: string
+  context?: number
+  window?: number
+  cacheUntil?: number
 }
 
 interface ToolReference {
@@ -47,6 +50,10 @@ export class TranscriptModel {
   private readonly tools = new Map<string, ToolReference>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
+  private facts: Pick<TranscriptStats, 'model' | 'context' | 'window' | 'cacheUntil'> = {}
+
+  private hourCacheUntil: number | undefined
+  private shortCacheUntil: number | undefined
 
   get turns(): readonly Turn[] {
     return this.turnList
@@ -54,6 +61,24 @@ export class TranscriptModel {
 
   append(entries: readonly Entry[]): void {
     for (const entry of entries) {
+      if (entry.kind === 'usage') {
+        if (entry.model) this.facts.model = entry.model
+        this.facts.context = entry.context
+        this.facts.window = entry.window
+        const cache = entry.cache
+        if (cache && entry.at !== undefined && (cache.read > 0 || cache.write > 0)) {
+          const hourRead = cache.read > 0 && this.hourCacheUntil !== undefined && this.hourCacheUntil > entry.at
+          if (cache.hourWrite > 0 || hourRead) this.hourCacheUntil = entry.at + 3_600_000
+          if (cache.write > cache.hourWrite || (cache.read > 0 && !hourRead)) this.shortCacheUntil = entry.at + 300_000
+          this.facts.cacheUntil = Math.max(this.hourCacheUntil ?? 0, this.shortCacheUntil ?? 0)
+        }
+        continue
+      }
+      if (entry.kind === 'event' && entry.contextReset) {
+        this.facts.context = entry.context
+        this.facts.cacheUntil = undefined
+        this.hourCacheUntil = this.shortCacheUntil = undefined
+      }
       if (entry.kind === 'result') {
         const reference = this.tools.get(entry.id)
         if (!reference) continue
@@ -113,6 +138,8 @@ export class TranscriptModel {
     this.tools.clear()
     this.dirty.clear()
     this.resetRequested = true
+    this.facts = {}
+    this.hourCacheUntil = this.shortCacheUntil = undefined
   }
 
   stats(): TranscriptStats {
@@ -134,6 +161,7 @@ export class TranscriptModel {
       ...(startedAt === undefined ? {} : { startedAt }),
       ...(endedAt === undefined ? {} : { endedAt }),
       ...(model === undefined ? {} : { model }),
+      ...this.facts,
     }
   }
 

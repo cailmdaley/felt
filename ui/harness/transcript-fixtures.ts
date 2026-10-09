@@ -1,7 +1,10 @@
+import claudeUsage from '../src/board/transcript/fixtures/claude-usage.jsonl?raw'
+import codexUsage from '../src/board/transcript/fixtures/codex-usage.jsonl?raw'
+
 export const WORKSPACE_LATEST_SESSION = 'c1a5e0d2-5b8f-4c1e-9a7e-2f3d4b5c6a71'
 export const WORKSPACE_EARLIER_SESSION = 'd2b6f1e3-6c90-4d2f-8b5a-3e4f6a7b8c92'
 
-export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome'
+export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome' | 'warm' | 'cold' | 'context'
 
 export const LONG_OUTCOME = 'What changed in the deck:\n\n' + Array.from({ length: 12 }, (_, i) =>
   `${i + 1}. **Validation slide ${i + 1}.** The fictional response and mask-split results are shown alongside the independent reference bins. The source products and reviewer notes are ready for the next check.`,
@@ -107,6 +110,15 @@ function liveTranscript(now: number, updates: number): string {
   return records.join('')
 }
 
+/** Captured numeric usage, with only its timestamp shifted for screenshot staging. */
+function headFacts(now: number, scenario: TranscriptScenario): string {
+  if (!['warm', 'cold', 'context'].includes(scenario)) return ''
+  const source = scenario === 'context' ? codexUsage : claudeUsage
+  const record = JSON.parse(source.trim().split('\n')[0]) as RecordValue
+  record.timestamp = timestamp(now, scenario === 'cold' ? -7_200_000 : -60_000)
+  return line(record)
+}
+
 export function workspaceTranscriptBytes(
   scenario: TranscriptScenario,
   now: number,
@@ -116,5 +128,5 @@ export function workspaceTranscriptBytes(
   const source = scenario === 'large'
     ? largeTranscript(now)
     : ordinaryTranscript(transcriptStart, options.earlier === true, scenario === 'long-outcome') + (scenario === 'live' ? liveTranscript(now, options.updates ?? 0) : '')
-  return encoder.encode(source)
+  return encoder.encode(source + headFacts(now, scenario))
 }

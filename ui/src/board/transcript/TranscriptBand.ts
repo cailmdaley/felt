@@ -5,6 +5,7 @@ import { TranscriptModel, segments, type Step, type ToolStep, type Turn } from '
 import { TranscriptFeed, type FeedStatus } from './feed.js'
 import { toolLabel } from './tools.js'
 import { promptParts, type Entry } from './records.js'
+import { tokenLabel } from './tokenLabel.js'
 import './transcript.css'
 
 export interface TranscriptTarget {
@@ -321,6 +322,9 @@ export class TranscriptBand {
   private readonly reading: HTMLElement
   private readonly liveDot: HTMLElement
   private readonly liveLabel: HTMLElement
+  private readonly cacheFact: HTMLElement
+  private readonly contextFact: HTMLElement
+  private cacheTimer: number | null = null
   private readonly openButton: HTMLButtonElement
   private readonly latestButton: HTMLButtonElement
   private readonly note: HTMLParagraphElement
@@ -396,7 +400,11 @@ export class TranscriptBand {
     chevron.className = 'ws-transcript-chevron'
     chevron.setAttribute('aria-hidden', 'true')
     chevron.textContent = '▾'
-    this.head.append(this.label, this.reading, this.liveDot, this.liveLabel, chevron)
+    this.cacheFact = document.createElement('span')
+    this.cacheFact.className = 'ws-transcript-fact ws-transcript-cache'
+    this.contextFact = document.createElement('span')
+    this.contextFact.className = 'ws-transcript-fact ws-transcript-context'
+    this.head.append(this.label, this.reading, this.liveDot, this.liveLabel, this.cacheFact, this.contextFact, chevron)
     this.openButton = createButton('ws-transcript-open-full', 'Full transcript')
     this.openButton.setAttribute('aria-expanded', 'false')
     headRow.append(this.head, this.openButton)
@@ -523,6 +531,7 @@ export class TranscriptBand {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.clearCacheTimer()
     this.closeFull()
     this.stopPollTimer()
     this.clearLoadingTimer()
@@ -555,6 +564,7 @@ export class TranscriptBand {
       this.readingPromise = null
       this.cancelPendingRender()
       this.clearView()
+      this.model.reset()
       this.setNote(null)
       this.el.hidden = true
       this.paintHead()
@@ -645,8 +655,37 @@ export class TranscriptBand {
     this.paneReading.textContent = pieces.join(' · ')
     this.liveDot.hidden = !target?.live
     this.liveLabel.hidden = !target?.live
+    this.paintFacts()
     this.latestButton.hidden = !(this.pinned && this.latest && target && !this.sameTarget(target, this.latest))
     this.el.hidden = !target && !this.pinned
+  }
+
+  private clearCacheTimer(): void {
+    if (this.cacheTimer !== null) window.clearTimeout(this.cacheTimer)
+    this.cacheTimer = null
+  }
+
+  /** Expiry is independent of transcript polling and the band's folded/live state. */
+  private paintFacts(): void {
+    this.clearCacheTimer()
+    const stats = this.model.stats()
+    const until = stats.cacheUntil
+    const warm = until !== undefined && until > Date.now()
+    this.cacheFact.hidden = until === undefined
+    this.cacheFact.classList.toggle('ws-transcript-cache-cold', !warm)
+    this.cacheFact.textContent = warm ? `Cache warm until ${clock(until!).text}` : 'Cache cold'
+    this.cacheFact.title = until === undefined ? '' : `Estimated from Claude cache usage; expiry ${clock(until).title}`
+    if (warm) {
+      this.cacheTimer = window.setTimeout(() => {
+        this.cacheTimer = null
+        if (!this.disposed) this.paintFacts()
+      }, Math.min(until! - Date.now(), 2_147_483_647))
+    }
+    this.contextFact.hidden = stats.context === undefined
+    this.contextFact.textContent = stats.context === undefined ? ''
+      : `Context ${tokenLabel(stats.context)}${stats.window ? ` / ${tokenLabel(stats.window)}` : ''}`
+    this.contextFact.title = stats.context === undefined ? ''
+      : `Last recorded input: ${new Intl.NumberFormat('en-US').format(stats.context)} tokens${stats.window ? `; window ${new Intl.NumberFormat('en-US').format(stats.window)} tokens` : '; session window not recorded'}`
   }
 
   private agentName(): string {

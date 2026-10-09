@@ -1,10 +1,21 @@
+export type UsageEntry = {
+  kind: 'usage'
+  at?: number
+  model?: string
+  context?: number
+  window?: number
+  /** Only Claude's native usage records establish a cache TTL. */
+  cache?: { read: number; write: number; hourWrite: number }
+}
+
 export type Entry =
+  | UsageEntry
   | { kind: 'prompt'; text: string; images: number; dispatch: boolean; at?: number }
   | { kind: 'text'; text: string; at?: number; model?: string }
   | { kind: 'thinking'; text: string; at?: number }
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
   | { kind: 'result'; id: string; text: string; isError: boolean; images: number; at?: number }
-  | { kind: 'event'; label: string; detail?: string; text?: string; at?: number }
+  | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
 
 type ObjectValue = Record<string, unknown>
 
@@ -16,6 +27,15 @@ function object(value: unknown): ObjectValue | null {
 
 function string(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+function count(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function sumCounts(...values: unknown[]): number | undefined {
+  const counts = values.map(count)
+  return counts.every((n) => n !== undefined) ? counts.reduce<number>((total, n) => total + n!, 0) : undefined
 }
 
 function timestamp(value: unknown): number | undefined {
@@ -60,7 +80,7 @@ function firstLine(text: string, limit = 80): string {
   return line.length <= limit ? line : `${line.slice(0, limit - 1)}…`
 }
 
-function event(label: string, fields: { detail?: string; text?: string } = {}, time?: number): Entry {
+function event(label: string, fields: { detail?: string; text?: string } = {}, time?: number): Extract<Entry, { kind: 'event' }> {
   return at({ kind: 'event' as const, label, ...fields }, time)
 }
 
@@ -162,7 +182,9 @@ function claudeRecord(record: ObjectValue): Entry[] {
   const message = object(record.message)
   const time = timestamp(record.timestamp)
   if (record.type === 'system') {
-    return record.subtype === 'compact_boundary' ? [event('Compacted', {}, time)] : []
+    return record.subtype === 'compact_boundary'
+      ? [{ ...event('Compacted', {}, time), contextReset: true, context: count(object(record.compactMetadata)?.postTokens) }]
+      : []
   }
   if (!message) return []
   if (record.type === 'user') return claudeUser(record, message, time)
@@ -170,7 +192,16 @@ function claudeRecord(record: ObjectValue): Entry[] {
   const model = string(message.model)
   const content = message.content
   const items = typeof content === 'string' ? [{ type: 'text', text: content }] : blocks(content)
-  const out: Entry[] = []
+  const usage = object(message.usage)
+  const out: Entry[] = usage ? [at({
+    kind: 'usage' as const, model,
+    context: sumCounts(usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens),
+    cache: {
+      read: count(usage.cache_read_input_tokens) ?? 0,
+      write: count(usage.cache_creation_input_tokens) ?? 0,
+      hourWrite: count(object(usage.cache_creation)?.ephemeral_1h_input_tokens) ?? 0,
+    },
+  }, time)] : []
   for (const block of items) {
     const value = string(block.text)
     if (block.type === 'text' && value && value !== '(no content)') {
@@ -203,6 +234,9 @@ function piUserContent(value: unknown, time?: number): Entry[] {
 }
 
 function piRecord(record: ObjectValue): Entry[] {
+  if (record.type === 'compaction' || record.type === 'context_edit') {
+    return [{ ...event('Compacted', {}, timestamp(record.timestamp)), contextReset: true }]
+  }
   if (record.type === 'custom_message') {
     const content = string(record.content)
     return [event('Context', { detail: string(record.customType), text: content }, timestamp(record.timestamp))]
@@ -222,7 +256,12 @@ function piRecord(record: ObjectValue): Entry[] {
   if (role !== 'assistant') return []
 
   const items = typeof content === 'string' ? [{ type: 'text', text: content }] : blocks(content)
-  const out: Entry[] = []
+  const usage = object(message.usage)
+  const model = string(message.model)
+  const out: Entry[] = usage && !['error', 'aborted'].includes(String(message.stopReason)) ? [at({
+    kind: 'usage' as const, model,
+    context: sumCounts(usage.input, usage.cacheRead, usage.cacheWrite),
+  }, time)] : []
   for (const block of items) {
     const text = string(block.text)
     if (block.type === 'text' && text?.trim()) out.push(at({ kind: 'text' as const, text }, time))
@@ -260,8 +299,22 @@ function codexInput(value: unknown): unknown {
 
 function codexRecord(record: ObjectValue): Entry[] {
   const payload = object(record.payload)
-  if (record.type !== 'response_item' || !payload) return []
   const time = timestamp(record.timestamp)
+  if (record.type === 'compacted' || (record.type === 'event_msg' && payload?.type === 'context_compacted')) {
+    return [{ ...event('Compacted', {}, time), contextReset: true }]
+  }
+  if (record.type === 'event_msg' && payload?.type === 'token_count') {
+    const info = object(payload.info)
+    const usage = object(info?.last_token_usage)
+    // Compaction resets can report a retained total with no measured input/output.
+    const resetOnly = usage?.input_tokens === 0 && usage.output_tokens === 0
+      && (count(usage.total_tokens) ?? 0) > 0
+    return usage ? [at({ kind: 'usage' as const,
+      // Codex's cached input is a subset, not another part of the prompt.
+      context: resetOnly ? undefined : count(usage.input_tokens), window: count(info?.model_context_window),
+    }, time)] : []
+  }
+  if (record.type !== 'response_item' || !payload) return []
   switch (payload.type) {
     case 'message': {
       const role = string(payload.role)
@@ -303,8 +356,8 @@ export function normalizeRecord(raw: unknown): Entry[] {
   try {
     const record = object(raw)
     if (!record) return []
-    if (record.type === 'response_item') return codexRecord(record)
-    if (record.type === 'message' || record.type === 'custom_message') return piRecord(record)
+    if (['response_item', 'event_msg', 'compacted'].includes(String(record.type))) return codexRecord(record)
+    if (['message', 'custom_message', 'compaction', 'context_edit'].includes(String(record.type))) return piRecord(record)
     return claudeRecord(record)
   } catch {
     return []
