@@ -2,15 +2,29 @@
 .ws-dock .ws-transcript {
   grid-column: 1 / -1;
   min-width: 0;
-  margin-bottom: var(--ws-inset);
+  margin-top: var(--ws-small-gap);
   color: var(--ws-ink);
+  /* Who spoke, as a wash behind the words: the agent blue, the human warm.
+     The washes take the palette's own hues; the workspace's ink-deepened
+     speaker tokens turn grey at this strength. */
+  --ws-transcript-agent-wash: color-mix(in srgb, var(--kbn-agent, var(--ws-machine)) 12%, transparent);
+  --ws-transcript-agent-rule: color-mix(in srgb, var(--kbn-agent, var(--ws-machine)) 60%, transparent);
+  --ws-transcript-you-wash: color-mix(in srgb, var(--kbn-you, var(--ws-you)) 7%, transparent);
+  --ws-transcript-you-rule: color-mix(in srgb, var(--kbn-you, var(--ws-you)) 45%, transparent);
+}
+.ws-dock .ws-transcript-headrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 .ws-dock .ws-transcript-head {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   gap: 8px;
   box-sizing: border-box;
-  width: 100%;
+  min-width: 0;
   min-height: 30px;
   padding: 4px 0;
   border: 0;
@@ -20,7 +34,6 @@
   font: var(--ws-label-size)/1.4 var(--ws-serif);
 }
 .ws-dock .ws-transcript-head:hover { color: var(--ws-ink); }
-.ws-dock .ws-transcript-open .ws-transcript-head { border-bottom: 1px solid var(--ws-hairline-soft); }
 .ws-dock .ws-transcript-label { flex: none; }
 .ws-dock .ws-transcript-reading {
   min-width: 0;
@@ -41,7 +54,8 @@
   font: var(--ws-small-size)/1.4 var(--ws-mono);
 }
 .ws-dock .ws-transcript-live-dot::before { content: '·'; }
-.ws-dock .ws-transcript-live-dot::after {
+.ws-dock .ws-transcript-live-dot::after,
+.ws-dock .ws-transcript-working::before {
   content: '';
   width: var(--ws-dot-size);
   height: var(--ws-dot-size);
@@ -53,17 +67,19 @@
 .ws-dock .ws-transcript-chevron {
   flex: none;
   line-height: 1;
+  transform: rotate(-90deg);
   transition: transform 140ms ease;
 }
 .ws-dock .ws-transcript-chevron::before { content: '·'; margin-right: 8px; }
-.ws-dock .ws-transcript-open .ws-transcript-chevron { transform: rotate(180deg); }
+.ws-dock .ws-transcript-open .ws-transcript-chevron { transform: none; }
 @keyframes ws-transcript-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .35; }
 }
+.ws-dock .ws-transcript-open-full,
 .ws-dock .ws-transcript-latest,
-.ws-dock .ws-transcript-more,
 .ws-dock .ws-transcript-showall {
+  flex: none;
   min-height: 24px;
   padding: 2px 0;
   border: 0;
@@ -71,19 +87,189 @@
   color: var(--ws-ink-muted);
   text-align: left;
   text-decoration: underline;
+  text-decoration-color: var(--ws-hairline);
   text-underline-offset: 3px;
   font: italic var(--ws-label-size)/1.4 var(--ws-serif);
 }
-.ws-dock :is(.ws-transcript-latest, .ws-transcript-more, .ws-transcript-showall):hover { color: var(--ws-ink); }
+.ws-dock :is(.ws-transcript-open-full, .ws-transcript-latest, .ws-transcript-showall):hover {
+  color: var(--ws-ink);
+  text-decoration-color: currentColor;
+}
 .ws-dock .ws-transcript-note {
   margin: 6px 0 0;
   color: var(--ws-ink-muted);
   font: italic var(--ws-label-size)/1.45 var(--ws-serif);
 }
 .ws-dock .ws-transcript-body { min-width: 0; }
+
+/* The last exchange, in a window a third of the viewport tall. */
+.ws-dock .ws-transcript-preview {
+  position: relative;
+  box-sizing: border-box;
+  max-height: 33vh;
+  max-height: 33dvh;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-hairline-soft);
+  border-radius: var(--ws-control-radius);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  cursor: zoom-in;
+}
+.ws-dock .ws-transcript-preview:hover { border-color: var(--ws-hairline); }
+/* Scrolled to the newest message, the window fades at its top: there is more above. */
+.ws-dock .ws-transcript-preview.ws-transcript-scrolled {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, var(--ws-mask) 2.5em);
+  mask-image: linear-gradient(to bottom, transparent, var(--ws-mask) 2.5em);
+}
+.ws-dock .ws-transcript-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ws-dock .ws-transcript-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  color: var(--ws-ink-muted);
+  font: italic var(--ws-small-size)/1.4 var(--ws-serif);
+}
+
+/* A message: the speaker's rule and wash, a kicker, the words. */
+.ws-dock .ws-transcript-msg {
+  min-width: 0;
+  padding: 6px 10px 8px 12px;
+  border-left: 2px solid var(--ws-transcript-agent-rule);
+  border-radius: 0 var(--ws-control-radius) var(--ws-control-radius) 0;
+  background: var(--ws-transcript-agent-wash);
+}
+.ws-dock .ws-transcript-msg-you {
+  border-left-color: var(--ws-transcript-you-rule);
+  background: var(--ws-transcript-you-wash);
+}
+.ws-dock .ws-transcript-kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-bottom: 2px;
+  color: var(--ws-ink-muted);
+  font: var(--ws-small-size)/1.4 var(--ws-mono);
+}
+.ws-dock .ws-transcript-author-you,
+.ws-dock .ws-transcript-author-dispatch { color: var(--ws-you); }
+.ws-dock .ws-transcript-author-agent { color: var(--ws-machine); }
+.ws-dock .ws-transcript-clock { color: var(--ws-ink-muted); }
+.ws-dock .ws-transcript-prompt-text {
+  max-height: 4.6em;
+  overflow: hidden;
+  color: var(--ws-ink-soft);
+  font: var(--ws-label-size)/1.5 var(--ws-serif);
+  overflow-wrap: anywhere;
+}
+.ws-dock .ws-transcript-prompt-text.ws-transcript-overflowing { cursor: pointer; }
+.ws-dock .ws-transcript-prompt-text.ws-transcript-prompt-dispatch { max-height: 1.55em; }
+.ws-dock .ws-transcript-prompt-text p { margin: 0 0 .5em; }
+.ws-dock .ws-transcript-prompt-text p:last-child { margin-bottom: 0; }
+.ws-dock .ws-transcript-prompt-images {
+  display: block;
+  margin-top: 4px;
+  color: var(--ws-ink-muted);
+  font: var(--ws-small-size)/1.5 var(--ws-mono);
+}
+.ws-dock .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; overflow: visible; }
+.ws-dock .ws-transcript-prompt-text.ws-transcript-overflowing {
+  -webkit-mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
+  mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
+}
+.ws-dock .ws-transcript-prose {
+  color: var(--ws-ink);
+  font: var(--ws-prose-size)/1.55 var(--ws-serif);
+  overflow-wrap: anywhere;
+}
+.ws-dock .ws-transcript-prose p { margin: 0 0 .8em; }
+.ws-dock .ws-transcript-prose :is(p, ul, ol, pre, table):last-child { margin-bottom: 0; }
+.ws-dock .ws-transcript-prose :is(h1, h2, h3, h4) { margin: .4em 0 .3em; font-size: 1em; font-weight: 600; }
+.ws-dock .ws-transcript-prose :is(pre, code) { overflow-wrap: anywhere; }
+.ws-dock .ws-transcript-prose pre { white-space: pre-wrap; }
+.ws-dock .ws-transcript-prose table { max-width: 100%; border-collapse: collapse; font-size: .8em; }
+.ws-dock .ws-transcript-prose th,
+.ws-dock .ws-transcript-prose td { padding: 3px 7px; border: 1px solid var(--ws-hairline-soft); }
+.ws-dock .ws-transcript-prose img { display: none; }
+.ws-dock .ws-transcript-prose a { color: inherit; }
+
+/* The whole session: a dialog laid over the constitution page. */
+.ws-dock .ws-transcript-dialog {
+  position: fixed;
+  inset: var(--ws-transcript-top, 0px) var(--ws-transcript-right, 0px) var(--ws-transcript-bottom, 0px) var(--ws-transcript-left, 0px);
+  box-sizing: border-box;
+  width: auto;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink);
+  overflow: visible;
+}
+.ws-dock .ws-transcript-dialog[open] { display: flex; }
+.ws-dock .ws-transcript-dialog::backdrop { background: color-mix(in srgb, var(--ws-ink) 18%, transparent); }
+.ws-dock .ws-transcript-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(100%, 860px);
+  min-height: 0;
+  margin: 12px auto;
+  border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-radius);
+  background: var(--ws-paper);
+  box-shadow: var(--ws-float);
+  overflow: hidden;
+}
+.ws-dock .ws-transcript-dialog[open] .ws-transcript-panel { animation: ws-transcript-rise 160ms var(--ws-ease, ease-out); }
+@keyframes ws-transcript-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.ws-dock .ws-transcript-panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 10px 8px 18px;
+  border-bottom: 1px solid var(--ws-hairline-soft);
+  color: var(--ws-ink-muted);
+  font: var(--ws-label-size)/1.4 var(--ws-serif);
+}
+.ws-dock .ws-transcript-close {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--ws-control-radius);
+  background: transparent;
+  color: var(--ws-ink-muted);
+  font: 20px/1 var(--ws-serif);
+}
+.ws-dock .ws-transcript-close:hover { background: var(--ws-hover); color: var(--ws-ink); }
+.ws-dock .ws-transcript-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 18px 18px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
 .ws-dock .ws-transcript-earlier,
 .ws-dock .ws-transcript-steps,
-.ws-dock .ws-transcript-trailing,
 .ws-dock .ws-transcript-steps-more {
   display: block;
   box-sizing: border-box;
@@ -100,10 +286,9 @@
   white-space: nowrap;
   font: var(--ws-small-size)/1.6 var(--ws-mono);
 }
-.ws-dock :is(.ws-transcript-earlier, .ws-transcript-steps, .ws-transcript-trailing, .ws-transcript-steps-more):hover {
-  color: var(--ws-ink);
-}
-.ws-dock .ws-transcript-earlier { margin-top: 4px; }
+.ws-dock :is(.ws-transcript-earlier, .ws-transcript-steps, .ws-transcript-steps-more):hover { color: var(--ws-ink); }
+.ws-dock .ws-transcript-earlier { margin-top: 8px; }
+.ws-dock .ws-transcript-steps { padding-left: 12px; }
 .ws-dock .ws-transcript-turns {
   min-width: 0;
   margin: 0;
@@ -111,71 +296,13 @@
   list-style: none;
 }
 .ws-dock .ws-transcript-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
   padding-block: 14px;
 }
 .ws-dock .ws-transcript-turn + .ws-transcript-turn { border-top: 1px solid var(--ws-hairline-soft); }
-.ws-dock .ws-transcript-kicker {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  margin-bottom: 4px;
-  color: var(--ws-ink-muted);
-  font: var(--ws-small-size)/1.4 var(--ws-mono);
-}
-.ws-dock .ws-transcript-author-you,
-.ws-dock .ws-transcript-author-dispatch { color: var(--ws-you); }
-.ws-dock .ws-transcript-author-agent { color: var(--ws-machine); }
-.ws-dock .ws-transcript-clock { color: var(--ws-ink-muted); }
-.ws-dock .ws-transcript-prompt { min-width: 0; margin-bottom: 6px; }
-.ws-dock .ws-transcript-prompt-text {
-  max-height: 4.6em;
-  overflow: hidden;
-  padding-left: 12px;
-  border-left: 2px solid color-mix(in srgb, var(--ws-you) 45%, transparent);
-  color: var(--ws-ink-soft);
-  font: var(--ws-label-size)/1.5 var(--ws-serif);
-  overflow-wrap: anywhere;
-  cursor: pointer;
-}
-.ws-dock .ws-transcript-prompt-text.ws-transcript-prompt-dispatch { max-height: 1.55em; }
-.ws-dock .ws-transcript-prompt-images {
-  display: block;
-  margin: 4px 0 0 14px;
-  color: var(--ws-ink-muted);
-  font: var(--ws-small-size)/1.5 var(--ws-mono);
-}
-.ws-dock .ws-transcript-prompt-text.ws-transcript-unclamped,
-.ws-dock .ws-transcript-prose.ws-transcript-unclamped { max-height: none; overflow: visible; }
-.ws-dock .ws-transcript-prompt-text.ws-transcript-overflowing,
-.ws-dock .ws-transcript-prose.ws-transcript-overflowing {
-  -webkit-mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
-  mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
-}
-.ws-dock .ws-transcript-answer { min-width: 0; }
-.ws-dock .ws-transcript-prose {
-  max-height: 12em;
-  overflow: hidden;
-  color: var(--ws-ink);
-  font: var(--ws-prose-size)/1.55 var(--ws-serif);
-  overflow-wrap: anywhere;
-}
-.ws-dock .ws-transcript-answer-last .ws-transcript-prose { max-height: 22em; }
-.ws-dock .ws-transcript-prose p { margin: 0 0 .8em; }
-.ws-dock .ws-transcript-prose p:last-child { margin-bottom: 0; }
-.ws-dock .ws-transcript-prose :is(pre, code) { overflow-wrap: anywhere; }
-.ws-dock .ws-transcript-prose pre { white-space: pre-wrap; }
-.ws-dock .ws-transcript-prose table { max-width: 100%; border-collapse: collapse; font-size: .8em; }
-.ws-dock .ws-transcript-prose th,
-.ws-dock .ws-transcript-prose td { padding: 3px 7px; border: 1px solid var(--ws-hairline-soft); }
-.ws-dock .ws-transcript-prose img { display: none; }
-.ws-dock .ws-transcript-prose a { color: inherit; }
-.ws-dock .ws-transcript-say {
-  margin: 6px 0;
-  color: var(--ws-ink-soft);
-  font: 16px/1.5 var(--ws-serif);
-  overflow-wrap: anywhere;
-}
 .ws-dock .ws-transcript-tool { min-width: 0; margin: 2px 0; }
 .ws-dock .ws-transcript-tool-line {
   display: flex;
@@ -283,7 +410,7 @@
   min-height: 24px;
   font: italic var(--ws-label-size)/1.4 var(--ws-serif);
 }
-.ws-dock .ws-transcript-trailing .ws-transcript-pending { margin-left: 3px; }
+.ws-dock .ws-transcript-steps .ws-transcript-pending { margin-left: 3px; }
 .ws-dock .ws-transcript-steplist {
   margin: 4px 0 10px;
   padding: 0 0 0 12px;
@@ -291,13 +418,14 @@
   list-style: none;
 }
 .ws-dock .ws-transcript-steps-more { padding-left: 12px; }
-.ws-dock .ws-transcript-steps { margin-top: 2px; }
-.ws-dock .ws-transcript-trailing { margin-top: 2px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .ws-dock .ws-transcript-live-dot::after { animation: none; }
+  .ws-dock .ws-transcript-live-dot::after,
+  .ws-dock .ws-transcript-working::before { animation: none; }
   .ws-dock .ws-transcript-chevron { transition: none; }
+  .ws-dock .ws-transcript-dialog[open] .ws-transcript-panel { animation: none; }
 }
 @media (max-width: 600px) {
   .ws-dock .ws-transcript-prose { font-size: calc(var(--ws-label-size) + 1px); }
+  .ws-dock .ws-transcript-panel { margin: 0; border-radius: 0; }
 }

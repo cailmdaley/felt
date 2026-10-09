@@ -55,7 +55,37 @@ afterEach(() => {
 })
 
 describe('TranscriptBand', () => {
-  it('shows only the last turn, renders safe prose, and lazily expands tool details', async () => {
+  it('shows the last exchange as words only: the prompt and every agent message since, no tools or thinking', async () => {
+    const items = [
+      ...records('Inspect the first mask split.', 'Earlier report.'),
+      { type: 'user', timestamp: '2026-09-26T14:20:00.000Z', message: { content: 'Check the response again.' } },
+      { type: 'assistant', timestamp: '2026-09-26T14:21:00.000Z', message: { model: 'claude-opus', content: [
+        { type: 'text', text: 'Starting with the bins.' },
+        { type: 'thinking', thinking: 'Private reasoning.' },
+        { type: 'tool_use', id: 'call-2', name: 'Bash', input: { command: 'pytest -q' } },
+      ] } },
+      { type: 'user', timestamp: '2026-09-26T14:22:00.000Z', message: { content: [{ type: 'tool_result', tool_use_id: 'call-2', content: 'ok' }] } },
+      { type: 'assistant', timestamp: '2026-09-26T14:23:00.000Z', message: { model: 'claude-opus', content: [{ type: 'text', text: 'All **bins** pass.' }] } },
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+
+    const preview = band.el.querySelector<HTMLElement>('.ws-transcript-preview')!
+    expect(preview.hidden).toBe(false)
+    const messages = [...preview.querySelectorAll<HTMLElement>('.ws-transcript-msg')]
+    expect(messages.map((node) => node.classList.contains('ws-transcript-msg-agent') ? 'agent' : 'you')).toEqual(['you', 'agent', 'agent'])
+    expect(messages[0].textContent).toContain('Check the response again.')
+    expect(messages[1].textContent).toContain('Starting with the bins.')
+    expect(messages[2].querySelector('strong')?.textContent).toBe('bins')
+    expect(preview.textContent).not.toContain('Earlier report.')
+    expect(preview.textContent).not.toContain('pytest')
+    expect(preview.textContent).not.toContain('Private reasoning')
+    expect(preview.querySelector('.ws-transcript-steps, .ws-transcript-tool')).toBeNull()
+    expect(band.el.querySelector('.ws-transcript-turn')).toBeNull()
+  })
+
+  it('opens the whole session in a dialog, with tools behind each run and safe prose', async () => {
     const output = Array.from({ length: 48 }, (_, index) => `response-bin-${index + 1}`).join('\n')
     const answer = `# Calibration\n\nThe null test is consistent with $\\chi^2$.\n\n[unsafe](javascript:alert(1)) <img src=x onerror=alert(1)>\n\n${output}`
     const items = [
@@ -70,24 +100,32 @@ describe('TranscriptBand', () => {
 
     expect(requests[0]).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
     expect(band.el.hidden).toBe(false)
-    expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
-    expect(band.el.querySelector('.ws-transcript-prompt-text')?.textContent).toContain('You are a Shuttle worker')
-    expect(band.el.querySelector('.ws-transcript-kicker')?.textContent).toContain('dispatch')
-    expect(band.el.querySelector('.ws-transcript-answer')?.textContent).toContain('Calibration')
-    expect(band.el.querySelector('.ws-transcript-answer')?.innerHTML).not.toContain('<img')
-    expect(band.el.querySelector('.ws-transcript-answer')?.innerHTML).not.toContain('javascript:')
-    expect(band.el.querySelector('.ws-transcript-steplist')).toBeNull()
+    const dialog = band.el.querySelector<HTMLDialogElement>('.ws-transcript-dialog')!
+    expect(dialog.open).toBe(false)
+    band.el.querySelector<HTMLElement>('.ws-transcript-preview')!.click()
+    await settle()
+    expect(dialog.open).toBe(true)
 
-    const steps = band.el.querySelector<HTMLButtonElement>('.ws-transcript-steps')!
+    expect(dialog.querySelectorAll('.ws-transcript-turn')).toHaveLength(2)
+    const last = dialog.querySelectorAll<HTMLElement>('.ws-transcript-turn')[1]
+    expect(last.querySelector('.ws-transcript-prompt-text')?.textContent).toContain('You are a Shuttle worker')
+    expect(last.querySelector('.ws-transcript-kicker')?.textContent).toContain('dispatch')
+    const prose = last.querySelector('.ws-transcript-msg-agent')!
+    expect(prose.textContent).toContain('Calibration')
+    expect(prose.innerHTML).not.toContain('<img')
+    expect(prose.innerHTML).not.toContain('javascript:')
+    expect(dialog.querySelector('.ws-transcript-steplist')).toBeNull()
+
+    const steps = last.querySelector<HTMLButtonElement>('.ws-transcript-steps')!
+    expect(steps.textContent).toBe('▸ 1 step · 11m · Bash 1')
     steps.click()
-    expect(band.el.querySelectorAll('.ws-transcript-steplist')).toHaveLength(1)
-    const tool = band.el.querySelector<HTMLButtonElement>('.ws-transcript-tool-line')!
+    expect(dialog.querySelectorAll('.ws-transcript-steplist')).toHaveLength(1)
+    const tool = dialog.querySelector<HTMLButtonElement>('.ws-transcript-tool-line')!
     expect(tool.textContent).toContain('Bash')
     expect(tool.parentElement?.querySelector('.ws-transcript-tool-detail')).toBeNull()
     tool.click()
     const detail = tool.parentElement?.querySelector<HTMLElement>('.ws-transcript-tool-detail')!
     expect(detail.textContent).toContain('git log --oneline -5')
-    expect(detail.querySelector('.ws-transcript-tool-error')).toBeNull()
     expect(detail.querySelector('.ws-transcript-output')?.classList.contains('ws-transcript-error')).toBe(true)
     expect(detail.querySelector('.ws-transcript-output')?.textContent).toContain('response-bin-40')
     expect(detail.querySelector('.ws-transcript-output')?.textContent).not.toContain('response-bin-48')
@@ -96,9 +134,50 @@ describe('TranscriptBand', () => {
     showAll.click()
     expect(detail.querySelector('.ws-transcript-output')?.textContent).toContain('response-bin-48')
 
-    band.el.querySelector<HTMLButtonElement>('.ws-transcript-earlier')!.click()
-    expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(2)
-    expect([...band.el.querySelectorAll('.ws-transcript-turn')].map((node) => node.textContent)).toContainEqual(expect.stringContaining('Earlier report.'))
+    dialog.querySelector<HTMLButtonElement>('.ws-transcript-close')!.click()
+    expect(dialog.open).toBe(false)
+    expect(dialog.querySelector('.ws-transcript-turn')).toBeNull()
+  })
+
+  it('pages earlier turns inside the dialog, never in the page', async () => {
+    const items = Array.from({ length: 20 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}.`)).flat()
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+    const dialog = band.el.querySelector<HTMLDialogElement>('.ws-transcript-dialog')!
+    expect(dialog.querySelectorAll('.ws-transcript-turn')).toHaveLength(3)
+    const earlier = dialog.querySelector<HTMLButtonElement>('.ws-transcript-earlier')!
+    expect(earlier.textContent).toBe('▴ 12 earlier turns')
+    earlier.click()
+    expect(dialog.querySelectorAll('.ws-transcript-turn')).toHaveLength(15)
+    expect(earlier.textContent).toBe('▴ 5 earlier turns')
+    expect(band.el.querySelector('.ws-transcript-preview')?.textContent).toContain('Answer 19.')
+    expect(band.el.querySelector('.ws-transcript-preview')?.textContent).not.toContain('Answer 18.')
+  })
+
+  it('marks a live worker at work after its last message, and Escape closes the dialog alone', async () => {
+    const items = records('Run the suite.', 'unused', true).slice(0, 3)
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId, { live: true }))
+    await settle()
+    const preview = band.el.querySelector<HTMLElement>('.ws-transcript-preview')!
+    expect(preview.querySelector('.ws-transcript-working')).not.toBeNull()
+    expect(preview.textContent).not.toContain('git log')
+    band.follow(target(latestId, { live: false }))
+    await settle()
+    expect(preview.querySelector('.ws-transcript-working')).toBeNull()
+
+    const outside = vi.fn()
+    window.addEventListener('keydown', outside)
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    const dialog = band.el.querySelector<HTMLDialogElement>('.ws-transcript-dialog')!
+    expect(dialog.open).toBe(true)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+    expect(dialog.open).toBe(false)
+    expect(outside).not.toHaveBeenCalled()
+    window.removeEventListener('keydown', outside)
   })
 
   it('pins a History session and returns to the latest runtime session', async () => {
