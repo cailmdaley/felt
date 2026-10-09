@@ -51,7 +51,7 @@ import type {
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
-import { byCreatedAtDesc, deriveCycleLens, IN_FLIGHT_BANDS, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { byCreatedAtDesc, deriveCycleLens, IN_FLIGHT_BANDS, inFlightBand, isQuestion, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
 import type { PhoneMeeting } from './phoneMeeting'
 import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
@@ -125,8 +125,8 @@ const QUEUE_ROW_MIME = 'application/x-queue-row'
  * becomes the clickable worker button itself, so the human-attention state IS
  * the call-to-action rather than a flag beside it. `attention` (raised its hand
  * via Notification) takes over from the first event — the red manicule chip.
- * `waiting` (the worker stopped at a prompt) takes over once idle ≥60s — the
- * amber chip (the daemon stamps `waiting` the instant a stop fires, so the
+ * `waiting` (the worker ended its turn with nothing running under it — your
+ * turn) takes over once idle ≥60s — the amber chip (the daemon stamps `waiting` the instant a stop fires, so the
  * takeover is gated downstream in `renderCard`; under 60s the pill stays the
  * plain "Aloft"). The third live category, `working` (busy mid-tool), has NO entry here — its
  * absence IS the "no chip" behavior. The rest fire *without* a live worker to
@@ -141,7 +141,7 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   // a serif text glyph, not a color emoji — paired with `font-variant-emoji:
   // text` and the EB Garamond stack in CSS.
   attention: { label: '☞︎ at a prompt', title: 'The harness reports that the worker needs human input. Open it to respond.' },
-  waiting: { label: '⏸ waiting', title: 'The worker is paused at a prompt waiting for human input — open it to respond.' },
+  waiting: { label: '⏸ your turn', title: 'The worker ended its turn with nothing running under it — open it to respond.' },
   retrying: { label: '⟳ retrying', title: 'Dispatch failed — daemon is retrying with backoff. No live worker right now.' },
   due: { label: '◴ due', title: 'Scheduled tick elapsed — awaiting dispatch.' },
   dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
@@ -1411,12 +1411,14 @@ export class KanbanSurfaceRenderer {
           // looking, not a filter that takes the board away from you.
           dim: !hostsMeeting && lens !== null && !lens.memberIds.has(card.id),
         })
+        // Your turn holds questions and idle turns; a question is drawn heavier.
+        if (kind === 'inFlight' && inFlightBand(card) === 'yourTurn') el.dataset.turn = isQuestion(card) ? 'question' : 'idle'
         if (hostsMeeting) this.hostMeeting(el, meeting)
         parent.append(el)
       }
       if (kind === 'inFlight') {
-        // The read model owns order within each band. These captions expose
-        // the one state change that can move a card across the seam.
+        // The read model owns order within each band, questions first in
+        // Your turn. The captions name whose move each band is.
         for (const [key, label] of IN_FLIGHT_BANDS) {
           const members = cards.filter((card) => inFlightBand(card) === key)
           if (members.length === 0) continue

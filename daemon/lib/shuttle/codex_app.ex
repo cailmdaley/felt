@@ -83,9 +83,28 @@ defmodule Shuttle.CodexApp do
     end
   end
 
-  def state(id), do: status(id).state
+  def state(id), do: thread_read_status(id).state
 
+  @doc """
+  The thread's ownership state and board phase. An idle thread whose spawned
+  agents are still running is `"working"`, not `"waiting"`: the App Server
+  marks the parent idle the moment its turn ends, while each spawned agent is
+  its own loaded thread naming the parent in `parentThreadId` and staying
+  `active` until it finishes. Only an idle thread with no active descendant
+  is the human's move. When the children cannot be read, the thread stays
+  `"waiting"`.
+  """
   def status(id) do
+    case thread_read_status(id) do
+      %{phase: "waiting"} = status ->
+        if live_descendants?(id), do: %{status | phase: "working"}, else: status
+
+      status ->
+        status
+    end
+  end
+
+  defp thread_read_status(id) do
     result =
       with {:ok, client} <- client(),
            do:
@@ -110,6 +129,81 @@ defmodule Shuttle.CodexApp do
         %{state: :unknown, phase: nil}
     end
   end
+
+  # Loaded threads are the only ones that can be running, so the scan reads
+  # each loaded thread once and follows `parentThreadId` up from every active
+  # one; a grandchild spawned by a child counts.
+  defp live_descendants?(id) do
+    deadline = System.monotonic_time(:millisecond) + 2_000
+
+    with {:ok, client} <- client(),
+         {:ok, ids} <- loaded_thread_ids(client, nil, [], MapSet.new(), deadline) do
+      threads =
+        for tid <- ids, tid != id, thread = loaded_thread(client, tid, deadline), do: thread
+
+      parents = Map.new(threads, &{&1["id"], &1["parentThreadId"]})
+
+      Enum.any?(threads, fn thread ->
+        get_in(thread, ["status", "type"]) == "active" and
+          descends_from?(thread["parentThreadId"], id, parents, MapSet.new())
+      end)
+    else
+      _ -> false
+    end
+  end
+
+  defp loaded_thread_ids(client, cursor, acc, seen, deadline) do
+    params = if cursor, do: %{"cursor" => cursor}, else: %{}
+
+    case child_request(client, "thread/loaded/list", params, deadline) do
+      {:ok, %{"data" => ids} = page} when is_list(ids) ->
+        acc = acc ++ Enum.filter(ids, &is_binary/1)
+
+        case page["nextCursor"] do
+          next when is_binary(next) and next != "" and next != cursor ->
+            if MapSet.member?(seen, next),
+              do: :error,
+              else: loaded_thread_ids(client, next, acc, MapSet.put(seen, next), deadline)
+
+          _ ->
+            {:ok, acc}
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp loaded_thread(client, tid, deadline) do
+    case child_request(
+           client,
+           "thread/read",
+           %{"threadId" => tid, "includeTurns" => false},
+           deadline
+         ) do
+      {:ok, %{"thread" => %{"id" => ^tid} = thread}} -> thread
+      _ -> nil
+    end
+  end
+
+  # One budget for the whole scan, not one timeout per loaded thread: a
+  # busy App Server must not stall a worker's heartbeat for N RPC timeouts.
+  defp child_request(client, method, params, deadline) do
+    case deadline - System.monotonic_time(:millisecond) do
+      remaining when remaining > 0 -> Transport.request(client, method, params, remaining)
+      _ -> {:error, :timeout}
+    end
+  end
+
+  defp descends_from?(parent, id, _parents, _seen) when parent == id, do: true
+
+  defp descends_from?(parent, id, parents, seen) when is_binary(parent) do
+    if MapSet.member?(seen, parent),
+      do: false,
+      else: descends_from?(Map.get(parents, parent), id, parents, MapSet.put(seen, parent))
+  end
+
+  defp descends_from?(_parent, _id, _parents, _seen), do: false
 
   defp with_rpc(method, params, mapper) do
     with {:ok, client} <- client(),

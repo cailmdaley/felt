@@ -1,0 +1,19 @@
+{
+  "parent": {
+    "id": "probe-parent",
+    "parentThreadId": null,
+    "status": {
+      "type": "idle"
+    }
+  },
+  "children": [
+    {
+      "id": "probe-child",
+      "parentThreadId": "probe-parent",
+      "status": {
+        "type": "active",
+        "activeFlags": []
+      }
+    }
+  ]
+}

@@ -575,7 +575,7 @@ const MOCK_FEED = {
         }
       }
       // The second one has been stopped at a prompt for hours — the case the
-      // aged `⏸ waiting · 3h` pill exists for. Its session is bridged, so under
+      // aged `⏸ your turn · 3h` pill exists for. Its session is bridged, so under
       // a finger the pill links to it in the Claude app.
       return {
         ...e,
@@ -610,9 +610,9 @@ const MOCK_FEED = {
     ...STANDING.map(fiber),
     ...ROLE_SEATS.map(fiber),
     ...SEATS.map(fiber),
-    // An older seat with a live Codex app worker that raised its hand.
-    // It sits BELOW the newer waiting reimbursement inside Stalled, not at
-    // the top by urgency. No tmux session: liveness and the app link are native.
+    // An older seat with a live Codex app worker that raised its hand. A
+    // question leads Your turn, so it sits ABOVE the newer reimbursement idle
+    // at its prompt. No tmux session: liveness and the app link are native.
     {
       ...fiber({
         id: 'seats/seat-app',

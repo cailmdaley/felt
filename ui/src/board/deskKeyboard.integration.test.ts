@@ -213,7 +213,7 @@ describe('Desk keyboard selection', () => {
   it('opens the reader on one grouped sidebar, and keeps the flight column for the cards that fly', () => {
     press('j'); press('h'); press('Enter')
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Question', 'Working', 'Awaiting review'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     expect(document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued-list')!.hidden).toBe(false)

@@ -1,10 +1,10 @@
 import { renderMarkdown } from '../utils.js'
 import { sessionWhen } from '../sessionHistory.js'
 import { DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
-import { TranscriptModel, type Step, type ToolStep, type Turn } from './model.js'
+import { TranscriptModel, segments, type Step, type ToolStep, type Turn } from './model.js'
 import { TranscriptFeed, type FeedStatus } from './feed.js'
 import { toolLabel } from './tools.js'
-import type { Entry } from './records.js'
+import { promptParts, type Entry } from './records.js'
 import './transcript.css'
 
 export interface TranscriptTarget {
@@ -20,6 +20,10 @@ export interface TranscriptBandOptions {
   fetch?: typeof fetch
 }
 
+type Prompt = Extract<Entry, { kind: 'prompt' }>
+type Text = Extract<Entry, { kind: 'text' }>
+type Speaker = 'you' | 'dispatch' | 'agent'
+
 interface StepRow {
   version: number
   node: HTMLLIElement
@@ -28,38 +32,45 @@ interface StepRow {
   detailKey?: string
 }
 
-interface StepListState {
+/** One run of work between two agent messages, folded behind its summary. */
+interface StepGroup {
   expanded: boolean
   count: number
+  button: HTMLButtonElement
   list: HTMLOListElement | null
   more: HTMLButtonElement | null
+}
+
+interface Message {
+  node: HTMLElement
+  kicker: HTMLElement
+  prose: HTMLElement
+  images?: HTMLElement
+  source?: string
+  identity?: string
+  unclamped: boolean
 }
 
 interface TurnView {
   index: number
   node: HTMLLIElement
-  prompt?: HTMLElement
-  promptText?: HTMLElement
-  promptImages?: HTMLElement
-  answer?: HTMLElement
-  answerKicker?: HTMLElement
-  answerProse?: HTMLElement
-  answerMore?: HTMLButtonElement
-  answerText?: string
-  preButton: HTMLButtonElement | null
-  trailingButton: HTMLButtonElement | null
-  pre: StepListState
-  trailing: StepListState
+  prompt?: Message
+  texts: Map<number, Message>
+  groups: Map<number, StepGroup>
   rows: Map<number, StepRow>
   expandedRows: Set<number>
-  promptUnclamped: boolean
-  answerUnclamped: boolean
 }
 
 const PAGE_SIZE = 150
+const INITIAL_TURNS = 3
+const EARLIER_TURNS = 12
 const FOLD_KEY = 'shuttle.transcript.folded'
 const LIVE_POLL_MS = 3000
 const MAX_POLL_MS = 15000
+/** Room left above the anchored message, so its kicker is not flush with the edge. */
+const ANCHOR_MARGIN = 8
+/** How close to the anchor a reader must stay to keep following new messages. */
+const FOLLOW_SLACK = 24
 
 function createButton(className: string, text: string): HTMLButtonElement {
   const button = document.createElement('button')
@@ -74,10 +85,6 @@ function clock(ms: number): { text: string; title: string } {
     text: formatInstant(ms, { hour: '2-digit', minute: '2-digit', hour12: false }),
     title: formatInstant(ms, DATE_AND_TIME),
   }
-}
-
-function entryTime(entry: Step): number | undefined {
-  return entry.at
 }
 
 function outputWithImages(result: NonNullable<ToolStep['result']>): string {
@@ -171,13 +178,11 @@ function buildToolInput(step: ToolStep): HTMLElement {
   return detail
 }
 
-function addKicker(parent: HTMLElement, author: string, kind: 'you' | 'dispatch' | 'agent', time?: number): HTMLElement {
-  const kicker = document.createElement('div')
-  kicker.className = 'ws-transcript-kicker'
+function setKicker(kicker: HTMLElement, author: string, speaker: Speaker, time?: number): void {
   const name = document.createElement('span')
-  name.className = `ws-transcript-author ws-transcript-author-${kind}`
+  name.className = `ws-transcript-author ws-transcript-author-${speaker}`
   name.textContent = author
-  kicker.append(name)
+  kicker.replaceChildren(name)
   if (time !== undefined) {
     const when = clock(time)
     const stamp = document.createElement('span')
@@ -186,11 +191,122 @@ function addKicker(parent: HTMLElement, author: string, kind: 'you' | 'dispatch'
     stamp.title = when.title
     kicker.append(document.createTextNode(' · '), stamp)
   }
-  parent.append(kicker)
-  return kicker
 }
 
-/** The Dock's reader for one worker's native session transcript. */
+/** A speaker's message: a kicker naming who spoke and when, over the rendered words. */
+function createMessage(speaker: Speaker, tag: 'div' | 'li' = 'div'): Message {
+  const node = document.createElement(tag)
+  node.className = `ws-transcript-msg ws-transcript-msg-${speaker === 'agent' ? 'agent' : 'you'}`
+  const kicker = document.createElement('div')
+  kicker.className = 'ws-transcript-kicker'
+  const prose = document.createElement('div')
+  prose.className = speaker === 'agent' ? 'ws-transcript-prose' : 'ws-transcript-prompt-text'
+  node.append(kicker, prose)
+  return { node, kicker, prose, unclamped: false }
+}
+
+function paintText(message: Message, author: string, entry: Text): void {
+  const identity = `${author}|${entry.at ?? ''}`
+  if (message.identity !== identity) {
+    setKicker(message.kicker, author, 'agent', entry.at)
+    message.identity = identity
+  }
+  if (message.source !== entry.text) {
+    message.source = entry.text
+    message.prose.innerHTML = renderMarkdown(entry.text, { untrusted: true })
+  }
+}
+
+/** A prompt's words, with each pasted block set apart as a quoted paste. */
+function promptHtml(source: string): string {
+  return promptParts(source).map((part) => {
+    const html = renderMarkdown(part.text, { untrusted: true })
+    if (part.kind === 'text') return html
+    const lines = part.text.split('\n').length
+    return `<div class="ws-transcript-pasted"><div class="ws-transcript-pasted-label">pasted · ${lines} ${lines === 1 ? 'line' : 'lines'}</div>${html}</div>`
+  }).join('')
+}
+
+/** A prompt clamps to a few lines until it is clicked open: a dispatch carries the whole constitution. */
+function paintPrompt(message: Message, prompt: Prompt): void {
+  const speaker: Speaker = prompt.dispatch ? 'dispatch' : 'you'
+  const identity = `${speaker}|${prompt.at ?? ''}`
+  if (message.identity !== identity) {
+    setKicker(message.kicker, speaker, speaker, prompt.at)
+    message.identity = identity
+  }
+  const text = message.prose
+  if (message.source !== prompt.text) {
+    message.source = prompt.text
+    text.innerHTML = promptHtml(prompt.text)
+  }
+  if (!text.dataset.clampable) {
+    text.dataset.clampable = '1'
+    text.tabIndex = 0
+    text.setAttribute('role', 'button')
+    const unclamp = (event: Event): void => {
+      if (!text.classList.contains('ws-transcript-overflowing')) return
+      event.stopPropagation()
+      message.unclamped = true
+      text.classList.add('ws-transcript-unclamped')
+      text.classList.remove('ws-transcript-overflowing')
+      text.setAttribute('aria-expanded', 'true')
+      text.removeAttribute('aria-label')
+    }
+    text.addEventListener('click', unclamp)
+    text.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        unclamp(event)
+      }
+    })
+  }
+  text.classList.toggle('ws-transcript-prompt-dispatch', prompt.dispatch)
+  text.classList.toggle('ws-transcript-unclamped', message.unclamped)
+  text.setAttribute('aria-expanded', String(message.unclamped))
+  if (!message.images) {
+    message.images = document.createElement('span')
+    message.images.className = 'ws-transcript-prompt-images'
+    message.node.append(message.images)
+  }
+  message.images.textContent = Array.from({ length: prompt.images }, () => '[image]').join(' ')
+  message.images.hidden = prompt.images === 0
+}
+
+function measureClamp(text: HTMLElement, unclamped: boolean): void {
+  const overflow = !unclamped && text.scrollHeight > text.clientHeight
+  text.classList.toggle('ws-transcript-overflowing', overflow)
+  if (overflow) text.setAttribute('aria-label', 'Expand prompt')
+  else text.removeAttribute('aria-label')
+}
+
+/**
+ * Scroll so the newest message starts in view: its top when it is taller than
+ * the window, otherwise as far down as the content goes. Returns the offset
+ * it settled on, against which a reader's own scrolling is measured.
+ */
+function anchorLatest(scroller: HTMLElement): number {
+  const messages = scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')
+  const last = messages[messages.length - 1]
+  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+  const top = last
+    ? scroller.scrollTop + last.getBoundingClientRect().top - scroller.getBoundingClientRect().top - ANCHOR_MARGIN
+    : max
+  const settled = Math.max(0, Math.min(top, max))
+  scroller.scrollTop = settled
+  return settled
+}
+
+/**
+ * The Dock's reader for one worker's native session transcript.
+ *
+ * In the page it shows the last exchange as words only — the last prompt and
+ * every agent message since — in a window a third of the viewport tall,
+ * scrolled to the newest message. The whole session, with its tool calls,
+ * thinking and events, opens as a pane over the constitution page's content:
+ * not a modal, so the board, the sidebar and the constitution's other pages
+ * stay in reach while it is open.
+ */
 export class TranscriptBand {
   readonly el: HTMLElement
   private readonly shuttleBase: string
@@ -202,12 +318,28 @@ export class TranscriptBand {
   private readonly reading: HTMLElement
   private readonly liveDot: HTMLElement
   private readonly liveLabel: HTMLElement
-  private readonly chevron: HTMLElement
+  private readonly openButton: HTMLButtonElement
   private readonly latestButton: HTMLButtonElement
   private readonly note: HTMLParagraphElement
   private readonly body: HTMLElement
+  private readonly preview: HTMLElement
+  private readonly exchange: HTMLOListElement
+  private readonly working: HTMLLIElement
+  private readonly pane: HTMLElement
+  private readonly paneReading: HTMLElement
+  private readonly scroller: HTMLElement
   private readonly earlierButton: HTMLButtonElement
   private readonly list: HTMLOListElement
+  private previewPrompt: Message | null = null
+  private previewTexts = new Map<number, Message>()
+  private previewTurn = -1
+  private previewKey = ''
+  private previewAnchor = 0
+  private previewFollowing = true
+  private fullAnchor = 0
+  private fullFollowing = true
+  private fullOpen = false
+  private fullRendered = false
   private latest: TranscriptTarget | null = null
   private target: TranscriptTarget | null = null
   private pinned = false
@@ -218,7 +350,7 @@ export class TranscriptBand {
   private pollDelay = LIVE_POLL_MS
   private loadingTimer: number | null = null
   private renderFrame: number | null = null
-  private measureFrame: number | null = null
+  private layoutFrame: number | null = null
   private pendingEntries: Entry[] = []
   private hasInitialRender = false
   private initialReadyPending = false
@@ -228,6 +360,9 @@ export class TranscriptBand {
   private disposed = false
   private readonly visibilityListener = (): void => this.visibilityChanged()
   private observer: IntersectionObserver | null = null
+  private resizer: ResizeObserver | null = null
+  private previewScroll = 0
+  private fullScroll = 0
 
   constructor(opts: TranscriptBandOptions) {
     this.shuttleBase = opts.shuttleBase
@@ -238,6 +373,8 @@ export class TranscriptBand {
     this.el.hidden = true
     this.el.addEventListener('click', (event) => event.stopPropagation())
 
+    const headRow = document.createElement('div')
+    headRow.className = 'ws-transcript-headrow'
     this.head = createButton('ws-transcript-head', '')
     this.head.setAttribute('aria-expanded', String(!this.folded))
     this.label = document.createElement('span')
@@ -251,28 +388,88 @@ export class TranscriptBand {
     this.liveLabel = document.createElement('span')
     this.liveLabel.className = 'ws-transcript-live-label'
     this.liveLabel.textContent = 'live'
-    this.chevron = document.createElement('span')
-    this.chevron.className = 'ws-transcript-chevron'
-    this.chevron.setAttribute('aria-hidden', 'true')
-    this.chevron.textContent = '▾'
-    this.head.append(this.label, this.reading, this.liveDot, this.liveLabel, this.chevron)
+    const chevron = document.createElement('span')
+    chevron.className = 'ws-transcript-chevron'
+    chevron.setAttribute('aria-hidden', 'true')
+    chevron.textContent = '▾'
+    this.head.append(this.label, this.reading, this.liveDot, this.liveLabel, chevron)
+    this.openButton = createButton('ws-transcript-open-full', 'Full transcript')
+    this.openButton.setAttribute('aria-expanded', 'false')
+    headRow.append(this.head, this.openButton)
 
     this.latestButton = createButton('ws-transcript-latest', '← latest')
     this.latestButton.hidden = true
     this.note = document.createElement('p')
     this.note.className = 'ws-transcript-note'
     this.note.hidden = true
+
     this.body = document.createElement('div')
     this.body.className = 'ws-transcript-body'
     this.body.hidden = this.folded
+    this.preview = document.createElement('div')
+    this.preview.className = 'ws-transcript-preview'
+    this.preview.title = 'Open the full transcript'
+    this.preview.hidden = true
+    this.exchange = document.createElement('ol')
+    this.exchange.className = 'ws-transcript-exchange'
+    this.working = document.createElement('li')
+    this.working.className = 'ws-transcript-working'
+    this.working.textContent = 'working'
+    this.preview.append(this.exchange)
+    this.body.append(this.preview)
+
+    this.pane = document.createElement('section')
+    this.pane.className = 'ws-transcript-pane'
+    this.pane.setAttribute('aria-label', 'Transcript')
+    this.pane.hidden = true
+    const panelHead = document.createElement('header')
+    panelHead.className = 'ws-transcript-panel-head'
+    const title = document.createElement('span')
+    title.className = 'kbn-ctl-label ws-transcript-label'
+    title.textContent = 'Transcript'
+    this.paneReading = document.createElement('span')
+    this.paneReading.className = 'ws-transcript-reading'
+    const close = createButton('ws-transcript-close', '×')
+    close.setAttribute('aria-label', 'Close the transcript')
+    panelHead.append(title, this.paneReading, close)
+    this.scroller = document.createElement('div')
+    this.scroller.className = 'ws-transcript-scroll'
+    this.scroller.tabIndex = -1
     this.earlierButton = createButton('ws-transcript-earlier', '')
     this.earlierButton.hidden = true
     this.list = document.createElement('ol')
     this.list.className = 'ws-transcript-turns'
-    this.body.append(this.earlierButton, this.list)
-    this.el.append(this.head, this.latestButton, this.note, this.body)
+    this.scroller.append(this.earlierButton, this.list)
+    this.pane.append(panelHead, this.scroller)
+
+    this.el.append(headRow, this.latestButton, this.note, this.body)
 
     this.head.addEventListener('click', () => this.toggleFold())
+    this.openButton.addEventListener('click', () => this.openFull())
+    this.preview.addEventListener('click', (event) => {
+      if ((event.target as Element | null)?.closest('a')) return
+      if (window.getSelection?.()?.toString()) return
+      this.openFull()
+    })
+    this.preview.addEventListener('scroll', () => {
+      if (!this.preview.clientHeight) return
+      this.previewScroll = this.preview.scrollTop
+      this.previewFollowing = this.preview.scrollTop >= this.previewAnchor - FOLLOW_SLACK
+      this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
+    }, { passive: true })
+    this.scroller.addEventListener('scroll', () => {
+      if (!this.scroller.clientHeight) return
+      this.fullScroll = this.scroller.scrollTop
+      this.fullFollowing = this.scroller.scrollTop >= this.fullAnchor - FOLLOW_SLACK
+    }, { passive: true })
+    close.addEventListener('click', () => this.closeFull())
+    this.pane.addEventListener('click', (event) => event.stopPropagation())
+    this.pane.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.isComposing) return
+      event.preventDefault()
+      event.stopPropagation()
+      this.closeFull()
+    })
     this.latestButton.addEventListener('click', () => {
       this.pinned = false
       this.showTarget(this.latest)
@@ -287,9 +484,19 @@ export class TranscriptBand {
         this.intersecting = visible
         if (visible) {
           if (becameVisible) this.readIfVisible()
-        } else this.stopPollTimer()
+        } else if (!this.fullOpen) this.stopPollTimer()
       })
       this.observer.observe(this.el)
+    }
+    // When the window's box changes (a resize, unfolding), keep the reader
+    // on the newest message, or where they were.
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizer = new ResizeObserver(() => {
+        if (this.disposed || !this.preview.clientHeight) return
+        if (this.previewFollowing) this.scheduleLayout()
+        else if (this.preview.scrollTop !== this.previewScroll) this.preview.scrollTop = this.previewScroll
+      })
+      this.resizer.observe(this.preview)
     }
     this.paintFold()
   }
@@ -312,24 +519,29 @@ export class TranscriptBand {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.closeFull()
     this.stopPollTimer()
     this.clearLoadingTimer()
     if (this.renderFrame !== null) cancelAnimationFrame(this.renderFrame)
-    if (this.measureFrame !== null) cancelAnimationFrame(this.measureFrame)
-    this.renderFrame = this.measureFrame = null
+    if (this.layoutFrame !== null) cancelAnimationFrame(this.layoutFrame)
+    this.renderFrame = this.layoutFrame = null
     this.feed?.dispose()
     this.feed = null
     this.readingPromise = null
     this.cancelPendingRender()
     this.observer?.disconnect()
     this.observer = null
+    this.resizer?.disconnect()
+    this.resizer = null
     document.removeEventListener('visibilitychange', this.visibilityListener)
+    this.pane.remove()
     this.el.replaceChildren()
   }
 
   private showTarget(target: TranscriptTarget | null): void {
     const previous = this.target
     if (!target) {
+      this.closeFull()
       this.target = null
       this.hasReadCurrent = false
       this.stopPollTimer()
@@ -350,11 +562,12 @@ export class TranscriptBand {
     if (previous && this.sameTarget(previous, target)) {
       const becameParked = previous.live && !target.live
       this.paintHead()
+      this.updateLiveMarks()
       if (becameParked) this.finishLiveSession()
       else if (!previous.live && target.live) {
         this.pollDelay = LIVE_POLL_MS
         this.readIfVisible()
-      } else this.updateLiveMarks()
+      }
       return
     }
 
@@ -370,7 +583,6 @@ export class TranscriptBand {
     this.model.takeChanges()
     this.hasInitialRender = false
     this.hasReadCurrent = false
-    this.visibleStart = -1
     this.pollDelay = LIVE_POLL_MS
     this.feed = new TranscriptFeed({
       shuttleBase: this.shuttleBase,
@@ -404,8 +616,9 @@ export class TranscriptBand {
     this.folded = !this.folded
     this.paintFold()
     this.writeFolded()
-    if (this.folded) this.stopPollTimer()
+    if (!this.canReadNow()) this.stopPollTimer()
     else this.readIfVisible()
+    if (!this.folded) this.scheduleLayout()
   }
 
   private paintFold(): void {
@@ -419,15 +632,21 @@ export class TranscriptBand {
     const target = this.target
     const when = stats.startedAt ?? target?.at
     this.label.textContent = `Transcript${this.pinned && target && when !== undefined ? ` · ${sessionWhen(when)}` : ''}`
-    const agent = target?.agent ?? stats.model
     const pieces: string[] = []
-    if (agent) pieces.push(agent)
+    const agent = this.agentName()
+    if (target?.agent ?? stats.model) pieces.push(agent)
     if (when !== undefined) pieces.push(sessionWhen(when))
-    this.reading.textContent = pieces.join(' · ')
+    if (stats.turns > 1) pieces.push(`${stats.turns} turns`)
+    this.reading.textContent = pieces.slice(0, 2).join(' · ')
+    this.paneReading.textContent = pieces.join(' · ')
     this.liveDot.hidden = !target?.live
     this.liveLabel.hidden = !target?.live
     this.latestButton.hidden = !(this.pinned && this.latest && target && !this.sameTarget(target, this.latest))
     this.el.hidden = !target && !this.pinned
+  }
+
+  private agentName(): string {
+    return this.target?.agent ?? this.model.stats().model ?? 'worker'
   }
 
   private visibilityChanged(): void {
@@ -436,7 +655,8 @@ export class TranscriptBand {
   }
 
   private canReadNow(): boolean {
-    return !this.disposed && !!this.target && !this.folded && document.visibilityState === 'visible' && this.intersecting
+    return !this.disposed && !!this.target && document.visibilityState === 'visible'
+      && (this.fullOpen || (!this.folded && this.intersecting))
   }
 
   private readIfVisible(): void {
@@ -510,12 +730,15 @@ export class TranscriptBand {
     if (status === 'ready') {
       if (!this.hasInitialRender) {
         this.initialReadyPending = true
-        this.renderInitialTurnsWhenDrained()
+        this.renderInitialWhenDrained()
       }
       const empty = this.model.turns.length === 0
       this.setNote(empty && this.target?.live ? 'empty-live' : null)
       return
     }
+    // A failed poll after a good read is transient: keep the words on screen
+    // and let the next poll try again. Only a transcript never read says so.
+    if ((status === 'error' || status === 'unreachable') && this.model.turns.length > 0) return
     this.setNote(status, detail)
   }
 
@@ -554,21 +777,25 @@ export class TranscriptBand {
       const changes = this.model.takeChanges()
       if (changes.reset) this.clearView()
       if (!this.hasInitialRender) {
-        this.renderInitialTurnsWhenDrained()
+        this.renderInitialWhenDrained()
         return
       }
       const after = this.model.turns.length
-      if (before === 0 && after > 0) this.visibleStart = after - 1
-      for (const index of changes.turns) {
-        if (index >= this.visibleStart) this.renderTurn(index)
+      this.paintPreview()
+      if (this.fullRendered) {
+        if (before === 0 && after > 0) this.visibleStart = Math.max(0, after - INITIAL_TURNS)
+        for (const index of changes.turns) {
+          if (index >= this.visibleStart) this.renderTurn(index)
+        }
+        // The turn that was last loses its live marks once another follows it.
+        if (after > before && before > 0) {
+          const previous = this.views.get(before - 1)
+          if (previous) this.updateTurnView(previous, this.model.turns[before - 1])
+        }
+        this.updateEarlierButton()
       }
-      if (after > before && before > 0) {
-        const previous = this.views.get(before - 1)
-        if (previous) this.updateTurnView(previous, this.model.turns[before - 1])
-      }
-      this.updateEarlierButton()
       this.paintHead()
-      this.scheduleClampMeasure()
+      this.scheduleLayout()
       this.setNote(null)
     })
   }
@@ -579,31 +806,21 @@ export class TranscriptBand {
     this.model.takeChanges()
     this.hasInitialRender = false
     this.hasReadCurrent = false
-    this.visibleStart = -1
     this.clearView()
     this.paintHead()
     this.setNote(null)
   }
 
-  private renderInitialTurnsWhenDrained(): void {
+  private renderInitialWhenDrained(): void {
     if (!this.initialReadyPending || this.hasInitialRender || this.pendingEntries.length || this.renderFrame !== null) return
     this.initialReadyPending = false
-    this.renderInitialTurns()
-    this.setNote(this.model.turns.length === 0 && this.target?.live ? 'empty-live' : null)
-  }
-
-  private renderInitialTurns(): void {
-    if (this.hasInitialRender) return
-    this.initialReadyPending = false
     this.hasInitialRender = true
-    const turns = this.model.turns
-    this.visibleStart = turns.length ? turns.length - 1 : -1
-    this.list.replaceChildren()
-    this.views.clear()
-    if (turns.length) this.renderTurn(turns.length - 1)
-    this.updateEarlierButton()
+    this.previewFollowing = this.fullFollowing = true
+    this.paintPreview()
+    if (this.fullOpen) this.renderFull()
     this.paintHead()
-    this.scheduleClampMeasure()
+    this.scheduleLayout()
+    this.setNote(this.model.turns.length === 0 && this.target?.live ? 'empty-live' : null)
   }
 
   private cancelPendingRender(): void {
@@ -614,10 +831,131 @@ export class TranscriptBand {
   }
 
   private clearView(): void {
+    this.clearFull()
+    this.exchange.replaceChildren()
+    this.previewPrompt = null
+    this.previewTexts.clear()
+    this.previewTurn = -1
+    this.previewKey = ''
+    this.preview.hidden = true
+    this.previewFollowing = true
+  }
+
+  private clearFull(): void {
     this.views.clear()
     this.list.replaceChildren()
+    this.fullRendered = false
+    this.visibleStart = -1
+    this.fullFollowing = true
     this.earlierButton.hidden = true
     this.earlierButton.textContent = ''
+  }
+
+  // ── The exchange in the page ─────────────────────────────────────────
+
+  /** Paint the last turn's prompt and every agent message since, words only. */
+  private paintPreview(): void {
+    const turns = this.model.turns
+    const turn = turns[turns.length - 1]
+    if (!turn) {
+      this.exchange.replaceChildren()
+      this.preview.hidden = true
+      return
+    }
+    if (turn.index !== this.previewTurn) {
+      this.previewTurn = turn.index
+      this.previewPrompt = null
+      this.previewTexts.clear()
+      this.previewFollowing = true
+    }
+    const live = this.target?.live === true
+    const last = turn.steps[turn.steps.length - 1]
+    const working = live && (!last || last.kind !== 'text')
+    const key = `${turn.index}:${turn.version}:${working}:${this.agentName()}`
+    if (key === this.previewKey) return
+    this.previewKey = key
+
+    const nodes: HTMLElement[] = []
+    if (turn.prompt) {
+      this.previewPrompt ??= createMessage(turn.prompt.dispatch ? 'dispatch' : 'you', 'li')
+      paintPrompt(this.previewPrompt, turn.prompt)
+      nodes.push(this.previewPrompt.node)
+    }
+    const agent = this.agentName()
+    turn.steps.forEach((step, index) => {
+      if (step.kind !== 'text') return
+      let message = this.previewTexts.get(index)
+      if (!message) {
+        message = createMessage('agent', 'li')
+        this.previewTexts.set(index, message)
+      }
+      paintText(message, agent, step)
+      nodes.push(message.node)
+    })
+    if (working) nodes.push(this.working)
+    this.exchange.replaceChildren(...nodes)
+    this.preview.hidden = nodes.length === 0
+  }
+
+  // ── The whole session, in a pane over the page ─────────────────────
+
+  /**
+   * The pane lies over the constitution page's content box, the frame its
+   * prose scrolls inside, so the page's chrome, its tabs and the board stay
+   * live around it. Outside a page it opens in place, under the band.
+   */
+  private openFull(): void {
+    if (this.disposed || this.fullOpen || !this.target) return
+    this.fullOpen = true
+    const host = this.el.closest<HTMLElement>('.ws-content')
+    this.pane.classList.toggle('ws-transcript-pane-inline', !host)
+    ;(host ?? this.el).append(this.pane)
+    this.pane.hidden = false
+    this.openButton.setAttribute('aria-expanded', 'true')
+    this.fullFollowing = true
+    if (this.hasInitialRender) this.renderFull()
+    this.scroller.focus({ preventScroll: true })
+    this.scheduleLayout()
+    this.readIfVisible()
+  }
+
+  /**
+   * The band's element moved into a fresh page: moving resets scroll
+   * positions, and the page's content box was rebuilt without the pane. Put
+   * both back.
+   */
+  reseated(): void {
+    if (this.disposed) return
+    if (this.fullOpen) {
+      const host = this.el.closest<HTMLElement>('.ws-content')
+      if (host && this.pane.parentElement !== host) host.append(this.pane)
+      if (!this.fullFollowing) this.scroller.scrollTop = this.fullScroll
+    }
+    if (!this.previewFollowing) this.preview.scrollTop = this.previewScroll
+    this.scheduleLayout()
+  }
+
+  /** Close the full transcript; true when it was open, so Escape can peel it as a layer. */
+  closeFull(): boolean {
+    if (!this.fullOpen) return false
+    this.fullOpen = false
+    const hadFocus = this.pane.contains(document.activeElement)
+    this.pane.hidden = true
+    this.pane.remove()
+    this.openButton.setAttribute('aria-expanded', 'false')
+    this.clearFull()
+    if (!this.canReadNow()) this.stopPollTimer()
+    if (hadFocus && this.openButton.isConnected && !this.disposed) this.openButton.focus({ preventScroll: true })
+    return true
+  }
+
+  private renderFull(): void {
+    this.clearFull()
+    this.fullRendered = true
+    const turns = this.model.turns
+    this.visibleStart = turns.length ? Math.max(0, turns.length - INITIAL_TURNS) : -1
+    for (let index = Math.max(0, this.visibleStart); index < turns.length; index++) this.renderTurn(index)
+    this.updateEarlierButton()
   }
 
   private renderTurn(index: number): void {
@@ -639,232 +977,108 @@ export class TranscriptBand {
     const node = document.createElement('li')
     node.className = 'ws-transcript-turn'
     node.dataset.turn = String(index)
-    return {
-      index,
-      node,
-      preButton: null,
-      trailingButton: null,
-      pre: { expanded: false, count: PAGE_SIZE, list: null, more: null },
-      trailing: { expanded: false, count: PAGE_SIZE, list: null, more: null },
-      rows: new Map(),
-      expandedRows: new Set(),
-      promptUnclamped: false,
-      answerUnclamped: false,
-    }
+    return { index, node, texts: new Map(), groups: new Map(), rows: new Map(), expandedRows: new Set() }
   }
 
   private updateTurnView(view: TurnView, turn: Turn): void {
-    if (turn.prompt) this.updatePrompt(view, turn.prompt)
-    const answerStep = turn.answer >= 0 ? turn.steps[turn.answer] : undefined
-    if (answerStep?.kind === 'text') this.updateAnswer(view, answerStep, turn.answer, view.index === this.model.turns.length - 1)
-
-    const beforeCount = turn.answer >= 0 ? turn.answer : 0
-    const afterStart = turn.answer >= 0 ? turn.answer + 1 : 0
-    const trailingCount = turn.steps.length - afterStart
-    if (beforeCount > 0) this.ensureStepsButton(view)
-    if (trailingCount > 0) this.ensureTrailingButton(view)
-    if (view.pre.expanded && beforeCount > 0) this.reconcileStepList(view, turn, 'pre', beforeCount)
-    if (view.trailing.expanded && trailingCount > 0) this.reconcileStepList(view, turn, 'trailing', trailingCount)
-
     const children: Node[] = []
-    if (view.prompt) children.push(view.prompt)
-    if (beforeCount > 0 && view.preButton) {
-      children.push(view.preButton)
-      if (view.pre.expanded && view.pre.list) children.push(view.pre.list)
-      if (view.pre.expanded && view.pre.more) children.push(view.pre.more)
+    if (turn.prompt) {
+      view.prompt ??= createMessage(turn.prompt.dispatch ? 'dispatch' : 'you')
+      paintPrompt(view.prompt, turn.prompt)
+      children.push(view.prompt.node)
     }
-    if (view.answer) children.push(view.answer)
-    if (trailingCount > 0 && view.trailingButton) {
-      children.push(view.trailingButton)
-      if (view.trailing.expanded && view.trailing.list) children.push(view.trailing.list)
-      if (view.trailing.expanded && view.trailing.more) children.push(view.trailing.more)
-    }
-    view.node.replaceChildren(...children)
-    this.updateStepSummary(view, turn, beforeCount, trailingCount, afterStart)
-  }
-
-  private updatePrompt(view: TurnView, prompt: Extract<Entry, { kind: 'prompt' }>): void {
-    if (!view.prompt) {
-      view.prompt = document.createElement('div')
-      view.prompt.className = 'ws-transcript-prompt'
-      const text = document.createElement('div')
-      text.className = 'ws-transcript-prompt-text'
-      text.addEventListener('click', () => this.unclampPrompt(view))
-      text.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          this.unclampPrompt(view)
+    const agent = this.agentName()
+    const parts = segments(turn.steps)
+    const isLastTurn = view.index === this.model.turns.length - 1
+    parts.forEach((part, position) => {
+      if (part.kind === 'text') {
+        const step = turn.steps[part.index] as Text
+        let message = view.texts.get(part.index)
+        if (!message) {
+          message = createMessage('agent')
+          view.texts.set(part.index, message)
         }
-      })
-      view.promptText = text
-      const images = document.createElement('span')
-      images.className = 'ws-transcript-prompt-images'
-      view.promptImages = images
-      view.prompt.append(text, images)
-    }
-    const text = view.promptText!
-    if (text.dataset.source !== prompt.text) {
-      text.dataset.source = prompt.text
-      text.innerHTML = renderMarkdown(prompt.text, { untrusted: true })
-    }
-    text.classList.toggle('ws-transcript-prompt-dispatch', prompt.dispatch)
-    text.classList.toggle('ws-transcript-unclamped', view.promptUnclamped)
-    text.setAttribute('role', 'button')
-    text.setAttribute('aria-expanded', String(view.promptUnclamped))
-    text.tabIndex = 0
-    const existing = view.prompt.querySelector('.ws-transcript-kicker')
-    existing?.remove()
-    addKicker(view.prompt, prompt.dispatch ? 'dispatch' : 'you', prompt.dispatch ? 'dispatch' : 'you', prompt.at)
-    view.prompt.append(text, view.promptImages!)
-    view.promptImages!.textContent = Array.from({ length: prompt.images }, () => '[image]').join(' ')
-    view.promptImages!.hidden = prompt.images === 0
-  }
-
-  private updateAnswer(view: TurnView, entry: Extract<Entry, { kind: 'text' }>, index: number, isLast: boolean): void {
-    if (!view.answer) {
-      view.answer = document.createElement('div')
-      view.answer.className = 'ws-transcript-answer'
-      view.answerKicker = document.createElement('div')
-      view.answerKicker.className = 'ws-transcript-kicker'
-      view.answerProse = document.createElement('div')
-      view.answerProse.className = 'ws-transcript-prose'
-      view.answerMore = createButton('ws-transcript-more', 'Continue reading')
-      view.answerMore.hidden = true
-      view.answerMore.addEventListener('click', () => {
-        view.answerUnclamped = true
-        view.answerProse?.classList.add('ws-transcript-unclamped')
-        view.answerProse?.classList.remove('ws-transcript-overflowing')
-        view.answerMore!.hidden = true
-      })
-      view.answerProse.addEventListener('click', () => {
-        if (view.answerProse?.classList.contains('ws-transcript-overflowing')) {
-          view.answerUnclamped = true
-          view.answerProse.classList.add('ws-transcript-unclamped')
-          view.answerProse.classList.remove('ws-transcript-overflowing')
-          view.answerMore!.hidden = true
-        }
-      })
-      view.answer.append(view.answerKicker, view.answerProse, view.answerMore)
-    }
-    const agent = this.target?.agent ?? this.model.stats().model ?? 'worker'
-    const stamp = entry.at === undefined ? '' : clock(entry.at).text
-    const identity = `${agent}|${stamp}`
-    if (view.answerKicker!.dataset.identity !== identity) {
-      view.answerKicker!.replaceChildren()
-      addKicker(view.answerKicker!, agent, 'agent', entry.at)
-      view.answerKicker!.dataset.identity = identity
-    }
-    if (view.answerText !== entry.text || view.answer?.dataset.answerIndex !== String(index)) {
-      view.answerText = entry.text
-      view.answer.dataset.answerIndex = String(index)
-      view.answerProse!.innerHTML = renderMarkdown(entry.text, { untrusted: true })
-    }
-    view.answer.classList.toggle('ws-transcript-answer-last', isLast)
-    view.answerProse!.classList.toggle('ws-transcript-unclamped', view.answerUnclamped)
-  }
-
-  private ensureStepsButton(view: TurnView): HTMLButtonElement {
-    if (!view.preButton) {
-      view.preButton = createButton('ws-transcript-steps', '')
-      view.preButton.setAttribute('aria-expanded', 'false')
-      view.preButton.addEventListener('click', () => this.toggleSteps(view, 'pre'))
-    }
-    return view.preButton
-  }
-
-  private ensureTrailingButton(view: TurnView): HTMLButtonElement {
-    if (!view.trailingButton) {
-      view.trailingButton = createButton('ws-transcript-trailing', '')
-      view.trailingButton.setAttribute('aria-expanded', 'false')
-      view.trailingButton.addEventListener('click', () => this.toggleSteps(view, 'trailing'))
-    }
-    return view.trailingButton
-  }
-
-  private updateStepSummary(view: TurnView, turn: Turn, beforeCount: number, trailingCount: number, afterStart: number): void {
-    if (beforeCount > 0 && view.preButton) {
-      const steps = turn.steps.slice(0, beforeCount)
-      const labels = new Map<string, number>()
-      for (const step of steps) {
-        if (step.kind !== 'tool') continue
-        const name = toolLabel(step.name, step.input).name
-        labels.set(name, (labels.get(name) ?? 0) + 1)
+        paintText(message, agent, step)
+        children.push(message.node)
+        return
       }
-      const start = turn.startedAt
-      const end = turn.answer >= 0 ? entryTime(turn.steps[turn.answer]) : undefined
-      const duration = start !== undefined && end !== undefined && end >= start
-        ? ` · ${formatSpanMinutes(Math.floor((end - start) / 60_000))}`
-        : ''
-      const tools = [...labels].map(([name, count]) => `${name} ${count}`).join(' · ')
-      view.preButton.textContent = `${view.pre.expanded ? '▾' : '▸'} ${beforeCount} steps${duration}${tools ? ` · ${tools}` : ''}`
-      view.preButton.setAttribute('aria-expanded', String(view.pre.expanded))
-    }
+      const group = this.groupFor(view, part.start)
+      const trailing = isLastTurn && position === parts.length - 1
+      this.paintGroupSummary(group, turn, part.start, part.end, trailing)
+      if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
+      children.push(group.button)
+      if (group.expanded && group.list) children.push(group.list)
+      if (group.expanded && group.more && !group.more.hidden) children.push(group.more)
+    })
+    view.node.replaceChildren(...children)
+  }
 
-    if (trailingCount > 0 && view.trailingButton) {
-      const trailing = turn.steps.slice(afterStart)
-      const lines = trailing
-        .filter((step): step is ToolStep => step.kind === 'tool')
-        .slice(0, 2)
-        .map((step) => {
-          const label = toolLabel(step.name, step.input)
-          return [label.name, label.summary].filter(Boolean).join(' ')
-        })
-      const lastTool = trailing.filter((step): step is ToolStep => step.kind === 'tool').at(-1)
-      const pending = this.target?.live === true && !!lastTool && !lastTool.result
-      view.trailingButton.replaceChildren(document.createTextNode(
-        `then ${trailingCount} steps${lines.length ? ` · ${lines.join(' · ')}` : ''}`,
-      ))
+  private groupFor(view: TurnView, start: number): StepGroup {
+    let group = view.groups.get(start)
+    if (group) return group
+    const button = createButton('ws-transcript-steps', '')
+    button.setAttribute('aria-expanded', 'false')
+    const created: StepGroup = { expanded: false, count: PAGE_SIZE, button, list: null, more: null }
+    button.addEventListener('click', () => {
+      created.expanded = !created.expanded
+      const turn = this.model.turns[view.index]
+      if (turn) this.updateTurnView(view, turn)
+    })
+    view.groups.set(start, created)
+    return created
+  }
+
+  private paintGroupSummary(group: StepGroup, turn: Turn, start: number, end: number, trailing: boolean): void {
+    const steps = turn.steps.slice(start, end)
+    const labels = new Map<string, number>()
+    for (const step of steps) {
+      if (step.kind !== 'tool') continue
+      const name = toolLabel(step.name, step.input).name
+      labels.set(name, (labels.get(name) ?? 0) + 1)
+    }
+    const first = steps.find((step) => step.at !== undefined)?.at ?? turn.startedAt
+    const following = turn.steps[end]
+    const last = following?.at ?? [...steps].reverse().find((step) => step.at !== undefined)?.at
+    const minutes = first !== undefined && last !== undefined && last >= first ? Math.floor((last - first) / 60_000) : 0
+    const pieces = [`${steps.length} ${steps.length === 1 ? 'step' : 'steps'}`]
+    if (minutes > 0) pieces.push(formatSpanMinutes(minutes))
+    pieces.push(...[...labels].map(([name, count]) => `${name} ${count}`))
+    const lastTool = steps.filter((step): step is ToolStep => step.kind === 'tool').at(-1)
+    const pending = trailing && this.target?.live === true && !!lastTool && !lastTool.result
+    group.button.replaceChildren(document.createTextNode(`${group.expanded ? '▾' : '▸'} ${pieces.join(' · ')}`))
+    if (pending) {
       const mark = document.createElement('span')
       mark.className = 'ws-transcript-pending'
-      mark.hidden = !pending
-      mark.setAttribute('aria-label', pending ? 'tool running' : '')
-      view.trailingButton.append(document.createTextNode(' '), mark)
-      view.trailingButton.setAttribute('aria-expanded', String(view.trailing.expanded))
+      mark.setAttribute('aria-label', 'tool running')
+      group.button.append(document.createTextNode(' '), mark)
     }
+    group.button.setAttribute('aria-expanded', String(group.expanded))
   }
 
-  private toggleSteps(view: TurnView, which: 'pre' | 'trailing'): void {
-    const state = view[which]
-    state.expanded = !state.expanded
-    const turn = this.model.turns[view.index]
-    const count = which === 'pre'
-      ? (turn.answer >= 0 ? turn.answer : 0)
-      : turn.steps.length - (turn.answer >= 0 ? turn.answer + 1 : 0)
-    if (state.expanded && count > 0) this.reconcileStepList(view, turn, which, count)
-    this.updateTurnView(view, turn)
-  }
-
-  private reconcileStepList(view: TurnView, turn: Turn, which: 'pre' | 'trailing', count: number): void {
-    const state = view[which]
-    if (!state.expanded) return
-    if (!state.list) {
-      state.list = document.createElement('ol')
-      state.list.className = 'ws-transcript-steplist'
-    }
-    if (!state.more) {
-      state.more = createButton('ws-transcript-steps-more', '')
-      state.more.hidden = true
-      state.more.addEventListener('click', () => {
-        state.count += PAGE_SIZE
-        this.reconcileStepList(view, this.model.turns[view.index], which, which === 'pre'
-          ? (this.model.turns[view.index].answer >= 0 ? this.model.turns[view.index].answer : 0)
-          : this.model.turns[view.index].steps.length - (this.model.turns[view.index].answer >= 0 ? this.model.turns[view.index].answer + 1 : 0))
-        this.updateTurnView(view, this.model.turns[view.index])
+  private reconcileGroup(view: TurnView, group: StepGroup, turn: Turn, start: number, end: number): void {
+    group.list ??= Object.assign(document.createElement('ol'), { className: 'ws-transcript-steplist' })
+    if (!group.more) {
+      group.more = createButton('ws-transcript-steps-more', '')
+      group.more.addEventListener('click', () => {
+        group.count += PAGE_SIZE
+        const current = this.model.turns[view.index]
+        if (current) this.updateTurnView(view, current)
       })
     }
-    const start = which === 'pre' ? 0 : (turn.answer >= 0 ? turn.answer + 1 : 0)
-    const available = turn.steps.slice(start, start + count)
-    const shown = available.slice(0, state.count)
+    const available = turn.steps.slice(start, end)
+    const shown = available.slice(0, group.count)
+    // Opening a run opens what is in it: thinking reads as text, a tool shows
+    // its input and output. Each row still folds on its own line.
+    shown.forEach((_, relative) => { if (!view.rows.has(start + relative)) view.expandedRows.add(start + relative) })
     const wanted = shown.map((step, relative) => this.getStepRow(view, step, start + relative).node)
-    const children = [...state.list.children]
+    const children = [...group.list.children]
     const prefix = children.length <= wanted.length && children.every((child, index) => child === wanted[index])
     if (prefix) {
-      for (let i = children.length; i < wanted.length; i++) state.list.append(wanted[i])
-    } else state.list.replaceChildren(...wanted)
-
+      for (let i = children.length; i < wanted.length; i++) group.list.append(wanted[i])
+    } else group.list.replaceChildren(...wanted)
     const remaining = Math.max(0, available.length - shown.length)
-    state.more.hidden = remaining === 0
-    state.more.textContent = `▾ ${remaining} more steps`
+    group.more.hidden = remaining === 0
+    group.more.textContent = `▾ ${remaining} more steps`
   }
 
   private getStepRow(view: TurnView, step: Step, index: number): StepRow {
@@ -879,11 +1093,6 @@ export class TranscriptBand {
 
   private createStepRow(view: TurnView, step: Step, index: number): StepRow {
     const node = document.createElement('li')
-    if (step.kind === 'text') {
-      node.className = 'ws-transcript-say'
-      node.innerHTML = renderMarkdown(step.text, { untrusted: true })
-      return { version: 0, node }
-    }
     if (step.kind === 'tool') return this.createToolRow(view, node, step, index)
     if (step.kind === 'thinking') {
       node.className = 'ws-transcript-think'
@@ -903,6 +1112,7 @@ export class TranscriptBand {
       node.append(button, text)
       return { version: 0, node }
     }
+    if (step.kind !== 'event') return { version: 0, node }
     node.className = 'ws-transcript-event'
     const text = step.text
     const label = [step.label, step.detail].filter(Boolean).join(' · ')
@@ -977,7 +1187,7 @@ export class TranscriptBand {
       row.mark.className = 'ws-transcript-tool-mark'
       row.mark.hidden = true
     }
-    if (row.detail && viewExpanded(row)) {
+    if (row.detail && !row.detail.hidden) {
       const detailKey = `${step.version}:${this.target?.live ? 'live' : 'parked'}`
       if (row.detailKey !== detailKey) this.buildToolResult(row, step)
     }
@@ -1014,6 +1224,8 @@ export class TranscriptBand {
   }
 
   private updateLiveMarks(): void {
+    this.previewKey = ''
+    this.paintPreview()
     for (const view of this.views.values()) {
       for (const [index, row] of view.rows) {
         const step = this.model.turns[view.index]?.steps[index]
@@ -1025,74 +1237,44 @@ export class TranscriptBand {
   }
 
   private updateEarlierButton(): void {
-    const count = Math.min(12, Math.max(0, this.visibleStart))
+    const count = Math.min(EARLIER_TURNS, Math.max(0, this.visibleStart))
     this.earlierButton.hidden = count === 0
-    this.earlierButton.textContent = `▴ ${count} earlier turns`
+    this.earlierButton.textContent = `▴ ${count} earlier ${count === 1 ? 'turn' : 'turns'}`
   }
 
+  /** Earlier turns load above the reader's place, which stays where it was. */
   private showEarlier(): void {
     if (this.visibleStart <= 0) return
     const anchor = this.list.firstElementChild as HTMLElement | null
     const before = anchor?.getBoundingClientRect().top
-    const count = Math.min(12, this.visibleStart)
+    const count = Math.min(EARLIER_TURNS, this.visibleStart)
     const start = this.visibleStart - count
     this.visibleStart = start
     for (let index = start; index < start + count; index++) this.renderTurn(index)
     this.updateEarlierButton()
     if (anchor && before !== undefined) {
-      const after = anchor.getBoundingClientRect().top
-      const delta = after - before
-      if (delta) this.adjustScroll(delta, anchor)
+      const delta = anchor.getBoundingClientRect().top - before
+      if (delta) this.scroller.scrollTop += delta
     }
-    this.scheduleClampMeasure()
+    this.fullFollowing = false
+    this.scheduleLayout()
   }
 
-  private adjustScroll(delta: number, from: HTMLElement): void {
-    let parent = from.parentElement
-    while (parent) {
-      const style = getComputedStyle(parent)
-      if (/^(auto|scroll)$/.test(style.overflowY) && parent.scrollHeight > parent.clientHeight) {
-        parent.scrollTop += delta
-        return
-      }
-      parent = parent.parentElement
-    }
-    try { window.scrollBy(0, delta) } catch { /* the page may not expose a window scroller */ }
-  }
-
-  private unclampPrompt(view: TurnView): void {
-    if (!view.promptText || !view.promptText.classList.contains('ws-transcript-overflowing')) return
-    view.promptUnclamped = true
-    view.promptText.setAttribute('aria-expanded', 'true')
-    view.promptText.classList.add('ws-transcript-unclamped')
-    view.promptText.classList.remove('ws-transcript-overflowing')
-  }
-
-  private scheduleClampMeasure(): void {
-    if (this.measureFrame !== null) cancelAnimationFrame(this.measureFrame)
-    this.measureFrame = requestAnimationFrame(() => {
-      this.measureFrame = null
+  /** After a paint: measure prompt clamps, then keep each window on the newest message while its reader follows. */
+  private scheduleLayout(): void {
+    if (this.layoutFrame !== null) cancelAnimationFrame(this.layoutFrame)
+    this.layoutFrame = requestAnimationFrame(() => {
+      this.layoutFrame = null
       if (this.disposed) return
+      if (this.previewPrompt) measureClamp(this.previewPrompt.prose, this.previewPrompt.unclamped)
       for (const view of this.views.values()) {
-        const prompt = view.promptText
-        if (prompt) {
-          const overflow = !view.promptUnclamped && prompt.scrollHeight > prompt.clientHeight
-          prompt.classList.toggle('ws-transcript-overflowing', overflow)
-          prompt.setAttribute('aria-expanded', String(view.promptUnclamped))
-          if (overflow) prompt.setAttribute('aria-label', 'Expand prompt')
-          else prompt.removeAttribute('aria-label')
-        }
-        const prose = view.answerProse
-        if (prose) {
-          const overflow = !view.answerUnclamped && prose.scrollHeight > prose.clientHeight
-          prose.classList.toggle('ws-transcript-overflowing', overflow)
-          if (view.answerMore) view.answerMore.hidden = !overflow
-        }
+        if (view.prompt) measureClamp(view.prompt.prose, view.prompt.unclamped)
       }
+      if (!this.preview.hidden && !this.body.hidden && this.previewFollowing && this.preview.clientHeight) {
+        this.previewAnchor = this.previewScroll = anchorLatest(this.preview)
+      }
+      this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
+      if (this.fullOpen && this.fullFollowing && this.scroller.clientHeight) this.fullAnchor = this.fullScroll = anchorLatest(this.scroller)
     })
   }
-}
-
-function viewExpanded(row: StepRow): boolean {
-  return Boolean(row.detail && !row.detail.hidden)
 }

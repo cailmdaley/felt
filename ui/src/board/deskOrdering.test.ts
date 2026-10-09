@@ -10,6 +10,7 @@ import {
   byInFlightBand,
   dedupeMirroredRows,
   inFlightBand,
+  isQuestion,
 } from './KanbanReadModel.js'
 import { buildDependents, queuedBehind } from './KanbanRules.js'
 import { clusterStashCards, sortDatedByReturn, splitStashByReturn } from './KanbanSurfaces.js'
@@ -136,25 +137,33 @@ describe('Desk comparators', () => {
     expect(dueCivilDay('2024-02-29')).toBe('2024-02-29')
   })
 
-  it('keeps one creation order within each In flight band regardless of phase or activity age', () => {
+  it('ranks questions first in Your turn, then keeps creation order regardless of activity age', () => {
     const workers = [
       card({ id: 'waiting-new', runtimePhase: 'waiting', createdAt: NEW, lastActivityAt: NOW }),
       card({ id: 'attention-old', runtimePhase: 'attention', createdAt: OLD, lastActivityAt: 1 }),
+      card({ id: 'asked-old', runtimePhase: 'working', ask: { text: 'Which?', at: OLD }, createdAt: OLD, uid: 'z', lastActivityAt: 1 }),
       card({ id: 'working-new', runtimePhase: 'working', createdAt: NEW, lastActivityAt: 1 }),
       card({ id: 'unobserved-old', createdAt: OLD, status: 'active' }),
     ]
-    const expected = ['waiting-new', 'attention-old', 'working-new', 'unobserved-old']
+    const expected = ['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old']
     for (let seed = 1; seed <= 40; seed++) {
       expect(ids(shuffled(workers, seed).sort(byInFlightBand))).toEqual(expected)
-      const changed = workers.map((c) => ({
-        ...c, lastActivityAt: seed * 100,
-        runtimePhase: inFlightBand(c) === 'question' ? (seed % 2 ? 'blocked' : 'waiting') : 'retrying',
-      }))
-      expect(ids(shuffled(changed, seed).sort(byInFlightBand))).toEqual(expected)
+      const aged = workers.map((c) => ({ ...c, lastActivityAt: seed * 100 }))
+      expect(ids(shuffled(aged, seed).sort(byInFlightBand))).toEqual(expected)
     }
-    workers[2].runtimePhase = 'waiting'
-    expect(ids(workers.sort(byInFlightBand)))
-      .toEqual(['waiting-new', 'working-new', 'attention-old', 'unobserved-old'])
+    expect(workers.map(inFlightBand)).toEqual(['yourTurn', 'yourTurn', 'yourTurn', 'working', 'working'])
+    expect(workers.map(isQuestion)).toEqual([false, true, true, false, false])
+    // An idle turn joins Your turn below the questions; a question raised on it lifts it to the top.
+    workers[3].runtimePhase = 'waiting'
+    expect(ids([...workers].sort(byInFlightBand)))
+      .toEqual(['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old'])
+    workers[3].ask = { text: 'Choose the next slice?', at: NEW }
+    expect(ids([...workers].sort(byInFlightBand))[0]).toBe('working-new')
+    workers[3].ask = undefined
+    expect(ids([...workers].sort(byInFlightBand)))
+      .toEqual(['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old'])
+    workers[3].runtimePhase = 'blocked'
+    expect(ids([...workers].sort(byInFlightBand))[0]).toBe('working-new')
   })
 })
 

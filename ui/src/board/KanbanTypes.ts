@@ -87,11 +87,12 @@ export interface KanbanCard {
   tmuxSession?: string
   /**
    * What the live worker is doing, for the chips and the In-flight sort:
-   * `working` (busy mid-tool — the Working band, no chip), `waiting`
-   * (paused at a stop — "waiting for you" once idle ≥60s), `attention` (raised
-   * a harness attention signal — "at a prompt"), or `blocked` (the worker is
-   * `workerState: 'blocked'` with `launchError`). These phases and an
-   * outstanding `ask` put the worker in Question above Working. Absent when there
+   * `working` (busy, or idle over work it started — the Working band, no
+   * chip), `waiting` (its turn ended with nothing running under it — "your
+   * turn" once idle ≥60s), `attention` (raised a harness attention signal — "at
+   * a prompt"), or `blocked` (the worker is `workerState: 'blocked'` with
+   * `launchError`). These phases and an outstanding `ask` put the worker in
+   * Your turn above Working, questions first. Absent when there
    * is no worker, or before a live worker's first activity event.
    */
   runtimePhase?: string

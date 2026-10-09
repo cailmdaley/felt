@@ -62,7 +62,7 @@ import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, inFlightBand, restingCards, surfaceTotals } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, restingCards, surfaceTotals } from './KanbanReadModel.js'
 import {
   dueBouncesFromResting,
   nextStandingLaunch,
@@ -670,7 +670,7 @@ export class KanbanModal {
       ? document.activeElement
       : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
-    if (card.status === 'active' && inFlightBand(card) === 'question') this.workspace?.openQuestion(card)
+    if (card.status === 'active' && isQuestion(card)) this.workspace?.openQuestion(card)
     else this.workspace?.open(card)
   }
 

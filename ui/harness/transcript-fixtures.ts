@@ -45,7 +45,8 @@ function ordinaryTranscript(now: number, earlier: boolean): string {
     }]),
     user(now, -90_000, earlier
       ? 'Record the next check so the follow-up has a clear starting point.'
-      : 'Summarize the last word for review, including the literal HTML-like text `<img src=x onerror=alert(1)>` as untrusted worker content.'),
+      : 'Summarize the last word for review, including the literal HTML-like text `<img src=x onerror=alert(1)>` as untrusted worker content. The reviewer\'s note:\n\n' +
+        '<pasted_content id="6629">\nThe north patch looked noisier than the south one in the first pass.\nCheck that the mask split is not hiding it.\n</pasted_content>'),
     assistant(now, -89_000, [{
       type: 'text',
       text: earlier
@@ -78,6 +79,30 @@ function largeTranscript(now: number): string {
 }
 
 /** Fictional native Claude JSONL used by the offline Board harness. */
+/**
+ * A worker partway through one long exchange: one prompt, then for each update
+ * a command and its result followed by a message, so the last exchange grows
+ * taller than the page's transcript window.
+ */
+function liveTranscript(now: number, updates: number): string {
+  const records = [user(now, -30_000, 'Run the remaining validation batches and report each one as it lands.')]
+  for (let index = 0; index < Math.max(0, Math.min(20, updates)); index++) {
+    const update = index + 1
+    const at = index * 6000
+    const id = `fixture-live-${update}`
+    records.push(
+      assistant(now, at, [{ type: 'tool_use', id, name: 'Bash', input: { command: `python validate.py --batch ${update}` } }]),
+      user(now, at + 200, [{ type: 'tool_result', tool_use_id: id, content: `batch ${update}: 12 bins, max deviation 0.${update}%` }]),
+      assistant(now, at + 500, [{
+        type: 'text',
+        text: `Live worker update ${update}: the next fictional validation batch is in progress.\n\n` +
+          `Batch ${update} covers twelve more fixture bins; the largest deviation is 0.${update}%, inside the stated tolerance, so the measured values stand.`,
+      }]),
+    )
+  }
+  return records.join('')
+}
+
 export function workspaceTranscriptBytes(
   scenario: TranscriptScenario,
   now: number,
@@ -86,13 +111,6 @@ export function workspaceTranscriptBytes(
   const transcriptStart = options.earlier ? now - 5 * 60_000 : now
   const source = scenario === 'large'
     ? largeTranscript(now)
-    : ordinaryTranscript(transcriptStart, options.earlier === true) + (scenario === 'live'
-      ? Array.from({ length: Math.max(0, Math.min(20, options.updates ?? 0)) }, (_, index) => {
-          const update = index + 1
-          const at = index * 6000
-          return user(now, at, `Append live fixture update ${update}; do not replace the prior result.`) +
-            assistant(now, at + 500, [{ type: 'text', text: `Live worker update ${update}: the next fictional validation batch is in progress.` }])
-        }).join('')
-      : '')
+    : ordinaryTranscript(transcriptStart, options.earlier === true) + (scenario === 'live' ? liveTranscript(now, options.updates ?? 0) : '')
   return encoder.encode(source)
 }

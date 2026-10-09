@@ -205,7 +205,10 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 Prompt rendering lives in `Shuttle.Dispatcher`.
 
 Launch messages open with `You are a Shuttle worker. Activate the felt and
-shuttle skills.` and otherwise carry only this dispatch's facts:
+shuttle skills.` and the attention contract: close with an outcome when done, ask with a report when a human decision unlocks work, otherwise just end the turn.
+Workers never raise a flag on every turn.
+Standing prompts name their completion exception: hand off instead of closing, so the daemon marks the run for review.
+The rest carries this dispatch's facts:
 
 - `Fiber:` and `Felt store:`; kind, surface, and headless mode.
 - `Mode: resume` and `Sync and re-read the fiber before continuing.` on a

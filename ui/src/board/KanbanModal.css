@@ -1303,15 +1303,19 @@
   letter-spacing: 0.06em;
   color: var(--kbn-ink-muted);
 }
-.kbn-flight-band[data-flight-band="question"] .kbn-flight-caption {
+.kbn-flight-band[data-flight-band="yourTurn"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
-/* The gold edge is painted inside the card's own 1 px border, so a card
-   crossing into the band changes colour, never size. A background layer
-   leaves the card's shadows to whichever surface draws it. */
-.kbn-flight-band[data-flight-band="question"] .kbn-card {
+/* Your turn draws a question heavier than an idle turn: a full gold edge
+   against a hairline. The edge is painted inside the card's own 1 px border,
+   so a card crossing into the band changes colour, never size. A background
+   layer leaves the card's shadows to whichever surface draws it. */
+.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card[data-turn="question"] {
   border-left-color: var(--kbn-owed);
   background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
+}
+.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card[data-turn="idle"] {
+  border-left-color: color-mix(in srgb, var(--kbn-owed) 55%, transparent);
 }
 .kbn-card-question {
   color: var(--kbn-owed-ink);

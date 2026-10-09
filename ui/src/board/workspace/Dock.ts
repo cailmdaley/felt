@@ -628,9 +628,15 @@ export class Dock {
     return true
   }
 
+  /** The page re-seated this Dock's element in a fresh prose page. */
+  reseated(): void {
+    this.transcriptBand?.reseated()
+  }
+
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
+    if (this.transcriptBand?.closeFull()) return true
     return Boolean(this.dismissConversation?.() || this.dismissParent?.())
   }
 
@@ -839,7 +845,6 @@ export class Dock {
     errorEl.style.display = 'none'
     if (shuttleManaged) {
       this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase })
-      body.append(this.transcriptBand.el)
       body.append(this.buildComposer(card))
     }
     body.append(this.buildTranscriptPane(card))
@@ -959,9 +964,11 @@ export class Dock {
     this.composerDisposers.push(() => { release?.(); release = null })
     this.verdictMenu = menu
     foot.append(errorEl, statusEl)
-    body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
+    // The transcript reads below every control, so the composer and its
+    // verbs stay at the top of the dock however long the worker has talked.
+    body.append(settings, ...(history ? [history as HTMLElement] : []), foot, ...(this.transcriptBand ? [this.transcriptBand.el] : []))
     // Review and live verdicts sit on the status line. Drafts and resting
-    // constitutions keep their verdicts in a menu below the transcript.
+    // constitutions keep their verdicts in a menu on the controls row.
     this.actPaint = () => {
       const column = fiberPageColumn(card)
       this.el.dataset.column = column

@@ -166,3 +166,22 @@ export class TranscriptModel {
     this.dirty.add(turn.index)
   }
 }
+
+/** A turn's steps as the reader lays them out: each agent message on its own, the work between messages as one run. */
+export type Segment =
+  | { kind: 'text'; index: number }
+  | { kind: 'steps'; start: number; end: number }
+
+export function segments(steps: readonly Step[]): Segment[] {
+  const out: Segment[] = []
+  let runStart = -1
+  steps.forEach((step, index) => {
+    if (step.kind === 'text') {
+      if (runStart >= 0) out.push({ kind: 'steps', start: runStart, end: index })
+      runStart = -1
+      out.push({ kind: 'text', index })
+    } else if (runStart < 0) runStart = index
+  })
+  if (runStart >= 0) out.push({ kind: 'steps', start: runStart, end: steps.length })
+  return out
+}

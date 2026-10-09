@@ -50,7 +50,7 @@ Nothing goes above this opening, including a title, as-of stamp, status panel or
 A loose, nonblocking request for a view is welcome; don't manufacture fixed choices.
 3. **Executive summary** — below the question, followed by evidence and depth.
 
-The Question band's card opens the report when one is present.
+A question card, which leads the Your turn band, opens the report when one is present.
 Keep working after raising the ask, and clear it when it becomes moot.
 
 Without an outstanding ask, the default skeleton is:

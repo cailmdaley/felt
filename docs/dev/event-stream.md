@@ -81,13 +81,26 @@ session sitting on `bg > 0` categorizes as `working`, not `waiting` or
 `attention` — nobody is being asked for anything. A permission prompt overrides
 that: the human is the blocker there, running shells or not.
 
+Codex states no count on its `Stop`, but its spawned agents leave a trail on the
+parent's own stream: each `spawn_agent` or `followup_task` call (`tool` on a
+`post_tool_use` line) starts a child turn and each `SubagentStop` ends one, and
+the children's tool calls land on the parent's session too. `WaitingTracker`
+counts starts minus stops as the session's live children. A `stop` over live
+children holds: the children's tool events refresh its time without turning it
+back into a running turn, and the `SubagentStop` that brings the count to zero
+is when the session becomes the human's move. A prompt does not clear this
+count, since no later stop restates it; a session start or end does.
+The count is scoped to the Codex harness and its `sessionId`, so another harness or a nested session in the same tmux pane cannot inherit or retire it.
+The hook stream supplies no individual child identity or live registry; an incomplete stream can therefore leave a stale count until the bound expires.
+Pi exposes turn activity through the shared event stream but no child registry here; idle Pi workers fall back to Your turn.
+
 **The suppression expires after an hour, and that bound is the whole safety
-story.** Nothing decrements the count when a task finishes — work that ends
-triggers a follow-up turn whose stop restates it, which is the ordinary path. A
+story.** Claude's carried background count is restated by the follow-up turn's stop rather than decremented on a child stop.
+Codex's child count is decremented by `SubagentStop`. A
 task that never returns has no such path, and left unbounded it would silence
 its worker forever: a false "needs you" is noise a
 person dismisses, a false "nothing to see" is a worker nobody looks at again.
-Past the bound the session categorizes as if the count were zero.
+Past the bound the session categorizes as if both counts were zero.
 
 `internal/shuttlecli/testdata/events_golden.jsonl` is the cross-language contract: written
 byte-for-byte by `internal/shuttlecli/hook_event_test.go`, parsed by the Elixir projections in

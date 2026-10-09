@@ -139,7 +139,9 @@ another launch.
 App responses and runtime rows can also carry `desktop_link`, the validated
 `codex://threads/<thread_id>` desktop route. This is separate from a verified
 phone `session_link`. The board uses native working, waiting, and attention
-states without treating an idle conversation as released ownership.
+states without treating an idle conversation as released ownership. An idle
+conversation with an active loaded thread descended from it (a spawned agent
+naming it as `parentThreadId`) reads as working, not waiting.
 
 A created conversation whose first turn could not be confirmed returns HTTP
 502 with `reason: "app_launch_failed"`, its conversation id, and a recovery

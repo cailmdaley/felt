@@ -55,7 +55,37 @@ afterEach(() => {
 })
 
 describe('TranscriptBand', () => {
-  it('shows only the last turn, renders safe prose, and lazily expands tool details', async () => {
+  it('shows the last exchange as words only: the prompt and every agent message since, no tools or thinking', async () => {
+    const items = [
+      ...records('Inspect the first mask split.', 'Earlier report.'),
+      { type: 'user', timestamp: '2026-09-26T14:20:00.000Z', message: { content: 'Check the response again.' } },
+      { type: 'assistant', timestamp: '2026-09-26T14:21:00.000Z', message: { model: 'claude-opus', content: [
+        { type: 'text', text: 'Starting with the bins.' },
+        { type: 'thinking', thinking: 'Private reasoning.' },
+        { type: 'tool_use', id: 'call-2', name: 'Bash', input: { command: 'pytest -q' } },
+      ] } },
+      { type: 'user', timestamp: '2026-09-26T14:22:00.000Z', message: { content: [{ type: 'tool_result', tool_use_id: 'call-2', content: 'ok' }] } },
+      { type: 'assistant', timestamp: '2026-09-26T14:23:00.000Z', message: { model: 'claude-opus', content: [{ type: 'text', text: 'All **bins** pass.' }] } },
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+
+    const preview = band.el.querySelector<HTMLElement>('.ws-transcript-preview')!
+    expect(preview.hidden).toBe(false)
+    const messages = [...preview.querySelectorAll<HTMLElement>('.ws-transcript-msg')]
+    expect(messages.map((node) => node.classList.contains('ws-transcript-msg-agent') ? 'agent' : 'you')).toEqual(['you', 'agent', 'agent'])
+    expect(messages[0].textContent).toContain('Check the response again.')
+    expect(messages[1].textContent).toContain('Starting with the bins.')
+    expect(messages[2].querySelector('strong')?.textContent).toBe('bins')
+    expect(preview.textContent).not.toContain('Earlier report.')
+    expect(preview.textContent).not.toContain('pytest')
+    expect(preview.textContent).not.toContain('Private reasoning')
+    expect(preview.querySelector('.ws-transcript-steps, .ws-transcript-tool')).toBeNull()
+    expect(band.el.querySelector('.ws-transcript-turn')).toBeNull()
+  })
+
+  it('opens the whole session in a pane over the page content, with each run opening onto its tools and thinking', async () => {
     const output = Array.from({ length: 48 }, (_, index) => `response-bin-${index + 1}`).join('\n')
     const answer = `# Calibration\n\nThe null test is consistent with $\\chi^2$.\n\n[unsafe](javascript:alert(1)) <img src=x onerror=alert(1)>\n\n${output}`
     const items = [
@@ -70,24 +100,37 @@ describe('TranscriptBand', () => {
 
     expect(requests[0]).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
     expect(band.el.hidden).toBe(false)
-    expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
-    expect(band.el.querySelector('.ws-transcript-prompt-text')?.textContent).toContain('You are a Shuttle worker')
-    expect(band.el.querySelector('.ws-transcript-kicker')?.textContent).toContain('dispatch')
-    expect(band.el.querySelector('.ws-transcript-answer')?.textContent).toContain('Calibration')
-    expect(band.el.querySelector('.ws-transcript-answer')?.innerHTML).not.toContain('<img')
-    expect(band.el.querySelector('.ws-transcript-answer')?.innerHTML).not.toContain('javascript:')
-    expect(band.el.querySelector('.ws-transcript-steplist')).toBeNull()
+    const content = document.createElement('div')
+    content.className = 'ws-content'
+    document.body.append(content)
+    content.append(band.el)
+    expect(document.querySelector('.ws-transcript-pane')).toBeNull()
+    band.el.querySelector<HTMLElement>('.ws-transcript-preview')!.click()
+    await settle()
+    const dialog = document.querySelector<HTMLElement>('.ws-transcript-pane')!
+    expect(dialog.parentElement).toBe(content)
+    expect(dialog.hidden).toBe(false)
+    expect(band.el.querySelector('.ws-transcript-open-full')?.getAttribute('aria-expanded')).toBe('true')
 
-    const steps = band.el.querySelector<HTMLButtonElement>('.ws-transcript-steps')!
+    expect(dialog.querySelectorAll('.ws-transcript-turn')).toHaveLength(2)
+    const last = dialog.querySelectorAll<HTMLElement>('.ws-transcript-turn')[1]
+    expect(last.querySelector('.ws-transcript-prompt-text')?.textContent).toContain('You are a Shuttle worker')
+    expect(last.querySelector('.ws-transcript-kicker')?.textContent).toContain('dispatch')
+    const prose = last.querySelector('.ws-transcript-msg-agent')!
+    expect(prose.textContent).toContain('Calibration')
+    expect(prose.innerHTML).not.toContain('<img')
+    expect(prose.innerHTML).not.toContain('javascript:')
+    expect(dialog.querySelector('.ws-transcript-steplist')).toBeNull()
+
+    const steps = last.querySelector<HTMLButtonElement>('.ws-transcript-steps')!
+    expect(steps.textContent).toBe('▸ 1 step · 11m · Bash 1')
     steps.click()
-    expect(band.el.querySelectorAll('.ws-transcript-steplist')).toHaveLength(1)
-    const tool = band.el.querySelector<HTMLButtonElement>('.ws-transcript-tool-line')!
+    expect(dialog.querySelectorAll('.ws-transcript-steplist')).toHaveLength(1)
+    const tool = dialog.querySelector<HTMLButtonElement>('.ws-transcript-tool-line')!
     expect(tool.textContent).toContain('Bash')
-    expect(tool.parentElement?.querySelector('.ws-transcript-tool-detail')).toBeNull()
-    tool.click()
+    expect(tool.getAttribute('aria-expanded')).toBe('true')
     const detail = tool.parentElement?.querySelector<HTMLElement>('.ws-transcript-tool-detail')!
     expect(detail.textContent).toContain('git log --oneline -5')
-    expect(detail.querySelector('.ws-transcript-tool-error')).toBeNull()
     expect(detail.querySelector('.ws-transcript-output')?.classList.contains('ws-transcript-error')).toBe(true)
     expect(detail.querySelector('.ws-transcript-output')?.textContent).toContain('response-bin-40')
     expect(detail.querySelector('.ws-transcript-output')?.textContent).not.toContain('response-bin-48')
@@ -96,9 +139,135 @@ describe('TranscriptBand', () => {
     showAll.click()
     expect(detail.querySelector('.ws-transcript-output')?.textContent).toContain('response-bin-48')
 
-    band.el.querySelector<HTMLButtonElement>('.ws-transcript-earlier')!.click()
-    expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(2)
-    expect([...band.el.querySelectorAll('.ws-transcript-turn')].map((node) => node.textContent)).toContainEqual(expect.stringContaining('Earlier report.'))
+    tool.click()
+    expect(detail.hidden).toBe(true)
+
+    dialog.querySelector<HTMLButtonElement>('.ws-transcript-close')!.click()
+    expect(dialog.isConnected).toBe(false)
+    expect(dialog.querySelector('.ws-transcript-turn')).toBeNull()
+  })
+
+  it('pages earlier turns inside the pane, never in the page', async () => {
+    const items = Array.from({ length: 20 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}.`)).flat()
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+    const dialog = band.el.querySelector<HTMLElement>('.ws-transcript-pane')!
+    expect(dialog.querySelectorAll('.ws-transcript-turn')).toHaveLength(3)
+    const earlier = dialog.querySelector<HTMLButtonElement>('.ws-transcript-earlier')!
+    expect(earlier.textContent).toBe('▴ 12 earlier turns')
+    earlier.click()
+    expect(dialog.querySelectorAll('.ws-transcript-turn')).toHaveLength(15)
+    expect(earlier.textContent).toBe('▴ 5 earlier turns')
+    expect(band.el.querySelector('.ws-transcript-preview')?.textContent).toContain('Answer 19.')
+    expect(band.el.querySelector('.ws-transcript-preview')?.textContent).not.toContain('Answer 18.')
+  })
+
+  it('marks a live worker at work after its last message, and Escape in the pane closes it alone', async () => {
+    const items = records('Run the suite.', 'unused', true).slice(0, 3)
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId, { live: true }))
+    await settle()
+    const preview = band.el.querySelector<HTMLElement>('.ws-transcript-preview')!
+    expect(preview.querySelector('.ws-transcript-working')).not.toBeNull()
+    expect(preview.textContent).not.toContain('git log')
+    band.follow(target(latestId, { live: false }))
+    await settle()
+    expect(preview.querySelector('.ws-transcript-working')).toBeNull()
+
+    const outside = vi.fn()
+    window.addEventListener('keydown', outside)
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    const pane = band.el.querySelector<HTMLElement>('.ws-transcript-pane')!
+    expect(document.activeElement).toBe(pane.querySelector('.ws-transcript-scroll'))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j' }))
+    expect(outside).toHaveBeenCalledTimes(1)
+    pane.querySelector('.ws-transcript-scroll')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(pane.isConnected).toBe(false)
+    expect(outside).toHaveBeenCalledTimes(1)
+    window.removeEventListener('keydown', outside)
+  })
+
+  it('sets a paste apart as a quoted block, with no wrapper markup', async () => {
+    const items = [
+      { type: 'user', timestamp: '2026-09-26T14:02:00.000Z', message: { content: 'Read this note.\n\n<pasted_content id="6629">\nThe mask split is fine.\nKeep the bins.\n</pasted_content>\n\nThen decide.' } },
+      { type: 'assistant', timestamp: '2026-09-26T14:03:00.000Z', message: { model: 'claude-opus', content: [{ type: 'text', text: 'Decided.' }] } },
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+    const prompt = band.el.querySelector<HTMLElement>('.ws-transcript-preview .ws-transcript-prompt-text')!
+    expect(prompt.textContent).not.toContain('pasted_content')
+    expect(prompt.querySelector('.ws-transcript-pasted')?.textContent).toContain('The mask split is fine.')
+    expect(prompt.querySelector('.ws-transcript-pasted-label')?.textContent).toBe('pasted · 2 lines')
+    expect(prompt.textContent).toContain('Read this note.')
+    expect(prompt.textContent).toContain('Then decide.')
+  })
+
+  it('keeps the last good words through a failed poll, and says so only for a transcript never read', async () => {
+    vi.useFakeTimers()
+    const bytes = encoded(records('Run it.', 'First result.'))
+    let fail = false
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      if (fail) return new Response('boom', { status: 500 })
+      const offset = Number(new URL(String(input)).searchParams.get('offset'))
+      return new Response(bytes.slice(offset), { headers: { 'x-transcript-offset': String(offset) } })
+    })
+    const band = makeBand(fetcher)
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(band.el.textContent).toContain('First result.')
+    fail = true
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(band.el.querySelector<HTMLElement>('.ws-transcript-note')?.hidden).toBe(true)
+    expect(band.el.textContent).toContain('First result.')
+
+    const fresh = makeBand(vi.fn<typeof fetch>(async () => new Response('boom', { status: 500 })))
+    fresh.follow(target(earlierId))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fresh.el.querySelector('.ws-transcript-note')?.textContent).toBe('The transcript could not be read.')
+  })
+
+  it('opens a run onto its thinking text', async () => {
+    const items = [
+      { type: 'user', timestamp: '2026-09-26T14:02:00.000Z', message: { content: 'Think first.' } },
+      { type: 'assistant', timestamp: '2026-09-26T14:03:00.000Z', message: { model: 'claude-opus', content: [
+        { type: 'thinking', thinking: 'The bins at high ell carry the signal.' },
+        { type: 'text', text: 'Done thinking.' },
+      ] } },
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+    const pane = band.el.querySelector<HTMLElement>('.ws-transcript-pane')!
+    pane.querySelector<HTMLButtonElement>('.ws-transcript-steps')!.click()
+    const thinking = pane.querySelector<HTMLElement>('.ws-transcript-thinking-text')!
+    expect(thinking.hidden).toBe(false)
+    expect(thinking.textContent).toBe('The bins at high ell carry the signal.')
+  })
+
+  it('puts the open pane back when the page re-seats the band in a fresh prose page', async () => {
+    const band = makeBand(fixtureFetch({ [latestId]: records('Prompt', 'Answer.') }))
+    const content = document.createElement('div')
+    content.className = 'ws-content'
+    document.body.append(content)
+    content.append(band.el)
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    const pane = content.querySelector<HTMLElement>('.ws-transcript-pane')!
+    const fresh = document.createElement('div')
+    fresh.append(band.el)
+    content.replaceChildren(fresh)
+    expect(pane.isConnected).toBe(false)
+    band.reseated()
+    expect(pane.parentElement).toBe(content)
+    expect(pane.querySelector('.ws-transcript-turn')).not.toBeNull()
   })
 
   it('pins a History session and returns to the latest runtime session', async () => {

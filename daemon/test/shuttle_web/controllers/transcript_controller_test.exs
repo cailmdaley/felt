@@ -83,6 +83,8 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       |> get("/api/v1/transcript/raw", %{"session" => @session, "offset" => "#{offset}"})
 
     assert response(conn, 200) == ""
+    # Bandit refuses a zero-length sendfile, so an empty slice is a plain response.
+    assert conn.state == :sent
     assert get_resp_header(conn, "x-transcript-offset") == [Integer.to_string(offset)]
     assert get_resp_header(conn, "x-transcript-byte-count") == [Integer.to_string(offset)]
   end

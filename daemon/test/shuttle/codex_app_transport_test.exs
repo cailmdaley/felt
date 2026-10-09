@@ -641,6 +641,12 @@ defmodule Shuttle.CodexApp.TransportTest do
             recv_json(socket)
 
           send_result(socket, request_id, %{"thread" => %{"id" => "thread-1", "status" => status}})
+
+          # An idle thread is the human's move only with no live children.
+          if status["type"] == "idle" do
+            %{"id" => list_id, "method" => "thread/loaded/list"} = recv_json(socket)
+            send_result(socket, list_id, %{"data" => ["thread-1"], "nextCursor" => nil})
+          end
         end
       end)
 
@@ -650,6 +656,123 @@ defmodule Shuttle.CodexApp.TransportTest do
       assert %{state: ^state, phase: ^phase} = CodexApp.status("thread-1")
     end
 
+    await_peer(peer)
+  end
+
+  test "an idle thread with a live spawned agent, at any depth, is still working" do
+    threads = %{
+      "child" => %{"parentThreadId" => "thread-1", "status" => %{"type" => "idle"}},
+      "grandchild" => %{
+        "parentThreadId" => "child",
+        "status" => %{"type" => "active", "activeFlags" => []}
+      },
+      "stranger" => %{
+        "parentThreadId" => "other",
+        "status" => %{"type" => "active", "activeFlags" => []}
+      }
+    }
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        for live? <- [true, false] do
+          %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+
+          send_result(socket, read_id, %{
+            "thread" => %{"id" => "thread-1", "status" => %{"type" => "idle"}}
+          })
+
+          %{"id" => list_id, "method" => "thread/loaded/list"} = recv_json(socket)
+
+          ids =
+            if live?,
+              do: ["thread-1", "child", "grandchild", "stranger"],
+              else: ["thread-1", "child", "stranger"]
+
+          send_result(socket, list_id, %{"data" => ids, "nextCursor" => nil})
+
+          for _ <- tl(ids) do
+            %{"id" => id, "method" => "thread/read", "params" => %{"threadId" => tid}} =
+              recv_json(socket)
+
+            send_result(socket, id, %{"thread" => Map.put(threads[tid], "id", tid)})
+          end
+        end
+      end)
+
+    configure_adapter(path)
+    # The parent's own ownership state stays idle; only the board phase moves.
+    assert %{state: :idle, phase: "working"} = CodexApp.status("thread-1")
+    assert %{state: :idle, phase: "waiting"} = CodexApp.status("thread-1")
+    await_peer(peer)
+  end
+
+  test "real App Server idle-parent/live-child output keeps the parent's phase working" do
+    %{"parent" => parent, "children" => [child]} =
+      Path.expand("../fixtures/whose_move/codex-app.json", __DIR__)
+      |> File.read!()
+      |> Jason.decode!()
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+        send_result(socket, read_id, %{"thread" => parent})
+        %{"id" => list_id, "method" => "thread/loaded/list"} = recv_json(socket)
+        send_result(socket, list_id, %{"data" => [parent["id"]], "nextCursor" => "page-2"})
+        %{"id" => page_id, "params" => %{"cursor" => "page-2"}} = recv_json(socket)
+        send_result(socket, page_id, %{"data" => [child["id"]], "nextCursor" => nil})
+        %{"id" => child_id, "method" => "thread/read"} = recv_json(socket)
+        send_result(socket, child_id, %{"thread" => child})
+      end)
+
+    configure_adapter(path)
+    assert %{state: :idle, phase: "working"} = CodexApp.status(parent["id"])
+    await_peer(peer)
+  end
+
+  test "unreadable child state falls back to the human's turn" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+
+        send_result(socket, read_id, %{
+          "thread" => %{"id" => "parent", "status" => %{"type" => "idle"}}
+        })
+
+        %{"id" => list_id, "method" => "thread/loaded/list"} = recv_json(socket)
+        send_result(socket, list_id, %{"data" => ["child"], "nextCursor" => nil})
+        %{"id" => child_id, "method" => "thread/read"} = recv_json(socket)
+        send_error(socket, child_id, %{"code" => -32603, "message" => "thread unavailable"})
+      end)
+
+    configure_adapter(path)
+    assert %{state: :idle, phase: "waiting"} = CodexApp.status("parent")
+    await_peer(peer)
+  end
+
+  test "child reads share one timeout budget rather than blocking once per loaded thread" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+
+        send_result(socket, read_id, %{
+          "thread" => %{"id" => "parent", "status" => %{"type" => "idle"}}
+        })
+
+        %{"id" => list_id, "method" => "thread/loaded/list"} = recv_json(socket)
+
+        send_result(socket, list_id, %{
+          "data" => ["child-1", "child-2", "child-3"],
+          "nextCursor" => nil
+        })
+
+        %{"method" => "thread/read"} = recv_json(socket)
+        Process.sleep(2_200)
+        # The first read used the scan budget; no further read may be sent.
+        assert {:error, :timeout} = :gen_tcp.recv(socket, 0, 100)
+      end)
+
+    configure_adapter(path)
+    assert %{state: :idle, phase: "waiting"} = CodexApp.status("parent")
     await_peer(peer)
   end
 
