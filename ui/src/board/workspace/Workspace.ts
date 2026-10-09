@@ -377,9 +377,10 @@ export class Workspace {
     const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
     if (!state) return document.createElement('div')
     this.proseRevisions.set(key, this.proseRevision(state))
+    const dock = this.controls(state)
     const page = buildFiberProse(state.card, state.channel, {
-      controls: this.controls(state)?.el,
-      acts: this.controls(state)?.head,
+      controls: dock?.el,
+      acts: dock?.head,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title) => this.openFile(path, title),
@@ -398,6 +399,9 @@ export class Workspace {
       }
       page.querySelector('.ws-prose')?.append(note)
     }
+    // The caller seats the new page synchronously; the Dock then puts back
+    // what moving its element reset (scroll positions, the open transcript).
+    if (dock) queueMicrotask(() => dock.reseated())
     return page
   }
   private refreshProse(state: ChannelState): void {

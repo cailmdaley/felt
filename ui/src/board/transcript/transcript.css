@@ -1,8 +1,8 @@
 /* The worker's words belong to the fiber page, not to a boxed widget. */
-.ws-dock .ws-transcript {
-  grid-column: 1 / -1;
+.ws-dock .ws-transcript { grid-column: 1 / -1; margin-top: var(--ws-small-gap); }
+.ws-dock .ws-transcript,
+.ws-transcript-pane {
   min-width: 0;
-  margin-top: var(--ws-small-gap);
   color: var(--ws-ink);
   /* Who spoke, as a wash behind the words: the agent blue, the human warm.
      The washes take the palette's own hues; the workspace's ink-deepened
@@ -12,13 +12,13 @@
   --ws-transcript-you-wash: color-mix(in srgb, var(--kbn-you, var(--ws-you)) 7%, transparent);
   --ws-transcript-you-rule: color-mix(in srgb, var(--kbn-you, var(--ws-you)) 45%, transparent);
 }
-.ws-dock .ws-transcript-headrow {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-headrow {
   display: flex;
   align-items: center;
   gap: 12px;
   min-width: 0;
 }
-.ws-dock .ws-transcript-head {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-head {
   display: flex;
   flex: 1 1 auto;
   align-items: center;
@@ -33,9 +33,9 @@
   text-align: left;
   font: var(--ws-label-size)/1.4 var(--ws-serif);
 }
-.ws-dock .ws-transcript-head:hover { color: var(--ws-ink); }
-.ws-dock .ws-transcript-label { flex: none; }
-.ws-dock .ws-transcript-reading {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-head:hover { color: var(--ws-ink); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-label { flex: none; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-reading {
   min-width: 0;
   margin-left: auto;
   overflow: hidden;
@@ -45,7 +45,7 @@
   font: var(--ws-small-size)/1.4 var(--ws-mono);
   letter-spacing: var(--ws-mono-tracking);
 }
-.ws-dock .ws-transcript-live-dot {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-dot {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -53,9 +53,9 @@
   color: var(--ws-ink-muted);
   font: var(--ws-small-size)/1.4 var(--ws-mono);
 }
-.ws-dock .ws-transcript-live-dot::before { content: '·'; }
-.ws-dock .ws-transcript-live-dot::after,
-.ws-dock .ws-transcript-working::before {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-dot::before { content: '·'; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-dot::after,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-working::before {
   content: '';
   width: var(--ws-dot-size);
   height: var(--ws-dot-size);
@@ -63,22 +63,22 @@
   background: var(--ws-machine);
   animation: ws-transcript-pulse 1.6s ease-in-out infinite;
 }
-.ws-dock .ws-transcript-live-label { color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); }
-.ws-dock .ws-transcript-chevron {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-label { color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-chevron {
   flex: none;
   line-height: 1;
   transform: rotate(-90deg);
   transition: transform 140ms ease;
 }
-.ws-dock .ws-transcript-chevron::before { content: '·'; margin-right: 8px; }
-.ws-dock .ws-transcript-open .ws-transcript-chevron { transform: none; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-chevron::before { content: '·'; margin-right: 8px; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-open .ws-transcript-chevron { transform: none; }
 @keyframes ws-transcript-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .35; }
 }
-.ws-dock .ws-transcript-open-full,
-.ws-dock .ws-transcript-latest,
-.ws-dock .ws-transcript-showall {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-open-full,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-latest,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-showall {
   flex: none;
   min-height: 24px;
   padding: 2px 0;
@@ -95,19 +95,19 @@
   color: var(--ws-ink);
   text-decoration-color: currentColor;
 }
-.ws-dock .ws-transcript-note {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-note {
   margin: 6px 0 0;
   color: var(--ws-ink-muted);
   font: italic var(--ws-label-size)/1.45 var(--ws-serif);
 }
-.ws-dock .ws-transcript-body { min-width: 0; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-body { min-width: 0; }
 
-/* The last exchange, in a window a third of the viewport tall. */
-.ws-dock .ws-transcript-preview {
+/* The last exchange, in a window half the viewport tall. */
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-preview {
   position: relative;
   box-sizing: border-box;
-  max-height: 33vh;
-  max-height: 33dvh;
+  max-height: 50vh;
+  max-height: 50dvh;
   margin-top: 4px;
   padding: 10px 12px;
   border: 1px solid var(--ws-hairline-soft);
@@ -117,13 +117,13 @@
   scrollbar-width: thin;
   cursor: zoom-in;
 }
-.ws-dock .ws-transcript-preview:hover { border-color: var(--ws-hairline); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-preview:hover { border-color: var(--ws-hairline); }
 /* Scrolled to the newest message, the window fades at its top: there is more above. */
-.ws-dock .ws-transcript-preview.ws-transcript-scrolled {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-preview.ws-transcript-scrolled {
   -webkit-mask-image: linear-gradient(to bottom, transparent, var(--ws-mask) 2.5em);
   mask-image: linear-gradient(to bottom, transparent, var(--ws-mask) 2.5em);
 }
-.ws-dock .ws-transcript-exchange {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-exchange {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -131,7 +131,7 @@
   padding: 0;
   list-style: none;
 }
-.ws-dock .ws-transcript-working {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-working {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -141,18 +141,18 @@
 }
 
 /* A message: the speaker's rule and wash, a kicker, the words. */
-.ws-dock .ws-transcript-msg {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg {
   min-width: 0;
   padding: 6px 10px 8px 12px;
   border-left: 2px solid var(--ws-transcript-agent-rule);
   border-radius: 0 var(--ws-control-radius) var(--ws-control-radius) 0;
   background: var(--ws-transcript-agent-wash);
 }
-.ws-dock .ws-transcript-msg-you {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-you {
   border-left-color: var(--ws-transcript-you-rule);
   background: var(--ws-transcript-you-wash);
 }
-.ws-dock .ws-transcript-kicker {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-kicker {
   display: flex;
   align-items: baseline;
   gap: 5px;
@@ -160,86 +160,75 @@
   color: var(--ws-ink-muted);
   font: var(--ws-small-size)/1.4 var(--ws-mono);
 }
-.ws-dock .ws-transcript-author-you,
-.ws-dock .ws-transcript-author-dispatch { color: var(--ws-you); }
-.ws-dock .ws-transcript-author-agent { color: var(--ws-machine); }
-.ws-dock .ws-transcript-clock { color: var(--ws-ink-muted); }
-.ws-dock .ws-transcript-prompt-text {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-you,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-dispatch { color: var(--ws-you); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-agent { color: var(--ws-machine); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-clock { color: var(--ws-ink-muted); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text {
   max-height: 4.6em;
   overflow: hidden;
   color: var(--ws-ink-soft);
   font: var(--ws-label-size)/1.5 var(--ws-serif);
   overflow-wrap: anywhere;
 }
-.ws-dock .ws-transcript-prompt-text.ws-transcript-overflowing { cursor: pointer; }
-.ws-dock .ws-transcript-prompt-text.ws-transcript-prompt-dispatch { max-height: 1.55em; }
-.ws-dock .ws-transcript-prompt-text p { margin: 0 0 .5em; }
-.ws-dock .ws-transcript-prompt-text p:last-child { margin-bottom: 0; }
-.ws-dock .ws-transcript-prompt-images {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text.ws-transcript-overflowing { cursor: pointer; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text.ws-transcript-prompt-dispatch { max-height: 1.55em; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text p { margin: 0 0 .5em; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text p:last-child { margin-bottom: 0; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-images {
   display: block;
   margin-top: 4px;
   color: var(--ws-ink-muted);
   font: var(--ws-small-size)/1.5 var(--ws-mono);
 }
-.ws-dock .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; overflow: visible; }
-.ws-dock .ws-transcript-prompt-text.ws-transcript-overflowing {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; overflow: visible; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text.ws-transcript-overflowing {
   -webkit-mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
   mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
 }
-.ws-dock .ws-transcript-prose {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose {
   color: var(--ws-ink);
   font: var(--ws-prose-size)/1.55 var(--ws-serif);
   overflow-wrap: anywhere;
 }
-.ws-dock .ws-transcript-prose p { margin: 0 0 .8em; }
-.ws-dock .ws-transcript-prose :is(p, ul, ol, pre, table):last-child { margin-bottom: 0; }
-.ws-dock .ws-transcript-prose :is(h1, h2, h3, h4) { margin: .4em 0 .3em; font-size: 1em; font-weight: 600; }
-.ws-dock .ws-transcript-prose :is(pre, code) { overflow-wrap: anywhere; }
-.ws-dock .ws-transcript-prose pre { white-space: pre-wrap; }
-.ws-dock .ws-transcript-prose table { max-width: 100%; border-collapse: collapse; font-size: .8em; }
-.ws-dock .ws-transcript-prose th,
-.ws-dock .ws-transcript-prose td { padding: 3px 7px; border: 1px solid var(--ws-hairline-soft); }
-.ws-dock .ws-transcript-prose img { display: none; }
-.ws-dock .ws-transcript-prose a { color: inherit; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose p { margin: 0 0 .8em; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose :is(p, ul, ol, pre, table):last-child { margin-bottom: 0; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose :is(h1, h2, h3, h4) { margin: .4em 0 .3em; font-size: 1em; font-weight: 600; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose :is(pre, code) { overflow-wrap: anywhere; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose pre { white-space: pre-wrap; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose table { max-width: 100%; border-collapse: collapse; font-size: .8em; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose th,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose td { padding: 3px 7px; border: 1px solid var(--ws-hairline-soft); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose img { display: none; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose a { color: inherit; }
 
-/* The whole session: a dialog laid over the constitution page. */
-.ws-dock .ws-transcript-dialog {
-  position: fixed;
-  inset: var(--ws-transcript-top, 0px) var(--ws-transcript-right, 0px) var(--ws-transcript-bottom, 0px) var(--ws-transcript-left, 0px);
-  box-sizing: border-box;
-  width: auto;
-  max-width: none;
-  height: auto;
-  max-height: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ws-ink);
-  overflow: visible;
-}
-.ws-dock .ws-transcript-dialog[open] { display: flex; }
-.ws-dock .ws-transcript-dialog::backdrop { background: color-mix(in srgb, var(--ws-ink) 18%, transparent); }
-.ws-dock .ws-transcript-panel {
+/* The whole session: a pane laid over the constitution page's content box.
+   It is not modal: the page's chrome, its other pages and the board stay live. */
+.ws-transcript-pane {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
   display: flex;
-  flex: 1 1 auto;
   flex-direction: column;
-  box-sizing: border-box;
-  width: min(100%, 860px);
   min-height: 0;
-  margin: 12px auto;
+  background: var(--ws-paper);
+  color: var(--ws-ink);
+  animation: ws-transcript-rise 140ms var(--ws-ease, ease-out);
+}
+.ws-transcript-pane[hidden],
+.ws-transcript-pane [hidden] { display: none !important; }
+.ws-transcript-pane.ws-transcript-pane-inline {
+  position: relative;
+  height: 70vh;
+  margin-top: 8px;
   border: 1px solid var(--ws-hairline);
   border-radius: var(--ws-radius);
-  background: var(--ws-paper);
-  box-shadow: var(--ws-float);
-  overflow: hidden;
 }
-.ws-dock .ws-transcript-dialog[open] .ws-transcript-panel { animation: ws-transcript-rise 160ms var(--ws-ease, ease-out); }
 @keyframes ws-transcript-rise {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
-.ws-dock .ws-transcript-panel-head {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-panel-head {
   display: flex;
   flex: none;
   align-items: center;
@@ -250,7 +239,7 @@
   color: var(--ws-ink-muted);
   font: var(--ws-label-size)/1.4 var(--ws-serif);
 }
-.ws-dock .ws-transcript-close {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-close {
   flex: none;
   width: 32px;
   height: 32px;
@@ -260,17 +249,17 @@
   color: var(--ws-ink-muted);
   font: 20px/1 var(--ws-serif);
 }
-.ws-dock .ws-transcript-close:hover { background: var(--ws-hover); color: var(--ws-ink); }
-.ws-dock .ws-transcript-scroll {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-close:hover { background: var(--ws-hover); color: var(--ws-ink); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-scroll {
   flex: 1 1 auto;
   min-height: 0;
   padding: 4px 18px 18px;
   overflow: auto;
   overscroll-behavior: contain;
 }
-.ws-dock .ws-transcript-earlier,
-.ws-dock .ws-transcript-steps,
-.ws-dock .ws-transcript-steps-more {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-earlier,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-steps,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-steps-more {
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -287,24 +276,24 @@
   font: var(--ws-small-size)/1.6 var(--ws-mono);
 }
 .ws-dock :is(.ws-transcript-earlier, .ws-transcript-steps, .ws-transcript-steps-more):hover { color: var(--ws-ink); }
-.ws-dock .ws-transcript-earlier { margin-top: 8px; }
-.ws-dock .ws-transcript-steps { padding-left: 12px; }
-.ws-dock .ws-transcript-turns {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-earlier { margin-top: 8px; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-steps { padding-left: 12px; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-turns {
   min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.ws-dock .ws-transcript-turn {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-turn {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
   padding-block: 14px;
 }
-.ws-dock .ws-transcript-turn + .ws-transcript-turn { border-top: 1px solid var(--ws-hairline-soft); }
-.ws-dock .ws-transcript-tool { min-width: 0; margin: 2px 0; }
-.ws-dock .ws-transcript-tool-line {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-turn + .ws-transcript-turn { border-top: 1px solid var(--ws-hairline-soft); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool { min-width: 0; margin: 2px 0; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-line {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -319,24 +308,24 @@
   text-align: left;
   font: 12px/1.7 var(--ws-mono);
 }
-.ws-dock .ws-transcript-tool-line:hover { background: var(--ws-hover); }
-.ws-dock .ws-transcript-tool-name { flex: none; color: var(--ws-ink-soft); font-weight: 500; }
-.ws-dock .ws-transcript-tool-summary {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-line:hover { background: var(--ws-hover); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-name { flex: none; color: var(--ws-ink-soft); font-weight: 500; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-summary {
   min-width: 0;
   overflow: hidden;
   color: var(--ws-ink-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ws-dock .ws-transcript-tool-mark { flex: none; margin-left: auto; color: var(--ws-ink-muted); }
-.ws-dock .ws-transcript-tool-error { color: var(--ws-red); }
-.ws-dock .ws-transcript-tool-pending {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-mark { flex: none; margin-left: auto; color: var(--ws-ink-muted); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-error { color: var(--ws-red); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-pending {
   width: var(--ws-dot-size);
   height: var(--ws-dot-size);
   border-radius: 50%;
   background: var(--ws-machine);
 }
-.ws-dock .ws-transcript-pending {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-pending {
   display: inline-block;
   width: var(--ws-dot-size);
   height: var(--ws-dot-size);
@@ -344,15 +333,15 @@
   background: var(--ws-machine);
   vertical-align: middle;
 }
-.ws-dock .ws-transcript-thinking-text,
-.ws-dock .ws-transcript-event-text {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-thinking-text,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-event-text {
   margin: 4px 0 8px;
   padding-left: 8px;
   color: var(--ws-ink-muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.ws-dock .ws-transcript-think .ws-transcript-expand {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-think .ws-transcript-expand {
   min-height: 24px;
   padding: 2px 0;
   border: 0;
@@ -361,7 +350,7 @@
   text-align: left;
   font: italic var(--ws-label-size)/1.5 var(--ws-serif);
 }
-.ws-dock .ws-transcript-event .ws-transcript-expand {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-event .ws-transcript-expand {
   display: block;
   width: 100%;
   min-height: 24px;
@@ -373,18 +362,18 @@
   text-align: left;
   font: var(--ws-small-size)/1.7 var(--ws-mono);
 }
-.ws-dock .ws-transcript-event .ws-transcript-expand:hover,
-.ws-dock .ws-transcript-think .ws-transcript-expand:hover { color: var(--ws-ink); }
-.ws-dock .ws-transcript-tool-detail,
-.ws-dock .ws-transcript-thinking-text,
-.ws-dock .ws-transcript-event-text,
-.ws-dock .ws-transcript-no-result {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-event .ws-transcript-expand:hover,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-think .ws-transcript-expand:hover { color: var(--ws-ink); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-detail,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-thinking-text,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-event-text,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-no-result {
   font: 12px/1.45 var(--ws-mono);
 }
-.ws-dock .ws-transcript-tool-detail pre,
-.ws-dock .ws-transcript-thinking-text,
-.ws-dock .ws-transcript-event-text,
-.ws-dock .ws-transcript-no-result {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-detail pre,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-thinking-text,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-event-text,
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-no-result {
   box-sizing: border-box;
   max-height: 60vh;
   margin: 4px 0 8px;
@@ -396,36 +385,50 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.ws-dock .ws-transcript-tool-path {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-path {
   margin: 4px 0;
   color: var(--ws-ink-muted);
   font: 12px/1.45 var(--ws-mono);
   overflow-wrap: anywhere;
 }
-.ws-dock .ws-transcript-tool-detail pre { width: 100%; }
-.ws-dock .ws-transcript-diff .del { display: block; color: var(--ws-red); }
-.ws-dock .ws-transcript-diff .ins { display: block; color: var(--ws-verdict); }
-.ws-dock .ws-transcript-error { color: var(--ws-red); }
-.ws-dock .ws-transcript-tool-detail .ws-transcript-showall {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-detail pre { width: 100%; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-diff .del { display: block; color: var(--ws-red); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-diff .ins { display: block; color: var(--ws-verdict); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-error { color: var(--ws-red); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-detail .ws-transcript-showall {
   min-height: 24px;
   font: italic var(--ws-label-size)/1.4 var(--ws-serif);
 }
-.ws-dock .ws-transcript-steps .ws-transcript-pending { margin-left: 3px; }
-.ws-dock .ws-transcript-steplist {
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-steps .ws-transcript-pending { margin-left: 3px; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist {
   margin: 4px 0 10px;
   padding: 0 0 0 12px;
   border-left: 1px solid var(--ws-hairline-soft);
   list-style: none;
 }
-.ws-dock .ws-transcript-steps-more { padding-left: 12px; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-steps-more { padding-left: 12px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .ws-dock .ws-transcript-live-dot::after,
-  .ws-dock .ws-transcript-working::before { animation: none; }
-  .ws-dock .ws-transcript-chevron { transition: none; }
-  .ws-dock .ws-transcript-dialog[open] .ws-transcript-panel { animation: none; }
+  :is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-dot::after,
+  :is(.ws-dock, .ws-transcript-pane) .ws-transcript-working::before { animation: none; }
+  :is(.ws-dock, .ws-transcript-pane) .ws-transcript-chevron { transition: none; }
+  .ws-transcript-pane { animation: none; }
 }
 @media (max-width: 600px) {
-  .ws-dock .ws-transcript-prose { font-size: calc(var(--ws-label-size) + 1px); }
-  .ws-dock .ws-transcript-panel { margin: 0; border-radius: 0; }
+  :is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose { font-size: calc(var(--ws-label-size) + 1px); }
 }
+
+/* A paste inside a prompt reads as quoted material, not as the prompt's own words. */
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-pasted {
+  margin: .4em 0;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--ws-hairline);
+  color: var(--ws-ink-muted);
+  font-size: .94em;
+}
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-pasted-label {
+  margin-bottom: 2px;
+  color: var(--ws-ink-faint, var(--ws-ink-muted));
+  font: var(--ws-small-size)/1.4 var(--ws-mono);
+}
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist :is(.ws-transcript-tool-detail pre, .ws-transcript-thinking-text) { max-height: 22em; }

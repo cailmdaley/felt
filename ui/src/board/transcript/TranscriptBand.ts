@@ -4,7 +4,7 @@ import { DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
 import { TranscriptModel, segments, type Step, type ToolStep, type Turn } from './model.js'
 import { TranscriptFeed, type FeedStatus } from './feed.js'
 import { toolLabel } from './tools.js'
-import type { Entry } from './records.js'
+import { promptParts, type Entry } from './records.js'
 import './transcript.css'
 
 export interface TranscriptTarget {
@@ -217,6 +217,16 @@ function paintText(message: Message, author: string, entry: Text): void {
   }
 }
 
+/** A prompt's words, with each pasted block set apart as a quoted paste. */
+function promptHtml(source: string): string {
+  return promptParts(source).map((part) => {
+    const html = renderMarkdown(part.text, { untrusted: true })
+    if (part.kind === 'text') return html
+    const lines = part.text.split('\n').length
+    return `<div class="ws-transcript-pasted"><div class="ws-transcript-pasted-label">pasted · ${lines} ${lines === 1 ? 'line' : 'lines'}</div>${html}</div>`
+  }).join('')
+}
+
 /** A prompt clamps to a few lines until it is clicked open: a dispatch carries the whole constitution. */
 function paintPrompt(message: Message, prompt: Prompt): void {
   const speaker: Speaker = prompt.dispatch ? 'dispatch' : 'you'
@@ -228,7 +238,7 @@ function paintPrompt(message: Message, prompt: Prompt): void {
   const text = message.prose
   if (message.source !== prompt.text) {
     message.source = prompt.text
-    text.innerHTML = renderMarkdown(prompt.text, { untrusted: true })
+    text.innerHTML = promptHtml(prompt.text)
   }
   if (!text.dataset.clampable) {
     text.dataset.clampable = '1'
@@ -293,7 +303,9 @@ function anchorLatest(scroller: HTMLElement): number {
  * In the page it shows the last exchange as words only — the last prompt and
  * every agent message since — in a window a third of the viewport tall,
  * scrolled to the newest message. The whole session, with its tool calls,
- * thinking and events, opens in a dialog sized to the constitution page.
+ * thinking and events, opens as a pane over the constitution page's content:
+ * not a modal, so the board, the sidebar and the constitution's other pages
+ * stay in reach while it is open.
  */
 export class TranscriptBand {
   readonly el: HTMLElement
@@ -313,8 +325,8 @@ export class TranscriptBand {
   private readonly preview: HTMLElement
   private readonly exchange: HTMLOListElement
   private readonly working: HTMLLIElement
-  private readonly dialog: HTMLDialogElement
-  private readonly dialogReading: HTMLElement
+  private readonly pane: HTMLElement
+  private readonly paneReading: HTMLElement
   private readonly scroller: HTMLElement
   private readonly earlierButton: HTMLButtonElement
   private readonly list: HTMLOListElement
@@ -326,7 +338,7 @@ export class TranscriptBand {
   private previewFollowing = true
   private fullAnchor = 0
   private fullFollowing = true
-  private modalOpen = false
+  private fullOpen = false
   private fullRendered = false
   private latest: TranscriptTarget | null = null
   private target: TranscriptTarget | null = null
@@ -347,17 +359,10 @@ export class TranscriptBand {
   private intersecting = true
   private disposed = false
   private readonly visibilityListener = (): void => this.visibilityChanged()
-  private readonly resizeListener = (): void => { if (this.modalOpen) this.placeDialog() }
-  /** While the dialog is open the board's own keys stand down; Escape closes it. */
-  private readonly keyListener = (event: KeyboardEvent): void => {
-    if (!this.modalOpen) return
-    event.stopImmediatePropagation()
-    if (event.key === 'Escape' && !event.isComposing) {
-      event.preventDefault()
-      this.closeFull()
-    }
-  }
   private observer: IntersectionObserver | null = null
+  private resizer: ResizeObserver | null = null
+  private previewScroll = 0
+  private fullScroll = 0
 
   constructor(opts: TranscriptBandOptions) {
     this.shuttleBase = opts.shuttleBase
@@ -389,7 +394,7 @@ export class TranscriptBand {
     chevron.textContent = '▾'
     this.head.append(this.label, this.reading, this.liveDot, this.liveLabel, chevron)
     this.openButton = createButton('ws-transcript-open-full', 'Full transcript')
-    this.openButton.setAttribute('aria-haspopup', 'dialog')
+    this.openButton.setAttribute('aria-expanded', 'false')
     headRow.append(this.head, this.openButton)
 
     this.latestButton = createButton('ws-transcript-latest', '← latest')
@@ -413,32 +418,31 @@ export class TranscriptBand {
     this.preview.append(this.exchange)
     this.body.append(this.preview)
 
-    this.dialog = document.createElement('dialog')
-    this.dialog.className = 'ws-transcript-dialog'
-    this.dialog.setAttribute('aria-label', 'Transcript')
-    const panel = document.createElement('div')
-    panel.className = 'ws-transcript-panel'
+    this.pane = document.createElement('section')
+    this.pane.className = 'ws-transcript-pane'
+    this.pane.setAttribute('aria-label', 'Transcript')
+    this.pane.hidden = true
     const panelHead = document.createElement('header')
     panelHead.className = 'ws-transcript-panel-head'
     const title = document.createElement('span')
     title.className = 'kbn-ctl-label ws-transcript-label'
     title.textContent = 'Transcript'
-    this.dialogReading = document.createElement('span')
-    this.dialogReading.className = 'ws-transcript-reading'
+    this.paneReading = document.createElement('span')
+    this.paneReading.className = 'ws-transcript-reading'
     const close = createButton('ws-transcript-close', '×')
     close.setAttribute('aria-label', 'Close the transcript')
-    panelHead.append(title, this.dialogReading, close)
+    panelHead.append(title, this.paneReading, close)
     this.scroller = document.createElement('div')
     this.scroller.className = 'ws-transcript-scroll'
+    this.scroller.tabIndex = -1
     this.earlierButton = createButton('ws-transcript-earlier', '')
     this.earlierButton.hidden = true
     this.list = document.createElement('ol')
     this.list.className = 'ws-transcript-turns'
     this.scroller.append(this.earlierButton, this.list)
-    panel.append(panelHead, this.scroller)
-    this.dialog.append(panel)
+    this.pane.append(panelHead, this.scroller)
 
-    this.el.append(headRow, this.latestButton, this.note, this.body, this.dialog)
+    this.el.append(headRow, this.latestButton, this.note, this.body)
 
     this.head.addEventListener('click', () => this.toggleFold())
     this.openButton.addEventListener('click', () => this.openFull())
@@ -448,22 +452,30 @@ export class TranscriptBand {
       this.openFull()
     })
     this.preview.addEventListener('scroll', () => {
+      if (!this.preview.clientHeight) return
+      this.previewScroll = this.preview.scrollTop
       this.previewFollowing = this.preview.scrollTop >= this.previewAnchor - FOLLOW_SLACK
       this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
     }, { passive: true })
     this.scroller.addEventListener('scroll', () => {
+      if (!this.scroller.clientHeight) return
+      this.fullScroll = this.scroller.scrollTop
       this.fullFollowing = this.scroller.scrollTop >= this.fullAnchor - FOLLOW_SLACK
     }, { passive: true })
     close.addEventListener('click', () => this.closeFull())
-    this.dialog.addEventListener('click', (event) => { if (event.target === this.dialog) this.closeFull() })
-    this.dialog.addEventListener('close', () => this.fullClosed())
+    this.pane.addEventListener('click', (event) => event.stopPropagation())
+    this.pane.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || event.isComposing) return
+      event.preventDefault()
+      event.stopPropagation()
+      this.closeFull()
+    })
     this.latestButton.addEventListener('click', () => {
       this.pinned = false
       this.showTarget(this.latest)
     })
     this.earlierButton.addEventListener('click', () => this.showEarlier())
     document.addEventListener('visibilitychange', this.visibilityListener)
-    window.addEventListener('resize', this.resizeListener)
     if (typeof IntersectionObserver !== 'undefined') {
       this.intersecting = false
       this.observer = new IntersectionObserver((entries) => {
@@ -472,9 +484,19 @@ export class TranscriptBand {
         this.intersecting = visible
         if (visible) {
           if (becameVisible) this.readIfVisible()
-        } else if (!this.modalOpen) this.stopPollTimer()
+        } else if (!this.fullOpen) this.stopPollTimer()
       })
       this.observer.observe(this.el)
+    }
+    // When the window's box changes (a resize, unfolding), keep the reader
+    // on the newest message, or where they were.
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizer = new ResizeObserver(() => {
+        if (this.disposed || !this.preview.clientHeight) return
+        if (this.previewFollowing) this.scheduleLayout()
+        else if (this.preview.scrollTop !== this.previewScroll) this.preview.scrollTop = this.previewScroll
+      })
+      this.resizer.observe(this.preview)
     }
     this.paintFold()
   }
@@ -509,8 +531,10 @@ export class TranscriptBand {
     this.cancelPendingRender()
     this.observer?.disconnect()
     this.observer = null
+    this.resizer?.disconnect()
+    this.resizer = null
     document.removeEventListener('visibilitychange', this.visibilityListener)
-    window.removeEventListener('resize', this.resizeListener)
+    this.pane.remove()
     this.el.replaceChildren()
   }
 
@@ -614,7 +638,7 @@ export class TranscriptBand {
     if (when !== undefined) pieces.push(sessionWhen(when))
     if (stats.turns > 1) pieces.push(`${stats.turns} turns`)
     this.reading.textContent = pieces.slice(0, 2).join(' · ')
-    this.dialogReading.textContent = pieces.join(' · ')
+    this.paneReading.textContent = pieces.join(' · ')
     this.liveDot.hidden = !target?.live
     this.liveLabel.hidden = !target?.live
     this.latestButton.hidden = !(this.pinned && this.latest && target && !this.sameTarget(target, this.latest))
@@ -632,7 +656,7 @@ export class TranscriptBand {
 
   private canReadNow(): boolean {
     return !this.disposed && !!this.target && document.visibilityState === 'visible'
-      && (this.modalOpen || (!this.folded && this.intersecting))
+      && (this.fullOpen || (!this.folded && this.intersecting))
   }
 
   private readIfVisible(): void {
@@ -712,6 +736,9 @@ export class TranscriptBand {
       this.setNote(empty && this.target?.live ? 'empty-live' : null)
       return
     }
+    // A failed poll after a good read is transient: keep the words on screen
+    // and let the next poll try again. Only a transcript never read says so.
+    if ((status === 'error' || status === 'unreachable') && this.model.turns.length > 0) return
     this.setNote(status, detail)
   }
 
@@ -790,7 +817,7 @@ export class TranscriptBand {
     this.hasInitialRender = true
     this.previewFollowing = this.fullFollowing = true
     this.paintPreview()
-    if (this.modalOpen) this.renderFull()
+    if (this.fullOpen) this.renderFull()
     this.paintHead()
     this.scheduleLayout()
     this.setNote(this.model.turns.length === 0 && this.target?.live ? 'empty-live' : null)
@@ -870,58 +897,56 @@ export class TranscriptBand {
     this.preview.hidden = nodes.length === 0
   }
 
-  // ── The whole session, in the dialog ─────────────────────────────────
+  // ── The whole session, in a pane over the page ─────────────────────
 
+  /**
+   * The pane lies over the constitution page's content box, the frame its
+   * prose scrolls inside, so the page's chrome, its tabs and the board stay
+   * live around it. Outside a page it opens in place, under the band.
+   */
   private openFull(): void {
-    if (this.disposed || this.modalOpen || !this.target) return
-    this.modalOpen = true
-    this.placeDialog()
-    try {
-      if (typeof this.dialog.showModal === 'function') this.dialog.showModal()
-      else this.dialog.setAttribute('open', '')
-    } catch {
-      this.dialog.setAttribute('open', '')
-    }
+    if (this.disposed || this.fullOpen || !this.target) return
+    this.fullOpen = true
+    const host = this.el.closest<HTMLElement>('.ws-content')
+    this.pane.classList.toggle('ws-transcript-pane-inline', !host)
+    ;(host ?? this.el).append(this.pane)
+    this.pane.hidden = false
     this.openButton.setAttribute('aria-expanded', 'true')
-    window.addEventListener('keydown', this.keyListener, true)
     this.fullFollowing = true
     if (this.hasInitialRender) this.renderFull()
+    this.scroller.focus({ preventScroll: true })
     this.scheduleLayout()
     this.readIfVisible()
   }
 
-  private closeFull(): void {
-    if (!this.modalOpen) return
-    if (this.dialog.open && typeof this.dialog.close === 'function') this.dialog.close()
-    else this.dialog.removeAttribute('open')
-    this.fullClosed()
+  /**
+   * The band's element moved into a fresh page: moving resets scroll
+   * positions, and the page's content box was rebuilt without the pane. Put
+   * both back.
+   */
+  reseated(): void {
+    if (this.disposed) return
+    if (this.fullOpen) {
+      const host = this.el.closest<HTMLElement>('.ws-content')
+      if (host && this.pane.parentElement !== host) host.append(this.pane)
+      if (!this.fullFollowing) this.scroller.scrollTop = this.fullScroll
+    }
+    if (!this.previewFollowing) this.preview.scrollTop = this.previewScroll
+    this.scheduleLayout()
   }
 
-  private fullClosed(): void {
-    if (!this.modalOpen) return
-    this.modalOpen = false
-    window.removeEventListener('keydown', this.keyListener, true)
+  /** Close the full transcript; true when it was open, so Escape can peel it as a layer. */
+  closeFull(): boolean {
+    if (!this.fullOpen) return false
+    this.fullOpen = false
+    const hadFocus = this.pane.contains(document.activeElement)
+    this.pane.hidden = true
+    this.pane.remove()
     this.openButton.setAttribute('aria-expanded', 'false')
     this.clearFull()
     if (!this.canReadNow()) this.stopPollTimer()
-    if (this.openButton.isConnected && !this.disposed) this.openButton.focus({ preventScroll: true })
-  }
-
-  /** Fit the dialog to the constitution page it was opened from, inside the viewport. */
-  private placeDialog(): void {
-    const page = this.el.closest<HTMLElement>('.ws-page')
-    const rect = page?.getBoundingClientRect()
-    const style = this.dialog.style
-    if (!rect || rect.width < 320 || rect.height < 240) {
-      for (const side of ['top', 'right', 'bottom', 'left']) style.removeProperty(`--ws-transcript-${side}`)
-      return
-    }
-    const width = window.innerWidth
-    const height = window.innerHeight
-    style.setProperty('--ws-transcript-top', `${Math.max(0, rect.top)}px`)
-    style.setProperty('--ws-transcript-left', `${Math.max(0, rect.left)}px`)
-    style.setProperty('--ws-transcript-right', `${Math.max(0, width - rect.right)}px`)
-    style.setProperty('--ws-transcript-bottom', `${Math.max(0, height - rect.bottom)}px`)
+    if (hadFocus && this.openButton.isConnected && !this.disposed) this.openButton.focus({ preventScroll: true })
+    return true
   }
 
   private renderFull(): void {
@@ -1042,6 +1067,9 @@ export class TranscriptBand {
     }
     const available = turn.steps.slice(start, end)
     const shown = available.slice(0, group.count)
+    // Opening a run opens what is in it: thinking reads as text, a tool shows
+    // its input and output. Each row still folds on its own line.
+    shown.forEach((_, relative) => { if (!view.rows.has(start + relative)) view.expandedRows.add(start + relative) })
     const wanted = shown.map((step, relative) => this.getStepRow(view, step, start + relative).node)
     const children = [...group.list.children]
     const prefix = children.length <= wanted.length && children.every((child, index) => child === wanted[index])
@@ -1242,9 +1270,11 @@ export class TranscriptBand {
       for (const view of this.views.values()) {
         if (view.prompt) measureClamp(view.prompt.prose, view.prompt.unclamped)
       }
-      if (!this.preview.hidden && !this.body.hidden && this.previewFollowing) this.previewAnchor = anchorLatest(this.preview)
+      if (!this.preview.hidden && !this.body.hidden && this.previewFollowing && this.preview.clientHeight) {
+        this.previewAnchor = this.previewScroll = anchorLatest(this.preview)
+      }
       this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
-      if (this.modalOpen && this.fullFollowing) this.fullAnchor = anchorLatest(this.scroller)
+      if (this.fullOpen && this.fullFollowing && this.scroller.clientHeight) this.fullAnchor = this.fullScroll = anchorLatest(this.scroller)
     })
   }
 }

@@ -624,9 +624,15 @@ export class Dock {
     return true
   }
 
+  /** The page re-seated this Dock's element in a fresh prose page. */
+  reseated(): void {
+    this.transcriptBand?.reseated()
+  }
+
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
+    if (this.transcriptBand?.closeFull()) return true
     return Boolean(this.dismissConversation?.() || this.dismissParent?.())
   }
 

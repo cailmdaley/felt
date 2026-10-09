@@ -45,7 +45,8 @@ function ordinaryTranscript(now: number, earlier: boolean): string {
     }]),
     user(now, -90_000, earlier
       ? 'Record the next check so the follow-up has a clear starting point.'
-      : 'Summarize the last word for review, including the literal HTML-like text `<img src=x onerror=alert(1)>` as untrusted worker content.'),
+      : 'Summarize the last word for review, including the literal HTML-like text `<img src=x onerror=alert(1)>` as untrusted worker content. The reviewer\'s note:\n\n' +
+        '<pasted_content id="6629">\nThe north patch looked noisier than the south one in the first pass.\nCheck that the mask split is not hiding it.\n</pasted_content>'),
     assistant(now, -89_000, [{
       type: 'text',
       text: earlier

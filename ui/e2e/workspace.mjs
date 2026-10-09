@@ -51,7 +51,7 @@ test('The Dock follows a live transcript by byte offset', async p => {
   assert.ok(Number(new URL(transcriptRequests.at(-1).url, 'file:///').searchParams.get('offset')) > 0, 'the second read requests only the appended bytes')
 })
 
-test('The large transcript shows its last exchange in the page and pages earlier turns in the dialog', async p => {
+test('The large transcript shows its last exchange in the page and pages earlier turns in a pane that leaves the board live', async p => {
   await p.goto(`${url}&transcript=large`)
   await p.locator('.kbn-card').filter({ hasText: name }).click()
   await choose(p, 'Constitution')
@@ -60,19 +60,25 @@ test('The large transcript shows its last exchange in the page and pages earlier
   const last = 'Fixture bin 3000 is within the review tolerance; retain the measured value and continue.'
   await band.locator('.ws-transcript-preview').getByText(last).waitFor()
   assert.equal(await band.locator('.ws-transcript-preview .ws-transcript-msg').count(), 2)
-  assert.equal(await band.locator('.ws-transcript-turn').count(), 0)
-  const pageHeight = await p.evaluate(() => document.querySelector('.ws-selected')?.scrollHeight)
+  assert.equal(await p.locator('.ws-transcript-turn').count(), 0)
+  const pageHeight = await p.evaluate(() => document.querySelector('.ws-selected .ws-prose-scroll')?.scrollHeight)
   await band.locator('.ws-transcript-preview').click()
-  const dialog = band.locator('.ws-transcript-dialog')
-  await dialog.getByText(last).waitFor()
-  assert.equal(await dialog.locator('.ws-transcript-turn').count(), 3)
-  const earlier = dialog.locator('.ws-transcript-earlier')
+  const pane = selected(p).locator('.ws-content > .ws-transcript-pane')
+  await pane.getByText(last).waitFor()
+  assert.equal(await pane.locator('.ws-transcript-turn').count(), 3)
+  const earlier = pane.locator('.ws-transcript-earlier')
   assert.match(await earlier.innerText(), /12 earlier turns/i)
   await earlier.click()
-  assert.equal(await dialog.locator('.ws-transcript-turn').count(), 15)
-  assert.equal(await p.evaluate(() => document.querySelector('.ws-selected')?.scrollHeight), pageHeight, 'earlier turns do not lengthen the page')
+  assert.equal(await pane.locator('.ws-transcript-turn').count(), 15)
+  assert.equal(await p.evaluate(() => document.querySelector('.ws-selected .ws-prose-scroll')?.scrollHeight), pageHeight, 'earlier turns do not lengthen the page')
+  assert.equal(await p.locator('dialog[open], .ws-transcript-dialog').count(), 0, 'the full transcript is not a modal')
+  await choose(p, 'calibration-report')
+  await choose(p, 'Constitution')
+  assert.equal(await pane.locator('.ws-transcript-turn').count(), 15, 'the pane stays with its page across the other pages')
+  await pane.locator('.ws-transcript-earlier').focus()
   await p.keyboard.press('Escape')
-  await poll(p, () => !document.querySelector('.ws-transcript-dialog')?.open)
+
+  await poll(p, () => !document.querySelector('.ws-transcript-pane'))
   assert.ok(await p.evaluate(() => !!document.querySelector('.kbn-reader-open')), 'Escape closes the transcript, not the reader')
 })
 async function choose(p, label) {
