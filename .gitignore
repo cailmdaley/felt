@@ -76,3 +76,4 @@ node_modules/
 **/.claude/agent-memory-local
 **/.claude/first-run
 **/.claude/assistant-daemon-state.json
+ui/harness-dist/
