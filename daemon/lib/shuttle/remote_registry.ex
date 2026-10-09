@@ -581,13 +581,23 @@ defmodule Shuttle.RemoteRegistry do
               "RemoteRegistry: #{remote.name} remote daemon is alive over SSH; waiting for route"
             )
 
-            with_recovery(entry, %{
-              recovery
-              | state: :reviving,
-                step: :probe_after_restart,
-                action_due_at: add_ms(now, state.restart_wait_ms),
-                last_action: "remote daemon alive; waiting for route"
-            })
+            if remote.tunnel.manager == :none do
+              with_recovery(entry, %{
+                recovery
+                | state: :reviving,
+                  step: :probe_after_restart,
+                  action_due_at: add_ms(now, state.restart_wait_ms),
+                  last_action: "remote daemon alive; waiting for route"
+              })
+            else
+              with_recovery(entry, %{
+                recovery
+                | state: :reviving,
+                  step: :bounce_tunnel,
+                  action_due_at: add_ms(now, state.bounce_wait_ms),
+                  last_action: "remote daemon alive; retrying tunnel bounce"
+              })
+            end
 
           {:ok, %{daemon: :not_running}} ->
             Logger.info(

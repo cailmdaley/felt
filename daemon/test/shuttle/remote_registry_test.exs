@@ -508,6 +508,37 @@ defmodule Shuttle.RemoteRegistryTest do
       assert [{"ssh", _}] = MockRunner.calls()
     end
 
+    test "a live daemon behind a tunnel retries the tunnel bounce" do
+      MockClient.set("http://localhost:4001/api/v1/state", {:error, :econnrefused})
+      MockRunner.set("launchctl", [{"", 0}])
+      MockRunner.set("ssh", [{"daemon=alive\n", 0}])
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_live_tunnel,
+          remotes: [candide_remote(poll_interval_ms: 1)],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          user_uid: "501"
+        )
+
+      # Initial failure -> tunnel bounce -> failed probe -> SSH says daemon is
+      # alive. The route still needs its locally-managed tunnel bounced again.
+      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+      Process.sleep(2)
+      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+
+      recovery = RemoteRegistry.snapshot(:reg_live_tunnel, "candide").recovery
+      assert recovery.last_action == "remote daemon alive; retrying tunnel bounce"
+      assert Enum.count(MockRunner.calls(), &(elem(&1, 0) == "launchctl")) == 1
+    end
+
     test "a bound daemon with readiness-gated state waits through boot" do
       recovery_at_ssh_check(:reg_booting, [{"daemon=alive\n", 0}], restart_wait_ms: 20)
 
