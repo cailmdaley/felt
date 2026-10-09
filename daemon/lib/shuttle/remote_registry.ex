@@ -576,9 +576,9 @@ defmodule Shuttle.RemoteRegistry do
 
       :ssh_check ->
         case ssh_check(remote, state.runner) do
-          {:ok, %{http_status: :healthy}} ->
+          {:ok, %{daemon: :alive}} ->
             Logger.info(
-              "RemoteRegistry: #{remote.name} remote daemon is healthy over SSH; recovering route"
+              "RemoteRegistry: #{remote.name} remote daemon is alive over SSH; waiting for route"
             )
 
             if remote.tunnel.manager == :none do
@@ -587,7 +587,7 @@ defmodule Shuttle.RemoteRegistry do
                 | state: :reviving,
                   step: :probe_after_restart,
                   action_due_at: add_ms(now, state.restart_wait_ms),
-                  last_action: "remote daemon healthy; waiting for route"
+                  last_action: "remote daemon alive; waiting for route"
               })
             else
               with_recovery(entry, %{
@@ -595,22 +595,13 @@ defmodule Shuttle.RemoteRegistry do
                 | state: :reviving,
                   step: :bounce_tunnel,
                   action_due_at: add_ms(now, state.bounce_wait_ms),
-                  last_action: "remote daemon healthy; retrying tunnel bounce"
+                  last_action: "remote daemon alive; retrying tunnel bounce"
               })
             end
 
-          {:ok, %{http_status: :booting}} ->
-            with_recovery(entry, %{
-              recovery
-              | state: :reviving,
-                step: :probe_after_restart,
-                action_due_at: add_ms(now, state.restart_wait_ms),
-                last_action: "remote daemon booting; waiting"
-            })
-
-          {:ok, %{http_status: :unhealthy}} ->
+          {:ok, %{daemon: :not_running}} ->
             Logger.info(
-              "RemoteRegistry: #{remote.name} remote daemon unreachable over SSH; restarting"
+              "RemoteRegistry: #{remote.name} remote daemon is not running over SSH; restarting"
             )
 
             with_recovery(entry, %{
@@ -618,7 +609,7 @@ defmodule Shuttle.RemoteRegistry do
               | state: :reviving,
                 step: :restart_remote,
                 action_due_at: now,
-                last_action: "remote daemon unreachable; restarting"
+                last_action: "remote daemon not running; restarting"
             })
 
           {:error, reason} ->
@@ -948,28 +939,21 @@ defmodule Shuttle.RemoteRegistry do
   defp remote_state_target(%Remote{remote_port: port}),
     do: "http://127.0.0.1:#{port}/api/v1/state"
 
-  # /version remains available during boot; /state is readiness-gated.
-  # A responding daemon owns its own startup, regardless of its supervisor.
-  defp remote_version_target(remote),
-    do: String.replace_suffix(remote_state_target(remote), "/state", "/version")
+  # Recovery uses SSH to separate transport failure from daemon liveness. Any
+  # HTTP response, including an error status during boot, proves the listener is
+  # alive. Allow slow startup and loaded hosts time to answer before calling it
+  # absent; ordinary snapshot freshness remains governed by the poll timeout.
+  @recovery_http_timeout_s 15
 
   defp ssh_check(%Remote{} = remote, runner) do
     script =
-      "if curl -sf --max-time 3 #{remote_state_target(remote)} >/dev/null; " <>
-        "then echo http=healthy; " <>
-        "elif curl -sf --max-time 3 #{remote_version_target(remote)} >/dev/null; " <>
-        "then echo http=booting; else echo http=unhealthy; fi"
+      "if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_state_target(remote)} >/dev/null 2>&1; " <>
+        "then echo daemon=alive; else echo daemon=not_running; fi"
 
     case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), script), stderr_to_stdout: true) do
       {out, 0} ->
-        status =
-          cond do
-            String.contains?(out, "http=healthy") -> :healthy
-            String.contains?(out, "http=booting") -> :booting
-            true -> :unhealthy
-          end
-
-        {:ok, %{http_status: status}}
+        daemon = if String.contains?(out, "daemon=alive"), do: :alive, else: :not_running
+        {:ok, %{daemon: daemon}}
 
       {out, code} ->
         {:error, {:ssh_check_failed, code, trim_output(out)}}
@@ -1012,7 +996,7 @@ defmodule Shuttle.RemoteRegistry do
   defp restart_script(%Remote{} = remote) do
     daemon =
       """
-      if curl -sf --max-time 3 #{remote_version_target(remote)} >/dev/null; then echo daemon=responding; else
+      if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_state_target(remote)} >/dev/null 2>&1; then echo daemon=responding; else
       repo=$(head -n 1 "$HOME/.shuttle/repo" 2>/dev/null || true); if [ -n "$repo" ] && [ -x "$repo/bin/shuttle-launch" ]; then SHUTTLE_DIR="$repo" "$repo/bin/shuttle-launch"; else "$HOME/.local/bin/shuttle-launch"; fi
       fi
       """
