@@ -836,6 +836,22 @@
    than another lane: no shadow, no lift. The head names what the bottom of the page
    means; the gloss is there so a card down here doesn't read as one that
    failed. Under the head, the column head's own hairline rule. */
+.kbn-rest-popover {
+  position: fixed;
+  z-index: 1000;
+  width: 260px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: var(--kbn-parchment);
+  color: var(--kbn-ink);
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px #0003;
+}
+.kbn-rest-popover label { display: grid; gap: 8px; }
+.kbn-rest-popover small { opacity: .65; }
+
 .kbn-section-stash {
   /* Design size, like `.kbn-col`. */
   --kbn-type-scale: 1;

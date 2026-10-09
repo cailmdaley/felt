@@ -38,6 +38,7 @@ export interface WorkspaceOptions {
   focusFind?(): boolean
   /** Expand has taken, or given back, the whole window. */
   onExpand?(expanded: boolean): void
+  onRest?(card: KanbanCard, anchor: HTMLElement): void
 }
 interface ChannelState {
   card: KanbanCard
@@ -145,6 +146,7 @@ export class Workspace {
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
       onConversation: card => { this.dock.openConversation(card) },
+      onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
       buildProse: doc => this.prose(doc.key),

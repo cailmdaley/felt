@@ -73,6 +73,10 @@ reads as a question.
 any verdict, concludes the run and stops the worker: the card goes back to
 Resting, its outcome the session's report, and starts again by hand. This is
 how a hub or a seat — a constitution with no finish line — ends a session.
+On the Desk's focused card or a constitution page, press **s** to open a small date popover.
+Enter with an empty date rests undated; choosing a date rests until that day.
+The same operation is `shuttle rest <fiber> --until YYYY-MM-DD` (or `--until ''` for no date).
+It works in any state and stops a live worker through the owning daemon's serialized rest lifecycle.
 
 **4. More work, not blocked?** Leave the fiber active and just hand off. The
 daemon starts a fresh worker next tick, and it lands on your `## Status`.

@@ -832,9 +832,8 @@ func TestShuttleRest_LegacyPinnedRests(t *testing.T) {
 }
 
 // TestShuttleRest_Refusals: a standing constitution is placed by its schedule
-// and a card with a verdict is past review; rest refuses both and leaves the
-// document alone.
-func TestShuttleRest_Refusals(t *testing.T) {
+// and a card with a verdict can both be rested.
+func TestShuttleRest_StandingAndVerdict(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
@@ -850,13 +849,12 @@ func TestShuttleRest_Refusals(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"standing", "done"} {
-		before, _ := os.ReadFile(storage.Path(id))
-		if _, err := runIn(t, env, dir, "rest", id, "--local"); err == nil {
-			t.Fatalf("rest on %s must refuse", id)
+		if out, err := runIn(t, env, dir, "rest", id, "--local"); err != nil {
+			t.Fatalf("rest on %s: %v\n%s", id, err, out)
 		}
-		after, _ := os.ReadFile(storage.Path(id))
-		if string(before) != string(after) {
-			t.Fatalf("refused rest modified %s", id)
+		got, _ := storage.Read(id)
+		if got.Status != felt.StatusOpen || readTempered(got) != nil {
+			t.Fatalf("rest did not clear the verdict for %s", id)
 		}
 	}
 }
