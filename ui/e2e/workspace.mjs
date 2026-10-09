@@ -141,6 +141,48 @@ async function pollReport(p, fn, arg) { await (await reportDocument(p)).waitForF
 function innerHeightGap(box, viewport) { return viewport.height - (box.y + box.height) }
 async function records(p) { return p.evaluate(() => window.__harness.requests) }
 
+test('Oversized embedded media fit report and constitution text columns', async p => {
+  await open(p)
+  await reportReady(p)
+  const frame = await reportDocument(p)
+  await frame.locator('#oversized-report-image').waitFor()
+  const reportSize = await frame.evaluate(async () => {
+    const img = document.querySelector('#oversized-report-image')
+    await img.decode()
+    return { width: img.width, height: img.height, natural: img.naturalWidth, column: document.body.clientWidth }
+  })
+  assert.equal(reportSize.natural, 3000)
+  assert.ok(reportSize.width <= reportSize.column)
+  assert.ok(Math.abs(reportSize.height / reportSize.width - .2) < .01)
+  const authored = await frame.evaluate(() => {
+    const img = document.querySelector('#oversized-report-image')
+    img.classList.add('authored-media')
+    const css = getComputedStyle(img), result = { maxWidth: css.maxWidth, height: css.height }
+    img.classList.remove('authored-media')
+    return result
+  })
+  assert.deepEqual(authored, { maxWidth: '42%', height: '123px' }, 'authored cascade layers override reader defaults')
+  await choose(p, 'Constitution')
+  const image = selected(p).locator('.kbn-detail-prose img')
+  await image.waitFor({ state: 'attached' })
+  const proseSize = await image.evaluate(async img => {
+    await img.decode()
+    const parent = img.closest('.kbn-detail-prose')
+    const css = getComputedStyle(parent)
+    return { width: img.width, height: img.height, column: parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) }
+  })
+  assert.ok(proseSize.width <= proseSize.column)
+  assert.ok(Math.abs(proseSize.height / proseSize.width - .2) < .01)
+  await choose(p, 'brief.md')
+  const markdownImage = selected(p).locator('.kbn-detail-prose img')
+  await markdownImage.waitFor()
+  assert.ok(await markdownImage.evaluate(async img => {
+    await img.decode()
+    const parent = img.closest('.kbn-detail-prose'), css = getComputedStyle(parent)
+    return img.width <= parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) && Math.abs(img.height / img.width - .2) < .01
+  }), 'Markdown deliverables fit their padded text column')
+})
+
 test('Fresh Desk leaves focus alone; the first j selects awaiting review and Enter opens first', async p => {
   assert.ok(await p.evaluate(() => document.activeElement !== document.querySelector('.kbn-col-head')), 'load must not focus a column head')
   assert.equal(await p.locator('.kbn-key-selected').count(), 0)

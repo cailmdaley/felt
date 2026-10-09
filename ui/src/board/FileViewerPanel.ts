@@ -609,6 +609,17 @@ export function htmlAssetUrl(src: string): string {
 
 /** Srcdoc inherits its parent's URL, so install the byte-owning report's asset base. */
 export function htmlWithBase(html: string, src: string): string {
+  // The first cascade layer and zero specificity keep report-authored styles in charge.
+  const mediaStyle = '<style data-shuttle-media-fit>@layer shuttle-media-fit { :where(img, svg, video, canvas) { max-width: 100%; height: auto; } }</style>'
+  if (!html.includes('data-shuttle-media-fit')) {
+    const head = /<head\b[^>]*>/i
+    const htmlTag = /<html\b[^>]*>/i
+    const doctype = /<!doctype\b[^>]*>/i
+    if (head.test(html)) html = html.replace(head, match => `${match}${mediaStyle}`)
+    else if (htmlTag.test(html)) html = html.replace(htmlTag, match => `${match}<head>${mediaStyle}</head>`)
+    else if (doctype.test(html)) html = html.replace(doctype, match => `${match}${mediaStyle}`)
+    else html = `${mediaStyle}${html}`
+  }
   const asset = htmlAssetUrl(src)
   const declared = /<base\b[^>]*>/i.exec(html)
   if (declared) {

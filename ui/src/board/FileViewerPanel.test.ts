@@ -20,6 +20,19 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it.each([
+    '<!doctype html><html><head><style>img { max-width: 42%; }</style></head><body><img width="3000" height="600"></body></html>',
+    '<html><body><svg width="3000"></svg></body></html>',
+    '<!doctype html><img width="3000">',
+    '<base href="assets/"><video width="3000"></video>',
+  ])('installs overridable, idempotent media defaults in HTML: %s', html => {
+    const source = htmlWithBase(html, 'https://board.test/report.html')
+    const doc = new DOMParser().parseFromString(source, 'text/html')
+    expect(doc.querySelector('[data-shuttle-media-fit]')?.textContent).toBe('@layer shuttle-media-fit { :where(img, svg, video, canvas) { max-width: 100%; height: auto; } }')
+    expect(doc.querySelector('img,svg,video')?.getAttribute('width')).toBe('3000')
+    expect(new DOMParser().parseFromString(htmlWithBase(source, 'https://board.test/report.html'), 'text/html').querySelectorAll('[data-shuttle-media-fit]')).toHaveLength(1)
+    if (html.includes('<style>')) expect([...doc.querySelectorAll('style')].at(-1)?.textContent).toBe('img { max-width: 42%; }')
+  })
   it('resolves sibling and nested report assets under the byte-owning host', () => {
     const asset = htmlAssetUrl('https://board.test/api/v1/file?path=%2Fproject%2Freport%20dir%2Findex.html&origin=host-b')
     expect(asset).toBe('https://board.test/api/v1/file-assets/host-b/project/report%20dir/index.html')
