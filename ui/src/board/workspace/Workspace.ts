@@ -48,6 +48,7 @@ interface ChannelState {
   /** The owner file-time reads in flight, at most one per channel. */
   metadataRead?: Promise<boolean>
   selected?: DocKey
+  questionLanding?: boolean
   routedFile?: DocKey
   loaded: boolean
   /** The run is final: body and receipts are both in, or the body read failed. The strip waits for it. */
@@ -205,6 +206,14 @@ export class Workspace {
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
     this.startPrompt = { card, failure }
     this.open(card, this.opts.origin(), proseDocument(this.ensure(card).channel)?.key)
+  }
+
+  /** A Question card leads with its report, even after a previous visit to prose. */
+  openQuestion(card: KanbanCard): void {
+    const state = this.ensure(card)
+    state.questionLanding = true
+    state.selected = undefined
+    this.open(card)
   }
 
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
@@ -468,6 +477,11 @@ export class Workspace {
     }
     await bodyRead
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
+    if (state.questionLanding) {
+      state.questionLanding = false
+      const report = state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'report.html')
+      state.selected = report?.key ?? proseDocument(state.channel)?.key
+    }
     this.show(state, loadedBefore)
     this.history.select(this.shown(state))
     this.startTimer()

@@ -81,8 +81,11 @@ Questions include agent-raised asks and workers needing human input; a harness a
 
 **Work.** Sit with the whole shape of the problem before deciding. Before you commit to a constraint or stop to ask, try this test: would the constraint surprise the human? If so, you haven't sat long enough. Most decisions that look like they need the human follow from what the system is for, and genuine taste questions are narrower than they feel. You have authority, so make ambitious moves even when they span sessions; shuttle will send the next worker. When a choice is load-bearing — a model, a pivot that removes a capability — do the work and set out the alternatives in the artifact, rather than stopping to ask. Give sub-goals their own context: hand bulk reading, sweeps and verification to subagents, and on long runs have a fresh-context subagent check the work against Desired State every few substantial changes. Stream long jobs with `Monitor` or background Bash, and see them through before you exit.
 
-**Ask without stopping.** When your work from here would go better with the human's view, run `shuttle -C <store> ask <id> "<one-line question>"` and keep working.
-Point the question at the report section that frames the choice; it appears in the board's **Question** band without pausing your worker.
+**Ask without stopping.** When your work would go better with the human's view, rewrite `report.html` **before** running `shuttle -C <store> ask <id> "<one-line question>"`, then keep working.
+The report must lead with short background pitched at what the human knows since their last engagement: bridge the gap, without re-explaining a conversation you just had.
+Follow with the question and its options and tradeoffs; put the executive summary below them, with nothing above this opening.
+A question can be a loose, nonblocking request for a view, not only a decision between fixed options.
+The card appears in **Question** without pausing your worker and opens the report on click when one is present.
 In Claude Code, also send a PushNotification with the question.
 Clear it with `shuttle -C <store> ask <id> --clear` when it becomes moot; resuming or messaging the worker also clears it.
 

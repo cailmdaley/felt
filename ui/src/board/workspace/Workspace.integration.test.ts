@@ -113,6 +113,22 @@ beforeEach(() => {
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('a Question opens its report rather than the previously selected prose', async () => {
+    workspace.open(cards[0]); await flush(); await flush()
+    const prose = document.querySelector<HTMLElement>('[data-key="fiber:host-a:alpha"]')!
+    prose.click(); await flush()
+    workspace.returnToOrigin(); await flush()
+    workspace.openQuestion(cards[0]); await flush(); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key'))
+      .toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+  })
+
+  it('a Question without a report opens its constitution', async () => {
+    bodyOverrides.set('host-b:beta', 'A question without a report.')
+    workspace.openQuestion(cards[1]); await flush(); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-b:beta')
+  })
+
   it('names the roster the feed carries and repaints the page when it changes', async () => {
     const original = cards[0]
     const roles = (): string[] => [...document.querySelectorAll('.ws-fiber-role')].map(role => role.textContent ?? '')
