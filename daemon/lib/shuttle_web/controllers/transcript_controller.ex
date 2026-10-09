@@ -74,10 +74,6 @@ defmodule ShuttleWeb.TranscriptController do
     end
   end
 
-  # Bandit raises on a zero-length sendfile, which a poll at EOF asks for.
-  defp send_slice(conn, _path, _offset, 0), do: send_resp(conn, 200, "")
-  defp send_slice(conn, path, offset, length), do: send_file(conn, 200, path, offset, length)
-
   defp local_bytes(conn, session, offset) when is_integer(offset) do
     case Transcript.path(session) do
       path when is_binary(path) ->
@@ -134,6 +130,10 @@ defmodule ShuttleWeb.TranscriptController do
         json(conn, receipt(session, :host_unreachable, host: remote.name))
     end
   end
+
+  # Bandit raises on a zero-length sendfile, which a poll at EOF asks for.
+  defp send_slice(conn, _path, _offset, 0), do: send_resp(conn, 200, "")
+  defp send_slice(conn, path, offset, length), do: send_file(conn, 200, path, offset, length)
 
   defp remote_bytes(conn, session, %Remote{} = remote, offset) do
     query = %{"session" => session, "host" => "local"}
