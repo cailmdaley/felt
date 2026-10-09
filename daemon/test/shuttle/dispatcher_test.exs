@@ -469,6 +469,24 @@ defmodule Shuttle.DispatcherTest do
     refute prompt =~ "──"
   end
 
+  test "fresh, resumed and standing prompts carry the same attention contract" do
+    for prompt <- [
+          Dispatcher.render_prompt("tests/a"),
+          Dispatcher.render_resume_prompt("tests/a"),
+          Dispatcher.render_standing_run_prompt("tests/a", "run-1")
+        ] do
+      assert prompt =~ "Close with an outcome when done"
+      assert prompt =~ "ask with a report when a human decision unlocks work"
+      assert prompt =~ "otherwise just end your turn"
+      assert prompt =~ "Never raise a flag on every turn"
+    end
+
+    assert Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~
+             "For a standing run, finish with handoff instead of close"
+
+    refute Dispatcher.render_prompt("tests/a") =~ "For a standing run"
+  end
+
   test "render_prompt carries the previous-session lineage line only when one exists" do
     prev = %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: "claude-code"}
 
@@ -605,7 +623,7 @@ defmodule Shuttle.DispatcherTest do
     end
   end
 
-  test "worker prompt entrypoints carry this dispatch's facts and no static instructions" do
+  test "worker prompt entrypoints leave detailed workflow to the skill" do
     prompts = [
       Dispatcher.render_prompt("tests/a", felt_store: "/tmp/shared loom"),
       Dispatcher.render_resume_prompt("tests/a", felt_store: "/tmp/shared loom"),
@@ -624,7 +642,7 @@ defmodule Shuttle.DispatcherTest do
     end)
   end
 
-  test "the fresh prompt is exactly its dispatch facts" do
+  test "the fresh prompt carries dispatch facts and the attention contract" do
     assert Dispatcher.render_prompt("tests/a",
              felt_store: "/tmp/store",
              previous_session: %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: "pi"}
@@ -632,6 +650,7 @@ defmodule Shuttle.DispatcherTest do
              String.trim_trailing("""
              You are a Shuttle worker. Activate the felt and shuttle skills.
              Fiber: tests/a
+             Close with an outcome when done; ask with a report when a human decision unlocks work; otherwise just end your turn. Never raise a flag on every turn.
              Felt store: /tmp/store
              Kind: oneshot; surface: cli; headless: false
              Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (pi)

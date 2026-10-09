@@ -431,13 +431,19 @@ defmodule Shuttle.Dispatcher do
     _ -> :error
   end
 
-  # Prompts carry only this dispatch's facts; the shuttle skill owns worker
-  # behavior (sync, reading the fiber, the loop, exiting).
+  # Prompts carry dispatch facts and the attention contract; the shuttle
+  # skill owns the detailed worker workflow.
   defp compose_prompt(header, opts) do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
     [
       header,
+      "Close with an outcome when done; ask with a report when a human decision unlocks work; otherwise just end your turn. Never raise a flag on every turn.",
+      if(Keyword.get(opts, :kind) == "standing",
+        do:
+          "For a standing run, finish with handoff instead of close; the daemon marks the run for review.",
+        else: ""
+      ),
       if(felt_store, do: "Felt store: #{felt_store}", else: ""),
       "Kind: #{Keyword.get(opts, :kind, "oneshot")}; surface: #{Keyword.get(opts, :surface, "cli")}; headless: #{Keyword.get(opts, :headless, false)}",
       render_previous_session_line(opts),

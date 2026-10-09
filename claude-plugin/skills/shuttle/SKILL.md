@@ -69,8 +69,9 @@ To put a todo on the board, give it a shuttle block; the board shows nothing els
 
 A worker leaves in one of three ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. It **closes**, moving the card to **Awaiting review**, and nobody is launched; the human then tempers the card (accepts it), discards it, or resumes it. Or it **rests**, putting the card in **Resting** with no review, to be started again by hand. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times. Not every constitution has a finish line: a hub or a seat the human comes back to — a chair, a practice, a debug intake — is a oneshot that rests between sessions.
 
-The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. In flight has two bands, **Question** then **Working**.
-Questions include agent-raised asks and workers needing human input; a harness attention signal reads **at a prompt** on the card.
+The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. In flight has two bands, decided by whose move it is: **Your turn**, then **Working**.
+A worker idle at its prompt with nothing it started still running is the human's turn; one idle over its own background shells or subagents is still Working.
+Questions lead Your turn and are drawn heavier: an outstanding `ask`, or a harness prompt, which reads **at a prompt** on the card.
 **Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
 
 ## Working a constitution
@@ -81,32 +82,42 @@ Questions include agent-raised asks and workers needing human input; a harness a
 
 **Work.** Sit with the whole shape of the problem before deciding. Before you commit to a constraint or stop to ask, try this test: would the constraint surprise the human? If so, you haven't sat long enough. Most decisions that look like they need the human follow from what the system is for, and genuine taste questions are narrower than they feel. You have authority, so make ambitious moves even when they span sessions; shuttle will send the next worker. When a choice is load-bearing — a model, a pivot that removes a capability — do the work and set out the alternatives in the artifact, rather than stopping to ask. Give sub-goals their own context: hand bulk reading, sweeps and verification to subagents, and on long runs have a fresh-context subagent check the work against Desired State every few substantial changes. Stream long jobs with `Monitor` or background Bash, and see them through before you exit.
 
-**Ask without stopping.** When your work would go better with the human's view, rewrite `report.html` **before** running `shuttle -C <store> ask <id> "<one-line question>"`, then keep working.
+**Signal only what the board cannot see.** A worker has two explicit signals: **close** with an outcome when the work is done, and **ask** with a report when a decision from the human would unlock work. Otherwise just end your turn. A turn that ends with nothing running under it already shows as the human's turn, which covers conversation, pauses and anything you forget to flag. Never raise a flag on every turn: an ask that only says "your move" buries the questions that matter.
+
+**Ask without stopping.** When a decision from the human would unlock work, rewrite `report.html` **before** running `shuttle -C <store> ask <id> "<one-line question>"`, then keep working.
 The report must lead with short background pitched at what the human knows since their last engagement: bridge the gap, without re-explaining a conversation you just had.
 Follow with the question and its options and tradeoffs; put the executive summary below them, with nothing above this opening.
 A question can be a loose, nonblocking request for a view, not only a decision between fixed options.
-The card appears in **Question** without pausing your worker and opens the report on click when one is present.
+The card leads **Your turn** without pausing your worker and opens the report on click when one is present.
 In Claude Code, also send a PushNotification with the question.
 Clear it with `shuttle -C <store> ask <id> --clear` when it becomes moot; resuming or messaging the worker also clears it.
 
 **Keep the surfaces current.** Leave progress where others will find it — commits, sub-fibers, files in the fiber folder — not in a log in the body. When you learn something stable, put it in the constitution where it belongs: the lede, Desired State, or an earned section. Refresh `## Status` after each meaningful transition and before returning a turn, so another session could take over at any moment. Before you exit, bring everything up to date: consolidate `## Status`, rewrite `report.html` whole, rewrite the outcome, file decisions and findings as sub-fibers, fold what your role learned into its charter and anything particular to you into your collaborator fiber, and commit.
 
-**Stop earlier than feels natural.** `## Status` and the constitution give the next worker most of your picture, and a clean handoff beats pushing through auto-compact. Stop when the desired state is realized, when you are blocked on something only the human can supply, at the first sub-task boundary after your context is half full, or when the next step is both heavy and disjoint from what you have built up.
+**Hand off before context runs out.** `## Status` and the constitution give the next worker most of your picture, and a clean handoff beats pushing through auto-compact.
+Use a handoff when context pressure calls for a fresh worker, at a coherent sub-task boundary.
 
 ## Exiting
 
-First commit, run `felt -C <store> sync --push`, and resolve any conflicts. Then exit with exactly one verb, and choose it by asking in order:
+First commit, run `felt -C <store> sync --push`, and resolve any conflicts.
+Then choose by asking in order:
 
 1. **Is the desired state realized?** Close: make `shuttle close <id>` your final action, then do nothing more; the daemon reaps your session. Substantive work — code, configs, the product, not the fiber's own surfaces — needs fresh eyes first: have a subagent review the diff against the constitution and close once it comes back clean, or hand off so the next worker reviews it.
-2. **Blocked on something only the human can answer?** Run `shuttle close <id>`, and start the outcome with "Blocked: …" so the human reads the card as a question rather than a review. Put questions in the outcome and `## Status`, where the human will see them; a `question` fiber sediments.
+2. **Does a human decision unlock work?** Raise an ask with a report as above, and keep doing anything useful that isn't blocked.
+If nothing remains to do until the answer arrives, end your turn; don't close unfinished work just to ask a question.
 3. **Did the human drive this session, and is it over with nothing to review?** Rest: make `shuttle rest <id>` your final action. The card goes back to Resting with your outcome as the session's report.
-4. **More to do?** Hand off: make `shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX shuttle -C <store> handoff <id>` and end your turn.
+4. **Does the next slice need a fresh worker?** Hand off: make `shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX shuttle -C <store> handoff <id>` and end your turn.
+5. **Otherwise, just end your turn.** The board infers Your turn when no live background work remains; it stays Working while your children run.
+No ask or exit verb is needed for an ordinary conversational pause.
 
 If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation, include the store selector on the exit verb: `shuttle -C <store> close <id>`, `shuttle -C <store> rest <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
 
 **When the human names the exit, take it literally: it means the command.** "Hand off" means sweep, commit, sync, then run `shuttle handoff <id>`. "Close out", "wrap it up" or "I'm done for now" means the same sequence ending in `shuttle close <id>`, even when you can see more to do — unfinished is often exactly why they want it back on their desk. "Put it to rest" or "rest it" means the sequence ending in `shuttle rest <id>`. None of them is a request for a summary in chat.
 
-**Close by default.** When an arc ends, take an exit verb, even with the human present. The transcript stays readable from the board, and talking again is resuming the session, so an open session is never needed for the conversation to continue. Stay interactive, still `active`, only when the human asked for it ("let's chat", "stay open"), or the constitution says a human will attach (a 2FA step, a message to send in their voice). Open taste calls are a close with the questions in the outcome, not a reason to wait. In a **headless** run (`headless: true` in the launch metadata) nobody can attach, so record the question and take case 2.
+**Close completed work, not every turn.** Close carries an outcome for review; ask carries a report for a decision.
+A conversational turn ending is neither signal.
+The transcript stays readable from the board after closing, and talking again resumes the session.
+In a **headless** run (`headless: true` in the launch metadata) nobody can attach, but a question can still be raised with a report and answered through a message.
 
 A **standing** constitution always hands off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
 

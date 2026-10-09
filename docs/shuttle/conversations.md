@@ -2,7 +2,7 @@
 
 A worker keeps running where Shuttle launched it.
 Opening its conversation gives you another view of that work; it doesn't move the process to your laptop, browser, or phone.
-The **Aloft**, **Waiting**, and **Needs you** controls on a card all open that worker.
+The **Aloft**, **Your turn**, and **At a prompt** controls on a card all open that worker.
 
 ## Supported routes
 
