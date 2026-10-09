@@ -355,6 +355,7 @@ export class KanbanModal {
           stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
         },
         workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
+        onRest: (card, anchor) => this.openRestPopover(card, anchor),
       },
     )
     this.surfaces = new KanbanSurfaceRenderer({
@@ -369,6 +370,7 @@ export class KanbanModal {
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
       openDetail: (card) => this.openDocumentChannel(card),
+      onRest: (card, anchor) => this.openRestPopover(card, anchor),
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,

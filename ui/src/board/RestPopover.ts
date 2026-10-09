@@ -1,4 +1,5 @@
 import type { KanbanCard } from './KanbanTypes.js'
+import { anchorPopover } from './workspace/anchoredPopover.js'
 
 /** A blank date deliberately rests without a return day. */
 export function restPopover(card: KanbanCard, anchor: HTMLElement, submit: (until: string) => Promise<void>): () => void {
@@ -19,10 +20,12 @@ export function restPopover(card: KanbanCard, anchor: HTMLElement, submit: (unti
   button.textContent = 'Rest'
   label.append(input)
   panel.append(label, hint, button)
-  const rect = anchor.getBoundingClientRect()
-  panel.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 280))}px`
-  panel.style.top = `${Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - 160))}px`
+  // Keep the board's palette without inheriting an inert Desk or reader body.
+  const root = anchor.closest('.kbn-modal') ?? document.body
+  root.append(panel)
+  const release = anchorPopover(panel, anchor, { gap: 8 })
   const close = (): void => {
+    release()
     document.removeEventListener('pointerdown', outside, true)
     document.removeEventListener('keydown', escape, true)
     panel.remove()
@@ -42,7 +45,6 @@ export function restPopover(card: KanbanCard, anchor: HTMLElement, submit: (unti
     close()
     void submit(until)
   })
-  document.body.append(panel)
   document.addEventListener('pointerdown', outside, true)
   document.addEventListener('keydown', escape, true)
   input.focus()
