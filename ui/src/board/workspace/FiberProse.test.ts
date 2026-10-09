@@ -45,6 +45,20 @@ describe('fiber prose', () => {
     expect(ledeHtml('')).toBe('')
   })
 
+  it('keeps the outcome preview clamped when continue reading opens the transcript', () => {
+    const onContinueReading = vi.fn()
+    const outcome = 'What changed in the deck:\n\n' + '1. **A slide.** Details for review.\n\n'.repeat(20)
+    const pane = buildFiberProse(card, { ...channel, outcome }, {
+      shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn(), onContinueReading,
+    })
+    const preview = pane.querySelector('.ws-outcome-preview')!
+    const before = preview.querySelector('.kbn-detail-lede')!.outerHTML
+    preview.querySelector<HTMLButtonElement>('button')!.click()
+    expect(onContinueReading).toHaveBeenCalledWith(outcome)
+    expect(preview.querySelector('.kbn-detail-lede')!.outerHTML).toBe(before)
+    expect(preview.querySelector('[aria-expanded="true"]')).toBeNull()
+  })
+
   it('names no Desk column for a fiber without a shuttle block', () => {
     for (const status of ['open', 'closed']) {
       const note = { ...card, status, shuttleAgent: undefined, shuttleKind: undefined }

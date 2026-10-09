@@ -380,6 +380,7 @@ export class Workspace {
     const dock = this.controls(state)
     const page = buildFiberProse(state.card, state.channel, {
       controls: dock?.el,
+      onContinueReading: dock && state.card.sessionUuid ? text => dock.openOutcome(text) : undefined,
       acts: dock?.head,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },

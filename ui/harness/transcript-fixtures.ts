@@ -1,7 +1,11 @@
 export const WORKSPACE_LATEST_SESSION = 'c1a5e0d2-5b8f-4c1e-9a7e-2f3d4b5c6a71'
 export const WORKSPACE_EARLIER_SESSION = 'd2b6f1e3-6c90-4d2f-8b5a-3e4f6a7b8c92'
 
-export type TranscriptScenario = 'live' | 'large' | 'normal'
+export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome'
+
+export const LONG_OUTCOME = 'What changed in the deck:\n\n' + Array.from({ length: 12 }, (_, i) =>
+  `${i + 1}. **Validation slide ${i + 1}.** The fictional response and mask-split results are shown alongside the independent reference bins. The source products and reviewer notes are ready for the next check.`,
+).join('\n\n')
 
 const encoder = new TextEncoder()
 const LARGE_TURNS = 3000
@@ -27,7 +31,7 @@ function assistant(now: number, offsetMs: number, content: unknown): string {
   })
 }
 
-function ordinaryTranscript(now: number, earlier: boolean): string {
+function ordinaryTranscript(now: number, earlier: boolean, longOutcome = false): string {
   const readId = earlier ? 'fixture-read-earlier' : 'fixture-read-latest'
   const topic = earlier ? 'the first validation pass' : 'the shear-response validation'
   return [
@@ -51,7 +55,7 @@ function ordinaryTranscript(now: number, earlier: boolean): string {
       type: 'text',
       text: earlier
         ? 'The follow-up should compare the north and south fixture patches before changing the mask.'
-        : 'The check is complete: no correction is needed for these fictional bins. The literal tag stays text, not executable markup.',
+        : longOutcome ? LONG_OUTCOME : 'The check is complete: no correction is needed for these fictional bins. The literal tag stays text, not executable markup.',
     }]),
   ].join('')
 }
@@ -111,6 +115,6 @@ export function workspaceTranscriptBytes(
   const transcriptStart = options.earlier ? now - 5 * 60_000 : now
   const source = scenario === 'large'
     ? largeTranscript(now)
-    : ordinaryTranscript(transcriptStart, options.earlier === true) + (scenario === 'live' ? liveTranscript(now, options.updates ?? 0) : '')
+    : ordinaryTranscript(transcriptStart, options.earlier === true, scenario === 'long-outcome') + (scenario === 'live' ? liveTranscript(now, options.updates ?? 0) : '')
   return encoder.encode(source)
 }

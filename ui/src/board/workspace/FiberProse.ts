@@ -98,6 +98,7 @@ export function buildFiberProse(
     controls?: HTMLElement
     /** The status line's acts (worker pill, Temper, Discard), owned by the control band. */
     acts?: HTMLElement
+    onContinueReading?: (text: string) => void
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
     /** On a role page, the constitutions whose roster names the role, in Desk order. */
@@ -127,7 +128,17 @@ export function buildFiberProse(
   title.textContent = channel.name
   title.dataset.part = 'fiber-title'
   const outcome = document.createElement('div')
-  outcome.innerHTML = ledeHtml(channel.outcome ?? card.outcome ?? '')
+  const outcomeText = channel.outcome ?? card.outcome ?? ''
+  outcome.innerHTML = ledeHtml(outcomeText)
+  if (outcomeText.trim() && opts.onContinueReading) {
+    outcome.className = 'ws-outcome-preview'
+    const read = document.createElement('button')
+    read.type = 'button'
+    read.className = 'ws-outcome-continue'
+    read.textContent = 'continue reading'
+    read.addEventListener('click', () => opts.onContinueReading!(outcomeText))
+    outcome.append(read)
+  }
   const body = document.createElement('div')
   body.className = 'ws-prose-body'
   body.innerHTML = renderFiberMarkdown(channel.body, '', {
