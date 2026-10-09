@@ -1552,8 +1552,7 @@ defmodule Shuttle.PollerTest do
         felt_stores: [MockRunner.felt_root()]
       )
 
-    Application.put_env(:shuttle, :paste_submit_delay_ms, 0)
-    on_exit(fn -> Application.delete_env(:shuttle, :paste_submit_delay_ms) end)
+    Shuttle.Test.Env.put_app_env(:paste_submit_delay_ms, 0)
 
     assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
     before = length(MockRunner.commands())
