@@ -19,6 +19,9 @@ export function workerPlateFacts(card: KanbanCard, now = Date.now(), phase = tru
   return { state, elapsed, working: card.workerState === 'running' && card.runtimePhase === 'working' }
 }
 
+/** The plate's word for a state whose data name is not what the reader is told. */
+const PLATE_WORDS: Record<string, string> = { attention: 'at a prompt', waiting: 'your turn' }
+
 /**
  * Decorate the real conversation target, never a second opening mechanism:
  * a dot in the state's pigment, the state word, and the age. A fallback route
@@ -40,6 +43,6 @@ export function workerPlate(card: KanbanCard, target: HTMLElement | null, phase 
   // The dot is the plate's first item, so it centres on the capitals beside it and stands alone where the words are hidden.
   const dot = part('ws-worker-dot')
   dot.setAttribute('aria-hidden', 'true')
-  plate.replaceChildren(dot, part('ws-worker-state', facts.state === 'attention' ? 'at a prompt' : facts.state), part('ws-worker-elapsed', facts.elapsed ?? ''), ...(via ? [part('ws-worker-via', via)] : []))
+  plate.replaceChildren(dot, part('ws-worker-state', PLATE_WORDS[facts.state] ?? facts.state), part('ws-worker-elapsed', facts.elapsed ?? ''), ...(via ? [part('ws-worker-via', via)] : []))
   return plate
 }

@@ -127,7 +127,7 @@ describe('the terminal worker pill under a finger', () => {
   for (const [deviceName, device] of [['phone', PHONE_PORTRAIT], ['iPad', IPAD_PORTRAIT]] as const) describe(deviceName, () => {
     beforeEach(() => useDevice(device))
     for (const [surface, options] of SURFACES) {
-      it.each([['working', 'Aloft'], ['waiting', 'Waiting'], ['attention', 'At a prompt']])(
+      it.each([['working', 'Aloft'], ['waiting', 'Your turn'], ['attention', 'At a prompt']])(
         `${deviceName}, ${surface}: a bridged %s worker is a tappable link to its session`,
         (phase, label) => {
           const pill = terminalWorkerPill(worker(phase, LINK), options) as unknown as FakeElement
@@ -141,7 +141,7 @@ describe('the terminal worker pill under a finger', () => {
       it(`${deviceName}, ${surface}: an unbridged worker is a mark that takes no taps`, () => {
         const pill = terminalWorkerPill(worker('waiting'), { ...options, openWorker: () => {} }) as unknown as FakeElement
         expect(pill.tagName).toBe('SPAN')
-        expect(pill.textContent).toBe('Waiting')
+        expect(pill.textContent).toBe('Your turn')
         expect(coarseDeclarations(pill, TOUCH_CSS).get('pointer-events')).toBe('none')
       })
     }
@@ -172,7 +172,7 @@ describe('the terminal worker pill under a mouse', () => {
       const openWorker = vi.fn()
       const pill = terminalWorkerPill(worker('waiting', LINK), { ...options, openWorker }) as unknown as FakeElement
       expect(pill.tagName).toBe('BUTTON')
-      expect(pill.textContent).toBe('Waiting')
+      expect(pill.textContent).toBe('Your turn')
       pill.click()
       expect(openWorker).toHaveBeenCalledWith('felt-abc', 'workstation')
     })

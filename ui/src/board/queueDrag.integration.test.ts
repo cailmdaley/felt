@@ -75,7 +75,7 @@ describe('queue row drop on a card', () => {
 
     const targetEl = document.querySelector<HTMLElement>(`[data-fiber-id="${target.id}"]`)!
     expect(targetEl.closest<HTMLElement>('[data-flight-band]')?.dataset.flightBand)
-      .toBe(phase === 'waiting' ? 'question' : 'working')
+      .toBe(phase === 'waiting' ? 'yourTurn' : 'working')
     const rect = { x: 120, y: 120, left: 120, top: 120, right: 420, bottom: 320, width: 300, height: 200, toJSON: () => ({}) }
     vi.spyOn(targetEl, 'getBoundingClientRect').mockReturnValue(rect)
     for (let node = targetEl.parentElement; node; node = node.parentElement) {

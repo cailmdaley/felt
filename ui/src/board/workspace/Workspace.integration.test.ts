@@ -390,7 +390,7 @@ describe('workspace reader integration', () => {
     workspace.open(feed[0], 'Desk'); await flush()
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Question', 'Working', 'Awaiting review'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
     const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
     await press('K'); expect(current()).toBe('w1')
     await press('j'); expect(current()).toBe('w2')
@@ -409,8 +409,8 @@ describe('workspace reader integration', () => {
     const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     // Empty groups draw no entry; the strip abbreviates Awaiting review, its caption does not.
-    expect(entries().map(entry => entry.textContent)).toEqual(['Question1', 'Working2', 'Review1'])
-    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Question, 1', 'Working, 2', 'Awaiting review, 1'])
+    expect(entries().map(entry => entry.textContent)).toEqual(['Your turn1', 'Working2', 'Review1'])
+    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Your turn, 1', 'Working, 2', 'Awaiting review, 1'])
     expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title)).toEqual(['Awaiting review'])
     entries()[1].click(); await flush()
     expect(current()).toBe('w1')

@@ -331,8 +331,9 @@ function assembleSurfaces(
   // Seats read like a shelf of offices: alphabetical, so a launcher stays
   // where the hand expects it whatever was used last.
   roles.sort(byNameAsc);
-  // A card moves only when it crosses a Question / Working seam.
-  // Activity age and phase changes within a band do not change its position.
+  // A card moves only when it crosses the Your turn / Working seam, or when a
+  // question is raised or answered inside Your turn. Activity age does not
+  // move it.
   inFlight.sort(byInFlightBand);
   awaitingReview.sort(byClosedAtDesc);
   tempered.sort(byClosedAtDesc);
@@ -748,21 +749,36 @@ export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
   return descByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || byCardIdentity(a, b);
 }
 
-export type InFlightBand = 'question' | 'working';
+export type InFlightBand = 'yourTurn' | 'working';
 
 /** In flight's bands in drawn order, with the caption each surface gives them. */
-export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['question', 'Question'], ['working', 'Working']];
+export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['yourTurn', 'Your turn'], ['working', 'Working']];
 
-export function inFlightBand(card: KanbanCard): InFlightBand {
-  if (card.ask) return 'question';
-  return card.runtimePhase === 'waiting' || card.runtimePhase === 'blocked' || card.runtimePhase === 'attention'
-    ? 'question'
-    : 'working';
+/**
+ * A worker that has put a question to the human: an outstanding `ask`, a
+ * harness prompt (`attention`), or a turn that could not start (`blocked`).
+ * Questions lead the Your turn band and are drawn heavier than a plain idle
+ * turn.
+ */
+export function isQuestion(card: KanbanCard): boolean {
+  return !!card.ask || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked';
 }
 
+/**
+ * Whose move it is. A question is the human's move; so is a worker idle at
+ * its prompt (`waiting`), which the daemon reports only when nothing the
+ * worker started is still running under it. Everything else is the worker's.
+ */
+export function inFlightBand(card: KanbanCard): InFlightBand {
+  return isQuestion(card) || card.runtimePhase === 'waiting' ? 'yourTurn' : 'working';
+}
+
+/** Your turn before Working; within Your turn, questions first; then newest first. */
 export function byInFlightBand(a: KanbanCard, b: KanbanCard): number {
-  const order: Record<InFlightBand, number> = { question: 0, working: 1 };
-  return order[inFlightBand(a)] - order[inFlightBand(b)] || byCreatedAtDesc(a, b);
+  const order: Record<InFlightBand, number> = { yourTurn: 0, working: 1 };
+  return order[inFlightBand(a)] - order[inFlightBand(b)]
+    || Number(isQuestion(b)) - Number(isQuestion(a))
+    || byCreatedAtDesc(a, b);
 }
 
 export function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {
