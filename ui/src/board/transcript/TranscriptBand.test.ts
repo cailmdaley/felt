@@ -85,18 +85,33 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelector('.ws-transcript-pane')).toBeNull()
   })
 
-  it('waits for initial streaming decode to finish before consuming a native match', async () => {
-    let stream!: ReadableStreamDefaultController<Uint8Array>
-    const body = new ReadableStream<Uint8Array>({ start(controller) { stream = controller } })
-    const band = makeBand(vi.fn<typeof fetch>(async () => new Response(body)))
+  it('waits for initial decoding to finish before consuming a partially decoded native match', async () => {
+    let clock = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => clock += 10)
+    const yields: Array<() => void> = []
+    const timeout = globalThis.setTimeout
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: () => void, delay?: number) => {
+      if (delay === 0) { yields.push(callback); return 0 }
+      return timeout(callback, delay)
+    }) as typeof setTimeout)
+    const items = [
+      ...records('First prompt', 'Early outcome'),
+      ...Array.from({ length: 6 }, (_, index) => records(`Later prompt ${index}`, `Later answer ${index}`)).flat(),
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
     band.follow(target(latestId))
+    await microtasks()
+    yields.shift()!()
+    await microtasks()
+    await tick()
+    // The first two records have reached the model; later records are held at a decoder yield.
     band.openAtMessage('Early outcome')
-    stream.enqueue(encoded(records('First prompt', 'Early outcome')))
-    await settle()
     await tick()
     expect(band.el.querySelector('.ws-transcript-outcome')?.textContent).toContain('Early outcome')
-    stream.enqueue(encoded(Array.from({ length: 6 }, (_, index) => records(`Later prompt ${index}`, `Later answer ${index}`)).flat()))
-    stream.close()
+    for (let index = 0; index < items.length; index++) {
+      yields.shift()?.()
+      await microtasks()
+    }
     await settle()
     await tick()
     expect(band.el.querySelector('.ws-transcript-outcome')).toBeNull()
