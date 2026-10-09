@@ -3,7 +3,7 @@ import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { queuedControl } from '../QueuedControl.js'
 import { sidebarQueue } from './sidebarQueue.js'
-import { onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
+import { onDesk, restReachable, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -1068,7 +1068,8 @@ export class Reader {
       if (this.currentCard) this.opts.onConversation?.(this.currentCard)
     }
     else if (intent === 'rest') {
-      if (this.currentCard) this.opts.onRest?.(this.currentCard, this.el)
+      if (!this.currentCard || !restReachable(this.currentCard)) return false
+      this.opts.onRest?.(this.currentCard, this.el)
     }
     else if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'find') {
