@@ -281,18 +281,21 @@ function measureClamp(text: HTMLElement, unclamped: boolean): void {
 }
 
 /**
- * Scroll so the newest message starts in view: its top when it is taller than
- * the window, otherwise as far down as the content goes. Returns the offset
- * it settled on, against which a reader's own scrolling is measured.
+ * The newest message's reading offset: its top when it is taller than
+ * the window, otherwise as far down as the content goes.
  */
-function anchorLatest(scroller: HTMLElement): number {
+function latestOffset(scroller: HTMLElement): number {
   const messages = scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')
   const last = messages[messages.length - 1]
   const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
   const top = last
     ? scroller.scrollTop + last.getBoundingClientRect().top - scroller.getBoundingClientRect().top - ANCHOR_MARGIN
     : max
-  const settled = Math.max(0, Math.min(top, max))
+  return Math.max(0, Math.min(top, max))
+}
+
+function anchorLatest(scroller: HTMLElement): number {
+  const settled = latestOffset(scroller)
   scroller.scrollTop = settled
   return settled
 }
@@ -338,6 +341,7 @@ export class TranscriptBand {
   private previewFollowing = true
   private fullAnchor = 0
   private fullFollowing = true
+  private messageToReveal: string | null = null
   private fullOpen = false
   private fullRendered = false
   private latest: TranscriptTarget | null = null
@@ -831,6 +835,7 @@ export class TranscriptBand {
   }
 
   private clearView(): void {
+    this.messageToReveal = null
     this.clearFull()
     this.exchange.replaceChildren()
     this.previewPrompt = null
@@ -904,6 +909,15 @@ export class TranscriptBand {
    * prose scrolls inside, so the page's chrome, its tabs and the board stay
    * live around it. Outside a page it opens in place, under the band.
    */
+  /** Read the outcome in its native session, keeping the page preview bounded. */
+  openAtMessage(text: string): void {
+    this.pinned = false
+    this.showTarget(this.latest)
+    this.messageToReveal = text.trim()
+    this.openFull()
+    this.scheduleLayout()
+  }
+
   private openFull(): void {
     if (this.disposed || this.fullOpen || !this.target) return
     this.fullOpen = true
@@ -939,6 +953,7 @@ export class TranscriptBand {
   closeFull(): boolean {
     if (!this.fullOpen) return false
     this.fullOpen = false
+    this.messageToReveal = null
     const hadFocus = this.pane.contains(document.activeElement)
     this.pane.hidden = true
     this.pane.remove()
@@ -1274,6 +1289,39 @@ export class TranscriptBand {
         this.previewAnchor = this.previewScroll = anchorLatest(this.preview)
       }
       this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
+      if (this.fullOpen && this.messageToReveal !== null && this.hasInitialRender) {
+        const source = this.messageToReveal
+        let match: Message | undefined
+        for (let turnIndex = this.model.turns.length - 1; turnIndex >= 0 && !match; turnIndex--) {
+          const turn = this.model.turns[turnIndex]
+          const stepIndex = turn.steps.findIndex(step => step.kind === 'text' && step.text.trim() === source)
+          if (stepIndex < 0) continue
+          const previousStart = this.visibleStart
+          this.visibleStart = Math.min(previousStart, turnIndex)
+          for (let index = this.visibleStart; index < previousStart; index++) this.renderTurn(index)
+          this.renderTurn(turnIndex)
+          this.updateEarlierButton()
+          match = this.views.get(turnIndex)?.texts.get(stepIndex)
+        }
+        if (match) {
+          this.list.querySelector('.ws-transcript-outcome')?.remove()
+          this.messageToReveal = null
+          this.fullAnchor = latestOffset(this.scroller)
+          this.fullFollowing = false
+          this.scroller.scrollTop += match.node.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top - ANCHOR_MARGIN
+          this.fullScroll = this.scroller.scrollTop
+        } else if (!this.list.querySelector('.ws-transcript-outcome')) {
+          // Outcomes can be authored independently of the worker's final reply.
+          const outcome = createMessage('agent', 'li')
+          outcome.node.classList.add('ws-transcript-outcome')
+          paintText(outcome, 'Outcome', { kind: 'text', text: source })
+          this.list.append(outcome.node)
+          this.fullAnchor = latestOffset(this.scroller)
+          this.fullFollowing = false
+          this.scroller.scrollTop += outcome.node.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top - ANCHOR_MARGIN
+          this.fullScroll = this.scroller.scrollTop
+        }
+      }
       if (this.fullOpen && this.fullFollowing && this.scroller.clientHeight) this.fullAnchor = this.fullScroll = anchorLatest(this.scroller)
     })
   }

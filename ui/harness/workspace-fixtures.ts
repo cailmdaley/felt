@@ -5,7 +5,7 @@ import webmData from './fixtures/test.webm?inline'
 import imageData from './fixtures/figure.png?inline'
 import pdfData from './fixtures/native.pdf?inline'
 import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/index.js'
-import { WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION } from './transcript-fixtures.js'
+import { LONG_OUTCOME, WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION } from './transcript-fixtures.js'
 
 export const WORKSPACE_HOST = 'umber-workstation'
 export const WORKSPACE_REMOTE = 'basalt-login-02'
@@ -167,7 +167,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       name: WORKSPACE_NAME,
       status: transcriptScenario === 'live' ? 'active' : 'closed',
       age: 0.1,
-      outcome: 'The response passes the null test at every scale; the report and source products are ready for review.',
+      outcome: transcriptScenario === 'long-outcome' ? LONG_OUTCOME : 'The response passes the null test at every scale; the report and source products are ready for review.',
       host: WORKSPACE_HOST,
       collaboration: { surveyor: ['opus'] },
     },

@@ -55,6 +55,65 @@ afterEach(() => {
 })
 
 describe('TranscriptBand', () => {
+  it('opens an outcome at its message outside the initial turn window, before the feed loads', async () => {
+    const items = Array.from({ length: 6 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}`)).flat()
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    const host = document.createElement('div')
+    host.className = 'ws-content'
+    document.body.append(host)
+    host.append(band.el)
+    const rect = (top: number) => ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: top, toJSON: () => ({}) })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.classList.contains('ws-transcript-msg') ? (this.textContent?.includes('Answer 1') ? 240 : 1000) : 0
+      return rect(this.classList.contains('ws-transcript-msg') ? top - (this.closest('.ws-transcript-scroll')?.scrollTop ?? 0) : 0)
+    })
+    band.follow(target(latestId))
+    band.openAtMessage('Answer 1')
+    const scroller = host.querySelector<HTMLElement>('.ws-transcript-scroll')!
+    Object.defineProperties(scroller, { clientHeight: { value: 100 }, scrollHeight: { value: 2000 } })
+    await settle()
+    await tick()
+    const pane = host.querySelector<HTMLElement>('.ws-transcript-pane')!
+    expect(pane.hidden).toBe(false)
+    expect(pane.querySelector('[data-turn="1"]')?.textContent).toContain('Answer 1')
+    expect(scroller.scrollTop).toBeGreaterThan(200)
+    const position = scroller.scrollTop
+    scroller.dispatchEvent(new Event('scroll'))
+    band.reseated()
+    await tick()
+    expect(scroller.scrollTop).toBe(position)
+    expect(band.el.querySelector('.ws-transcript-pane')).toBeNull()
+  })
+
+  it('retains a requested outcome until an in-flight read delivers its message', async () => {
+    let deliver!: (response: Response) => void
+    const bytes = encoded(records('Initial prompt', 'Initial answer'))
+    const more = encoded(records('Next prompt', 'Delayed outcome'))
+    let reads = 0
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      if (++reads === 1) return new Response(new TextDecoder().decode(bytes), { headers: { 'x-transcript-offset': '0', 'x-transcript-byte-count': String(bytes.length) } })
+      return new Promise<Response>(resolve => { deliver = resolve })
+    })
+    const band = makeBand(fetcher)
+    band.follow(target(latestId))
+    await settle()
+    band.follow(target(latestId, { live: true }))
+    await microtasks()
+    band.openAtMessage('Delayed outcome')
+    await tick()
+    expect(band.el.querySelector('.ws-transcript-outcome')?.textContent).toContain('Delayed outcome')
+    const scroller = band.el.querySelector<HTMLElement>('.ws-transcript-scroll')!
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { top: this.classList.contains('ws-transcript-msg-agent') && this.textContent?.includes('Delayed outcome') ? 300 : 0 } as DOMRect
+    })
+    deliver(new Response(new TextDecoder().decode(more), { headers: { 'x-transcript-offset': String(bytes.length), 'x-transcript-byte-count': String(bytes.length + more.length) } }))
+    await settle()
+    await tick()
+    expect(scroller.scrollTop).toBeGreaterThan(250)
+    expect(band.el.querySelector('.ws-transcript-pane')?.textContent).toContain('Delayed outcome')
+    expect(band.el.querySelector('.ws-transcript-outcome')).toBeNull()
+  })
+
   it('shows the last exchange as words only: the prompt and every agent message since, no tools or thinking', async () => {
     const items = [
       ...records('Inspect the first mask split.', 'Earlier report.'),

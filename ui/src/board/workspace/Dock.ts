@@ -628,6 +628,10 @@ export class Dock {
     return true
   }
 
+  openOutcome(text: string): void {
+    this.transcriptBand?.openAtMessage(text)
+  }
+
   /** The page re-seated this Dock's element in a fresh prose page. */
   reseated(): void {
     this.transcriptBand?.reseated()
