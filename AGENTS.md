@@ -43,6 +43,7 @@ lives in the docs site (`docs/`, published to
 | Event stream + ledger writer/reader contract | [`docs/dev/event-stream.md`](docs/dev/event-stream.md) |
 | Plugin integration, `scripts/release.sh`, release candidates | [`docs/dev/releasing.md`](docs/dev/releasing.md) |
 | Codebase layout, test suites | [`docs/dev/layout.md`](docs/dev/layout.md) |
+| Writing a test: where it goes, tiers, fixtures, properties | [`docs/dev/testing.md`](docs/dev/testing.md) |
 | Installing a daemon, keep-alive, macOS TCC, sharp edges | [`docs/shuttle/installation.md`](docs/shuttle/installation.md) |
 | Fiber model, frontmatter, cross-project stores | [`docs/concepts/`](docs/concepts/) |
 | CLI verbs, daemon HTTP API | [`docs/reference/cli.md`](docs/reference/cli.md), [`docs/reference/api.md`](docs/reference/api.md) |
@@ -127,6 +128,15 @@ lives in the docs site (`docs/`, published to
   daemon. `shuttle install` and `shuttle repeat` stamp `host` by default. The
   same predicate gates orphan resurrection, so a remote restart can't
   re-grab another host's fiber.
+- **Two kinds; one resting place.** `shuttle.kind` is `oneshot` or
+  `standing` (which carries a cron `schedule:`). A retired `pinned` still
+  reads as `oneshot` in the CLI (`shuttle.NormalizeKind`), the daemon
+  (`Poller.block_kind`) and the board, and `shuttle check` warns about it. A
+  constitution at rest is `status: open` + `horizon: stashed`, drawn in
+  Resting; `shuttle rest` puts it there without review. "Role" names only an
+  identity under `roles/`, never a kind of constitution. A constitution with
+  `shuttle.seat: <role>` is a seat of that office (`shuttle seat`); at rest
+  the board draws it in the Roles band, and its lifecycle is unchanged.
 - **`shuttle.project_dir` is required for armed installs.** `shuttle install`
   and `shuttle repeat` require `--project-dir`; workers start there instead of
   falling back to the felt store.
@@ -142,7 +152,7 @@ lives in the docs site (`docs/`, published to
   daemon restart parks every dispatchable candidate — fresh launches and
   dirty-death resumes alike — in `pending_launch` until
   `shuttle daemon release`; only work the daemon observed running and
-  cron-due standing roles pass through. The one exception is opt-in per host
+  cron-due standing constitutions pass through. The one exception is opt-in per host
   (`~/.config/shuttle/host.json` has `"quarantine_auto_release": true`): a
   daemon killed hard and back within the heartbeat window, on the same
   machine, with every recorded worker re-adopted and no churn, releases
@@ -188,8 +198,7 @@ make test                  # go test ./... + mix test + the board suite + the pl
 go test ./...              # Go (felt and shuttle CLIs)
 make test-linux            # the Go suite in a Linux container, as CI runs it
 make mix-test              # full Elixir suite (shells felt and shuttle: make cli-install first)
-cd ui && npm test          # vitest, run TWICE under two pinned TZs
-                           # (America/Los_Angeles, Europe/Paris)
+cd ui && npm test          # vitest, once, under TZ=America/Los_Angeles
 ```
 
 **macOS is not CI's platform.** `/bin/sh` is bash on macOS and dash on CI's
@@ -198,11 +207,16 @@ OS-facing Go can pass locally and fail on CI. Before pushing changes there,
 run `make test-linux` (`scripts/test-linux.sh [go test args]`; Apple's
 `container` CLI, or docker). Cached runs take seconds.
 
-**The board suite runs twice on purpose, in both local tests and CI.** The
-second pinned offset is where the civil-day logic breaks, so a hand-run `npx
-vitest run` can go green on a change `make test` would fail. CI runs `npm test`
-under America/Los_Angeles and Europe/Paris, then type-checks and builds the
-bundle with `npm run build`.
+**The board suite runs once, under one pinned zone.** `npm test` pins
+TZ=America/Los_Angeles, a negative-offset DST zone, so view code that defaults
+to the host zone renders deterministically and away from UTC. Zone coverage
+does not come from the pin: every zone-dependent computation lives in
+`ui/src/board/civilDay.ts` and takes its zone as a parameter,
+`civilDay.properties.test.ts` checks its laws across the IANA zone database,
+and `ui/test/zoneReads.test.ts` fails on a local-zone `Date` read anywhere
+else (`src/board/workspace/` excepted, whose suite still guards on the pin).
+CI runs `npm test`, then type-checks and builds the bundle with
+`npm run build`.
 
 ### Deploying
 
@@ -228,7 +242,7 @@ receipt` still fails afterwards fails, naming each unhealthy component and
 its repair.
 **Every deploy and operator restart arms the boot quarantine**
 — the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
-oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing roles
+oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing constitutions
 still fire). Only on a host that opted in does a hard-killed, previously
 released daemon back within seconds, workers intact and no churn, release
 itself. A daemon

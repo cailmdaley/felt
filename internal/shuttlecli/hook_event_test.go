@@ -1,17 +1,21 @@
 package shuttlecli
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 // updateGolden regenerates internal/shuttlecli/testdata/events_golden.jsonl instead of
@@ -20,38 +24,48 @@ var updateGolden = flag.Bool("update-golden", false, "rewrite the events golden 
 
 const goldenPath = "testdata/events_golden.jsonl"
 
-// isolateEvents points every resolver tier at a temp tree, so no test can read
-// or write the real ~/.shuttle stream. Returns the fake home.
-func isolateEvents(t *testing.T) string {
+// isolateEvents is an env whose every stream resolver tier points into the
+// test's own temp tree, so no test can read or write a real ~/.shuttle
+// stream. It returns the env and its (empty) home.
+func isolateEvents(t *testing.T) (*sysenv.Env, string) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SHUTTLE_EVENTS_FILE", "")
-	t.Setenv("SHUTTLE_DATA_DIR", "")
-	t.Setenv("SHUTTLE_EVENTS", "")
-	t.Setenv("SHUTTLE_EVENTS_MAX_BYTES", "")
-	t.Setenv("SHUTTLE_TMUX_SESSION", "test-session")
-	t.Setenv("TMUX", "")
+	env, home := envWithHome(t)
+	env.Set("SHUTTLE_EVENTS_FILE", "")
+	env.Set("SHUTTLE_DATA_DIR", "")
+	env.Set("SHUTTLE_EVENTS", "")
+	env.Set("SHUTTLE_EVENTS_MAX_BYTES", "")
+	env.Set("SHUTTLE_TMUX_SESSION", "test-session")
+	env.Set("TMUX", "")
 	// Pin identity: resolveOwnHost would otherwise reach os.Hostname().
-	t.Setenv("SHUTTLE_HOST", "testhost")
-	return home
+	env.Set("SHUTTLE_HOST", "testhost")
+	return env, home
+}
+
+// eventStream is isolateEvents with SHUTTLE_EVENTS_FILE naming a fresh
+// stream, whose path it returns.
+func eventStream(t *testing.T) (*sysenv.Env, string) {
+	t.Helper()
+	env, _ := isolateEvents(t)
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", path)
+	return env, path
 }
 
 // record feeds one payload to the hook and returns the lines the stream holds
 // afterward.
-func record(t *testing.T, path string, payload map[string]any) []map[string]any {
+func record(t *testing.T, env *sysenv.Env, path string, payload map[string]any) []map[string]any {
 	t.Helper()
-	writeEvent(t, payload)
+	writeEvent(t, env, payload)
 	return readEventLines(t, path)
 }
 
-func writeEvent(t *testing.T, payload map[string]any) {
+func writeEvent(t *testing.T, env *sysenv.Env, payload map[string]any) {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	if err := runEventHook(bytes.NewReader(raw)); err != nil {
+	if err := newApp(env).runEventHook(bytes.NewReader(raw)); err != nil {
 		t.Fatalf("runEventHook: %v", err)
 	}
 }
@@ -83,9 +97,8 @@ func readEventLines(t *testing.T, path string) []map[string]any {
 // reader switches on these strings (waiting_tracker.ex category/1), so a
 // renamed type silently reclassifies a worker's phase.
 func TestEventTypeMapping(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
+	env, path := eventStream(t)
 
 	for name, want := range map[string]string{
 		"PreToolUse":       "pre_tool_use",
@@ -100,7 +113,7 @@ func TestEventTypeMapping(t *testing.T) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("reset stream: %v", err)
 		}
-		lines := record(t, path, map[string]any{"hook_event_name": name, "session_id": "s1"})
+		lines := record(t, env, path, map[string]any{"hook_event_name": name, "session_id": "s1"})
 		if len(lines) != 1 {
 			t.Fatalf("%s: got %d lines, want 1", name, len(lines))
 		}
@@ -113,7 +126,7 @@ func TestEventTypeMapping(t *testing.T) {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		t.Fatalf("reset stream: %v", err)
 	}
-	if lines := record(t, path, map[string]any{"hook_event_name": "PreCompact"}); len(lines) != 0 {
+	if lines := record(t, env, path, map[string]any{"hook_event_name": "PreCompact"}); len(lines) != 0 {
 		t.Fatalf("unknown event recorded %d lines, want 0", len(lines))
 	}
 }
@@ -123,9 +136,7 @@ func TestEventTypeMapping(t *testing.T) {
 // a message" over minutes nobody was awake for, and it can only be decided
 // here — the daemon never sees the prompt text.
 func TestEventMachinePrompt(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
 
 	for _, tc := range []struct {
 		name   string
@@ -147,12 +158,12 @@ func TestEventMachinePrompt(t *testing.T) {
 		},
 		{
 			"dispatched for an ad-hoc role run",
-			"The orchestration system Shuttle dispatched you for an ad-hoc run of this standing role — right-now work",
+			"The orchestration system Shuttle dispatched you for an ad-hoc run of this standing constitution — right-now work",
 			true,
 		},
 		{
 			"dispatched for a scheduled role run",
-			"The orchestration system Shuttle dispatched you for a scheduled run of this standing role.",
+			"The orchestration system Shuttle dispatched you for a scheduled run of this standing constitution.",
 			true,
 		},
 		// One keystroke, one spine: a slash command expands into up to three
@@ -177,10 +188,9 @@ func TestEventMachinePrompt(t *testing.T) {
 		{"empty prompt", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				t.Fatalf("reset stream: %v", err)
-			}
-			lines := record(t, path, map[string]any{
+			t.Parallel()
+			env, path := eventStream(t)
+			lines := record(t, env, path, map[string]any{
 				"hook_event_name": "UserPromptSubmit",
 				"session_id":      "s1",
 				"prompt":          tc.prompt,
@@ -202,10 +212,8 @@ func TestEventMachinePrompt(t *testing.T) {
 
 	// Only prompts carry the flag: a tool event with the same text nearby must
 	// not pick it up.
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		t.Fatalf("reset stream: %v", err)
-	}
-	lines := record(t, path, map[string]any{
+	env, path := eventStream(t)
+	lines := record(t, env, path, map[string]any{
 		"hook_event_name": "PreToolUse",
 		"session_id":      "s1",
 		"prompt":          "<task-notification> x",
@@ -220,9 +228,10 @@ func TestEventMachinePrompt(t *testing.T) {
 // the opt-in. Absent, the hook writes nothing AND creates nothing — a felt
 // user who never runs shuttle gets no surprise ~/.shuttle.
 func TestEventWriteGate(t *testing.T) {
-	home := isolateEvents(t)
+	t.Parallel()
+	env, home := isolateEvents(t)
 
-	writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	writeEvent(t, env, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
 
 	if _, err := os.Stat(filepath.Join(home, ".shuttle")); !os.IsNotExist(err) {
 		t.Fatalf("~/.shuttle was created (err=%v); the gate must not create it", err)
@@ -232,7 +241,7 @@ func TestEventWriteGate(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, ".shuttle"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	writeEvent(t, env, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
 	if lines := readEventLines(t, filepath.Join(home, ".shuttle", "events.jsonl")); len(lines) != 1 {
 		t.Fatalf("got %d lines after enabling, want 1", len(lines))
 	}
@@ -245,13 +254,14 @@ func TestEventWriteGate(t *testing.T) {
 // event on a machine without Shuttle state would create ~/.shuttle — and with it, from the
 // next event on, a live stream nobody opted into.
 func TestEventHookSeedsNothingWithoutStateDir(t *testing.T) {
-	home := isolateEvents(t)
+	t.Parallel()
+	env, home := isolateEvents(t)
 	// Undo the identity pin: this test needs the hostname tier, the only one
 	// that writes.
-	t.Setenv("SHUTTLE_HOST", "")
-	t.Setenv("SHUTTLE_HOST_FILE", "")
+	env.Set("SHUTTLE_HOST", "")
+	env.Set("SHUTTLE_HOST_FILE", "")
 
-	writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	writeEvent(t, env, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
 
 	entries, err := os.ReadDir(home)
 	if err != nil {
@@ -270,11 +280,12 @@ func TestEventHookSeedsNothingWithoutStateDir(t *testing.T) {
 // so it creates its parent rather than declining to write. This is also what
 // makes the bootstrap probe and these tests possible on a bare host.
 func TestEventExplicitFileOverridesGate(t *testing.T) {
-	isolateEvents(t)
+	t.Parallel()
+	env, _ := isolateEvents(t)
 	path := filepath.Join(t.TempDir(), "nested", "deeper", "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	env.Set("SHUTTLE_EVENTS_FILE", path)
 
-	if lines := record(t, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"}); len(lines) != 1 {
+	if lines := record(t, env, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"}); len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
 }
@@ -283,11 +294,12 @@ func TestEventExplicitFileOverridesGate(t *testing.T) {
 // gated — it names a directory the daemon owns, not a path the caller asked
 // for.
 func TestEventDataDirTier(t *testing.T) {
-	isolateEvents(t)
+	t.Parallel()
+	env, _ := isolateEvents(t)
 	dataDir := filepath.Join(t.TempDir(), "shuttle-data")
-	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
+	env.Set("SHUTTLE_DATA_DIR", dataDir)
 
-	writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	writeEvent(t, env, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
 	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
 		t.Fatalf("SHUTTLE_DATA_DIR was created (err=%v); it is gated like the default", err)
 	}
@@ -295,7 +307,7 @@ func TestEventDataDirTier(t *testing.T) {
 	if err := os.Mkdir(dataDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	writeEvent(t, env, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
 	if lines := readEventLines(t, filepath.Join(dataDir, "events.jsonl")); len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
@@ -304,12 +316,11 @@ func TestEventDataDirTier(t *testing.T) {
 // TestEventKillSwitch: SHUTTLE_EVENTS=off wins over everything, including an
 // explicit file — it is the "this host records nothing" switch.
 func TestEventKillSwitch(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
-	t.Setenv("SHUTTLE_EVENTS", "off")
+	t.Parallel()
+	env, path := eventStream(t)
+	env.Set("SHUTTLE_EVENTS", "off")
 
-	if lines := record(t, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"}); len(lines) != 0 {
+	if lines := record(t, env, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"}); len(lines) != 0 {
 		t.Fatalf("kill switch recorded %d lines, want 0", len(lines))
 	}
 }
@@ -318,9 +329,7 @@ func TestEventKillSwitch(t *testing.T) {
 // in jq (file_path // path // filePath // files[0]). The board's thumbnail
 // route and every raw-stream reader key on the normalized field.
 func TestEventFilePathNormalization(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
 
 	cases := []struct {
 		name      string
@@ -337,10 +346,9 @@ func TestEventFilePathNormalization(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				t.Fatalf("reset: %v", err)
-			}
-			lines := record(t, path, map[string]any{
+			t.Parallel()
+			env, path := eventStream(t)
+			lines := record(t, env, path, map[string]any{
 				"hook_event_name": "PreToolUse",
 				"session_id":      "s1",
 				"tool_name":       "Write",
@@ -380,11 +388,10 @@ func TestEventFilePathNormalization(t *testing.T) {
 // tool's payload, while PostToolUse carries the tool name that closes activity
 // without duplicating paths/content. A non-tool event carries neither key.
 func TestEventToolInputPresence(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
+	env, path := eventStream(t)
 
-	lines := record(t, path, map[string]any{
+	lines := record(t, env, path, map[string]any{
 		"hook_event_name": "PreToolUse", "session_id": "s1", "tool_name": "Bash",
 	})
 	v, present := lines[0]["toolInput"]
@@ -395,7 +402,7 @@ func TestEventToolInputPresence(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	lines = record(t, path, map[string]any{
+	lines = record(t, env, path, map[string]any{
 		"hook_event_name": "PostToolUse", "session_id": "s1", "tool_name": "Bash",
 		"tool_input": map[string]any{"command": "echo secret"},
 	})
@@ -409,7 +416,7 @@ func TestEventToolInputPresence(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	lines = record(t, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	lines = record(t, env, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
 	if _, present := lines[0]["tool"]; present {
 		t.Fatal("non-tool event carries a tool key")
 	}
@@ -421,9 +428,10 @@ func TestEventToolInputPresence(t *testing.T) {
 // TestEventHarnessDetection: the transcript path is the only discriminator the
 // harnesses give us, and the PreToolUse gate reads it the same way.
 func TestEventHarnessDetection(t *testing.T) {
-	home := isolateEvents(t)
+	t.Parallel()
+	env, home := isolateEvents(t)
 	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	env.Set("SHUTTLE_EVENTS_FILE", path)
 
 	for _, tc := range []struct {
 		transcript string
@@ -437,7 +445,7 @@ func TestEventHarnessDetection(t *testing.T) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			t.Fatalf("reset: %v", err)
 		}
-		lines := record(t, path, map[string]any{
+		lines := record(t, env, path, map[string]any{
 			"hook_event_name": "Stop", "session_id": "s1", "transcript_path": tc.transcript,
 		})
 		if lines[0]["harness"] != tc.want {
@@ -450,11 +458,10 @@ func TestEventHarnessDetection(t *testing.T) {
 // body in the stream. What a reader consumes — files, file_path — survives,
 // and `truncated` says the rest did not.
 func TestEventOversizeToolInputTrimmed(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
+	env, path := eventStream(t)
 
-	lines := record(t, path, map[string]any{
+	lines := record(t, env, path, map[string]any{
 		"hook_event_name": "PreToolUse",
 		"session_id":      "s1",
 		"tool_name":       "Write",
@@ -493,13 +500,12 @@ func TestEventOversizeToolInputTrimmed(t *testing.T) {
 // TestEventRotation: past the size bound the live file is renamed to .1 and a
 // fresh one starts, so the stream is bounded without a cron job.
 func TestEventRotation(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
-	t.Setenv("SHUTTLE_EVENTS_MAX_BYTES", "10")
+	t.Parallel()
+	env, path := eventStream(t)
+	env.Set("SHUTTLE_EVENTS_MAX_BYTES", "10")
 
 	for i := 0; i < 3; i++ {
-		writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": fmt.Sprintf("s%d", i)})
+		writeEvent(t, env, map[string]any{"hook_event_name": "Stop", "session_id": fmt.Sprintf("s%d", i)})
 	}
 	// Every line is over 10 bytes, so every write after the first rotates, and
 	// each rotation replaces the previous .1 — the bound is two files, always.
@@ -519,12 +525,11 @@ func TestEventRotation(t *testing.T) {
 // TestEventDegenerateInput: a tracking hook must never fail a tool call. Every
 // unusable payload is a silent, writeless pass.
 func TestEventDegenerateInput(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
+	env, path := eventStream(t)
 
 	for _, in := range []string{"", "   ", "not json", "{", `{"hook_event_name":`, `[]`, `"a string"`, `{"hook_event_name":123}`} {
-		if err := runEventHook(strings.NewReader(in)); err != nil {
+		if err := newApp(env).runEventHook(strings.NewReader(in)); err != nil {
 			t.Fatalf("runEventHook(%q) = %v, want nil", in, err)
 		}
 	}
@@ -534,7 +539,7 @@ func TestEventDegenerateInput(t *testing.T) {
 
 	// A missing session_id still records — the stream is per-session, and
 	// "unknown" is how the bash hook labeled an anonymous one.
-	lines := record(t, path, map[string]any{"hook_event_name": "Stop"})
+	lines := record(t, env, path, map[string]any{"hook_event_name": "Stop"})
 	if len(lines) != 1 || lines[0]["sessionId"] != "unknown" {
 		t.Fatalf("sessionId = %v, want \"unknown\"", lines)
 	}
@@ -543,95 +548,135 @@ func TestEventDegenerateInput(t *testing.T) {
 // TestEventCommandIsSilent: the hook prints nothing on stdout. Claude Code
 // parses hook stdout as an envelope; any stray byte is a protocol error.
 func TestEventCommandIsSilent(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
+	env, path := eventStream(t)
 
-	out := captureStdout(t, func() {
-		writeEvent(t, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
-	})
-	if out != "" {
+	streams := sysenvtest.Capture(env)
+	writeEvent(t, env, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	if out := streams.Stdout.String(); out != "" {
 		t.Fatalf("hook wrote %q to stdout, want nothing", out)
 	}
+	if lines := readEventLines(t, path); len(lines) != 1 {
+		t.Fatalf("hook recorded %d lines, want 1: the silence must come from a hook that ran", len(lines))
+	}
 }
 
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	os.Stdout = w
-	fn()
-	os.Stdout = old
-	if err := w.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(r); err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	return buf.String()
-}
-
-// TestEventConcurrentAppends: 50 real processes append at once. Single-write
+// TestEventConcurrentAppends: real processes append at once. Single-write
 // O_APPEND is atomic on Darwin and Linux, which is the whole reason the writer
-// takes no lock — and the reason lines are size-bounded.
+// takes no lock — and the reason lines are size-bounded. Each child reads its
+// payloads, reports ready, and starts appending only when the parent closes
+// its stdin, which the parent does for every child back to back once all are
+// ready: the appends overlap instead of trailing each child's start-up.
 func TestEventConcurrentAppends(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
-		t.Skip("spawns 50 processes")
+		t.Skip("spawns helper processes")
 	}
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
-	// Keep rotation out of it: this test is about append atomicity.
-	t.Setenv("SHUTTLE_EVENTS_MAX_BYTES", "1000000000")
+	env, path := eventStream(t)
+	env.Set("SHUTTLE_EVENT_HELPER", "1")
 
-	const n = 50
-	var wg sync.WaitGroup
-	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			payload := fmt.Sprintf(`{"hook_event_name":"PreToolUse","session_id":"s%d","tool_name":"Bash","tool_input":{"command":"%s"}}`,
-				i, strings.Repeat("c", 200))
-			cmd := exec.Command(os.Args[0], "-test.run=^TestEventHookHelperProcess$")
-			cmd.Env = append(os.Environ(), "SHUTTLE_EVENT_HELPER=1")
-			cmd.Stdin = strings.NewReader(payload)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				errs <- fmt.Errorf("child %d: %v\n%s", i, err, out)
-			}
-		}(i)
+	const procs, perProc = 8, 100
+	type child struct {
+		cmd    *exec.Cmd
+		stdin  io.WriteCloser
+		ready  *bufio.Reader
+		stderr *bytes.Buffer
 	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Fatal(err)
+	children := make([]child, procs)
+	for i := range children {
+		cmd := env.Command(os.Args[0], "-test.run=^TestEventHookHelperProcess$")
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stderr := &bytes.Buffer{}
+		cmd.Stderr = stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+		var payloads strings.Builder
+		for j := 0; j < perProc; j++ {
+			fmt.Fprintf(&payloads, `{"hook_event_name":"PreToolUse","session_id":"p%d-%d","tool_name":"Bash","tool_input":{"command":"%s"}}`+"\n",
+				i, j, strings.Repeat("c", 200))
+		}
+		payloads.WriteString("\n")
+		if _, err := io.WriteString(stdin, payloads.String()); err != nil {
+			t.Fatalf("child %d: write payloads: %v", i, err)
+		}
+		children[i] = child{cmd, stdin, bufio.NewReader(stdout), stderr}
+	}
+	for i, c := range children {
+		if line, err := c.ready.ReadString('\n'); err != nil || line != "ready\n" {
+			t.Fatalf("child %d never reported ready: %q %v\n%s", i, line, err, c.stderr)
+		}
+	}
+	for _, c := range children {
+		_ = c.stdin.Close()
+	}
+	for i, c := range children {
+		_, _ = io.Copy(io.Discard, c.ready)
+		if err := c.cmd.Wait(); err != nil {
+			t.Fatalf("child %d: %v\n%s", i, err, c.stderr)
+		}
 	}
 
 	lines := readEventLines(t, path) // fails the test on any non-JSON line
-	if len(lines) != n {
-		t.Fatalf("got %d lines, want %d", len(lines), n)
+	if len(lines) != procs*perProc {
+		t.Fatalf("got %d lines, want %d", len(lines), procs*perProc)
 	}
 	seen := map[string]bool{}
 	for _, l := range lines {
 		seen[l["sessionId"].(string)] = true
 	}
-	if len(seen) != n {
-		t.Fatalf("got %d distinct sessions, want %d — a write was interleaved", len(seen), n)
+	if len(seen) != procs*perProc {
+		t.Fatalf("got %d distinct sessions, want %d — a write was interleaved", len(seen), procs*perProc)
 	}
 }
 
 // TestEventHookHelperProcess is the child half of TestEventConcurrentAppends:
-// it re-execs the test binary and calls the hook implementation directly. It
-// is inert unless SHUTTLE_EVENT_HELPER is set.
+// the parent re-execs the test binary, and this child reads one payload per
+// line up to a blank line, prints "ready", waits for stdin to close, then
+// feeds each payload to the hook implementation in turn. It is inert unless
+// SHUTTLE_EVENT_HELPER is set. The child is a process of its own, so it reads
+// its own process environment, where TestMain keeps the parent's
+// SHUTTLE_EVENTS_FILE.
 func TestEventHookHelperProcess(t *testing.T) {
 	if os.Getenv("SHUTTLE_EVENT_HELPER") != "1" {
 		return
 	}
-	_ = runEventHook(os.Stdin)
+	in := bufio.NewReader(os.Stdin)
+	var payloads []string
+	for {
+		line, err := in.ReadString('\n')
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reading payloads: %v\n", err)
+			os.Exit(2)
+		}
+		if line == "\n" {
+			break
+		}
+		payloads = append(payloads, line)
+	}
+	fmt.Fprintln(os.Stdout, "ready")
+	_, _ = io.Copy(io.Discard, in)
+	// Keep rotation out of it: the parent's test is about append atomicity.
+	env, _ := sysenvtest.FromProcess(t, map[string]string{
+		"SHUTTLE_EVENTS_MAX_BYTES": "1000000000",
+		"SHUTTLE_HOST":             "testhost",
+		"SHUTTLE_TMUX_SESSION":     "test-session",
+	})
+	a := newApp(env)
+	for _, payload := range payloads {
+		if err := a.runEventHook(strings.NewReader(payload)); err != nil {
+			fmt.Fprintf(os.Stderr, "runEventHook: %v\n", err)
+			os.Exit(2)
+		}
+	}
 	os.Exit(0)
 }
 
@@ -738,6 +783,7 @@ func goldenEvents(home string) []goldenEvent {
 // is worse than a wrong count — a session whose stops vanish never reads as
 // idle at all.
 func TestBackgroundTaskCount(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		tasks any
@@ -753,11 +799,10 @@ func TestBackgroundTaskCount(t *testing.T) {
 		{"a bare count counts nothing rather than dropping the line", 3, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			isolateEvents(t)
-			path := filepath.Join(t.TempDir(), "events.jsonl")
-			t.Setenv("SHUTTLE_EVENTS_FILE", path)
+			t.Parallel()
+			env, path := eventStream(t)
 
-			lines := record(t, path, map[string]any{
+			lines := record(t, env, path, map[string]any{
 				"hook_event_name": "Stop", "session_id": "s1", "background_tasks": tc.tasks,
 			})
 			got, present := lines[0]["backgroundTasks"]
@@ -778,11 +823,10 @@ func TestBackgroundTaskCount(t *testing.T) {
 // and a worker whose last event is its subagent finishing is exactly the case
 // the count exists to cover.
 func TestSubagentStopCarriesBackgroundTasks(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
+	env, path := eventStream(t)
 
-	lines := record(t, path, map[string]any{
+	lines := record(t, env, path, map[string]any{
 		"hook_event_name": "SubagentStop", "session_id": "s1",
 		"background_tasks": []map[string]any{{"type": "local_bash"}},
 	})
@@ -794,11 +838,10 @@ func TestSubagentStopCarriesBackgroundTasks(t *testing.T) {
 // TestNotificationKindRecorded: the harness's own discriminator, passed
 // through. Without it the idle timer and a permission request are one event.
 func TestNotificationKindRecorded(t *testing.T) {
-	isolateEvents(t)
-	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	t.Parallel()
+	env, path := eventStream(t)
 
-	lines := record(t, path, map[string]any{
+	lines := record(t, env, path, map[string]any{
 		"hook_event_name": "Notification", "session_id": "s1",
 		"notification_type": "permission_prompt",
 	})
@@ -807,7 +850,7 @@ func TestNotificationKindRecorded(t *testing.T) {
 	}
 
 	// A harness that names nothing leaves the field off entirely.
-	bare := record(t, path, map[string]any{"hook_event_name": "Notification", "session_id": "s2"})
+	bare := record(t, env, path, map[string]any{"hook_event_name": "Notification", "session_id": "s2"})
 	if _, present := bare[1]["notificationKind"]; present {
 		t.Fatalf("notificationKind present on an unnamed notification")
 	}
@@ -818,27 +861,28 @@ func TestNotificationKindRecorded(t *testing.T) {
 // two languages, so writer drift fails a test instead of quietly emptying the
 // board.
 func TestEventGoldenParity(t *testing.T) {
-	home := isolateEvents(t)
+	t.Parallel()
+	env, home := isolateEvents(t)
 
 	// Freeze everything the line would otherwise pick up from the machine.
 	base := time.UnixMilli(1753900000000).UTC()
 	tick := 0
-	oldNow, oldRand := eventNow, eventRand
-	t.Cleanup(func() { eventNow, eventRand = oldNow, oldRand })
-	eventNow = func() time.Time { return base.Add(time.Duration(tick) * time.Second) }
-	eventRand = func() int { return 1000 + tick }
+	now := func() time.Time { return base.Add(time.Duration(tick) * time.Second) }
+	rand := func() int { return 1000 + tick }
 	// A generic host id: the fixture is tracked, and a real machine name in it
 	// is exactly the thing this change removed from the rest of the tree.
-	t.Setenv("SHUTTLE_HOST", "hub-a")
+	env.Set("SHUTTLE_HOST", "hub-a")
 
 	var got bytes.Buffer
 	for _, ev := range goldenEvents(home) {
-		t.Setenv("SHUTTLE_TMUX_SESSION", ev.tmux)
+		env.Set("SHUTTLE_TMUX_SESSION", ev.tmux)
 		raw, err := json.Marshal(ev.payload)
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		line, ok := renderEventLine(bytes.NewReader(raw))
+		a := newApp(env)
+		a.eventNow, a.eventRand = now, rand
+		line, ok := a.renderEventLine(bytes.NewReader(raw))
 		if !ok {
 			t.Fatalf("payload recorded nothing: %v", ev.payload)
 		}
@@ -870,13 +914,14 @@ func TestEventGoldenParity(t *testing.T) {
 // TestEmptyTmuxSessionWithoutTmux: outside tmux the field is empty rather than
 // absent — WaitingTracker keys on it, and a missing key is not a nil string.
 func TestEmptyTmuxSessionWithoutTmux(t *testing.T) {
-	isolateEvents(t)
-	t.Setenv("SHUTTLE_TMUX_SESSION", "")
-	t.Setenv("TMUX", "")
+	t.Parallel()
+	env, _ := isolateEvents(t)
+	env.Set("SHUTTLE_TMUX_SESSION", "")
+	env.Set("TMUX", "")
 	path := filepath.Join(t.TempDir(), "events.jsonl")
-	t.Setenv("SHUTTLE_EVENTS_FILE", path)
+	env.Set("SHUTTLE_EVENTS_FILE", path)
 
-	lines := record(t, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
+	lines := record(t, env, path, map[string]any{"hook_event_name": "Stop", "session_id": "s1"})
 	v, present := lines[0]["tmuxSession"]
 	if !present || v != "" {
 		t.Fatalf("tmuxSession = %v (present=%v), want present and empty", v, present)

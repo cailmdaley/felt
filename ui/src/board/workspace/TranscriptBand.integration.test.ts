@@ -65,7 +65,7 @@ describe('Dock worker transcript', () => {
     expect(requests).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
   })
 
-  it('places the reader before review verdicts and the composer', async () => {
+  it('places the transcript before the composer with review verdicts on the status line', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url) => String(url).endsWith('/agents')
       ? json([{ id: 'claude-opus', cli: 'claude' }])
       : json({})))
@@ -75,8 +75,8 @@ describe('Dock worker transcript', () => {
     const children = [...body.children]
 
     expect(children[0].classList.contains('ws-transcript')).toBe(true)
-    expect(children[1].classList.contains('kbn-ctl-verdict')).toBe(true)
-    expect(children.findIndex((node) => node.classList.contains('kbn-ctl-compose'))).toBeGreaterThan(1)
+    expect(children[1].classList.contains('kbn-ctl-compose')).toBe(true)
+    expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
   })
 
   it('pins a History session with read and returns to the latest session', async () => {

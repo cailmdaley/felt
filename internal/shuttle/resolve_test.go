@@ -11,6 +11,7 @@ import (
 // capture flow) yields the byte-identical record ResolveBlock emits under
 // shuttle.resolved.agent (the poll/dispatch path). One projection, two callers.
 func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 	for _, name := range []string{"claude-opus", "codex-sol", "pi-luna"} {
 		block := &Block{Kind: "oneshot", Agent: name, Effort: "", Chrome: false}
@@ -22,7 +23,7 @@ func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Resolve(%s): %v", name, err)
 		}
-		viaVerb := NewResolvedAgent(rec, axes)
+		viaVerb := reg.NewResolvedAgent(rec, axes)
 		if *viaVerb != *viaBlock.Agent {
 			t.Fatalf("%s: verb path %+v != block path %+v", name, viaVerb, viaBlock.Agent)
 		}
@@ -30,6 +31,7 @@ func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
 }
 
 func TestCodexModelFamily(t *testing.T) {
+	t.Parallel()
 	reg := loadReg(t)
 
 	tests := []struct {
@@ -67,6 +69,7 @@ func TestCodexModelFamily(t *testing.T) {
 }
 
 func TestResolveBlock_Oneshot(t *testing.T) {
+	t.Parallel()
 	reg := builtinReg(t)
 	res, err := ResolveBlock(&Block{Kind: "oneshot", Agent: "claude-opus"}, reg, time.Now())
 	if err != nil {
@@ -87,6 +90,7 @@ func TestResolveBlock_Oneshot(t *testing.T) {
 }
 
 func TestResolveBlock_StandingNextDue(t *testing.T) {
+	t.Parallel()
 	reg := builtinReg(t)
 	b := &Block{Kind: "standing", Agent: "claude-sonnet", Schedule: &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}}
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
@@ -95,7 +99,7 @@ func TestResolveBlock_StandingNextDue(t *testing.T) {
 		t.Fatalf("ResolveBlock: %v", err)
 	}
 	if res.NextDue == nil {
-		t.Fatal("standing role should have a next_due")
+		t.Fatal("standing constitution should have a next_due")
 	}
 	nd := *res.NextDue
 	if !nd.After(now) {
@@ -110,9 +114,10 @@ func TestResolveBlock_StandingNextDue(t *testing.T) {
 }
 
 // TestResolveBlock_StandingPrevDue locks the field the daemon's catch-up
-// dispatch decision reads: a standing role resolves a prev_due (most recent tick
+// dispatch decision reads: a standing constitution resolves a prev_due (most recent tick
 // ≤ now) that brackets now with next_due. A oneshot has neither.
 func TestResolveBlock_StandingPrevDue(t *testing.T) {
+	t.Parallel()
 	reg := builtinReg(t)
 	b := &Block{Kind: "standing", Agent: "claude-sonnet", Schedule: &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"}}
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
@@ -121,10 +126,10 @@ func TestResolveBlock_StandingPrevDue(t *testing.T) {
 		t.Fatalf("ResolveBlock: %v", err)
 	}
 	if res.PrevDue == nil {
-		t.Fatal("standing role should have a prev_due")
+		t.Fatal("standing constitution should have a prev_due")
 	}
 	if res.NextDue == nil {
-		t.Fatal("standing role should have a next_due")
+		t.Fatal("standing constitution should have a next_due")
 	}
 	if res.PrevDue.After(now) {
 		t.Fatalf("prev_due %v must be <= now %v", *res.PrevDue, now)
@@ -146,8 +151,9 @@ func TestResolveBlock_StandingPrevDue(t *testing.T) {
 // TestResolveBlock_ImpossibleSchedule: a grammatical but unsatisfiable schedule
 // (Feb 30) resolves no occurrence — robfig's Next returns the zero time, which
 // ResolveBlock must drop rather than emit as a year-0001 next_due. The daemon
-// then sees an unschedulable (invalid) standing role, matching the old behavior.
+// then sees an unschedulable (invalid) standing constitution, matching the old behavior.
 func TestResolveBlock_ImpossibleSchedule(t *testing.T) {
+	t.Parallel()
 	reg := builtinReg(t)
 	b := &Block{Kind: "standing", Agent: "claude-sonnet", Schedule: &Schedule{Expr: "0 0 30 2 *", TZ: "UTC"}}
 	res, err := ResolveBlock(b, reg, time.Now())
@@ -167,6 +173,7 @@ func TestResolveBlock_ImpossibleSchedule(t *testing.T) {
 }
 
 func TestResolveBlock_UnknownAgentErrors(t *testing.T) {
+	t.Parallel()
 	reg := builtinReg(t)
 	if _, err := ResolveBlock(&Block{Kind: "oneshot", Agent: "no-such-agent"}, reg, time.Now()); err == nil {
 		t.Fatal("an unknown agent should make ResolveBlock error")
@@ -174,6 +181,7 @@ func TestResolveBlock_UnknownAgentErrors(t *testing.T) {
 }
 
 func TestResolveBlock_DefaultsUnnamedAgent(t *testing.T) {
+	t.Parallel()
 	reg := builtinReg(t)
 	res, err := ResolveBlock(&Block{Kind: "oneshot"}, reg, time.Now())
 	if err != nil {
@@ -188,7 +196,7 @@ func TestResolveBlock_DefaultsUnnamedAgent(t *testing.T) {
 // deliberately exercise the agents felt ships, not axes_test's fixture.
 func builtinReg(t *testing.T) *AgentRegistry {
 	t.Helper()
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(testEnv(t))
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}

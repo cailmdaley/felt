@@ -19,156 +19,169 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var shuttleDaemonCmd = &cobra.Command{
-	Use:   "daemon",
-	Short: "Start, inspect, and supervise the local daemon",
+func (a *app) shuttleDaemonCmd() *cobra.Command {
+	shuttleDaemonCmd := &cobra.Command{
+		Use:   "daemon",
+		Short: "Start, inspect, and supervise the local daemon",
+	}
+	shuttleDaemonCmd.AddCommand(
+		a.shuttleDaemonStartCmd(),
+		a.newShuttleDaemonStopCommand(),
+		a.shuttleDaemonStatusCmd(),
+		a.shuttleDaemonReleaseCmd(),
+		a.shuttleDaemonResetCmd(),
+		a.newShuttleDaemonInstallCommand(),
+		a.newShuttleDaemonUninstallCommand(),
+	)
+	return shuttleDaemonCmd
 }
 
-var shuttleDaemonStartCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start the daemon in the foreground",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		force, _ := cmd.Flags().GetBool("force")
-		release, err := findDaemonRelease()
-		if err != nil {
-			return err
-		}
-		if !force {
-			settings, err := resolveHostSettings()
+func (a *app) shuttleDaemonStartCmd() *cobra.Command {
+	shuttleDaemonStartCmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start the daemon in the foreground",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			force, _ := cmd.Flags().GetBool("force")
+			release, err := a.findDaemonRelease()
 			if err != nil {
 				return err
 			}
-			if err := daemonLifecycleOwnerCheck(settings); err != nil {
-				return fmt.Errorf("refusing to start after the daemon owner check failed: %w", err)
-			}
-			if _, err := daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
-				fmt.Fprintf(os.Stderr, "Daemon already running at %s.\n", settings.Listen)
-				fmt.Fprintln(os.Stderr, "If a keep-alive supervisor owns it, cycle it there:")
-				fmt.Fprintln(os.Stderr, "  launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   (macOS)")
-				fmt.Fprintln(os.Stderr, "  systemctl --user restart shuttle-daemon.service         (Linux)")
-				fmt.Fprintln(os.Stderr, "Otherwise stop the listener directly:")
-				if settings.listen.Network == "unix" {
-					fmt.Fprintf(os.Stderr, "  lsof -t -- %s | xargs kill\n", settings.listen.Address)
-				} else {
-					_, port, _ := net.SplitHostPort(settings.listen.Address)
-					fmt.Fprintf(os.Stderr, "  lsof -ti:%s -sTCP:LISTEN | xargs kill\n", port)
+			if !force {
+				settings, err := a.resolveHostSettings()
+				if err != nil {
+					return err
 				}
-				fmt.Fprintln(os.Stderr, "Pass --force to launch anyway.")
-				return errors.New("daemon is already running")
+				if err := a.daemonLifecycleOwnerCheck(settings); err != nil {
+					return fmt.Errorf("refusing to start after the daemon owner check failed: %w", err)
+				}
+				if _, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
+					fmt.Fprintf(a.env.Stderr, "Daemon already running at %s.\n", settings.Listen)
+					fmt.Fprintln(a.env.Stderr, "If a keep-alive supervisor owns it, cycle it there:")
+					fmt.Fprintln(a.env.Stderr, "  launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   (macOS)")
+					fmt.Fprintln(a.env.Stderr, "  systemctl --user restart shuttle-daemon.service         (Linux)")
+					fmt.Fprintln(a.env.Stderr, "Otherwise stop the listener directly:")
+					if settings.listen.Network == "unix" {
+						fmt.Fprintf(a.env.Stderr, "  lsof -t -- %s | xargs kill\n", settings.listen.Address)
+					} else {
+						_, port, _ := net.SplitHostPort(settings.listen.Address)
+						fmt.Fprintf(a.env.Stderr, "  lsof -ti:%s -sTCP:LISTEN | xargs kill\n", port)
+					}
+					fmt.Fprintln(a.env.Stderr, "Pass --force to launch anyway.")
+					return errors.New("daemon is already running")
+				}
 			}
-		}
-		return execDaemonRelease(release.Launcher, "start")
-	},
-}
-
-var shuttleDaemonStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Print the daemon state or version receipt",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		settings, err := resolveHostSettings()
-		if err != nil {
-			return err
-		}
-		version, err := daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "(daemon down at %s)\n", settings.Listen)
-			return &cliExitError{code: 2, err: fmt.Errorf("daemon is down at %s: %w", settings.Listen, err)}
-		}
-		if daemonVersionIsBooting(version) {
-			printDaemonBody(version)
-			return nil
-		}
-		state, err := daemonLifecycleGet(settings, "/api/v1/state", 5*time.Second)
-		if err == nil {
-			printDaemonBody(state)
-		} else {
-			printDaemonBody(version)
-		}
-		return nil
-	},
-}
-
-var shuttleDaemonReleaseCmd = &cobra.Command{
-	Use:   "release",
-	Short: "Release the daemon's boot quarantine",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		settings, err := resolveHostSettings()
-		if err != nil {
-			return err
-		}
-		if version, err := daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil && daemonVersionIsBooting(version) {
-			return errors.New("daemon is still booting; retry when /api/v1/version shows ready:true")
-		}
-		if _, err := daemonLifecyclePost(settings, "/api/v1/quarantine/release", nil); err == nil {
-			fmt.Println("quarantine released — parked launches will dispatch on the next tick")
-			return nil
-		}
-		if version, err := daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil && daemonVersionIsBooting(version) {
-			return errors.New("daemon is still booting; retry when /api/v1/version shows ready:true")
-		}
-		return errors.New("release failed: daemon unreachable or poller not running")
-	},
-}
-
-var shuttleDaemonResetCmd = &cobra.Command{
-	Use:   "reset <remote>",
-	Short: "Reset a remote daemon's circuit breaker",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		remote := strings.TrimSpace(args[0])
-		if remote == "" {
-			return errors.New("Usage: shuttle daemon reset <remote>")
-		}
-		settings, err := resolveHostSettings()
-		if err != nil {
-			return err
-		}
-		path := "/api/v1/remotes/" + url.PathEscape(remote) + "/reset"
-		if _, err := daemonLifecyclePost(settings, path, nil); err != nil {
-			return errors.New("reset failed: unknown remote, breaker not tripped, or daemon unreachable")
-		}
-		fmt.Printf("circuit breaker reset for %s — recovery cascade re-running\n", remote)
-		return nil
-	},
-}
-
-var shuttleVersionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print the running daemon version or its release version",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		settings, err := resolveHostSettings()
-		if err != nil {
-			return err
-		}
-		if version, err := daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
-			printDaemonBody(version)
-			return nil
-		}
-		release, err := findDaemonRelease()
-		if err != nil {
-			return err
-		}
-		return runDaemonReleaseVersion(release.Launcher)
-	},
-}
-
-func init() {
+			return a.execDaemonRelease(release.Launcher, "start")
+		},
+	}
 	shuttleDaemonStartCmd.Flags().Bool("force", false, "Start without checking whether a daemon is already running")
-	shuttleDaemonCmd.AddCommand(
-		shuttleDaemonStartCmd,
-		newShuttleDaemonStopCommand(),
-		shuttleDaemonStatusCmd,
-		shuttleDaemonReleaseCmd,
-		shuttleDaemonResetCmd,
-		newShuttleDaemonInstallCommand(),
-		newShuttleDaemonUninstallCommand(),
-	)
-	addShuttleCommand(shuttleDaemonCmd)
-	addShuttleCommand(shuttleVersionCmd)
+	return shuttleDaemonStartCmd
+}
+
+func (a *app) shuttleDaemonStatusCmd() *cobra.Command {
+	shuttleDaemonStatusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Print the daemon state or version receipt",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			version, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second)
+			if err != nil {
+				fmt.Fprintf(a.env.Stderr, "(daemon down at %s)\n", settings.Listen)
+				return &cliExitError{code: 2, err: fmt.Errorf("daemon is down at %s: %w", settings.Listen, err)}
+			}
+			if daemonVersionIsBooting(version) {
+				a.printDaemonBody(version)
+				return nil
+			}
+			state, err := a.daemonLifecycleGet(settings, "/api/v1/state", 5*time.Second)
+			if err == nil {
+				a.printDaemonBody(state)
+			} else {
+				a.printDaemonBody(version)
+			}
+			return nil
+		},
+	}
+	return shuttleDaemonStatusCmd
+}
+
+func (a *app) shuttleDaemonReleaseCmd() *cobra.Command {
+	shuttleDaemonReleaseCmd := &cobra.Command{
+		Use:   "release",
+		Short: "Release the daemon's boot quarantine",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			if version, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil && daemonVersionIsBooting(version) {
+				return errors.New("daemon is still booting; retry when /api/v1/version shows ready:true")
+			}
+			if _, err := a.daemonLifecyclePost(settings, "/api/v1/quarantine/release", nil); err == nil {
+				fmt.Fprintln(a.env.Stdout, "quarantine released — parked launches will dispatch on the next tick")
+				return nil
+			}
+			if version, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil && daemonVersionIsBooting(version) {
+				return errors.New("daemon is still booting; retry when /api/v1/version shows ready:true")
+			}
+			return errors.New("release failed: daemon unreachable or poller not running")
+		},
+	}
+	return shuttleDaemonReleaseCmd
+}
+
+func (a *app) shuttleDaemonResetCmd() *cobra.Command {
+	shuttleDaemonResetCmd := &cobra.Command{
+		Use:   "reset <remote>",
+		Short: "Reset a remote daemon's circuit breaker",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			remote := strings.TrimSpace(args[0])
+			if remote == "" {
+				return errors.New("Usage: shuttle daemon reset <remote>")
+			}
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			path := "/api/v1/remotes/" + url.PathEscape(remote) + "/reset"
+			if _, err := a.daemonLifecyclePost(settings, path, nil); err != nil {
+				return errors.New("reset failed: unknown remote, breaker not tripped, or daemon unreachable")
+			}
+			fmt.Fprintf(a.env.Stdout, "circuit breaker reset for %s — recovery cascade re-running\n", remote)
+			return nil
+		},
+	}
+	return shuttleDaemonResetCmd
+}
+
+func (a *app) shuttleVersionCmd() *cobra.Command {
+	shuttleVersionCmd := &cobra.Command{
+		Use:   "version",
+		Short: "Print the running daemon version or its release version",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			if version, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
+				a.printDaemonBody(version)
+				return nil
+			}
+			release, err := a.findDaemonRelease()
+			if err != nil {
+				return err
+			}
+			return a.runDaemonReleaseVersion(release.Launcher)
+		},
+	}
+	return shuttleVersionCmd
 }
 
 func daemonLifecycleURL(settings hostSettings, path string) string {
@@ -178,20 +191,18 @@ func daemonLifecycleURL(settings hostSettings, path string) string {
 	return "http://" + settings.listen.Address + path
 }
 
-var daemonLifecycleOwnerCheck = checkResolvedDaemonPortOwner
-
-func daemonLifecycleGet(settings hostSettings, path string, timeout time.Duration) ([]byte, error) {
-	if err := daemonLifecycleOwnerCheck(settings); err != nil {
+func (a *app) daemonLifecycleGet(settings hostSettings, path string, timeout time.Duration) ([]byte, error) {
+	if err := a.daemonLifecycleOwnerCheck(settings); err != nil {
 		return nil, fmt.Errorf("refusing the TCP request after the daemon owner check failed: %w", err)
 	}
-	return getDaemon(daemonLifecycleURL(settings, path), timeout)
+	return a.getDaemon(daemonLifecycleURL(settings, path), timeout)
 }
 
-func daemonLifecyclePost(settings hostSettings, path string, payload []byte) ([]byte, error) {
-	if err := daemonLifecycleOwnerCheck(settings); err != nil {
+func (a *app) daemonLifecyclePost(settings hostSettings, path string, payload []byte) ([]byte, error) {
+	if err := a.daemonLifecycleOwnerCheck(settings); err != nil {
 		return nil, fmt.Errorf("refusing the TCP request after the daemon owner check failed: %w", err)
 	}
-	return postDaemon(daemonLifecycleURL(settings, path), payload, 10*time.Second)
+	return a.postDaemon(daemonLifecycleURL(settings, path), payload, 10*time.Second)
 }
 
 func daemonVersionIsBooting(body []byte) bool {
@@ -209,29 +220,29 @@ type daemonRelease struct {
 	Launcher string
 }
 
-func findDaemonRelease() (daemonRelease, error) {
-	executable, err := resolvedExecutablePath()
+func (a *app) findDaemonRelease() (daemonRelease, error) {
+	executable, err := a.resolvedExecutablePath()
 	if err != nil {
 		return daemonRelease{}, err
 	}
-	home, _ := os.UserHomeDir()
-	return findDaemonReleaseAt(os.Getenv("SHUTTLE_RELEASE"), executable, home)
+	home, _ := a.env.UserHomeDir()
+	return a.findDaemonReleaseAt(a.env.Getenv("SHUTTLE_RELEASE"), executable, home)
 }
 
-func findDaemonReleaseAt(configured, executable, home string) (daemonRelease, error) {
+func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRelease, error) {
 	if configured = strings.TrimSpace(configured); configured != "" {
-		dir, err := expandUserPath(configured)
+		dir, err := a.expandUserPath(configured)
 		if err != nil {
 			return daemonRelease{}, fmt.Errorf("resolving SHUTTLE_RELEASE: %w", err)
 		}
-		return validateDaemonRelease(dir)
+		return a.validateDaemonRelease(dir)
 	}
 	executableDir := filepath.Dir(executable)
-	if release, err := validateDaemonRelease(executableDir); err == nil {
+	if release, err := a.validateDaemonRelease(executableDir); err == nil {
 		return release, nil
 	}
 	if info, err := os.Stat(filepath.Join(executableDir, "shuttled")); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
-		if release, err := validateDaemonRelease(filepath.Dir(executableDir)); err == nil {
+		if release, err := a.validateDaemonRelease(filepath.Dir(executableDir)); err == nil {
 			return release, nil
 		}
 	}
@@ -240,11 +251,11 @@ func findDaemonReleaseAt(configured, executable, home string) (daemonRelease, er
 		if readErr == nil {
 			repo := strings.TrimSpace(string(data))
 			if repo != "" {
-				if expanded, expandErr := expandUserPath(repo); expandErr == nil {
-					if release, releaseErr := validateDaemonRelease(expanded); releaseErr == nil {
+				if expanded, expandErr := a.expandUserPath(repo); expandErr == nil {
+					if release, releaseErr := a.validateDaemonRelease(expanded); releaseErr == nil {
 						return release, nil
 					}
-					if release, releaseErr := validateDaemonRelease(filepath.Join(expanded, "bin", "rel")); releaseErr == nil {
+					if release, releaseErr := a.validateDaemonRelease(filepath.Join(expanded, "bin", "rel")); releaseErr == nil {
 						return release, nil
 					}
 				}
@@ -254,9 +265,9 @@ func findDaemonReleaseAt(configured, executable, home string) (daemonRelease, er
 	return daemonRelease{}, errors.New("no daemon release found; set SHUTTLE_RELEASE or build/install a Mix release")
 }
 
-func validateDaemonRelease(dir string) (daemonRelease, error) {
+func (a *app) validateDaemonRelease(dir string) (daemonRelease, error) {
 	if !filepath.IsAbs(dir) {
-		abs, err := filepath.Abs(dir)
+		abs, err := a.env.Abs(dir)
 		if err != nil {
 			return daemonRelease{}, err
 		}
@@ -273,24 +284,24 @@ func validateDaemonRelease(dir string) (daemonRelease, error) {
 	return daemonRelease{Dir: dir, Launcher: launcher}, nil
 }
 
-func executablePath() (string, error) {
+func (a *app) executablePath() (string, error) {
 	path, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("locating shuttle executable: %w", err)
 	}
-	return absoluteExecutablePath(path)
+	return a.absoluteExecutablePath(path)
 }
 
-func absoluteExecutablePath(path string) (string, error) {
-	abs, err := filepath.Abs(path)
+func (a *app) absoluteExecutablePath(path string) (string, error) {
+	abs, err := a.env.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("resolving shuttle executable path: %w", err)
 	}
 	return abs, nil
 }
 
-func resolvedExecutablePath() (string, error) {
-	path, err := executablePath()
+func (a *app) resolvedExecutablePath() (string, error) {
+	path, err := a.executablePath()
 	if err != nil {
 		return "", err
 	}
@@ -300,46 +311,46 @@ func resolvedExecutablePath() (string, error) {
 	return path, nil
 }
 
-var execDaemonRelease = func(path string, args ...string) error {
+// execRelease replaces this process with the daemon release
+// (app.execDaemonRelease).
+func (a *app) execRelease(path string, args ...string) error {
 	argv := append([]string{path}, args...)
-	return syscall.Exec(path, argv, os.Environ())
+	return syscall.Exec(path, argv, a.env.Environ())
 }
 
-var runDaemonReleaseVersion = func(path string) error {
-	cmd := exec.Command(path, "version")
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+// runReleaseVersion runs the release's version command on this terminal
+// (app.runDaemonReleaseVersion).
+func (a *app) runReleaseVersion(path string) error {
+	cmd := a.env.Command(path, "version")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = a.env.Stdin, a.env.Stdout, a.env.Stderr
 	return cmd.Run()
 }
 
-var daemonFindPIDs = findDaemonPIDs
-var daemonSignalPID = signalDaemonPID
-var daemonPause = time.Sleep
-
-func newShuttleDaemonStopCommand() *cobra.Command {
+func (a *app) newShuttleDaemonStopCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
 		Short: "Stop the daemon process for this release",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			release, err := findDaemonRelease()
+			release, err := a.findDaemonRelease()
 			if err != nil {
 				return err
 			}
-			return stopDaemonRelease(release)
+			return a.stopDaemonRelease(release)
 		},
 	}
 }
 
-func stopDaemonRelease(release daemonRelease) error {
+func (a *app) stopDaemonRelease(release daemonRelease) error {
 	pattern := daemonProcessPattern(release.Dir)
-	pids, err := daemonFindPIDs(pattern)
+	pids, err := a.daemonFindPIDs(pattern)
 	if err != nil {
 		return err
 	}
 	if len(pids) == 0 {
 		return nil
 	}
-	marker, err := daemonStopMarkerPath()
+	marker, err := a.daemonStopMarkerPath()
 	if err != nil {
 		return err
 	}
@@ -347,16 +358,16 @@ func stopDaemonRelease(release daemonRelease) error {
 		return fmt.Errorf("marking the requested daemon stop: %w", err)
 	}
 	pid := pids[0]
-	fmt.Printf("stopping the running daemon (pid %d)\n", pid)
-	_ = daemonSignalPID(pid, syscall.SIGTERM)
+	fmt.Fprintf(a.env.Stdout, "stopping the running daemon (pid %d)\n", pid)
+	_ = a.daemonSignalPID(pid, syscall.SIGTERM)
 	for i := 0; i < 5; i++ {
-		daemonPause(time.Second)
-		pids, err = daemonFindPIDs(pattern)
+		a.daemonPause(time.Second)
+		pids, err = a.daemonFindPIDs(pattern)
 		if err != nil || len(pids) == 0 {
 			return err
 		}
 	}
-	_ = daemonSignalPID(pid, syscall.SIGKILL)
+	_ = a.daemonSignalPID(pid, syscall.SIGKILL)
 	return nil
 }
 
@@ -364,8 +375,8 @@ func daemonProcessPattern(releaseDir string) string {
 	return regexp.QuoteMeta(filepath.Join(releaseDir, "releases")) + `/[^[:space:]]+/start([[:space:]]|$)`
 }
 
-func findDaemonPIDs(pattern string) ([]int, error) {
-	output, err := exec.Command("pgrep", "-f", pattern).Output()
+func (a *app) findDaemonPIDs(pattern string) ([]int, error) {
+	output, err := a.env.Command("pgrep", "-f", pattern).Output()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
@@ -392,8 +403,8 @@ func signalDaemonPID(pid int, signal syscall.Signal) error {
 	return process.Signal(signal)
 }
 
-func daemonStopMarkerPath() (string, error) {
-	dir, err := shuttle.DataDir()
+func (a *app) daemonStopMarkerPath() (string, error) {
+	dir, err := shuttle.DataDir(a.env)
 	if err != nil {
 		return "", err
 	}

@@ -1,5 +1,5 @@
 defmodule Shuttle.WaitingTrackerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.EventStream
 
@@ -22,15 +22,10 @@ defmodule Shuttle.WaitingTrackerTest do
   defp start(events) do
     name = :"waiting_tracker_#{System.unique_integer([:positive])}"
 
-    {:ok, pid} =
-      EventStream.start_link(
-        events_file: events,
-        poll_interval_ms: 10,
-        clock: fn -> @base end,
-        name: name
-      )
+    start_supervised!(
+      {EventStream, events_file: events, poll_interval_ms: 10, clock: fn -> @base end, name: name}
+    )
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
     name
   end
 
@@ -51,7 +46,18 @@ defmodule Shuttle.WaitingTrackerTest do
   defp last_event_at(name, session), do: (activity(name, session) || %{})[:last_event_at]
   defp ingested?(name, session), do: not is_nil(activity(name, session))
 
-  defp wait_until(fun, tries \\ 50) do
+  # Lines are ingested in file order, so once a line appended after the ones
+  # under test has landed, those have been ingested too: a negative assertion
+  # after this speaks for lines the tracker has read.
+  defp barrier(events, name) do
+    session = "barrier-01J00000000000000000000000-shuttle"
+    append(events, "pre_tool_use", session)
+    assert wait_until(fn -> ingested?(name, session) end)
+  end
+
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, tries \\ 3_000) do
     cond do
       fun.() ->
         true
@@ -186,7 +192,7 @@ defmodule Shuttle.WaitingTrackerTest do
       notificationKind: "idle_prompt"
     })
 
-    Process.sleep(30)
+    barrier(events, name)
     assert phase(name, "foo-01J00000000000000000000000-shuttle") == "working"
   end
 
@@ -409,7 +415,7 @@ defmodule Shuttle.WaitingTrackerTest do
   test "non-shuttle sessions are ignored", %{events: events} do
     name = start(events)
     append(events, "notification", "my-interactive-session")
-    Process.sleep(40)
+    barrier(events, name)
     refute ingested?(name, "my-interactive-session")
   end
 
@@ -444,7 +450,9 @@ defmodule Shuttle.WaitingTrackerTest do
            end)
 
     File.write!(events, "")
-    Process.sleep(40)
+    # The tail must see the shrink before the next append: `bar`'s line is as
+    # long as `foo`'s, so a truncate-and-rewrite it missed is invisible to it.
+    assert wait_until(fn -> :sys.get_state(name).offset == 0 end)
     append(events, "notification", "bar-01J00000000000000000000000-shuttle")
 
     assert wait_until(fn ->

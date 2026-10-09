@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 )
 
 func TestAddressRoundTrip(t *testing.T) {
+	t.Parallel()
 	raw, err := FormatAddress("host-1", "codex", "id/with spaces?yes")
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +35,7 @@ func TestAddressRoundTrip(t *testing.T) {
 }
 
 func TestHarnessAliasesNormalizeAndMatchSharedFixture(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join("..", "..", "daemon", "test", "fixtures", "harness_names.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -73,6 +76,7 @@ func TestHarnessAliasesNormalizeAndMatchSharedFixture(t *testing.T) {
 	}
 }
 func TestParseAddressRejectsNoncanonical(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{"http://h/codex/id", "shuttle://H/codex/id", "shuttle://h/codex/id/extra", "shuttle://h/codex/%69d", "shuttle://h/codex/id?q=x"} {
 		if _, err := ParseAddress(s); err == nil {
 			t.Errorf("accepted %q", s)
@@ -81,8 +85,9 @@ func TestParseAddressRejectsNoncanonical(t *testing.T) {
 }
 
 func TestSendNormalizesLedgerHarnessAlias(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
-	if err := RegisterMailbox("claude", "session", "host", "/work", os.Getpid(), true); err != nil {
+	t.Parallel()
+	env := testEnv(t)
+	if err := RegisterMailbox(env, "claude", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	request := Request{
@@ -91,7 +96,7 @@ func TestSendNormalizesLedgerHarnessAlias(t *testing.T) {
 		MessageID: "alias",
 		Wake:      false,
 	}
-	receipt, err := Send(context.Background(), "host", request)
+	receipt, err := Send(context.Background(), env, "host", request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +106,7 @@ func TestSendNormalizesLedgerHarnessAlias(t *testing.T) {
 	// Normalization precedes the dedup hash, so the canonical spelling of the
 	// same request replays the stored receipt instead of conflicting.
 	request.Address = "shuttle://host/claude/session"
-	replay, err := Send(context.Background(), "host", request)
+	replay, err := Send(context.Background(), env, "host", request)
 	if err != nil || !reflect.DeepEqual(replay, receipt) {
 		t.Fatalf("canonical replay = %#v, %v; want stored receipt %#v", replay, err, receipt)
 	}
@@ -116,78 +121,85 @@ func plainSend(send func() (Receipt, error)) func(context.Context) dedupSendResu
 }
 
 func TestDedupReplayAndConflict(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Parallel()
+	env := testEnv(t)
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "m1"}
 	var calls atomic.Int32
 	send := func() (Receipt, error) {
 		calls.Add(1)
 		return Receipt{MessageID: "m1", Address: req.Address, Status: StatusAccepted, Transport: "test"}, nil
 	}
-	a, err := withDedup(context.Background(), req, plainSend(send))
+	a, err := withDedup(context.Background(), env, req, plainSend(send))
 	if err != nil || a.Status != StatusAccepted {
 		t.Fatalf("first: %#v %v", a, err)
 	}
-	b, err := withDedup(context.Background(), req, plainSend(send))
+	b, err := withDedup(context.Background(), env, req, plainSend(send))
 	if err != nil || !reflect.DeepEqual(b, a) || calls.Load() != 1 {
 		t.Fatalf("replay: %#v %v calls=%d", b, err, calls.Load())
 	}
 	req.Text = "different"
-	c, err := withDedup(context.Background(), req, plainSend(send))
+	c, err := withDedup(context.Background(), env, req, plainSend(send))
 	if ErrorCode(err) != "message_id_conflict" || c.Status != StatusRejected || calls.Load() != 1 {
 		t.Fatalf("conflict: %#v %v", c, err)
 	}
 }
 
+// TestDedupConcurrentFirstSendersSendOnce races sixteen first senders of one
+// message_id, fifty times over: exactly one may own the reservation and send.
+// Each round has its own store, so the rounds run as parallel subtests, and
+// the duplicates poll every millisecond rather than at the production
+// interval, which only shortens how long each loser waits for the winner's
+// stored receipt.
 func TestDedupConcurrentFirstSendersSendOnce(t *testing.T) {
-	for iteration := 0; iteration < 50; iteration++ {
-		dir, err := os.MkdirTemp("/tmp", "felt-dedup-race-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		cleanupDir := dir
-		t.Cleanup(func() { _ = os.RemoveAll(cleanupDir) })
-		t.Setenv("SHUTTLE_DATA_DIR", dir)
-		req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "race"}
-		var calls atomic.Int32
-		var wg sync.WaitGroup
-		start := make(chan struct{})
-		errs := make([]error, 16)
-		for g := 0; g < len(errs); g++ {
-			wg.Add(1)
-			go func(g int) {
-				defer wg.Done()
-				<-start
-				_, errs[g] = withDedup(context.Background(), req, plainSend(func() (Receipt, error) {
-					calls.Add(1)
-					time.Sleep(5 * time.Millisecond)
-					return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}, nil
-				}))
-			}(g)
-		}
-		close(start)
-		wg.Wait()
-		if calls.Load() != 1 {
-			t.Fatalf("iteration %d: send ran %d times", iteration, calls.Load())
-		}
-		for g, err := range errs {
-			if err != nil {
-				t.Fatalf("iteration %d sender %d: %v", iteration, g, err)
+	t.Parallel()
+	race := dedupOptions{pollInterval: time.Millisecond}
+	for round := 0; round < 50; round++ {
+		t.Run(fmt.Sprint(round), func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "race"}
+			var calls atomic.Int32
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			errs := make([]error, 16)
+			for g := 0; g < len(errs); g++ {
+				wg.Add(1)
+				go func(g int) {
+					defer wg.Done()
+					<-start
+					_, errs[g] = race.run(context.Background(), env, req, plainSend(func() (Receipt, error) {
+						calls.Add(1)
+						time.Sleep(5 * time.Millisecond)
+						return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}, nil
+					}))
+				}(g)
 			}
-		}
+			close(start)
+			wg.Wait()
+			if calls.Load() != 1 {
+				t.Fatalf("send ran %d times", calls.Load())
+			}
+			for g, err := range errs {
+				if err != nil {
+					t.Fatalf("sender %d: %v", g, err)
+				}
+			}
+		})
 	}
 }
 
 func TestDedupPublishesOwnerDeadlineBeforeSend(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Parallel()
+	env := testEnv(t)
 	req := Request{Address: "shuttle://h/claude/session", Text: "hello", MessageID: "deadline-publish", Wake: true}
 	deadline := time.Now().Add(17 * time.Second)
 	var observed int64
-	r, err := withDedup(context.Background(), req, func(ctx context.Context) dedupSendResult {
+	r, err := withDedup(context.Background(), env, req, func(ctx context.Context) dedupSendResult {
 		if err := publishOwnerDeadline(ctx, deadline); err != nil {
 			return dedupSendResult{Err: err}
 		}
 		name := sha256.Sum256([]byte(req.MessageID))
-		reservation, err := readDedupRecord(filepath.Join(dataDir(), "messages", hex.EncodeToString(name[:])+".json"))
+		reservation, err := readDedupRecord(filepath.Join(dataDir(env), "messages", hex.EncodeToString(name[:])+".json"))
 		if err != nil {
 			return dedupSendResult{Err: err}
 		}
@@ -200,7 +212,8 @@ func TestDedupPublishesOwnerDeadlineBeforeSend(t *testing.T) {
 }
 
 func TestDedupOwnNonceEEXISTIsTreatedAsReservationSuccess(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Parallel()
+	env := testEnv(t)
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "nfs-replay"}
 	var calls atomic.Int32
 	writer := func(path string, b []byte) (bool, error) {
@@ -212,7 +225,7 @@ func TestDedupOwnNonceEEXISTIsTreatedAsReservationSuccess(t *testing.T) {
 		// reports EEXIST for our just-published nonce.
 		return false, os.ErrExist
 	}
-	result, err := dedupOptions{timeout: time.Second, pollInterval: time.Millisecond, reserve: writer}.run(context.Background(), req, func(context.Context) dedupSendResult {
+	result, err := dedupOptions{timeout: time.Second, pollInterval: time.Millisecond, reserve: writer}.run(context.Background(), env, req, func(context.Context) dedupSendResult {
 		calls.Add(1)
 		return dedupSendResult{Receipt: Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}}
 	})
@@ -222,6 +235,7 @@ func TestDedupOwnNonceEEXISTIsTreatedAsReservationSuccess(t *testing.T) {
 }
 
 func TestDedupWaitDeadlineAddsOwnerMargin(t *testing.T) {
+	t.Parallel()
 	ownerDeadline := time.Now().Add(5 * time.Second)
 	got := duplicateOwnerWaitDeadline(ownerDeadline.UnixNano(), 10*time.Millisecond)
 	want := time.Unix(0, ownerDeadline.UnixNano()).Add(duplicateWaitMargin)
@@ -231,8 +245,9 @@ func TestDedupWaitDeadlineAddsOwnerMargin(t *testing.T) {
 }
 
 func TestDedupWaitUsesPublishedOwnerDeadlineAndCapsAtContext(t *testing.T) {
-	d := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", d)
+	t.Parallel()
+	env := testEnv(t)
+	d := dataDir(env)
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "owner-deadline"}
 	writeDedupRecord(t, d, req, record{
 		Hash: requestHash(req), State: "reserved", OwnerPID: os.Getpid(), OwnerStart: currentProcessStartTime(),
@@ -241,7 +256,7 @@ func TestDedupWaitUsesPublishedOwnerDeadlineAndCapsAtContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	r, err := dedupOptions{timeout: 10 * time.Millisecond}.run(ctx, req, plainSend(func() (Receipt, error) { return Receipt{}, nil }))
+	r, err := dedupOptions{timeout: 10 * time.Millisecond}.run(ctx, env, req, plainSend(func() (Receipt, error) { return Receipt{}, nil }))
 	if time.Since(start) < 200*time.Millisecond || r.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("owner wait did not honor recorded deadline/context cap: %+v %v elapsed=%s", r, err, time.Since(start))
 	}
@@ -265,7 +280,8 @@ func writeDedupRecord(t *testing.T, dir string, req Request, rec record) {
 }
 
 func TestDedupConcurrentDuplicateWaitsForCompletion(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Parallel()
+	env := testEnv(t)
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "concurrent"}
 	want := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusAccepted, Transport: "test"}
 	started := make(chan struct{})
@@ -287,7 +303,7 @@ func TestDedupConcurrentDuplicateWaitsForCompletion(t *testing.T) {
 		return want, nil
 	}
 	go func() {
-		r, err := withDedup(context.Background(), req, plainSend(send))
+		r, err := withDedup(context.Background(), env, req, plainSend(send))
 		firstDone <- struct {
 			receipt Receipt
 			err     error
@@ -305,7 +321,7 @@ func TestDedupConcurrentDuplicateWaitsForCompletion(t *testing.T) {
 		wait := dedupOptions{timeout: time.Second, pollInterval: time.Millisecond, onWait: func() {
 			waitingOnce.Do(func() { close(waiting) })
 		}}
-		r, err := wait.run(context.Background(), req, plainSend(send))
+		r, err := wait.run(context.Background(), env, req, plainSend(send))
 		duplicateDone <- struct {
 			receipt Receipt
 			err     error
@@ -332,12 +348,13 @@ func TestDedupConcurrentDuplicateWaitsForCompletion(t *testing.T) {
 }
 
 func TestDedupDeadOwnerIsAmbiguousAndNotRetried(t *testing.T) {
-	d := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", d)
+	t.Parallel()
+	env := testEnv(t)
+	d := dataDir(env)
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "dead-owner"}
 	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved", OwnerPID: 1 << 30})
 	called := false
-	r, err := withDedup(context.Background(), req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
+	r, err := withDedup(context.Background(), env, req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
 	const detail = "a previous attempt stopped mid-delivery; it may or may not have been delivered"
 	if called || r.Status != StatusUnknown || r.Detail != detail || ErrorCode(err) != "ambiguous_delivery" || err.Error() != detail {
 		t.Fatalf("got %#v %v called=%v", r, err, called)
@@ -345,12 +362,13 @@ func TestDedupDeadOwnerIsAmbiguousAndNotRetried(t *testing.T) {
 }
 
 func TestDedupLiveReservationWaitExpires(t *testing.T) {
-	d := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", d)
+	t.Parallel()
+	env := testEnv(t)
+	d := dataDir(env)
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "live-owner"}
 	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved", OwnerPID: os.Getpid(), OwnerStart: currentProcessStartTime()})
 	called := false
-	r, err := dedupOptions{timeout: 20 * time.Millisecond}.run(context.Background(), req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
+	r, err := dedupOptions{timeout: 20 * time.Millisecond}.run(context.Background(), env, req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
 	const detail = "an identical delivery is still in progress; retry with the same message_id"
 	if called || r.Status != StatusUnknown || r.Detail != detail || ErrorCode(err) != "ambiguous_delivery" || err.Error() != detail {
 		t.Fatalf("got %#v %v called=%v", r, err, called)
@@ -358,23 +376,25 @@ func TestDedupLiveReservationWaitExpires(t *testing.T) {
 }
 
 func TestDedupLegacyReservedRecordKeepsAmbiguousBehavior(t *testing.T) {
-	d := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", d)
+	t.Parallel()
+	env := testEnv(t)
+	d := dataDir(env)
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", MessageID: "legacy"}
 	writeDedupRecord(t, d, req, record{Hash: requestHash(req), State: "reserved"})
 	called := false
-	r, err := withDedup(context.Background(), req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
+	r, err := withDedup(context.Background(), env, req, plainSend(func() (Receipt, error) { called = true; return Receipt{}, nil }))
 	if called || r.Status != StatusUnknown || r.Detail != "delivery may have been attempted" || ErrorCode(err) != "ambiguous_delivery" || err.Error() != "delivery may have been attempted; refusing to resend" {
 		t.Fatalf("got %#v %v called=%v", r, err, called)
 	}
 }
 
 func TestDedupReleasesPreflightFailure(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Parallel()
+	env := testEnv(t)
 	req := Request{Address: "shuttle://h/codex/x", Text: "x", MessageID: "m"}
 	calls := 0
 	for range 2 {
-		_, err := withDedup(context.Background(), req, plainSend(func() (Receipt, error) {
+		_, err := withDedup(context.Background(), env, req, plainSend(func() (Receipt, error) {
 			calls++
 			return rejected(req, "test", "offline"), errCode("preflight_failed", "offline")
 		}))
@@ -428,17 +448,21 @@ func piFixture(t *testing.T, reply string) (string, string) {
 	return root, sock
 }
 func TestPiRequiresWake(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	r := Request{Address: "shuttle://h/pi/job-1", Text: "x", MessageID: "m"}
-	got, err := (piAdapter{}).send(context.Background(), Address{Host: "h", Harness: "pi", ID: "job-1"}, r)
+	got, err := (piAdapter{}).send(context.Background(), env, Address{Host: "h", Harness: "pi", ID: "job-1"}, r)
 	if got.Status != StatusRejected || ErrorCode(err) != "wake_required" {
 		t.Fatalf("%#v %v", got, err)
 	}
 }
 func TestPiMalformedReplyIsUnknown(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	root, _ := piFixture(t, "not-json\n")
-	t.Setenv("SHUTTLE_CONFER_STATE_DIR", root)
+	env.Set("SHUTTLE_CONFER_STATE_DIR", root)
 	r := Request{Address: "shuttle://h/pi/job-1", Text: "x", MessageID: "m", Wake: true}
-	got, err := (piAdapter{}).send(context.Background(), Address{Host: "h", Harness: "pi", ID: "job-1"}, r)
+	got, err := (piAdapter{}).send(context.Background(), env, Address{Host: "h", Harness: "pi", ID: "job-1"}, r)
 	if got.Status != StatusUnknown || ErrorCode(err) != "ambiguous_delivery" {
 		t.Fatalf("%#v %v", got, err)
 	}
@@ -470,6 +494,7 @@ func FuzzPiReply(f *testing.F) {
 }
 
 func TestDecodePiReplyShape(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in        string
 		valid, ok bool
@@ -478,5 +503,39 @@ func TestDecodePiReplyShape(t *testing.T) {
 		if (err == nil) != tc.valid || err == nil && got.OK != tc.ok {
 			t.Errorf("%s => %#v, %v", tc.in, got, err)
 		}
+	}
+}
+
+// Confer keeps one record per job at <workspace>/jobs/<job>.json beside the
+// job's own state directory. Discovery reads only that level: a JSON file
+// deeper in a job's state, even one shaped like a job record, is not a job.
+func TestPiDiscoveryReadsOnlyWorkspaceJobRecords(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	root, sock := piFixture(t, "")
+	env.Set("SHUTTLE_CONFER_STATE_DIR", root)
+	nested := filepath.Join(root, "project", "jobs", "job-1", "session", "jobs")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(map[string]any{"id": "job-nested", "socketPath": sock})
+	if err := os.WriteFile(filepath.Join(nested, "job-nested.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "stray.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ss, err := (piAdapter{}).discover(context.Background(), env, "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ss) != 1 || ss[0].ID != "job-1" || ss[0].State != "idle" || ss[0].Title != "worker" {
+		t.Fatalf("sessions = %#v", ss)
+	}
+	if _, err := findPi(context.Background(), env, "job-nested"); err == nil {
+		t.Fatal("findPi resolved a record nested inside a job's state")
+	}
+	if j, err := findPi(context.Background(), env, "job-1"); err != nil || j.SocketPath != sock {
+		t.Fatalf("findPi(job-1) = %#v, %v", j, err)
 	}
 }

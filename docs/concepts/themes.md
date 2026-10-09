@@ -1,11 +1,12 @@
 # Constitution themes
 
 A constitution can give its Shuttle channel a visual identity without changing its documents or the Desk.
-Its theme reaches the reader's veil, its running head and hover preview, thumbnail paper, page frames, label bars, fiber header and prose, Markdown or text pages, and audio waveform ink.
+Its theme reaches the reader's veil, thumbnail paper, page frames, label bars, fiber header and prose, Markdown or text pages, and audio waveform ink.
 On the Board overview, its changed-work rows and every folio density wear the same paper and accents.
 Its sidebar card has its own channel boundary, even inside another constitution's reader.
 Phone top and bottom bars and the page sheet use the channel's materials without adding a card frame around the edge-to-edge page.
 HTML reports, PDFs, images and other documents keep their own styling.
+The board's bar, with the reader's map of pages, stays the Desk's on every view.
 
 ## Declaration
 
@@ -50,13 +51,11 @@ Nested roots reset inherited typography and custom properties, so a foreign card
 
 ### Act zone
 
-The composer and its verbs, Temper/Discard, verdict plates, the fiber page and sidebar worker controls, and the undo toast are **act zones**, marked `data-part="act"`.
-The `data-act` attribute identifies `composer`, `verdict`, `worker` or `toast`; it isn't permission for theme rules to enter.
+The composer and its verbs, Temper/Discard, verdict plates (and the undo line that takes their place while a verdict waits), and the fiber page and sidebar worker controls are **act zones**, marked `data-part="act"`.
+The `data-act` attribute identifies `composer`, `verdict` or `worker`; it isn't permission for theme rules to enter.
 Each generated CSS scope stops before that zone, so even a broad `button { color: red }` rule can't select Temper or the worker control.
 The zone also resets inherited UI variables and typography to the unthemed defaults, accepting only `--ws-paper` and `--ws-ink` from the channel.
 Its hairlines and control fills derive from that paper and ink; its fonts, sizing and pigment meanings remain Shuttle's.
-The body-level undo toast copies those two material tokens when the verdict is queued, retaining that constitution's paper and ink if the reader navigates elsewhere.
-It never receives the author's scoped CSS.
 This boundary is structural, not a styling convention.
 
 `@font-face` definitions are hoisted as written; give custom font families distinctive names because their definitions are document-wide.
@@ -106,18 +105,14 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | Selector | Part |
 |---|---|
 | `[data-part='veil']` | Still backdrop beneath the reader |
-| `[data-part='tab-strip']` | The running head's index of pages |
-| `[data-part='tab']` | One page's label in the index; `.ws-tab-label` holds its words |
-| `[data-part='tab'][aria-selected='true']` | Selected label, ruled by its text decoration |
-| `[data-part='tab-preview']` | Hover preview card beneath an index label |
 | `[data-part='label-bar']` | Bottom document label and its controls |
 | `[data-part='page-frame']` | Paper sheet enclosing content and label |
 | `[data-part='fiber-header']` | Fiber status header |
 | `[data-part='fiber-title']` | Constitution title |
-| `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts, workers and undo toast |
+| `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts and workers |
 | `[data-part='prose']` | Fiber article or text/Markdown pane |
 | `[data-part='prose'] h1`, `h2`, `h3`, `p`, `blockquote`, `code`, `table`, `hr` | Prose elements; prefix each with the prose selector |
-| `[data-part='thumbnail']` | Shared preview's UI paper in the hover preview, folios, changed-work rows and page sheet |
+| `[data-part='thumbnail']` | Shared preview's UI paper in folios, changed-work rows and the page sheet |
 | `[data-part='thumbnail-face']` | Designed text face beneath a loaded preview |
 | `:scope[data-part='sidebar-card']` | Channel's Desk-card face in the reader sidebar |
 | `:scope[data-part='since-row']` | Channel's since-you-were-here row |

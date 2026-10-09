@@ -9,7 +9,7 @@ import { expect, vi } from 'vitest'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { surfaceTotals } from './KanbanReadModel.js'
 import { buildTimelineDays } from './KanbanSurfaces.js'
-import { civilDayToLocalDate } from './civilDay.js'
+import { civilDayAt, hostZone } from './civilDay.js'
 import type { CommitRecord, SessionPairing } from './views/TemporalData.js'
 
 /**
@@ -45,7 +45,7 @@ export function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
     now: { drafts: [], inFlight: [], awaitingReview: [] },
     timeline: { past: [], futureDated: [] },
     stash: [],
-    pinned: [],
+    roles: [],
     folded: [],
     cycles: [],
     staleness: {},
@@ -94,37 +94,30 @@ export function ownerFiberResponse(options: {
 }
 
 // The real Chronicle column layout: 28 back, 14 forward, today fixed at a
-// known LOCAL day. Built from the production helper so the fixture is the same
-// shape in both zones `npm test` pins.
-export const WINDOW_DAYS = buildTimelineDays(28, 14, new Date(2026, 6, 15))
+// known civil day. Built from the production helper, which needs no zone.
+export const WINDOW_DAYS = buildTimelineDays(28, 14, '2026-07-15')
 export const DAY_INDEX = new Map(WINDOW_DAYS.map((d, i) => [d.iso, i]))
 export const TODAY_IDX = WINDOW_DAYS.findIndex((d) => d.isToday)
 export const TODAY_DAY = WINDOW_DAYS[TODAY_IDX].iso
 
-/** An INSTANT at local noon on a civil day — safely inside that day's column
- *  in any zone, unlike a midnight that a DST shift can push over the edge. */
+/** An INSTANT at noon on a civil day in the host zone — safely inside that
+ *  day's column, unlike a midnight that a DST shift can push over the edge. */
 export function noonOf(dayISO: string): string {
-  const d = civilDayToLocalDate(dayISO)
-  if (!d) throw new Error(`not a civil day: ${dayISO}`)
-  d.setHours(12, 0, 0, 0)
-  return d.toISOString()
+  const ms = civilDayAt(dayISO, 12)
+  if (ms === undefined) throw new Error(`not a civil day: ${dayISO}`)
+  return new Date(ms).toISOString()
 }
 
 /**
- * The pinned-zone guard, asserted per suite.
- *
- * `npm test` runs the board suite TWICE, under TZ=America/Los_Angeles
- * (negative offset) and TZ=Europe/Paris (positive), because a UTC-only run
- * passes against broken civil-day code. Each zone-sensitive suite keeps its
- * OWN `it()` calling this, so it fails loudly on its own when run unpinned
- * rather than relying on one guard somewhere else in the tree.
+ * The pinned-zone guard for the workspace's suite, which is the one part of
+ * the board still reading the ambient zone through `Date` (it sits outside
+ * `civilDay.ts`'s reach; see `ui/test/zoneReads.test.ts`). `npm test` pins
+ * TZ=America/Los_Angeles, a negative-offset DST zone, so a test that calls
+ * this fails loudly when run unpinned rather than passing vacuously. Every
+ * other suite passes its zone explicitly and calls nothing of the kind.
  */
 export function expectPinnedZone(): void {
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-  expect(tz, 'run via `npm test` — the zone is what this suite tests').toMatch(
-    /^(America\/Los_Angeles|Europe\/Paris)$/,
-  )
-  expect(new Date(2026, 6, 1).getTimezoneOffset()).not.toBe(0)
+  expect(hostZone().id, 'run via `npm test` — the zone is what this suite tests').toBe('America/Los_Angeles')
 }
 
 /** One ledger commit. Only what the joins and the totals read is worth

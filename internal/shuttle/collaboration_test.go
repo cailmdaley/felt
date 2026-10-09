@@ -9,6 +9,7 @@ import (
 const collaborationTestUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
 func TestParseCollaborationJSON_AcceptsLocalAndLegacyReferences(t *testing.T) {
+	t.Parallel()
 	c, err := ParseCollaborationJSON(`{"collaborator":{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","origin":"hub-1"},"role":{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","origin":"remote_2"}}`)
 	if err != nil {
 		t.Fatalf("ParseCollaborationJSON: %v", err)
@@ -19,6 +20,7 @@ func TestParseCollaborationJSON_AcceptsLocalAndLegacyReferences(t *testing.T) {
 }
 
 func TestParseCollaborationJSON_AcceptsUIDOnlyLocalReferences(t *testing.T) {
+	t.Parallel()
 	c, err := ParseCollaborationJSON(`{"role":{"uid":"` + collaborationTestUID + `"}}`)
 	if err != nil {
 		t.Fatalf("ParseCollaborationJSON: %v", err)
@@ -29,6 +31,7 @@ func TestParseCollaborationJSON_AcceptsUIDOnlyLocalReferences(t *testing.T) {
 }
 
 func TestParseCollaborationJSON_RosterAndLegacySnapshotsRoundTrip(t *testing.T) {
+	t.Parallel()
 	roster, err := ParseCollaborationJSON(`{"vizier":["fable","astra"],"role":[],"collaborator":[]}`)
 	if err != nil {
 		t.Fatalf("parse roster: %v", err)
@@ -61,6 +64,7 @@ func TestParseCollaborationJSON_RosterAndLegacySnapshotsRoundTrip(t *testing.T) 
 }
 
 func TestParseCollaborationJSON_RejectsAmbiguousOrMalformedInput(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		raw  string

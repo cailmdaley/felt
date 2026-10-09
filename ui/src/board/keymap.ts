@@ -1,8 +1,10 @@
+import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
+
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'undoVerdict' | 'compose' | 'conversation'
+export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
-  'prev', 'next', 'prevChannel', 'nextChannel', 'first', 'last',
+  'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
   'back', 'sidebar', 'find', 'help',
 ]
@@ -13,13 +15,14 @@ export interface KeyBinding {
   alt?: boolean
   command?: boolean
 }
+const VERDICT_UNDO = `${VERDICT_DELAY_MS / 1000} s`
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
 /** Desk regions follow reading order: the three Now columns left-to-right,
- * then Pinned, then Resting. In flight's Question, Stalled and Working bands form one
- * column. Pinned and Resting each form one list in their drawn reading order.
+ * then Roles, then Resting. In flight's Question, Stalled and Working bands form one
+ * column. Roles and Resting each form one list in their drawn reading order.
  * Empty regions are skipped; movement stops at the ends, never wraps. */
-export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-pinned', '.kbn-section-stash'] as const
+export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-roles', '.kbn-section-stash'] as const
 
 /** The binding table is also the help overlay's source; surfaces consume intents,
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */
@@ -30,6 +33,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
     bind(['c', '.'], 'conversation', 'Open selected conversation'),
+    bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
     bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
@@ -44,8 +48,9 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
     bind(['c', '.'], 'conversation', 'Open conversation'),
     bind(['r'], 'compose', 'Focus composer on the fiber page'),
-    bind(['t'], 'temper', 'Temper awaiting review (6 s undo)'),
-    bind(['x'], 'discard', 'Discard awaiting review (6 s undo)'),
+    bind(['t'], 'temper', `Temper the open fiber (${VERDICT_UNDO} undo)`),
+    bind(['x'], 'discard', `Discard the open fiber (${VERDICT_UNDO} undo)`),
+    bind(['a'], 'toReview', `Move the open fiber to Awaiting review (${VERDICT_UNDO} undo)`),
     bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
     bind(['s'], 'sidebar', 'Toggle constitution sidebar'),
     bind(['/'], 'find', 'Find a constitution or file'),
@@ -55,6 +60,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['d'], 'halfDown', 'Scroll half a viewport down'), bind(['u'], 'halfUp', 'Scroll half a viewport up'),
     bind([' '], 'pageDown', 'Page document down'), bind(['Shift+ '], 'pageUp', 'Page document up'),
     bind(['j'], 'nextChannel', 'Next constitution'), bind(['k'], 'prevChannel', 'Previous constitution'),
+    bind(['J'], 'nextGroup', 'Next sidebar group'), bind(['K'], 'prevGroup', 'Previous sidebar group'),
     bind(['ArrowLeft'], 'prev', 'Previous page', true), bind(['ArrowRight'], 'next', 'Next page', true),
     bind(['ArrowDown'], 'nextChannel', 'Next constitution', true), bind(['ArrowUp'], 'prevChannel', 'Previous constitution', true),
     bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Return to origin view'),
@@ -89,7 +95,7 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
-  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'temper', 'discard', 'undoVerdict', 'compose', 'conversation'].includes(binding.intent)) return null
+  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'temper', 'discard', 'toReview', 'undoVerdict', 'compose', 'conversation'].includes(binding.intent)) return null
   return binding.intent
 }
 

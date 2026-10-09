@@ -91,12 +91,12 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `Shuttle.ULID.from_tmux/1` is its only parser: a fiber without a ULID `id:`
   is refused with `{:uid_missing, message}`, a preflight refusal like the
   others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
-- **Standing roles** — `shuttle.kind: standing` with a cron `schedule:`.
-  Nothing due is stored: an armed (`active`, untempered) role is due when a
+- **Standing constitutions** — `shuttle.kind: standing` with a cron
+  `schedule:`. Nothing due is stored: an armed (`active`, untempered) one is due when a
   cron occurrence has passed since it was last serviced — the later of
   `shuttle.runtime.dispatched_at`, `handed_off_at` and the fiber's creation
   (`StandingRoles.standing_role_due?/1`). Manual dispatch is ad-hoc
-  (`adhoc-<ms>` run id). Worker exit closes the role into Awaiting review, and
+  (`adhoc-<ms>` run id). Worker exit closes it into Awaiting review, and
   `shuttle accept` or `resume` re-arms it and stamps `handed_off_at` in
   the same write, so the just-served occurrence never fires again.
 - **A finished run is finished — there is no reopen.** When a oneshot's
@@ -118,7 +118,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `Shuttle.Transcript.path/2` and one stat, taken only on that no-handoff
   branch. A `surface: app` conversation is exempt from the transcript check:
   it keeps its identity in the Codex App Server, so it resumes whenever it did
-  not hand off. Pinned and standing roles start fresh on the autonomous loop.
+  not hand off. A standing constitution starts fresh on the autonomous loop.
 
   `resume_mode` overrides the autonomous rule: `"previous"` (the board's
   Resume) resumes unconditionally; `"fresh"` (New session) never resumes but
@@ -132,7 +132,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   awaiting fiber re-arm the document for a fresh dispatch rather than
   reattaching. The only reattach window is while the run is live (`shuttle
   attach`); a worker that wants a human's word before it ends stays alive at
-  the checkpoint instead of handing off (the pinned-role contract). This is
+  the checkpoint instead of handing off. This is
   the contract, not a gap.
 
 ## tmux server ownership (macOS)
@@ -215,8 +215,9 @@ shuttle skills.` and otherwise carry only this dispatch's facts:
   one. When the previous session ended without a handoff and is not resumed,
   the line says so and gives its transcript path.
 - `Collaboration:` — the assigned role and collaborator (named when the
-  roster has exactly one of each) and the shared role store, when the fiber
-  carries a roster.
+  roster has exactly one of each) and the shared role store. A fiber with no
+  roster gets `Collaboration: no roster` instead, with the same role store;
+  what to do about it is the shuttle skill's.
 - `From User:` followed by the exact user message, when nonblank.
 
 Syncing the store, reading the fiber and its `## Status`, what to do with a

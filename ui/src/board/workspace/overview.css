@@ -75,6 +75,14 @@
 .ws-overview-rib-label, .ws-overview-rib-name { font: var(--ws-label-size)/1.3 var(--ws-serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-overview-rib-name { color: var(--ws-ink-soft); }
 .ws-overview-rib-footer { display: flex; justify-content: space-between; gap: 8px; min-width: 0; margin-top: -2px; }
+/* Read lately: one quiet line of names under the files, most recent first. */
+.ws-overview-read { display: flex; align-items: baseline; gap: 4px 20px; flex-wrap: wrap; margin: 4px 0 0; }
+.ws-overview-read-title { margin: 0; font: inherit; color: var(--ws-ink-muted); font-variant-caps: all-small-caps; letter-spacing: .025em; white-space: nowrap; }
+.ws-overview-read-list { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 20px; min-width: 0; }
+.ws-overview .ws-overview-read-item { display: inline-flex; align-items: baseline; gap: 6px; max-width: 32ch; min-height: 36px; text-align: left; }
+.ws-overview-read-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-soft); }
+.ws-overview-read-item .ws-overview-hostmark { flex: none; }
+.ws-overview-read-item:hover .ws-overview-read-name { color: var(--ws-ink); text-decoration: underline; text-decoration-color: var(--ws-hairline); text-underline-offset: .15em; }
 
 /* Lookup controls live inside the section rule, not in dashboard plates. */
 .ws-overview-controls { display: flex; align-items: center; gap: 24px; margin: 20px 0 0; border-bottom: 1px solid var(--ws-hairline); }
@@ -89,6 +97,8 @@
   border-radius: 0; font: var(--ws-label-size)/1.3 var(--ws-serif); padding: 6px 0;
 }
 .ws-overview-find::placeholder { color: var(--ws-ink-faint); }
+/* On the board the bar's Find filters the sheet; the phone, whose bar is its bottom nav, keeps this one. */
+.kbn-modal .ws-overview-find { display: none; }
 .ws-overview .ws-overview-find:focus-visible { outline: none; border-color: var(--ws-focus); }
 .ws-overview-find::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 
@@ -163,7 +173,7 @@
   .ws-overview-lens { flex: none; gap: 16px; }
   .ws-overview-lens button { font-size: var(--ws-label-size); }
   .ws-overview-lens button + button::before { left: -10px; }
-  .ws-overview-find { flex: 1; width: 0; }
+  .ws-overview-find, .kbn-modal .ws-overview-find { display: block; flex: 1; width: 0; }
   .ws-overview-folios, .ws-overview-group[data-density='compact'] .ws-overview-folios { grid-template-columns: 1fr; gap: 0; }
   .ws-overview .ws-overview-folio { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 14px; padding: 14px 0; height: auto; min-height: 100px; border-bottom: 1px solid var(--ws-hairline-soft); }
   .ws-overview .ws-overview-stack { order: 2; width: auto; margin: 2px 6px 6px 0; align-self: start; }

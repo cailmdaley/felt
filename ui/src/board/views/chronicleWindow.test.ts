@@ -1,16 +1,15 @@
 /**
  * chronicleWindow — the two properties continuous scroll lives or dies by.
  *
- * THE TIMEZONE IS THE EXPERIMENT here as everywhere on this board: `npm test`
- * runs the file twice, under America/Los_Angeles and Europe/Paris, because the
- * chunk boundaries are real local 6am instants and a UTC-only run would agree
- * with broken code. Every clock is built LOCALLY (see `atLocal`) — a UTC
- * literal names a different local day either side of the Atlantic, and worse,
- * UTC noon falls at 05:00 in Los Angeles, which is on the far side of the 6am
- * rail boundary from Paris.
+ * Chunk boundaries are real local 6am instants, so every call that meets a
+ * day names its zone: America/Los_Angeles, where a UTC literal noon falls at
+ * 05:00 — the far side of the 6am rail boundary — and a DST zone, so the
+ * 23- and 25-hour chunks are real. Every clock is built on that zone's wall
+ * clock (see `atLocal`), never as a UTC literal.
  */
 
 import { describe, expect, it } from 'vitest';
+import fc from 'fast-check';
 import {
   activityChunks,
   CHUNK_DAYS,
@@ -28,18 +27,17 @@ import {
   windowOf,
   type ScrollProbe,
 } from './chronicleWindow.js';
-import { civilDayToLocalDate, RAIL_START_HOUR } from '../civilDay.js';
-import { expectPinnedZone } from '../testFixtures.js';
-import { shiftCivilDay } from './railTime.js';
+import { civilDayAt, RAIL_START_HOUR, shiftCivilDay, wallClock, zone } from '../civilDay.js';
 
+const LA = zone('America/Los_Angeles');
 
-/** An instant at a LOCAL wall-clock time on a civil day — never a UTC literal,
- *  and noon by default so it is unambiguously past the 6am rail boundary. */
+/** An instant at a wall-clock time on a civil day in Los Angeles — never a UTC
+ *  literal, and noon by default so it is unambiguously past the 6am rail
+ *  boundary. */
 function atLocal(day: string, hour = 12, minute = 0): number {
-  const d = civilDayToLocalDate(day);
-  if (!d) throw new Error(`not a civil day: ${day}`);
-  d.setHours(hour, minute, 0, 0);
-  return d.getTime();
+  const ms = civilDayAt(day, hour, LA);
+  if (ms === undefined) throw new Error(`not a civil day: ${day}`);
+  return ms + minute * 60_000;
 }
 
 const NOW = atLocal('2026-08-05');
@@ -51,12 +49,6 @@ const settled: ScrollProbe = {
   dayWidthPx: 24,
 };
 
-describe('the suite runs under a pinned, non-UTC zone', () => {
-  it('is one of the two zones `npm test` pins', () => {
-    expectPinnedZone();
-  });
-});
-
 describe('civil-day arithmetic', () => {
   it('counts whole days between civil days, signed', () => {
     expect(daysBetween('2026-08-03', '2026-08-10')).toBe(7);
@@ -67,7 +59,7 @@ describe('civil-day arithmetic', () => {
   it('counts correctly across a month, a year and a DST transition', () => {
     expect(daysBetween('2026-07-27', '2026-08-03')).toBe(7);
     expect(daysBetween('2026-12-28', '2027-01-04')).toBe(7);
-    // Both zones move their clocks inside these spans; a civil-day difference
+    // US and European clocks move inside these spans; a civil-day difference
     // must not notice.
     expect(daysBetween('2026-03-01', '2026-04-01')).toBe(31);
     expect(daysBetween('2026-10-01', '2026-11-01')).toBe(31);
@@ -94,42 +86,41 @@ describe('civil-day arithmetic', () => {
 describe('extension only near an edge', () => {
   const win = windowOf('2026-06-01', '2026-08-20');
 
-  it('does nothing while the scroller sits in the middle', () => {
-    expect(planExtension(win, settled, NOW)).toBeNull();
+  // Scroll positions a day-width either side of each trigger line, at either
+  // edge, in the middle, or with an unmeasured column; a viewport sometimes
+  // wide enough to touch both edges at once.
+  const nearOrFar = (trigger: number) => fc.oneof(
+    fc.integer({ min: -1, max: 1 }).map((d) => trigger + d),
+    fc.integer({ min: 0, max: 3000 }),
+  );
+  const probes = fc.record({
+    dayWidthPx: fc.oneof(fc.constant(0), fc.integer({ min: 8, max: 64 })),
+    clientWidth: fc.integer({ min: 200, max: 1600 }),
+    slack: fc.integer({ min: 0, max: 3000 }),
+  }).chain(({ dayWidthPx, clientWidth, slack }) => {
+    const trigger = EDGE_TRIGGER_DAYS * dayWidthPx;
+    return fc.oneof(nearOrFar(trigger), nearOrFar(trigger).map((d) => slack - d))
+      .map((left) => Math.max(0, Math.min(slack, left)))
+      .map((scrollLeft): ScrollProbe => ({ scrollLeft, clientWidth, scrollWidth: clientWidth + slack, dayWidthPx }));
   });
 
-  it('does nothing before the column width has been measured', () => {
-    // Extending against a zero width would compute a zero compensation and
-    // jump — the exact failure this feature must not have.
-    expect(planExtension(win, { ...settled, scrollLeft: 0, dayWidthPx: 0 }, NOW)).toBeNull();
-  });
-
-  it('prepends when within three day-widths of the left edge', () => {
-    const probe = { ...settled, scrollLeft: EDGE_TRIGGER_DAYS * settled.dayWidthPx };
-    const plan = planExtension(win, probe, NOW);
-    expect(plan?.side).toBe('past');
-    expect(plan?.added).toBe(PAST_BLOCK_DAYS);
-    expect(plan?.next.first).toBe(shiftCivilDay(win.first, -PAST_BLOCK_DAYS));
-    expect(plan?.next.last).toBe(win.last);
-  });
-
-  it('appends a smaller block at the right edge', () => {
-    const probe = {
-      ...settled,
-      scrollLeft: settled.scrollWidth - settled.clientWidth - EDGE_TRIGGER_DAYS * settled.dayWidthPx,
-    };
-    const plan = planExtension(win, probe, NOW);
-    expect(plan?.side).toBe('future');
-    expect(plan?.added).toBe(FUTURE_BLOCK_DAYS);
+  // Within EDGE_TRIGGER_DAYS day-widths of the left edge the window grows a
+  // past block; otherwise, within it of the right edge, a smaller future
+  // block; touching both, the past wins; anywhere else, or before the column
+  // is measured, nothing. A window well inside both caps grows by a whole block.
+  it('grows the side the scroller is near, by that side\'s block', () => {
     expect(FUTURE_BLOCK_DAYS).toBeLessThan(PAST_BLOCK_DAYS);
-    expect(plan?.next.last).toBe(shiftCivilDay(win.last, FUTURE_BLOCK_DAYS));
-    expect(plan?.next.first).toBe(win.first);
-  });
-
-  it('prefers the past edge when a short window touches both', () => {
-    const tiny = windowOf('2026-08-01', '2026-08-07');
-    const probe: ScrollProbe = { scrollLeft: 0, clientWidth: 400, scrollWidth: 400, dayWidthPx: 24 };
-    expect(planExtension(tiny, probe, NOW)?.side).toBe('past');
+    fc.assert(fc.property(probes, (probe) => {
+      const trigger = EDGE_TRIGGER_DAYS * probe.dayWidthPx;
+      const nearPast = probe.scrollLeft <= trigger;
+      const nearFuture = probe.scrollWidth - probe.scrollLeft - probe.clientWidth <= trigger;
+      const side = probe.dayWidthPx <= 0 ? null : nearPast ? 'past' : nearFuture ? 'future' : null;
+      const plan = planExtension(win, probe, NOW, LA);
+      const added = side === 'past' ? PAST_BLOCK_DAYS : FUTURE_BLOCK_DAYS;
+      expect(plan).toEqual(side === null ? null : side === 'past'
+        ? { side, added, next: windowOf(shiftCivilDay(win.first, -added), win.last), scrollDelta: added * probe.dayWidthPx }
+        : { side, added, next: windowOf(win.first, shiftCivilDay(win.last, added)), scrollDelta: 0 });
+    }), { numRuns: 200, seed: 0xed6e });
   });
 });
 
@@ -140,7 +131,7 @@ describe('the no-jump property', () => {
     // the timeline lurches under the cursor.
     for (const dayWidthPx of [16, 24, 37, 56]) {
       const probe = { ...settled, scrollLeft: 10, dayWidthPx };
-      const plan = planExtension(windowOf('2026-06-01', '2026-08-20'), probe, NOW);
+      const plan = planExtension(windowOf('2026-06-01', '2026-08-20'), probe, NOW, LA);
       expect(plan?.scrollDelta).toBe((plan?.added ?? 0) * dayWidthPx);
       // And the day under the left edge is unchanged afterwards.
       const before = Math.round(probe.scrollLeft / dayWidthPx);
@@ -154,7 +145,7 @@ describe('the no-jump property', () => {
       ...settled,
       scrollLeft: settled.scrollWidth - settled.clientWidth,
     };
-    const plan = planExtension(windowOf('2026-06-01', '2026-08-20'), probe, NOW);
+    const plan = planExtension(windowOf('2026-06-01', '2026-08-20'), probe, NOW, LA);
     expect(plan?.side).toBe('future');
     expect(plan?.scrollDelta).toBe(0);
   });
@@ -162,16 +153,16 @@ describe('the no-jump property', () => {
 
 describe('the caps', () => {
   it('reaches a year back and eight weeks forward, and no further', () => {
-    const { earliest, latest } = windowLimits(NOW);
+    const { earliest, latest } = windowLimits(NOW, LA);
     expect(daysBetween(earliest, '2026-08-05')).toBe(MAX_PAST_DAYS);
     expect(daysBetween('2026-08-05', latest)).toBe(MAX_FUTURE_DAYS);
   });
 
   it('adds a partial block rather than overshooting the past cap', () => {
-    const { earliest } = windowLimits(NOW);
+    const { earliest } = windowLimits(NOW, LA);
     // Ten days short of the cap: the block must shrink to ten, not add 28.
     const win = windowOf(shiftCivilDay(earliest, 10), '2026-08-20');
-    const plan = planExtension(win, { ...settled, scrollLeft: 0 }, NOW);
+    const plan = planExtension(win, { ...settled, scrollLeft: 0 }, NOW, LA);
     expect(plan?.added).toBe(10);
     expect(plan?.next.first).toBe(earliest);
     // And the compensation still matches what was actually inserted.
@@ -179,82 +170,90 @@ describe('the caps', () => {
   });
 
   it('stops entirely at the cap instead of returning an empty plan', () => {
-    const { earliest, latest } = windowLimits(NOW);
-    expect(planExtension(windowOf(earliest, '2026-08-20'), { ...settled, scrollLeft: 0 }, NOW))
+    const { earliest, latest } = windowLimits(NOW, LA);
+    expect(planExtension(windowOf(earliest, '2026-08-20'), { ...settled, scrollLeft: 0 }, NOW, LA))
       .toBeNull();
     const atRight = windowOf('2026-06-01', latest);
     const probe = { ...settled, scrollLeft: settled.scrollWidth - settled.clientWidth };
-    expect(planExtension(atRight, probe, NOW)).toBeNull();
+    expect(planExtension(atRight, probe, NOW, LA)).toBeNull();
   });
 
   it('measures the caps from the RAIL day, so 2am does not move them', () => {
     // 02:00 on the 5th still belongs to the 4th's rail.
-    const small = windowLimits(atLocal('2026-08-05', 2));
-    const midday = windowLimits(atLocal('2026-08-04'));
+    const small = windowLimits(atLocal('2026-08-05', 2), LA);
+    const midday = windowLimits(atLocal('2026-08-04'), LA);
     expect(small).toEqual(midday);
   });
 });
 
 describe('activity chunks', () => {
-  it('keys on a fixed grid, so the same days keep the same key', () => {
-    // A window grown leftward in blocks and one grown in dribs must agree, or
-    // every reshape refetches the same days under a new key.
-    const wide = activityChunks(windowOf('2026-05-01', '2026-08-05'), NOW);
-    const narrow = activityChunks(windowOf('2026-06-10', '2026-08-05'), NOW);
-    const shared = narrow.filter((c) => wide.some((w) => w.key === c.key));
-    expect(shared.length).toBeGreaterThan(0);
-    for (const chunk of shared) {
-      const match = wide.find((w) => w.key === chunk.key)!;
-      expect(match.fromMs).toBe(chunk.fromMs);
-      expect(match.toMs).toBe(chunk.toMs);
-      expect(match.first).toBe(chunk.first);
-    }
+  // Zones that move their clocks both ways round (north and south), one that
+  // never does, and a half-hour offset; windows anywhere in 2025–2026 up to
+  // five months long, read at any minute from just before the window to well
+  // after it, then again later and over a window grown leftward.
+  const zones = ['America/Los_Angeles', 'Australia/Sydney', 'Europe/Paris', 'UTC', 'Asia/Kolkata'].map(zone)
+  const reading = fc.record({
+    z: fc.constantFrom(...zones),
+    startDay: fc.integer({ min: 0, max: 700 }),
+    length: fc.integer({ min: 1, max: 150 }),
+    nowDay: fc.integer({ min: -10, max: 200 }),
+    nowMinute: fc.integer({ min: 0, max: 1439 }),
+    laterMinutes: fc.integer({ min: 0, max: 60 * 24 * 60 }),
+    grownDays: fc.integer({ min: 0, max: 60 }),
+  })
+
+  it('tiles a fixed grid of 6am-to-6am civil-day chunks whose settled keys never move', () => {
+    fc.assert(fc.property(reading, ({ z, startDay, length, nowDay, nowMinute, laterMinutes, grownDays }) => {
+      const first = shiftCivilDay('2025-01-01', startDay);
+      const win = windowOf(first, shiftCivilDay(first, length - 1));
+      const now = civilDayAt(shiftCivilDay(first, nowDay), 0, z)! + nowMinute * 60_000;
+      const chunks = activityChunks(win, now, z);
+      // The chunk that opens the request holds the window's first day.
+      const home = chunkBounds(chunkIndexOf(win.first));
+      expect(daysBetween(home.first, win.first)).toBeGreaterThanOrEqual(0);
+      expect(daysBetween(win.first, home.last)).toBeGreaterThanOrEqual(0);
+      if (chunks.length > 0) expect(chunks[0].first).toBe(home.first);
+      chunks.forEach((chunk, i) => {
+        // On the grid: 28 civil days from a multiple of 28 days after the epoch.
+        expect(daysBetween('1970-01-01', chunk.first) % CHUNK_DAYS, chunk.key).toBe(0);
+        expect(daysBetween(chunk.first, chunk.last), chunk.key).toBe(CHUNK_DAYS - 1);
+        expect(chunkBounds(chunkIndexOf(chunk.first)), chunk.key).toEqual({ first: chunk.first, last: chunk.last });
+        // Opened and closed at real 6am instants, so a chunk spanning a DST
+        // transition is however many whole hours that actually takes.
+        expect(wallClock(chunk.fromMs, z).hour, chunk.key).toBe(RAIL_START_HOUR);
+        if (!chunk.live) {
+          expect(wallClock(chunk.toMs, z).hour, chunk.key).toBe(RAIL_START_HOUR);
+          const hours = (chunk.toMs - chunk.fromMs) / 3_600_000;
+          expect(Number.isInteger(hours), chunk.key).toBe(true);
+          expect(Math.abs(hours - CHUNK_DAYS * 24), chunk.key).toBeLessThanOrEqual(1);
+        }
+        if (i > 0) {
+          expect(chunk.first).toBe(shiftCivilDay(chunks[i - 1].last, 1));
+          expect(chunk.fromMs).toBe(chunks[i - 1].toMs);
+        }
+      });
+      // A settled chunk is the same request, under the same key, from any
+      // later clock and any window grown to include it.
+      const grown = activityChunks(windowOf(shiftCivilDay(win.first, -grownDays), win.last), now + laterMinutes * 60_000, z);
+      for (const chunk of chunks.filter((c) => !c.live)) {
+        expect(grown.find((g) => g.key === chunk.key), chunk.key).toEqual(chunk);
+      }
+      // At the same clock, a window grown leftward holds every chunk it already
+      // held, the live one included, unchanged.
+      const grownNow = activityChunks(windowOf(shiftCivilDay(win.first, -grownDays), win.last), now, z);
+      for (const chunk of chunks) {
+        expect(grownNow.find((g) => g.key === chunk.key), chunk.key).toEqual(chunk);
+      }
+    }), { numRuns: 200, seed: 0x6a3c4d });
   });
 
-  it('lays chunks end to end with no gap and no overlap', () => {
-    const chunks = activityChunks(windowOf('2026-05-01', '2026-08-05'), NOW);
-    for (let i = 1; i < chunks.length; i += 1) {
-      expect(chunks[i].first).toBe(shiftCivilDay(chunks[i - 1].last, 1));
-      // Settled chunks abut exactly; only the live one stops early.
-      if (!chunks[i - 1].live) expect(chunks[i].fromMs).toBe(chunks[i - 1].toMs);
-    }
-  });
-
-  it('opens AND closes every settled chunk at 6am local', () => {
-    // Zone-agnostic, and the assertion a `days * 86_400_000` span fails wherever
-    // a transition falls inside a chunk: both edges must be real 6am wall-clock
-    // instants, so the chunk is however many hours that actually takes.
-    for (const chunk of activityChunks(windowOf('2026-02-15', '2026-08-05'), NOW)) {
-      expect(new Date(chunk.fromMs).getHours()).toBe(RAIL_START_HOUR);
-      if (!chunk.live) expect(new Date(chunk.toMs).getHours()).toBe(RAIL_START_HOUR);
-    }
-  });
-
-  it('keeps every chunk within an hour of nominal, and on whole hours', () => {
-    for (const chunk of activityChunks(windowOf('2026-02-15', '2026-06-05'), atLocal('2026-08-05'))) {
-      const hours = (chunk.toMs - chunk.fromMs) / 3_600_000;
-      expect(Number.isInteger(hours)).toBe(true);
-      expect(Math.abs(hours - CHUNK_DAYS * 24)).toBeLessThanOrEqual(1);
-    }
-  });
-
-  // Zone-CONDITIONAL by premise, not by date literal: a chunk can only be
-  // off-nominal in a zone that actually moves its clocks, and UTC, Kolkata and
-  // São Paulo (which abolished DST in 2019) never do. Detected rather than
-  // listed, so it runs wherever it is meaningful — including the southern
-  // hemisphere, where the transitions fall the other way round.
-  const observesDst =
-    new Date(2026, 0, 15).getTimezoneOffset() !== new Date(2026, 6, 15).getTimezoneOffset();
-  it.runIf(observesDst)('makes a DST chunk longer or shorter than days × 24h', () => {
-    const spans = activityChunks(windowOf('2026-01-01', '2026-12-01'), atLocal('2026-12-15'))
-      .filter((c) => !c.live)
-      .map((c) => (c.toMs - c.fromMs) / 3_600_000);
-    expect(spans.some((h) => h !== CHUNK_DAYS * 24)).toBe(true);
-    expect(spans.some((h) => h === CHUNK_DAYS * 24)).toBe(true);
+  it('starts chunk zero on the epoch day', () => {
+    expect(chunkIndexOf('1970-01-01')).toBe(0);
+    expect(chunkBounds(chunkIndexOf('1970-01-01'))).toEqual({ first: '1970-01-01', last: '1970-01-28' });
   });
 
   it('caps the live chunk at now and leaves the settled ones whole', () => {
-    const chunks = activityChunks(windowOf('2026-05-01', '2026-09-20'), NOW);
+    const chunks = activityChunks(windowOf('2026-05-01', '2026-09-20'), NOW, LA);
     const live = chunks.filter((c) => c.live);
     expect(live).toHaveLength(1);
     expect(live[0].toMs).toBeGreaterThanOrEqual(NOW);
@@ -265,16 +264,9 @@ describe('activity chunks', () => {
     }
   });
 
-  it('gives a settled chunk a key that does not move with the clock', () => {
-    const a = activityChunks(windowOf('2026-05-01', '2026-08-05'), NOW).filter((c) => !c.live);
-    const b = activityChunks(windowOf('2026-05-01', '2026-08-05'), NOW + 37 * 60_000)
-      .filter((c) => !c.live);
-    expect(a.map((c) => c.key)).toEqual(b.map((c) => c.key));
-  });
-
   it('re-keys the live chunk at most once per quantum', () => {
     const keyAt = (ms: number) =>
-      activityChunks(windowOf('2026-08-01', '2026-08-05'), ms).find((c) => c.live)?.key;
+      activityChunks(windowOf('2026-08-01', '2026-08-05'), ms, LA).find((c) => c.live)?.key;
     // Two instants INSIDE one quantum share a key. Note NOW itself is local
     // noon, which lands exactly ON a boundary — under `ceil` that is the top of
     // the previous bucket, so probe from strictly inside instead.
@@ -289,31 +281,22 @@ describe('activity chunks', () => {
   });
 
   it('asks for nothing in a window wholly in the future', () => {
-    expect(activityChunks(windowOf('2027-01-01', '2027-02-01'), NOW)).toEqual([]);
+    expect(activityChunks(windowOf('2027-01-01', '2027-02-01'), NOW, LA)).toEqual([]);
   });
 
   it('omits future chunks from a window that straddles now', () => {
-    const chunks = activityChunks(windowOf('2026-07-01', '2026-11-30'), NOW);
+    const chunks = activityChunks(windowOf('2026-07-01', '2026-11-30'), NOW, LA);
     expect(chunks.length).toBeGreaterThan(0);
     for (const chunk of chunks) expect(chunk.fromMs).toBeLessThan(NOW + LIVE_QUANTUM_MS);
-  });
-
-  it('agrees with its own index/bounds helpers', () => {
-    for (const day of ['1970-01-01', '2026-08-05', '2026-12-31']) {
-      const { first, last } = chunkBounds(chunkIndexOf(day));
-      expect(daysBetween(first, last)).toBe(CHUNK_DAYS - 1);
-      expect(daysBetween(first, day)).toBeGreaterThanOrEqual(0);
-      expect(daysBetween(day, last)).toBeGreaterThanOrEqual(0);
-    }
   });
 
   it('asks for exactly one more chunk after a typical prepend', () => {
     // The payoff of matching CHUNK_DAYS to PAST_BLOCK_DAYS: one scroll gesture
     // usually costs one request, not a rescan of everything already held.
     const win = windowOf('2026-06-01', '2026-08-05');
-    const fetched = new Set(activityChunks(win, NOW).map((c) => c.key));
-    const plan = planExtension(win, { ...settled, scrollLeft: 0 }, NOW)!;
-    const fresh = activityChunks(plan.next, NOW).filter((c) => !fetched.has(c.key));
+    const fetched = new Set(activityChunks(win, NOW, LA).map((c) => c.key));
+    const plan = planExtension(win, { ...settled, scrollLeft: 0 }, NOW, LA)!;
+    const fresh = activityChunks(plan.next, NOW, LA).filter((c) => !fetched.has(c.key));
     expect(fresh.length).toBeLessThanOrEqual(2);
   });
 });

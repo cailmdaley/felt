@@ -8,12 +8,16 @@ import (
 	"testing"
 )
 
+// testScratch is a directory for fixtures built once per test binary and
+// shared read-only by the tests that copy them.
+var testScratch string
+
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "felt-cli-test-*")
 	if err != nil {
 		panic(err)
 	}
-	defer os.RemoveAll(dir)
+	testScratch = dir
 
 	home := filepath.Join(dir, "home")
 	if err := os.MkdirAll(home, 0o755); err != nil {
@@ -36,5 +40,7 @@ func TestMain(m *testing.M) {
 			panic(err)
 		}
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }

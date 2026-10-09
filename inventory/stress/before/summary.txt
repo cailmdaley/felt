@@ -1,0 +1,26 @@
+run 1  seed 977430  67s  failures 0  exit 0
+run 2  seed 154620  63s  failures 0  exit 0
+run 3  seed 34313  62s  failures 0  exit 0
+run 4  seed 313682  69s  failures 0  exit 0
+run 5  seed 214296  94s  failures 0  exit 0
+run 6  seed 894788  94s  failures 1  exit 2
+run 7  seed 263929  67s  failures 0  exit 0
+run 8  seed 658407  84s  failures 0  exit 0
+run 9  seed 581856  97s  failures 0  exit 0
+run 10  seed 684708  94s  failures 0  exit 0
+run 11  seed 936473  80s  failures 0  exit 0
+run 12  seed 640051  73s  failures 0  exit 0
+run 13  seed 184233  73s  failures 0  exit 0
+run 14  seed 223320  73s  failures 0  exit 0
+run 15  seed 549155  115s  failures 0  exit 0
+run 16  seed 993888  117s  failures 0  exit 0
+run 17  seed 65545  135s  failures 1  exit 2
+run 18  seed 224987  119s  failures 1  exit 2
+run 19  seed 896680  111s  failures 1  exit 2
+run 20  seed 389206  117s  failures 1  exit 2
+
+== per-test failures across 20 runs (16 burners), logs in run-N.log (not committed; failure blocks in failures.txt)
+   3 test/shuttle/poller_boot_test.exs:28  test a call to the registered Poller during slow init is processed after init (Shuttle.PollerBootTest)
+   1 test/shuttle/poller_test.exs:893  test kill_session SIGKILLs a live worker and tears down runtime immediately, writing no status (Shuttle.PollerTest)
+   1 test/shuttle/poller_test.exs:3405  test direct ad-hoc dispatch creates an ad-hoc standing run before the schedule is due (Shuttle.PollerTest)
+exit 1

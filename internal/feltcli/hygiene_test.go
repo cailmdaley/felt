@@ -47,6 +47,7 @@ var allowedIdentifierContexts = []string{
 var allowedFiles = map[string]bool{}
 
 func TestNoPersonalIdentifiersInSource(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 
 	// `--others --exclude-standard` alongside the tracked set: a brand-new file
@@ -139,6 +140,7 @@ func allowedContext(line string) bool {
 }
 
 func TestFeltPackagesDoNotReadShuttleEnvironmentOrProbeItsBinaries(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	var violations []string
 	for _, packageDir := range []string{"internal/felt", "internal/feltcli"} {
@@ -203,6 +205,7 @@ func TestFeltPackagesDoNotReadShuttleEnvironmentOrProbeItsBinaries(t *testing.T)
 }
 
 func TestHygieneScanIncludesInternalGoPackages(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"internal/felt/fiber.go", "internal/shuttlecli/root.go"} {
 		if !scannedPath(path) {
 			t.Errorf("hygiene scan excludes %s", path)

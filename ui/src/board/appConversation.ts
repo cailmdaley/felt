@@ -144,7 +144,7 @@ export function terminalWorkerPill(
   btn.textContent = fallback ? `${label} · terminal` : label
   const aria = !takesOver
     ? 'Open worker terminal'
-    : card.runtimePhase === 'attention' ? 'Worker needs you — open terminal' : 'Worker waiting for you — open terminal'
+    : card.runtimePhase === 'attention' ? 'Worker stalled — open terminal' : 'Worker waiting for you — open terminal'
   btn.setAttribute('aria-label', `${aria}: ${tmuxName}`)
   btn.title = `${fallback ? `${REMOTE_CONTROL_REQUIRED}\n` : ''}${state} — click to open ${tmuxName} in Kitty`
   btn.addEventListener('click', (e) => {

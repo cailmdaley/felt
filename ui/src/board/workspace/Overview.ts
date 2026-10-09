@@ -1,5 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
+import { inLane } from '../requestLanes.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
@@ -21,11 +22,17 @@ export interface OverviewOptions {
   onOpen(card: KanbanCard, doc?: DocKey): void
   /** Full lens order, independent of Find; suitable for reader channel stepping. */
   onOrder?(cards: KanbanCard[]): void
+  /** Summon the board bar's Find, which filters the sheet on the desktop; false leaves `/` to the sheet's own field. */
+  focusFind?(): boolean
+  /** The constitutions read lately in this session, most recent first. */
+  readLately?(): KanbanCard[]
 }
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
 const RECEIPT_OVERLAP_MS = 60000
 const MAX_CHANGE_ROWS = 8
+/** An unreachable owner's metadata read retries within this long. */
+const RETRY_MS = 30000
 const LENS_STORAGE = 'shuttle.workspace.overview.lens'
 const VISIT_STORAGE = 'shuttle.workspace.overview.visits'
 const SEEN_STORAGE = 'shuttle.workspace.overview.seen'
@@ -117,13 +124,15 @@ function place(parent: HTMLElement, children: HTMLElement[]): void {
   const keep = new Set(children)
   for (const child of [...parent.children]) if (!keep.has(child as HTMLElement)) child.remove()
 }
+let dayMonth: Intl.DateTimeFormat | undefined
 function age(timestamp: number): string {
   if (!timestamp) return 'Opened this session'
   const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000))
   if (minutes < 1) return 'just now'
   if (minutes < 60) return `${minutes}m ago`
   if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`
-  return new Date(timestamp).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  dayMonth ??= new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' })
+  return dayMonth.format(timestamp)
 }
 interface Receipt extends ShelfFile { key: DocKey; uid: string; owner: string }
 interface Folio {
@@ -207,21 +216,23 @@ export class Overview {
   private readonly boundary = node('div', 'ws-overview-boundary')
   private readonly latest = node('details', 'ws-overview-latest')
   private readonly ribbon = node('div', 'ws-overview-ribbon')
+  private readonly read = node('section', 'ws-overview-read')
+  private readonly readList = node('div', 'ws-overview-read-list')
+  private readonly readItems = new Map<string, { el: HTMLButtonElement; name: HTMLElement; host: HTMLElement; card: KanbanCard }>()
   private readonly groupsEl = node('div', 'ws-overview-groups')
   private readonly status = node('p', 'ws-overview-status')
   private readonly find = node('input', 'ws-overview-find')
   private readonly lensGroup = node('div', 'ws-overview-lens')
   private readonly lensButtons = new Map<OverviewLens, HTMLButtonElement>()
   private readonly folios = new Map<string, Folio>()
+  private readonly fallbacks = new Map<string, KanbanCard>()
   private readonly ribbonItems = new Map<DocKey, RibbonItem>()
   private readonly groups = new Map<string, Group>()
   private readonly thumbnails = new Map<string, Thumbnail>()
   private readonly visits = new Map<string, number>()
   private readonly openedCards = new Map<string, KanbanCard>()
   private readonly fetchedCards = new Map<string, KanbanCard>()
-  private readonly cardLoads = new Map<string, Promise<KanbanCard | undefined>>()
-  private readonly cardQueue: Array<{ uid: string; run(): Promise<void> }> = []
-  private activeCardReads = 0
+  private readonly cardLoads = new Map<string, { pending: Promise<KanbanCard | undefined>; promote: () => void }>()
   private readonly cardRetries = new Map<string, { attempts: number; at: number }>()
   private readonly missingCards = new Set<string>()
   private readonly provisionalOpened = new Set<string>()
@@ -242,6 +253,8 @@ export class Overview {
   private order: KanbanCard[] = []
   private request?: AbortController
   private visible = true
+  /** Model changes reached while the sheet was off screen, waiting to be drawn. */
+  private stale = false
   private disposed = false
   private scroll = 0
   /** The prior visit is fixed for this sheet, so reloads inside thirty seconds keep the news. */
@@ -289,6 +302,8 @@ export class Overview {
     this.changesMore.addEventListener('click', () => this.groupsEl.scrollIntoView?.({
       block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
     }))
+    this.read.setAttribute('aria-label', 'Read lately')
+    this.read.append(node('h2', 'ws-overview-read-title', 'Read lately'), this.readList)
     const controls = node('div', 'ws-overview-controls')
     this.lensGroup.setAttribute('role', 'radiogroup')
     this.lensGroup.setAttribute('aria-label', 'Group documents')
@@ -315,7 +330,7 @@ export class Overview {
     this.find.addEventListener('input', () => this.render())
     controls.append(this.lensGroup, this.find)
     this.status.setAttribute('role', 'status')
-    this.inner.append(header, changes, this.latest, controls, this.groupsEl, this.status)
+    this.inner.append(header, changes, this.latest, this.read, controls, this.groupsEl, this.status)
     this.el.append(this.inner)
     this.el.setAttribute('aria-label', 'Document overview')
     this.el.addEventListener('scroll', this.schedule, { passive: true })
@@ -343,7 +358,9 @@ export class Overview {
   /** Metadata paints immediately; one coalesced feed read finishes asynchronously. */
   refresh(): void {
     if (this.disposed) return
-    if (!this.request) for (const retry of this.cardRetries.values()) retry.at = 0
+    // A poll retries transient failures at once. A fiber its owner answered
+    // "not found" for waits for the next visit: every such read asks each host in turn.
+    if (!this.request) for (const [uid, retry] of this.cardRetries) if (!this.missingCards.has(uid)) retry.at = 0
     this.reconcile()
     if (this.request) return
     const controller = new AbortController()
@@ -425,11 +442,17 @@ export class Overview {
 
   setVisible(visible: boolean): void {
     if (this.disposed) return
-    if (visible === this.visible) { if (visible) this.startVisit(); return }
+    if (visible === this.visible) {
+      if (visible && this.stale) this.render()
+      if (visible) this.startVisit()
+      return
+    }
     if (!visible) { this.navigation++; this.scroll = this.el.scrollTop; this.leaveVisit() }
+    else for (const retry of this.cardRetries.values()) retry.at = 0
     this.visible = visible
     this.el.hidden = !visible
     this.el.inert = !visible
+    if (visible && this.stale) this.render()
     for (const folio of this.folios.values()) {
       if (visible) this.opts.themes?.bind(folio.el, folio.card)
       else this.opts.themes?.unbind(folio.el)
@@ -521,9 +544,16 @@ export class Overview {
     for (const card of this.opts.cards()) known.set(uidOf(card), card)
     return known
   }
+  /** One stand-in per fiber and owner, so an unchanged sheet keeps its channel order. */
   private fallback(uid: string, owner: string): KanbanCard {
-    return { id: uid, uid, name: uid.startsWith('other:') ? `Unfiled · ${owner}` : `Resolving fiber · ${owner}`, path: '', originId: owner, status: '', createdAt: '',
-      effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
+    const key = `${uid}\n${owner}`
+    let card = this.fallbacks.get(key)
+    if (!card) {
+      card = { id: uid, uid, name: uid.startsWith('other:') ? `Unfiled · ${owner}` : `Resolving fiber · ${owner}`, path: '', originId: owner, status: '', createdAt: '',
+        effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null }
+      this.fallbacks.set(key, card)
+    }
+    return card
   }
   private reconcile(): void {
     const arrived: Folio[] = []
@@ -535,7 +565,9 @@ export class Overview {
       const card = file.uid ? known.get(file.uid) : undefined
       const key = docKey(file.host ?? '', file.fullPath, card?.originId ?? 'local', card?.fiberDir)
       const parsed = parseDocKey(key)!
-      const uid = file.uid && !this.missingCards.has(file.uid) ? file.uid : `other:${parsed.owner}`
+      // A receipt sent outside any fiber carries its session id in place of a fiber uid.
+      const filed = file.uid && file.uid !== file.sessionId && !this.missingCards.has(file.uid)
+      const uid = filed ? file.uid! : `other:${parsed.owner}`
       const receipt: Receipt = { ...file, fullPath: parsed.path, key, uid, owner: parsed.owner, host: parsed.owner }
       let documents = byUid.get(uid)
       if (!documents) { documents = new Map(); byUid.set(uid, documents) }
@@ -566,7 +598,7 @@ export class Overview {
       if (priorReceipts && JSON.stringify(priorReceipts) !== JSON.stringify(receipts.map(r => [r.key, r.timestamp, r.sessionId]))) arrived.push(folio)
       folio.provisional = !known.has(uid)
       folio.card = card; folio.receipts = receipts
-      this.updateFolio(folio)
+      if (this.shown) this.updateFolio(folio)
     }
     for (const [uid, folio] of this.folios) if (!byUid.has(uid)) {
       if (folio.thumb) this.removeThumbnail(folio.thumb)
@@ -593,39 +625,42 @@ export class Overview {
     }
     clearTimeout(this.retryTimer)
     const eligible = new Set(candidates.map(uidOf))
-    const times = [...this.cardRetries].filter(([uid]) => eligible.has(uid) && !this.cardLoads.has(uid) && !this.externalLoads.has(uid)).map(([, retry]) => retry.at)
+    const times = [...this.cardRetries].filter(([uid]) => eligible.has(uid) && !this.cardLoads.has(uid) && !this.externalLoads.has(uid)).map(([, retry]) => retry.at).filter(Number.isFinite)
     if (times.length) this.retryTimer = setTimeout(() => this.reconcile(), Math.max(1, Math.min(...times) - Date.now()))
   }
 
-  /** Clicks move ahead of queued preloads without duplicating or preempting active reads. */
+  /**
+   * Preloads wait in the slow request lane, where one read can take many
+   * seconds; a click reads at once, taking over its own queued preload. A
+   * read already under way is shared, never duplicated or preempted.
+   */
   private queueCard(card: KanbanCard, priority = false): Promise<KanbanCard | undefined> {
     const uid = uidOf(card)
     const prior = this.cardLoads.get(uid)
     if (prior) {
-      const index = priority ? this.cardQueue.findIndex(job => job.uid === uid) : -1
-      if (index > 0) this.cardQueue.unshift(this.cardQueue.splice(index, 1)[0])
-      return prior
+      if (priority) prior.promote()
+      return prior.pending
     }
     let complete!: (card: KanbanCard | undefined) => void
     const pending = new Promise<KanbanCard | undefined>(resolve => { complete = resolve })
-    this.cardLoads.set(uid, pending)
-    const job = { uid, run: async (): Promise<void> => {
+    let started = false
+    const queued = new AbortController()
+    const run = async (): Promise<void> => {
+      started = true
       const resolved = this.disposed ? undefined : this.knownCards().get(uid) ?? await this.loadCard(card)
       this.cardLoads.delete(uid)
       complete(resolved)
       if (!this.disposed) this.reconcile()
-    } }
-    if (priority) this.cardQueue.unshift(job)
-    else this.cardQueue.push(job)
-    this.pumpCards()
-    return pending
-  }
-  private pumpCards(): void {
-    while (this.activeCardReads < 4 && this.cardQueue.length) {
-      const job = this.cardQueue.shift()!
-      this.activeCardReads++
-      void job.run().finally(() => { this.activeCardReads--; this.pumpCards() })
     }
+    const promote = (): void => {
+      if (started) return
+      queued.abort()
+      void run()
+    }
+    this.cardLoads.set(uid, { pending, promote })
+    if (priority) void run()
+    else void inLane('slow', run, { signal: queued.signal }).catch(() => { /* Promoted to a click. */ })
+    return pending
   }
 
   private createFolio(uid: string, card: KanbanCard): Folio {
@@ -710,10 +745,24 @@ export class Overview {
       ? DAY_GROUPS.indexOf(ak as typeof DAY_GROUPS[number]) - DAY_GROUPS.indexOf(bk as typeof DAY_GROUPS[number])
       : cmp(a[0], b[0]) || compare(ak, bk))
   }
+  /** Filter the sheet from the board bar's Find. */
+  setQuery(query: string): void {
+    if (this.find.value === query) return
+    this.find.value = query
+    this.render()
+  }
+  /** The sheet draws only while it is on screen; channel order stays current regardless. */
+  private get shown(): boolean { return this.visible && this.el.isConnected }
   private render(): void {
     const grouped = this.grouped()
-    this.order = grouped.flatMap(([, rows]) => rows.map(f => f.card))
-    this.opts.onOrder?.([...this.order])
+    const order = grouped.flatMap(([, rows]) => rows.map(f => f.card))
+    if (order.length !== this.order.length || order.some((card, i) => card !== this.order[i])) {
+      this.order = order
+      this.opts.onOrder?.([...order])
+    }
+    if (!this.shown) { this.stale = true; return }
+    if (this.stale) for (const folio of this.folios.values()) this.updateFolio(folio)
+    this.stale = false
     const query = this.find.value.trim().toLowerCase()
     const matches = (f: { card: KanbanCard; receipts: Receipt[] }): boolean => !query || [f.card.name, f.card.path, ...f.receipts.flatMap(r => [r.basename, r.fullPath, declaredTitle(r.key)?.title ?? ''])].some(v => v.toLowerCase().includes(query))
     const changes = this.changes()
@@ -758,6 +807,7 @@ export class Overview {
     if (this.lens === 'recent' && this.previousVisit && !boundaryPlaced) shown.push(this.boundary)
     place(this.groupsEl, shown)
     this.renderRibbon()
+    this.renderRead(query)
     const newDocuments = [...this.folios.values()].flatMap(f => f.receipts.filter(r => r.timestamp > this.seen))
     const documentCount = new Set(newDocuments.map(r => r.key)).size
     const constitutionCount = new Set([...newDocuments.map(r => r.uid), ...changes.map(c => c.uid)]).size
@@ -840,6 +890,7 @@ export class Overview {
   private candidates(): HTMLButtonElement[] {
     return [...this.changesEl.querySelectorAll<HTMLButtonElement>('.ws-overview-change-open'),
       ...(this.latest.open ? this.ribbon.querySelectorAll<HTMLButtonElement>('.ws-overview-rib') : []),
+      ...this.readList.querySelectorAll<HTMLButtonElement>('.ws-overview-read-item'),
       ...this.groupsEl.querySelectorAll<HTMLButtonElement>('.ws-overview-folio')].filter(el => !el.closest('[hidden]'))
   }
   private paintSelection(): void {
@@ -876,7 +927,7 @@ export class Overview {
     const intent = keyIntent(event, 'overview')
     if (!intent || intent === 'help') return
     event.preventDefault()
-    if (intent === 'find') this.find.focus({ preventScroll: true })
+    if (intent === 'find') { if (!this.opts.focusFind?.()) this.find.focus({ preventScroll: true }) }
     else this.moveSelection(intent)
   }
   private renderRibbon(): void {
@@ -918,6 +969,30 @@ export class Overview {
     }
     place(this.ribbon, recent.map(r => this.ribbonItems.get(r.key)!.el))
   }
+  /** One quiet line of the constitutions read lately, each opening in the reader. */
+  private renderRead(query: string): void {
+    const cards = (this.opts.readLately?.() ?? []).filter(card => !query || [card.name, card.path].some(v => v.toLowerCase().includes(query)))
+    const keyOf = (card: KanbanCard): string => JSON.stringify([card.originId, uidOf(card)])
+    const keep = new Set(cards.map(keyOf))
+    for (const [key, item] of this.readItems) if (!keep.has(key)) { item.el.remove(); this.readItems.delete(key) }
+    for (const card of cards) {
+      const key = keyOf(card)
+      let item = this.readItems.get(key)
+      if (!item) {
+        const el = button('ws-overview-read-item')
+        const name = node('span', 'ws-overview-read-name'), host = node('span', 'ws-overview-hostmark ws-overview-meta')
+        el.append(name, host)
+        item = { el, name, host, card }; this.readItems.set(key, item)
+        el.addEventListener('click', () => { const current = this.readItems.get(key); if (current) void this.open(current.card) })
+      }
+      item.card = card
+      text(item.name, card.name); text(item.host, this.marks.get(card.originId) ?? '○')
+      item.host.title = card.originId; item.host.setAttribute('aria-label', card.originId)
+      item.el.title = card.outcome ?? card.path
+    }
+    place(this.readList, cards.map(card => this.readItems.get(keyOf(card))!.el))
+    this.read.hidden = !cards.length
+  }
   private async open(card: KanbanCard, key?: DocKey): Promise<void> {
     const navigation = ++this.navigation
     const uid = uidOf(card)
@@ -942,9 +1017,11 @@ export class Overview {
       const current = this.knownCards().get(uid)
       if (current) return current
       if (!this.disposed) {
-        if (error instanceof Error && error.message.startsWith('Fiber not found on ')) this.missingCards.add(uid)
+        const missing = error instanceof Error && error.message.startsWith('Fiber not found on ')
+        if (missing) this.missingCards.add(uid)
         const attempts = (this.cardRetries.get(uid)?.attempts ?? 0) + 1
-        this.cardRetries.set(uid, { attempts, at: Date.now() + Math.min(30000, 1000 * 2 ** Math.min(attempts - 1, 5)) })
+        // A fiber its owner says does not exist is asked for again only on the next visit.
+        this.cardRetries.set(uid, { attempts, at: missing ? Infinity : Date.now() + Math.min(RETRY_MS, 1000 * 2 ** Math.min(attempts - 1, 5)) })
       }
       return undefined
     }

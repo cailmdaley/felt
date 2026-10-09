@@ -12,6 +12,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	t.Parallel()
 	f, err := New("test-task", "Test Task")
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -35,6 +36,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestNewRequiresName(t *testing.T) {
+	t.Parallel()
 	_, err := New("mocks-unbiased", "")
 	if err == nil {
 		t.Fatal("New() should require a name")
@@ -42,6 +44,7 @@ func TestNewRequiresName(t *testing.T) {
 }
 
 func TestNewSlugifiesInput(t *testing.T) {
+	t.Parallel()
 	f, err := New("Mocks Unbiased", "Mocks unbiased")
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -56,6 +59,7 @@ func TestNewSlugifiesInput(t *testing.T) {
 }
 
 func TestNewEmptySlug(t *testing.T) {
+	t.Parallel()
 	_, err := New("", "Some title")
 	if err == nil {
 		t.Error("New(\"\", ...) should return an error")
@@ -68,6 +72,7 @@ func TestNewEmptySlug(t *testing.T) {
 }
 
 func TestNewPreservesLongExplicitSlug(t *testing.T) {
+	t.Parallel()
 	// Regression: felt add used to silently truncate basenames at 32 chars
 	// via truncateAtWord, which could collide with existing siblings and
 	// produce confusing "already exists" errors.
@@ -90,6 +95,7 @@ func TestNewPreservesLongExplicitSlug(t *testing.T) {
 }
 
 func TestBodyStartLine(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		content string
@@ -142,6 +148,7 @@ created-at: 2026-04-10T09:00:00Z
 }
 
 func TestGenerateID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		title  string
 		wantID string
@@ -167,6 +174,7 @@ func TestGenerateID(t *testing.T) {
 }
 
 func TestGenerateIDRejectsEmptySlug(t *testing.T) {
+	t.Parallel()
 	_, err := GenerateID("!!!")
 	if err == nil {
 		t.Fatal("GenerateID should reject titles with no alphanumeric characters")
@@ -174,6 +182,7 @@ func TestGenerateIDRejectsEmptySlug(t *testing.T) {
 }
 
 func TestSlugify(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -196,6 +205,7 @@ func TestSlugify(t *testing.T) {
 }
 
 func TestSlugifyASCIIOnly(t *testing.T) {
+	t.Parallel()
 	// A long non-ASCII title must not be cut mid-rune by the byte-length
 	// truncation in GenerateID/truncateAtWord: Slugify must strip non-ASCII
 	// letters up front so every resulting slug is valid UTF-8 and ASCII-only.
@@ -228,6 +238,7 @@ func TestSlugifyASCIIOnly(t *testing.T) {
 }
 
 func TestParse(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: Test Task
 status: active
@@ -277,6 +288,7 @@ Some comment here.
 }
 
 func TestParseWithModeMetadataOnly(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: Test Task
 status: active
@@ -304,6 +316,7 @@ This body should not be parsed.
 }
 
 func TestParseFrontmatterBlockScalarDocumentMarkers(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		indicator string
@@ -357,6 +370,7 @@ Body with a thematic break below.
 }
 
 func TestParseWithModeMetadataOnlyPreservesFieldsAfterBlockScalarMarker(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: Standing Inbox
 status: active
@@ -390,6 +404,7 @@ This body should not be parsed.
 }
 
 func TestParseInvalid(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		content []byte
@@ -408,6 +423,7 @@ func TestParseInvalid(t *testing.T) {
 }
 
 func TestMarshal(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	f := &Felt{
 		ID:        "test-task",
@@ -447,6 +463,7 @@ func TestMarshal(t *testing.T) {
 }
 
 func TestUpdatedAtRoundTrips(t *testing.T) {
+	t.Parallel()
 	created := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	updated := time.Date(2026, 3, 4, 12, 30, 0, 0, time.UTC)
 	f := &Felt{
@@ -474,6 +491,7 @@ func TestUpdatedAtRoundTrips(t *testing.T) {
 }
 
 func TestMarshalOmitsUpdatedAtWhenUnset(t *testing.T) {
+	t.Parallel()
 	f := &Felt{
 		ID:        "untouched",
 		Name:      "Untouched",
@@ -491,6 +509,7 @@ func TestMarshalOmitsUpdatedAtWhenUnset(t *testing.T) {
 }
 
 func TestRecencyAnchor(t *testing.T) {
+	t.Parallel()
 	created := time.Date(2025, 11, 2, 14, 30, 0, 0, time.UTC)
 	updated := time.Date(2026, 5, 20, 8, 15, 0, 0, time.UTC)
 
@@ -510,6 +529,7 @@ func TestRecencyAnchor(t *testing.T) {
 }
 
 func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	f := &Felt{
 		ID:        "quick-gotcha",
@@ -529,6 +549,7 @@ func TestMarshalLeavesEmptyBodyEmpty(t *testing.T) {
 }
 
 func TestParseAndMarshalStructuredFields(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: BAO Damping Prior
 created-at: 2026-03-15T10:00:00Z
@@ -650,6 +671,7 @@ container: python:3.11-slim
 // diffs across machines/builds. Order must round-trip exactly, deterministically
 // — including a non-alphabetical input order, repeated across marshals.
 func TestMarshalPreservesExtraFieldOrder(t *testing.T) {
+	t.Parallel()
 	// tempered before shuttle is intentionally non-alphabetical: an alpha sort
 	// would reorder these, so a stable result proves order is *preserved*, not
 	// merely deterministic.
@@ -719,6 +741,7 @@ insights:
 }
 
 func TestSearchTextIncludesStructuredFields(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 id: 01JZ0000000000000000000002
 name: Searchable structured fields
@@ -798,6 +821,7 @@ container: python:3.11-slim
 }
 
 func TestJSONOmitsEmptyStructuredFields(t *testing.T) {
+	t.Parallel()
 	f := &Felt{
 		ID:        "quick-gotcha",
 		Name:      "Quick gotcha",
@@ -826,6 +850,7 @@ func TestJSONOmitsEmptyStructuredFields(t *testing.T) {
 }
 
 func TestStatusMethods(t *testing.T) {
+	t.Parallel()
 	f := &Felt{Status: StatusOpen}
 	if !f.IsOpen() {
 		t.Error("IsOpen() should be true for open status")
@@ -843,6 +868,7 @@ func TestStatusMethods(t *testing.T) {
 }
 
 func TestExtractTags(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		title     string
 		wantTags  []string
@@ -884,6 +910,7 @@ func TestExtractTags(t *testing.T) {
 }
 
 func TestHasTag(t *testing.T) {
+	t.Parallel()
 	f := &Felt{Tags: []string{"alpha", "beta", "rule:cosebis_data_vector"}}
 
 	if !f.HasTag("alpha") {
@@ -912,6 +939,7 @@ func TestHasTag(t *testing.T) {
 }
 
 func TestAddTag(t *testing.T) {
+	t.Parallel()
 	f := &Felt{Tags: []string{"existing"}}
 
 	f.AddTag("new")
@@ -930,6 +958,7 @@ func TestAddTag(t *testing.T) {
 }
 
 func TestRemoveTag(t *testing.T) {
+	t.Parallel()
 	f := &Felt{Tags: []string{"a", "b", "c"}}
 
 	f.RemoveTag("b")
@@ -951,6 +980,7 @@ func TestRemoveTag(t *testing.T) {
 }
 
 func TestParseTags(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: Test with Tags
 status: open
@@ -979,6 +1009,7 @@ Body here.
 }
 
 func TestMarshalTags(t *testing.T) {
+	t.Parallel()
 	f := &Felt{
 		ID:        "test-tags",
 		Name:      "Test Tags",
@@ -1014,6 +1045,7 @@ func TestMarshalTags(t *testing.T) {
 }
 
 func TestParseInputRefs(t *testing.T) {
+	t.Parallel()
 	content := []byte(`---
 name: Mixed input refs test
 status: open
@@ -1044,6 +1076,7 @@ created-at: 2026-01-01T10:00:00Z
 }
 
 func TestMarshalInputRefs(t *testing.T) {
+	t.Parallel()
 	f := &Felt{
 		ID:        "mixed-inputs",
 		Name:      "Mixed input refs test",
@@ -1088,6 +1121,7 @@ func TestMarshalInputRefs(t *testing.T) {
 }
 
 func TestExtractBodyRefsParsesFragments(t *testing.T) {
+	t.Parallel()
 	body := `
 See [[analysis]] and [[analysis#decision-a|decision]].
 Cross-check [method](project/method#step-1) and ignore [site](https://example.com).
@@ -1110,6 +1144,7 @@ Cross-check [method](project/method#step-1) and ignore [site](https://example.co
 }
 
 func TestExtractBodyRefsIgnoresCodeSpans(t *testing.T) {
+	t.Parallel()
 	body := `
 Real link: [[real-fiber]].
 Code span: ` + "`[[illustrative]]`" + `.
@@ -1143,6 +1178,7 @@ Back to real: [[another-real]].
 // survive a Parse → Marshal round-trip unchanged. This guards against
 // felt edit silently dropping them.
 func TestExtraFieldsRoundTrip(t *testing.T) {
+	t.Parallel()
 	input := `---
 name: My constitution
 status: active
@@ -1221,6 +1257,7 @@ Body here.
 }
 
 func TestFrontmatterIDRoundTripAsNativeUID(t *testing.T) {
+	t.Parallel()
 	const intrinsicID = "01JZ0000000000000000000000"
 	input := `---
 id: 01JZ0000000000000000000000
@@ -1278,6 +1315,7 @@ Body.
 // without this, downstream tools were forced into per-key `--field` reads
 // because the JSON output silently dropped namespaces it didn't model.
 func TestMarshalJSONIncludesExtraFields(t *testing.T) {
+	t.Parallel()
 	input := `---
 name: Modal fiber
 status: active
@@ -1368,6 +1406,7 @@ Body.
 // ExtraFields like any other unknown key, then surfaces flat-top-level
 // in MarshalJSON output.
 func TestMarshalJSONIncludesLegacyDependsOn(t *testing.T) {
+	t.Parallel()
 	input := `---
 name: Legacy fiber
 status: open
@@ -1408,6 +1447,7 @@ Body.
 // tool-owned frontmatter must round-trip through MarshalJSON without
 // regression.
 func TestMarshalJSONNoExtraFields(t *testing.T) {
+	t.Parallel()
 	input := `---
 name: Plain fiber
 status: open

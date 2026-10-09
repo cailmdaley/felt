@@ -1,9 +1,57 @@
 .ws-fiber-prose .ws-prose-header { border: 0; margin: 0 0 8px; padding: 0; font: var(--ws-label-size)/1.3 var(--ws-serif); font-variant-caps: all-small-caps; letter-spacing: .06em; }
 .ws-fiber-prose > h1 { font-size: var(--ws-heading-size); margin-bottom: 20px; }
-.ws-fiber-prose .kbn-detail-lede { background: transparent; padding-block: 0; font-size: var(--ws-lede-size); margin: 0 0 20px; }
+.ws-fiber-prose .kbn-detail-lede { background: transparent; padding-block: 0; font-size: var(--ws-lede-size); line-height: var(--ws-lede-leading); margin: 0 0 20px; }
 .ws-fiber-prose > .ws-prose-body { border-top: 1px solid var(--ws-hairline); padding-top: 20px; }
 .ws-fiber-prose > .ws-dock { border: 0; margin: 0; padding-bottom: 20px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-fiber-prose > h1 { display: none; }
-  .ws-fiber-prose .kbn-detail-lede { line-height: 1.42; }
 }
+/* A role page's ledger, between the lede and the body: who holds the role,
+   then the constitutions whose roster names it. Captions and holders share
+   the status line's register (mono capitals, muted); each hold is a compact
+   row in the Desk's order, its dot in its column's pigment, the outcome a
+   single muted line beneath the name. */
+.ws-role-ledger { margin: 0 0 20px; }
+.ws-role-caption {
+  margin: 0; color: var(--ws-ink-muted);
+  font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase;
+}
+.ws-role-holders { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--ws-small-gap) var(--ws-inset); margin: 0 0 var(--ws-gap); }
+.ws-role-holders[hidden] { display: none; }
+.ws-role-holder-names { color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
+.ws-role-holder + .ws-role-holder::before { content: '·'; margin-inline: var(--ws-small-gap); }
+.ws-role-holders a.kbn-wikilink-live { color: inherit; text-decoration: none; }
+.ws-role-holders a.kbn-wikilink-live:is(:hover, :focus-visible) {
+  color: var(--ws-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
+.ws-role-holds .ws-role-caption { margin-bottom: var(--ws-small-gap); }
+.ws-role-hold-list { list-style: none; margin: 0; padding: 0; }
+.ws-role-hold-list > li { margin: 0; padding: 0; }
+.ws-role-hold {
+  display: grid; grid-template-columns: var(--ws-dot-size) minmax(0, 1fr) auto; column-gap: var(--ws-inset); align-items: baseline;
+  width: calc(100% + 2 * var(--ws-inset)); margin: 0 calc(-1 * var(--ws-inset)); padding: var(--ws-small-gap) var(--ws-inset);
+  border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink);
+  font: 500 var(--ws-label-size)/1.35 var(--ws-serif); text-align: left; cursor: pointer;
+}
+.ws-role-hold:hover { background: var(--ws-hover); }
+.ws-role-hold:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: calc(-1 * var(--ws-focus-width)); }
+.ws-role-dot {
+  align-self: center; width: var(--ws-dot-size); height: var(--ws-dot-size); border-radius: 50%;
+  box-sizing: border-box; border: var(--ws-line-width) solid var(--ws-ink-muted);
+}
+.ws-role-hold[data-column='awaitingReview'] .ws-role-dot { border-color: var(--ws-fresh); background: var(--ws-fresh); }
+.ws-role-hold[data-column='inFlight'] .ws-role-dot { border-color: var(--ws-machine); background: var(--ws-machine); }
+.ws-role-hold[data-column='tempered'] .ws-role-dot { border-color: var(--ws-verdict); background: var(--ws-verdict); }
+.ws-role-hold[data-column='composted'] .ws-role-dot { border-color: var(--ws-hairline); }
+.ws-role-hold[data-column='composted'] .ws-role-hold-name { color: var(--ws-ink-muted); }
+.ws-role-hold-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ws-role-hold-column { color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.ws-role-hold-outcome {
+  grid-column: 2 / -1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  color: var(--ws-ink-muted); font-weight: 400;
+}
+.ws-role-more {
+  margin: var(--ws-small-gap) 0 0; padding: 0; border: 0; background: transparent; cursor: pointer; color: var(--ws-ink-muted);
+  font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase;
+}
+.ws-role-more:is(:hover, :focus-visible) { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 3px; }

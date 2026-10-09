@@ -91,14 +91,26 @@ defmodule Shuttle.ProcNetTcpTest do
       # FIN_WAIT1/FIN_WAIT2 is where an ordinary `Connection: close` client sits
       # by the time the plug reads the table; refusing these was the live bug.
       for state <- ~w(04 05) do
-        assert ProcNetTcp.uid_from_data(row(state, 4242, 54_401), @loopback, 54_401, @loopback, 4000) ==
+        assert ProcNetTcp.uid_from_data(
+                 row(state, 4242, 54_401),
+                 @loopback,
+                 54_401,
+                 @loopback,
+                 4000
+               ) ==
                  4242
       end
     end
 
     test "the closing states still name a live owned socket" do
       for state <- ~w(08 09 0B) do
-        assert ProcNetTcp.uid_from_data(row(state, 4242, 54_402), @loopback, 54_402, @loopback, 4000) ==
+        assert ProcNetTcp.uid_from_data(
+                 row(state, 4242, 54_402),
+                 @loopback,
+                 54_402,
+                 @loopback,
+                 4000
+               ) ==
                  4242
       end
     end

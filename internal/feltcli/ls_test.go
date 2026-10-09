@@ -8,9 +8,11 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"gopkg.in/yaml.v3"
 )
 
 func TestTreeDisplayID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		id   string
@@ -40,6 +42,7 @@ func TestTreeDisplayID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := treeDisplayID(tt.id); got != tt.want {
 				t.Fatalf("treeDisplayID(%q) = %q, want %q", tt.id, got, tt.want)
 			}
@@ -52,6 +55,7 @@ func TestTreeDisplayID(t *testing.T) {
 // which errors out on null — a single user with no active fibers shouldn't
 // have to handle two distinct empty shapes.
 func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
+	t.Parallel()
 	dir, _ := newStore(t)
 
 	for _, args := range [][]string{
@@ -70,7 +74,155 @@ func TestLsJSONEmptyEmitsArrayNotNull(t *testing.T) {
 	}
 }
 
+func TestLsIDsFromMatchesFullRowsAndInputOrder(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	shuttle := map[string]*yaml.Node{"shuttle": {Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}}
+	for _, fiber := range []*felt.Felt{
+		{ID: "parent", Name: "Parent", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "parent/aaa", Name: "Child", Status: felt.StatusActive, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "closed", Name: "Closed", Status: felt.StatusClosed, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "untracked/fiber", Name: "Untracked", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+		{ID: "nested-z", Name: "Nested Z", Status: felt.StatusActive, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), ExtraFields: shuttle},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s): %v", fiber.ID, err)
+		}
+	}
+	// This bare root file is the store's entry-point fiber.
+	if err := os.WriteFile(filepath.Join(storage.Root(), "overview.md"), []byte("---\nname: Overview\nstatus: open\ncreated-at: 2026-04-10T09:00:00Z\nshuttle: null\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	parentDir := filepath.Join(storage.Root(), "parent")
+	reportTarget := filepath.Join(t.TempDir(), "report.html")
+	if err := os.WriteFile(reportTarget, []byte("report"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(reportTarget, filepath.Join(parentDir, "report.html")); err != nil {
+		t.Fatal(err)
+	}
+
+	innerRoot := filepath.Join(t.TempDir(), ".felt")
+	if err := os.MkdirAll(filepath.Join(innerRoot, "guest"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(innerRoot, "guest.md"), []byte("---\nname: Guest entry\nstatus: closed\ncreated-at: 2026-04-10T09:00:00Z\nshuttle: null\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mount := filepath.Join(storage.Root(), "mounts", "guest")
+	if err := os.MkdirAll(filepath.Dir(mount), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(innerRoot, mount); err != nil {
+		t.Fatal(err)
+	}
+
+	// The field filter widens the full baseline to every status, including the
+	// statusless fiber; ids-from must do the same without -s all.
+	full, err := runCommand(t, dir, "ls", "--json", "--has-field", "shuttle")
+	if err != nil {
+		t.Fatalf("full listing: %v\n%s", err, full)
+	}
+	var allRows []json.RawMessage
+	if err := json.Unmarshal([]byte(full), &allRows); err != nil {
+		t.Fatal(err)
+	}
+	fullByID := make(map[string]json.RawMessage, len(allRows))
+	for _, row := range allRows {
+		var fields struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(row, &fields); err != nil {
+			t.Fatal(err)
+		}
+		fullByID[fields.ID] = row
+	}
+	requested := []string{"nested-z", "mounts/guest/guest", "parent/aaa", "overview", "closed", "untracked/fiber", "parent", "PARENT", "missing", "closed", "active-does-not-exist"}
+	for _, id := range []string{"nested-z", "mounts/guest/guest", "parent/aaa", "overview", "closed", "untracked/fiber", "parent"} {
+		if _, ok := fullByID[id]; !ok {
+			t.Fatalf("fixture id %q absent from full listing:\n%s", id, full)
+		}
+	}
+	idsPath := filepath.Join(t.TempDir(), "ids")
+	if err := os.WriteFile(idsPath, []byte(strings.Join(requested, "\n")+"\n\nclosed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := runCommand(t, dir, "ls", "--json", "--has-field", "shuttle", "--ids-from", idsPath)
+	if err != nil {
+		t.Fatalf("ids listing: %v\n%s", err, selected)
+	}
+	var selectedRows []json.RawMessage
+	if err := json.Unmarshal([]byte(selected), &selectedRows); err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := []string{"nested-z", "mounts/guest/guest", "parent/aaa", "overview", "closed", "untracked/fiber", "parent"}
+	if len(selectedRows) != len(wantOrder) {
+		t.Fatalf("selected %d rows, want %d: %s", len(selectedRows), len(wantOrder), selected)
+	}
+	for i, row := range selectedRows {
+		var fields struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(row, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields.ID != wantOrder[i] {
+			t.Errorf("row %d id = %q, want %q", i, fields.ID, wantOrder[i])
+		}
+		if string(row) != string(fullByID[fields.ID]) {
+			t.Errorf("row %q differs from full listing\n got: %s\nwant: %s", fields.ID, row, fullByID[fields.ID])
+		}
+	}
+	var parentRow struct {
+		ReportPath string `json:"report_path"`
+	}
+	if err := json.Unmarshal(selectedRows[len(selectedRows)-1], &parentRow); err != nil {
+		t.Fatal(err)
+	}
+	resolvedParentDir, err := filepath.EvalSymlinks(parentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReport := filepath.Join(resolvedParentDir, "report.html")
+	if parentRow.ReportPath != wantReport {
+		t.Fatalf("report_path = %q, want unresolved sibling path %q", parentRow.ReportPath, wantReport)
+	}
+
+	idsOnly, err := runCommand(t, dir, "ls", "--json", "--ids-from", idsPath)
+	if err != nil {
+		t.Fatalf("ids-only listing: %v\n%s", err, idsOnly)
+	}
+	var idsOnlyRows []json.RawMessage
+	if err := json.Unmarshal([]byte(idsOnly), &idsOnlyRows); err != nil {
+		t.Fatal(err)
+	}
+	idsOnlySet := make(map[string]bool, len(idsOnlyRows))
+	for _, row := range idsOnlyRows {
+		var fields struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(row, &fields); err != nil {
+			t.Fatal(err)
+		}
+		idsOnlySet[fields.ID] = true
+	}
+	for _, id := range []string{"closed", "untracked/fiber"} {
+		if !idsOnlySet[id] {
+			t.Errorf("ids-only listing omitted %s:\n%s", id, idsOnly)
+		}
+	}
+
+	if err := os.WriteFile(idsPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := runCommand(t, dir, "ls", "--json", "--ids-from", idsPath)
+	if err != nil || strings.TrimSpace(empty) != "[]" {
+		t.Fatalf("empty ids: %v, %q", err, empty)
+	}
+}
+
 func TestLsBodySearchScansMarkdown(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/question", Name: "Question", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z"), Body: "nothing special"},
@@ -96,6 +248,7 @@ func TestLsBodySearchScansMarkdown(t *testing.T) {
 // A multi-word query matches a fiber when every word occurs somewhere in it,
 // in any order and across fields; -r keeps the whole query as one pattern.
 func TestLsQueryMatchesEveryWord(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "email/reply-drafts", Name: "Draft replies", Outcome: "Every EMAIL gets a reply", CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -136,6 +289,7 @@ func TestLsQueryMatchesEveryWord(t *testing.T) {
 // A query with no words is no query: ls lists as it would bare, and find asks
 // for something to search for, rather than zero terms matching every fiber.
 func TestLsWhitespaceQueryIsNoQuery(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/open", Name: "Open", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -169,6 +323,7 @@ func TestLsWhitespaceQueryIsNoQuery(t *testing.T) {
 // pointing at that sibling); a fiber without one omits/empties the field. Both
 // the plain walk and the --json-field projection must agree.
 func TestLsJSONReportPath(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	for _, fiber := range []*felt.Felt{
 		{ID: "project/reported", Name: "Reported", Status: felt.StatusOpen, CreatedAt: mustParseTime(t, "2026-04-10T09:00:00Z")},
@@ -229,6 +384,7 @@ func TestLsJSONReportPath(t *testing.T) {
 // ancestor stands in for its descendants with a count; -v restores the flat
 // listing; --json stays uncollapsed for the daemon and hook consumers.
 func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
@@ -288,6 +444,7 @@ func TestLsCollapsesMatchesUnderMatchingAncestor(t *testing.T) {
 // An exact match is the likeliest target of the query, so it survives collapse
 // even when an ancestor also matches.
 func TestLsCollapseKeepsExactMatch(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{
@@ -315,6 +472,7 @@ func TestLsCollapseKeepsExactMatch(t *testing.T) {
 // matches are counted rather than printed — a store holds far more finished
 // work than live work.
 func TestLsQueryHidesClosedBehindHint(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
@@ -400,6 +558,7 @@ func TestLsQueryHidesClosedBehindHint(t *testing.T) {
 // Closed suppression runs before the containment collapse, so a collapsed
 // ancestor's count describes lines that would actually have printed.
 func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	closedAt := mustParseTime(t, "2026-04-11T09:00:00Z")
@@ -426,6 +585,7 @@ func TestLsCollapseCountExcludesSuppressedClosed(t *testing.T) {
 }
 
 func TestTreeDepthLimit(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	for _, fiber := range []*felt.Felt{

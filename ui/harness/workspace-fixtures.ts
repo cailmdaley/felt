@@ -51,6 +51,17 @@ const zipBytes = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...Array<number>(18).fi
 
 const key = (owner: string, path: string): string => `${owner}\u0000${path}`
 
+/** 64 hex digits that change with the identity they are computed from. */
+function fixtureDigest(identity: string): string {
+  let out = ''
+  for (let round = 0; out.length < 64; round++) {
+    let hash = 2166136261 ^ round
+    for (let i = 0; i < identity.length; i++) hash = Math.imul(hash ^ identity.charCodeAt(i), 16777619)
+    out += (hash >>> 0).toString(16).padStart(8, '0')
+  }
+  return out.slice(0, 64)
+}
+
 export interface WorkspaceNativeURLs {
   blobURLs: Record<string, string>
   rewrites: Array<{ owner: string; path: string; blobURL: string }>
@@ -91,7 +102,56 @@ export function installWorkspaceNativeURLs(example: WorkspaceExample): Workspace
   return { blobURLs, rewrites }
 }
 
-export function workspaceExample(now: number, transcriptScenario: string | null = null): WorkspaceExample {
+/**
+ * Plain notes the fixture links to, none Shuttle-managed: two roles from the
+ * role store (one held by two holders and named by three rosters, one held
+ * by no one and named by none), the holder pages, and a note outside it.
+ */
+export const NOTE_FIBERS = [
+  {
+    id: 'roles/surveyor',
+    uid: '01KVBR8P3JM2BTP4BB78T245T5',
+    name: 'Surveyor',
+    outcome: 'Walks a project end to end and maps what is there before anyone builds on it.',
+    body: 'The surveyor reads before it writes: the code, the data products and the open questions, in that order.\n\nIts working terms are in [[research/workspace/glossary]]; a role with no work yet is [[roles/scribe]].',
+  },
+  {
+    id: 'roles/surveyor/opus',
+    uid: '01KVBR9Q4KN3CVQ5CC89V356V6',
+    name: 'Surveyor: opus',
+    outcome: 'Opus holds the surveyor role across the workspace projects.',
+    body: 'Notes this holder keeps between surveys.',
+  },
+  {
+    id: 'roles/surveyor/sonnet',
+    uid: '01KVBRAR5MP4DWR6DD90W467W7',
+    name: 'Surveyor: sonnet',
+    outcome: 'Sonnet holds the surveyor role for quick passes.',
+    body: 'Notes this holder keeps between passes.',
+  },
+  {
+    id: 'roles/scribe',
+    uid: '01KVBRBS6NQ5EXS7EE01X578X8',
+    name: 'Scribe',
+    outcome: 'Keeps the record of what was decided and why.',
+    body: 'No roster names the scribe yet, and no one holds it.',
+  },
+  {
+    id: 'research/workspace/glossary',
+    uid: '01KVBRCT7PR6FYT8FF12Y689Y9',
+    name: 'Glossary',
+    outcome: 'The terms the workspace projects share.',
+    body: '**Transfer function**: the ratio of recovered to injected power, per scale.\n\n**Null test**: a difference map that should hold no signal.',
+  },
+]
+
+export const MUSIC_UID = '01KVBR7N2HK1ASN3AA67W134S4'
+export const MUSIC_NAME = 'Music'
+export const MUSIC_TRACKS = 19
+
+/** `music` adds a listening channel: a report and nineteen recordings, the shape of a real album review. */
+export function workspaceExample(now: number, options: { music?: boolean; transcriptScenario?: string | null } = {}): WorkspaceExample {
+  const { transcriptScenario = null } = options
   const minute = 60_000
   const day = 86_400_000
   const project = '/fixture-store/workspace'
@@ -109,6 +169,7 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
       age: 0.1,
       outcome: 'The response passes the null test at every scale; the report and source products are ready for review.',
       host: WORKSPACE_HOST,
+      collaboration: { surveyor: ['opus'] },
     },
     {
       id: 'research/workspace/weekly-summary',
@@ -118,6 +179,7 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
       age: 1,
       outcome: 'Collect the latest validation results and note what remains uncertain.',
       host: WORKSPACE_HOST,
+      collaboration: { surveyor: ['sonnet'] },
     },
     {
       id: 'pipeline/spin/remote-review',
@@ -127,6 +189,9 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
       age: 2,
       outcome: 'Check the covariance products on the remote host before the next run.',
       host: WORKSPACE_REMOTE,
+      // Two roles; the second names no role fiber, so it reads as plain text,
+      // and is long enough to need cutting at a phone's width.
+      collaboration: { surveyor: [], 'covariance-archivist-and-steward': [] },
     },
     {
       id: 'research/workspace/mask-validation',
@@ -147,6 +212,15 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
       host: WORKSPACE_REMOTE,
     },
     {
+      id: 'research/workspace/validation-follow-up',
+      uid: '01KVBRDV8QS7GZU9GG23Z790Z0',
+      name: 'Validate the summary against simulations',
+      status: 'open',
+      age: 0.5,
+      outcome: 'Run the summary’s null tests on independent simulations before closing the loop.',
+      host: WORKSPACE_HOST,
+    },
+    {
       id: 'research/workspace/method-note',
       uid: '01KVBR6M1GJ0ZRM29956V023R3',
       name: 'Method note',
@@ -156,6 +230,15 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
       host: WORKSPACE_HOST,
       inCardIndex: false,
     },
+    ...(options.music ? [{
+      id: 'research/workspace/music',
+      uid: MUSIC_UID,
+      name: MUSIC_NAME,
+      status: 'closed',
+      age: 0.05,
+      outcome: 'Nineteen takes are rendered; the listening notes compare them.',
+      host: WORKSPACE_HOST,
+    }] : []),
   ]
   const previews = new URLSearchParams(location.search).getAll('theme-preview')
   const previewFor = (uid: string): string | undefined => previews.find(value => value.startsWith(`${uid}:`))?.slice(uid.length + 1)
@@ -179,6 +262,9 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
         // Distinct from frontmatter stamps and receipt times: real file mtime.
         modified_at: iso(-47 * minute),
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
+        ...(fiber.id === 'research/workspace/weekly-summary' ? { depends_on: WORKSPACE_UID } : {}),
+        ...(fiber.id === 'research/workspace/validation-follow-up' ? { depends_on: '01KVBR2G7CXDWMG85592QW78M9' } : {}),
+        ...(fiber.collaboration ? { collaboration: fiber.collaboration } : {}),
         shuttle: {
           kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
           schedule: fiber.id === 'pipeline/spin/remote-review' ? { expr: '0 9 * * *', tz: 'UTC' } : undefined,
@@ -238,7 +324,7 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
   // A reveal.js-style deck and a script-driven carousel own their sideways gestures.
   const pageGestures = `<div id="gesture-deck" style="touch-action:pan-y;height:120px;background:#eee8dc">Deck</div><div id="gesture-carousel" style="height:120px;background:#e4ece4">Carousel</div><script>document.getElementById('gesture-carousel').addEventListener('touchmove',e=>e.preventDefault(),{passive:false})</script>`
   const longReport = Array.from({ length: 80 }, (_, index) => (index === 40 ? pageGestures : '') + reportLine(index)).join('\n')
-  const reportHTML = `<!doctype html><html><head><meta charset="utf-8"><title>Calibration report</title><style>body{font:16px/1.5 sans-serif;margin:32px}h1{color:#514637}</style></head><body><h1 id="report-sentinel">Calibration report</h1><p id="report-identity"></p><p>Read <code>brief.md</code> and <a href="../../../../deliverables/brief.md">the field note</a>; listen to <code>tone.mp3</code> or <code>tone.wav</code>.</p>${wideTable}${longReport}<script>document.getElementById('report-identity').textContent='instance:'+crypto.randomUUID()</script></body></html>`
+  const reportHTML = `<!doctype html><html><head><meta charset="utf-8"><title>Calibration report</title><style>body{font:16px/1.5 sans-serif;margin:32px}h1{color:#514637}@media (prefers-color-scheme: dark){body{background:#16181d;color:#e6e0d4}h1{color:#e8cf9a}}</style></head><body><h1 id="report-sentinel">Calibration report</h1><p id="report-identity"></p><p>Read <code>brief.md</code> and <a href="../../../../deliverables/brief.md">the field note</a>; listen to <code>tone.mp3</code> or <code>tone.wav</code>.</p>${wideTable}${longReport}<script>document.getElementById('report-identity').textContent='instance:'+crypto.randomUUID()</script></body></html>`
   const file = (owner: string, path: string, mime: string, body: Blob | string): WorkspaceFileFixture => ({
     owner,
     path,
@@ -281,6 +367,12 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
     file(WORKSPACE_REMOTE, '/scratch/fixture-store/covariance/transfer.txt', 'text/plain', 'Remote receipt fixture.\n'),
     file(WORKSPACE_HOST, `${project}/deliverables/mask-validation.md`, 'text/markdown', '# Mask validation\n\nThe input mask was held fixed.\n'),
   ]
+  const musicDir = `${project}/.felt/research/workspace/music`
+  const tracks = options.music ? Array.from({ length: MUSIC_TRACKS }, (_, i) => `${project}/music/take-${String(i + 1).padStart(2, '0')}.${i % 2 ? 'wav' : 'mp3'}`) : []
+  if (options.music) {
+    files.push(file(WORKSPACE_HOST, `${musicDir}/report.html`, 'text/html', `<!doctype html><html><head><meta charset="utf-8"><title>Listening notes</title></head><body><h1>Listening notes</h1>${tracks.map(t => `<p>${t.split('/').at(-1)}: steady.</p>`).join('')}</body></html>`))
+    for (const track of tracks) files.push(file(WORKSPACE_HOST, track, track.endsWith('.wav') ? 'audio/wav' : 'audio/mpeg', track.endsWith('.wav') ? blobFor(wavData, 'audio/wav') : blobFor(mp3Data, 'audio/mpeg')))
+  }
   const receipts: Array<Record<string, unknown>> = []
   const receipt = (fullPath: string, uid: string, offset: number, host: string, sessionId: string): void => {
     receipts.push({ fullPath, basename: fullPath.split('/').at(-1), timestamp: now + offset, sessionId, uid, host })
@@ -296,7 +388,10 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
   receipt(`${project}/deliverables/weekly.txt`, '01KVBR2G7CXDWMG85592QW78M9', -day, WORKSPACE_HOST, 'weekly-delivery')
   receipt('/scratch/fixture-store/covariance/transfer.txt', '01KVBR3H8DYFXNH96683RX89N0', -2 * day, WORKSPACE_REMOTE, 'remote-delivery')
   receipt(`${project}/deliverables/mask-validation.md`, '01KVBR4J9EZGYPJ07734SY90P1', -3 * day, WORKSPACE_HOST, 'mask-delivery')
+  tracks.forEach((track, i) => receipt(track, MUSIC_UID, -(30 - i) * minute, WORKSPACE_HOST, 'music-render'))
+  if (options.music) receipt(`${musicDir}/report.html`, MUSIC_UID, -minute, WORKSPACE_HOST, 'music-notes')
   const bodies: Record<string, string> = {
+    'research/workspace/music': ':::{embed} report.html\n:title: Listening notes\n:::\n\nNineteen takes of the theme.',
     [WORKSPACE_ID]: [
       'The response test keeps the science path and the data products together.',
       '',
@@ -314,6 +409,7 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
     ].join('\n'),
     'research/workspace/method-note': 'The response correction uses independent simulations and leaves the measured shear unchanged in the null tests.',
     'research/workspace/weekly-summary': 'Weekly summary body.',
+    'research/workspace/validation-follow-up': 'Compare the summary’s null tests against independent simulations.',
     'pipeline/spin/remote-review': 'The remote covariance review is running on the fixture host.',
     'research/workspace/mask-validation': 'The mask validation passed.',
     'pipeline/spin/transfer-check': 'Compare the transfer functions at both map resolutions.',
@@ -344,6 +440,7 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
       return { id: String(fiber.id), name: String(fiber.name) }
     }),
     { id: 'research/workspace/method-note', name: 'Method note' },
+    ...NOTE_FIBERS.map(({ id, name }) => ({ id, name })),
   ]
   const fileMap = new Map(files.map(item => [key(item.owner, item.path), item]))
   const fileResponse = (url: string, method: string, requestHeaders?: HeadersInit): Response => {
@@ -358,10 +455,21 @@ export function workspaceExample(now: number, transcriptScenario: string | null 
         : { exists: false }), { headers: { 'Content-Type': 'application/json' } })
     }
     if (!found) return new Response(null, { status: 404, statusText: 'Not Found' })
-    const etag = `"fixture-${found.body.size}"`
-    if (new Headers(requestHeaders).get('If-None-Match') === etag) return new Response(null, { status: 304, headers: { ETag: etag } })
-    const headers = new Headers({ 'Content-Type': found.mime, 'Content-Length': String(found.body.size), ETag: etag })
-    return new Response(method.toUpperCase() === 'HEAD' ? null : found.body, { status: 200, headers })
+    // Shaped like the daemon's content-digest validator, so conditional reads answer 304.
+    const etag = `W/"sha256-${fixtureDigest(`${owner}:${path}:${found.body.size}`)}"`
+    const request = new Headers(requestHeaders)
+    if (request.get('If-None-Match') === etag) return new Response(null, { status: 304, headers: { ETag: etag } })
+    const headers = new Headers({ 'Content-Type': found.mime, 'Content-Length': String(found.body.size), ETag: etag, 'Accept-Ranges': 'bytes' })
+    if (method.toUpperCase() === 'HEAD') return new Response(null, { status: 200, headers })
+    const range = /^bytes=(\d+)-(\d*)$/.exec(request.get('Range') ?? '')
+    if (range) {
+      const first = Number(range[1])
+      const last = Math.min(found.body.size - 1, range[2] ? Number(range[2]) : found.body.size - 1)
+      headers.set('Content-Range', `bytes ${first}-${last}/${found.body.size}`)
+      headers.set('Content-Length', String(last - first + 1))
+      return new Response(found.body.slice(first, last + 1), { status: 206, headers })
+    }
+    return new Response(found.body, { status: 200, headers })
   }
   return {
     host: WORKSPACE_HOST,

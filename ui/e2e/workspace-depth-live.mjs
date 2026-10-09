@@ -3,13 +3,13 @@
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { chromium } from 'playwright-core'
+import { getBrowser } from './browser.mjs'
 const output = process.env.WORKSPACE_DEPTH_SHOTS
 assert.ok(output, 'Set WORKSPACE_DEPTH_SHOTS to the evidence directory')
 await mkdir(output, { recursive: true })
 const url = process.env.WORKSPACE_LIVE_URL || 'http://localhost:5182'
 const name = process.env.WORKSPACE_DEPTH_CARD || 'A light, immediate Shuttle document workspace'
-const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true })
+const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
 const evidence = { url, name, screenshots: [], frameSamples: [], errors: [] }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function pageFor(viewport) {
@@ -28,7 +28,7 @@ async function pageFor(viewport) {
 async function redact(page) {
   // Private fibers keep their silhouette without copying their content into evidence.
   await page.evaluate(() => {
-    const rows = [...document.querySelectorAll('.kbn-card,.kbn-pin-chip,.kbn-cluster-item,.ws-overview-folio,.ws-channel-row')]
+    const rows = [...document.querySelectorAll('.kbn-card,.kbn-cluster-item,.ws-overview-folio,.ws-channel-row')]
     const privateUids = new Set(window.__workspacePrivateUids || [])
     for (const el of rows) {
       const path = el.dataset.fiberId || el.querySelector('.kbn-card-id')?.textContent || el.title

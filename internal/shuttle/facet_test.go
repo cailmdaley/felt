@@ -27,12 +27,14 @@ func fiberWithShuttleNode(t *testing.T, node *yaml.Node) *felt.Felt {
 // TestShuttleFacet_NonMappingIsNotAFacet checks that scalar, null, and sequence
 // values stay opaque to Shuttle's facet decoder and JSON decorator.
 func TestShuttleFacet_NonMappingIsNotAFacet(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	cases := map[string]*yaml.Node{
 		"scalar":   {Kind: yaml.ScalarNode, Tag: "!!str", Value: "just-a-string"},
 		"null":     {Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"},
 		"sequence": {Kind: yaml.SequenceNode, Tag: "!!seq", Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "a"}}},
 	}
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(env)
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -79,6 +81,7 @@ func shuttleFiber(t *testing.T, block map[string]any) *felt.Felt {
 }
 
 func TestShuttleFacet_PureNoteIsNoOp(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, nil)
 	if HasFacet(f) {
 		t.Fatal("a fiber with no shuttle: block must not report a facet")
@@ -92,6 +95,7 @@ func TestShuttleFacet_PureNoteIsNoOp(t *testing.T) {
 }
 
 func TestShuttleFacet_ValidOneshot(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{"kind": "oneshot", "agent": "claude-opus", "host": "somehost"})
 	if !HasFacet(f) {
 		t.Fatal("expected a shuttle facet")
@@ -102,6 +106,7 @@ func TestShuttleFacet_ValidOneshot(t *testing.T) {
 }
 
 func TestShuttleFacet_ValidStanding(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{
 		"kind":     "standing",
 		"agent":    "claude-sonnet",
@@ -113,6 +118,7 @@ func TestShuttleFacet_ValidStanding(t *testing.T) {
 }
 
 func TestShuttleFacet_RejectsBadKind(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{"kind": "bogus"})
 	err := ValidateFacet(f)
 	if err == nil || !strings.Contains(err.Error(), "kind") {
@@ -123,6 +129,7 @@ func TestShuttleFacet_RejectsBadKind(t *testing.T) {
 // Facet schema validation does not resolve an agent identity; Shuttle resolves
 // agents where a block is armed or dispatched.
 func TestShuttleFacet_ToleratesUnknownAgent(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{"kind": "oneshot", "agent": "no-such-agent"})
 	if err := ValidateFacet(f); err != nil {
 		t.Fatalf("unknown agent must not fail facet validation, got: %v", err)
@@ -130,6 +137,7 @@ func TestShuttleFacet_ToleratesUnknownAgent(t *testing.T) {
 }
 
 func TestShuttleFacet_StandingRequiresSchedule(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{"kind": "standing", "agent": "claude-sonnet"})
 	err := ValidateFacet(f)
 	if err == nil || !strings.Contains(err.Error(), "schedule") {
@@ -138,6 +146,7 @@ func TestShuttleFacet_StandingRequiresSchedule(t *testing.T) {
 }
 
 func TestShuttleFacet_ToleratesRuntimeFields(t *testing.T) {
+	t.Parallel()
 	// The daemon writes continuation/runtime fields as flat siblings of the
 	// config keys. Facet validation accepts them, and the typed view ignores them.
 	f := shuttleFiber(t, map[string]any{
@@ -163,6 +172,7 @@ func TestShuttleFacet_ToleratesRuntimeFields(t *testing.T) {
 // TestSetField_PreservesRuntimeKeys checks that writing one config/runtime key
 // preserves sibling fields and survives a Marshal -> Parse round-trip.
 func TestSetField_PreservesRuntimeKeys(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "host": "h", "project_dir": "/tmp/x",
 		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
@@ -204,6 +214,7 @@ func TestSetField_PreservesRuntimeKeys(t *testing.T) {
 // TestSetRuntimeField_NestsAndPreserves checks that runtime keys nest below
 // shuttle.runtime, config edits preserve them, and empty values remove keys.
 func TestSetRuntimeField_NestsAndPreserves(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{
 		"kind": "standing", "agent": "claude-opus", "host": "h", "project_dir": "/tmp/x",
 	})
@@ -289,6 +300,7 @@ func roundTrip(t *testing.T, f *felt.Felt) *felt.Felt {
 // TestSetField_NoBlockErrors checks that field writes require a mapping-valued
 // facet.
 func TestSetField_NoBlockErrors(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, nil)
 	if err := SetField(f, "handed_off_at", "2026-06-21T01:00:00Z"); err == nil {
 		t.Fatal("SetField on a pure note must error, got nil")
@@ -298,6 +310,7 @@ func TestSetField_NoBlockErrors(t *testing.T) {
 // TestSetNodeField_TypedAndDelete checks typed scalar values, key removal, and
 // preservation of runtime siblings across a Marshal -> Parse round-trip.
 func TestSetNodeField_TypedAndDelete(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "effort": "high",
 		"session_uuid": "abc-123", "dispatched_at": "2026-06-21T00:00:00Z",
@@ -351,12 +364,13 @@ func TestSetNodeField_TypedAndDelete(t *testing.T) {
 // TestSetConfig_PreservesRuntimeKeys checks that replacing block configuration
 // retains daemon-owned continuation fields and drops omitted config keys.
 func TestSetConfig_PreservesRuntimeKeys(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "effort": "high",
 		"session_uuid": "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
 	})
 
-	// Redefine as a standing role with a new agent and no effort.
+	// Redefine as a standing constitution with a new agent and no effort.
 	newBlock := &Block{
 		Kind: "standing", Host: "h", ProjectDir: "/tmp/x", Agent: "claude-sonnet",
 		Schedule: &Schedule{Expr: "0 9 * * 1-5", TZ: "Europe/Paris"},
@@ -392,6 +406,7 @@ func TestSetConfig_PreservesRuntimeKeys(t *testing.T) {
 
 // TestSetConfig_FreshInstall installs a block on a fiber without a facet.
 func TestSetConfig_FreshInstall(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, nil)
 	if err := SetConfig(f, &Block{Kind: "oneshot", Host: "h", Agent: "claude-opus"}); err != nil {
 		t.Fatalf("SetConfig (fresh): %v", err)
@@ -407,7 +422,7 @@ func TestSetConfig_FreshInstall(t *testing.T) {
 
 func marshalShuttle(t *testing.T, f *felt.Felt) map[string]any {
 	t.Helper()
-	reg, err := LoadAgentRegistry()
+	reg, err := LoadAgentRegistry(testEnv(t))
 	if err != nil {
 		t.Fatalf("LoadAgentRegistry: %v", err)
 	}
@@ -426,6 +441,7 @@ func marshalShuttle(t *testing.T, f *felt.Felt) map[string]any {
 }
 
 func TestResolve_AdditiveAndFlatPreserved(t *testing.T) {
+	t.Parallel()
 	// The daemon reads the flat config+runtime fields directly off `shuttle`.
 	// Resolution must leave every one of them in place and add ONLY `resolved`.
 	f := shuttleFiber(t, map[string]any{
@@ -456,6 +472,7 @@ func TestResolve_AdditiveAndFlatPreserved(t *testing.T) {
 }
 
 func TestResolve_StandingNextDue(t *testing.T) {
+	t.Parallel()
 	f := shuttleFiber(t, map[string]any{
 		"kind": "standing", "agent": "claude-sonnet",
 		"schedule": map[string]any{"expr": "0 9 * * 1-5", "tz": "Europe/Paris"},
@@ -464,16 +481,18 @@ func TestResolve_StandingNextDue(t *testing.T) {
 	sh := out["shuttle"].(map[string]any)
 	resolved, ok := sh["resolved"].(map[string]any)
 	if !ok {
-		t.Fatalf("resolved missing for standing role: %v", sh)
+		t.Fatalf("resolved missing for standing constitution: %v", sh)
 	}
 	if _, ok := resolved["next_due"]; !ok {
-		t.Fatalf("standing role must carry resolved.next_due, got: %v", resolved)
+		t.Fatalf("standing constitution must carry resolved.next_due, got: %v", resolved)
 	}
 }
 
 func TestResolve_PureNoteIsNoOp(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
 	f := shuttleFiber(t, nil)
-	reg, _ := LoadAgentRegistry()
+	reg, _ := LoadAgentRegistry(env)
 	if err := Resolve(f, reg, time.Now()); err != nil {
 		t.Fatalf("Resolve on a note: %v", err)
 	}

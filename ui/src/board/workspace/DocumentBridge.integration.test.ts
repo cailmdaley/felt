@@ -165,6 +165,7 @@ describe('minified production document keyboard bridge', () => {
       ['h', {}, 'prev'], ['l', {}, 'next'],
       ['s', {}, 'sidebar'], ['/', {}, 'find'],
       ['j', {}, 'nextChannel'], ['k', {}, 'prevChannel'],
+      ['J', { shiftKey: true }, 'nextGroup'], ['K', { shiftKey: true }, 'prevGroup'],
       ['ArrowDown', { repeat: true }, 'scrollDown'], ['?', { shiftKey: true }, 'help'],
       ['\\', { metaKey: true }, 'sidebar'], ['\\', { ctrlKey: true }, 'sidebar'],
     ]
@@ -178,8 +179,6 @@ describe('minified production document keyboard bridge', () => {
     press(frame, '?', { repeat: true })
     press(frame, 'Escape', { repeat: true })
     press(frame, 'Delete')
-    press(frame, 'J', { shiftKey: true })
-    press(frame, 'K', { shiftKey: true })
     press(frame, 'l', { ctrlKey: true })
     expect(app).toHaveBeenCalledTimes(keys.length)
     expect(messages).toHaveBeenCalledTimes(keys.length)

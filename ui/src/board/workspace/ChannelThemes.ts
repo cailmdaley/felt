@@ -1,6 +1,8 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { fileBytesUrl } from '../utils.js'
+import { fetchDocument, RESOURCE_PRIORITY } from '../documentResources.js'
 import { scopeTheme } from './themeScope.js'
+import { APPEARANCE_CHANGED, appearance, appearanceTheme, currentScheme, watchAppearance } from '../appearance.js'
 import './themes/surface.css'
 
 const bundled = import.meta.glob<string>('./themes/*.css', { query: '?raw', import: 'default', eager: true })
@@ -33,46 +35,60 @@ export class ChannelThemes {
   private readonly changes = new Set<HTMLElement>()
   private changeQueued = false
   private readonly base: string
+  /** The board's palette re-inks with the scheme, so the snapshot and every compiled theme follow it. */
+  private readonly reappear = (): void => {
+    this.writeDefaults()
+    for (const entry of this.entries.values()) {
+      entry.base = this.baseName(entry.card)
+      this.compile(entry); this.paint(entry)
+    }
+  }
   constructor(base: string) {
     this.base = base
-    // Snapshot the unthemed root, not the reader. Custom variables at a channel
-    // root cannot bleed through the CSS scope limit by ordinary inheritance.
+    watchAppearance()
+    window.addEventListener(APPEARANCE_CHANGED, this.reappear)
     this.actDefaults = document.createElement('style')
     this.actDefaults.dataset.wsActDefaults = ''
-    const defaults = getComputedStyle(document.documentElement)
-    for (let i = 0; i < defaults.length; i++) {
-      const name = defaults.item(i)
-      if (name.startsWith('--')) this.defaults.set(name, defaults.getPropertyValue(name).trim())
-    }
-    const declarations = (entries: Iterable<[string, string]>): string => [...entries].map(([name, value]) => `${name}: ${value || 'initial'};`).join('\n')
-    this.actDefaults.textContent = `@layer shuttle-theme-defaults {
-    :where([data-ws-theme-boundary]:not(.ws-reader)) {
-      all: initial; display: revert; direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
-      ${declarations(this.defaults)}
-      color: var(--ws-ink); font-family: var(--ws-serif); line-height: 1.4; box-sizing: border-box;
-    }
-    }
-    :where([data-ws-theme] [data-part="act"], [data-ws-act-material]) {
-      ${declarations([...this.defaults].filter(([name]) => name !== '--ws-paper' && name !== '--ws-ink'))}
-      --ws-ink-soft: var(--ws-ink); --ws-ink-muted: var(--ws-ink); --ws-ink-faint: var(--ws-ink);
-      --ws-hairline: color-mix(in srgb, var(--ws-ink) 35%, transparent);
-      --ws-hairline-soft: color-mix(in srgb, var(--ws-ink) 20%, transparent);
-      --ws-fill: color-mix(in srgb, var(--ws-ink) 10%, var(--ws-paper));
-      --ws-hover: color-mix(in srgb, var(--ws-ink) 8%, transparent);
-      --ws-agent: color-mix(in srgb, var(--kbn-agent) 50%, var(--ws-ink));
-      --ws-you: color-mix(in srgb, var(--kbn-you) 55%, var(--ws-ink));
-      --ws-owed: color-mix(in srgb, var(--kbn-owed) 40%, var(--ws-ink));
-      --ws-verdict: color-mix(in srgb, var(--kbn-tempered-ink) 40%, var(--ws-ink));
-      --ws-red: var(--ws-owed); --ws-machine: var(--ws-agent);
-      --ws-machine-halo: color-mix(in srgb, var(--ws-agent) 20%, transparent);
-      color: var(--ws-ink); font-style: normal; font-weight: normal; text-shadow: none;
-      direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
-    }`
+    this.writeDefaults()
     document.head.append(this.actDefaults)
     try {
       const stored: unknown = JSON.parse(localStorage.getItem(PLAIN_STORAGE) ?? '[]')
       if (Array.isArray(stored)) for (const key of stored) if (typeof key === 'string') this.plain.add(key)
     } catch { /* Storage is optional. */ }
+  }
+  /** Snapshot the unthemed root, not the reader. Custom variables at a channel
+   *  root cannot bleed through the CSS scope limit by ordinary inheritance. */
+  private writeDefaults(): void {
+    this.defaults.clear()
+      const defaults = getComputedStyle(document.documentElement)
+      for (let i = 0; i < defaults.length; i++) {
+        const name = defaults.item(i)
+        if (name.startsWith('--')) this.defaults.set(name, defaults.getPropertyValue(name).trim())
+      }
+      const declarations = (entries: Iterable<[string, string]>): string => [...entries].map(([name, value]) => `${name}: ${value || 'initial'};`).join('\n')
+      this.actDefaults.textContent = `@layer shuttle-theme-defaults {
+      :where([data-ws-theme-boundary]:not(.ws-reader)) {
+        all: initial; display: revert; direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
+        ${declarations(this.defaults)}
+        color: var(--ws-ink); font-family: var(--ws-serif); line-height: 1.4; box-sizing: border-box;
+      }
+      }
+      :where([data-ws-theme] [data-part="act"]) {
+        ${declarations([...this.defaults].filter(([name]) => name !== '--ws-paper' && name !== '--ws-ink'))}
+        --ws-ink-soft: var(--ws-ink); --ws-ink-muted: var(--ws-ink); --ws-ink-faint: var(--ws-ink);
+        --ws-hairline: color-mix(in srgb, var(--ws-ink) 35%, transparent);
+        --ws-hairline-soft: color-mix(in srgb, var(--ws-ink) 20%, transparent);
+        --ws-fill: color-mix(in srgb, var(--ws-ink) 10%, var(--ws-paper));
+        --ws-hover: color-mix(in srgb, var(--ws-ink) 8%, transparent);
+        --ws-agent: color-mix(in srgb, var(--kbn-agent) 50%, var(--ws-ink));
+        --ws-you: color-mix(in srgb, var(--kbn-you) 55%, var(--ws-ink));
+        --ws-owed: color-mix(in srgb, var(--kbn-owed) 40%, var(--ws-ink));
+        --ws-verdict: color-mix(in srgb, var(--kbn-tempered-ink) 40%, var(--ws-ink));
+        --ws-red: var(--ws-owed); --ws-machine: var(--ws-agent);
+        --ws-machine-halo: color-mix(in srgb, var(--ws-agent) 20%, transparent);
+        color: var(--ws-ink); font-style: normal; font-weight: normal; text-shadow: none;
+        direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
+      }`
   }
   isPlain(card: KanbanCard): boolean { return this.plain.has(this.key(card)) }
   hasTheme(card: KanbanCard): boolean {
@@ -129,13 +145,6 @@ export class ChannelThemes {
     if (old) this.paint(old)
     if (changed) this.changed(root)
   }
-  /** Only the queued verdict's paper and ink cross into the body-level ACT toast. */
-  material(root: HTMLElement): { paper: string; ink: string } | undefined {
-    const entry = this.roots.get(root)
-    if (!entry || this.plain.has(entry.key) || !root.classList.contains('ws-reader')) return
-    const style = getComputedStyle(root)
-    return { paper: style.getPropertyValue('--ws-paper').trim(), ink: style.getPropertyValue('--ws-ink').trim() }
-  }
   private changed(root: HTMLElement): void {
     this.changes.add(root)
     if (this.changeQueued) return
@@ -147,14 +156,16 @@ export class ChannelThemes {
     })
   }
   private key(card: KanbanCard): string { return JSON.stringify([card.originId, card.uid ?? card.id]) }
+  /** The declared bundled base, given way to the viewer's appearance; a preview shows its theme as named. */
   private baseName(card: KanbanCard): string {
     const previews = import.meta.env.DEV ? new URLSearchParams(location.search).getAll('theme-preview') : []
     const preview = previews.find(value => value.startsWith(`${card.uid ?? card.id}:`))?.slice((card.uid ?? card.id).length + 1)
     const declared = preview ?? card.theme ?? 'portolan'
     const name = declared.toLowerCase().replaceAll(' ', '-')
-    if (bundled[`./themes/${name}.css`] && name !== 'surface') return name
-    if (!this.warnings.has(declared)) { console.warn(`Shuttle theme: unknown theme “${declared}”; using Portolan`); this.warnings.add(declared) }
-    return 'portolan'
+    let known = 'portolan'
+    if (`./themes/${name}.css` in bundled && name !== 'surface') known = name
+    else if (!this.warnings.has(declared)) { console.warn(`Shuttle theme: unknown theme “${declared}”; using Portolan`); this.warnings.add(declared) }
+    return preview ? known : appearanceTheme(known, currentScheme(), appearance().dark)
   }
   private compile(entry: ThemeEntry): void {
     const selector = `[data-ws-theme="${entry.scope}"]`
@@ -208,8 +219,8 @@ export class ChannelThemes {
     let customAvailable = false
     entry.pending = (async () => {
       try {
-        const res = await fetch(fileBytesUrl(this.base, path, owner), {
-          cache: 'no-store', signal: AbortSignal.timeout(25000),
+        const res = await fetchDocument(fileBytesUrl(this.base, path, owner), {
+          cache: 'no-store', signal: AbortSignal.timeout(25000), rank: RESOURCE_PRIORITY.selected,
           headers: entry.etag ? { 'If-None-Match': entry.etag } : undefined,
         })
         if (this.disposed || entry.card.fiberDir + '/theme.css' !== path || entry.card.originId !== owner || res.status === 304) return
@@ -239,6 +250,7 @@ export class ChannelThemes {
   }
   dispose(): void {
     this.disposed = true
+    window.removeEventListener(APPEARANCE_CHANGED, this.reappear)
     for (const root of [...this.roots.keys()]) this.unbind(root)
     this.entries.clear()
     this.actDefaults.remove()

@@ -9,11 +9,13 @@ import (
 )
 
 func TestClaudePluginMaintenanceEnvironmentIsChildOnly(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
 	for _, key := range []string{"CLAUDE_CODE_SIMPLE", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_AUTOUPDATER"} {
-		t.Setenv(key, "0")
+		env.Set(key, "0")
 	}
 	args := []string{"marketplace", "add", "/path with spaces/plugin"}
-	command := claudePluginCommand(args...)
+	command := testApp(t, env).claudePluginCommand(args...)
 	if want := append([]string{"claude", "plugin"}, args...); !reflect.DeepEqual(command.Args, want) {
 		t.Fatalf("arguments changed: got %q, want %q", command.Args, want)
 	}
@@ -27,30 +29,28 @@ func TestClaudePluginMaintenanceEnvironmentIsChildOnly(t *testing.T) {
 				}
 			}
 		}
-		if count != 1 || os.Getenv(key) != "0" {
-			t.Fatalf("%s child entries=%d, parent=%q", key, count, os.Getenv(key))
+		if count != 1 || env.Getenv(key) != "0" {
+			t.Fatalf("%s child entries=%d, parent=%q", key, count, env.Getenv(key))
 		}
 	}
 }
 
 func TestHarnessRunnerScopesBareModeToClaudePluginCommands(t *testing.T) {
-	dir := t.TempDir()
-	log := filepath.Join(dir, "calls")
-	t.Setenv("FAKE_MAINTENANCE_LOG", log)
-	t.Setenv("CLAUDE_CODE_SIMPLE", "0")
-	t.Setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "0")
-	t.Setenv("DISABLE_AUTOUPDATER", "0")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	script := `#!/bin/sh
-printf '%s|%s|%s|%s\n' "$*" "$CLAUDE_CODE_SIMPLE" "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "$DISABLE_AUTOUPDATER" >> "$FAKE_MAINTENANCE_LOG"
+	t.Parallel()
+	env, _ := testEnv(t)
+	log := filepath.Join(t.TempDir(), "calls")
+	env.Set("FAKE_MAINTENANCE_LOG", log)
+	env.Set("CLAUDE_CODE_SIMPLE", "0")
+	env.Set("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "0")
+	env.Set("DISABLE_AUTOUPDATER", "0")
+	script := `printf '%s|%s|%s|%s\n' "$*" "$CLAUDE_CODE_SIMPLE" "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" "$DISABLE_AUTOUPDATER" >> "$FAKE_MAINTENANCE_LOG"
 `
 	for _, bin := range []string{"claude", "codex"} {
-		if err := os.WriteFile(filepath.Join(dir, bin), []byte(script), 0o700); err != nil {
-			t.Fatal(err)
-		}
+		fakeCommand(t, env, bin, script)
 	}
+	a := testApp(t, env)
 	for _, call := range [][]string{{"claude", "plugin", "list", "--json"}, {"claude", "--version"}, {"codex", "plugin", "list"}} {
-		if err := runHarnessCLI(call[0], call[1:]...); err != nil {
+		if err := a.runHarnessCLI(call[0], call[1:]...); err != nil {
 			t.Fatal(err)
 		}
 	}

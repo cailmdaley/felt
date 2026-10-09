@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+// One long-lived headless Chrome for e2e runs and agent-browser lanes; see docs/dev/layout.md, "Browser checks".
+import { main } from '../ui/e2e/sharedBrowser.mjs'
+
+main(process.argv.slice(2)).catch(error => { console.error(`shared-browser: ${error.message}`); process.exitCode = 1 })

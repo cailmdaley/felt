@@ -1,13 +1,16 @@
 defmodule ShuttleWeb.AttachmentsControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Phoenix.ConnTest
+
+  alias Shuttle.Test.Env
 
   @endpoint ShuttleWeb.Endpoint
 
   @png <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, "a tiny png body">>
 
+  # Local rather than Shuttle.Test.StubPostClient: it also records the POST
+  # timeout, which the upload forward must raise above the default.
   defmodule ForwardClient do
     use Agent
 
@@ -34,12 +37,10 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
     File.write!(Path.join(fiber_dir, "paste.md"), "---\nname: Paste\n---\n\n")
 
     data_dir = Path.join(root, "data")
-    previous = Map.new(~w(SHUTTLE_STORES SHUTTLE_DATA_DIR), &{&1, System.get_env(&1)})
-    System.put_env("SHUTTLE_STORES", store)
-    System.put_env("SHUTTLE_DATA_DIR", data_dir)
+    Env.put_env("SHUTTLE_STORES", store)
+    Env.put_env("SHUTTLE_DATA_DIR", data_dir)
 
     on_exit(fn ->
-      Enum.each(previous, fn {key, value} -> restore_env(key, value) end)
       File.rm_rf(root)
     end)
 
@@ -122,71 +123,40 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
       refute File.exists?(Path.join(data_dir, "attachments"))
     end
 
-    test "a missing fiber is a 400" do
-      conn = upload(%{"attachments" => [image()]})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "fiber"
-    end
-
-    test "a non-image mime is a 400" do
-      conn = upload(%{"fiber" => "tests/paste", "attachments" => [image("hi", "text/plain")]})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "not an accepted image type"
-    end
-
-    test "bytes that are not the declared image type are a 400" do
-      conn = upload(%{"fiber" => "tests/paste", "attachments" => [image("not a png")]})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "not a image/png image"
-    end
-
-    test "an oversized image is a 400" do
+    test "an invalid request is a 400 naming the broken rule, and writes nothing", %{
+      data_dir: data_dir
+    } do
       big = @png <> :binary.copy(<<0>>, Shuttle.Attachments.max_file_bytes())
-      conn = upload(%{"fiber" => "tests/paste", "attachments" => [image(big)]})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "larger than"
-    end
-
-    test "more than the per-send limit is a 400" do
       many = List.duplicate(image(), Shuttle.Attachments.max_files() + 1)
-      conn = upload(%{"fiber" => "tests/paste", "attachments" => many})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "at most 8 images"
-    end
-
-    test "a total over the batch limit is a 400" do
       # Three images under the per-image limit whose sum is over the total.
       chunk = @png <> :binary.copy(<<0>>, div(Shuttle.Attachments.max_total_bytes(), 3) + 1024)
+      over_total = for n <- 1..3, do: image(chunk <> <<n>>)
+      wrong_sha = Map.put(image(), "sha256", String.duplicate("0", 64))
+      bad_base64 = Map.put(image(), "data", "%%%not base64%%%")
 
-      images =
-        for n <- 1..3 do
-          image(chunk <> <<n>>)
-        end
+      rows = [
+        {"a missing fiber", %{"attachments" => [image()]}, "fiber"},
+        {"a non-image mime", [image("hi", "text/plain")], "not an accepted image type"},
+        {"bytes that are not the declared type", [image("not a png")], "not a image/png image"},
+        {"an oversized image", [image(big)], "larger than"},
+        {"more than the per-send limit", many, "at most 8 images"},
+        {"a total over the batch limit", over_total, "the limit is"},
+        # The batch is all-or-nothing: the valid first image is not written.
+        {"a sha256 that does not match", [image(), wrong_sha], "image 2: sha256 does not match"},
+        {"bad base64", [bad_base64], "not valid base64"},
+        {"an empty attachment list", [], "must not be empty"},
+        {"a missing attachment list", %{"fiber" => "tests/paste"}, "must be a list"}
+      ]
 
-      conn = upload(%{"fiber" => "tests/paste", "attachments" => images})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "the limit is"
-    end
+      for {label, input, message} <- rows do
+        body =
+          if is_list(input), do: %{"fiber" => "tests/paste", "attachments" => input}, else: input
 
-    test "a sha256 that does not match the bytes is a 400", %{data_dir: data_dir} do
-      wrong = Map.put(image(), "sha256", String.duplicate("0", 64))
-      conn = upload(%{"fiber" => "tests/paste", "attachments" => [image(), wrong]})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "image 2: sha256 does not match"
-      # The batch is all-or-nothing: the valid first image was not written.
-      refute File.exists?(Path.join(data_dir, "attachments"))
-    end
-
-    test "bad base64 is a 400" do
-      bad = Map.put(image(), "data", "%%%not base64%%%")
-      conn = upload(%{"fiber" => "tests/paste", "attachments" => [bad]})
-      assert conn.status == 400
-      assert Jason.decode!(conn.resp_body)["error"] =~ "not valid base64"
-    end
-
-    test "an empty or missing attachment list is a 400" do
-      assert upload(%{"fiber" => "tests/paste", "attachments" => []}).status == 400
-      assert upload(%{"fiber" => "tests/paste"}).status == 400
+        conn = upload(body)
+        assert conn.status == 400, label
+        assert Jason.decode!(conn.resp_body)["error"] =~ message, label
+        refute File.exists?(Path.join(data_dir, "attachments")), label
+      end
     end
   end
 
@@ -264,15 +234,8 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
        {:ok, 200, Jason.encode!(%{"files" => [%{"path" => "/remote/attachments/x.png"}]})}}
     )
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "cluster", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, ForwardClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "cluster", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, ForwardClient)
 
     conn =
       upload(%{"fiber" => "tests/remote-only", "origin" => "cluster", "attachments" => [image()]})
@@ -296,15 +259,8 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
   test "a failed forward is a 502 naming the origin" do
     start_supervised!({ForwardClient, {:error, :econnrefused}})
 
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    Application.put_env(:shuttle, :remotes, [%{name: "cluster", url: "http://localhost:4001"}])
-    Application.put_env(:shuttle, :write_forward_client, ForwardClient)
-
-    on_exit(fn ->
-      restore_app_env(:remotes, previous_remotes)
-      restore_app_env(:write_forward_client, previous_client)
-    end)
+    Env.put_app_env(:remotes, [%{name: "cluster", url: "http://localhost:4001"}])
+    Env.put_app_env(:write_forward_client, ForwardClient)
 
     conn = upload(%{"fiber" => "tests/paste", "origin" => "cluster", "attachments" => [image()]})
     assert conn.status == 502

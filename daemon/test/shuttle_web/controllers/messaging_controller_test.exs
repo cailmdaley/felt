@@ -1,5 +1,5 @@
 defmodule ShuttleWeb.MessagingControllerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
   import Phoenix.ConnTest
   import Shuttle.Test.ApiConn
   import Shuttle.Test.Ledgers
@@ -228,30 +228,20 @@ defmodule ShuttleWeb.MessagingControllerTest do
   end
 
   setup do
-    previous_runner = Application.get_env(:shuttle, :felt_runner)
-    previous_client = Application.get_env(:shuttle, :write_forward_client)
-    previous_remotes = Application.get_env(:shuttle, :remotes)
-    previous_app_workers_dir = Application.get_env(:shuttle, :app_workers_dir)
     ledger_path = ledger_setup!("SHUTTLE_SESSIONS_FILE", "messaging_peer_sessions")
 
     app_workers_dir =
       Path.join(System.tmp_dir!(), "messaging_app_workers_#{System.unique_integer([:positive])}")
 
     File.mkdir_p!(app_workers_dir)
-    Application.put_env(:shuttle, :app_workers_dir, app_workers_dir)
+    Shuttle.Test.Env.put_app_env(:app_workers_dir, app_workers_dir)
     host = Shuttle.Poller.own_host_id()
     Process.register(self(), Client)
-    Application.put_env(:shuttle, :felt_runner, Runner)
-    Application.put_env(:shuttle, :write_forward_client, Client)
-    Application.put_env(:shuttle, :remotes, [%Remote{name: "edge", url: "http://remote.test"}])
+    Shuttle.Test.Env.put_app_env(:felt_runner, Runner)
+    Shuttle.Test.Env.put_app_env(:write_forward_client, Client)
+    Shuttle.Test.Env.put_app_env(:remotes, [%Remote{name: "edge", url: "http://remote.test"}])
 
-    on_exit(fn ->
-      restore(:felt_runner, previous_runner)
-      restore(:write_forward_client, previous_client)
-      restore(:remotes, previous_remotes)
-      restore(:app_workers_dir, previous_app_workers_dir)
-      File.rm_rf(app_workers_dir)
-    end)
+    on_exit(fn -> File.rm_rf(app_workers_dir) end)
 
     {:ok, host: host, ledger_path: ledger_path, app_workers_dir: app_workers_dir}
   end
@@ -262,19 +252,9 @@ defmodule ShuttleWeb.MessagingControllerTest do
   } do
     store = Path.join(System.tmp_dir!(), "messaging-ask-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(store, ".felt"))
-    previous_stores = System.get_env("SHUTTLE_STORES")
-    previous_runner = Application.get_env(:shuttle, :felt_stores_runner)
-    System.put_env("SHUTTLE_STORES", store)
-    Application.put_env(:shuttle, :felt_stores_runner, Runner)
-
-    on_exit(fn ->
-      if previous_stores,
-        do: System.put_env("SHUTTLE_STORES", previous_stores),
-        else: System.delete_env("SHUTTLE_STORES")
-
-      restore(:felt_stores_runner, previous_runner)
-      File.rm_rf(store)
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+    Shuttle.Test.Env.put_app_env(:felt_stores_runner, Runner)
+    on_exit(fn -> File.rm_rf(store) end)
 
     write_jsonl!(path, [
       %{"session" => "native/id", "fiber" => "work/worker", "host" => host, "at" => 1}
@@ -330,7 +310,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     ledger_path: path,
     app_workers_dir: app_workers_dir
   } do
-    Application.put_env(:shuttle, :felt_runner, AppRunner)
+    Shuttle.Test.Env.put_app_env(:felt_runner, AppRunner)
     thread_id = "11111111-1111-4111-8111-111111111111"
     transcript_id = "22222222-2222-4222-8222-222222222222"
     uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -380,7 +360,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     host: host,
     app_workers_dir: app_workers_dir
   } do
-    Application.put_env(:shuttle, :felt_runner, EmptyPeerRunner)
+    Shuttle.Test.Env.put_app_env(:felt_runner, EmptyPeerRunner)
     thread_id = "11111111-1111-4111-8111-111111111111"
     address = "shuttle://#{host}/codex/#{thread_id}"
     record_path = Path.join(app_workers_dir, thread_id <> ".json")
@@ -425,7 +405,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     host: host,
     ledger_path: path
   } do
-    Application.put_env(:shuttle, :felt_runner, EmptyPeerRunner)
+    Shuttle.Test.Env.put_app_env(:felt_runner, EmptyPeerRunner)
 
     write_jsonl!(path, [
       %{
@@ -459,7 +439,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     host: host,
     ledger_path: path
   } do
-    Application.put_env(:shuttle, :felt_runner, EmptyPeerRunner)
+    Shuttle.Test.Env.put_app_env(:felt_runner, EmptyPeerRunner)
     thread_id = "11111111-1111-4111-8111-111111111111"
     transcript_id = "22222222-2222-4222-8222-222222222222"
     uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -538,7 +518,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
         end
       end)
 
-    app_workers_dir = Application.get_env(:shuttle, :app_workers_dir)
+    app_workers_dir = Shuttle.Env.app(:app_workers_dir)
     app_workers_token = {app_workers_dir, []}
 
     cached = %{
@@ -568,7 +548,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     ledger_path: path,
     app_workers_dir: app_workers_dir
   } do
-    Application.put_env(:shuttle, :felt_runner, AppRunner)
+    Shuttle.Test.Env.put_app_env(:felt_runner, AppRunner)
     thread_id = "11111111-1111-4111-8111-111111111111"
     transcript_id = "22222222-2222-4222-8222-222222222222"
     uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
@@ -643,7 +623,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
   end
 
   test "remote discovery timeouts identify an unreachable host" do
-    Application.put_env(:shuttle, :write_forward_client, TimeoutClient)
+    Shuttle.Test.Env.put_app_env(:write_forward_client, TimeoutClient)
 
     body = api_conn() |> get("/api/v1/peers") |> json_response(200)
 
@@ -998,7 +978,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
   end
 
   test "remote wake timeout stays unknown and explains safe retry" do
-    Application.put_env(:shuttle, :write_forward_client, TimeoutClient)
+    Shuttle.Test.Env.put_app_env(:write_forward_client, TimeoutClient)
 
     request = %{
       "address" => "shuttle://edge/codex/native%2Fid",
@@ -1032,8 +1012,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
   end
 
   test "malformed local discovery gaps become an explicit local gap", %{host: host} do
-    Application.put_env(:shuttle, :felt_runner, MalformedPeerRunner)
-    on_exit(fn -> Application.put_env(:shuttle, :felt_runner, Runner) end)
+    Shuttle.Test.Env.put_app_env(:felt_runner, MalformedPeerRunner)
 
     body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
     assert body["sessions"] == []
@@ -1101,7 +1080,4 @@ defmodule ShuttleWeb.MessagingControllerTest do
       assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(400)
     end
   end
-
-  defp restore(key, nil), do: Application.delete_env(:shuttle, key)
-  defp restore(key, value), do: Application.put_env(:shuttle, key, value)
 end

@@ -158,7 +158,7 @@ const (
 //   - with neither, and no https_proxy, bin/tailscaled-launch's socket under
 //     $HOME when it exists as a Unix socket ("default");
 //   - otherwise none ("").
-func effectiveTailscaleSocket(defaults *remoteDefaults) (path, source string, err error) {
+func (a *app) effectiveTailscaleSocket(defaults *remoteDefaults) (path, source string, err error) {
 	var d remoteDefaults
 	if defaults != nil {
 		d = *defaults
@@ -174,7 +174,7 @@ func effectiveTailscaleSocket(defaults *remoteDefaults) (path, source string, er
 	if strings.TrimSpace(d.HTTPSProxy) != "" {
 		return "", "", nil
 	}
-	if path, _ := defaultTailscaleSocketCheck(); path != "" {
+	if path, _ := a.defaultTailscaleSocketCheck(); path != "" {
 		return path, socketSourceDefault, nil
 	}
 	return "", "", nil
@@ -183,12 +183,12 @@ func effectiveTailscaleSocket(defaults *remoteDefaults) (path, source string, er
 // defaultSocketRefusal says why the default socket was refused, when the
 // fleet document leaves the choice to the default and something untrusted is
 // there; "" otherwise.
-func defaultSocketRefusal(defaults *remoteDefaults) string {
+func (a *app) defaultSocketRefusal(defaults *remoteDefaults) string {
 	if defaults != nil && (strings.TrimSpace(defaults.TailscaleSocket) != "" || strings.TrimSpace(defaults.HTTPSProxy) != "") {
 		return ""
 	}
-	if _, refused := defaultTailscaleSocketCheck(); refused != "" {
-		return filepath.Join(os.Getenv("HOME"), defaultTailscaleSocketPath) + ": " + refused
+	if _, refused := a.defaultTailscaleSocketCheck(); refused != "" {
+		return filepath.Join(a.env.Getenv("HOME"), defaultTailscaleSocketPath) + ": " + refused
 	}
 	return ""
 }
@@ -199,8 +199,8 @@ func defaultSocketRefusal(defaults *remoteDefaults) string {
 // it. macOS is excluded: its ACLs do not show in mode bits, and a Mac uses the
 // system tailscaled. When something is at the path but is not used, path is ""
 // and refused says why. Both are "" when nothing is there.
-func defaultTailscaleSocketCheck() (path, refused string) {
-	home := os.Getenv("HOME")
+func (a *app) defaultTailscaleSocketCheck() (path, refused string) {
+	home := a.env.Getenv("HOME")
 	if !filepath.IsAbs(home) {
 		return "", ""
 	}
@@ -211,7 +211,7 @@ func defaultTailscaleSocketCheck() (path, refused string) {
 	if _, err := os.Lstat(path); err != nil {
 		return "", ""
 	}
-	if hostGOOS != "linux" {
+	if a.hostGOOS != "linux" {
 		return "", "default socket is Linux-only"
 	}
 	if reason := literalSocketProblem(path, home, os.Geteuid()); reason != "" {
@@ -456,15 +456,15 @@ func managedTunnel(manager string) bool {
 
 // shuttleRemotesPath is the canonical fleet file location for reads AND writes:
 // $SHUTTLE_REMOTES_FILE, else ~/.config/shuttle/remotes.json.
-func shuttleRemotesPath() (string, error) {
-	return shuttleConfigPath("SHUTTLE_REMOTES_FILE", "remotes.json")
+func (a *app) shuttleRemotesPath() (string, error) {
+	return a.shuttleConfigPath("SHUTTLE_REMOTES_FILE", "remotes.json")
 }
 
 // loadRemotesFileRaw parses the fleet file WITHOUT filling defaults. Edit verbs
 // use it so a round-trip through `add`/`rm` never materializes every default
 // into the file and pins values the reader should keep deciding.
-func loadRemotesFileRaw() (remotesFile, error) {
-	path, err := shuttleRemotesPath()
+func (a *app) loadRemotesFileRaw() (remotesFile, error) {
+	path, err := a.shuttleRemotesPath()
 	if err != nil {
 		return remotesFile{}, err
 	}
@@ -505,31 +505,16 @@ func parseRemotesDocument(content []byte) (remotesFile, error) {
 // empty, valid document with no error. A malformed one is an error naming the
 // path — the CLI is the fleet's validator, so it fails loud rather than
 // silently degrading to "no remotes".
-func loadRemotesFile() (remotesFile, error) {
-	doc, err := loadRemotesFileRaw()
+func (a *app) loadRemotesFile() (remotesFile, error) {
+	doc, err := a.loadRemotesFileRaw()
 	if err != nil {
 		return remotesFile{}, err
 	}
-	if err := normalizeRemotes(&doc); err != nil {
-		path, _ := shuttleRemotesPath()
+	if err := a.normalizeRemotes(&doc); err != nil {
+		path, _ := a.shuttleRemotesPath()
 		return remotesFile{}, fmt.Errorf("%s: %w", path, err)
 	}
 	return doc, nil
-}
-
-// configuredRemotes returns the normalized, enabled fleet in file order.
-func configuredRemotes() ([]remoteSpec, error) {
-	doc, err := loadRemotesFile()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]remoteSpec, 0, len(doc.Remotes))
-	for _, r := range doc.Remotes {
-		if r.enabledOr() {
-			out = append(out, r)
-		}
-	}
-	return out, nil
 }
 
 // normalizeRemotes fills every default in place and validates the fleet.
@@ -538,7 +523,7 @@ func configuredRemotes() ([]remoteSpec, error) {
 // entry has no routing key, a duplicate name means two daemons answer to one
 // origin, duplicate local ports shadow tunnels, and private HTTPS remotes may
 // not claim the same authority.
-func normalizeRemotes(doc *remotesFile) error {
+func (a *app) normalizeRemotes(doc *remotesFile) error {
 	if doc.LaunchdLabelPrefix == "" {
 		doc.LaunchdLabelPrefix = defaultLaunchdLabelPrefix
 	}
@@ -565,7 +550,7 @@ func normalizeRemotes(doc *remotesFile) error {
 	}
 	// Duplicate https authorities matter whenever the daemon dials through a
 	// private socket, configured or default, exactly as the daemon decides.
-	effectiveSocket, _, _ := effectiveTailscaleSocket(doc.Defaults)
+	effectiveSocket, _, _ := a.effectiveTailscaleSocket(doc.Defaults)
 	privateDialConfigured := effectiveSocket != ""
 
 	seenNames := map[string]bool{}
@@ -661,7 +646,7 @@ func normalizeRemotes(doc *remotesFile) error {
 		opts := r.tunnelOpts()
 		switch {
 		case opts.Manager == "" && r.Port != 0:
-			opts.Manager = defaultTunnelManager()
+			opts.Manager = a.defaultTunnelManager()
 		case opts.Manager == "":
 			opts.Manager = "none"
 		case r.Port == 0 && managedTunnel(opts.Manager):
@@ -763,8 +748,8 @@ func validateRemoteSocket(path string) error {
 // recovery cascade BOUNCES — and the cascade only knows `launchctl kickstart`,
 // so on Linux it reads a managed tunnel as unbounceable and advances to the ssh
 // check instead.
-func defaultTunnelManager() string {
-	switch hostGOOS {
+func (a *app) defaultTunnelManager() string {
+	switch a.hostGOOS {
 	case "darwin":
 		return "launchd"
 	case "linux":
@@ -784,8 +769,8 @@ func firstNonZero(values ...int) int {
 
 // saveRemotes writes the fleet atomically (tmp + rename). An empty fleet deletes
 // the file, matching the stores/projects writers.
-func saveRemotes(doc remotesFile) error {
-	path, err := shuttleRemotesPath()
+func (a *app) saveRemotes(doc remotesFile) error {
+	path, err := a.shuttleRemotesPath()
 	if err != nil {
 		return err
 	}
@@ -814,22 +799,11 @@ func saveRemotes(doc remotesFile) error {
 
 // ── CLI ──
 
-var (
-	remotesAddSSH        string
-	remotesAddDisplay    string
-	remotesAddPort       int
-	remotesAddRemotePort int
-	remotesAddRemoteSock string
-	remotesAddCheckout   string
-	remotesAddMultiplex  bool
-	remotesAddURL        string
-	remotesAddTunnel     string
-)
-
-var remotesCmd = &cobra.Command{
-	Use:   "remotes",
-	Short: "Inspect and edit the remote shuttle daemon fleet",
-	Long: `The daemon finds every Shuttle daemon on its tailnet by itself and names each
+func (a *app) remotesCmd() *cobra.Command {
+	remotesCmd := &cobra.Command{
+		Use:   "remotes",
+		Short: "Inspect and edit the remote shuttle daemon fleet",
+		Long: `The daemon finds every Shuttle daemon on its tailnet by itself and names each
 by the host id it reports. The fleet file adds hosts outside the tailnet and
 overrides discovered ones: a name for each, and either a local tunnel port
 (forwarded over ssh) or a URL that reaches the daemon directly. An entry wins
@@ -849,9 +823,10 @@ Examples:
   shuttle remotes add hub-c --url https://hub-c.example.ts.net
   shuttle remotes rm hub-a
   shuttle remotes path`,
+	}
+	remotesCmd.AddCommand(a.remotesListCmd(), a.remotesAddCmd(), a.remotesRmCmd(), a.remotesPathCmd())
+	return remotesCmd
 }
-
-var remotesListConfigured bool
 
 // remotesListing is `remotes list --json`: the normalized fleet document, its
 // remotes extended with the discovered peers and each row's source, plus the
@@ -871,201 +846,233 @@ type remotesListing struct {
 	DiscoveryError         string           `json:"discovery_error,omitempty"`
 }
 
-var remotesListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List the fleet: configured remotes and discovered tailnet peers",
-	Long: `Lists every remote this host's daemon uses: the fleet file's entries
+func (a *app) remotesListCmd() *cobra.Command {
+	var remotesListConfigured bool
+	remotesListCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List the fleet: configured remotes and discovered tailnet peers",
+		Long: `Lists every remote this host's daemon uses: the fleet file's entries
 (disabled ones included) and the tailnet peers the local daemon discovered,
 with a SOURCE column saying which. Discovered peers come from the running
 daemon; when it cannot be reached the list is the file alone, and says so.
 
 --configured lists and validates the file alone, without asking the daemon.`,
-	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		var fleet resolvedFleet
-		if remotesListConfigured {
-			doc, err := loadRemotesFile()
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			var fleet resolvedFleet
+			if remotesListConfigured {
+				doc, err := a.loadRemotesFile()
+				if err != nil {
+					return err
+				}
+				fleet = resolvedFleet{Doc: doc}
+			} else {
+				var err error
+				if fleet, err = a.loadResolvedFleet(); err != nil {
+					return err
+				}
+			}
+			doc := fleet.Doc
+			rows := make([]remoteSpec, 0, len(doc.Remotes))
+			for _, r := range doc.Remotes {
+				r.Source = sourceConfigured
+				rows = append(rows, r)
+			}
+			if fleet.Discovery != nil {
+				rows = append(rows, a.admitDiscovered(doc, fleet.Discovery.Peers)...)
+			}
+
+			if a.json {
+				listing := remotesListing{
+					Version:            doc.Version,
+					LaunchdLabelPrefix: doc.LaunchdLabelPrefix,
+					Defaults:           doc.Defaults,
+					Remotes:            rows,
+					Discovery:          fleet.Discovery,
+				}
+				listing.TailscaleSocket, listing.TailscaleSocketSource, _ = a.effectiveTailscaleSocket(doc.Defaults)
+				listing.TailscaleSocketRefused = a.defaultSocketRefusal(doc.Defaults)
+				if fleet.DiscoveryErr != nil {
+					listing.DiscoveryError = fleet.DiscoveryErr.Error()
+				}
+				return a.outputJSON(listing)
+			}
+			if !remotesListConfigured {
+				fmt.Fprintln(a.env.Stdout, fleet.discoverySummary())
+			}
+			if len(rows) == 0 {
+				path, _ := a.shuttleRemotesPath()
+				fmt.Fprintf(a.env.Stdout, "no remotes (fleet file %s)\n", path)
+				return nil
+			}
+			if doc.Defaults != nil {
+				if proxy, _ := doc.Defaults.normalizedHTTPSProxy(); proxy.configured() {
+					fmt.Fprintf(a.env.Stdout, "https:// remotes via proxy %s\n", proxy)
+				}
+			}
+			if socket, source, _ := a.effectiveTailscaleSocket(doc.Defaults); socket != "" {
+				fmt.Fprintf(a.env.Stdout, "https:// remotes and discovery via tailscale LocalAPI socket %s (%s)\n", socket, source)
+			}
+			if refused := a.defaultSocketRefusal(doc.Defaults); refused != "" {
+				fmt.Fprintf(a.env.Stdout, "warning: default tailscale LocalAPI socket refused (%s)\n", refused)
+			}
+			fmt.Fprintln(a.env.Stdout)
+			fmt.Fprintf(a.env.Stdout, "%-16s %-6s %-18s %-12s %-11s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "SOURCE", "URL")
+			for _, r := range rows {
+				opts := r.tunnelOpts()
+				tunnel := opts.Manager
+				if opts.Multiplex {
+					tunnel += "+mux"
+				}
+				if !r.enabledOr() {
+					tunnel = "disabled"
+				}
+				// A url remote has no local port and no ssh destination; "-" says
+				// that, where 0 and "" read as a value that failed to load.
+				port, ssh := "-", "-"
+				if r.Port != 0 {
+					port = strconv.Itoa(r.Port)
+				}
+				if r.SSH != "" {
+					ssh = r.SSH
+				}
+				fmt.Fprintf(a.env.Stdout, "%-16s %-6s %-18s %-12s %-11s %s\n", r.Name, port, ssh, tunnel, r.Source, r.URL)
+				if r.Port == defaultRemoteDaemonPort {
+					fmt.Fprintf(a.env.Stderr,
+						"warning: remote %q uses port %d, which the local daemon binds\n",
+						r.Name, defaultRemoteDaemonPort)
+				}
+			}
+			return nil
+		},
+	}
+	remotesListCmd.Flags().BoolVar(&remotesListConfigured, "configured", false, "List and validate the fleet file alone, without asking the daemon for discovered peers")
+	return remotesListCmd
+}
+
+func (a *app) remotesAddCmd() *cobra.Command {
+	var remotesAddSSH string
+	var remotesAddDisplay string
+	var remotesAddPort int
+	var remotesAddRemotePort int
+	var remotesAddRemoteSock string
+	var remotesAddCheckout string
+	var remotesAddMultiplex bool
+	var remotesAddURL string
+	var remotesAddTunnel string
+	remotesAddCmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add or replace a remote",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			doc, err := a.loadRemotesFileRaw()
 			if err != nil {
 				return err
 			}
-			fleet = resolvedFleet{Doc: doc}
-		} else {
-			var err error
-			if fleet, err = loadResolvedFleet(); err != nil {
+			entry := remoteSpec{
+				Name:         args[0],
+				SSH:          remotesAddSSH,
+				Display:      remotesAddDisplay,
+				Port:         remotesAddPort,
+				RemotePort:   remotesAddRemotePort,
+				URL:          remotesAddURL,
+				RemoteSocket: remotesAddRemoteSock,
+				Checkout:     remotesAddCheckout,
+			}
+			// No manager is written unless the operator asked for one: an entry with
+			// no port already reads as `none` and a port entry already reads as this
+			// host's supervisor (see normalizeRemotes), and materializing either
+			// into the file would pin a decision the reader should keep making —
+			// which matters because the same file is carried between a Mac hub and a
+			// Linux one.
+			if remotesAddMultiplex || remotesAddTunnel != "" {
+				entry.Tunnel = &remoteTunnel{Multiplex: remotesAddMultiplex, Manager: remotesAddTunnel}
+			}
+			replaced := false
+			for i := range doc.Remotes {
+				if doc.Remotes[i].Name == args[0] {
+					doc.Remotes[i] = entry
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				doc.Remotes = append(doc.Remotes, entry)
+			}
+			// Validate a normalized copy; persist the sparse one.
+			check := doc
+			check.Remotes = append([]remoteSpec(nil), doc.Remotes...)
+			if err := a.normalizeRemotes(&check); err != nil {
 				return err
 			}
-		}
-		doc := fleet.Doc
-		rows := make([]remoteSpec, 0, len(doc.Remotes))
-		for _, r := range doc.Remotes {
-			r.Source = sourceConfigured
-			rows = append(rows, r)
-		}
-		if fleet.Discovery != nil {
-			rows = append(rows, admitDiscovered(doc, fleet.Discovery.Peers)...)
-		}
-
-		if jsonOutput {
-			listing := remotesListing{
-				Version:            doc.Version,
-				LaunchdLabelPrefix: doc.LaunchdLabelPrefix,
-				Defaults:           doc.Defaults,
-				Remotes:            rows,
-				Discovery:          fleet.Discovery,
+			if err := a.saveRemotes(doc); err != nil {
+				return err
 			}
-			listing.TailscaleSocket, listing.TailscaleSocketSource, _ = effectiveTailscaleSocket(doc.Defaults)
-			listing.TailscaleSocketRefused = defaultSocketRefusal(doc.Defaults)
-			if fleet.DiscoveryErr != nil {
-				listing.DiscoveryError = fleet.DiscoveryErr.Error()
-			}
-			return outputJSON(listing)
-		}
-		if !remotesListConfigured {
-			fmt.Println(fleet.discoverySummary())
-		}
-		if len(rows) == 0 {
-			path, _ := shuttleRemotesPath()
-			fmt.Printf("no remotes (fleet file %s)\n", path)
+			path, _ := a.shuttleRemotesPath()
+			fmt.Fprintf(a.env.Stdout, "saved %s (%s)\n", args[0], path)
 			return nil
-		}
-		if doc.Defaults != nil {
-			if proxy, _ := doc.Defaults.normalizedHTTPSProxy(); proxy.configured() {
-				fmt.Printf("https:// remotes via proxy %s\n", proxy)
-			}
-		}
-		if socket, source, _ := effectiveTailscaleSocket(doc.Defaults); socket != "" {
-			fmt.Printf("https:// remotes and discovery via tailscale LocalAPI socket %s (%s)\n", socket, source)
-		}
-		if refused := defaultSocketRefusal(doc.Defaults); refused != "" {
-			fmt.Printf("warning: default tailscale LocalAPI socket refused (%s)\n", refused)
-		}
-		fmt.Println()
-		fmt.Printf("%-16s %-6s %-18s %-12s %-11s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "SOURCE", "URL")
-		for _, r := range rows {
-			opts := r.tunnelOpts()
-			tunnel := opts.Manager
-			if opts.Multiplex {
-				tunnel += "+mux"
-			}
-			if !r.enabledOr() {
-				tunnel = "disabled"
-			}
-			// A url remote has no local port and no ssh destination; "-" says
-			// that, where 0 and "" read as a value that failed to load.
-			port, ssh := "-", "-"
-			if r.Port != 0 {
-				port = strconv.Itoa(r.Port)
-			}
-			if r.SSH != "" {
-				ssh = r.SSH
-			}
-			fmt.Printf("%-16s %-6s %-18s %-12s %-11s %s\n", r.Name, port, ssh, tunnel, r.Source, r.URL)
-			if r.Port == defaultRemoteDaemonPort {
-				fmt.Fprintf(os.Stderr,
-					"warning: remote %q uses port %d, which the local daemon binds\n",
-					r.Name, defaultRemoteDaemonPort)
-			}
-		}
-		return nil
-	},
+		},
+	}
+	remotesAddCmd.Flags().StringVar(&remotesAddSSH, "ssh", "", "SSH destination (default: the remote name when --port is set; none for a --url entry)")
+	remotesAddCmd.Flags().StringVar(&remotesAddDisplay, "display", "", "Presentation label (default: the remote name)")
+	remotesAddCmd.Flags().IntVar(&remotesAddPort, "port", 0, "Local forwarded port (required unless --url is given)")
+	remotesAddCmd.Flags().IntVar(&remotesAddRemotePort, "remote-port", 0, "Daemon port on the remote host (default: 4000)")
+	remotesAddCmd.Flags().StringVar(&remotesAddRemoteSock, "remote-socket", "", "Daemon unix socket on the remote host, forwarded instead of --remote-port")
+	remotesAddCmd.Flags().StringVar(&remotesAddURL, "url", "", "Reach the daemon at this URL outright, instead of through a local tunnel port")
+	remotesAddCmd.Flags().StringVar(&remotesAddTunnel, "tunnel-manager", "", "launchd | systemd | none (default: this host's supervisor for a --port entry, none without one)")
+	remotesAddCmd.Flags().StringVar(&remotesAddCheckout, "checkout", "", "Repo checkout path on the remote host (deploy metadata)")
+	remotesAddCmd.Flags().BoolVar(&remotesAddMultiplex, "multiplex", false, "Ride an existing ControlMaster socket (2FA hosts)")
+	return remotesAddCmd
 }
 
-var remotesAddCmd = &cobra.Command{
-	Use:   "add <name>",
-	Short: "Add or replace a remote",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		doc, err := loadRemotesFileRaw()
-		if err != nil {
-			return err
-		}
-		entry := remoteSpec{
-			Name:         args[0],
-			SSH:          remotesAddSSH,
-			Display:      remotesAddDisplay,
-			Port:         remotesAddPort,
-			RemotePort:   remotesAddRemotePort,
-			URL:          remotesAddURL,
-			RemoteSocket: remotesAddRemoteSock,
-			Checkout:     remotesAddCheckout,
-		}
-		// No manager is written unless the operator asked for one: an entry with
-		// no port already reads as `none` and a port entry already reads as this
-		// host's supervisor (see normalizeRemotes), and materializing either
-		// into the file would pin a decision the reader should keep making —
-		// which matters because the same file is carried between a Mac hub and a
-		// Linux one.
-		if remotesAddMultiplex || remotesAddTunnel != "" {
-			entry.Tunnel = &remoteTunnel{Multiplex: remotesAddMultiplex, Manager: remotesAddTunnel}
-		}
-		replaced := false
-		for i := range doc.Remotes {
-			if doc.Remotes[i].Name == args[0] {
-				doc.Remotes[i] = entry
-				replaced = true
-				break
+func (a *app) remotesRmCmd() *cobra.Command {
+	remotesRmCmd := &cobra.Command{
+		Use:   "rm <name>",
+		Short: "Remove a remote",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			doc, err := a.loadRemotesFileRaw()
+			if err != nil {
+				return err
 			}
-		}
-		if !replaced {
-			doc.Remotes = append(doc.Remotes, entry)
-		}
-		// Validate a normalized copy; persist the sparse one.
-		check := doc
-		check.Remotes = append([]remoteSpec(nil), doc.Remotes...)
-		if err := normalizeRemotes(&check); err != nil {
-			return err
-		}
-		if err := saveRemotes(doc); err != nil {
-			return err
-		}
-		path, _ := shuttleRemotesPath()
-		fmt.Printf("saved %s (%s)\n", args[0], path)
-		return nil
-	},
+			kept := make([]remoteSpec, 0, len(doc.Remotes))
+			found := false
+			for _, r := range doc.Remotes {
+				if r.Name == args[0] {
+					found = true
+					continue
+				}
+				kept = append(kept, r)
+			}
+			if !found {
+				return fmt.Errorf("unknown remote %q (configured: %s)", args[0], remoteNameList(doc.Remotes))
+			}
+			doc.Remotes = kept
+			if err := a.saveRemotes(doc); err != nil {
+				return err
+			}
+			fmt.Fprintf(a.env.Stdout, "removed %s\n", args[0])
+			return nil
+		},
+	}
+	return remotesRmCmd
 }
 
-var remotesRmCmd = &cobra.Command{
-	Use:   "rm <name>",
-	Short: "Remove a remote",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		doc, err := loadRemotesFileRaw()
-		if err != nil {
-			return err
-		}
-		kept := make([]remoteSpec, 0, len(doc.Remotes))
-		found := false
-		for _, r := range doc.Remotes {
-			if r.Name == args[0] {
-				found = true
-				continue
+func (a *app) remotesPathCmd() *cobra.Command {
+	remotesPathCmd := &cobra.Command{
+		Use:   "path",
+		Short: "Print the fleet file path",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path, err := a.shuttleRemotesPath()
+			if err != nil {
+				return err
 			}
-			kept = append(kept, r)
-		}
-		if !found {
-			return fmt.Errorf("unknown remote %q (configured: %s)", args[0], remoteNameList(doc.Remotes))
-		}
-		doc.Remotes = kept
-		if err := saveRemotes(doc); err != nil {
-			return err
-		}
-		fmt.Printf("removed %s\n", args[0])
-		return nil
-	},
-}
-
-var remotesPathCmd = &cobra.Command{
-	Use:   "path",
-	Short: "Print the fleet file path",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		path, err := shuttleRemotesPath()
-		if err != nil {
-			return err
-		}
-		fmt.Println(path)
-		return nil
-	},
+			fmt.Fprintln(a.env.Stdout, path)
+			return nil
+		},
+	}
+	return remotesPathCmd
 }
 
 // remoteNameList renders the configured names for an error message.
@@ -1079,19 +1086,4 @@ func remoteNameList(remotes []remoteSpec) string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
-}
-
-func init() {
-	remotesAddCmd.Flags().StringVar(&remotesAddSSH, "ssh", "", "SSH destination (default: the remote name when --port is set; none for a --url entry)")
-	remotesAddCmd.Flags().StringVar(&remotesAddDisplay, "display", "", "Presentation label (default: the remote name)")
-	remotesAddCmd.Flags().IntVar(&remotesAddPort, "port", 0, "Local forwarded port (required unless --url is given)")
-	remotesAddCmd.Flags().IntVar(&remotesAddRemotePort, "remote-port", 0, "Daemon port on the remote host (default: 4000)")
-	remotesAddCmd.Flags().StringVar(&remotesAddRemoteSock, "remote-socket", "", "Daemon unix socket on the remote host, forwarded instead of --remote-port")
-	remotesAddCmd.Flags().StringVar(&remotesAddURL, "url", "", "Reach the daemon at this URL outright, instead of through a local tunnel port")
-	remotesAddCmd.Flags().StringVar(&remotesAddTunnel, "tunnel-manager", "", "launchd | systemd | none (default: this host's supervisor for a --port entry, none without one)")
-	remotesAddCmd.Flags().StringVar(&remotesAddCheckout, "checkout", "", "Repo checkout path on the remote host (deploy metadata)")
-	remotesAddCmd.Flags().BoolVar(&remotesAddMultiplex, "multiplex", false, "Ride an existing ControlMaster socket (2FA hosts)")
-	remotesListCmd.Flags().BoolVar(&remotesListConfigured, "configured", false, "List and validate the fleet file alone, without asking the daemon for discovered peers")
-	remotesCmd.AddCommand(remotesListCmd, remotesAddCmd, remotesRmCmd, remotesPathCmd)
-	addShuttleCommand(remotesCmd)
 }

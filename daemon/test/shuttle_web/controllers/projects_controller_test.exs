@@ -8,19 +8,15 @@ defmodule ShuttleWeb.ProjectsControllerTest do
   Store initialization shells the real `felt init` on `PATH` (the default
   `:felt_runner`), so these tests check the store felt itself produced.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
   @endpoint ShuttleWeb.Endpoint
 
   setup do
-    previous_runner = Application.get_env(:shuttle, :felt_runner)
-    Application.put_env(:shuttle, :felt_runner, Shuttle.Runner.Default)
-    prev_env = System.get_env("SHUTTLE_PROJECTS")
-    prev_file = System.get_env("SHUTTLE_PROJECTS_FILE")
+    Shuttle.Test.Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
 
     file =
       Path.join(
@@ -28,8 +24,8 @@ defmodule ShuttleWeb.ProjectsControllerTest do
         "shuttle-projects-ctrl-#{System.unique_integer([:positive])}.json"
       )
 
-    System.delete_env("SHUTTLE_PROJECTS")
-    System.put_env("SHUTTLE_PROJECTS_FILE", file)
+    Shuttle.Test.Env.delete_env("SHUTTLE_PROJECTS")
+    Shuttle.Test.Env.put_env("SHUTTLE_PROJECTS_FILE", file)
 
     root =
       Path.join(System.tmp_dir!(), "shuttle_projects_ctrl_#{System.unique_integer([:positive])}")
@@ -37,11 +33,8 @@ defmodule ShuttleWeb.ProjectsControllerTest do
     File.mkdir_p!(root)
 
     on_exit(fn ->
-      restore_app_env(:felt_runner, previous_runner)
       File.rm(file)
       File.rm_rf(root)
-      restore_env("SHUTTLE_PROJECTS", prev_env)
-      restore_env("SHUTTLE_PROJECTS_FILE", prev_file)
     end)
 
     {:ok, root: root}
@@ -80,7 +73,7 @@ defmodule ShuttleWeb.ProjectsControllerTest do
   end
 
   test "a failing felt init is a 500 that names felt's error and registers nothing", %{root: root} do
-    Application.put_env(:shuttle, :felt_runner, FailingFelt)
+    Shuttle.Test.Env.put_app_env(:felt_runner, FailingFelt)
 
     body = post_project(root, 500)
 
@@ -172,6 +165,22 @@ defmodule ShuttleWeb.ProjectsControllerTest do
 
     assert conn.status == 400
     assert Jason.decode!(conn.resp_body)["error"] =~ "must be a path string"
+  end
+
+  test "an unreadable project list refuses to append rather than overwrite it", %{root: root} do
+    other = Path.join(root, "sub")
+    File.mkdir_p!(other)
+    post_project(root, 200)
+
+    file = Shuttle.Env.get("SHUTTLE_PROJECTS_FILE")
+    File.chmod!(file, 0o000)
+    on_exit(fn -> File.chmod(file, 0o644) end)
+
+    body = post_project(other, 500)
+    assert body["error"] =~ "eacces"
+
+    File.chmod!(file, 0o644)
+    assert Shuttle.Projects.registered_projects() == [Path.expand(root)]
   end
 
   defp post_project(path, expected_status) do

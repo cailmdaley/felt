@@ -102,6 +102,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       :request_timeout_ms,
       :remotes_token,
       :store_dir,
+      :clock,
       reload_from_file?: false,
       feeds: %{},
       # ref => remote name, for the in-flight fetch guard
@@ -130,12 +131,19 @@ defmodule Shuttle.RemoteFiberRegistry do
     * `:store_dir` — directory the per-remote JSON caches live in. Defaults to
       `$SHUTTLE_DATA_DIR/remote-fibers` (`~/.shuttle/remote-fibers`); `nil`
       disables persistence entirely.
+    * `:clock` — zero-arity fun returning the current `DateTime`, read for every
+      attempt, success and staleness decision. Defaults to
+      `&DateTime.utc_now/0`; tests pass a fake clock they advance.
     * `:name` — GenServer name. Defaults to `__MODULE__`.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   # The default on-disk home for the per-remote caches, honoring the same env
@@ -152,7 +160,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   callers tolerate this for graceful degradation).
   """
   @spec feeds() :: %{String.t() => map()}
-  def feeds, do: feeds(__MODULE__)
+  def feeds, do: feeds(Shuttle.Env.server(__MODULE__))
 
   @spec feeds(GenServer.server()) :: %{String.t() => map()}
   def feeds(server) do
@@ -165,7 +173,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   deterministically against a stub client.
   """
   @spec refresh_now() :: :ok
-  def refresh_now, do: refresh_now(__MODULE__)
+  def refresh_now, do: refresh_now(Shuttle.Env.server(__MODULE__))
 
   @spec refresh_now(GenServer.server()) :: :ok
   def refresh_now(server),
@@ -179,7 +187,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   previous scheduled-poll snapshot.
   """
   @spec refresh(String.t()) :: :ok | {:error, term()}
-  def refresh(name), do: refresh(__MODULE__, name)
+  def refresh(name), do: refresh(Shuttle.Env.server(__MODULE__), name)
 
   @doc """
   Best-effort feed invalidation after a forwarded remote mutation: refresh the
@@ -228,6 +236,7 @@ defmodule Shuttle.RemoteFiberRegistry do
       tick_interval_ms: Keyword.get(opts, :tick_interval_ms, @default_tick_interval_ms),
       request_timeout_ms: Keyword.get(opts, :request_timeout_ms, @default_request_timeout_ms),
       store_dir: store_dir,
+      clock: Keyword.get(opts, :clock, &DateTime.utc_now/0),
       feeds:
         Map.new(remotes, fn remote ->
           {remote.name,
@@ -259,7 +268,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   def handle_call(:refresh_now, _from, state) do
     state = reload_remotes(state)
-    now = DateTime.utc_now()
+    now = now(state)
 
     feeds =
       Enum.reduce(state.remotes, state.feeds, fn remote, acc ->
@@ -274,7 +283,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   def handle_call({:refresh, name}, _from, state) do
     case Enum.find(state.remotes, &(&1.name == name)) do
       %Remote{} = remote ->
-        now = DateTime.utc_now()
+        now = now(state)
         entry = Map.get(state.feeds, remote.name, initial_entry(remote))
         result = fetch_fibers(remote, state.client, state.request_timeout_ms, entry[:etag])
         updated = apply_and_persist(state, remote.name, entry, result, now)
@@ -308,12 +317,14 @@ defmodule Shuttle.RemoteFiberRegistry do
 
       {name, tasks} ->
         Logger.warning("RemoteFiberRegistry: #{name} fiber fetch crashed: #{inspect(reason)}")
-        feeds = RegistryCommon.record_failure(state.feeds, name, reason, DateTime.utc_now())
+        feeds = RegistryCommon.record_failure(state.feeds, name, reason, now(state))
         {:noreply, %{state | tasks: tasks, feeds: feeds}}
     end
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp now(%State{clock: clock}), do: clock.()
 
   # ── Fleet reload ──
 
@@ -330,7 +341,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   end
 
   defp start_due_fetches_for_fleet(%State{} = state) do
-    now_ms = DateTime.to_unix(DateTime.utc_now(), :millisecond)
+    now_ms = DateTime.to_unix(now(state), :millisecond)
     in_flight = MapSet.new(Map.values(state.tasks))
 
     Enum.reduce(state.remotes, state, fn remote, acc ->
@@ -364,7 +375,7 @@ defmodule Shuttle.RemoteFiberRegistry do
         {name, fetch_fibers(remote, client, timeout, etag)}
       end)
 
-    feeds = RegistryCommon.stamp_attempt(state.feeds, remote, &initial_entry/1)
+    feeds = RegistryCommon.stamp_attempt(state.feeds, remote, now(state), &initial_entry/1)
     %{state | tasks: Map.put(state.tasks, task.ref, name), feeds: feeds}
   end
 
@@ -384,7 +395,7 @@ defmodule Shuttle.RemoteFiberRegistry do
             %{state | tasks: tasks}
 
           entry ->
-            updated = apply_and_persist(state, name, entry, result, DateTime.utc_now())
+            updated = apply_and_persist(state, name, entry, result, now(state))
             %{state | tasks: tasks, feeds: Map.put(state.feeds, name, updated)}
         end
     end
@@ -535,7 +546,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   # ── Views ──
 
   defp build_feeds_view(%State{} = state) do
-    now = DateTime.utc_now()
+    now = now(state)
 
     Map.new(state.feeds, fn {name, entry} ->
       {name,

@@ -32,6 +32,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
     # reconcile_orphaned_sessions adopts them as soon as tmux answers.
     case Poller.list_shuttle_sessions(state) do
       {:ok, sessions} ->
+        state = Poller.boot_discover_candidates(state)
         lookup = candidate_session_lookup(state)
 
         state =
@@ -202,9 +203,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # (a copied file): it resolves to `:ambiguous` and is skipped rather than
   # mis-adopted. A candidate without a uid has no worker name and no entry.
   defp candidate_session_lookup(%State{} = state) do
-    {candidates, _store_map, _store_listings} = Poller.discover_candidates(state)
-
-    candidates
+    state.last_known_listings
+    |> Map.values()
+    |> List.flatten()
     |> Enum.reduce(%{}, fn fiber, acc ->
       fiber_id = Map.get(fiber, "id")
 

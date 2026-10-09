@@ -353,29 +353,6 @@ export function fiberDocUrl(shuttleBase: string, id: string): string {
   return `${shuttleBase}/api/v1/fibers/${id.split('/').map(encodeURIComponent).join('/')}`
 }
 
-/**
- * Build the owner-routed metadata URL used to check an artifact without
- * downloading its bytes. The daemon returns `{exists, modified_at, size}`;
- * `cache: no-store` belongs on the request, not in this URL builder.
- */
-export function fileInfoUrl(base: string, fullPath: string, originId: string): string {
-  const abs = fullPath.startsWith('/') ? fullPath : `/${fullPath}`
-  return withOrigin(`${base}/api/v1/file-info?path=${encodePathParam(abs)}`, originId)
-}
-
-/**
- * Make a fresh browser navigation for an artifact while preserving its source
- * path and owner query. Replacing the prior marker keeps repeated refreshes
- * from growing the URL forever.
- */
-const CACHE_BUST_BASE = 'http://_cachebust.invalid'
-
-export function cacheBustUrl(url: string, nonce: number = Date.now()): string {
-  const u = new URL(url, CACHE_BUST_BASE)
-  u.searchParams.set('_shuttle_refresh', String(nonce))
-  return u.origin === CACHE_BUST_BASE ? u.pathname + u.search + u.hash : u.href
-}
-
 /** File kind vocabulary shared by documents, readers, and thumbnails. */
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif'])
 export const AUDIO_EXTS = new Set(['wav', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus'])
@@ -435,8 +412,8 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
         bottom: 24px;
         left: 50%;
         transform: translateX(-50%) translateY(100px);
-        background: #1a1a1a;
-        color: #f5f5f0;
+        background: var(--kbn-toast);
+        color: var(--kbn-toast-ink);
         padding: 12px 20px;
         border-radius: 8px;
         display: flex;
@@ -444,7 +421,7 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
         gap: 10px;
         font-family: 'EB Garamond', Garamond, serif;
         font-size: 14px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        box-shadow: 0 0 0 1px var(--kbn-toast-edge), 0 4px 20px color-mix(in srgb, var(--kbn-shade) 40%, transparent);
         z-index: 10000;
         opacity: 0;
         animation: toast-in 0.3s ease forwards;
@@ -456,9 +433,9 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
         font-size: 16px;
         font-weight: bold;
       }
-      .shuttle-toast.success .toast-icon { color: #c9a959; }
-      .shuttle-toast.warning .toast-icon { color: #D39B36; }
-      .shuttle-toast.error .toast-icon { color: #d9534f; }
+      .shuttle-toast.success .toast-icon { color: var(--kbn-owed-bright); }
+      .shuttle-toast.warning .toast-icon { color: var(--kbn-owed-bright); }
+      .shuttle-toast.error .toast-icon { color: var(--kbn-alarm); }
       @keyframes toast-in {
         from { opacity: 0; transform: translateX(-50%) translateY(100px); }
         to { opacity: 1; transform: translateX(-50%) translateY(0); }

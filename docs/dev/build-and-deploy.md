@@ -122,10 +122,20 @@ To deploy a release candidate across the configured fleet, pin its tag:
 bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
 ```
 
-The helper resolves the tag to one commit and builds it in a persistent detached Git worktree beside each configured checkout.
-The regular checkout's branch and local edits stay in place.
+The helper resolves the tag to one commit and builds it in a detached Git worktree under `<main-worktree>.deploy/<commit>`.
+Git's common directory selects the main worktree, so linked checkouts share one deploy root.
+The regular checkout's branch and local edits stay in place; every deploy runs the build.
+
+Before retargeting the launcher, the helper reads the live daemon's commit from `/api/v1/version`.
+After the new daemon verifies a fresh ready boot, harness setup succeeds, and quarantine release succeeds, it removes other worktrees under the deploy root with `git worktree remove --force`, then runs `git worktree prune`.
+It keeps the new tree, the previous live tree, and any tree referenced by `pi list`.
+Generated files and local edits do not prevent removal of other trees.
+
+A new worktree seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous live tree.
+These are Mix dependencies and compiled artifacts, plus npm dependencies and the `.npm-ci-stamp` that lets `make ui` skip `npm ci`.
+Symlinked cache roots disable seeding.
+Otherwise the helper stages no-dereference copies (APFS clones with `cp -c` on macOS, reflinks where supported on Linux) and publishes them only after successful copying; any seeding failure is reported and the build proceeds cold.
 Version tags stamp both CLIs and the daemon with the release version.
-Keep deployment worktrees while their releases or harness integrations are in use; the supervisor and plugin receipts refer to those paths.
 If Pi loads a Felt package from another revision, the helper reports the mismatch without replacing that package choice.
 Use Pi's native package commands to select the deployed source directory, then rerun the host's deployment check.
 Use `--hosts local,hub-a` to deploy a subset.
@@ -134,8 +144,9 @@ Push the verified revision, then deploy it on each host:
 
 1. Pull the checkout and run `make build` in the host's login shell.
 2. Re-render an installed daemon supervisor that an older template wrote — a
-   pre-split one (it bakes `FELT_STORES`) or one that predates `TMUX_TMPDIR`
-   (the word appears nowhere in it) — through `shuttle daemon install`, keeping
+   pre-split one (it bakes `FELT_STORES`), one that predates `TMUX_TMPDIR`
+   (the word appears nowhere in it), or one without an open-file limit
+   (no `NumberOfFiles` or `LimitNOFILE`) — through `shuttle daemon install`, keeping
    its label, stores, port, log, `PATH`, and `SSH_AUTH_SOCK` and capturing
    `TMUX_TMPDIR` from the login shell.
 3. Run `felt setup <harness>` for each harness that carries felt's plugin, so
@@ -208,9 +219,11 @@ network. They are skipped when the receipt already passes and its active
 generation was sealed at the checkout's `HEAD` by a clean build. A dirty
 checkout builds felt as `dev (<sha>-dirty)`, which does not identify a single
 tree, so a dirty host is set up again on every deploy. pi has no `--source`
-flag and no generation. For pi's GitHub package, `felt setup pi` installs the
-default branch, so the helper runs it only when pi's clone is not at the
-checkout's `HEAD`. A local felt package is never re-pointed: it is current when
+flag and no generation. For pi's GitHub package, a regular deploy runs
+`felt setup pi` only when pi's clone is not at the checkout's `HEAD`. An exact-ref
+deploy fetches and detaches a clean clone at the deployed commit when it differs;
+tracked edits or a commit that cannot be fetched fail the host. A local felt
+package is never re-pointed: it is current when
 it is the deployed checkout or sits at its `HEAD`, and otherwise the host fails
 with the package's path and commit. Any pi package other than the deployed
 checkout must also have no tracked edits or deletions (`git status
@@ -225,9 +238,8 @@ repair, for example a stale `felt` shadowing the new one on `PATH`, or `hooks
 mismatch: open a Codex session and approve felt's hooks`. It falls back to the
 receipt's top-level repair when no component reports one. The host counts as failed
 only after its daemon cycle and quarantine release have run, so a harness
-problem never leaves the daemon on the old build. A pi clone that cannot reach
-`HEAD` also fails the host; this happens when the deployed revision is not on
-the default branch.
+problem never leaves the daemon on the old build. A pi clone that cannot fetch
+the deployed commit fails the host.
 
 ### The bundle on a host that does not build it
 

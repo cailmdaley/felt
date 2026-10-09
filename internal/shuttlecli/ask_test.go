@@ -64,8 +64,9 @@ func TestAskWriteResolveAndClear(t *testing.T) {
 		case "reopen":
 			_, err = runCommand(t, dir, "reopen", "f", "--local")
 		case "message":
-			changeDir = dir
-			err = clearMessagedFiberAsk("f")
+			a := testApp(t)
+			a.dir = dir
+			err = a.clearMessagedFiberAsk("f")
 		}
 		if err != nil {
 			t.Fatalf("%s: %v", action, err)

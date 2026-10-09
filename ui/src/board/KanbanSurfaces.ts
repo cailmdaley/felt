@@ -1,12 +1,21 @@
 import { appWorkerLink, terminalWorkerPill, workerVariant } from './appConversation.js'
+import { workerPlate } from './workspace/workerPlate.js'
+import { queuedControl } from './QueuedControl.js'
+import { markVerdictHost } from './workspace/Verdicts.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
-  civilDayToLocalDate,
+  civilWeekday,
   dueCivilDay,
   dueSortMs,
+  formatCivilDay,
+  formatInstant,
+  hostZone,
   instantMs,
   isoDayLocal,
+  shiftCivilDay,
+  TIME_OF_DAY,
+  type Zone,
 } from './civilDay.js'
 import type {
   ColumnKind,
@@ -15,7 +24,6 @@ import type {
   KanbanOriginStaleness,
   KanbanResponse,
 } from './KanbanTypes.js'
-import { hasLiveWorker } from './KanbanTypes.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import {
   buildDependents,
@@ -30,10 +38,8 @@ import {
   queueIsLinear,
   queueRowDetachPlan,
   queueRowDropWrites,
-  queueMemberNote,
   queueRowGesture,
   queuedBehind,
-  queuedChipLabel,
   reorderQueueWrites,
   stackClaimsDrop,
   stackDropVerdict,
@@ -45,7 +51,7 @@ import type {
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
-import { byCreatedAtDesc, deriveCycleLens, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { byCreatedAtDesc, deriveCycleLens, IN_FLIGHT_BANDS, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
 import type { PhoneMeeting } from './phoneMeeting'
 import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
@@ -68,7 +74,6 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   awaitingReview: 'Awaiting review',
   tempered: 'Tempered',
   composted: 'Discarded',
-  pinned: 'Pinned',
 }
 
 /** The same paper face in a Desk column, a folio, or a compact constitution card. */
@@ -142,7 +147,7 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
   starting: { label: '▸ starting', title: 'The app conversation is starting.' },
   running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
-  blocked: { label: 'Blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
+  blocked: { label: 'blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
 }
 
 /** Below this, an attention chip carries no clock: a worker that just raised
@@ -226,9 +231,6 @@ interface KanbanSurfaceRendererOptions {
     horizon: HorizonKind,
     opts?: { cold?: boolean; due?: string | null },
   ) => void | Promise<void>
-  /** Reshape a fiber to a resting `kind:pinned` role with the Pinned-strip
-   *  gesture, alongside `setSurface` and `transition`. */
-  pin: (card: KanbanCard) => void | Promise<void>
   /** Author a sequence edge — `card.depends_on = tailId`, the card-onto-card
    *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
    *  and resolved the chain tail. */
@@ -385,8 +387,8 @@ export class KanbanSurfaceRenderer {
   /**
    * Make a band head fold its band away — mobile only.
    *
-   * On a phone the pager already fills the screen, so Pinned and Resting stack
-   * below it and each becomes a leaf you open. On the desktop board they are
+   * On a phone the pager already fills the screen, so Resting stacks below it
+   * and becomes a leaf you open. On the desktop board they are
    * standing furniture that is always shown, so nothing here applies: the head
    * gets no interactive role, no listener and no fold mark, and the CSS that
    * acts on `kbn-band-folded` lives entirely inside the mobile query.
@@ -638,150 +640,6 @@ export class KanbanSurfaceRenderer {
     return el
   }
 
-  /** Render the Pinned band: a dense wrap of at-rest pinned-role launcher
-   *  chips. These are schedule-less `kind:pinned` roles the poller never
-   *  auto-fires; you dispatch one by dragging it onto the Now In-flight column
-   *  (the chips are draggable and `findCardColumn` returns 'pinned' so the drag
-   *  routes through `transition(card,'inFlight')`). Chips follow the read
-   *  model's creation order, and EVERY ONE OF THEM
-   *  RENDERS — no row cap, no "+N more" pager, because a launcher runs on
-   *  muscle memory and a role you reach for daily must never be on page 2. The
-   *  band wraps to as many rows as the pinned set needs. ALWAYS rendered — even
-   *  with zero parked roles — because the band IS the drop target for parking
-   *  a role; the empty state shrinks to a slim "drag a role here" hint.
-   */
-  renderPinnedSection(
-    pinned: KanbanCard[],
-    staleness: Record<string, KanbanOriginStaleness>,
-  ): HTMLElement {
-    const section = document.createElement('section')
-    section.className = 'kbn-section kbn-section-pinned'
-    if (pinned.length === 0) section.classList.add('kbn-section-pinned-empty')
-    section.setAttribute('role', 'region')
-    section.setAttribute('aria-label', `Pinned (${pinned.length}) — drag a role here to park it; drag one to In flight to start it`)
-
-    const pinnedHead = renderBandHead('Pinned', pinned.length)
-    section.append(pinnedHead)
-    this.installBandCollapse(section, pinnedHead, 'pinned')
-
-    const row = document.createElement('div')
-    row.className = 'kbn-pinned-row'
-    row.setAttribute('role', 'list')
-    if (pinned.length === 0) {
-      const hint = document.createElement('div')
-      hint.className = 'kbn-pinned-empty-hint'
-      hint.textContent = 'Drag a role here to park it on the strip'
-      row.append(hint)
-    } else {
-      for (const card of pinned) row.append(this.renderPinnedChip(card, staleness[card.originId]))
-    }
-    section.append(row)
-    // Dropping a card on the Pinned strip reshapes it to a resting
-    // `kind:pinned` role via `reshape` — the sibling of dragging a pinned card
-    // onto In-flight (which dispatches it), and a `/lifecycle` reshape rather
-    // than the `/felt-edit` field that Now and Resting write. A card already on
-    // the strip is handled inside `pinRole`, which reports "already pinned".
-    // No `rowDrop`: a peek row never arms `dragSourceId`, so it cannot land here.
-    this.installSectionDragHandlers(section, {
-      skipColHead: false,
-      commit: (card) => void this.o.pin(card),
-    })
-    return section
-  }
-
-  /**
-   * One pinned role as a compact launcher chip — a launcher, not a monitor.
-   * The user arrives with intent ("start X") and scans for the role,
-   * so the chip carries only what locates and launches it: an actor glyph,
-   * the role name, a status/staleness dot, and the agent/host hint. No outcome
-   * text (it lives on the `title` tooltip for the rare glance). The two
-   * human-attention phases (`attention`/`waiting`) still earn a small marker —
-   * they're genuinely "this one needs you." Click opens the fiber detail, as
-   * a desk card does; the chip stays draggable so drag-to-In-flight dispatches
-   * it and drag-off-strip is handled upstream.
-   *
-   * A PINNED ROLE IS A HEAD LIKE ANY OTHER. Filing a pile of related work under
-   * an umbrella role is the canonical use of the queue, and the strip is the
-   * only surface the role appears on, so the pile must be visible here. The
-   * chip takes stack drops (`installStackTarget`) and wears the compact
-   * "+N queued" chip, and the peek list hangs off a WRAPPER rather than
-   * the chip itself — the chip is a `<button>`, and a list of buttons nested
-   * inside one is neither valid nor clickable.
-   */
-  private renderPinnedChip(
-    card: KanbanCard,
-    originStaleness: KanbanOriginStaleness | undefined,
-  ): HTMLElement {
-    const isStale = originStaleness?.status === 'stale'
-    const isAgent = isAgentCard(card)
-
-    const el = document.createElement('button')
-    el.type = 'button'
-    el.className = `kbn-pin-chip${isAgent ? ' kbn-pin-chip-agent' : ' kbn-pin-chip-human'}${isStale ? ' kbn-card--stale' : ''}`
-    el.dataset.fiberId = card.id
-    el.dataset.cardUid = card.uid ?? card.id
-    el.dataset.cardOrigin = card.originId
-    el.setAttribute('role', 'listitem')
-    el.draggable = !isStale && !coarsePointer()
-    el.title = card.outcome ? `${card.name} — ${card.outcome}` : card.name
-    el.setAttribute('aria-label', `${card.name}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
-
-    if (!isStale) this.installDraggable(el, card, true)
-    // Held still, a chip offers the same menu a desk card does.
-    this.installLongPressMove(el, card)
-    // The strip takes stack drops like any other surface that draws a head.
-    this.installStackTarget(el, card)
-
-    // Status/staleness dot: stale (grey), live worker (teal, pulsing), or at-
-    // rest (faint). The dot is the whole health read — no text needed.
-    const dotState = isStale ? 'stale' : hasLiveWorker(card) ? 'live' : card.held ? 'held' : 'rest'
-    const dot = document.createElement('span')
-    dot.className = `kbn-pin-chip-dot kbn-pin-chip-dot-${dotState}`
-    dot.setAttribute('aria-hidden', 'true')
-
-    const glyph = document.createElement('span')
-    glyph.className = 'kbn-pin-chip-glyph'
-    glyph.setAttribute('aria-hidden', 'true')
-    glyph.textContent = isAgent ? '◐' : '✓'
-
-    const name = document.createElement('span')
-    name.className = 'kbn-pin-chip-name'
-    name.textContent = card.name
-
-    const agentName = this.agentName(card)
-    const hint = document.createElement('span')
-    hint.className = 'kbn-pin-chip-hint'
-    hint.textContent = isAgent ? (agentName ?? '') : 'me'
-    hint.hidden = isAgent && agentName === null
-
-    el.append(dot, glyph, name, hint)
-
-    // Attention-bearing marker — the one thing that overrides "launcher, not
-    // monitor." A parked role whose worker raised its hand (or is waiting on
-    // input) shows a small manicule/pause chip so it can call you back.
-    const phase = card.runtimePhase
-    if (phase === 'attention' || phase === 'waiting') {
-      const badge = RUNTIME_PHASE_BADGES[phase]
-      const mark = document.createElement('span')
-      mark.className = `kbn-pin-chip-attn kbn-pin-chip-attn-${phase}`
-      mark.textContent = phase === 'attention' ? '☞︎' : '⏸'
-      mark.title = badge.title
-      mark.setAttribute('aria-label', badge.label)
-      el.append(mark)
-    }
-
-    el.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('a')) return
-      this.o.openDetail(card)
-    })
-
-    const wrap = document.createElement('span')
-    wrap.className = 'kbn-pin-chip-wrap'
-    wrap.append(el)
-    // No queue, no wrapper: an ordinary role is just its chip.
-    return this.renderQueuedChip(card, wrap, { compact: true }) ? wrap : el
-  }
-
   /**
    * The drag-reveal horizon: a slim row of future days that materializes below
    * the tab strip for the duration of a drag, and nothing at all the rest of
@@ -919,6 +777,89 @@ export class KanbanSurfaceRenderer {
       commit: (card) => void this.o.setSurface(card, 'stashed'),
     })
     return section
+  }
+
+  /**
+   * The Roles band: every seat at rest (`shuttle.seat`), as a dense wrap of
+   * launcher chips above Resting. A seat is an office you return to, so the
+   * chip carries only what finds and starts it: a dot, the constitution's name,
+   * and its agent, or its next firing for a standing seat. Every seat renders —
+   * no "+N more", because a launcher you reach for daily must never be on page
+   * two. Click opens the fiber; drag it to In flight to start it.
+   *
+   * Rendered only when there is a seat to show. The band is not a drop target:
+   * a card becomes a seat through `shuttle seat`, and a seat dragged into
+   * Resting rests and comes back here.
+   */
+  renderRolesSection(
+    roles: KanbanCard[],
+    staleness: Record<string, KanbanOriginStaleness>,
+  ): HTMLElement | null {
+    if (roles.length === 0) return null
+    const section = document.createElement('section')
+    section.className = 'kbn-section kbn-section-roles'
+    section.setAttribute('role', 'region')
+    section.setAttribute('aria-label', `Roles (${roles.length}) — seats at rest; drag one to In flight to start it`)
+
+    const head = renderBandHead('Roles', roles.length)
+    section.append(head)
+    this.installBandCollapse(section, head, 'roles')
+
+    const row = document.createElement('div')
+    row.className = 'kbn-roles-row'
+    row.setAttribute('role', 'list')
+    for (const card of roles) row.append(this.renderRoleChip(card, staleness[card.originId]))
+    section.append(row)
+    return section
+  }
+
+  private renderRoleChip(
+    card: KanbanCard,
+    originStaleness: KanbanOriginStaleness | undefined,
+  ): HTMLElement {
+    const isStale = originStaleness?.status === 'stale'
+    const el = document.createElement('button')
+    el.type = 'button'
+    el.className = `kbn-role-chip${isStale ? ' kbn-card--stale' : ''}`
+    el.dataset.fiberId = card.id
+    el.dataset.cardUid = card.uid ?? card.id
+    el.dataset.cardOrigin = card.originId
+    el.setAttribute('role', 'listitem')
+    el.draggable = !isStale && !coarsePointer()
+    if (!isStale) this.installDraggable(el, card, true)
+    this.installLongPressMove(el, card)
+
+    const dot = document.createElement('span')
+    dot.className = `kbn-role-chip-dot kbn-role-chip-dot-${isStale ? 'stale' : card.held ? 'held' : 'rest'}`
+    dot.setAttribute('aria-hidden', 'true')
+
+    const name = document.createElement('span')
+    name.className = 'kbn-role-chip-name'
+    name.textContent = card.name
+
+    const hint = document.createElement('span')
+    hint.className = 'kbn-role-chip-hint'
+    let detail = ''
+    if (isSleepingOnSchedule(card)) {
+      const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
+      hint.textContent = returns ? `↻ ${returns}` : '↻'
+      const schedule = humanizeCron(card.shuttleSchedule) ?? card.shuttleSchedule
+      detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
+    } else {
+      hint.textContent = this.agentName(card) ?? ''
+    }
+    hint.hidden = hint.textContent === ''
+
+    el.append(dot, name, hint)
+    const seat = card.shuttleSeat ? `seat of roles/${card.shuttleSeat}` : ''
+    el.title = [card.name, seat, detail, card.outcome].filter(Boolean).join(' — ')
+    el.setAttribute('aria-label', `${card.name}${seat ? `, ${seat}` : ''}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
+
+    el.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a')) return
+      this.o.openDetail(card)
+    })
+    return el
   }
 
   /** Warm-then-held-open rendering of one Resting half (the undated watch
@@ -1079,7 +1020,7 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Install drop handlers on a section (Now, Resting, Pinned). A drop outside
+  /** Install drop handlers on a section (Now, Resting). A drop outside
    *  a column header calls `commit`; `rowDrop` also accepts a peek-list row,
    *  which leaves the queue and takes that horizon. */
   private installSectionDragHandlers(
@@ -1321,7 +1262,7 @@ export class KanbanSurfaceRenderer {
 
     // TWO WAYS OF COMING BACK, said differently on purpose.
     //
-    // A standing role asleep on its cron returns BY ITSELF — "↻ returns Aug 12"
+    // A standing constitution asleep on its cron returns BY ITSELF — "↻ returns Aug 12"
     // — and the ↻ is the whole distinction from a snooze, which is a thing YOU
     // put down and which "wakes" on a day you chose. Reading them the same way
     // would make the desk claim you had parked a role you never touched.
@@ -1474,7 +1415,7 @@ export class KanbanSurfaceRenderer {
       if (kind === 'inFlight') {
         // The read model owns order within each band. These captions expose
         // the one state change that can move a card across the seam.
-        for (const [key, label] of [['question', 'Question'], ['stalled', 'Stalled'], ['working', 'Working']] as const) {
+        for (const [key, label] of IN_FLIGHT_BANDS) {
           const members = cards.filter((card) => inFlightBand(card) === key)
           if (members.length === 0) continue
           const band = document.createElement('div')
@@ -1809,6 +1750,8 @@ export class KanbanSurfaceRenderer {
 
     const meta = document.createElement('div')
     meta.className = 'kbn-card-meta'
+    // A verdict given from the Desk waits out its undo window on this foot.
+    markVerdictHost(meta, card)
 
     const actor = document.createElement('span')
     actor.className = `kbn-card-actor ${isAgentCard(card) ? 'kbn-card-actor-agent' : 'kbn-card-actor-human'}`
@@ -1838,7 +1781,8 @@ export class KanbanSurfaceRenderer {
     // badge / held pill / worker pill are the RIGHT region, built further
     // down and collected into `rightChip` for the same reason.
     let reviewMetaActions: HTMLDivElement | undefined
-    if (kind === 'awaitingReview' && !isStale) {
+    // Work awaiting review or in flight can be cleared from its card.
+    if ((kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
       reviewMetaActions = document.createElement('div')
       reviewMetaActions.className = 'kbn-card-review-meta-actions'
       const verdictBtn = (label: string, modifier: string, target: ColumnKind): HTMLButtonElement => {
@@ -1891,7 +1835,7 @@ export class KanbanSurfaceRenderer {
         const classes = card.launchError || phaseName === 'blocked'
           ? 'kbn-card-phase-blocked'
           : `kbn-card-worker-${variant}`
-        rightChip = appWorkerLink(card, classes)
+        rightChip = workerPlate(card, appWorkerLink(card, classes))
         rightChip.title = `${phasePillLabel(phaseName, card.lastActivityAt)} — ${rightChip.title}`
       } else {
         const phase = document.createElement('span')
@@ -1914,7 +1858,7 @@ export class KanbanSurfaceRenderer {
       heldEl.type = 'button'
       heldEl.className = 'kbn-card-held'
       const since = card.heldSince
-        ? ` since ${new Date(card.heldSince).toLocaleTimeString()}`
+        ? ` since ${formatInstant(card.heldSince, TIME_OF_DAY)}`
         : ''
       const host = card.shuttleHost
       heldEl.setAttribute(
@@ -1942,7 +1886,7 @@ export class KanbanSurfaceRenderer {
       rightChip = heldEl
     }
     if (card.tmuxSession) {
-      rightChip = terminalWorkerPill(card, { phase: kind === 'inFlight', openWorker: this.o.openWorker })
+      rightChip = workerPlate(card, terminalWorkerPill(card, { phase: kind === 'inFlight', openWorker: this.o.openWorker }), kind === 'inFlight')
     }
 
     // Place the CENTER (Temper/Compost) and RIGHT (phase/held/worker) regions
@@ -1955,12 +1899,14 @@ export class KanbanSurfaceRenderer {
     // room rather than flush against whichever side claims it first; the
     // right chip then lands flush against the row's own right edge, same as
     // it always has.
+    // In flight the pair follows the left chips instead of centring, so a
+    // worker pill that changes width never moves it under the pointer.
     if (reviewMetaActions) {
       const before = document.createElement('div')
       before.className = 'kbn-card-meta-spacer'
       const after = document.createElement('div')
       after.className = 'kbn-card-meta-spacer'
-      meta.append(before, reviewMetaActions, after)
+      meta.append(...(kind === 'inFlight' ? [] : [before]), reviewMetaActions, after)
     }
     if (rightChip) {
       if (!reviewMetaActions) {
@@ -2028,14 +1974,10 @@ export class KanbanSurfaceRenderer {
    * the board to do it would lose the thing you were comparing it to.
    *
    * This chip is the ONLY place a folded card appears, so every surface that
-   * draws a head has to call it: the full card, the Resting row, and the pinned
-   * launcher chip. A head drawn without it is a queue that is simply gone.
+   * draws a head has to call it: the full card and the Resting row. A head
+   * drawn without it is a queue that is simply gone.
    */
-  private renderQueuedChip(
-    card: KanbanCard,
-    host: HTMLElement,
-    opts: { compact?: boolean } = {},
-  ): boolean {
+  private renderQueuedChip(card: KanbanCard, host: HTMLElement): boolean {
     // THE SAME GRAPH THE GESTURE READS. A follower in awaiting review is still
     // in the chain — it is what a drop resolves the tail to, and what makes a
     // second drop refuse — so a chip that counted only the live ones described
@@ -2045,31 +1987,6 @@ export class KanbanSurfaceRenderer {
 
     const resp = this.o.getLastResponse()
     const members = queued.map((id) => findCardById(resp, id))
-    const names = members.map((m, i) => m?.name ?? queued[i])
-    const notes = members.map((m) => (m ? queueMemberNote(m) : null))
-
-    const chip = document.createElement('button')
-    chip.type = 'button'
-    // COMPACT is the same chip in a smaller room — a pinned launcher or a
-    // Resting row has no width for "+3 queued", so the words drop to `+3` and
-    // the count survives where it always has to: the tooltip and the aria
-    // label, both written below and both naming the number outright.
-    chip.className = opts.compact ? 'kbn-card-queued kbn-card-queued--compact' : 'kbn-card-queued'
-    chip.textContent = opts.compact ? `+${queued.length}` : queuedChipLabel(queued.length)
-    chip.setAttribute('aria-expanded', 'false')
-    chip.setAttribute(
-      'aria-label',
-      `${queued.length} card${queued.length === 1 ? '' : 's'} queued behind ${card.name} — show them`,
-    )
-    chip.title = `Waiting on this one, in order: ${names
-      .map((name, i) => (notes[i] ? `${name} (${notes[i]})` : name))
-      .join(' → ')}`
-
-    const list = document.createElement('ol')
-    list.className = opts.compact
-      ? 'kbn-card-queued-list kbn-card-queued-list--floating'
-      : 'kbn-card-queued-list'
-    list.hidden = true
     // Each row asks for itself. `chainAllScalar` is the only chain-wide fact in
     // play, and it gates REORDER alone — taking a row out is a fact about that
     // row's own fiber, so it stays offered even in a queue of one and even when
@@ -2085,6 +2002,7 @@ export class KanbanSurfaceRenderer {
     const gestures = members.map(gestureFor)
     const reorderable = gestures.some((g) => g.reorderable)
       && queueIsLinear(card.id, queued, members.filter((m): m is KanbanCard => !!m))
+    const { chip, list } = queuedControl(card, queued, members, member => this.o.openDetail(member))
     // THE LIST IS ITS OWN DRAG BOUNDARY.
     //
     // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
@@ -2125,28 +2043,8 @@ export class KanbanSurfaceRenderer {
       list.classList.add('kbn-card-queued-list--reorderable')
       chip.title = `${chip.title}. Drag a row to reorder the queue.`
     }
-    names.forEach((name, i) => {
-      const li = document.createElement('li')
-      li.className = 'kbn-card-queued-row'
-      li.textContent = name
-      const note = notes[i]
-      if (note) {
-        // A closed member reads dimmer and says which closed state it is in —
-        // it is in the queue, but it is not what the queue is waiting on next.
-        // It also wears the state's OWN pigment: verdigris for awaiting review,
-        // the board's verdict colour, so a settled member is findable at a
-        // glance the moment the list is open.
-        li.classList.add('kbn-card-queued-row--settled')
-        li.classList.add(
-          note === 'awaiting review'
-            ? 'kbn-card-queued-row--review'
-            : 'kbn-card-queued-row--discarded',
-        )
-        const suffix = document.createElement('span')
-        suffix.className = 'kbn-card-queued-note'
-        suffix.textContent = ` · ${note}`
-        li.append(suffix)
-      }
+    Array.from(list.children).forEach((child, i) => {
+      const li = child as HTMLLIElement
       const gesture = gestures[i]
       const canReorder = reorderable && gesture.reorderable
       // The row SAYS what its drag can do — or, when it has none, why. A row
@@ -2154,31 +2052,11 @@ export class KanbanSurfaceRenderer {
       const hint = gesture.reorderable && !reorderable
         ? 'Drag out to move. This queue branches, so rows cannot be reordered.'
         : gesture.hint
-      li.title = `Open “${name}”${note ? ` (${note})` : ''}. ${hint}`
-      // A ROW IS THE FIBER IT NAMES. Without this the click bubbles to the
-      // card the list hangs off and opens the HEAD — you click "Euclid
-      // timetracker", you get the card you were reading. The row is the only
-      // place some of these fibers appear on the board at all (the fold draws
-      // them here and nowhere else), so it has to be a way in.
-      const member = members[i]
-      if (member) {
-        li.dataset.cardUid = member.uid ?? member.id
-        li.dataset.cardOrigin = member.originId
-      }
-      li.addEventListener('click', (e) => {
-        e.stopPropagation()
-        if (member) this.o.openDetail(member)
-      })
+      li.title += ` ${hint}`
       if (!gesture.draggable) li.classList.add('kbn-card-queued-row--fixed')
       if (gesture.draggable) {
         this.installQueueRowDrag(li, list, card.id, queued, i, canReorder)
       }
-      list.append(li)
-    })
-    chip.addEventListener('click', (e) => {
-      e.stopPropagation()
-      list.hidden = !list.hidden
-      chip.setAttribute('aria-expanded', String(!list.hidden))
     })
     host.append(chip)
     host.append(list)
@@ -2587,7 +2465,7 @@ function adoptColumnActions(board: HTMLElement, strip: HTMLElement): void {
   })
 }
 
-/** The head of a Desk band (Pinned, Resting) — the column head's own parts at
+/** The head of a Desk band (Resting) — the column head's own parts at
  *  band scale: a small-caps title and the count in mono beside it. No dropcap:
  *  the F2/F1 initial needs the column title's size to read as illumination
  *  (see `.kbn-bandhead-title`). */
@@ -2642,30 +2520,25 @@ export interface TimelineDay {
 /**
  * The strip of day columns, from `past` days back to `future` days ahead.
  *
- * Strides by CALENDAR day, not by 86_400_000 ms. A fixed-millisecond stride
- * drifts an hour across a DST transition and eventually skips or repeats a
- * civil day — and a skipped column is a card that VANISHES, because its due
- * day finds no column to land on. `setDate(getDate() + 1)` is local-calendar
- * arithmetic: it always lands on the next civil day, 23- or 25-hour.
- * `today` is injectable so the DST crossings are testable.
+ * Strides by CALENDAR day (`shiftCivilDay`), never by 86_400_000 ms of an
+ * instant. A fixed-millisecond stride drifts an hour across a DST transition
+ * and eventually skips or repeats a civil day — and a skipped column is a card
+ * that VANISHES, because its due day finds no column to land on. `today` is a
+ * civil day, and the strip is built from it with no zone in sight.
  */
 export function buildTimelineDays(
   past: number,
   future: number,
-  today: Date = new Date(),
+  today: string = isoDayLocal(Date.now()),
 ): TimelineDay[] {
   const days: TimelineDay[] = []
-  const cursor = new Date(today.getTime())
-  cursor.setHours(0, 0, 0, 0)
-  cursor.setDate(cursor.getDate() - past)
   for (let offset = -past; offset <= future; offset += 1) {
-    const d = new Date(cursor.getTime())
-    cursor.setDate(cursor.getDate() + 1)
-    const dow = d.getDay()
+    const iso = shiftCivilDay(today, offset)
+    const dow = civilWeekday(iso)
     days.push({
-      iso: isoDayLocal(d.getTime()),
-      label: String(d.getDate()),
-      weekdayLabel: d.toLocaleDateString(undefined, { weekday: 'short' }),
+      iso,
+      label: String(Number(iso.slice(8, 10))),
+      weekdayLabel: formatCivilDay(iso, { weekday: 'short' }) ?? '',
       isToday: offset === 0,
       isPast: offset < 0,
       isWeekend: dow === 0 || dow === 6,
@@ -2696,9 +2569,7 @@ function buildDayCell(day: TimelineDay): HTMLElement {
 /** `Aug 12` — a civil day said the short way, for a chip that has no room for
  *  more. Falls back to the raw ISO if the day will not parse. */
 function shortDayLabel(iso: string): string {
-  const d = civilDayToLocalDate(iso)
-  if (!d) return iso
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return formatCivilDay(iso, { month: 'short', day: 'numeric' }) ?? iso
 }
 
 /** What the aim readout says while a day cell is the target. Today is a
@@ -2784,7 +2655,7 @@ function splitByPathDepth(cards: KanbanCard[], depth: number): Array<{ key: stri
 
 /**
  * When a resting card comes back on its own — a `due:` snooze date, or a
- * standing role asleep on its cron (it dispatches itself regardless of
+ * standing constitution asleep on its cron (it dispatches itself regardless of
  * whether `nextLaunchAt` parsed to a shown date). Anything else has no
  * appointment at all: nothing is going to surface it again, so a person is
  * the only mechanism that ever will.
@@ -2819,9 +2690,9 @@ export function splitStashByReturn(
  *  occurrence for a sleeping role, otherwise its `due:` day. Absent for a
  *  card `splitStashByReturn` would have called undated; such a card sorts
  *  last via `ascByKey`'s undefined-last rule, rather than crash. */
-function returnMs(card: KanbanCard): number | undefined {
+function returnMs(card: KanbanCard, z: Zone): number | undefined {
   if (isSleepingOnSchedule(card)) return card.nextLaunchAt ? instantMs(card.nextLaunchAt) : undefined
-  return dueSortMs(card.due)
+  return dueSortMs(card.due, z)
 }
 
 /** Re-sort clusters already built by `clusterStashCards` so the dated half of
@@ -2829,9 +2700,9 @@ function returnMs(card: KanbanCard): number | undefined {
  *  clustering doesn't give you on its own. Cluster membership (and the
  *  warm/cold split) is untouched; only the order of clusters and the cards
  *  within each is affected. */
-export function sortDatedByReturn(clusters: StashCluster[]): StashCluster[] {
+export function sortDatedByReturn(clusters: StashCluster[], z: Zone = hostZone()): StashCluster[] {
   const byReturn = (a: KanbanCard, b: KanbanCard): number =>
-    ascByKey(returnMs(a), returnMs(b)) || byCreatedAtDesc(a, b)
+    ascByKey(returnMs(a, z), returnMs(b, z)) || byCreatedAtDesc(a, b)
   return clusters
     .map((c) => ({ ...c, cards: [...c.cards].sort(byReturn) }))
     .sort((a, b) => a.cold !== b.cold ? (a.cold ? 1 : -1) : byReturn(a.cards[0], b.cards[0]))
@@ -2884,21 +2755,16 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
 export function formatLaunchDay(iso: string): string {
   const ms = instantMs(iso)
   if (ms === undefined) return ''
-  return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  return formatInstant(ms, { month: 'short', day: 'numeric' })
 }
 
 /** The `due <date>` chip on a card. Reads the value as the CIVIL DAY it names,
  *  the same way Chronicle places the card's due mark — otherwise one board
  *  would name two different days for one due, Thursday on the column and
- *  Wednesday on the chip. The day is materialized as a local date, never
- *  re-parsed as an instant (see civilDay.ts). */
+ *  Wednesday on the chip. The day is said as a civil day, never re-parsed as
+ *  an instant (see civilDay.ts). */
 export function formatDue(iso: string): string {
-  const date = civilDayToLocalDate(dueCivilDay(iso))
-  if (!date) return iso
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  })
+  return formatCivilDay(dueCivilDay(iso), { month: 'short', day: 'numeric' }) ?? iso
 }
 
 /**
@@ -2935,7 +2801,6 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
   for (const kind of NOW_COLUMN_ORDER) {
     if (resp.now[kind].some((c) => c.id === id)) return kind
   }
-  if (resp.pinned.some((c) => c.id === id)) return 'pinned'
   for (const c of resp.timeline.past) {
     if (c.id === id) return c.tempered === false ? 'composted' : 'tempered'
   }
@@ -2986,7 +2851,7 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
     resp.timeline.past,
     resp.timeline.futureDated,
     resp.stash,
-    resp.pinned,
+    resp.roles,
     resp.folded,
   ]) {
     for (const card of list) {
@@ -3022,15 +2887,16 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     if (hit) return hit
   }
   // ANYTHING DRAWN MUST BE FINDABLE. Every list below reaches the screen —
-  // `restingCards` joins `stash` and `timeline.futureDated`, the past lane draws
-  // itself, the strip draws `pinned` — and a card that renders but resolves to
+  // `restingCards` joins `stash` and `timeline.futureDated`, the Roles band
+  // draws `roles`, the past lane draws
+  // itself — and a card that renders but resolves to
   // null here is a card whose every drag silently no-ops. Add a list to what the
   // board draws, add it here.
   for (const list of [
     resp.timeline.past,
     resp.timeline.futureDated,
     resp.stash,
-    resp.pinned,
+    resp.roles,
     // FOLDED CARDS ARE NOT DRAWN, but they are on screen: every one of them is
     // a row in some head's peek list, and every row opens, drags and reorders
     // through this lookup. A folded card that did not resolve here would be a

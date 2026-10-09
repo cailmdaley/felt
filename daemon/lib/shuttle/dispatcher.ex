@@ -33,6 +33,7 @@ defmodule Shuttle.Dispatcher do
           {:ok, String.t()}
           | {:error, :not_found}
           | {:error, :closed}
+          | {:error, :not_active}
           | {:error, :already_running}
           | {:error, {:arm_refused, arm_refusal()}}
           | {:error, :missing_session_id}
@@ -98,7 +99,7 @@ defmodule Shuttle.Dispatcher do
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
          {:ok, uid} <- check_uid(fiber_id, fiber),
-         :ok <- check_not_closed(fiber, force),
+         :ok <- check_dispatchable(fiber, force),
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_app_not_running(fiber_id, uid),
@@ -200,9 +201,8 @@ defmodule Shuttle.Dispatcher do
       previous one when it ended without a handoff.
     * `"continue"` — a message delivered to a fiber with no live worker
       (`Shuttle.Delivery`): the no-handoff rule below, for any kind of fiber.
-    * absent — the autonomous loop: the no-handoff rule for oneshots; pinned
-      and standing roles start fresh (a pinned role only redispatches itself
-      after a clean handoff, and standing roles run discrete occurrences).
+    * absent — the autonomous loop: the no-handoff rule for oneshots; a
+      standing constitution starts fresh, since it runs discrete occurrences.
 
   The no-handoff rule: with no session, or a clean handoff since dispatch
   (`handed_off_at >= dispatched_at`), start fresh. A `surface: app`
@@ -706,19 +706,20 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Reject closed fibers by default. Manual force-dispatch (the "New session"
-  # / "Resume" buttons) explicitly opts in to dispatching against closed
-  # fibers; `maybe_reopen_on_force/5` then reopens the YAML so the kanban
-  # view actually reclassifies the card.
-  defp check_not_closed(_fiber, true), do: :ok
+  # An unforced dispatch launches only what this fresh read still finds
+  # `active`. The tick that chose the fiber read it earlier, so a pause, rest
+  # or close landing in between must stop the launch here: `closed` and every
+  # other status alike. Manual force-dispatch (the "New session" / "Resume"
+  # buttons) explicitly opts in to dispatching a fiber that is not armed;
+  # `maybe_reopen_on_force/5` then reopens the YAML so the kanban view
+  # actually reclassifies the card.
+  defp check_dispatchable(_fiber, true), do: :ok
 
-  defp check_not_closed(fiber, _force) do
-    status = Map.get(fiber, "status", "")
-
-    if status == "closed" do
-      {:error, :closed}
-    else
-      :ok
+  defp check_dispatchable(fiber, _force) do
+    case Map.get(fiber, "status", "") do
+      "active" -> :ok
+      "closed" -> {:error, :closed}
+      _ -> {:error, :not_active}
     end
   end
 
@@ -856,7 +857,7 @@ defmodule Shuttle.Dispatcher do
   # the daemon refuses with :already_running and the caller adopts instead.
   defp check_not_running(fiber_id, uid, runner, surface) do
     cond do
-      surface == "app" and System.find_executable("tmux") == nil -> :ok
+      surface == "app" and Shuttle.Env.find_executable("tmux") == nil -> :ok
       Shuttle.Tmux.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
       true -> :ok
     end
@@ -1805,7 +1806,7 @@ defmodule Shuttle.Dispatcher do
          cwd when is_binary(cwd) <- Map.get(header, "cwd"),
          timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
          {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      Path.expand(cwd) == Path.expand(work_dir) and
+      Shuttle.Env.expand(cwd) == Shuttle.Env.expand(work_dir) and
         DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
         String.contains?(content, "Fiber: #{fiber_id}")
     else
@@ -1919,7 +1920,7 @@ defmodule Shuttle.Dispatcher do
     # lands in ~300-500ms. The 10s timeout is the safety net for the rare
     # cases where that auto-attach can't run — kitty isn't running, or the
     # daemon was dispatched with no human in the loop (CLI, scheduled
-    # standing role). After the timeout the harness proceeds at the
+    # standing constitution). After the timeout the harness proceeds at the
     # default-size.
     wait_for_client_block =
       if session != "" and not headless, do: wait_for_client_block(session), else: ""

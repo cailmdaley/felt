@@ -107,6 +107,7 @@ defmodule Shuttle.RemoteRegistry do
       :trip_cooldown_schedule_ms,
       :user_uid,
       :remotes_token,
+      clock: &DateTime.utc_now/0,
       reload_from_file?: false,
       snapshots: %{}
     ]
@@ -160,6 +161,9 @@ defmodule Shuttle.RemoteRegistry do
       never abandons a remote.
     * `:user_uid` — override the local GUI UID used for `launchctl`
       labels (tests). Defaults to `$UID` / `id -u`.
+    * `:clock` — zero-arity fun returning the current `DateTime`, read for
+      every poll, recovery deadline and staleness view. Defaults to
+      `&DateTime.utc_now/0`; tests pass a fake clock they advance.
     * `:auto_poll` — whether to schedule the registry's background
       polling tick. Defaults to `true`; tests can set `false` and drive
       the registry deterministically with `poll_now/1`.
@@ -167,8 +171,12 @@ defmodule Shuttle.RemoteRegistry do
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @doc """
@@ -204,7 +212,7 @@ defmodule Shuttle.RemoteRegistry do
   registry.
   """
   @spec poll_now() :: :ok
-  def poll_now, do: poll_now(__MODULE__)
+  def poll_now, do: poll_now(Shuttle.Env.server(__MODULE__))
 
   @spec poll_now(GenServer.server()) :: :ok
   def poll_now(server) do
@@ -227,7 +235,7 @@ defmodule Shuttle.RemoteRegistry do
   `{:error, :unknown_remote}` when the name isn't configured.
   """
   @spec reset_breaker(String.t()) :: :ok | {:error, :not_tripped | :unknown_remote}
-  def reset_breaker(name), do: reset_breaker(__MODULE__, name)
+  def reset_breaker(name), do: reset_breaker(Shuttle.Env.server(__MODULE__), name)
 
   @spec reset_breaker(GenServer.server(), String.t()) ::
           :ok | {:error, :not_tripped | :unknown_remote}
@@ -290,7 +298,8 @@ defmodule Shuttle.RemoteRegistry do
       user_uid: user_uid,
       snapshots: snapshots,
       reload_from_file?: reload_from_file?,
-      remotes_token: Shuttle.Remotes.config_token()
+      remotes_token: Shuttle.Remotes.config_token(),
+      clock: Keyword.get(opts, :clock, &DateTime.utc_now/0)
     }
 
     state =
@@ -325,7 +334,7 @@ defmodule Shuttle.RemoteRegistry do
             recovery
             | state: :degraded,
               step: :bounce_tunnel,
-              action_due_at: DateTime.utc_now(),
+              action_due_at: state.clock.(),
               next_retry_at: nil,
               last_action: "circuit breaker manually reset; re-running recovery cascade"
           })
@@ -384,7 +393,7 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   defp poll_configured(%State{remotes: remotes} = state) do
-    now = DateTime.utc_now()
+    now = state.clock.()
     now_ms = DateTime.to_unix(now, :millisecond)
 
     new_snapshots =
@@ -1060,12 +1069,12 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   defp current_uid do
-    case System.get_env("UID") do
+    case Shuttle.Env.get("UID") do
       uid when is_binary(uid) and uid != "" ->
         uid
 
       _ ->
-        case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+        case Shuttle.Env.cmd("id", ["-u"], stderr_to_stdout: true) do
           {out, 0} -> String.trim(out)
           _ -> "0"
         end
@@ -1089,7 +1098,7 @@ defmodule Shuttle.RemoteRegistry do
   # ── Views ──
 
   defp build_snapshots_view(%State{} = state) do
-    now = DateTime.utc_now()
+    now = state.clock.()
 
     Map.new(state.snapshots, fn {name, entry} ->
       {name, view_entry(entry, now)}
@@ -1099,7 +1108,7 @@ defmodule Shuttle.RemoteRegistry do
   defp build_one_view(%State{} = state, name) do
     case Map.get(state.snapshots, name) do
       nil -> nil
-      entry -> view_entry(entry, DateTime.utc_now())
+      entry -> view_entry(entry, state.clock.())
     end
   end
 
@@ -1479,15 +1488,17 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   defp current_tailscale_socket do
     # The resolved file path matters independently of its stat token: two
     # selected files can have the same `{mtime, size}` and different sockets.
-    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :tailscale_socket)}
+    # The slot is per test scope (`Shuttle.Env.scope_key/1`): the answer also
+    # depends on `:tailscale_home`, HOME and `:os_type`, which a test scopes.
+    key = {remotes_file_snapshot(), Shuttle.Env.app(:tailscale_socket)}
 
-    case :persistent_term.get(@tailscale_socket_key, :unset) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@tailscale_socket_key), :unset) do
       {^key, socket} ->
         socket
 
       _ ->
         socket = Shuttle.Remotes.tailscale_socket()
-        :persistent_term.put(@tailscale_socket_key, {key, socket})
+        :persistent_term.put(Shuttle.Env.scope_key(@tailscale_socket_key), {key, socket})
         socket
     end
   end
@@ -1586,15 +1597,15 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # `SHUTTLE_REMOTES_FILE` cannot reuse a value from another file with matching
   # metadata, and `Shuttle.Remotes.https_proxy/0` owns the precedence decision.
   defp current_proxy do
-    key = {remotes_file_snapshot(), Application.get_env(:shuttle, :https_proxy)}
+    key = {remotes_file_snapshot(), Shuttle.Env.app(:https_proxy)}
 
-    case :persistent_term.get(@proxy_key, :unset) do
+    case :persistent_term.get(Shuttle.Env.scope_key(@proxy_key), :unset) do
       {^key, proxy} ->
         proxy
 
       _ ->
         proxy = Shuttle.Remotes.https_proxy()
-        :persistent_term.put(@proxy_key, {key, proxy})
+        :persistent_term.put(Shuttle.Env.scope_key(@proxy_key), {key, proxy})
         proxy
     end
   end
@@ -1651,7 +1662,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def tls_opts do
     cacerts =
       if @tailnet_dial_test_cacerts_enabled do
-        Application.get_env(:shuttle, :tailnet_dial_test_cacerts) || :public_key.cacerts_get()
+        Shuttle.Env.app(:tailnet_dial_test_cacerts) || :public_key.cacerts_get()
       else
         :public_key.cacerts_get()
       end

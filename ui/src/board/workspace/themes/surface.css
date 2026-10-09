@@ -1,13 +1,12 @@
 /* Inherited CSS stops here too; the ordinary control rules rebuild this zone. */
-:where([data-ws-theme] [data-part='act'], [data-ws-act-material]) { all: initial; display: revert; }
+:where([data-ws-theme] [data-part='act']) { all: initial; display: revert; }
 /* The shared worker control keeps its pigments on the channel's paper. */
 @scope ([data-ws-theme]) to (:scope [data-ws-theme-boundary], :scope [data-ws-theme]) {
-  :scope .kbn-card-worker {
-    color: var(--ws-agent); border-color: color-mix(in srgb, var(--ws-agent) 55%, transparent);
-    background-color: color-mix(in srgb, var(--ws-agent) 12%, transparent);
-  }
-  :scope .kbn-card-worker-attention { color: var(--ws-you); background-color: color-mix(in srgb, var(--ws-you) 15%, transparent); }
-  :scope .kbn-card-worker-waiting { color: var(--ws-owed); background-color: color-mix(in srgb, var(--ws-owed) 15%, transparent); }
+  :scope .kbn-card-worker { color: var(--ws-ink-soft); }
+  :scope .kbn-card-worker:hover { color: var(--ws-ink); background: var(--ws-hover); }
+  :scope .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-agent); }
+  :scope .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
+  :scope .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--ws-you); }
 }
 /* Only the room's tint crosses; its pages and chrome change immediately. */
 .ws-reader [data-part='veil'] {

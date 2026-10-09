@@ -39,7 +39,7 @@ describe('verdict transition authorization', () => {
     vi.advanceTimersByTime(6000)
     expect(board.commitTransition).not.toHaveBeenCalled()
     expect(board.workspace.queueVerdict).not.toHaveBeenCalled()
-    expect(document.querySelector('.ws-verdict-toast')).toBeNull()
+    expect(document.querySelector('.ws-verdict-undo')).toBeNull()
     expect(board.showBanner).toHaveBeenCalledWith(expect.stringContaining('already in'), 'info')
   })
   it('checks an explicit gesture basis before queuing, not its optimistic destination', () => {

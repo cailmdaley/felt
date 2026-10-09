@@ -20,6 +20,7 @@ func defaultBatcher() *followBatcher {
 }
 
 func TestFollowAddressedLineFlushesEverythingPending(t *testing.T) {
+	t.Parallel()
 	b := defaultBatcher()
 	if batch := b.Add("00:00:01 me   just talking about the covariance", followAt(0)); batch != nil {
 		t.Fatalf("unexpected flush: %q", batch)
@@ -38,6 +39,7 @@ func TestFollowAddressedLineFlushesEverythingPending(t *testing.T) {
 }
 
 func TestFollowAddressedMatchIsCaseInsensitiveAndCatchesMishearings(t *testing.T) {
+	t.Parallel()
 	for _, word := range []string{"Claude", "cloud", "Clawed", "KLAUD"} {
 		if batch := defaultBatcher().Add("00:00:01 me   "+word+", what do you think?", followAt(0)); batch == nil {
 			t.Errorf("%s did not flush", word)
@@ -46,12 +48,14 @@ func TestFollowAddressedMatchIsCaseInsensitiveAndCatchesMishearings(t *testing.T
 }
 
 func TestFollowAddressedMatchIsWholeWord(t *testing.T) {
+	t.Parallel()
 	if batch := defaultBatcher().Add("00:00:01 me   the clouds are thick today", followAt(0)); batch != nil {
 		t.Fatalf("substring match flushed: %q", batch)
 	}
 }
 
 func TestFollowWordThresholdFlushesOnceReached(t *testing.T) {
+	t.Parallel()
 	b := newFollowBatcher(10, 1000*time.Second, defaultFollowNames)
 	sixWords := strings.TrimSpace(strings.Repeat("word ", 6))
 	if batch := b.Add("00:00:01 me   "+sixWords, followAt(0)); batch != nil {
@@ -63,6 +67,7 @@ func TestFollowWordThresholdFlushesOnceReached(t *testing.T) {
 }
 
 func TestFollowWordCountSkipsTheStampOrRange(t *testing.T) {
+	t.Parallel()
 	for _, stamp := range []string{"00:00:01", "00:00:01-00:00:04"} {
 		b := newFollowBatcher(4, 1000*time.Second, defaultFollowNames)
 		if batch := b.Add(stamp+" S1  two words", followAt(0)); batch != nil {
@@ -75,6 +80,7 @@ func TestFollowWordCountSkipsTheStampOrRange(t *testing.T) {
 }
 
 func TestFollowTimeThresholdFlushesAfterSecondsSinceFirstPendingLine(t *testing.T) {
+	t.Parallel()
 	b := newFollowBatcher(1000, 15*time.Second, defaultFollowNames)
 	if batch := b.Add("00:00:01 me   hi", followAt(100)); batch != nil {
 		t.Fatalf("unexpected flush: %q", batch)
@@ -88,6 +94,7 @@ func TestFollowTimeThresholdFlushesAfterSecondsSinceFirstPendingLine(t *testing.
 }
 
 func TestFollowEndedLineFlushesAndMarksEnded(t *testing.T) {
+	t.Parallel()
 	b := newFollowBatcher(1000, 1000*time.Second, defaultFollowNames)
 	b.Add("00:00:01 me   hi", followAt(0))
 	batch := b.Add("# ended 00:00:02", followAt(1))
@@ -100,6 +107,7 @@ func TestFollowEndedLineFlushesAndMarksEnded(t *testing.T) {
 }
 
 func TestFollowNamingLineRidesAlongWithoutCountingOrTriggering(t *testing.T) {
+	t.Parallel()
 	b := newFollowBatcher(1000, 1000*time.Second, defaultFollowNames)
 	b.Add("00:00:01 me   hello there", followAt(0))
 	b.Add("# S2 = Martin", followAt(1))
@@ -147,6 +155,7 @@ func appendTranscript(t *testing.T, path, text string) {
 }
 
 func TestFollowPrintsExistingContentsAsFirstBatch(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "live.txt")
 	writeTranscript(t, path, "# hark session\n00:00:01 me   hello\n")
 	lines, _ := runFollow(t, path, func(n int) {
@@ -161,6 +170,7 @@ func TestFollowPrintsExistingContentsAsFirstBatch(t *testing.T) {
 }
 
 func TestFollowWaitsForTheFileToAppear(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "live.txt")
 	lines, calls := runFollow(t, path, func(n int) {
 		if n == 3 {
@@ -177,6 +187,7 @@ func TestFollowWaitsForTheFileToAppear(t *testing.T) {
 }
 
 func TestFollowHandlesTruncationByRereadingFromZero(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "live.txt")
 	writeTranscript(t, path, "# hark session\n00:00:01 me   this line will be lost\n")
 	lines, _ := runFollow(t, path, func(n int) {
@@ -194,6 +205,7 @@ func TestFollowHandlesTruncationByRereadingFromZero(t *testing.T) {
 }
 
 func TestFollowHoldsPartialLineUntilItsNewline(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "live.txt")
 	writeTranscript(t, path, "# hark session\n00:00:01 me   hey cla")
 	lines, _ := runFollow(t, path, func(n int) {
@@ -208,6 +220,7 @@ func TestFollowHoldsPartialLineUntilItsNewline(t *testing.T) {
 }
 
 func TestFollowTickFlushesPendingBetweenLines(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "live.txt")
 	writeTranscript(t, path, "# hark session\n")
 	now := followEpoch
@@ -237,6 +250,7 @@ func TestFollowTickFlushesPendingBetweenLines(t *testing.T) {
 }
 
 func TestFollowDecodesInvalidUTF8Leniently(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "live.txt")
 	writeTranscript(t, path, "00:00:01 me   caf\xe9\n# ended 00:00:02\n")
 	lines, _ := runFollow(t, path, func(int) {})
@@ -247,6 +261,7 @@ func TestFollowDecodesInvalidUTF8Leniently(t *testing.T) {
 }
 
 func TestTranscriptLinesSplitsCompleteLines(t *testing.T) {
+	t.Parallel()
 	got := transcriptLines([]byte("a\r\nb\n\nc\n"))
 	if want := []string{"a", "b", "", "c"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("transcriptLines = %q, want %q", got, want)

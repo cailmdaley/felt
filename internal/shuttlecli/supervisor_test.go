@@ -2,15 +2,22 @@ package shuttlecli
 
 import (
 	"encoding/xml"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
+	t.Parallel()
 	releaseDir := filepath.Join(t.TempDir(), "release")
 	release := writeTestDaemonRelease(t, releaseDir)
 	share := filepath.Join(release.Dir, "share")
@@ -43,6 +50,7 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 		{"Linux", "io.shuttle.daemon.service.template"},
 	} {
 		t.Run(tc.osName, func(t *testing.T) {
+			t.Parallel()
 			path, err := findSupervisorTemplate(release, tc.osName)
 			if err != nil || filepath.Base(path) != tc.name {
 				t.Fatalf("template path = %q, %v", path, err)
@@ -51,7 +59,7 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rendered, err := renderSupervisorTemplate(tc.osName, string(source), options, release)
+			rendered, err := newApp(testEnv(t)).renderSupervisorTemplate(tc.osName, string(source), options, release)
 			if err != nil {
 				t.Fatalf("render template: %v", err)
 			}
@@ -99,6 +107,7 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 }
 
 func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	share := filepath.Join(release.Dir, "share")
 	if err := os.MkdirAll(share, 0o755); err != nil {
@@ -127,6 +136,8 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 		{"Linux", `ExecStart="/opt/shuttle" daemon start --force`, `Environment="TMUX_TMPDIR=/scratch/tmux"`},
 	} {
 		t.Run(tc.osName, func(t *testing.T) {
+			t.Parallel()
+			a := newApp(testEnv(t))
 			path, err := findSupervisorTemplate(release, tc.osName)
 			if err != nil {
 				t.Fatal(err)
@@ -135,7 +146,7 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rendered, err := renderSupervisorTemplate(tc.osName, string(source), options, release)
+			rendered, err := a.renderSupervisorTemplate(tc.osName, string(source), options, release)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,7 +158,7 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 			}
 			bare := options
 			bare.TmuxTmpdir = ""
-			without, err := renderSupervisorTemplate(tc.osName, string(source), bare, release)
+			without, err := a.renderSupervisorTemplate(tc.osName, string(source), bare, release)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -168,7 +179,62 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 	}
 }
 
+func TestSupervisorTemplatesSetFileDescriptorHeadroom(t *testing.T) {
+	t.Parallel()
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	options := supervisorOptions{
+		Label: defaultDaemonLabel, ShuttleBin: "/bin/shuttle", StoresFile: "/tmp/stores.json",
+		Path: "/bin", Log: "/tmp/shuttle.log",
+	}
+	for _, tc := range []struct {
+		osName string
+		name   string
+	}{
+		{"Darwin", "io.shuttle.daemon.plist.template"},
+		{"Linux", "io.shuttle.daemon.service.template"},
+	} {
+		t.Run(tc.osName, func(t *testing.T) {
+			t.Parallel()
+			source, err := os.ReadFile(filepath.Join("..", "..", "daemon", "share", tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			rendered, err := newApp(testEnv(t)).renderSupervisorTemplate(tc.osName, string(source), options, release)
+			if err != nil {
+				t.Fatalf("render template: %v", err)
+			}
+			if tc.osName == "Darwin" {
+				flat := strings.Join(strings.Fields(rendered), " ")
+				want := "<key>SoftResourceLimits</key> <dict> <key>NumberOfFiles</key> <integer>8192</integer> </dict>"
+				if count := strings.Count(flat, "<key>SoftResourceLimits</key>"); count != 1 || strings.Count(flat, want) != 1 {
+					t.Errorf("SoftResourceLimits NumberOfFiles setting is not exactly one 8192 limit")
+				}
+				// The hard limit stays launchd's default, so the daemon's children
+				// (a tmux server and its workers) keep their headroom.
+				if strings.Contains(flat, "HardResourceLimits") {
+					t.Errorf("plist caps HardResourceLimits; the daemon's children inherit that cap")
+				}
+			} else {
+				count := 0
+				for _, line := range strings.Split(rendered, "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "LimitNOFILE=") {
+						count++
+						if line != "LimitNOFILE=8192" {
+							t.Errorf("systemd file descriptor limit = %q; want 8192", line)
+						}
+					}
+				}
+				if count != 1 {
+					t.Errorf("systemd LimitNOFILE directive occurs %d times; want exactly once", count)
+				}
+			}
+		})
+	}
+}
+
 func TestDaemonInstallLinuxPrintOmitsDarwinSSHAgentDefault(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	share := filepath.Join(release.Dir, "share")
 	if err := os.MkdirAll(share, 0o755); err != nil {
@@ -178,23 +244,12 @@ func TestDaemonInstallLinuxPrintOmitsDarwinSSHAgentDefault(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(share, name), []byte(supervisorTemplateFixtures()[name]), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SHUTTLE_RELEASE", release.Dir)
-	t.Setenv("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
-	previous, wasSet := os.LookupEnv("AGENT_SSH_AUTH_SOCK")
-	if err := os.Unsetenv("AGENT_SSH_AUTH_SOCK"); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if wasSet {
-			_ = os.Setenv("AGENT_SSH_AUTH_SOCK", previous)
-		} else {
-			_ = os.Unsetenv("AGENT_SSH_AUTH_SOCK")
-		}
-	})
-	stubLoginEnv(t, loginEnv{Path: "/captured", TmuxTmpdir: ""})
-	out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "install", "--print", "--os", "Linux", "--path", "/bin", "--log", filepath.Join(home, "shuttle.log"))
+	env, home := envWithHome(t)
+	env.Set("SHUTTLE_RELEASE", release.Dir)
+	env.Set("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
+	env.Unset("AGENT_SSH_AUTH_SOCK")
+	a := stubLoginEnv(env, loginEnv{Path: "/captured", TmuxTmpdir: ""})
+	out, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "install", "--print", "--os", "Linux", "--path", "/bin", "--log", filepath.Join(home, "shuttle.log"))
 	if err != nil {
 		t.Fatalf("daemon install --print --os Linux: %v\n%s", err, stderr)
 	}
@@ -204,6 +259,7 @@ func TestDaemonInstallLinuxPrintOmitsDarwinSSHAgentDefault(t *testing.T) {
 }
 
 func TestDaemonInstallPrintRendersFromFakeRelease(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	share := filepath.Join(release.Dir, "share")
 	if err := os.MkdirAll(share, 0o755); err != nil {
@@ -222,17 +278,15 @@ func TestDaemonInstallPrintRendersFromFakeRelease(t *testing.T) {
 	if err := os.WriteFile(storesFile, []byte(`{"stores":[]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	feltDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(feltDir, "felt"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("PATH", feltDir)
-	t.Setenv("SHUTTLE_RELEASE", release.Dir)
-	t.Setenv("SHUTTLE_STORES_FILE", storesFile)
-	t.Setenv("AGENT_STORES", "")
-	stubLoginEnv(t, loginEnv{Path: "/captured"})
-	out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "install", "--dry-run", "--os", "Linux", "--stores", "", "--ssh-auth-sock=", "--path", "/usr/bin", "--log", "/tmp/shuttle.log", "--label", defaultDaemonLabel)
+	env := testEnv(t)
+	feltDir := sysenvtest.FakeBin(t, env)
+	sysenvtest.FakeCommand(t, env, "felt", "exit 0\n")
+	env.Set("PATH", feltDir)
+	env.Set("SHUTTLE_RELEASE", release.Dir)
+	env.Set("SHUTTLE_STORES_FILE", storesFile)
+	env.Set("AGENT_STORES", "")
+	a := stubLoginEnv(env, loginEnv{Path: "/captured"})
+	out, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "install", "--dry-run", "--os", "Linux", "--stores", "", "--ssh-auth-sock=", "--path", "/usr/bin", "--log", "/tmp/shuttle.log", "--label", defaultDaemonLabel)
 	if err != nil {
 		t.Fatalf("daemon install --dry-run: %v\n%s", err, stderr)
 	}
@@ -242,6 +296,7 @@ func TestDaemonInstallPrintRendersFromFakeRelease(t *testing.T) {
 }
 
 func TestSupervisorTemplatesOmitEmptyOptionalValues(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	options := supervisorOptions{
 		OS:         "Darwin",
@@ -258,7 +313,7 @@ func TestSupervisorTemplatesOmitEmptyOptionalValues(t *testing.T) {
 		{"Darwin", "io.shuttle.daemon.plist.template"},
 		{"Linux", "io.shuttle.daemon.service.template"},
 	} {
-		rendered, err := renderSupervisorTemplate(tc.osName, supervisorTemplateFixtures()[tc.name], options, release)
+		rendered, err := newApp(testEnv(t)).renderSupervisorTemplate(tc.osName, supervisorTemplateFixtures()[tc.name], options, release)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -273,6 +328,7 @@ func TestSupervisorTemplatesOmitEmptyOptionalValues(t *testing.T) {
 }
 
 func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		releaseDir func(string) string
@@ -281,6 +337,7 @@ func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *test
 		{"fetched release", func(root string) string { return filepath.Join(root, "release") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			root := t.TempDir()
 			release := writeTestDaemonRelease(t, tc.releaseDir(root))
 			want, err := filepath.EvalSymlinks(root)
@@ -299,7 +356,7 @@ func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *test
 				if osName == "Darwin" {
 					template = supervisorTemplateFixtures()["io.shuttle.daemon.plist.template"]
 				}
-				rendered, err := renderSupervisorTemplate(osName, template, options, release)
+				rendered, err := newApp(testEnv(t)).renderSupervisorTemplate(osName, template, options, release)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -321,6 +378,7 @@ func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *test
 }
 
 func TestSupervisorInstallStopsOnlyTheIndistinguishableDefaultDaemon(t *testing.T) {
+	t.Parallel()
 	if !supervisorInstallStopsDaemon(defaultDaemonLabel) {
 		t.Fatal("replacing the default supervisor must stop its daemon")
 	}
@@ -330,6 +388,7 @@ func TestSupervisorInstallStopsOnlyTheIndistinguishableDefaultDaemon(t *testing.
 }
 
 func TestSupervisorTemplateSourceCheckoutFallbackIsScopedToBinRel(t *testing.T) {
+	t.Parallel()
 	repo := t.TempDir()
 	release := writeTestDaemonRelease(t, filepath.Join(repo, "bin", "rel"))
 	if err := os.MkdirAll(filepath.Join(repo, "daemon", "share"), 0o755); err != nil {
@@ -352,6 +411,7 @@ func TestSupervisorTemplateSourceCheckoutFallbackIsScopedToBinRel(t *testing.T) 
 }
 
 func TestSupervisorTemplateRequiresExactPlaceholderSet(t *testing.T) {
+	t.Parallel()
 	template := supervisorTemplateFixtures()["io.shuttle.daemon.service.template"]
 	if err := validateTemplatePlaceholderSet("Linux", template); err != nil {
 		t.Fatalf("valid template rejected: %v", err)
@@ -365,6 +425,7 @@ func TestSupervisorTemplateRequiresExactPlaceholderSet(t *testing.T) {
 }
 
 func TestCaptureLoginEnvReadsFencedShellOutput(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("login-shell capture requires a POSIX shell")
 	}
@@ -379,11 +440,10 @@ func TestCaptureLoginEnvReadsFencedShellOutput(t *testing.T) {
 		{"no path", `__SHUTTLE_PATH__\n__SHUTTLE_TMUX_TMPDIR__/scratch/tmp\n`, loginEnv{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			shell := filepath.Join(t.TempDir(), "login-shell")
-			if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf '"+tc.output+"'\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			got, ok := captureLoginEnvWith(shell, "-lc")
+			t.Parallel()
+			env, home := envWithHome(t)
+			writeLoginRC(t, home, "printf '"+tc.output+"'\nexit 0\n")
+			got, ok := newApp(env).captureLoginEnvWith(fakeLoginShell(t), "-lc")
 			if got != tc.want || ok != tc.ok {
 				t.Fatalf("captured %+v, %v; want %+v, %v", got, ok, tc.want, tc.ok)
 			}
@@ -392,29 +452,21 @@ func TestCaptureLoginEnvReadsFencedShellOutput(t *testing.T) {
 }
 
 func TestCaptureLoginEnvRunsOneLoginShellForEveryValue(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("login-shell capture requires a POSIX shell")
 	}
-	dir := t.TempDir()
-	calls := filepath.Join(dir, "calls")
-	rc := filepath.Join(dir, "rc")
+	env, home := envWithHome(t)
 	// The rc file exports TMUX_TMPDIR the way a cluster ~/.bashrc does; the
 	// capture must evaluate the real script, not echo canned markers.
-	if err := os.WriteFile(rc, []byte("PATH=/rc/bin:/usr/bin\nTMUX_TMPDIR=/scratch/me/tmp\nexport PATH TMUX_TMPDIR\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	shell := filepath.Join(dir, "sh")
-	script := "#!/bin/sh\necho \"$1\" >> '" + calls + "'\n. '" + rc + "'\nexec /bin/sh -c \"$2\"\n"
-	if err := os.WriteFile(shell, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("SHELL", shell)
-	t.Setenv("TMUX_TMPDIR", "/leaked/from/installer")
-	got := captureLoginEnv()
+	writeLoginRC(t, home, "PATH=/rc/bin:/usr/bin\nTMUX_TMPDIR=/scratch/me/tmp\nexport PATH TMUX_TMPDIR\n")
+	env.Set("SHELL", fakeLoginShell(t))
+	env.Set("TMUX_TMPDIR", "/leaked/from/installer")
+	got := newApp(env).captureLoginEnv()
 	if got != (loginEnv{Path: "/rc/bin:/usr/bin", TmuxTmpdir: "/scratch/me/tmp"}) {
 		t.Fatalf("captured %+v", got)
 	}
-	invocations, err := os.ReadFile(calls)
+	invocations, err := os.ReadFile(filepath.Join(home, loginShellCalls))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +475,66 @@ func TestCaptureLoginEnvRunsOneLoginShellForEveryValue(t *testing.T) {
 	}
 }
 
+// The fake login shell keeps its per-test behaviour in the HOME the capture
+// hands it: it appends its flags to $HOME/<loginShellCalls>, sources
+// $HOME/<loginShellRC>, then runs the command it was given.
+const (
+	loginShellCalls = "shell-calls"
+	loginShellRC    = "shell-rc"
+)
+
+var loginShell struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+// fakeLoginShell is the package's one fake login shell, named sh so
+// captureLoginEnv accepts it as $SHELL. It is written and run once per test
+// binary: macOS assesses a freshly written executable on its first exec,
+// which can take seconds, and the capture under test gives its shell a 10s
+// budget.
+func fakeLoginShell(t *testing.T) string {
+	t.Helper()
+	loginShell.once.Do(func() {
+		dir, err := os.MkdirTemp(testFenceDir, "login-shell-*")
+		if err != nil {
+			loginShell.err = err
+			return
+		}
+		path := filepath.Join(dir, "sh")
+		script := "#!/bin/sh\n" +
+			"echo \"$1\" >> \"$HOME/" + loginShellCalls + "\"\n" +
+			"[ -f \"$HOME/" + loginShellRC + "\" ] && . \"$HOME/" + loginShellRC + "\"\n" +
+			"exec /bin/sh -c \"$2\"\n"
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			loginShell.err = err
+			return
+		}
+		warm := exec.Command(path, "-c", "true")
+		warm.Env = []string{"HOME=" + dir}
+		if out, err := warm.CombinedOutput(); err != nil {
+			loginShell.err = fmt.Errorf("running the fake login shell: %v\n%s", err, out)
+			return
+		}
+		loginShell.path = path
+	})
+	if loginShell.err != nil {
+		t.Fatal(loginShell.err)
+	}
+	return loginShell.path
+}
+
+// writeLoginRC gives the fake login shell run with HOME=home its rc script.
+func writeLoginRC(t *testing.T, home, rc string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(home, loginShellRC), []byte(rc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDaemonInstallTmuxTmpdirPrecedence(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	share := filepath.Join(release.Dir, "share")
 	if err := os.MkdirAll(share, 0o755); err != nil {
@@ -434,11 +545,6 @@ func TestDaemonInstallTmuxTmpdirPrecedence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SHUTTLE_RELEASE", release.Dir)
-	t.Setenv("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
-	unsetEnv(t, "AGENT_TMUX_TMPDIR")
 	for _, tc := range []struct {
 		name  string
 		env   *string
@@ -456,22 +562,25 @@ func TestDaemonInstallTmuxTmpdirPrecedence(t *testing.T) {
 		{name: "explicit empty omits", args: []string{"--tmux-tmpdir="}, want: "", calls: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env, home := envWithHome(t)
+			env.Set("SHUTTLE_RELEASE", release.Dir)
+			env.Set("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
 			if tc.env != nil {
-				t.Setenv("AGENT_TMUX_TMPDIR", *tc.env)
+				env.Set("AGENT_TMUX_TMPDIR", *tc.env)
 			} else {
-				unsetEnv(t, "AGENT_TMUX_TMPDIR")
+				env.Unset("AGENT_TMUX_TMPDIR")
 			}
 			calls := 0
-			previous := loginEnvCapture
-			loginEnvCapture = func() loginEnv {
+			a := newApp(env)
+			a.loginEnvCapture = func() loginEnv {
 				calls++
 				return loginEnv{Path: "/captured", TmuxTmpdir: "/scratch/captured"}
 			}
-			t.Cleanup(func() { loginEnvCapture = previous })
 			for _, osName := range []string{"Linux", "Darwin"} {
 				calls = 0
 				args := append([]string{"daemon", "install", "--print", "--os", osName, "--ssh-auth-sock=", "--log", filepath.Join(home, "shuttle.log")}, tc.args...)
-				out, stderr, err := executeCLI(t, t.TempDir(), args...)
+				out, stderr, err := executeApp(t, a, t.TempDir(), args...)
 				if err != nil {
 					t.Fatalf("%s: daemon install --print: %v\n%s", osName, err, stderr)
 				}
@@ -501,43 +610,30 @@ func TestDaemonInstallTmuxTmpdirPrecedence(t *testing.T) {
 	}
 }
 
-func stubLoginEnv(t *testing.T, env loginEnv) {
-	t.Helper()
-	previous := loginEnvCapture
-	loginEnvCapture = func() loginEnv { return env }
-	t.Cleanup(func() { loginEnvCapture = previous })
-}
-
-func unsetEnv(t *testing.T, key string) {
-	t.Helper()
-	previous, wasSet := os.LookupEnv(key)
-	if err := os.Unsetenv(key); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if wasSet {
-			_ = os.Setenv(key, previous)
-		} else {
-			_ = os.Unsetenv(key)
-		}
-	})
+// stubLoginEnv is an app on env whose login-shell capture answers login.
+func stubLoginEnv(env *sysenv.Env, login loginEnv) *app {
+	a := newApp(env)
+	a.loginEnvCapture = func() loginEnv { return login }
+	return a
 }
 
 func stringPtr(value string) *string { return &value }
 
 func TestSupervisorPathContainsShuttleAndFeltDirectories(t *testing.T) {
+	t.Parallel()
+	a := newApp(testEnv(t))
 	binDir := t.TempDir()
 	for _, name := range []string{"felt", "shuttle"} {
 		if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got := pathForDaemonSupervisor(binDir)
+	got := a.pathForDaemonSupervisor(binDir)
 	entries := cleanPathEntries(got)
 	if !containsPathEntry(entries, binDir) {
 		t.Fatalf("PATH %q lost the directory containing both CLIs", got)
 	}
-	executable, err := executablePath()
+	executable, err := a.executablePath()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,9 +675,12 @@ func supervisorTemplateFixtures() map[string]string {
 <key>CODEX_HOME</key>
 <string>__CODEX_HOME__</string>
 </dict>
+<key>SoftResourceLimits</key>
+<dict><key>NumberOfFiles</key><integer>8192</integer></dict>
 </dict></plist>
 `,
 		"io.shuttle.daemon.service.template": `[Service]
+LimitNOFILE=8192
 WorkingDirectory=__WORKING_DIRECTORY__
 ExecStart="__SHUTTLE_BIN__" daemon start --force
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ]; then :; fi'
@@ -602,12 +701,13 @@ StandardError=append:__LOG__
 }
 
 func TestSupervisorCodexEndpointPreservedAcrossReinstall(t *testing.T) {
+	t.Parallel()
 	for _, osName := range []string{"Darwin", "Linux"} {
 		t.Run(osName, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
-			unsetEnv(t, "SHUTTLE_CODEX_SOCKET")
-			unsetEnv(t, "CODEX_HOME")
+			t.Parallel()
+			env, home := envWithHome(t)
+			env.Unset("SHUTTLE_CODEX_SOCKET")
+			env.Unset("CODEX_HOME")
 			name := "io.shuttle.daemon.plist.template"
 			path := filepath.Join(home, "Library", "LaunchAgents", defaultDaemonLabel+".plist")
 			if osName == "Linux" {
@@ -620,7 +720,7 @@ func TestSupervisorCodexEndpointPreservedAcrossReinstall(t *testing.T) {
 			}
 			original := supervisorOptions{OS: osName, Label: defaultDaemonLabel, ShuttleBin: "/bin/shuttle", Path: "/bin", Log: "/tmp/shuttle.log",
 				CodexSocket: `/tmp/desktop "quoted" & 50%/control.sock`, CodexHome: "/tmp/codex home"}
-			rendered, err := renderSupervisorTemplate(osName, string(source), original, daemonRelease{Dir: "/opt/shuttle"})
+			rendered, err := newApp(env).renderSupervisorTemplate(osName, string(source), original, daemonRelease{Dir: "/opt/shuttle"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -640,11 +740,13 @@ func TestSupervisorCodexEndpointPreservedAcrossReinstall(t *testing.T) {
 				{name: "explicit reset", env: "/tmp/env.sock", explicit: true},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
+					t.Parallel()
+					env := env.Clone()
 					if tc.env != "" {
-						t.Setenv("SHUTTLE_CODEX_SOCKET", tc.env)
+						env.Set("SHUTTLE_CODEX_SOCKET", tc.env)
 					}
 					options := supervisorOptions{OS: osName, Label: defaultDaemonLabel, CodexSocket: tc.flag, CodexSocketSet: tc.explicit}
-					if err := resolveSupervisorCodex(&options); err != nil {
+					if err := newApp(env).resolveSupervisorCodex(&options); err != nil {
 						t.Fatal(err)
 					}
 					if options.CodexSocket != tc.want || options.CodexHome != original.CodexHome {
@@ -652,9 +754,10 @@ func TestSupervisorCodexEndpointPreservedAcrossReinstall(t *testing.T) {
 					}
 				})
 			}
-			t.Setenv("CODEX_HOME", "/tmp/env home")
+			codexHome := env.Clone()
+			codexHome.Set("CODEX_HOME", "/tmp/env home")
 			options := supervisorOptions{OS: osName, Label: defaultDaemonLabel}
-			if err := resolveSupervisorCodex(&options); err != nil || options.CodexHome != "/tmp/env home" {
+			if err := newApp(codexHome).resolveSupervisorCodex(&options); err != nil || options.CodexHome != "/tmp/env home" {
 				t.Fatalf("home override: %+v, %v", options, err)
 			}
 		})
@@ -662,6 +765,7 @@ func TestSupervisorCodexEndpointPreservedAcrossReinstall(t *testing.T) {
 }
 
 func TestDaemonInstallCodexSocketFlagAndValidation(t *testing.T) {
+	t.Parallel()
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	share := filepath.Join(release.Dir, "share")
 	if err := os.MkdirAll(share, 0o755); err != nil {
@@ -672,14 +776,14 @@ func TestDaemonInstallCodexSocketFlagAndValidation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("SHUTTLE_RELEASE", release.Dir)
-	t.Setenv("SHUTTLE_CODEX_SOCKET", "/tmp/env.sock")
-	unsetEnv(t, "CODEX_HOME")
-	stubLoginEnv(t, loginEnv{Path: "/bin"})
+	env := testEnv(t)
+	env.Set("SHUTTLE_RELEASE", release.Dir)
+	env.Set("SHUTTLE_CODEX_SOCKET", "/tmp/env.sock")
+	env.Unset("CODEX_HOME")
+	a := stubLoginEnv(env, loginEnv{Path: "/bin"})
 	for _, osName := range []string{"Darwin", "Linux"} {
 		for _, endpoint := range []string{"/tmp/not-created-yet.sock", ""} {
-			out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "install", "--print", "--os", osName, "--codex-socket="+endpoint)
+			out, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "install", "--print", "--os", osName, "--codex-socket="+endpoint)
 			if err != nil {
 				t.Fatalf("%s: %v %s", osName, err, stderr)
 			}
@@ -692,7 +796,7 @@ func TestDaemonInstallCodexSocketFlagAndValidation(t *testing.T) {
 		}
 	}
 	for _, path := range []string{"relative.sock", "unix:///tmp/control.sock", "/tmp/../control.sock", "/tmp/control\nsock", "/tmp/control\x00sock"} {
-		_, _, err := executeCLI(t, t.TempDir(), "daemon", "install", "--print", "--codex-socket="+path)
+		_, _, err := executeApp(t, a, t.TempDir(), "daemon", "install", "--print", "--codex-socket="+path)
 		if err == nil || !strings.Contains(err.Error(), "--codex-socket") {
 			t.Errorf("invalid endpoint %q: %v", path, err)
 		}
@@ -700,6 +804,7 @@ func TestDaemonInstallCodexSocketFlagAndValidation(t *testing.T) {
 }
 
 func TestSupervisorCodexMalformedExistingConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ osName, source string }{{"Darwin", "<plist><dict>"}, {"Linux", `Environment="SHUTTLE_CODEX_SOCKET=/tmp/unclosed`}} {
 		if _, err := supervisorCodexEnvironment(tc.osName, tc.source); err == nil {
 			t.Errorf("%s accepted malformed settings", tc.osName)
@@ -708,15 +813,17 @@ func TestSupervisorCodexMalformedExistingConfiguration(t *testing.T) {
 }
 
 func TestSupervisorCodexOlderTemplateCompatibility(t *testing.T) {
+	t.Parallel()
+	a := newApp(testEnv(t))
 	source := supervisorTemplateFixtures()["io.shuttle.daemon.service.template"]
 	source = removeEnvironmentLine(source, "SHUTTLE_CODEX_SOCKET", "__CODEX_SOCKET__")
 	source = removeEnvironmentLine(source, "CODEX_HOME", "__CODEX_HOME__")
 	options := supervisorOptions{Label: defaultDaemonLabel, ShuttleBin: "/bin/shuttle", Path: "/bin", Log: "/tmp/shuttle.log"}
-	if _, err := renderSupervisorTemplate("Linux", source, options, daemonRelease{Dir: "/opt/shuttle"}); err != nil {
+	if _, err := a.renderSupervisorTemplate("Linux", source, options, daemonRelease{Dir: "/opt/shuttle"}); err != nil {
 		t.Fatalf("old template without endpoint: %v", err)
 	}
 	options.CodexSocket = "/tmp/control.sock"
-	if _, err := renderSupervisorTemplate("Linux", source, options, daemonRelease{Dir: "/opt/shuttle"}); err == nil {
+	if _, err := a.renderSupervisorTemplate("Linux", source, options, daemonRelease{Dir: "/opt/shuttle"}); err == nil {
 		t.Fatal("old template silently discarded the endpoint")
 	}
 }

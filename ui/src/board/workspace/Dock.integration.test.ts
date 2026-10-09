@@ -40,17 +40,16 @@ beforeEach(async () => {
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('shared verdict controls', () => {
-  it('uses the same lifecycle callback from the fiber band and floating plate', async () => {
+  it('uses the same lifecycle callback from both verdict buttons of the act zone', async () => {
     const transition = vi.fn()
-    const review = task({ status: 'closed', tempered: false })
+    const review = task({ status: 'closed' })
     const controls = new Dock('', saved, transition)
     const band = controls.bandFor(review)
-    const plate = controls.verdictPlateFor(review)
-    document.body.append(band.el, plate)
+    document.body.append(band.head, band.el)
     expect(band.el.dataset.part).toBe('act'); expect(band.el.dataset.act).toBe('composer')
-    expect(plate.dataset.part).toBe('act'); expect(plate.dataset.act).toBe('verdict')
-    band.el.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
-    plate.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
+    expect(band.head.dataset.part).toBe('act'); expect(band.head.dataset.act).toBe('verdict')
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!.click()
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
     ])
@@ -93,17 +92,84 @@ describe('anchored pickers', () => {
     expect(band.el.querySelector('.ws-select-picker')).toBeNull()
     expect(document.activeElement).toBe(effort)
   })
-  it('anchors the Meeting menu to its microphone and releases it on close', () => {
-    const control = { canJoin: () => true, current: () => null, join: vi.fn() }
+  it('offers Meeting as a switch whose verb stands in for the send verbs', async () => {
+    let recording: { title: string; state: 'live' } | null = null
+    let canJoin = true
+    const join = vi.fn(async () => ({ error: null, delivered: true }))
+    const control = { canJoin: () => canJoin, current: () => recording, join }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const meetingBand = meetingDock.bandFor(task({ sessionUuid: 'session-1', status: 'active' }))
+    document.body.append(meetingBand.el)
+    const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
+    const toggle = q<HTMLInputElement>('.kbn-ctl-meet-switch input')
+    const field = q<HTMLTextAreaElement>('textarea')
+    expect([toggle.getAttribute('role'), toggle.checked]).toEqual(['switch', false])
+    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-modes').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([false, true, true])
+
+    toggle.click()
+    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-modes').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([true, false, false])
+    expect([...meetingBand.el.querySelectorAll('.kbn-ctl-meet-modes [role="radio"]')].map(r => r.textContent)).toEqual(['Call', 'Room', 'Phone'])
+    expect(field.placeholder).toBe('A note for the meeting (optional)')
+    ;[...meetingBand.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-meet-modes [role="radio"]')].find(r => r.textContent === 'Room')!.click()
+    vi.mocked(fetch).mockClear()
+    field.value = 'agenda'
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'room', expect.any(Function))
+    expect(writes()).toEqual([])
+    await flush()
+    expect(toggle.checked).toBe(false)
+    expect(q('.kbn-ctl-sends').hidden).toBe(false)
+
+    // A recording elsewhere holds the switch off, naming it on hover.
+    toggle.click()
+    recording = { title: 'Standup', state: 'live' }
+    canJoin = false
+    meetingDock.syncMeeting()
+    expect([toggle.checked, toggle.disabled, q('.kbn-ctl-meet-switch').title]).toEqual([false, true, 'Recording: Standup'])
+    expect(q('.kbn-ctl-sends').hidden).toBe(false)
+    meetingDock.reset()
+  })
+
+  it('stops the recording this constitution hosts, by the shared stop path', async () => {
+    let recording: Record<string, unknown> | null = { title: 'Standup', state: 'live', fiber: 'a/task', tail: [] }
+    let requested = false
+    const stop = vi.fn(() => { requested = true })
+    const control = { canJoin: () => false, current: () => recording, join: vi.fn(), stop, stopRequested: () => requested }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const band = meetingDock.bandFor(task())
+    document.body.append(band.el)
+    const button = band.el.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
+    expect([button.hidden, button.textContent, button.disabled]).toEqual([false, 'Stop', false])
+    button.click()
+    expect(stop).toHaveBeenCalledWith(recording)
+    meetingDock.syncMeeting()
+    expect(button.disabled).toBe(true)
+    button.click()
+    expect(stop).toHaveBeenCalledTimes(1)
+
+    recording = { ...recording, state: 'failed' }
+    requested = false
+    meetingDock.syncMeeting()
+    expect([button.hidden, button.textContent]).toEqual([false, 'Dismiss'])
+
+    // A recording another constitution hosts shows no Stop here.
+    recording = { title: 'Standup', state: 'live', fiber: 'other', tail: [] }
+    meetingDock.syncMeeting()
+    expect(button.closest('section')!.hidden).toBe(true)
+    meetingDock.reset()
+  })
+
+  it('keeps the switch on when a meeting fails to start', async () => {
+    const control = { canJoin: () => true, current: () => null, join: vi.fn(async () => ({ error: 'hark unavailable', delivered: false })) }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const meetingBand = meetingDock.bandFor(task())
     document.body.append(meetingBand.el)
-    const opener = meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-btn')!
-    opener.click()
-    const menu = meetingBand.el.querySelector<HTMLElement>('.kbn-ctl-meet .kbn-ctl-menu')!
-    expect([menu.hidden, menu.style.position, menu.hasAttribute('data-anchored')]).toEqual([false, 'fixed', true])
-    opener.click()
-    expect([menu.hidden, menu.style.position, menu.hasAttribute('data-anchored')]).toEqual([true, '', false])
+    const toggle = meetingBand.el.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
+    toggle.click()
+    meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
+    await flush()
+    expect(meetingBand.el.querySelector('.kbn-ctl-compose > .kbn-detail-error:last-child')!.textContent).toBe('hark unavailable')
+    expect(toggle.checked).toBe(true)
     meetingDock.reset()
   })
 })
@@ -165,40 +231,53 @@ describe('Dock dispatch recovery', () => {
 })
 
 describe('state-shaped act zone', () => {
-  it('names the default review send and keeps other columns generic', () => {
+  it('leaves the field unworded in every column', () => {
     band = dock.bandFor(task({ status: 'closed' }))
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
-    expect(message.placeholder).toBe('Reply and start…')
+    expect(message.placeholder).toBe('')
     dock.syncRuntime(task({ status: 'active', workerState: 'running' }))
-    expect(message.placeholder).toBe('What should the worker do next?')
+    expect(message.placeholder).toBe('')
     dock.syncRuntime(task({ status: 'open' }))
-    expect(message.placeholder).toBe('What should the worker do next?')
+    expect(message.placeholder).toBe('')
   })
 
-  it("puts the transcript before review verdicts, retains a draft across runtime changes, and keeps a draft's verdicts in its menu", () => {
+  it.each([['open', 'open'], ['closed', 'closed']])('offers no verdicts on a %s fiber without a shuttle block', (_label, status) => {
+    // A note or a role opened from a link is not on the Desk's lifecycle.
+    band = dock.bandFor(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
+  })
+  it("keeps review and live verdicts on the status line, the transcript above the composer, and draft verdicts in its menu", () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
     const children = [...band.el.querySelector('.ws-dock-body')!.children]
     expect(children[0].classList.contains('ws-transcript')).toBe(true)
-    expect(children[1].classList.contains('kbn-ctl-verdict')).toBe(true)
-    expect(band.el.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
+    expect(children[1].classList.contains('kbn-ctl-compose')).toBe(true)
+    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
+    expect(band.head.dataset.column).toBe('awaitingReview')
+    expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
-    expect(message.placeholder).toBe('Reply and resume…')
+    expect(message.placeholder).toBe('')
     dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
-    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
-    expect(band.el.querySelector('.kbn-ctl-verdict-menu')).not.toBeNull()
+    // In flight the pair sits beside the worker; drafts keep it in the menu.
+    expect(band.head.dataset.column).toBe('inFlight')
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
+    expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
     expect(band.el.querySelectorAll('.kbn-ctl-verdict-menu .kbn-ctl-temper,.kbn-ctl-verdict-menu .kbn-ctl-discard')).toHaveLength(2)
+    dock.syncRuntime({ ...review, status: 'closed', tempered: true })
+    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
+    expect(band.el.querySelector('.kbn-ctl-verdict-menu')).toBeNull()
+    dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
   })
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
-    ['pinned with a session', { status: 'active', shuttleKind: 'pinned', sessionUuid: 's' }, ['New session ↵', 'Resume']],
+    ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
     ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session ↵', 'Resume']],
     ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
     ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
@@ -209,6 +288,39 @@ describe('state-shaped act zone', () => {
     expect(shown.map(b => b.textContent)).toEqual(verbs)
     expect(shown[0].classList.contains('kbn-ctl-secondary')).toBe(false)
     expect(shown[1]?.classList.contains('kbn-ctl-secondary') ?? false).toBe(verbs.length > 1)
+  })
+  it('keeps a constitution\'s draft across a rebuilt composer and drops it once sent', async () => {
+    const stored = new Map<string, string>()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => stored.get(k) ?? null, setItem: (k: string, v: string) => void stored.set(k, v), removeItem: (k: string) => void stored.delete(k) })
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'come back to this'
+    message.dispatchEvent(new Event('input'))
+    dock.reset(); dock = new Dock('', saved)
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    const again = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    expect(again.value).toBe('come back to this')
+    again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(again.value).toBe('')
+    dock.reset(); dock = new Dock('', saved)
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    expect(band.el.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('')
+  })
+  it('Escape leaves the composer, keeping its draft, and closes nothing', () => {
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    document.body.append(band.el)
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.focus(); message.value = 'half a thought'
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    const outer = vi.fn(); document.addEventListener('keydown', outer)
+    message.dispatchEvent(event)
+    document.removeEventListener('keydown', outer)
+    expect(document.activeElement).not.toBe(message)
+    expect(message.value).toBe('half a thought')
+    expect(event.defaultPrevented).toBe(true)
+    expect(outer).not.toHaveBeenCalled()
+    band.el.remove()
   })
   it('Enter starts a new session and Alt-Enter resumes the named one', async () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
@@ -226,26 +338,30 @@ describe('state-shaped act zone', () => {
 
 describe('Dock settings queue', () => {
   it('serializes agent, shape and due writes and keeps the last selected values', async () => {
+    // A standing card, so One-shot is a real shape write.
+    band.el.remove()
+    band = dock.bandFor(task({ id: 'a/standing', uid: 'standing-uid', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', shuttleTz: 'UTC' }))
+    document.body.append(band.el)
+    await flush()
     const pending: Array<ReturnType<typeof deferred<Response>>> = []
     vi.mocked(fetch).mockImplementation(async () => {
       const write = deferred<Response>(); pending.push(write); return write.promise
     })
     change('Effort', 'low')
-    button('Pinned').click()
-    change('Effort', 'high')
     button('One-shot').click()
+    change('Effort', 'high')
     const due = band.el.querySelector<HTMLInputElement>('input[type="date"]')!
     due.value = '2026-10-15'; due.dispatchEvent(new Event('change'))
     due.value = '2026-10-16'; due.dispatchEvent(new Event('change'))
     await flush()
     expect(writes()).toHaveLength(1)
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 5; i++) {
       pending[i].resolve(response())
       await flush()
-      expect(writes()).toHaveLength(Math.min(i + 2, 6))
+      expect(writes()).toHaveLength(Math.min(i + 2, 5))
     }
     expect(writes().map(write => write.effort ?? write.kind ?? write.due)).toEqual([
-      'low', 'pinned', 'high', 'oneshot', '2026-10-15', '2026-10-16',
+      'low', 'oneshot', 'high', '2026-10-15', '2026-10-16',
     ])
     expect(select('Effort').value).toBe('high')
     expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('One-shot')
@@ -259,7 +375,7 @@ describe('Dock settings queue', () => {
       return JSON.parse(String(options?.body)).fiber === 'a/task' ? first.promise : response()
     })
     change('Effort', 'low')
-    button('Pinned').click()
+    change('Effort', 'high')
     const other = dock.bandFor(task({ id: 'a/other', uid: 'other-uid' }))
     await flush()
     const effort = other.el.querySelector<HTMLSelectElement>('[aria-label="Effort"]')!
@@ -271,7 +387,7 @@ describe('Dock settings queue', () => {
     first.resolve(response())
     await flush()
     expect(writes()).toHaveLength(2)
-    expect(writes().some(write => write.action === 'reshape')).toBe(false)
+    expect(writes().some(write => write.fiber === 'a/task' && write.effort === 'high')).toBe(false)
   })
 
   it('queues a rapid agent reversal and does not roll back newer intent when an earlier write fails', async () => {
@@ -374,6 +490,7 @@ describe('Dock settings queue', () => {
     expect(writes()).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(200)
     expect(writes().at(-1)).toEqual({ action: 'set-agent', origin: 'owner', fiber: 'a/task', effort: 'high' })
+    // Through a staged Standing and back: an abandoned promotion writes nothing.
     step('Kind', 'ArrowLeft'); step('Kind', 'ArrowRight')
     expect(writes()).toHaveLength(2)
     await vi.advanceTimersByTimeAsync(200)
@@ -431,10 +548,10 @@ describe('Dock poll reconciliation', () => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     draft.value = 'unsent'
     dock.syncRuntime(task({ id: 'b/task', shuttleAgent: 'codex-luna', shuttleEffort: 'low',
-      shuttleKind: 'pinned', shuttleSurface: 'app', due: '2026-10-12' }))
+      shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', shuttleTz: 'UTC', shuttleSurface: 'app', due: '2026-10-12' }))
     expect(select('Agent').value).toBe('codex-luna')
     expect(select('Effort').value).toBe('low')
-    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Pinned')
+    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Standing')
     expect(band.el.querySelector('[aria-label="Session"] [aria-checked="true"]')?.textContent).toBe('App')
     expect(band.el.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-10-12')
     expect(band.el.querySelector('.kbn-ctl-parent')?.textContent).toBe('b')
@@ -453,13 +570,13 @@ describe('Dock poll reconciliation', () => {
     const cron = band.el.querySelector<HTMLInputElement>('[aria-label="Cron"]')!
     button('Standing').click()
     cron.value = 'my half typed expression'
-    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'pinned' }))
+    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *' }))
     expect(cron.value).toBe('my half typed expression')
     expect(select('Agent').value).toBe('codex-sol')
     band.el.querySelector<HTMLTextAreaElement>('textarea')!.focus()
     await flush()
-    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'pinned' }))
+    dock.syncRuntime(task({ shuttleAgent: 'codex-luna', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *' }))
     expect(select('Agent').value).toBe('codex-luna')
-    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Pinned')
+    expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Standing')
   })
 })

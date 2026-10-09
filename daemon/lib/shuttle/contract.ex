@@ -23,8 +23,11 @@ defmodule Shuttle.Contract do
   # Level 4: the daemon shells `shuttle accept|resume <fiber> --local`.
   # Level 6: the daemon shells `shuttle resolve-dir <path>` and
   # `shuttle reopen <fiber> --project-dir <dir> --conclude-run --local`.
-  # The daemon clears worker questions with `shuttle ask <fiber> --clear`.
-  @expected_level 7
+  # Level 7: the daemon shells `shuttle rest <fiber>`; `shuttle pin` is gone.
+  # Level 8: the daemon shells `shuttle seat <fiber> <role>|--clear`.
+  # Level 9: discovery uses `shuttle ls --ids-from` for hot-set reads.
+  # Level 10: the daemon clears worker questions with `shuttle ask <fiber> --clear`.
+  @expected_level 10
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
-import { Reader, SIDEBAR_MEDIA } from './Reader.js'
+import { Reader, SIDEBAR_MEDIA, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import type { Channel, DocKey } from './documents.js'
 
@@ -29,7 +29,7 @@ let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
 const channels = [alpha, beta, gamma]
 
-function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerPill?: (card: KanbanCard) => HTMLElement | null): Reader {
+function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerPill?: (card: KanbanCard) => HTMLElement | null, extra: Partial<ReaderOptions> = {}): Reader {
   const reader = new Reader({
     shuttleBase: '', themes, workerPill,
     buildProse: () => document.createElement('div'),
@@ -38,8 +38,10 @@ function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerP
     onReturn: vi.fn(),
     onChannel,
     cards: () => channels,
+    queueCards: () => listedCards,
     switcherCards: () => listedCards,
     files: card => card === beta ? ['unique-result.pdf'] : [],
+    ...extra,
   })
   document.body.append(reader.el)
   reader.show(channel(current), fiberKey(current), 'Board', current)
@@ -93,6 +95,63 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
+  it('shares Desk’s queue chip and peek, resolves UID edges, and refreshes a retained head when its children change', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const queued = { ...beta, dependsOn: [alpha.uid!.toUpperCase()], foldedUnder: alpha.id }
+    const tail = { ...gamma, status: 'closed', dependsOn: [beta.id] }
+    listedCards = [queued, alpha, tail]
+    const reader = makeReader()
+    const head = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
+    const chip = (): HTMLButtonElement => head.querySelector('.kbn-card-queued')!
+    expect(rowNames(reader)).toEqual(['Alpha'])
+    expect(chip().textContent).toBe('+2 queued')
+    expect(chip().getAttribute('aria-expanded')).toBe('false')
+    chip().click()
+    expect(onChannel).not.toHaveBeenCalled()
+    expect(head.querySelector<HTMLOListElement>('.kbn-card-queued-list')!.hidden).toBe(false)
+    expect(head.querySelector('.kbn-card-queued-row--review')?.textContent).toBe('Gamma · awaiting review')
+    head.querySelector<HTMLElement>('.kbn-card-queued-row')!.click()
+    expect(onChannel).toHaveBeenCalledExactlyOnceWith(queued)
+    reader.show(channel(queued), fiberKey(queued), 'Board', queued)
+    expect(rowNames(reader)).toEqual(['Alpha'])
+    listedCards = [alpha, { ...queued, name: 'Renamed child' }]
+    reader.refreshChannels()
+    expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(head)
+    expect(chip().textContent).toBe('+1 queued')
+    expect(chip().title).toContain('Renamed child')
+    listedCards = [alpha, beta]
+    reader.refreshChannels()
+    expect(head.querySelector('.kbn-card-queued')).toBeNull()
+    expect(rowNames(reader)).toEqual(['Alpha', 'Beta'])
+  })
+  it('keeps unresolved edges visible but excludes active and live dependency children, including the current child', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    listedCards = [alpha, { ...beta, dependsOn: ['missing'] }, { ...gamma, dependsOn: [alpha.id], status: 'active', workerState: 'running', runtimePhase: 'working', tmuxSession: 'gamma-worker' }]
+    const reader = makeReader()
+    expect(rowNames(reader)).toEqual(['Alpha', 'Beta'])
+    const folded = { ...beta, dependsOn: [alpha.id], foldedUnder: alpha.id, status: 'active' }
+    listedCards = [alpha, folded, gamma]
+    reader.show(channel(folded), fiberKey(folded), 'Board', folded)
+    expect(rowNames(reader)).toEqual(['Alpha', 'Gamma'])
+  })
+  it('filters heads with Find without promoting a matching queued child into the sidebar', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const queued = { ...beta, dependsOn: [alpha.id] }
+    listedCards = [alpha, queued, gamma]
+    const reader = makeReader()
+    const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar input')!
+    find.value = 'Beta'; find.dispatchEvent(new Event('input'))
+    expect(rowNames(reader)).toEqual([])
+    find.value = 'Alpha'; find.dispatchEvent(new Event('input'))
+    expect(rowNames(reader)).toEqual(['Alpha'])
+    const chip = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar .kbn-card-queued')!
+    expect(chip.textContent).toBe('+1 queued')
+    chip.click()
+    expect(rowNames(reader)).toEqual(['Alpha'])
+    chip.click()
+    expect(chip.getAttribute('aria-expanded')).toBe('false')
+    expect(reader.el.querySelector<HTMLOListElement>('.ws-sidebar .kbn-card-queued-list')!.hidden).toBe(true)
+  })
   it('gives a sidebar worker separate state and elapsed text without replacing its conversation target', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 60000 }
@@ -107,12 +166,12 @@ describe('Reader channel sidebar', () => {
     })
     expect(reader.el.querySelector('.ws-sidebar .ws-worker-control')).toBe(target)
     expect(target.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
-    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1 m')
+    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m')
     expect(target.dataset.part).toBe('act')
     target.click()
     expect(open).toHaveBeenCalledOnce()
   })
-  it("draws the card's own worker pill bare at the head's right end, before the page count", () => {
+  it("draws the card's own worker pill bare at the head's right end; the page count rides the map", () => {
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 34 * 60000 }
     listedCards = [working]
     const open = vi.fn()
@@ -125,14 +184,21 @@ describe('Reader channel sidebar', () => {
     const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
     expect(head.hidden).toBe(false)
     expect(head.dataset.part).toBe('act')
+    // The trail ends with the page count; the head's centre holds the map.
     expect(head.nextElementSibling?.classList.contains('ws-head-position')).toBe(true)
+    expect(reader.el.querySelector('.ws-navbar .ws-nav-lead + [data-part="page-band"] > [role="tablist"]')).not.toBeNull()
     const control = head.querySelector<HTMLElement>('.ws-worker-control')!
     expect(control.dataset.workerState).toBe('aloft')
     expect(control.querySelector('.ws-worker-dot')).not.toBeNull()
     expect(control.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
-    expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34 m')
+    expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34m')
     control.click()
     expect(open).toHaveBeenCalledOnce()
+    // Where the phone shows the dot alone, the dot is the target's own child: a click on it is a click on the target.
+    const dot = control.querySelector<HTMLElement>('.ws-worker-dot')!
+    expect(dot.parentElement).toBe(control)
+    dot.click()
+    expect(open).toHaveBeenCalledTimes(2)
   })
   it('binds retained sidebar roots only while active and visible, through revisions, filtering and hide/show', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
@@ -148,12 +214,12 @@ describe('Reader channel sidebar', () => {
     expect(reader.el.hasAttribute('data-ws-theme-boundary')).toBe(true)
     // The running head sits on the veil: there are no chrome plates to theme.
     expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(0)
-    for (const part of ['tab-strip', 'tab', 'tab-preview', 'page-sheet', 'page-sheet-panel']) {
+    for (const part of ['page-band', 'tab-strip', 'tab', 'tab-tip', 'page-sheet', 'page-sheet-panel']) {
       expect(reader.el.querySelector(`[data-part="${part}"]`)).not.toBeNull()
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
     expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
-    expect(reader.el.querySelector('.ws-nav-verdicts')?.getAttribute('data-act')).toBe('verdict')
+    expect(reader.el.querySelector('.ws-navbar .kbn-ctl-temper, .ws-navbar .kbn-ctl-discard')).toBeNull()
     expect(reader.el.querySelector<HTMLElement>('.ws-navbar .ws-head-worker')?.hidden).toBe(true)
     const revised = { ...alpha, outcome: 'A new result' }
     listedCards = [revised, beta]
@@ -370,6 +436,19 @@ describe('Reader channel sidebar', () => {
     expect(onChannel).toHaveBeenCalledWith(alpha)
   })
 
+  it('marks only a fiber on the Desk lifecycle with its glyph', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const managed = { ...gamma, shuttleKind: 'oneshot' as const }
+    channels.splice(2, 1, managed)
+    listedCards = channels
+    try {
+      const reader = makeReader(alpha)
+      const glyph = (uid: string) => reader.el.querySelector(`.ws-sidebar [data-channel-uid="${uid}"] .kbn-card-glyph`)
+      expect(glyph('alpha')).toBeNull()
+      expect(glyph('gamma')?.textContent).toBe('◐')
+    } finally { channels.splice(2, 1, gamma) }
+  })
+
   it('refreshes sidebar rows without clearing the find text', () => {
     viewport.wide = true
     const reader = makeReader()
@@ -439,6 +518,25 @@ describe('Reader channel sidebar', () => {
     expect(onChannel).toHaveBeenLastCalledWith(beta)
     onChannel.mockClear()
     for (const key of ['J', 'K']) document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    expect(onChannel).not.toHaveBeenCalled()
+  })
+
+  it('jumps between sidebar group stops with J/K, landing on the constitution last open in each', () => {
+    const delta = card({ id: 'work/delta', uid: 'delta', name: 'Delta', originId: 'host-d' })
+    listedCards = [alpha, beta, gamma, delta]
+    const stops = new Map([[alpha, 'review'], [beta, 'review'], [gamma, 'flight:working'], [delta, 'flight:working']])
+    const reader = makeReader(alpha, undefined, undefined, { sidebarBand: row => stops.get(row) })
+    const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: true, bubbles: true, cancelable: true })) }
+    press('J')
+    expect(onChannel).toHaveBeenLastCalledWith(gamma)
+    reader.show(channel(delta), fiberKey(delta), 'Board', delta)
+    press('K')
+    expect(onChannel).toHaveBeenLastCalledWith(alpha)
+    reader.show(channel(beta), fiberKey(beta), 'Board', beta)
+    press('J')
+    expect(onChannel).toHaveBeenLastCalledWith(delta)
+    onChannel.mockClear()
+    press('K')
     expect(onChannel).not.toHaveBeenCalled()
   })
 

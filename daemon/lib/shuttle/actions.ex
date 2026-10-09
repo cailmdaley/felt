@@ -62,17 +62,14 @@ defmodule Shuttle.Actions do
     status = Map.get(fiber, "status")
 
     cond do
-      # Temper on a STANDING role with no verdict is ACCEPT in every non-draft
+      # Temper on a STANDING constitution with no verdict is ACCEPT in every non-draft
       # state — running (an interactive run just wrapped, worker alive or freshly
       # killed), armed (`status: active`, exit not yet marked awaiting), or
       # awaiting (`status: closed`). close_tempered is a ONESHOT terminus;
-      # resolving it here checked a standing role off for good (the morning-post
+      # resolving it here checked a standing constitution off for good (the morning-post
       # temper bug, 2026-06-12). This clause MUST precede the generic `running?`
       # clauses — a live or just-killed worker is exactly the state where status
-      # hasn't flipped to closed yet. This ACCEPT-while-active clause is
-      # standing-only: a pinned role's accept is a re-park of a CLOSED arc (the
-      # dedicated pinned clause below), not a temper of a live interactive
-      # worker, so tempering a running pinned role stays the close path.
+      # hasn't flipped to closed yet.
       standing?(shuttle) and untempered?(fiber) and status != "open" and
           target == "tempered" ->
         :accept_run
@@ -94,12 +91,11 @@ defmodule Shuttle.Actions do
       running? and target == "composted" ->
         :close_composted
 
-      # A CLOSED standing role with no verdict (`tempered` unset) is the
+      # A CLOSED standing constitution with no verdict (`tempered` unset) is the
       # new-model AWAITING signal: status:closed + untempered = "ran this cycle,
       # pending a human verdict" — felt-native, no `review.state`. A STANDING
-      # role re-arms to active; a PINNED role re-parks to the strip (the
-      # dedicated pinned clause below); a oneshot closes for good. The verdict
-      # gestures for a standing role: inFlight/tempered = keep it
+      # constitution re-arms to active; a oneshot closes for good. The verdict
+      # gestures for a standing constitution: inFlight/tempered = keep it
       # (accept-run → advance the schedule), composted = reject (close-composted),
       # drafts = park the role as a paused draft (reopen-draft — stopping a role
       # for now is not the same verdict as composting it), awaitingReview = no-op
@@ -107,7 +103,7 @@ defmodule Shuttle.Actions do
       # `status == "closed"` clauses below — those resolve a closed fiber to
       # reopen/close, which would TERMINATE the role instead of re-arming it
       # (the slice-1 entanglement). Tempered-true and composted (tempered:false)
-      # closed roles, and all closed pinned/oneshot roles, are termini and fall
+      # closed runs, and every closed oneshot, are termini and fall
       # through to the generic clauses.
       status == "closed" and standing?(shuttle) and untempered?(fiber) and
           target in ["inFlight", "tempered"] ->
@@ -120,21 +116,6 @@ defmodule Shuttle.Actions do
       status == "closed" and standing?(shuttle) and untempered?(fiber) and
           target == "awaitingReview" ->
         :close_awaiting_review
-
-      # A CLOSED, untempered PINNED role is awaiting review after its arc
-      # finished (the worker self-closed, or a human closed it). Under the
-      # unified lifecycle the human verdict RE-PARKS it to the strip: accept
-      # (status: open, verdict cleared) — the kind-aware pinned half of accept,
-      # the mirror of standing's re-arm. One verb, two gestures: the accept
-      # gestures (inFlight / tempered, per the standing convention) AND dragging
-      # the card back to the strip (drafts) both resolve to accept-run. composted
-      # (reject) and awaitingReview (a same-column no-op) fall through to the
-      # generic closed clauses. MUST precede the generic `status == "closed"`
-      # clauses below, which would otherwise reopen/close the role instead of
-      # re-parking it.
-      status == "closed" and pinned?(shuttle) and untempered?(fiber) and
-          target in ["inFlight", "tempered", "drafts"] ->
-        :accept_run
 
       # A closed fiber dragged to Drafts reopens AS A DRAFT (status:open,
       # verdict cleared — `shuttle reopen --as-draft`): the gesture means
@@ -178,7 +159,7 @@ defmodule Shuttle.Actions do
       # An armed fiber (`status: active`). drafts parks it (pause → status:open).
       # inFlight ("launch it now") force-dispatches, which surfaces the real
       # dispatch outcome (spawned, or a concrete error). This holds for both an
-      # armed standing role (ad-hoc tick) and an armed oneshot (launch).
+      # armed standing constitution (ad-hoc tick) and an armed oneshot (launch).
       target == "drafts" ->
         :pause
 
@@ -225,15 +206,10 @@ defmodule Shuttle.Actions do
     end
   end
 
-  # Only STANDING roles have the active→closed→active cron lifecycle that the
-  # accept re-arm advances (accept writes `status: active`). PINNED roles join
-  # the unified lifecycle but accept re-PARKS them instead (`status: open`, back
-  # to the strip) — same verb, different terminus, resolved by the dedicated
-  # pinned clause above. A oneshot has neither: its accept is the tempered
-  # terminus.
-  defp standing?(shuttle), do: Shuttle.Poller.role_kind(shuttle) == "standing"
-
-  defp pinned?(shuttle), do: Shuttle.Poller.role_kind(shuttle) == "pinned"
+  # Only STANDING constitutions have the active→closed→active cron lifecycle
+  # that the accept re-arm advances (accept writes `status: active`). A
+  # oneshot's accept is the tempered terminus.
+  defp standing?(shuttle), do: Shuttle.Poller.block_kind(shuttle) == "standing"
 
   # `tempered` absent (nil) is the no-verdict state — the awaiting signal for a
   # closed fiber. `tempered: true` (accepted oneshot terminus) and

@@ -173,6 +173,21 @@ defmodule Shuttle.CollaborationTest do
     refute multi =~ "opus"
   end
 
+  test "a fiber without a roster reports no roster and the role store" do
+    prompt = Collaboration.prompt_section({:ok, nil}, "/tmp/shared loom")
+
+    assert prompt =~
+             ~r"\ACollaboration: no roster; role store: (/private)?/tmp/shared loom\z"
+
+    assert Collaboration.prompt_section({:ok, nil}) ==
+             "Collaboration: no roster"
+  end
+
+  test "no snapshot or a non-result renders no collaboration line" do
+    assert Collaboration.prompt_section(nil) == ""
+    assert Collaboration.prompt_section(:junk, "/tmp/loom") == ""
+  end
+
   test "malformed document metadata remains visible in the worker prompt" do
     assert Collaboration.prompt_section({:error, "collaboration must be an object"}) ==
              "Collaboration: invalid metadata (collaboration must be an object)"

@@ -1,5 +1,5 @@
 defmodule Shuttle.TmuxServerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.TmuxServer
 
@@ -56,13 +56,8 @@ defmodule Shuttle.TmuxServerTest do
   end
 
   describe "ensure_available/1" do
-    setup do
-      on_exit(fn -> Application.delete_env(:shuttle, :os_type) end)
-      :ok
-    end
-
     test "no darwin, no opinion — an absent server is fine on Linux" do
-      Application.put_env(:shuttle, :os_type, {:unix, :linux})
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :linux})
       start_supervised!({StubRunner, {"no server running on /tmp/tmux-1000/default", 1}})
 
       assert TmuxServer.ensure_available(StubRunner) == :ok
@@ -76,7 +71,7 @@ defmodule Shuttle.TmuxServerTest do
     # `new-session` forks a fresh one rooted at the daemon. Disarming
     # `exit-empty` on a server we did not fork closes that window.
     test "a present server is hardened against exiting when its last session goes" do
-      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :darwin})
       start_supervised!({StubRunner, {"shuttle-anchor\n", 0}})
 
       assert TmuxServer.ensure_available(StubRunner) == :ok
@@ -85,7 +80,7 @@ defmodule Shuttle.TmuxServerTest do
     end
 
     test "an uncertain server is left alone — there may be nothing to harden" do
-      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :darwin})
       start_supervised!({StubRunner, {"tmux ls timed out after 60000ms", :timeout}})
 
       assert TmuxServer.ensure_available(StubRunner) == :ok
@@ -98,7 +93,7 @@ defmodule Shuttle.TmuxServerTest do
     # A `set-option` that fails changes nothing about the dispatch: losing the
     # hardening is not a reason to refuse work that would have run.
     test "a failed hardening never refuses the dispatch" do
-      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :darwin})
 
       start_supervised!(
         {StubRunner,
@@ -123,13 +118,8 @@ defmodule Shuttle.TmuxServerTest do
 
   describe "ensure_available/1 with no server" do
     setup do
-      Application.put_env(:shuttle, :os_type, {:unix, :darwin})
-      Application.put_env(:shuttle, :kitty_impl, RunnerEchoKitty)
-
-      on_exit(fn ->
-        Application.delete_env(:shuttle, :os_type)
-        Application.delete_env(:shuttle, :kitty_impl)
-      end)
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :darwin})
+      Shuttle.Test.Env.put_app_env(:kitty_impl, RunnerEchoKitty)
     end
 
     test "forks through kitty with the dispatch's runner, and refuses when kitty cannot" do

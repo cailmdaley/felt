@@ -32,7 +32,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 
 | Command | Purpose |
 |---|---|
-| `felt ls [query]` | List and search fibers; a query matches when each of its words occurs, case-insensitively, in the name, outcome, frontmatter, or id (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact name, id, or basename, `--body`, `--has-field`, `--json-field`; a query or tag filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
+| `felt ls [query]` | List and search fibers; a query matches when each of its words occurs, case-insensitively, in the name, outcome, frontmatter, or id (`-t` tag, `-s` status, `-n` recent N, `-r` regex, `-e` exact name, id, or basename, `--body`, `--has-field`, `--json-field`, `--ids-from <file>` (one canonical id per line from a full listing; reads only those fibers without a store walk, ignores blank lines and duplicates, and preserves first-seen input order; ids are resolved as given, without walk-time alias suppression); a query, tag, field, or id-file filter searches every status but closed, counting closed matches in a trailing hint; matches under a matching ancestor collapse into it, `-v` expands) |
 | `felt find [query]` | Search the whole store, not just this view — local hits first under their local ids, then the rest of the enclosing store under a separator naming it, each by its full id there (those ids work as arguments to `show`, `edit`, `nest`, `rm`, `tree`). Takes `ls`'s matching and filters (`-t`, `-s`, `-r`, `-e`, `--body`, `--has-field`, `-v`, `--limit`, `-j`) |
 | `felt session` | Print the SessionStart context as plain text |
 | `felt tree [id]` | Show the containment tree, every status included (`-L`/`--depth` caps depth; elided branches show how much is below) |
@@ -117,18 +117,17 @@ the daemon speaks directly, see the [HTTP API](api.md).
 | Command | Purpose |
 |---|---|
 | `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
-| `shuttle pin <fiber>` | Install as a pinned, schedule-less perennial role (`--project-dir` required, `-m`, `--surface`, `--host`) |
 | `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
-| `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing role's schedule (`-s/--schedule`, `-z/--tz`) |
+| `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing constitution's schedule (`-s/--schedule`, `-z/--tz`) |
 | `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
 
-`install`, `pin`, and `repeat` are create-only: each refuses a fiber that
+`install` and `repeat` are create-only: each refuses a fiber that
 already carries a `shuttle:` block, pointing at `reshape` (kind/schedule),
 `set-model`/`set-agent` (agent), or `uninstall` (start over). A fresh create
-settles status (`install`/`repeat` arm to `active`, `pin` and `install
---disabled` park at `open`); an arming create refuses a closed fiber — arming
+settles status (`install`/`repeat` arm to `active`, `install --disabled`
+parks at `open`); an arming create refuses a closed fiber — arming
 something already reviewed needs an explicit `reopen`. `reshape` touches only the block's shape — `kind`, and a standing
-role's schedule — and leaves status and verdict fields exactly as found, so a
+constitution's schedule — and leaves status and verdict fields exactly as found, so a
 role in Awaiting review can be reshaped in place without being requeued; `kind`
 is optional, so `reshape <fiber> --schedule "0 7 * * *"` is a schedule-only
 edit. Lifecycle moves (`pause`/`resume`/`close`/`reopen`/`accept`) are
@@ -140,12 +139,14 @@ untouched by any of this.
 |---|---|
 | `shuttle claim <fiber>` | Associate the current conversation with an installed draft without launching or activating a worker (`--surface cli\|app`, `--session <native-id>`, `--tmux-session <name>`, `--json`) |
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
-| `shuttle resume <fiber>` | Set status to `active`; a standing role awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
-| `shuttle accept <fiber>` | Resolve the human verdict on an untempered role, closed or still active: a standing role re-arms and its run concludes (`handed_off_at`); a pinned role re-parks to `open`. The outcome is kept. `--local` skips the daemon |
+| `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
+| `shuttle accept <fiber>` | Resolve the human verdict on an untempered standing constitution, closed or still active: it re-arms and its run concludes (`handed_off_at`). The outcome is kept. A oneshot is refused. `--local` skips the daemon |
+| `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works from active, open and awaiting review; refuses standing and tempered/discarded. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its backend (tmux or an app interrupt); `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write and tmux kill |
 | `shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |
 | `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
+| `shuttle seat <fiber> [role]` | Make the constitution a seat of a role (`shuttle.seat`), or `--clear` it. The role resolves like `assign --role` and must have a charter under `roles/`; the slug is stored. Lifecycle and roster are untouched; routes to the owning daemon like the other block writers |
 | `shuttle assign <fiber>` | Add roster membership with repeatable `--role <name/path/UID>` and `--collaborator <name/path/UID>` flags; replace the whole roster with `--json-assignment <JSON>` or remove it with `--clear`. References resolve under `roles/` and are stored as readable role/collaborator slugs; preserves lifecycle and execution settings |
 | `shuttle ask <fiber> "<one-line question>"` | Raise a non-blocking question for the human in `shuttle.ask: {text, at}`; the worker keeps working and its In flight card appears in **Question** above **Stalled** and **Working**. `--clear` removes it. Resume, reopen, and messaging the fiber's worker clear it too. Works offline and accepts `-C <store>` |
 | `shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |

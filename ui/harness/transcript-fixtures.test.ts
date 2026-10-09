@@ -15,7 +15,7 @@ describe('fictional workspace transcripts', () => {
     for (const session of [WORKSPACE_LATEST_SESSION, WORKSPACE_EARLIER_SESSION]) {
       expect(session).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
     }
-    const example = workspaceExample(NOW, 'live')
+    const example = workspaceExample(NOW, { transcriptScenario: 'live' })
     const row = example.feed.fibers.find(entry => (entry.fiber as { uid?: string }).uid === WORKSPACE_UID)!
     const fiber = row.fiber as { id: string; status: string; shuttle: { runtime: { session_uuid: string } } }
     expect(fiber.id).toBe(WORKSPACE_ID)

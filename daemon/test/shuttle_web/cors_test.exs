@@ -12,7 +12,7 @@ defmodule ShuttleWeb.CORSTest do
   - Non-credentialed requests (no Origin header) are unaffected.
   """
 
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Plug.Conn
   import Phoenix.ConnTest
 

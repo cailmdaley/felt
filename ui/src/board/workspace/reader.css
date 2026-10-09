@@ -1,5 +1,9 @@
+/* On the desktop the reader starts beneath the board's bar, which carries its
+   map of pages; the map overhangs the bar, and the pages start clear of it. */
 .ws-reader {
-  position: fixed; inset: 0; z-index: var(--ws-reader-layer);
+  --ws-corner-inset: 8px;
+  --ws-stage-top: calc(var(--kbn-bar-overhang, 0px) + var(--ws-stage-gap));
+  position: fixed; inset: 0; top: var(--kbn-bar-bottom, 0px); z-index: var(--ws-reader-layer);
   display: flex; flex-direction: column; min-width: 0;
   background: transparent; color: var(--ws-ink);
   font: var(--ws-chrome-size)/1.45 var(--ws-serif);
@@ -36,100 +40,48 @@
 .ws-mono, .ws-labelbar, .ws-receipts, .ws-position {
   font-family: var(--ws-mono); letter-spacing: var(--ws-mono-tracking);
 }
-/* The running head: one row on the veil, no plates. Names and verbs in the
-   serif, the page count in mono, all on one baseline. */
-.ws-navbar {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: baseline; column-gap: var(--ws-head-span); padding: var(--ws-head-top) var(--ws-head-end) 0 var(--ws-head-start);
-  background: transparent; position: relative; z-index: 3; flex: none;
-}
-.ws-nav-lead { display: flex; align-items: baseline; min-width: 0; gap: var(--ws-head-gap); }
-.ws-return, .ws-channel-title, .ws-sidebar-toggle {
-  height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border-radius: var(--ws-control-radius);
-  font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0; white-space: nowrap;
-}
-.ws-return { flex: none; color: var(--ws-ink-muted) !important; }
-.ws-channel-title {
-  color: var(--ws-ink); flex: 0 1 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; text-align: left; min-width: 0;
-}
-.ws-return:hover, .ws-channel-title:hover { color: var(--ws-ink) !important; background: var(--ws-hover); }
-.ws-channel-title::after { content: ' ▾'; font-size: var(--ws-small-size); color: var(--ws-ink-muted); }
-/* The constitutions glyph is the sidebar's handle: its left edge is the sidebar's. */
+/* Expand takes the whole window: no bar above, no sidebar beside. */
+.ws-reader.ws-expand-mode { top: 0; --ws-stage-top: var(--ws-stage-gap); }
+/* The phone's top bar (back, name, worker dot); the desktop has no head of its own. */
+.ws-navbar { display: none; position: relative; z-index: 3; flex: none; }
+.ws-nav-lead { display: flex; min-width: 0; }
+.ws-return, .ws-channel-title { font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0; white-space: nowrap; }
+.ws-channel-title { color: var(--ws-ink); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ws-nav-trail { display: flex; min-width: 0; }
+.ws-head-worker { flex: none; display: flex; }
+.ws-head-worker[hidden] { display: none; }
+/* The top bar's worker dot is the card's own pill, bare. */
+.ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { border: 0; background: transparent; }
+/* The constitutions glyph sits snug in the corner beneath the bar, inset as
+   the bar insets its own controls; with the sidebar hidden it sits there alone. */
 .ws-sidebar-toggle {
-  flex: none; align-self: center; display: grid; place-items: center; width: var(--ws-control-height); padding: 0;
-  margin-left: calc((var(--ws-control-height) - 16px) / -2); color: var(--ws-ink-muted) !important;
+  position: absolute; z-index: 4; left: var(--ws-corner-inset); top: var(--ws-corner-inset);
+  display: grid; place-items: center; width: var(--ws-control-height); height: var(--ws-control-height); padding: 0;
+  border-radius: var(--ws-control-radius); color: var(--ws-ink-muted) !important;
 }
+.ws-expand-mode .ws-sidebar-toggle { display: none; }
 .ws-sidebar-toggle svg { fill: none; stroke: currentColor; stroke-width: var(--ws-line-width); }
 .ws-sidebar-toggle .ws-toggle-column { fill: currentColor; stroke: none; opacity: 0; }
 .ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
-/* The right end: the worker control, then the page count. */
-.ws-nav-trail { justify-self: end; display: flex; align-items: baseline; gap: var(--ws-gap); min-width: 0; }
-.ws-head-worker { flex: none; display: flex; align-items: baseline; }
-.ws-head-worker[hidden] { display: none; }
-/* The card's own pill, bare: a pigmented dot, the state in mono capitals, the time in mono. */
-.ws-reader .ws-navbar .ws-head-worker .ws-worker-control {
-  display: inline-flex; align-items: baseline; gap: 6px; height: var(--ws-control-height); margin: 0 calc(-1 * var(--ws-small-gap));
-  padding: 0 var(--ws-small-gap); border: 0; border-radius: var(--ws-control-radius); background: transparent; box-shadow: none;
-  color: var(--ws-ink-muted); font: var(--ws-small-size)/var(--ws-control-height) var(--ws-mono);
-  letter-spacing: 0; text-transform: none; text-decoration: none; animation: none;
-}
-.ws-reader .ws-navbar .ws-head-worker .ws-worker-control:hover { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-head-worker .ws-worker-dot { align-self: center; width: 7px; height: 7px; }
-.ws-head-worker .ws-worker-state { font: inherit; letter-spacing: .06em; text-transform: uppercase; }
-.ws-head-worker .ws-worker-elapsed { font: var(--ws-small-size)/1 var(--ws-mono); letter-spacing: 0; }
-.ws-head-position { color: var(--ws-ink-muted); font-size: var(--ws-small-size); letter-spacing: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ws-worker-state { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
-.ws-worker-elapsed { font: var(--ws-small-size)/1.4 var(--ws-mono); }
-/* A dot is too small for ink-mixed pigments: working is the machine's own cobalt, waiting the undiluted gold. */
-.ws-worker-dot { --ws-dot: var(--ws-machine); width: 8px; height: 8px; border-radius: 50%; background: var(--ws-dot); flex: none; }
-.ws-worker-control[data-worker-state='waiting'] .ws-worker-dot,
-.ws-worker-control[data-worker-state='attention'] .ws-worker-dot,
-.ws-worker-control[data-worker-state='blocked'] .ws-worker-dot { --ws-dot: var(--ws-fresh); }
-.ws-worker-control[data-worker-state='no worker'] .ws-worker-dot { --ws-dot: var(--ws-ink-muted); }
-/* In the head the dot wears a faint ring of its own pigment, so it reads at dot size on any paper. */
-.ws-reader .ws-head-worker .ws-worker-dot { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ws-dot) 20%, transparent); }
-.ws-turn-active .ws-worker-dot { animation: ws-worker-breathe 2.4s ease-in-out infinite; }
-@keyframes ws-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { .ws-worker-dot { animation: none !important; } }
-.ws-nav-verdicts { flex: none; margin-left: var(--ws-small-gap); }
-.ws-nav-verdicts[hidden] { display: none; }
-.ws-review-plate, .ws-review-plate .kbn-ctl-verdict { display: flex; align-items: baseline; gap: 2px; }
-.ws-review-plate { font: var(--ws-label-size)/1.2 var(--ws-serif); }
-/* In the head the verdicts are verbs in their pigments, plated only under the pointer. */
-.ws-reader .ws-nav-verdicts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
-  height: var(--ws-control-height); padding: 0 var(--ws-small-gap); border: 0; border-radius: var(--ws-control-radius);
-  background: transparent; font: var(--ws-label-size)/var(--ws-control-height) var(--ws-serif); letter-spacing: 0; text-transform: none;
-}
-.ws-reader .ws-nav-verdicts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); }
-.ws-tabs {
-  display: flex; align-self: center; gap: var(--ws-tab-gap); overflow-x: auto; scrollbar-width: none;
-  min-width: 0; position: relative; padding: 0 var(--ws-tab-fade);
-  --ws-fade-left: 0px; --ws-fade-right: 0px;
-  mask-image: linear-gradient(90deg, transparent, var(--ws-mask) var(--ws-fade-left), var(--ws-mask) calc(100% - var(--ws-fade-right)), transparent);
-}
-.ws-tabs::-webkit-scrollbar { display: none; }
-.ws-tabs.ws-fade-l { --ws-fade-left: var(--ws-tab-fade); }
-.ws-tabs.ws-fade-r { --ws-fade-right: var(--ws-tab-fade); }
-.ws-tab {
-  flex: none; display: flex; align-items: center; min-width: var(--ws-tab-floor); max-width: var(--ws-tab-ceiling);
-  height: var(--ws-control-height); padding: 0 var(--ws-tab-pad); border-radius: var(--ws-control-radius);
-  white-space: nowrap; overflow: hidden; color: var(--ws-ink-muted) !important;
-  font-size: var(--ws-label-size); font-family: var(--ws-serif); letter-spacing: 0; justify-content: center; border: 0 !important;
-}
-.ws-tab-fresh::after { content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 5px; border-radius: 50%; background: var(--kbn-owed); }
-.ws-tab:hover, .ws-tab[aria-selected='true'] { color: var(--ws-ink) !important; }
-.ws-tab.ws-clipped { mask-image: linear-gradient(90deg, var(--ws-mask) calc(100% - var(--ws-tab-fade)), transparent); }
+/* In the reader the worker state is mono capitals and the dot takes the room's own pigments. */
+.ws-reader .kbn-card-worker .ws-worker-state { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
+.ws-reader .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-machine); }
+.ws-reader .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
+.ws-reader .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--ws-you); }
+.ws-reader .kbn-card-worker[data-worker-state='no worker'] .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
+.ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .ws-stage {
-  position: relative; overflow: hidden; flex: 1; min-height: 0; min-width: 0;
+  /* Pages clip at the stage's sides; their shadows still fall below it. */
+  position: relative; overflow-x: clip; overflow-y: visible; flex: 1; min-height: 0; min-width: 0;
   background: transparent; transform-origin: center 40%;
 }
 .ws-parallax { position: absolute; inset: 0; transform: translate3d(var(--ws-page-x, 0px), var(--ws-page-y, 0px), 0); }
 .ws-track { position: absolute; left: 0; top: 0; height: 100%; width: 0; transition: transform var(--ws-crossing) var(--ws-ease); }
 .ws-page {
-  position: absolute; top: var(--ws-stage-inset); transform-origin: center;
+  position: absolute; top: var(--ws-stage-top); transform-origin: center;
   transition: left var(--ws-crossing) var(--ws-ease), width var(--ws-crossing) var(--ws-ease), height var(--ws-crossing) var(--ws-ease), transform var(--ws-crossing) var(--ws-ease), opacity var(--ws-crossing) var(--ws-ease);
 }
 .ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-radius); overflow: hidden; background: var(--ws-paper); box-shadow: var(--ws-float); }
@@ -187,11 +139,45 @@
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-channel-row[aria-current='true'] { background: var(--ws-paper); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: 0 2px 3px color-mix(in srgb, var(--ws-ink) 18%, transparent), 0 6px 12px color-mix(in srgb, var(--ws-ink) 12%, transparent); }
 /* The column travels as cards; the current slip reaches toward the reading stage. */
-.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-stage-inset) var(--ws-inset) 0; position: relative; z-index: 2; }
+.ws-sidebar { display: none; width: var(--ws-sidebar-width); flex: none; flex-direction: column; gap: var(--ws-inset); min-height: 0; padding: var(--ws-corner-inset) var(--ws-inset) 0; position: relative; z-index: 2; }
 .ws-sidebar .ws-channel-find { flex: none; box-shadow: var(--ws-chrome-shadow); }
+/* The index strip holds the toggle's row, on its centre line: each group and
+   its count in mono caps, the open constitution's group in full ink. Its
+   entries are the J/K stops, and a click lands as J/K would. */
+.ws-sidebar-index {
+  flex: none; display: flex; align-items: center; min-width: 0; height: var(--ws-control-height);
+  margin-bottom: calc(-1 * var(--ws-small-gap));
+  padding-left: calc(var(--ws-corner-inset) + var(--ws-control-height) + var(--ws-small-gap) - var(--ws-inset));
+  overflow: hidden; white-space: nowrap;
+}
+.ws-sidebar-index-entry {
+  display: inline-flex; align-items: center; gap: .45em; height: 100%; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .04em; text-transform: uppercase;
+}
+.ws-sidebar-index-entry + .ws-sidebar-index-entry { margin-left: .5em; }
+.ws-sidebar-index-entry + .ws-sidebar-index-entry::before { content: '·'; margin-right: .05em; color: var(--ws-ink-muted); }
+.ws-sidebar-index-count { font-variant-numeric: tabular-nums; }
+.ws-sidebar-index-entry:hover, .ws-sidebar-index-entry[aria-current='location'] { color: var(--ws-ink); }
+.ws-sidebar-index-entry[aria-current='location'] .ws-sidebar-index-name { text-decoration: underline; text-decoration-thickness: var(--ws-line-width); text-underline-offset: 4px; }
+.ws-sidebar-index-entry:focus { outline: none; }
+.ws-reader.ws-keyboard .ws-sidebar-index-entry:focus-visible { outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: 2px; }
+/* The sidebar's edge resizes it: a hairline that darkens under the pointer, the keyboard or a drag. */
+.ws-sidebar-handle {
+  position: absolute; top: 0; bottom: 0; right: calc(var(--ws-sidebar-handle) / -2); z-index: 3; width: var(--ws-sidebar-handle);
+  cursor: col-resize; touch-action: none;
+}
+.ws-sidebar-handle::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: var(--ws-line-width); transform: translateX(-50%);
+  background: transparent; transition: background-color 120ms var(--ws-ease), width 120ms var(--ws-ease);
+}
+.ws-sidebar-handle:hover::after, .ws-sidebar-resizing .ws-sidebar-handle::after { width: 2px; background: var(--ws-hairline); }
+.ws-sidebar-handle:focus { outline: none; }
+.ws-reader.ws-keyboard .ws-sidebar-handle:focus-visible::after { width: 2px; background: var(--ws-focus); }
+.ws-sidebar-resizing, .ws-sidebar-resizing * { cursor: col-resize !important; user-select: none; }
+.ws-sidebar-resizing iframe { pointer-events: none; }
 .ws-sidebar .ws-channel-list {
   flex: 1; min-height: 0; width: calc(100% + var(--ws-sidebar-overflow)); margin-right: calc(-1 * var(--ws-sidebar-overflow));
-  padding: var(--ws-small-gap) var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;
+  padding: 0 var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;
   scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent;
 }
 .ws-sidebar .ws-constitution-card {
@@ -204,20 +190,47 @@
 .ws-sidebar .ws-constitution-card .kbn-card-name { font: 500 var(--ws-prose-size)/1.2 var(--ws-serif); }
 .ws-sidebar .ws-constitution-card .kbn-card-outcome { -webkit-line-clamp: var(--ws-sidebar-outcome-lines); font: var(--ws-label-size)/1.35 var(--ws-serif); pointer-events: none; }
 .ws-sidebar .ws-constitution-card .kbn-card-meta { justify-content: space-between; gap: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); }
+/* The meta row's line box is the worker pill's, held whether or not a worker runs, so one starting moves nothing. */
+.ws-sidebar .ws-constitution-card .kbn-card-meta { min-height: var(--ws-meta-row); }
+.ws-sidebar .ws-constitution-card .kbn-card-meta > * { max-height: var(--ws-meta-row); }
 .ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; }
 .ws-sidebar .ws-channel-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-paper); border-color: var(--ws-ink-faint); transform: translateY(var(--ws-sidebar-lift)); }
+@media (prefers-reduced-motion: reduce) { .ws-sidebar .ws-constitution-card:hover:not([aria-current='true']) { transform: none; } }
 .ws-sidebar .ws-constitution-card[aria-current='true'] {
   background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink);
   transform: translate(var(--ws-sidebar-pull), var(--ws-sidebar-lift));
   box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light);
 }
-.ws-sidebar .kbn-flight-caption { margin: var(--ws-inset) 0; }
+/* Each group's caption holds the top of the list while its cards pass beneath,
+   and a card scrolled into view keeps clear of it, so a landing shows both.
+   Its ground and the fade below it show only while it is stuck, where the
+   browser can tell; elsewhere they stay, so cards never run through its text. */
+.ws-sidebar .kbn-flight-caption {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: var(--ws-control-height);
+  margin: var(--ws-small-gap) 0;
+}
+.ws-sidebar .ws-channel-group:first-child > .kbn-flight-caption { margin-top: 0; }
+.ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { content: ''; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none; }
+.ws-sidebar .kbn-flight-caption::before { top: 0; bottom: 0; background: var(--ws-ground); }
+.ws-sidebar .kbn-flight-caption::after { top: 100%; height: var(--ws-small-gap); background: linear-gradient(var(--ws-ground), transparent); }
+@supports (container-type: scroll-state) {
+  .ws-sidebar .kbn-flight-caption { container-type: scroll-state; }
+  .ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { opacity: 0; }
+  @container scroll-state(stuck: top) {
+    .ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { opacity: 1; }
+  }
+}
+.ws-sidebar .ws-channel-row { scroll-margin-top: calc(var(--ws-control-height) + var(--ws-small-gap)); }
 .ws-sidebar-source, .ws-sidebar .ws-card-travelling { opacity: 0 !important; }
 .ws-sidebar.ws-sidebar-flight { display: block; position: fixed; inset: 0; width: auto; padding: 0; pointer-events: none; z-index: calc(var(--ws-reader-layer) + 1); }
 .ws-sidebar-flight .ws-constitution-card { overflow: hidden; pointer-events: none; transition: none; }
 .ws-sidebar-flight .ws-flight-current { background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light); }
+/* The column has its own ground: the reader's paper ground, held over the veil so
+   the blurred Desk stops at its edge, and one hairline where it meets the stage.
+   The current card still reaches across that line toward the page. */
 .ws-with-sidebar .ws-sidebar { display: flex; }
+:is(.ws-with-sidebar, .ws-sidebar-leaving) .ws-sidebar:not(.ws-sidebar-flight) { background: color-mix(in srgb, var(--ws-ground) 82%, transparent); box-shadow: inset calc(-1 * var(--ws-line-width)) 0 0 var(--ws-hairline-soft); }
 /* A closing sidebar slides out over the stage that has already taken its room. */
 .ws-sidebar-sliding .ws-stage { overflow: visible; }
 .ws-sidebar-leaving .ws-sidebar { display: flex; position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
@@ -266,9 +279,9 @@
 .ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); z-index: 2; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-reader { --ws-stage-inset: 0px; --ws-prose-padding: 24px 16px 48px; --ws-lede-size: 20px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
+  .ws-reader { top: 0; --ws-stage-inset: 0px; --ws-stage-top: 0px; --ws-prose-padding: 24px 16px 48px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
-  .ws-navbar { grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; column-gap: 0; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
+  .ws-navbar { display: grid; grid-template-columns: minmax(0, 1fr) var(--ws-phone-target); gap: 0; column-gap: 0; height: auto; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden .ws-navbar { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
   .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
   /* Phone neighbours are flat sheets beside the page, seen only while a swipe or crossing carries them in. */
@@ -277,18 +290,20 @@
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
-  .ws-nav-verdicts, .ws-tabs, .ws-head-position { display: none !important; }
+  /* The phone keeps its place in the bottom bar's ticks and count and its page sheet. */
+  .ws-head-index, .ws-head-position, .ws-tab-tip { display: none !important; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
-  .ws-reader .ws-navbar .ws-head-worker .ws-worker-control { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
-  .ws-head-worker :is(.ws-worker-state, .ws-worker-elapsed) { display: none; }
-  .ws-head-worker .ws-worker-dot { width: 9px; height: 9px; }
+  .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
+  /* The state word stays for assistive technology, unseen. */
+  .ws-head-worker .ws-worker-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .ws-head-worker :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
+  .ws-head-worker .ws-worker-dot { position: static; translate: none; width: 9px; height: 9px; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
   /* One chevron drawing for back and stepping: a drawn stroke in ink, legible at 44 px. */
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
   .ws-return::before { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
   .ws-channel-title { text-align: center; flex: 1; height: var(--ws-phone-target); line-height: var(--ws-phone-target); padding: 0; }
-  .ws-channel-title::after { display: none; }
   .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) minmax(0, 1fr) var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); height: calc(var(--ws-thumb-height) + env(safe-area-inset-bottom)); flex: none; border-top: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); touch-action: pan-y; user-select: none; }
   /* Two lines: the page's title, then where it sits and how it arrived. */
   .ws-page-choice { min-width: 0; height: 55px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 3px; padding: 0 4px; }

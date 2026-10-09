@@ -1,6 +1,6 @@
 import { renderMarkdown } from '../utils.js'
 import { sessionWhen } from '../sessionHistory.js'
-import { formatSpanMinutes } from '../civilDay.js'
+import { DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
 import { TranscriptModel, type Step, type ToolStep, type Turn } from './model.js'
 import { TranscriptFeed, type FeedStatus } from './feed.js'
 import { toolLabel } from './tools.js'
@@ -70,10 +70,9 @@ function createButton(className: string, text: string): HTMLButtonElement {
 }
 
 function clock(ms: number): { text: string; title: string } {
-  const date = new Date(ms)
   return {
-    text: date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false }),
-    title: date.toLocaleString(),
+    text: formatInstant(ms, { hour: '2-digit', minute: '2-digit', hour12: false }),
+    title: formatInstant(ms, DATE_AND_TIME),
   }
 }
 

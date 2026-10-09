@@ -277,28 +277,28 @@ export function injectProjectPickerStyles(): void {
       padding: 6px 8px;
       font-family: var(--font-main, 'EB Garamond', serif);
       font-size: 14px;
-      color: #2E2A26;
-      background: #FFFFFF;
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      color: var(--kbn-graphite);
+      background: var(--kbn-blank);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       border-radius: 3px;
     }
     .projpick-input:focus {
       outline: none;
-      border-color: rgba(154, 123, 53, 0.55);
-      box-shadow: 0 0 0 2px rgba(154, 123, 53, 0.16);
+      border-color: color-mix(in srgb, var(--kbn-owed) 55%, transparent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed) 16%, transparent);
     }
     .projpick-addpath {
       display: flex;
       flex-direction: column;
       gap: 5px;
       padding: 8px 10px;
-      background: rgba(154, 123, 53, 0.07);
-      border: 1px solid rgba(154, 123, 53, 0.28);
+      background: color-mix(in srgb, var(--kbn-owed) 7%, transparent);
+      border: 1px solid color-mix(in srgb, var(--kbn-owed) 28%, transparent);
       border-radius: 3px;
     }
     .projpick-addpath-label {
       font-size: 11.5px;
-      color: #5C544D;
+      color: var(--kbn-graphite-soft);
     }
     .projpick-addpath-row {
       display: flex;
@@ -316,15 +316,15 @@ export function injectProjectPickerStyles(): void {
       font-size: 13px;
       padding: 5px 12px;
       border-radius: 3px;
-      border: 1px solid rgba(46, 42, 38, 0.20);
+      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
       background: transparent;
-      color: #5C544D;
+      color: var(--kbn-graphite-soft);
       cursor: pointer;
       white-space: nowrap;
     }
     .projpick-addpath-go {
-      border-color: rgba(154, 123, 53, 0.55);
-      color: #6E5518;
+      border-color: color-mix(in srgb, var(--kbn-owed) 55%, transparent);
+      color: color-mix(in srgb, var(--kbn-owed-bright) 54%, var(--kbn-ink));
     }
     .projpick-addpath-go:disabled,
     .projpick-addpath-cancel:disabled {
@@ -333,7 +333,7 @@ export function injectProjectPickerStyles(): void {
     }
     .projpick-addpath-error {
       font-size: 12px;
-      color: #8B3A28;
+      color: var(--kbn-error);
     }
   `)
 }

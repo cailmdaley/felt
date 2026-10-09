@@ -7,10 +7,10 @@ What you need to drive shuttle from a session: when a fiber dispatches, the verb
 A fiber is eligible for a worker when these conditions hold:
 
 1. The fiber lives in a store the daemon polls — from `SHUTTLE_STORES`, else `~/.config/shuttle/stores.json`, with no implicit default. A cross-project store such as `~/loom` brings in the project stores symlinked under it.
-2. It carries a `shuttle:` block, written by `shuttle install` (oneshot), `repeat` (standing) or `pin` (pinned).
+2. It carries a `shuttle:` block, written by `shuttle install` (oneshot) or `repeat` (standing).
 3. Its `status` is `active`: `open` is a draft, `closed` is awaiting review or finished, and tags never gate anything.
 4. Its `shuttle.host` exactly matches this daemon's host ID.
-5. The boot quarantine is released with `shuttle daemon release`, except for observed live workers and cron-due standing roles.
+5. The boot quarantine is released with `shuttle daemon release`, except for observed live workers and cron-due standing constitutions.
 
 Inspect eligible work before releasing: the release applies to the whole host.
 
@@ -24,9 +24,9 @@ tmux owns the workers, so restarting the daemon never ends them; it re-adopts li
 
 The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` and whether a worker owns it:
 
-- **Drafts** — `status: open`.
-- **Scheduled** — an armed standing role between runs, drawn in Resting with its next launch.
-- **Pinned** — a resting pinned role, waiting for a human to start it; once running, the skill's exits govern it.
+- **Drafts** — `status: open`, on the desk.
+- **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` and a drag into Resting put a card here.
+- **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch.
 - **In flight** — a live worker or owned app conversation, or an armed oneshot, even one waiting on its dependencies.
 - **Awaiting review** — `status: closed` with no `tempered`, parked for the human.
 - **Tempered** — `closed`, `tempered: true`: the human accepted it.
@@ -37,12 +37,12 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 ```bash
 shuttle install <fiber> [--disabled]   # add a oneshot block, armed (or a draft)
 shuttle repeat  <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris   # standing
-shuttle pin     <fiber>                # pinned
 shuttle reshape <fiber> [kind]         # change kind or schedule in place
 shuttle set-agent <fiber> <agent-id>   # change the agent (--effort, --chrome)
 shuttle pause   <fiber>                # back to draft, schedule kept; kills a live worker unless --no-kill
-shuttle resume  <fiber>                # arm; a standing role awaiting review re-arms for its next tick
-shuttle accept  <fiber>                # accept the run: standing re-arms for its next tick, pinned re-parks to the strip
+shuttle rest    <fiber>                # into Resting without review; stops a live worker
+shuttle resume  <fiber>                # arm; a standing constitution awaiting review re-arms for its next tick
+shuttle accept  <fiber>                # accept a standing run: re-arms for its next tick
 shuttle close   <fiber> [--tempered=true|false]
 shuttle reopen  <fiber> [--as-draft]   # requeue a closed fiber
 shuttle uninstall <fiber>              # remove the block (see below)

@@ -17,11 +17,12 @@
  *   the literal `[[…]]` text it was written as. So an unresolvable reference
  *   reads exactly as it always did, and no click ever opens a broken card.
  *
- * The index is `GET /api/v1/fibers` (ids + names, a few hundred rows), fetched
+ * The index is `GET /api/v1/fibers?fields=index` (ids, slugs and names), fetched
  * once per daemon base and shared — the parent picker already pays for it.
  */
 
 import { fetchFiberIndex } from './fiberSearch.js'
+import { inLane } from './requestLanes.js'
 
 export interface FiberIndexEntry {
   id: string
@@ -36,7 +37,8 @@ const indexCache = new Map<string, Promise<FiberIndexEntry[]>>()
 export function fiberIndex(shuttleBase: string): Promise<FiberIndexEntry[]> {
   const hit = indexCache.get(shuttleBase)
   if (hit) return hit
-  const p = fetchFiberIndex(shuttleBase).catch((e: unknown) => {
+  // Every fiber on the host, read in the slow lane: links decorate when it lands.
+  const p = inLane('slow', () => fetchFiberIndex(shuttleBase)).catch((e: unknown) => {
     indexCache.delete(shuttleBase)
     throw e
   })
@@ -97,6 +99,8 @@ export async function installWikilinks(
   opts: {
     shuttleBase: string
     onOpen: (fiberId: string) => void
+    /** Resolve only a target the index names exactly, never by suffix, case or title. */
+    exact?: boolean
     /** Guard against a panel that closed (or re-rendered) while we awaited. */
     stillCurrent?: () => boolean
   },
@@ -117,7 +121,7 @@ export async function installWikilinks(
 
   for (const a of links) {
     const target = a.dataset.fiber ?? ''
-    const id = resolveWikilink(target, index)
+    const id = opts.exact ? (index.some(row => row.id === target) ? target : null) : resolveWikilink(target, index)
     if (!id) {
       deaden(a)
       continue

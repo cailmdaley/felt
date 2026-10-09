@@ -28,18 +28,21 @@ suite, so `make test` needs it too.
 
 ## Running tests
 
+Before writing a test, read [`docs/dev/testing.md`](docs/dev/testing.md):
+where it goes, which tier runs it, which fixture to reuse, and how to write a
+property.
+
 ```bash
 go test ./...                       # Go (felt and shuttle CLIs)
 make mix-test                       # Elixir (daemon)
-(cd ui && npm test)                 # TypeScript (board) — runs twice, once per pinned timezone
+(cd ui && npm test)                 # TypeScript (board), under TZ=America/Los_Angeles
 bash scripts/test-plugin-hooks.sh   # shell hook shims (claude-plugin/hooks/*)
 make test                           # all four
 ```
 
 CI runs `go build`/`go test ./...`, `scripts/test-plugin-hooks.sh`, a check
 that the two plugin manifests agree on version, `mix compile
---warnings-as-errors` + `mix test`, and both `npm test` (under the two
-pinned time zones) and `npm run build` for the board on every PR.
+--warnings-as-errors` + `mix test`, and both `npm test` and `npm run build` for the board on every PR.
 Mix commands run inside `daemon/`.
 
 ## Invariants

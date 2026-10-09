@@ -13,7 +13,7 @@
      so this one number carries the whole hierarchy. */
   font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1.62;
-  color: #2E2A26;
+  color: var(--kbn-graphite);
 }
 @container kbn-detail (max-width: 600px) {
   .kbn-detail-prose {
@@ -30,11 +30,11 @@
 .kbn-detail-lede {
   margin: 0 0 1.7rem;
   padding: 0.5rem 0.9rem 0.55rem 1.1rem;
-  border-left: 3px solid #C2963B;
+  border-left: 3px solid var(--kbn-gilt);
   border-radius: 0 3px 3px 0;
-  background: rgba(194, 150, 59, 0.07);
+  background: color-mix(in srgb, var(--kbn-gilt) 7%, transparent);
   font-size: 1.04em;
-  color: #3a352e;
+  color: var(--kbn-ink-soft);
 }
 .kbn-detail-lede > :first-child { margin-top: 0; }
 .kbn-detail-lede > :last-child { margin-bottom: 0; }
@@ -49,7 +49,7 @@
   font-family: var(--font-main, 'EB Garamond', Georgia, serif);
   font-weight: 600;
   line-height: 1.2;
-  color: #1f1b16;
+  color: var(--kbn-ink);
   margin: 1.7em 0 0.5em;
 }
 .kbn-detail-prose h1 { font-size: 1.6em; font-weight: 500; font-style: italic; }
@@ -58,7 +58,7 @@
 .kbn-detail-prose h4 { font-size: 1em; letter-spacing: 0.01em; }
 .kbn-detail-prose h2 {
   padding-bottom: 0.18em;
-  border-bottom: 1px solid rgba(27, 22, 17, 0.10);
+  border-bottom: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
 }
 
 .kbn-detail-prose ul,
@@ -70,25 +70,25 @@
 .kbn-detail-prose blockquote {
   margin: 0 0 0.95em;
   padding-left: 1em;
-  border-left: 2px solid #C2963B;
+  border-left: 2px solid var(--kbn-gilt);
   font-style: italic;
-  color: #5e564b;
+  color: var(--kbn-graphite-soft);
 }
 
 .kbn-detail-prose hr {
   border: none;
-  border-top: 1px solid rgba(27, 22, 17, 0.14);
+  border-top: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent);
   margin: 1.8em 0;
 }
 
 .kbn-detail-prose a,
 .kbn-detail-prose a.md-link {
-  color: #2f7d6f;
+  color: var(--kbn-tempered);
   text-decoration: underline;
   text-underline-offset: 2px;
   text-decoration-thickness: 1px;
 }
-.kbn-detail-prose a:hover { color: #B5453A; }
+.kbn-detail-prose a:hover { color: color-mix(in srgb, var(--kbn-you) 92%, var(--kbn-ink-muted)); }
 
 /* ── [[wikilinks]] ────────────────────────────────────────────────────────
    A body's reference to another fiber, which the workspace reader can open as
@@ -117,15 +117,15 @@
   text-underline-offset: 2px;
   /* Two thirds strength at rest so a paragraph of references still reads as a
      paragraph; the plain hex first for anything without color-mix. */
-  text-decoration-color: rgba(188, 69, 56, 0.66);
-  text-decoration-color: color-mix(in srgb, var(--kbn-you, #BC4538) 66%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--kbn-you) 66%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--kbn-you, var(--kbn-you)) 66%, transparent);
   transition: text-decoration-color 120ms ease, color 120ms ease;
 }
 .kbn-detail-prose a.kbn-wikilink-live:hover,
 .kbn-detail-prose a.kbn-wikilink-live:focus-visible {
   /* Firmer, not louder: the same rule at full pigment, the ink darkened. */
-  color: #1B1611;
-  text-decoration-color: var(--kbn-you, #BC4538);
+  color: var(--kbn-ink);
+  text-decoration-color: var(--kbn-you, var(--kbn-you));
   text-decoration-thickness: 1.5px;
   outline: none;
 }
@@ -133,15 +133,15 @@
 .kbn-detail-prose code.md-inline-code {
   font-family: var(--font-mono, 'IBM Plex Mono', monospace);
   font-size: 0.86em;
-  background: rgba(46, 42, 38, 0.07);
+  background: color-mix(in srgb, var(--kbn-graphite) 7%, transparent);
   padding: 0.08em 0.34em;
   border-radius: 3px;
 }
 .kbn-detail-prose pre.md-code-block {
   margin: 0 0 0.95em;
   padding: 0.9em 1.05em;
-  background: #2E2A26;
-  color: #E4DCCB;
+  background: var(--kbn-code-ground);
+  color: var(--kbn-code-ink);
   border-radius: 6px;
   overflow-x: auto;
   font-size: 0.82em;
@@ -164,7 +164,7 @@
 .kbn-detail-prose td {
   text-align: left;
   padding: 0.4em 0.6em;
-  border-bottom: 1px solid rgba(27, 22, 17, 0.14);
+  border-bottom: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent);
   vertical-align: top;
 }
 .kbn-detail-prose th {
@@ -172,7 +172,7 @@
   font-size: 0.82em;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #7A7368;
+  color: var(--kbn-graphite-muted);
   font-weight: 500;
 }
 

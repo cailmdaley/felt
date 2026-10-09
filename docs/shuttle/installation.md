@@ -151,7 +151,10 @@ running. Under its root sit `bin/`, `erts-*/`, `lib/`, `releases/` and
 `share/`. `bin/` contains `shuttled`, the BEAM launcher; `share/` holds the
 launchd plist and systemd unit templates. The supervisor invokes the installed
 Go `shuttle` CLI with the release path, and `shuttle daemon install` renders
-the same templates in a checkout or fetched install.
+the same templates in a checkout or fetched install. Both templates raise the
+daemon's open-file limit to 8192 (the soft `NumberOfFiles` for launchd, leaving
+the hard limit at its default; `LimitNOFILE` for systemd). launchd's default soft limit of 256 is fewer descriptors than a
+busy board's sockets and `felt` pipes can need.
 
 What the tarball leaves behind is the repo's *development* surface: the `make`
 targets and `bin/shuttle-deploy`. A fetched host runs a daemon and keeps it
@@ -1317,7 +1320,7 @@ Do not expose a daemon containing untrusted reports publicly; the daemon's trust
 each dispatchable candidate it has never observed running into `pending_launch`.
 Nothing *fresh* launches until a human runs `shuttle daemon release`. (Work the
 daemon did observe alive — adopted at boot, or dispatched since — keeps
-redispatching, because that counts as continuation, and a standing role whose
+redispatching, because that counts as continuation, and a standing constitution whose
 cron is due fires on schedule. See
 [Boot quarantine](lifecycle.md#boot-quarantine) for why.) The quarantine guards
 your token budget. It also explains why your first worker never starts while

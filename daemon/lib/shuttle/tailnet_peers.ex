@@ -214,7 +214,7 @@ defmodule Shuttle.TailnetPeers do
     doc = Remotes.document()
 
     cond do
-      not is_nil(Application.get_env(:shuttle, :remotes)) ->
+      not is_nil(Shuttle.Env.app(:remotes)) ->
         %{base | state: "disabled", error: "application config sets the fleet"}
 
       not Remotes.discover?(doc) ->
@@ -259,7 +259,7 @@ defmodule Shuttle.TailnetPeers do
     # rejection rather than a signal to this process.
     Shuttle.TaskSupervisor
     |> Task.Supervisor.async_stream_nolink(urls, probe,
-      timeout: @probe_timeout_ms + 1_000,
+      timeout: probe_timeout_ms() + 1_000,
       on_timeout: :kill_task,
       max_concurrency: 32
     )
@@ -499,7 +499,7 @@ defmodule Shuttle.TailnetPeers do
         {:error, "cli", "no executable tailscale CLI found"}
 
       path ->
-        run = fn -> System.cmd(path, ["status", "--json"], stderr_to_stdout: true) end
+        run = fn -> Shuttle.Env.cmd(path, ["status", "--json"], stderr_to_stdout: true) end
 
         case isolated(run, @status_timeout_ms) do
           # `tailscale status` exits non-zero when stopped but still prints the
@@ -526,8 +526,8 @@ defmodule Shuttle.TailnetPeers do
   # The first executable tailscale CLI: PATH, then the standard locations.
   # `:tailscale_cli_locations` application config replaces the whole search.
   def tailscale_cli do
-    case Application.get_env(:shuttle, :tailscale_cli_locations) do
-      nil -> System.find_executable("tailscale") || Enum.find(@cli_locations, &executable?/1)
+    case Shuttle.Env.app(:tailscale_cli_locations) do
+      nil -> Shuttle.Env.find_executable("tailscale") || Enum.find(@cli_locations, &executable?/1)
       locations -> Enum.find(locations, &executable?/1)
     end
   end
@@ -560,7 +560,7 @@ defmodule Shuttle.TailnetPeers do
           localapi_get(socket, host, path)
 
         nil ->
-          Shuttle.RemoteRegistry.Client.Default.get(version_url, @probe_timeout_ms)
+          Shuttle.RemoteRegistry.Client.Default.get(version_url, probe_timeout_ms())
       end
 
     case result do
@@ -575,8 +575,13 @@ defmodule Shuttle.TailnetPeers do
     end
   end
 
+  # One probe's whole budget: dial, TLS and the HTTP exchange. The app env
+  # `:tailnet_probe_timeout_ms` overrides it (tests on a loaded machine).
+  defp probe_timeout_ms,
+    do: Shuttle.Env.app(:tailnet_probe_timeout_ms, @probe_timeout_ms)
+
   defp localapi_get(socket, host, path) do
-    deadline = deadline(@probe_timeout_ms)
+    deadline = deadline(probe_timeout_ms())
 
     case Shuttle.TailnetDial.Bridge.open_tls(socket, host, 443) do
       {:ok, tls} ->

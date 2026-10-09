@@ -9,6 +9,7 @@ import (
 )
 
 func TestEditMetadataFlags(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
@@ -47,6 +48,7 @@ func TestEditMetadataFlags(t *testing.T) {
 }
 
 func TestEditStampsUpdatedAt(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	created := mustParseTime(t, "2026-04-10T09:00:00Z")
 	if err := storage.Write(&felt.Felt{
@@ -78,6 +80,7 @@ func TestEditStampsUpdatedAt(t *testing.T) {
 }
 
 func TestEditBodyOverwriteDetection(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
@@ -102,6 +105,7 @@ func TestEditBodyOverwriteDetection(t *testing.T) {
 // real boolean in the JSON the board UI reads), --unset removes, and a full
 // horizon round-trip set→unset leaves the frontmatter clean.
 func TestEditSetUnsetExtraScalars(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	if err := storage.Write(&felt.Felt{
 		ID:        "fiber-a",
@@ -160,6 +164,7 @@ func TestEditSetUnsetExtraScalars(t *testing.T) {
 // both verbs, malformed --set is rejected, and --set will not scalar-clobber a
 // structured value (the shuttle: block).
 func TestEditSetUnsetGuards(t *testing.T) {
+	t.Parallel()
 	dir, storage := newStore(t)
 	f := &felt.Felt{
 		ID:        "fiber-a",
@@ -187,6 +192,7 @@ func TestEditSetUnsetGuards(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			out, err := runCommand(t, dir, append([]string{"edit", "fiber-a"}, tc.args...)...)
 			if err == nil {
 				t.Fatalf("expected error, got success: %s", out)

@@ -44,12 +44,15 @@ const click = (selector: string) => {
   expect(button).not.toBeNull()
   act(() => button.click())
 }
-const mount = async (overrides: Partial<CaptureFormProps> = {}) => {
+// Meeting starts off; most of these tests exercise it on, so `mount` switches it on unless asked not to.
+const mount = async (overrides: Partial<CaptureFormProps> = {}, armed = true) => {
   const host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
   await act(async () => root!.render(<CaptureForm projects={projects} hosts={hosts} onSpawned={vi.fn()} onCancel={vi.fn()} onMeetingResult={result} phoneAudio={phone} {...overrides} />))
   await tick()
+  const toggle = document.querySelector<HTMLButtonElement>('.capture-meeting-toggle')
+  if (armed && toggle?.getAttribute('aria-pressed') === 'false') { act(() => toggle.click()); await tick() }
 }
 const unmount = async () => { if (root) { await act(async () => root!.unmount()); root = null } }
 const choices = () => [...document.querySelectorAll<HTMLSelectElement>('.form-select')].map((select) => select.value)
@@ -148,6 +151,18 @@ describe('phone Capture form wiring', () => {
     expect(phone.session.mic).toBe(opened)
   })
 
+  it('starts mobile Capture with Meeting off, so the default action is an ordinary new session', async () => {
+    localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
+    await mount({}, false)
+    expect(document.querySelector('.capture-meeting-toggle')?.getAttribute('aria-pressed')).toBe('false')
+    expect(document.querySelector('.form-submit')?.textContent).toBe('Spawn')
+    expect(choices().slice(0, 2)).toEqual([saved.hostId, saved.projectId])
+    click('.capture-meeting-toggle')
+    expect(document.querySelector('.capture-meeting-toggle')?.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('[role="radiogroup"]')).toBeNull()
+    expect(document.querySelector('.form-submit')?.textContent).toBe('Start meeting')
+  })
+
   it('defaults mobile Capture to Phone, restores its successful host/project, and leaves the keyboard closed', async () => {
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
     await mount()
@@ -163,7 +178,7 @@ describe('phone Capture form wiring', () => {
   it('keeps desktop defaults and lets desktop explicitly select Phone', async () => {
     mobile(false)
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
-    await mount()
+    await mount({}, false)
     expect(document.querySelector('.capture-meeting-toggle')?.getAttribute('aria-pressed')).toBe('false')
     expect(choices().slice(0, 2)).toEqual(['local', 'local:/desk'])
     expect(document.activeElement?.tagName).toBe('TEXTAREA')

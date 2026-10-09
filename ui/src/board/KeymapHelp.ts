@@ -1,6 +1,7 @@
 import './keymap.css'
 import './workspace/tokens.css'
 import { bindingKeyLabel, keyIntent, surfaceBindings, type KeySurface } from './keymap.js'
+import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 import { blockingDialogOpen } from './views/ViewRegistry.js'
 
 /** One app-level overlay, available even when the reader owns the keystroke. */
@@ -37,7 +38,7 @@ export class KeymapHelp {
     close.addEventListener('click', () => this.close())
     header.append(title, close)
     const note = document.createElement('p')
-    note.textContent = 'Bare keys work outside fields, without ⌘/Ctrl or IME composition. Verdict keys write after 6 s; Undo or z cancels the latest pending verdict, even after navigation. Esc or ? closes this guide.'
+    note.textContent = `Bare keys work outside fields, without ⌘/Ctrl or IME composition. Verdict keys write after ${VERDICT_DELAY_MS / 1000} s; Undo or z cancels the latest pending verdict, even after navigation. Esc or ? closes this guide.`
     dialog.append(header, note)
     const sections = document.createElement('div')
     sections.className = 'kbn-keymap-sections'

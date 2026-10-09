@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func testAttachment(name string, data []byte) Attachment {
@@ -20,8 +22,9 @@ func testAttachment(name string, data []byte) Attachment {
 }
 
 func TestPartialAttachmentWriteRemainsDefiniteRejection(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", root)
+	t.Parallel()
+	env := testEnv(t)
+	root := dataDir(env)
 	request := Request{Address: "shuttle://host/codex/thread", MessageID: "partial-files", Attachments: []Attachment{testAttachment("first.bin", []byte("first")), testAttachment("second.bin", []byte("second"))}}
 	idHash := sha256.Sum256([]byte(request.MessageID))
 	dir := filepath.Join(root, "message-files", hex.EncodeToString(idHash[:]))
@@ -31,7 +34,7 @@ func TestPartialAttachmentWriteRemainsDefiniteRejection(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "02"), []byte("blocks directory creation"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	receipt, err := Send(context.Background(), "host", request)
+	receipt, err := Send(context.Background(), env, "host", request)
 	if ErrorCode(err) != "preflight_failed" || receipt.Status != StatusRejected || len(receipt.Files) != 0 {
 		t.Fatalf("partial write was not a definite rejection: %+v %v", receipt, err)
 	}
@@ -41,13 +44,14 @@ func TestPartialAttachmentWriteRemainsDefiniteRejection(t *testing.T) {
 }
 
 func TestReadAttachmentsPreservesBinaryBytes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	want := []byte{0, 1, 2, 0xff, '\n', 0}
 	path := filepath.Join(dir, "payload.bin")
 	if err := os.WriteFile(path, want, 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ReadAttachments([]string{path})
+	got, err := ReadAttachments(sysenv.New(t.TempDir(), nil), []string{path})
 	if err != nil || len(got) != 1 || got[0].Name != "payload.bin" || !reflect.DeepEqual(got[0].Data, want) {
 		t.Fatalf("ReadAttachments() = %#v, %v", got, err)
 	}
@@ -57,13 +61,14 @@ func TestReadAttachmentsPreservesBinaryBytes(t *testing.T) {
 }
 
 func TestReadAttachmentsRejectsFIFOWithoutBlocking(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "pipe")
 	if err := syscall.Mkfifo(path, 0600); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := ReadAttachments([]string{path})
+		_, err := ReadAttachments(sysenv.New(t.TempDir(), nil), []string{path})
 		done <- err
 	}()
 	select {
@@ -77,6 +82,7 @@ func TestReadAttachmentsRejectsFIFOWithoutBlocking(t *testing.T) {
 }
 
 func TestAttachmentValidationRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
 	base := Request{Address: "shuttle://host/codex/session", Text: "message", MessageID: "id"}
 	tests := []struct {
 		name        string
@@ -92,6 +98,7 @@ func TestAttachmentValidationRejectsMalformedInput(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			req := base
 			req.Attachments = tc.attachments
 			if err := validateRequest("host", req); ErrorCode(err) != "invalid_request" {
@@ -110,6 +117,7 @@ func TestAttachmentValidationRejectsMalformedInput(t *testing.T) {
 }
 
 func TestRequestHashWithoutAttachmentsIsCompatible(t *testing.T) {
+	t.Parallel()
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", From: "sender", Wake: true, MessageID: "ignored"}
 	b, _ := json.Marshal(struct {
 		Address, Text, From string
@@ -122,10 +130,11 @@ func TestRequestHashWithoutAttachmentsIsCompatible(t *testing.T) {
 }
 
 func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
-	dataDir := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
-	t.Setenv("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
-	if err := RegisterMailbox("codex", "session", "host", "/work", os.Getpid(), true); err != nil {
+	t.Parallel()
+	env := testEnv(t)
+	dataDir := dataDir(env)
+	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
+	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	attachments := []Attachment{
@@ -133,7 +142,7 @@ func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
 		testAttachment("same.bin", []byte("second")),
 	}
 	req := Request{Address: "shuttle://host/codex/session", MessageID: "with-files", Attachments: attachments}
-	first, err := Send(context.Background(), "host", req)
+	first, err := Send(context.Background(), env, "host", req)
 	if err != nil || first.Status != StatusQueued || len(first.Files) != 2 {
 		t.Fatalf("first Send() = %#v, %v", first, err)
 	}
@@ -150,12 +159,12 @@ func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
 			t.Fatalf("file %d = %v, %v", i, got, readErr)
 		}
 	}
-	second, err := Send(context.Background(), "host", req)
+	second, err := Send(context.Background(), env, "host", req)
 	if err != nil || !reflect.DeepEqual(second, first) {
 		t.Fatalf("replay Send() = %#v, %v; want %#v", second, err, first)
 	}
 	var offered []Request
-	if err := OfferMailbox("codex", "session", "host", func(batch []Request) error {
+	if err := OfferMailbox(env, "codex", "session", "host", func(batch []Request) error {
 		offered = append(offered, batch...)
 		return nil
 	}); err != nil {
@@ -170,11 +179,12 @@ func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
 }
 
 func TestMaterializePreservesMaximumLengthName(t *testing.T) {
-	t.Setenv("SHUTTLE_DATA_DIR", t.TempDir())
+	t.Parallel()
+	env := testEnv(t)
 	name := strings.Repeat("a", 255)
-	files, err := materializeAttachments("long-name", []Attachment{testAttachment(name, []byte("data"))})
+	files, err := materializeAttachments(env, "long-name", []Attachment{testAttachment(name, []byte("data"))})
 	if err != nil || len(files) != 1 {
-		t.Fatalf("materializeAttachments() = %#v, %v", files, err)
+		t.Fatalf("materializeAttachments(env) = %#v, %v", files, err)
 	}
 	if filepath.Base(files[0].Path) != name {
 		t.Fatalf("receiver basename length = %d, want 255", len(filepath.Base(files[0].Path)))
@@ -185,27 +195,29 @@ func TestMaterializePreservesMaximumLengthName(t *testing.T) {
 }
 
 func TestAttachmentPayloadChangeConflictsOnMessageID(t *testing.T) {
-	dataDir := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
-	t.Setenv("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
-	if err := RegisterMailbox("codex", "session", "host", "/work", os.Getpid(), true); err != nil {
+	t.Parallel()
+	env := testEnv(t)
+	dataDir := dataDir(env)
+	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
+	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	req := Request{Address: "shuttle://host/codex/session", MessageID: "same-id", Attachments: []Attachment{testAttachment("x", []byte("one"))}}
-	if _, err := Send(context.Background(), "host", req); err != nil {
+	if _, err := Send(context.Background(), env, "host", req); err != nil {
 		t.Fatal(err)
 	}
 	req.Attachments = []Attachment{testAttachment("x", []byte("two"))}
-	if receipt, err := Send(context.Background(), "host", req); ErrorCode(err) != "message_id_conflict" || receipt.Status != StatusRejected {
+	if receipt, err := Send(context.Background(), env, "host", req); ErrorCode(err) != "message_id_conflict" || receipt.Status != StatusRejected {
 		t.Fatalf("Send() = %#v, %v", receipt, err)
 	}
 }
 
 func TestPreexistingSymlinkPreventsDelivery(t *testing.T) {
-	dataDir := t.TempDir()
-	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
-	t.Setenv("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
-	if err := RegisterMailbox("codex", "session", "host", "/work", os.Getpid(), true); err != nil {
+	t.Parallel()
+	env := testEnv(t)
+	dataDir := dataDir(env)
+	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
+	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
 	messageID := "symlink"
@@ -221,10 +233,10 @@ func TestPreexistingSymlinkPreventsDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := Request{Address: "shuttle://host/codex/session", MessageID: messageID, Attachments: []Attachment{testAttachment("x", []byte("data"))}}
-	if receipt, err := Send(context.Background(), "host", req); ErrorCode(err) != "preflight_failed" || receipt.Status != StatusRejected {
+	if receipt, err := Send(context.Background(), env, "host", req); ErrorCode(err) != "preflight_failed" || receipt.Status != StatusRejected {
 		t.Fatalf("Send() = %#v, %v", receipt, err)
 	}
-	pending, err := os.ReadDir(filepath.Join(mailboxDir("codex", "session"), "pending"))
+	pending, err := os.ReadDir(filepath.Join(mailboxDir(env, "codex", "session"), "pending"))
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}

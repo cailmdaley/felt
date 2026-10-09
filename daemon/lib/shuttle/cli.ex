@@ -16,7 +16,7 @@ defmodule Shuttle.CLI do
           | {:command_error, non_neg_integer() | :timeout, String.t()}
           | {:error, String.t()}
 
-  @local_verbs ~w(pause resume close reopen accept set-outcome set-model set-agent reshape uninstall)
+  @local_verbs ~w(pause rest resume close reopen accept set-outcome set-model set-agent seat reshape uninstall)
 
   @doc "Run the `shuttle` executable with raw argv."
   @spec run([String.t()], keyword()) :: result()
@@ -57,7 +57,7 @@ defmodule Shuttle.CLI do
 
   # The single test seam covers both executable names; the runner receives the
   # actual binary name so stubs can preserve the process boundary.
-  defp configured_runner, do: Application.get_env(:shuttle, :felt_runner, Shuttle.Runner.Default)
+  defp configured_runner, do: Shuttle.Env.app(:felt_runner, Shuttle.Runner.Default)
 
   defp local_flag(verb) when verb in @local_verbs, do: ["--local"]
   defp local_flag(_verb), do: []

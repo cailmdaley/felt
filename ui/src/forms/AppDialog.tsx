@@ -6,7 +6,7 @@
  * portal-to-body for free. The standalone UI has no competing modal stack, so
  * the z-index just needs to clear the board (10000/10001 for headroom).
  *
- * The chrome is the board's manuscript language: a warm paper field (#F4F0E8)
+ * The chrome is the board's manuscript language: the forms' paper field (`--kbn-form-paper`)
  * under a slightly darker header band, a brass hairline under the header, and
  * EB Garamond throughout. It is small enough to carry inline, with a small
  * sheet for the entrance keyframes (CSS-only, so Radix's mount is what
@@ -95,8 +95,8 @@ function injectAppDialogStyles(): void {
         margin-right: -22px;
         margin-bottom: -16px;
         padding: 10px 22px calc(14px + env(safe-area-inset-bottom, 0px));
-        background: #EFEAE0;
-        border-top: 1px solid rgba(46, 42, 38, 0.10);
+        background: var(--kbn-form-well);
+        border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
       }
       /* Esc and ⌘↵ are a keyboard's line, and a phone has neither key. */
       .app-dialog-body > * > .form-foot > .form-foot-hint {
@@ -123,7 +123,7 @@ function injectAppDialogStyles(): void {
 const appDialogOverlayStyles: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(46, 42, 38, 0.45)',
+  background: 'color-mix(in srgb, var(--kbn-shade) 45%, transparent)',
   backdropFilter: 'blur(2px)',
   zIndex: 10000,
   animation: 'app-dialog-scrim-in 120ms ease-out',
@@ -131,17 +131,17 @@ const appDialogOverlayStyles: React.CSSProperties = {
 
 /** The paper, and only the paper — see `.app-dialog-card` for the shape. */
 const appDialogContentStyles: React.CSSProperties = {
-  background: '#F4F0E8',
+  background: 'var(--kbn-form-paper)',
   backgroundImage:
-    'linear-gradient(135deg, rgba(154, 123, 53, 0.025) 0%, transparent 60%),' +
-    'linear-gradient(315deg, rgba(46, 42, 38, 0.020) 0%, transparent 70%)',
-  color: '#2E2A26',
+    'linear-gradient(135deg, color-mix(in srgb, var(--kbn-owed) 2.5%, transparent) 0%, transparent 60%),' +
+    'linear-gradient(315deg, color-mix(in srgb, var(--kbn-graphite) 2%, transparent) 0%, transparent 70%)',
+  color: 'var(--kbn-graphite)',
   fontFamily: "var(--font-main, 'EB Garamond', serif)",
-  border: '1px solid rgba(46, 42, 38, 0.22)',
+  border: '1px solid color-mix(in srgb, var(--kbn-graphite) 22%, transparent)',
   boxShadow:
-    '0 1px 0 rgba(255, 252, 245, 0.6) inset,' +
-    '0 14px 36px rgba(46, 42, 38, 0.26),' +
-    '0 2px 6px rgba(46, 42, 38, 0.12)',
+    '0 1px 0 color-mix(in srgb, var(--kbn-rag) 60%, transparent) inset,' +
+    '0 14px 36px color-mix(in srgb, var(--kbn-shade) 26%, transparent),' +
+    '0 2px 6px color-mix(in srgb, var(--kbn-shade) 12%, transparent)',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
@@ -151,8 +151,8 @@ const appDialogContentStyles: React.CSSProperties = {
 const headerStyles: React.CSSProperties = {
   position: 'relative',
   padding: '13px 22px 11px',
-  background: '#E5DED2',
-  borderBottom: '1px solid rgba(46, 42, 38, 0.10)',
+  background: 'var(--kbn-form-band)',
+  borderBottom: '1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent)',
   flex: 'none',
 }
 
@@ -164,8 +164,8 @@ const headerRuleStyles: React.CSSProperties = {
   bottom: '-1px',
   height: '1px',
   background:
-    'linear-gradient(to right, transparent 0%, rgba(154, 123, 53, 0) 6%,' +
-    ' rgba(154, 123, 53, 0.55) 50%, rgba(154, 123, 53, 0) 94%, transparent 100%)',
+    'linear-gradient(to right, transparent 0%, color-mix(in srgb, var(--kbn-owed) 0%, transparent) 6%,' +
+    ' color-mix(in srgb, var(--kbn-owed) 55%, transparent) 50%, color-mix(in srgb, var(--kbn-owed) 0%, transparent) 94%, transparent 100%)',
 }
 
 export interface AppDialogProps {
@@ -253,7 +253,7 @@ export function AppDialog({
                     fontSize: '10px',
                     letterSpacing: '0.16em',
                     textTransform: 'uppercase',
-                    color: '#9A8E80',
+                    color: 'var(--kbn-graphite-faint)',
                   }}
                 >
                   {eyebrow}

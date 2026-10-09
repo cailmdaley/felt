@@ -3,8 +3,8 @@
    holds only what every view page agrees on: the host box, the sheet, the
    illuminated head, and the empty state.
 
-   Palette is KanbanModal.css's — iron-gall #1B1611, muted #7A6F5C, faded
-   #A89B83, ochre #C49333, cinnabar #BC4538 — and the same 0.5px hairlines. */
+   Palette is KanbanModal.css's — iron-gall var(--kbn-ink), muted var(--kbn-ink-muted), faded
+   var(--kbn-ink-faint), ochre var(--kbn-owed-bright), cinnabar var(--kbn-you) — and the same 0.5px hairlines. */
 
 /* The full-width slot the active view mounts into. Sits where the Desk
    surfaces would be, as a sibling of `.kbn-desk` inside `.kbn-body`, and
@@ -34,8 +34,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid rgba(27, 22, 17, 0.10);
-  background: rgba(237, 226, 206, 0.45);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
+  background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
   border-radius: 3px;
   padding: 8px 14px 14px;
 }
@@ -46,7 +46,7 @@
   justify-content: space-between;
   gap: 12px;
   padding-bottom: 6px;
-  border-bottom: 0.5px solid rgba(122, 111, 92, 0.22);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 22%, transparent);
   margin-bottom: 10px;
 }
 
@@ -62,7 +62,7 @@
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.06em;
   text-transform: none;
-  color: #1B1611;
+  color: var(--kbn-ink);
   margin: 0;
 }
 .kbn-view-title .kbn-cap {
@@ -88,7 +88,7 @@
      flex-column body centers the line on both axes. */
   margin: auto;
   text-align: center;
-  color: #A89B83;
+  color: var(--kbn-ink-faint);
   font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
   font-style: italic;
   font-size: calc(14px * var(--kbn-type-scale, 1));
@@ -103,7 +103,7 @@
   appearance: none;
   background: none;
   border: 0;
-  border-bottom: 0.5px solid rgba(188, 69, 56, 0.55);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-you) 55%, transparent);
   border-radius: 0;
   margin: 0 0 0 0.75em;
   padding: 0 0 1px;
@@ -113,27 +113,27 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-style: normal;
-  color: #A2362A;
+  color: color-mix(in srgb, var(--kbn-you) 88%, var(--kbn-ink));
   transition: color 120ms ease, border-color 120ms ease;
 }
 .kbn-view-retry:hover {
-  color: #BC4538;
-  border-bottom-color: #BC4538;
+  color: var(--kbn-you);
+  border-bottom-color: var(--kbn-you);
 }
 .kbn-view-retry:focus-visible {
-  outline: 1px dashed rgba(188, 69, 56, 0.55);
+  outline: 1px dashed color-mix(in srgb, var(--kbn-you) 55%, transparent);
   outline-offset: 2px;
 }
 
 .kbn-view-empty::before {
   content: '✶  ';
-  color: #C49333;
+  color: var(--kbn-owed-bright);
   opacity: 0.55;
   font-style: normal;
 }
 .kbn-view-empty::after {
   content: '  ✶';
-  color: #C49333;
+  color: var(--kbn-owed-bright);
   opacity: 0.55;
   font-style: normal;
 }

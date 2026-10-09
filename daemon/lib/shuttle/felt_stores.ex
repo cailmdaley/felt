@@ -54,17 +54,28 @@ defmodule Shuttle.FeltStores do
   # Cached by base list, so a config change never serves the old expansion.
   # `:infinity` sorts above every integer, so the read path takes the cached
   # branch whenever an entry for this base exists.
+  #
+  # A registry that exists but cannot be read (EMFILE under load) is not an
+  # empty one. Caching `[]` from such a read would make every later call see a
+  # changed base and re-walk the whole tree on its request process, so the last
+  # good expansion is served until a read succeeds.
   defp cached_expansion(max_age_ms) do
-    base = configured_base_stores()
     now = System.monotonic_time(:millisecond)
 
-    case :persistent_term.get(@expanded_cache_key, :none) do
-      {^base, expanded, walked_at} when now - walked_at < max_age_ms ->
+    case {PathListConfig.read_configured(@spec_),
+          :persistent_term.get(Shuttle.Env.scope_key(@expanded_cache_key), :none)} do
+      {{:ok, base}, {base, expanded, walked_at}} when now - walked_at < max_age_ms ->
         expanded
 
-      _ ->
+      {{:error, _reason}, {_base, expanded, _walked_at}} ->
+        expanded
+
+      {{:error, _reason}, :none} ->
+        []
+
+      {{:ok, base}, _cached} ->
         expanded = expand_with_symlinked_substores(base)
-        :persistent_term.put(@expanded_cache_key, {base, expanded, now})
+        :persistent_term.put(Shuttle.Env.scope_key(@expanded_cache_key), {base, expanded, now})
         expanded
     end
   end
@@ -97,7 +108,7 @@ defmodule Shuttle.FeltStores do
     discovered = Enum.flat_map(stores, &symlinked_substore_roots/1)
 
     (stores ++ discovered)
-    |> Enum.map(&Path.expand/1)
+    |> Enum.map(&Shuttle.Env.expand/1)
     # When two stores share a `.felt/` realpath, keep the REAL-directory store:
     # `list_shuttle_fibers/2` returns `{:ok, []}` for a store whose `.felt/` is a
     # symlink, so keeping that one would drop the realpath from dispatch (and the
@@ -117,7 +128,7 @@ defmodule Shuttle.FeltStores do
   """
   @spec store_felt_realpath(String.t()) :: String.t()
   def store_felt_realpath(store) do
-    felt_dir = store |> Path.join(".felt") |> Path.expand()
+    felt_dir = store |> Path.join(".felt") |> Shuttle.Env.expand()
 
     case Shuttle.Realpath.resolve(felt_dir) do
       {:ok, resolved} -> resolved
@@ -129,7 +140,7 @@ defmodule Shuttle.FeltStores do
   # Such a store is skipped by the poller's enumerator, so it must lose a dedup
   # tie to a real-directory store sharing the same `.felt/` realpath.
   defp felt_symlink?(store) do
-    case File.lstat(Path.join(Path.expand(store), ".felt")) do
+    case File.lstat(Path.join(Shuttle.Env.expand(store), ".felt")) do
       {:ok, %File.Stat{type: :symlink}} -> true
       _ -> false
     end
@@ -414,7 +425,7 @@ defmodule Shuttle.FeltStores do
   # injection is by config rather than a threaded opt. Tests set
   # `:shuttle, :felt_stores_runner` to a mock; production defaults to the
   # bounded runner.
-  defp runner, do: Application.get_env(:shuttle, :felt_stores_runner, Shuttle.Runner.Default)
+  defp runner, do: Shuttle.Env.app(:felt_stores_runner, Shuttle.Runner.Default)
 
   defp resolved(path, store, fiber_id, uid) do
     %{store: store, fiber_id: fiber_id, path: path, uid: uid}

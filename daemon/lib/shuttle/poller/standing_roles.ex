@@ -2,7 +2,7 @@ defmodule Shuttle.Poller.StandingRoles do
   @moduledoc """
   The poller-side standing-role lifecycle.
 
-  Standing roles are perennial constitutions with a cron `schedule:` — they
+  Standing constitutions carry a cron `schedule:` — they
   arm (`status: active`, no verdict), fire when a scheduled occurrence has
   elapsed since they were last serviced, run to `status: closed` awaiting
   review, and re-arm on human accept. This module owns that lifecycle as the
@@ -22,19 +22,12 @@ defmodule Shuttle.Poller.StandingRoles do
   alias Shuttle.Poller
   alias Shuttle.Poller.State
 
-  # Downtime recovery for perennial roles (standing + pinned), on the tmux-scan
-  # substrate. A perennial
-  # role whose worker exited while the daemon was down never fired
-  # `handle_worker_exit`, so its document stays `status:active` with no live
-  # session. Scan tmux: an owned, active role with NO live session and NO live
-  # watcher → a standing role is marked awaiting (status:closed) so the cron
-  # doesn't re-fire; a pinned role that died DIRTY is parked (status:open) back to
-  # the strip so a dead interface neither sits stuck `active` in In-flight nor
-  # relaunches. A pinned role that handed off CLEANLY before the daemon went down
-  # is deliberately left `active` for an autonomous redispatch — and it never
-  # reaches the park branch anyway: the `standing_role_dispatched_unexited?` gate
-  # below treats a clean handoff (`handed_off_at >= dispatched_at`) as "not an
-  # orphan" and skips the fiber. Oneshots need no analog — a status:active
+  # Downtime recovery for standing constitutions, on the tmux-scan substrate. A
+  # standing constitution whose worker exited while the daemon was down never
+  # fired `handle_worker_exit`, so its document stays `status:active` with no
+  # live session. Scan tmux: an owned, active one with NO live session and NO
+  # live watcher is marked awaiting (status:closed) so the cron doesn't
+  # re-fire. Oneshots need no analog — a status:active
   # oneshot with no live session is simply eligible again next tick (retries
   # collapsed into the poll loop).
   #
@@ -48,7 +41,7 @@ defmodule Shuttle.Poller.StandingRoles do
     # including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
     # (a wedged `tmux ls`, a timeout) the pass is skipped wholesale —
     # uncertainty counts as present (see Shuttle.Tmux), and a wedged tmux must
-    # never mass-mark live standing/pinned roles dead. A truly dead orphan is
+    # never mass-mark live standing constitutions dead. A truly dead orphan is
     # simply caught by the next healthy scan.
     case scan do
       {:ok, sessions} ->
@@ -72,7 +65,7 @@ defmodule Shuttle.Poller.StandingRoles do
     fiber_id = Map.get(fiber, "id", "")
     shuttle = Map.get(fiber, "shuttle", %{})
     status = Map.get(fiber, "status", "")
-    kind = Poller.role_kind(shuttle)
+    kind = Poller.block_kind(shuttle)
 
     cond do
       # Only the owning daemon writes a fiber's document. A fiber owned by
@@ -82,9 +75,8 @@ defmodule Shuttle.Poller.StandingRoles do
         state
 
       # Oneshots: no on-down handling — status:active + no live session just
-      # re-dispatches next tick (retries are the poll loop now). Standing and
-      # pinned both reconcile (different terminal action, below); oneshots don't.
-      kind not in ["standing", "pinned"] ->
+      # re-dispatches next tick (retries are the poll loop now).
+      kind != "standing" ->
         state
 
       # Only an armed role can regress into a phantom re-fire; closed/tempered
@@ -116,28 +108,20 @@ defmodule Shuttle.Poller.StandingRoles do
       not standing_role_dispatched_unexited?(fiber) ->
         state
 
-      # SELF-HEAL, don't close, on inverted markers — STANDING ONLY. An
+      # SELF-HEAL, don't close, on inverted markers. An
       # inverted pair (`handed_off_at` earlier than `dispatched_at`) is NOT
       # physically impossible: it is the ordinary shape of any re-dispatched
       # role, because the PREVIOUS run's handoff stamp persists while the new
       # dispatch writes a newer `dispatched_at` (the re-arm-then-dispatch write
-      # ordering alone produces a ~100ms inversion). For a STANDING role, the
+      # ordering alone produces a ~100ms inversion). For a STANDING constitution, the
       # safe reading of that shape with no live session is "conclude the
       # phantom run and stay armed" — stamping `handed_off_at = now` is
       # harmless because the CRON gates the next fire, and it avoids the
       # re-close-every-poll oscillation (a corrupt-marker inference must never
       # override the file's `status: active`).
-      #
-      # For a PINNED role the same stamp is catastrophic: `handed_off_at >=
-      # dispatched_at` IS the pinned autonomous relaunch trigger
-      # (`deliberate_handoff_since_dispatch?`), so "healing" a pinned dirty
-      # death manufactures a relaunch signal and the role loops forever
-      # (heal → dispatch → dirty death → heal → …). A pinned role with an
-      # un-exited dispatch and no live session is a dead interface regardless
-      # of marker ordering; it falls through to the park branch below.
-      kind == "standing" and standing_role_markers_inverted?(fiber) ->
+      standing_role_markers_inverted?(fiber) ->
         Logger.info(
-          "Standing role #{fiber_id} has inverted runtime markers (handed_off_at earlier than " <>
+          "Standing constitution #{fiber_id} has inverted runtime markers (handed_off_at earlier than " <>
             "dispatched_at) — corrupt, not genuinely in-flight; self-healing (stamping " <>
             "handed_off_at=now) and leaving armed instead of closing"
         )
@@ -153,43 +137,30 @@ defmodule Shuttle.Poller.StandingRoles do
 
         state
 
-      # A dead ADHOC extra-run must not close the SCHEDULED standing role. An
+      # A dead ADHOC extra-run must not close the SCHEDULED standing constitution. An
       # ad-hoc (force-dispatched) run carries an `adhoc-<ms>` run_id; its dirty
       # death (daemon down across the exit) is caught here, but concluding the
-      # standing role to awaiting-review on the strength of a crashed EXTRA run
+      # standing constitution to awaiting-review on the strength of a crashed EXTRA run
       # would disrupt the cron cadence and demand a human temper. A completed
       # ad-hoc run reaches awaiting-review through `handle_worker_exit` instead
       # (worker exit → mark_standing_awaiting), so this reconciler only ever fires
       # on genuinely dead runs — leaving a crashed ad-hoc run's role simply armed
       # for its next scheduled tick is safe.
-      kind == "standing" and dead_run_is_adhoc?(fiber) ->
+      dead_run_is_adhoc?(fiber) ->
         Logger.info(
-          "Standing role #{fiber_id} has a dead ADHOC extra-run (daemon down across its exit) — " <>
+          "Standing constitution #{fiber_id} has a dead ADHOC extra-run (daemon down across its exit) — " <>
             "leaving the scheduled role armed instead of marking awaiting"
         )
 
         state
 
-      # Daemon-down analog of handle_worker_exit, split by kind. Only reached for
-      # a DIRTY exit — the `standing_role_dispatched_unexited?` gate above already
-      # skipped any role that handed off cleanly (a cleanly-handed-off pinned role
-      # is left `active` for an autonomous redispatch, exactly as the live-exit
-      # path leaves it):
-      #  • standing → awaiting (status:closed) so the cron doesn't re-fire;
-      #  • pinned   → parked (status:open) back to the strip, so a dead interface
-      #    doesn't sit stuck `active` in In-flight and never relaunches itself.
-      kind == "pinned" ->
-        Logger.info(
-          "Pinned role #{fiber_id} active with an un-exited dispatch but no live tmux " <>
-            "session/watcher — session ended dirty while daemon was down; parking (status:open)"
-        )
-
-        mark_pinned_parked(fiber_id)
-        state
-
+      # Daemon-down analog of handle_worker_exit. Only reached for a DIRTY
+      # exit — the `standing_role_dispatched_unexited?` gate above already
+      # skipped any run that handed off cleanly: awaiting (status:closed) so
+      # the cron doesn't re-fire.
       true ->
         Logger.info(
-          "Standing role #{fiber_id} armed with an un-exited dispatch but no live tmux " <>
+          "Standing constitution #{fiber_id} armed with an un-exited dispatch but no live tmux " <>
             "session/watcher — worker exited while daemon was down; marking awaiting (status:closed)"
         )
 
@@ -211,7 +182,7 @@ defmodule Shuttle.Poller.StandingRoles do
   # accept/resume in the same write, `LifecycleStore.rearm` just after), the same
   # signal a clean worker exit leaves, since a human
   # accepting the run IS concluding it. This is what stops the standing-role
-  # temper oscillation observed on standing roles like morning-post / weekly-arxiv
+  # temper oscillation observed on standing constitutions like morning-post / weekly-arxiv
   # (a worker that died without handing off was re-closed to awaiting on every reconcile).
   # Git-native, durable across a daemon restart, and needs no separate re-arm
   # field — the same `handed_off_at` covers both worker exit and human re-arm.
@@ -243,7 +214,7 @@ defmodule Shuttle.Poller.StandingRoles do
     StandingRole.ad_hoc_run_id?(Shuttle.Continuation.run_id(fiber))
   end
 
-  # Mark a standing role awaiting (`status: closed`, untempered) by writing its
+  # Mark a standing constitution awaiting (`status: closed`, untempered) by writing its
   # felt document on worker exit. Best-effort: a failed felt write must not crash
   # the exit-handling state machine (the worker is already gone; the dead-orphan
   # reconciler is the backstop), so we log and continue. No exit event is written
@@ -254,27 +225,15 @@ defmodule Shuttle.Poller.StandingRoles do
         :ok
 
       {:error, reason} ->
-        Logger.warning("Failed to mark standing role #{fiber_id} awaiting on exit: #{reason}")
+        Logger.warning(
+          "Failed to mark standing constitution #{fiber_id} awaiting on exit: #{reason}"
+        )
+
         :error
     end
   end
 
-  # Park a pinned interactive role back to the strip (`status: open`) on session
-  # end. Best-effort, same contract as mark_standing_awaiting: a failed felt
-  # write must not crash the exit-handling state machine (the worker is already
-  # gone), so we log and continue. No exit event is written to any log.
-  def mark_pinned_parked(fiber_id) do
-    case LifecycleStore.park(fiber_id) do
-      {:ok, _} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("Failed to park pinned role #{fiber_id} on exit: #{reason}")
-        :error
-    end
-  end
-
-  # Parse the standing roles straight from the candidate documents. The role's
+  # Parse the standing constitutions straight from the candidate documents. The role's
   # display next_due is computed
   # from cron in `standing_role_snapshots`, and awaiting/accepted are document
   # facts (status + tempered), so nothing daemon-owned is written.
@@ -292,7 +251,7 @@ defmodule Shuttle.Poller.StandingRoles do
     |> Enum.reverse()
   end
 
-  # A standing role parsed straight from a fiber map's `shuttle:` block — a poll
+  # A standing constitution parsed straight from a fiber map's `shuttle:` block — a poll
   # candidate row or a `shuttle show` read alike, since both carry Shuttle's
   # resolved view of the block (`shuttle.resolved.{next_due,prev_due}` included).
   # The document is the truth — status, tempered, and the cron schedule — and

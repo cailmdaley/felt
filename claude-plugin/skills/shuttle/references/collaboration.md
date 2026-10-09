@@ -4,7 +4,7 @@ Every worker holds a role. The role is an office — editor, scribe, analyst —
 
 ## Taking up a role
 
-**Consult relevant charters before substantive work; assign a roster when responsibility needs to persist across sessions.**
+**Consult relevant charters before substantive work. Every constitution that outlives one session has a roster.** A quick task that closes in one sitting can borrow a charter's practice without one. A constitution that hands off, recurs or is resumed is persistent responsibility by definition, and its first rosterless worker assigns one.
 
 **If the task has a roster**, find yourself on it. A task's `collaboration:` field maps roles to the collaborators who hold them:
 
@@ -14,9 +14,9 @@ collaboration:
   editor: [opus]
 ```
 
-Roles live at the top of the *shared* store — the outermost store your project's view belongs to, such as the loom — not in the project. The launch prompt's `Collaboration:` line gives the role store and, when the roster has exactly one role and collaborator, names them; otherwise read the roster and take the collaborator named for your model. After syncing, read the charter and your page with `felt -C <role store> show roles/<role>` and `felt -C <role store> show roles/<role>/<collaborator>`; a roster in the older form names fiber UIDs instead, read the same way with `felt -C <role store> show <uid>`. If the line says the metadata is invalid, report that in `## Status` rather than relying on the roster. Other collaborators' pages are not required reading; follow their links when a question or disagreement calls for it.
+Roles live at the top of the *shared* store — the outermost store your project's view belongs to, such as the loom — not in the project. The launch prompt's `Collaboration:` line gives the role store and, when the roster has exactly one role and collaborator, names them; otherwise read the roster and take the collaborator named for your model. After syncing, read the charter and your page with `felt -C <role store> show roles/<role>` and `felt -C <role store> show roles/<role>/<collaborator>`; a roster in the older form names fiber UIDs instead, read the same way with `felt -C <role store> show <uid>`. If the line says the metadata is invalid, report that in `## Status` rather than relying on the roster. If it says `no roster`, the next paragraph applies, and it applies before substantive work. Other collaborators' pages are not required reading; follow their links when a question or disagreement calls for it.
 
-**If the task has no roster, or the roster names a role that doesn't fit the work**, find the charters that do. `felt find -t role` lists the offices across the whole store — its separator line names the shared store's path — so read the charters that look close, and work under the one whose remit matches what this task is really asking for. When the task will outlive this session and none fits, create one: a role is cheap, and a charter that starts with two sentences grows as holders fold in what they learn. Assign the roster when the next session needs to know who holds the work. Create it with `-C` pointed at the shared store; a bare `felt add roles/…` from a project view files it inside the project.
+**If the task has no roster, or the roster names a role that doesn't fit the work**, find the charters that do. `felt find -t role` lists the offices across the whole store — its separator line names the shared store's path — so read the charters that look close, and work under the one whose remit matches what this task is really asking for. When the task will outlive this session and none fits, create one before substantive work: a role is cheap, and a charter that starts with two sentences and its gates grows as holders fold in what they learn. Then assign the roster, so the next worker's launch prompt names it. One symptom shows a missing role: a `## Status` that has grown a register, recipes, or lessons that would hold on any task in that office. That material is a charter that never got written. Move it there, and leave Status the handoff. Create it with `-C` pointed at the shared store; a bare `felt add roles/…` from a project view files it inside the project.
 
 ```bash
 felt -C <shared-store> add roles/editor "Editor · skills and docs" -o "<one-line remit>"   # then write the charter body
@@ -25,6 +25,8 @@ shuttle assign <task> --role editor --collaborator opus
 ```
 
 `assign` adds to the roster without replacing it; `--json-assignment '{"vizier":["fable","astra"],"editor":[]}'` replaces it exactly, and `--clear` removes it. A role with no collaborators (`editor: []`) is valid. The roster names identities only — `shuttle.agent` still decides what runs — and it is no lock: other sessions can work the same task, and it doesn't change how you exit. When the human wrote the roster and you add a role to it, say why in `## Status`.
+
+**A seat is a constitution that is the office itself**, not a task the office takes on: `shuttle.seat: <role>` (`shuttle seat <task> <role>`) marks it, and the board draws it at rest in the Roles band. Its playbooks, register and standing lessons belong in the charter; the seat keeps the lede, Desired State and Status. A role can have several seats — one per machine or stream — and a roster still names who holds it.
 
 ## Where notes go
 

@@ -106,12 +106,12 @@ type sessionLedgerResponse struct {
 	Origins map[string]any      `json:"origins,omitempty"`
 }
 
-func fetchSessionLedger() (*sessionLedgerResponse, error) {
-	endpoint, err := daemonEndpoint(sessionsCompositePath)
+func (a *app) fetchSessionLedger() (*sessionLedgerResponse, error) {
+	endpoint, err := a.daemonEndpoint(sessionsCompositePath)
 	if err != nil {
 		return nil, err
 	}
-	ledger, err := getDaemonJSON[sessionLedgerResponse](endpoint, "parsing session ledger")
+	ledger, err := getDaemonJSON[sessionLedgerResponse](a, endpoint, "parsing session ledger")
 	if err != nil {
 		if isLifecycleTransportError(err) {
 			return nil, fmt.Errorf("reading session provenance: %w (start the daemon with `make start` or set SHUTTLE_DAEMON_URL)", err)
@@ -124,8 +124,8 @@ func fetchSessionLedger() (*sessionLedgerResponse, error) {
 // fetchTranscriptReceipt asks the daemon to resolve a harness-native path. A
 // receipt is JSON; bytes are fetched separately through the native transcript
 // raw endpoint so this command never requires a transcript encoding.
-func fetchTranscriptReceipt(session, host string) (TranscriptReceipt, error) {
-	endpoint, err := daemonEndpoint(transcriptPath)
+func (a *app) fetchTranscriptReceipt(session, host string) (TranscriptReceipt, error) {
+	endpoint, err := a.daemonEndpoint(transcriptPath)
 	if err != nil {
 		return TranscriptReceipt{}, err
 	}
@@ -139,7 +139,7 @@ func fetchTranscriptReceipt(session, host string) (TranscriptReceipt, error) {
 		q.Set("host", host)
 	}
 	u.RawQuery = q.Encode()
-	receipt, err := getDaemonJSON[TranscriptReceipt](u.String(), fmt.Sprintf("parsing transcript receipt for %s", session))
+	receipt, err := getDaemonJSON[TranscriptReceipt](a, u.String(), fmt.Sprintf("parsing transcript receipt for %s", session))
 	if err != nil {
 		return TranscriptReceipt{}, err
 	}
@@ -149,11 +149,11 @@ func fetchTranscriptReceipt(session, host string) (TranscriptReceipt, error) {
 	return receipt, nil
 }
 
-func enrichSessionReceipt(s SessionProvenance) SessionProvenance {
+func (a *app) enrichSessionReceipt(s SessionProvenance) SessionProvenance {
 	if s.Transcript.Availability != "" {
 		return s
 	}
-	receipt, err := fetchTranscriptReceipt(s.Session, s.Host)
+	receipt, err := a.fetchTranscriptReceipt(s.Session, s.Host)
 	if err != nil {
 		// A ledger row is still valuable when a remote is down. Keep the
 		// distinction explicit rather than collapsing it into "missing".
@@ -179,7 +179,7 @@ func enrichSessionReceipt(s SessionProvenance) SessionProvenance {
 // through the ledger. Fiber paths are historical strings: a rename must not
 // strand old session rows. A ledger row can be the only address available for
 // a remote fiber, so it is considered before the local felt view.
-func resolveProvenanceRows(query string, records []SessionProvenance) (string, []SessionProvenance, *felt.Felt, error) {
+func (a *app) resolveProvenanceRows(query string, records []SessionProvenance) (string, []SessionProvenance, *felt.Felt, error) {
 	uid := ""
 	for _, row := range records {
 		if row.fiber() == query && row.UID != "" {
@@ -189,10 +189,10 @@ func resolveProvenanceRows(query string, records []SessionProvenance) (string, [
 	}
 	var addressed *felt.Felt
 	if uid == "" {
-		uid = compositeFiberUID(query)
+		uid = a.compositeFiberUID(query)
 	}
 	if uid == "" {
-		if f, err := shuttleAddressFiber(query); err == nil {
+		if f, err := a.shuttleAddressFiber(query); err == nil {
 			addressed = f
 			uid = f.UID
 		}
@@ -271,14 +271,14 @@ type compositeFiberRow struct {
 // compositeFiberRows is best-effort enrichment: every caller runs after the
 // same command fetched the session ledger, which has already failed loud on an
 // unresolvable daemon listener.
-func compositeFiberRows() []compositeFiberRow {
-	endpoint, err := daemonEndpoint("/api/v1/fibers/composite")
+func (a *app) compositeFiberRows() []compositeFiberRow {
+	endpoint, err := a.daemonEndpoint("/api/v1/fibers/composite")
 	if err != nil {
 		return nil
 	}
 	response, err := getDaemonJSON[struct {
 		Fibers []compositeFiberRow `json:"fibers"`
-	}](endpoint, "parsing composite fibers")
+	}](a, endpoint, "parsing composite fibers")
 	if err != nil {
 		return nil
 	}
@@ -295,8 +295,8 @@ func identityPending(block map[string]any) bool {
 	return strings.TrimSpace(dispatched) != "" && strings.TrimSpace(session) == ""
 }
 
-func compositeFiberUID(query string) string {
-	for _, row := range compositeFiberRows() {
+func (a *app) compositeFiberUID(query string) string {
+	for _, row := range a.compositeFiberRows() {
 		id, _ := row.Fiber["id"].(string)
 		slug, _ := row.Fiber["slug"].(string)
 		uid, _ := row.Fiber["uid"].(string)
@@ -310,8 +310,8 @@ func compositeFiberUID(query string) string {
 	return ""
 }
 
-func compositeFiberRuntimePending(query string) bool {
-	for _, row := range compositeFiberRows() {
+func (a *app) compositeFiberRuntimePending(query string) bool {
+	for _, row := range a.compositeFiberRows() {
 		slug, _ := row.Fiber["slug"].(string)
 		id, _ := row.Fiber["id"].(string)
 		if slug != query && id != query {
@@ -379,8 +379,8 @@ type sessionOwner struct {
 // through the composite commit ledger. "Not recorded" is the honest answer for
 // commits made before the hook existed or outside a harness session — it is a
 // coverage boundary, not proof the commit has no session.
-func commitSession(sha string) (string, error) {
-	endpoint, err := daemonEndpoint("/api/v1/commits/composite")
+func (a *app) commitSession(sha string) (string, error) {
+	endpoint, err := a.daemonEndpoint("/api/v1/commits/composite")
 	if err != nil {
 		return "", err
 	}
@@ -389,7 +389,7 @@ func commitSession(sha string) (string, error) {
 			SHA     string `json:"sha"`
 			Session string `json:"session"`
 		} `json:"records"`
-	}](endpoint, "parsing commit ledger")
+	}](a, endpoint, "parsing commit ledger")
 	if err != nil {
 		return "", err
 	}
@@ -441,8 +441,8 @@ func sessionOwningFiber(records []SessionProvenance, session string) (string, st
 
 // fiberDisposition reads status and the human verdict from the composite fiber
 // feed. Absence of the fiber (e.g. deleted) leaves both zero-valued.
-func fiberDisposition(uid string) (string, bool) {
-	for _, row := range compositeFiberRows() {
+func (a *app) fiberDisposition(uid string) (string, bool) {
+	for _, row := range a.compositeFiberRows() {
 		id, _ := row.Fiber["id"].(string)
 		rowUID, _ := row.Fiber["uid"].(string)
 		if rowUID == "" {
@@ -484,9 +484,9 @@ type transcriptManifestItem struct {
 // ordinary local file (native path when local, verified cache copy when
 // remote) and writes manifest.json into dir. Unavailable sessions stay in the
 // manifest with their explicit availability — unavailable is never absent.
-func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, dir string) (string, error) {
+func (a *app) materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, dir string) (string, error) {
 	if dir == "" {
-		cache, err := transcriptCacheDir()
+		cache, err := a.transcriptCacheDir()
 		if err != nil {
 			return "", err
 		}
@@ -522,7 +522,7 @@ func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, di
 				item.Error = "available_local but daemon returned no native path"
 			}
 		case "available_remote":
-			path, err := fetchRemoteTranscript(row.Transcript)
+			path, err := a.fetchRemoteTranscript(row.Transcript)
 			if err != nil {
 				// A failed transfer is a distinct condition from an
 				// unreachable host: keep the availability, record why the
@@ -545,16 +545,15 @@ func materializeFiberTranscripts(fiber, uid string, rows []SessionProvenance, di
 	return path, nil
 }
 
-var (
-	sessionsCommitSHA   string
-	sessionsMaterialize bool
-	sessionsDir         string
-)
-
-var shuttleSessionsCmd = &cobra.Command{
-	Use:   "sessions [fiber|session-uuid]",
-	Short: "Discover addressable sessions or inspect a fiber's session history",
-	Long: `With no argument, discovers addressable sessions across Shuttle's configured
+func (a *app) shuttleSessionsCmd() *cobra.Command {
+	var sessionsDiscovery sessionsDiscoveryOptions
+	var sessionsCommitSHA string
+	var sessionsMaterialize bool
+	var sessionsDir string
+	shuttleSessionsCmd := &cobra.Command{
+		Use:   "sessions [fiber|session-uuid]",
+		Short: "Discover addressable sessions or inspect a fiber's session history",
+		Long: `With no argument, discovers addressable sessions across Shuttle's configured
 fleet. Use --host or --harness to filter, and pass a returned address to
 'shuttle message'. Discovery gaps report unavailable hosts or transports.
 
@@ -571,145 +570,154 @@ fiber's sessions.
 (native path locally, verified cache copy for remote hosts) and writes a
 manifest.json carrying session, host, harness, lineage events, source path,
 and availability.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 && sessionsCommitSHA == "" {
-			if sessionsMaterialize || sessionsDir != "" {
-				return fmt.Errorf("--materialize and --dir require a fiber, session UUID, or --commit <sha>")
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 && sessionsCommitSHA == "" {
+				if sessionsMaterialize || sessionsDir != "" {
+					return fmt.Errorf("--materialize and --dir require a fiber, session UUID, or --commit <sha>")
+				}
+				return a.runShuttleSessionDiscovery(cmd.Context(), &sessionsDiscovery)
 			}
-			return runShuttleSessionDiscovery(cmd.Context())
-		}
-		if sessionsDiscoveryLocal || sessionsDiscoveryHost != "" || sessionsDiscoveryHarness != "" {
-			return fmt.Errorf("--local, --host, and --harness apply only to no-argument live session discovery")
-		}
-		ledger, err := fetchSessionLedger()
-		if err != nil {
-			return err
-		}
-		query := ""
-		if len(args) == 1 {
-			query = args[0]
-		}
-		var owner *sessionOwner
-		if sessionsCommitSHA != "" {
-			session, err := commitSession(sessionsCommitSHA)
+			if sessionsDiscovery.local || sessionsDiscovery.host != "" || sessionsDiscovery.harness != "" {
+				return fmt.Errorf("--local, --host, and --harness apply only to no-argument live session discovery")
+			}
+			ledger, err := a.fetchSessionLedger()
 			if err != nil {
 				return err
 			}
-			fiber, uid, err := sessionOwningFiber(ledger.Records, session)
-			if err != nil {
-				return err
+			query := ""
+			if len(args) == 1 {
+				query = args[0]
 			}
-			owner = &sessionOwner{Query: query, Commit: sessionsCommitSHA, Session: session, Fiber: fiber, UID: uid}
-			query = fiber
-		} else if sessionUUIDPattern.MatchString(query) {
-			fiber, uid, err := sessionOwningFiber(ledger.Records, query)
-			if err != nil {
-				return err
+			var owner *sessionOwner
+			if sessionsCommitSHA != "" {
+				session, err := a.commitSession(sessionsCommitSHA)
+				if err != nil {
+					return err
+				}
+				fiber, uid, err := sessionOwningFiber(ledger.Records, session)
+				if err != nil {
+					return err
+				}
+				owner = &sessionOwner{Query: query, Commit: sessionsCommitSHA, Session: session, Fiber: fiber, UID: uid}
+				query = fiber
+			} else if sessionUUIDPattern.MatchString(query) {
+				fiber, uid, err := sessionOwningFiber(ledger.Records, query)
+				if err != nil {
+					return err
+				}
+				owner = &sessionOwner{Query: query, Session: query, Fiber: fiber, UID: uid}
+				query = fiber
 			}
-			owner = &sessionOwner{Query: query, Session: query, Fiber: fiber, UID: uid}
-			query = fiber
-		}
-		var uid string
-		var rows []SessionProvenance
-		var addressed *felt.Felt
-		if owner != nil {
-			owner.Status, owner.Tempered = fiberDisposition(owner.UID)
-			if owner.UID != "" {
-				// The ledger already told us the intrinsic UID; filter on it
-				// directly rather than round-tripping through the fiber path,
-				// which could resolve a different (renamed/reused/empty) fiber.
-				uid = owner.UID
-				rows = filterProvenanceRows(uid, ledger.Records)
-				if query == "" {
-					query = uid
+			var uid string
+			var rows []SessionProvenance
+			var addressed *felt.Felt
+			if owner != nil {
+				owner.Status, owner.Tempered = a.fiberDisposition(owner.UID)
+				if owner.UID != "" {
+					// The ledger already told us the intrinsic UID; filter on it
+					// directly rather than round-tripping through the fiber path,
+					// which could resolve a different (renamed/reused/empty) fiber.
+					uid = owner.UID
+					rows = filterProvenanceRows(uid, ledger.Records)
+					if query == "" {
+						query = uid
+					}
 				}
 			}
-		}
-		if uid == "" {
-			uid, rows, addressed, err = resolveProvenanceRows(query, ledger.Records)
-			if err != nil {
-				return err
+			if uid == "" {
+				uid, rows, addressed, err = a.resolveProvenanceRows(query, ledger.Records)
+				if err != nil {
+					return err
+				}
 			}
-		}
-		rows = addIdentityPending(query, uid, rows, addressed)
-		if compositeFiberRuntimePending(query) {
-			pending := true
+			rows = addIdentityPending(query, uid, rows, addressed)
+			if a.compositeFiberRuntimePending(query) {
+				pending := true
+				for _, row := range rows {
+					if row.Kind == "identity_pending" {
+						pending = false
+						break
+					}
+				}
+				if pending {
+					rows = append(rows, SessionProvenance{Fiber: query, UID: uid, Kind: "identity_pending", Transcript: TranscriptReceipt{Availability: "identity_pending"}})
+				}
+			}
+			rows = applyOriginFreshness(rows, ledger.Origins)
+			for i := range rows {
+				rows[i] = a.enrichSessionReceipt(rows[i])
+				rows[i].Address = provenanceAddress(rows[i])
+			}
+			sort.SliceStable(rows, func(i, j int) bool {
+				if rows[i].At != rows[j].At {
+					return rows[i].At < rows[j].At
+				}
+				return rows[i].Session < rows[j].Session
+			})
+			manifestPath := ""
+			if sessionsMaterialize {
+				manifestPath, err = a.materializeFiberTranscripts(query, uid, rows, a.env.Resolve(sessionsDir))
+				if err != nil {
+					return err
+				}
+			}
+			if a.json {
+				if owner != nil || manifestPath != "" {
+					return a.outputJSON(map[string]any{
+						"owner":    owner,
+						"manifest": manifestPath,
+						"sessions": rows,
+					})
+				}
+				return a.outputJSON(rows)
+			}
+			if owner != nil {
+				disposition := owner.Status
+				if disposition == "" {
+					disposition = "unknown"
+				}
+				if owner.Tempered {
+					disposition += " (tempered)"
+				}
+				fmt.Fprintf(a.env.Stdout, "owner: %s  uid: %s  disposition: %s\n", owner.Fiber, owner.UID, disposition)
+			}
+			if manifestPath != "" {
+				fmt.Fprintf(a.env.Stdout, "manifest: %s\n", manifestPath)
+			}
+			if len(rows) == 0 {
+				fmt.Fprintf(a.env.Stdout, "no recorded Shuttle sessions for %s\n", query)
+				return nil
+			}
+			fmt.Fprintf(a.env.Stdout, "%-38s %-16s %-16s %-64s %-14s %-18s %s\n", "SESSION", "HOST", "HARNESS", "ADDRESS", "KIND", "AVAILABILITY", "FIBER")
 			for _, row := range rows {
-				if row.Kind == "identity_pending" {
-					pending = false
-					break
+				fiberName := row.fiber()
+				if row.Stale {
+					fiberName += " [stale]"
 				}
+				harness := messaging.NormalizeHarness(row.Harness)
+				fmt.Fprintf(a.env.Stdout, "%-38s %-16s %-16s %-64s %-14s %-18s %s\n", row.Session, row.Host, harness, row.Address, row.Kind, row.Transcript.Availability, fiberName)
 			}
-			if pending {
-				rows = append(rows, SessionProvenance{Fiber: query, UID: uid, Kind: "identity_pending", Transcript: TranscriptReceipt{Availability: "identity_pending"}})
-			}
-		}
-		rows = applyOriginFreshness(rows, ledger.Origins)
-		for i := range rows {
-			rows[i] = enrichSessionReceipt(rows[i])
-			rows[i].Address = provenanceAddress(rows[i])
-		}
-		sort.SliceStable(rows, func(i, j int) bool {
-			if rows[i].At != rows[j].At {
-				return rows[i].At < rows[j].At
-			}
-			return rows[i].Session < rows[j].Session
-		})
-		manifestPath := ""
-		if sessionsMaterialize {
-			manifestPath, err = materializeFiberTranscripts(query, uid, rows, sessionsDir)
-			if err != nil {
-				return err
-			}
-		}
-		if jsonOutput {
-			if owner != nil || manifestPath != "" {
-				return outputJSON(map[string]any{
-					"owner":    owner,
-					"manifest": manifestPath,
-					"sessions": rows,
-				})
-			}
-			return outputJSON(rows)
-		}
-		if owner != nil {
-			disposition := owner.Status
-			if disposition == "" {
-				disposition = "unknown"
-			}
-			if owner.Tempered {
-				disposition += " (tempered)"
-			}
-			fmt.Printf("owner: %s  uid: %s  disposition: %s\n", owner.Fiber, owner.UID, disposition)
-		}
-		if manifestPath != "" {
-			fmt.Printf("manifest: %s\n", manifestPath)
-		}
-		if len(rows) == 0 {
-			fmt.Printf("no recorded Shuttle sessions for %s\n", query)
 			return nil
-		}
-		fmt.Printf("%-38s %-16s %-16s %-64s %-14s %-18s %s\n", "SESSION", "HOST", "HARNESS", "ADDRESS", "KIND", "AVAILABILITY", "FIBER")
-		for _, row := range rows {
-			fiberName := row.fiber()
-			if row.Stale {
-				fiberName += " [stale]"
-			}
-			harness := messaging.NormalizeHarness(row.Harness)
-			fmt.Printf("%-38s %-16s %-16s %-64s %-14s %-18s %s\n", row.Session, row.Host, harness, row.Address, row.Kind, row.Transcript.Availability, fiberName)
-		}
-		return nil
-	},
+		},
+	}
+	shuttleSessionsCmd.Flags().BoolVar(&sessionsDiscovery.local, "local", false, "query this host's native harness adapters directly")
+	_ = shuttleSessionsCmd.Flags().MarkHidden("local")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscovery.host, "host", "", "limit live session discovery to one host")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDiscovery.harness, "harness", "", "limit live session discovery to one harness")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsCommitSHA, "commit", "", "reverse lookup: resolve a commit SHA (prefix accepted) to its owning fiber via the commit ledger")
+	shuttleSessionsCmd.Flags().BoolVar(&sessionsMaterialize, "materialize", false, "resolve every available transcript to an ordinary local file and write manifest.json")
+	shuttleSessionsCmd.Flags().StringVar(&sessionsDir, "dir", "", "directory for the materialized manifest.json (default: the felt transcript cache, keyed by fiber UID); remote transcript copies always land in the shared felt cache")
+	return shuttleSessionsCmd
 }
 
-func transcriptCacheDir() (string, error) {
-	if dir := strings.TrimSpace(os.Getenv("SHUTTLE_TRANSCRIPT_CACHE_DIR")); dir != "" {
+func (a *app) transcriptCacheDir() (string, error) {
+	if dir := strings.TrimSpace(a.env.Getenv("SHUTTLE_TRANSCRIPT_CACHE_DIR")); dir != "" {
 		return dir, nil
 	}
-	base := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME"))
+	base := strings.TrimSpace(a.env.Getenv("XDG_CACHE_HOME"))
 	if base == "" {
-		home, err := os.UserHomeDir()
+		home, err := a.env.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("locating transcript cache: %w", err)
 		}
@@ -718,8 +726,8 @@ func transcriptCacheDir() (string, error) {
 	return filepath.Join(base, "felt", "transcripts"), nil
 }
 
-func transcriptCachePath(session string) (string, string, error) {
-	dir, err := transcriptCacheDir()
+func (a *app) transcriptCachePath(session string) (string, string, error) {
+	dir, err := a.transcriptCacheDir()
 	if err != nil {
 		return "", "", err
 	}
@@ -737,8 +745,8 @@ func transcriptCachePath(session string) (string, string, error) {
 	return dir, dest, nil
 }
 
-func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
-	endpoint, err := daemonEndpoint("/api/v1/transcript/raw")
+func (a *app) fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
+	endpoint, err := a.daemonEndpoint("/api/v1/transcript/raw")
 	if err != nil {
 		return "", err
 	}
@@ -752,7 +760,7 @@ func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
 		q.Set("host", receipt.Host)
 	}
 	u.RawQuery = q.Encode()
-	client := daemonHTTPClient(transcriptTransferTimeout)
+	client := a.daemonHTTPClient(transcriptTransferTimeout)
 	resp, err := client.Get(u.String())
 	if err != nil {
 		return "", fmt.Errorf("reaching daemon at %s: %w", u.String(), err)
@@ -762,7 +770,7 @@ func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
 		body, _ := io.ReadAll(resp.Body)
 		return "", daemonStatusError{url: u.String(), status: resp.StatusCode, body: strings.TrimSpace(string(body))}
 	}
-	_, dest, err := transcriptCachePath(receipt.Session)
+	_, dest, err := a.transcriptCachePath(receipt.Session)
 	if err != nil {
 		return "", err
 	}
@@ -812,8 +820,8 @@ func fetchRemoteTranscript(receipt TranscriptReceipt) (string, error) {
 	return dest, nil
 }
 
-func transcriptHost(session string) (string, error) {
-	ledger, err := fetchSessionLedger()
+func (a *app) transcriptHost(session string) (string, error) {
+	ledger, err := a.fetchSessionLedger()
 	if err != nil {
 		return "", err
 	}
@@ -859,79 +867,74 @@ func transcriptResult(receipt TranscriptReceipt, localPath string) transcriptCom
 	}
 }
 
-var shuttleTranscriptCmd = &cobra.Command{
-	Use:   "transcript <session-id>",
-	Short: "Print a session's native transcript path or materialize its remote copy",
-	Long: `Resolves a complete native transcript by session ID. When the transcript
+func (a *app) shuttleTranscriptCmd() *cobra.Command {
+	shuttleTranscriptCmd := &cobra.Command{
+		Use:   "transcript <session-id>",
+		Short: "Print a session's native transcript path or materialize its remote copy",
+		Long: `Resolves a complete native transcript by session ID. When the transcript
 is on this host, prints its original native path. When it is remote, streams the
 exact bytes through Shuttle's native transcript surface into the managed
 felt cache and prints that ordinary local path. Use jq/rg/tail to inspect it.`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if !sessionUUIDPattern.MatchString(args[0]) {
-			return fmt.Errorf("invalid session ID %q: expected a UUID", args[0])
-		}
-		host, err := transcriptHost(args[0])
-		if err != nil {
-			return err
-		}
-		receipt, err := fetchTranscriptReceipt(args[0], host)
-		if err != nil {
-			return err
-		}
-		if receipt.Session == "" {
-			receipt.Session = args[0]
-		}
-		if jsonOutput {
-			return runTranscriptJSON(receipt)
-		}
-		switch receipt.Availability {
-		case "available_local":
-			path := receipt.SourcePath
-			if path == "" {
-				return fmt.Errorf("transcript %s is available_local but daemon returned no native path", args[0])
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !sessionUUIDPattern.MatchString(args[0]) {
+				return fmt.Errorf("invalid session ID %q: expected a UUID", args[0])
 			}
-			fmt.Println(path)
-			return nil
-		case "available_remote":
-			path, err := fetchRemoteTranscript(receipt)
+			host, err := a.transcriptHost(args[0])
 			if err != nil {
-				return fmt.Errorf("transferring transcript %s from %s: %w", args[0], receipt.Host, err)
+				return err
 			}
-			fmt.Println(path)
-			return nil
-		case "identity_pending", "host_unreachable", "transcript_missing":
-			return fmt.Errorf("transcript %s: %s", args[0], receipt.Availability)
-		default:
-			if receipt.Availability == "" {
-				return fmt.Errorf("transcript %s: daemon returned no availability state", args[0])
+			receipt, err := a.fetchTranscriptReceipt(args[0], host)
+			if err != nil {
+				return err
 			}
-			return fmt.Errorf("transcript %s: %s", args[0], receipt.Availability)
-		}
-	},
+			if receipt.Session == "" {
+				receipt.Session = args[0]
+			}
+			if a.json {
+				return a.runTranscriptJSON(receipt)
+			}
+			switch receipt.Availability {
+			case "available_local":
+				path := receipt.SourcePath
+				if path == "" {
+					return fmt.Errorf("transcript %s is available_local but daemon returned no native path", args[0])
+				}
+				fmt.Fprintln(a.env.Stdout, path)
+				return nil
+			case "available_remote":
+				path, err := a.fetchRemoteTranscript(receipt)
+				if err != nil {
+					return fmt.Errorf("transferring transcript %s from %s: %w", args[0], receipt.Host, err)
+				}
+				fmt.Fprintln(a.env.Stdout, path)
+				return nil
+			case "identity_pending", "host_unreachable", "transcript_missing":
+				return fmt.Errorf("transcript %s: %s", args[0], receipt.Availability)
+			default:
+				if receipt.Availability == "" {
+					return fmt.Errorf("transcript %s: daemon returned no availability state", args[0])
+				}
+				return fmt.Errorf("transcript %s: %s", args[0], receipt.Availability)
+			}
+		},
+	}
+	return shuttleTranscriptCmd
 }
 
-func runTranscriptJSON(receipt TranscriptReceipt) error {
+func (a *app) runTranscriptJSON(receipt TranscriptReceipt) error {
 	if receipt.Availability != "available_remote" {
 		localPath := ""
 		if receipt.Availability == "available_local" {
 			localPath = receipt.SourcePath
 		}
-		return outputJSON(transcriptResult(receipt, localPath))
+		return a.outputJSON(transcriptResult(receipt, localPath))
 	}
-	path, err := fetchRemoteTranscript(receipt)
+	path, err := a.fetchRemoteTranscript(receipt)
 	if err != nil {
 		return err
 	}
 	// JSON consumers receive both the resolution receipt and the materialized
 	// ordinary path; source_path remains the authoritative native location.
-	return outputJSON(transcriptResult(receipt, path))
-}
-
-func init() {
-	shuttleSessionsCmd.Flags().StringVar(&sessionsCommitSHA, "commit", "", "reverse lookup: resolve a commit SHA (prefix accepted) to its owning fiber via the commit ledger")
-	shuttleSessionsCmd.Flags().BoolVar(&sessionsMaterialize, "materialize", false, "resolve every available transcript to an ordinary local file and write manifest.json")
-	shuttleSessionsCmd.Flags().StringVar(&sessionsDir, "dir", "", "directory for the materialized manifest.json (default: the felt transcript cache, keyed by fiber UID); remote transcript copies always land in the shared felt cache")
-	addShuttleCommand(shuttleSessionsCmd)
-	addShuttleCommand(shuttleTranscriptCmd)
+	return a.outputJSON(transcriptResult(receipt, path))
 }

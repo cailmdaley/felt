@@ -76,63 +76,64 @@ type ReceiptTmuxServer struct {
 	RootedBy  string        `json:"rooted_by,omitempty"`
 }
 
-var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Check Shuttle's binary, daemon, host, and runtime health",
-	Long:  "Reports the running shuttle binary and hook resolution alongside the daemon contract and host configuration, including listener and socket evidence. Use felt setup receipt for plugin installation health.",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		receipt := collectDoctorReceipt()
-		if jsonOutput {
-			if err := outputJSON(receipt); err != nil {
-				return err
+func (a *app) doctorCmd() *cobra.Command {
+	doctorCmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Check Shuttle's binary, daemon, host, and runtime health",
+		Long:  "Reports the running shuttle binary and hook resolution alongside the daemon contract and host configuration, including listener and socket evidence. Use felt setup receipt for plugin installation health.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			receipt := a.collectDoctorReceipt()
+			if a.json {
+				if err := a.outputJSON(receipt); err != nil {
+					return err
+				}
+			} else {
+				fmt.Fprintf(a.env.Stdout, "shuttle %s\ndaemon: %s\n", receipt.Status, receipt.Daemon.Status)
+				a.printShuttleBinaryReceipt(receipt.ShuttleBinary)
+				a.printHostReceipt(receipt.Host)
+				a.printTailnetDialReceipt(receipt.Daemon.TailnetDial)
+				a.printDiscoveryReceipt(receipt.Daemon.Discovery)
+				a.printTmuxServerReceipt(receipt.TmuxServer)
+				if receipt.Repair != "" {
+					fmt.Fprintf(a.env.Stdout, "repair: %s\n", receipt.Repair)
+				}
 			}
-		} else {
-			fmt.Printf("shuttle %s\ndaemon: %s\n", receipt.Status, receipt.Daemon.Status)
-			printShuttleBinaryReceipt(receipt.ShuttleBinary)
-			printHostReceipt(receipt.Host)
-			printTailnetDialReceipt(receipt.Daemon.TailnetDial)
-			printDiscoveryReceipt(receipt.Daemon.Discovery)
-			printTmuxServerReceipt(receipt.TmuxServer)
-			if receipt.Repair != "" {
-				fmt.Printf("repair: %s\n", receipt.Repair)
+			if receipt.Status != receiptHealthy {
+				return fmt.Errorf("Shuttle doctor is %s", receipt.Status)
 			}
-		}
-		if receipt.Status != receiptHealthy {
-			return fmt.Errorf("Shuttle doctor is %s", receipt.Status)
-		}
-		return nil
-	},
+			return nil
+		},
+	}
+	return doctorCmd
 }
 
-func init() { addShuttleCommand(doctorCmd) }
-
-func printShuttleBinaryReceipt(binary ReceiptShuttleBinary) {
-	fmt.Printf("shuttle binary: %s (build %s)\n", binary.ResolvedPath, binary.Build)
+func (a *app) printShuttleBinaryReceipt(binary ReceiptShuttleBinary) {
+	fmt.Fprintf(a.env.Stdout, "shuttle binary: %s (build %s)\n", binary.ResolvedPath, binary.Build)
 	for _, executable := range binary.Executables {
 		label := "other"
 		if executable.Shadowing {
 			label = "shadowing"
 		}
 		if executable.Error != "" {
-			fmt.Printf("  %s shuttle: %s (%s)\n", label, executable.Path, executable.Error)
+			fmt.Fprintf(a.env.Stdout, "  %s shuttle: %s (%s)\n", label, executable.Path, executable.Error)
 			continue
 		}
-		fmt.Printf("  %s shuttle: %s (build %s)\n", label, executable.Path, executable.Build)
+		fmt.Fprintf(a.env.Stdout, "  %s shuttle: %s (build %s)\n", label, executable.Path, executable.Build)
 	}
 	if binary.HookResolution == "" {
-		fmt.Println("hooks/shuttle-bin.sh: no shuttle executable found")
+		fmt.Fprintln(a.env.Stdout, "hooks/shuttle-bin.sh: no shuttle executable found")
 		return
 	}
-	fmt.Printf("hooks/shuttle-bin.sh: selects %s (this binary: %t)\n", binary.HookResolution, binary.HooksWouldPickIt)
+	fmt.Fprintf(a.env.Stdout, "hooks/shuttle-bin.sh: selects %s (this binary: %t)\n", binary.HookResolution, binary.HooksWouldPickIt)
 }
 
-func collectDoctorReceipt() DoctorReceipt {
+func (a *app) collectDoctorReceipt() DoctorReceipt {
 	receipt := DoctorReceipt{Schema: 1}
-	receipt.ShuttleBinary = collectShuttleBinaryReceipt()
-	receipt.Daemon = collectDaemonReceipt()
-	receipt.Host = collectHostReceiptWhenReady(receipt.Daemon)
-	receipt.TmuxServer = collectTmuxServerReceipt()
+	receipt.ShuttleBinary = a.collectShuttleBinaryReceipt()
+	receipt.Daemon = a.collectDaemonReceipt()
+	receipt.Host = a.collectHostReceiptWhenReady(receipt.Daemon)
+	receipt.TmuxServer = a.collectTmuxServerReceipt()
 	statuses := []receiptStatus{receipt.Daemon.Status, receipt.Host.Status}
 	if receipt.TmuxServer != nil {
 		statuses = append(statuses, receipt.TmuxServer.Status)
@@ -200,28 +201,28 @@ func doctorReceiptRepair(status receiptStatus) string {
 	}
 }
 
-func printHostReceipt(host ReceiptHost) {
+func (a *app) printHostReceipt(host ReceiptHost) {
 	if host.Class != "" {
-		fmt.Printf("host %s (%s)\n", host.Class, host.Listen)
+		fmt.Fprintf(a.env.Stdout, "host %s (%s)\n", host.Class, host.Listen)
 	}
 	if host.TailscaleSocket != "" {
-		fmt.Printf("tailscale LocalAPI socket: %s (%s)", host.TailscaleSocket, host.TailscaleSocketSource)
+		fmt.Fprintf(a.env.Stdout, "tailscale LocalAPI socket: %s (%s)", host.TailscaleSocket, host.TailscaleSocketSource)
 		if host.TailnetSocketEvidence != nil {
 			evidence := host.TailnetSocketEvidence
-			fmt.Printf(" (unix=%t, owner_ok=%t, private=%t", evidence.Socket, evidence.OwnerOK, evidence.Private)
+			fmt.Fprintf(a.env.Stdout, " (unix=%t, owner_ok=%t, private=%t", evidence.Socket, evidence.OwnerOK, evidence.Private)
 			if evidence.Mode != "" {
-				fmt.Printf(", mode=%s", evidence.Mode)
+				fmt.Fprintf(a.env.Stdout, ", mode=%s", evidence.Mode)
 			}
-			fmt.Print(")")
+			fmt.Fprint(a.env.Stdout, ")")
 		}
-		fmt.Println()
+		fmt.Fprintln(a.env.Stdout)
 	}
 	for _, problem := range host.Problems {
-		fmt.Printf("  host: %s\n", problem)
+		fmt.Fprintf(a.env.Stdout, "  host: %s\n", problem)
 	}
 }
 
-func printTailnetDialReceipt(dial *ReceiptTailnetDial) {
+func (a *app) printTailnetDialReceipt(dial *ReceiptTailnetDial) {
 	if dial == nil || !dial.Configured {
 		return
 	}
@@ -231,19 +232,19 @@ func printTailnetDialReceipt(dial *ReceiptTailnetDial) {
 			ready++
 		}
 	}
-	fmt.Printf("tailnet dial: %d/%d remote bridges ready\n", ready, len(dial.Bridges))
+	fmt.Fprintf(a.env.Stdout, "tailnet dial: %d/%d remote bridges ready\n", ready, len(dial.Bridges))
 	for _, bridge := range dial.Bridges {
 		if bridge.Status == "ready" {
 			continue
 		}
-		fmt.Printf("  remote %s (%s:%d): %s", bridge.Name, bridge.Host, bridge.Port, bridge.Status)
+		fmt.Fprintf(a.env.Stdout, "  remote %s (%s:%d): %s", bridge.Name, bridge.Host, bridge.Port, bridge.Status)
 		if bridge.ErrorStage != "" {
-			fmt.Printf(" at %s", bridge.ErrorStage)
+			fmt.Fprintf(a.env.Stdout, " at %s", bridge.ErrorStage)
 		}
 		if bridge.Error != "" {
-			fmt.Printf(": %s", bridge.Error)
+			fmt.Fprintf(a.env.Stdout, ": %s", bridge.Error)
 		}
-		fmt.Println()
+		fmt.Fprintln(a.env.Stdout)
 	}
 }
 
@@ -251,7 +252,7 @@ func printTailnetDialReceipt(dial *ReceiptTailnetDial) {
 // or unavailable discovery is a warning, not a doctor failure: the daemon
 // still serves the fleet file's remotes, and a host off the tailnet is a
 // correct host.
-func printDiscoveryReceipt(discovery *daemonDiscovery) {
+func (a *app) printDiscoveryReceipt(discovery *daemonDiscovery) {
 	if discovery == nil {
 		return
 	}
@@ -261,34 +262,34 @@ func printDiscoveryReceipt(discovery *daemonDiscovery) {
 		for _, peer := range discovery.Peers {
 			names = append(names, peer.Name)
 		}
-		fmt.Printf("tailnet discovery via %s: %d peer(s)", discovery.Via, len(names))
+		fmt.Fprintf(a.env.Stdout, "tailnet discovery via %s: %d peer(s)", discovery.Via, len(names))
 		if len(names) > 0 {
-			fmt.Printf(" (%s)", strings.Join(names, ", "))
+			fmt.Fprintf(a.env.Stdout, " (%s)", strings.Join(names, ", "))
 		}
-		fmt.Println()
+		fmt.Fprintln(a.env.Stdout)
 	case "pending":
-		fmt.Println("tailnet discovery: first round still running")
+		fmt.Fprintln(a.env.Stdout, "tailnet discovery: first round still running")
 	case "disabled":
-		fmt.Printf("tailnet discovery: off (%s)\n", discovery.Error)
+		fmt.Fprintf(a.env.Stdout, "tailnet discovery: off (%s)\n", discovery.Error)
 	default:
-		fmt.Printf("warning: tailnet discovery unavailable (%s); this host is running on remotes.json alone\n", discovery.Error)
+		fmt.Fprintf(a.env.Stdout, "warning: tailnet discovery unavailable (%s); this host is running on remotes.json alone\n", discovery.Error)
 	}
 }
 
-func collectHostReceiptWhenReady(daemon ReceiptDaemon) ReceiptHost {
+func (a *app) collectHostReceiptWhenReady(daemon ReceiptDaemon) ReceiptHost {
 	if daemon.Ready != nil && !*daemon.Ready {
 		return ReceiptHost{Status: receiptBooting, Repair: daemon.Repair}
 	}
-	return collectHostReceipt(daemon)
+	return a.collectHostReceipt(daemon)
 }
 
-func collectDaemonReceipt() ReceiptDaemon {
-	base, err := daemonURL()
+func (a *app) collectDaemonReceipt() ReceiptDaemon {
+	base, err := a.daemonURL()
 	if err != nil {
 		return ReceiptDaemon{Status: receiptMismatch, Repair: hostFileRepair(err)}
 	}
 	d := ReceiptDaemon{URL: base, Status: receiptMissing, Repair: "start the Shuttle daemon, then rerun `shuttle doctor --json`"}
-	data, err := getDaemon(strings.TrimRight(base, "/")+"/api/v1/version", daemonReadTimeout)
+	data, err := a.getDaemon(strings.TrimRight(base, "/")+"/api/v1/version", daemonReadTimeout)
 	if err != nil {
 		return daemonReceiptOnTransportError(d, err)
 	}
@@ -363,11 +364,11 @@ func receiptJSONValue(raw json.RawMessage) any {
 	return string(raw)
 }
 
-func collectTmuxServerReceipt() *ReceiptTmuxServer {
+func (a *app) collectTmuxServerReceipt() *ReceiptTmuxServer {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	report := detectTmuxOrigin()
+	report := a.detectTmuxOrigin()
 	receipt := &ReceiptTmuxServer{
 		Status: receiptHealthy, Origin: report.Origin,
 		ServerPID: report.ServerPID, Coalition: report.Coalition, RootedBy: report.RootedBy,
@@ -382,21 +383,21 @@ func collectTmuxServerReceipt() *ReceiptTmuxServer {
 // printTmuxServerReceipt names the app the running tmux server is charged to,
 // then the remedy when that app is the daemon or the advisory when it is
 // neither the daemon nor kitty.
-func printTmuxServerReceipt(rec *ReceiptTmuxServer) {
+func (a *app) printTmuxServerReceipt(rec *ReceiptTmuxServer) {
 	if rec == nil {
 		return
 	}
 	switch rec.Origin {
 	case tmuxOriginAbsent:
-		fmt.Println("tmux server: not running")
+		fmt.Fprintln(a.env.Stdout, "tmux server: not running")
 	case tmuxOriginUnknown:
-		fmt.Printf("tmux server: pid %s, rooting app unknown\n", rec.ServerPID)
+		fmt.Fprintf(a.env.Stdout, "tmux server: pid %s, rooting app unknown\n", rec.ServerPID)
 	case tmuxOriginDaemonBorn:
-		fmt.Printf("tmux server: pid %s, rooted by %s — %s\n", rec.ServerPID, rec.RootedBy, rec.Repair)
+		fmt.Fprintf(a.env.Stdout, "tmux server: pid %s, rooted by %s — %s\n", rec.ServerPID, rec.RootedBy, rec.Repair)
 	default:
-		fmt.Printf("tmux server: pid %s, rooted by %s\n", rec.ServerPID, rec.RootedBy)
+		fmt.Fprintf(a.env.Stdout, "tmux server: pid %s, rooted by %s\n", rec.ServerPID, rec.RootedBy)
 	}
 	if rec.Warning != "" {
-		fmt.Printf("warning: %s\n", rec.Warning)
+		fmt.Fprintf(a.env.Stdout, "warning: %s\n", rec.Warning)
 	}
 }

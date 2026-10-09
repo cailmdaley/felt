@@ -1,5 +1,6 @@
 defmodule Shuttle.RemoteRegistryTest do
-  use ExUnit.Case
+  # group: Shuttle.TailnetPeers keeps its peers in an ETS table named after the module, which Remotes.configured/0 reads when :remotes is unset
+  use ExUnit.Case, async: true, group: :tailnet_peers
 
   alias Shuttle.Remote
   alias Shuttle.RemoteRegistry
@@ -107,6 +108,14 @@ defmodule Shuttle.RemoteRegistryTest do
   end
 
   # ── Remote struct ──
+
+  # A clock the test owns: `clock` reads it, `advance.(ms)` moves it forward.
+  defp fake_clock do
+    agent = start_supervised!({Agent, fn -> DateTime.utc_now() end}, id: make_ref())
+    clock = fn -> Agent.get(agent, & &1) end
+    advance = fn ms -> Agent.update(agent, &DateTime.add(&1, ms, :millisecond)) end
+    {clock, advance}
+  end
 
   describe "Remote.from_config/1 with a remote_socket" do
     test "a socket entry reads remote_port 0 and keeps its local tcp port" do
@@ -372,24 +381,26 @@ defmodule Shuttle.RemoteRegistryTest do
         {:ok, snapshot_with_running(["work/temp"])}
       )
 
+      {clock, advance} = fake_clock()
+
       {:ok, _pid} =
         RemoteRegistry.start_link(
           name: :reg_stale,
-          # Tiny intervals so the test runs fast. stale = 2 × 50ms = 100ms.
+          # stale = 2 × 50ms = 100ms on the test's clock.
           remotes: [candide_remote(poll_interval_ms: 50, stale_multiplier: 2)],
           client: MockClient,
           auto_poll: false,
-          tick_interval_ms: 60_000
+          tick_interval_ms: 60_000,
+          clock: clock
         )
 
       :ok = RemoteRegistry.poll_now(:reg_stale)
 
-      # Right after polling, fresh + running.
+      # Fresh through the threshold itself, stale one millisecond past it.
       refute RemoteRegistry.snapshot(:reg_stale, "candide").stale
-
-      # After 2 × poll_interval, the snapshot is stale for composite views.
-      Process.sleep(120)
-
+      advance.(100)
+      refute RemoteRegistry.snapshot(:reg_stale, "candide").stale
+      advance.(1)
       assert RemoteRegistry.snapshot(:reg_stale, "candide").stale
     end
   end
@@ -1133,20 +1144,9 @@ defmodule Shuttle.RemoteRegistryTest do
       File.mkdir_p!(dir)
       path = Path.join(dir, "remotes.json")
 
-      prev_file = System.get_env("SHUTTLE_REMOTES_FILE")
-      prev_remotes = Application.get_env(:shuttle, :remotes)
-      System.put_env("SHUTTLE_REMOTES_FILE", path)
-      Application.delete_env(:shuttle, :remotes)
-
-      on_exit(fn ->
-        File.rm_rf(dir)
-        if prev_file, do: System.put_env("SHUTTLE_REMOTES_FILE", prev_file)
-        if prev_file == nil, do: System.delete_env("SHUTTLE_REMOTES_FILE")
-
-        if prev_remotes == nil,
-          do: Application.delete_env(:shuttle, :remotes),
-          else: Application.put_env(:shuttle, :remotes, prev_remotes)
-      end)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
+      Shuttle.Test.Env.delete_app_env(:remotes)
+      on_exit(fn -> File.rm_rf(dir) end)
 
       {:ok, path: path}
     end

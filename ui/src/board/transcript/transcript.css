@@ -149,8 +149,8 @@
 .ws-dock .ws-transcript-prose.ws-transcript-unclamped { max-height: none; overflow: visible; }
 .ws-dock .ws-transcript-prompt-text.ws-transcript-overflowing,
 .ws-dock .ws-transcript-prose.ws-transcript-overflowing {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
+  mask-image: linear-gradient(to bottom, var(--ws-mask) calc(100% - 3em), transparent);
 }
 .ws-dock .ws-transcript-answer { min-width: 0; }
 .ws-dock .ws-transcript-prose {

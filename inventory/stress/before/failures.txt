@@ -1,0 +1,54 @@
+=== run-6 (seed: 894788)
+  1) test a call to the registered Poller during slow init is processed after init (Shuttle.PollerBootTest)
+     test/shuttle/poller_boot_test.exs:28
+     ** (ExUnit.TimeoutError) on_exit callback timed out after 60000ms. You can change the timeout:
+       1. per test by setting "@tag timeout: x" (accepts :infinity)
+       2. per test module by setting "@moduletag timeout: x" (accepts :infinity)
+       3. globally via "ExUnit.start(timeout: x)" configuration
+       4. by running "mix test --timeout x" which sets timeout
+       5. or by running "mix test --trace" which sets timeout to infinity
+          (useful when using IEx.pry/0)
+     where "x" is the timeout given as integer in milliseconds (defaults to 60_000).
+     stacktrace:
+       (stdlib 7.3) gen.erl:243: :gen.do_call/4
+       (stdlib 7.3) sys.erl:759: :sys.send_system_msg/3
+       (stdlib 7.3) proc_lib.erl:1588: :proc_lib.stop/3
+       (elixir 1.19.5) lib/gen_server.ex:1100: GenServer.stop/3
+       (ex_unit 1.19.5) lib/ex_unit/on_exit_handler.ex:140: ExUnit.OnExitHandler.exec_callback/1
+       (ex_unit 1.19.5) lib/ex_unit/on_exit_handler.ex:126: ExUnit.OnExitHandler.on_exit_runner_loop/0
+=== run-17 (seed: 65545)
+  1) test a call to the registered Poller during slow init is processed after init (Shuttle.PollerBootTest)
+     test/shuttle/poller_boot_test.exs:28
+     ** (EXIT from #PID<0.359.0>) exited in: GenServer.call(Shuttle.PollerBootTest.Poller2950, :snapshot, 5000)
+         ** (EXIT) time out
+.14:00:22.190 [debug] shuttle contract level 6 matches expected 6
+=== run-18 (seed: 224987)
+  1) test direct ad-hoc dispatch creates an ad-hoc standing run before the schedule is due (Shuttle.PollerTest)
+     test/shuttle/poller_test.exs:3405
+     ** (MatchError) no match of right hand side value:
+         nil
+     code: notify_worker_exit(poller, fiber_id)
+     stacktrace:
+       test/shuttle/poller_test.exs:6183: Shuttle.PollerTest.notify_worker_exit/2
+       test/shuttle/poller_test.exs:3451: (test)
+.14:02:15.669 [info] RemoteRegistry: configured 1 remote(s): ["candide"]
+=== run-19 (seed: 896680)
+  1) test a call to the registered Poller during slow init is processed after init (Shuttle.PollerBootTest)
+     test/shuttle/poller_boot_test.exs:28
+     ** (EXIT from #PID<0.611.0>) exited in: GenServer.call(Shuttle.PollerBootTest.Poller1160, :snapshot, 5000)
+         ** (EXIT) time out
+=== run-20 (seed: 389206)
+  1) test kill_session SIGKILLs a live worker and tears down runtime immediately, writing no status (Shuttle.PollerTest)
+     test/shuttle/poller_test.exs:893
+     Expected truthy, got false
+     code: assert wait_until(fn ->
+             case Poller.cached_fiber_documents(poller) do
+               {:ok, %{fibers: [entry]}} -> not Map.has_key?(entry, :runtime)
+               _ -> false
+             end
+           end)
+     arguments:
+         # 1
+         #Function<104.9776206/0 in Shuttle.PollerTest."test kill_session SIGKILLs a live worker and tears down runtime immediately, writing no status"/1>
+     stacktrace:
+       test/shuttle/poller_test.exs:935: (test)

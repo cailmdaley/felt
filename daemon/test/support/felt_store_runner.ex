@@ -10,7 +10,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
   `RemoteRegistryTest`, `WorkerWatcherTest`) keep their own local mocks; those
   are different abstractions that happen to share this behaviour.
 
-  Globally named, so start it from a NON-async module.
+  One instance per test: `start!/0` starts it under the test supervisor and
+  registers it in the test's scope (`Shuttle.Test.Env.start_scoped!/1`); the
+  daemon processes the test starts (a Poller and its tasks) find the same
+  instance through `$ancestors`/`$callers`.
   """
 
   import Shuttle.Test.TmuxSessions
@@ -18,6 +21,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
   @behaviour Shuttle.Runner
 
   use Agent
+
+  @doc "Start this test's instance (see the moduledoc); returns its pid."
+  def start!, do: Shuttle.Test.Env.start_scoped!(__MODULE__)
+
+  defp server, do: Shuttle.Test.Env.server!(__MODULE__)
 
   def start_link(_ \\ []) do
     # Each runner gets its own throwaway store root under a unique temp
@@ -32,27 +40,26 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
     File.mkdir_p!(Path.join(root, ".felt"))
 
-    Agent.start_link(
-      fn ->
-        %{
-          felt_root: root,
-          commands: [],
-          tmux_sessions: MapSet.new(),
-          fibers: %{},
-          shuttle: %{},
-          ls_stderr_warning: false,
-          ls_delay_ms: 0,
-          new_session_delay_ms: 0
-        }
-      end,
-      name: __MODULE__
-    )
+    Agent.start_link(fn ->
+      %{
+        felt_root: root,
+        commands: [],
+        tmux_sessions: MapSet.new(),
+        fibers: %{},
+        shuttle: %{},
+        ls_stderr_warning: false,
+        listing_error: nil,
+        ids_from_aliases: %{},
+        ls_delay_ms: 0,
+        new_session_delay_ms: 0
+      }
+    end)
   end
 
   # The store root (the directory containing `.felt/`) this run's MockRunner
   # writes fiber files under — pass this to `felt_stores:` / `SHUTTLE_STORES`
   # rather than relying on the operator's configured stores.
-  def felt_root, do: Agent.get(__MODULE__, & &1.felt_root)
+  def felt_root, do: Agent.get(server(), & &1.felt_root)
 
   # `<felt_root>/.felt`.
   def felt_dir, do: Path.join(felt_root(), ".felt")
@@ -62,7 +69,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
     File.rm_rf(felt_dir())
     File.mkdir_p!(felt_dir())
 
-    Agent.update(__MODULE__, fn state ->
+    Agent.update(server(), fn state ->
       %{
         felt_root: state.felt_root,
         commands: [],
@@ -70,6 +77,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
         fibers: %{},
         shuttle: %{},
         ls_stderr_warning: false,
+        listing_error: nil,
+        ids_from_aliases: %{},
         ls_delay_ms: 0,
         new_session_delay_ms: 0
       }
@@ -88,7 +97,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
     # an existing/explicit path already wins below.
     fallback_path = synth_path(felt_dir(), id)
 
-    Agent.update(__MODULE__, fn state ->
+    Agent.update(server(), fn state ->
       existing_path = get_in(state.fibers, [id, "path"])
       path = Map.get(fiber, "path") || existing_path || fallback_path
       put_in(state.fibers[id], Map.put(fiber, "path", path))
@@ -160,7 +169,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
         _ -> %{}
       end
 
-    Agent.update(__MODULE__, fn state ->
+    Agent.update(server(), fn state ->
       fiber =
         state.fibers
         |> Map.get(id, %{
@@ -194,7 +203,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def put_shuttle_fields(id, fields) do
     {runtime_fields, config_fields} = Map.split(fields, @runtime_key_names)
 
-    Agent.update(__MODULE__, fn state ->
+    Agent.update(server(), fn state ->
       fiber = Map.get(state.fibers, id) || %{"id" => id, "shuttle" => %{}}
       shuttle = Map.get(fiber, "shuttle") || %{}
       runtime = Map.merge(Map.get(shuttle, "runtime") || %{}, runtime_fields)
@@ -210,7 +219,19 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   # The full fiber map for `id` (carries `path`), for tests that read back what
   # a write path (e.g. the claim's frontmatter stamp) wrote to the real file.
-  def fiber(id), do: Agent.get(__MODULE__, &Map.get(&1.fibers, id))
+  def fiber(id), do: Agent.get(server(), &Map.get(&1.fibers, id))
+
+  def delete_fiber(id) do
+    path = get_in(fiber(id) || %{}, ["path"])
+    if is_binary(path), do: File.rm(path)
+
+    Agent.update(server(), fn state ->
+      %{state | fibers: Map.delete(state.fibers, id), shuttle: Map.delete(state.shuttle, id)}
+    end)
+  end
+
+  def set_ids_from_alias(old_id, current_id),
+    do: Agent.update(server(), &put_in(&1.ids_from_aliases[old_id], current_id))
 
   # Absolute, symlink-resolved path of a written fiber file, computed with the
   # SAME resolver the poller uses for store ownership (Shuttle.Realpath). This
@@ -227,55 +248,69 @@ defmodule Shuttle.Test.FeltStoreRunner do
   end
 
   def set_ls_stderr_warning(enabled),
-    do: Agent.update(__MODULE__, &Map.put(&1, :ls_stderr_warning, enabled))
+    do: Agent.update(server(), &Map.put(&1, :ls_stderr_warning, enabled))
 
   # Simulate a host where the agent's wrapper resolves to nothing in a login
   # bash — the dispatcher's preflight probe (`bash -lc "type -t -- '<word>'"`)
   # then exits non-zero, and the dispatch is refused before any tmux spawn.
   def set_wrapper_missing(enabled),
-    do: Agent.update(__MODULE__, &Map.put(&1, :wrapper_missing, enabled))
+    do: Agent.update(server(), &Map.put(&1, :wrapper_missing, enabled))
 
   # Simulate a host with NO tmux server at all — `tmux ls` answers with tmux's
   # own absence message, the positive evidence `Shuttle.TmuxServer.presence/1`
   # requires before it will refuse a dispatch on macOS.
   def set_tmux_server_missing(enabled),
-    do: Agent.update(__MODULE__, &Map.put(&1, :tmux_server_missing, enabled))
+    do: Agent.update(server(), &Map.put(&1, :tmux_server_missing, enabled))
 
   # Simulate a listing timeout while `shuttle show` remains responsive, so the
   # poller's last-known-candidate retention path is exercised.
   def set_listing_timeout(enabled),
-    do: Agent.update(__MODULE__, &Map.put(&1, :listing_timeout, enabled))
+    do: Agent.update(server(), &Map.put(&1, :listing_timeout, enabled))
+
+  def set_listing_error(status) when is_integer(status),
+    do: Agent.update(server(), &Map.put(&1, :listing_error, status))
+
+  def clear_listing_error, do: Agent.update(server(), &Map.put(&1, :listing_error, nil))
 
   def set_ls_delay(ms),
-    do: Agent.update(__MODULE__, &Map.put(&1, :ls_delay_ms, ms))
+    do: Agent.update(server(), &Map.put(&1, :ls_delay_ms, ms))
+
+  # Hold the next `felt`/`shuttle ls` until the caller releases it: the
+  # listing process sends `{:ls_held, reader}` to the caller of `hold_ls/0`
+  # and waits for `:release_ls`. One-shot; later listings run as usual. A
+  # test that holds a poll read this way knows exactly when it is in flight.
+  def hold_ls do
+    holder = self()
+    Agent.update(server(), &Map.put(&1, :ls_hold, holder))
+  end
 
   # Simulate a wedged tmux: `tmux ls` returns the bounded runner's timeout
   # shape. The session list is then UNKNOWN — the poller must skip its
   # destructive/reconciling scans, never read it as "no sessions".
   def set_tmux_ls_timeout(enabled),
-    do: Agent.update(__MODULE__, &Map.put(&1, :tmux_ls_timeout, enabled))
+    do: Agent.update(server(), &Map.put(&1, :tmux_ls_timeout, enabled))
 
   # What the process scan (`ps -o pid=,ppid=,args= -U <uid>`,
   # `Shuttle.WorkerProcess`) answers. Defaults to no processes.
   def set_ps_result(result),
-    do: Agent.update(__MODULE__, &Map.put(&1, :ps_result, result))
+    do: Agent.update(server(), &Map.put(&1, :ps_result, result))
 
   # A worker that outlives `tmux kill-session`: after the next successful kill,
   # the killed session's run script stays in the process scan for `scans` more
   # `ps` calls, or — with `:until_signalled` — until a `kill` names its pid.
   def set_worker_linger(scans),
-    do: Agent.update(__MODULE__, &Map.put(&1, :worker_linger, scans))
+    do: Agent.update(server(), &Map.put(&1, :worker_linger, scans))
 
   @linger_pid 4242
 
   def add_tmux_session(session),
-    do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
+    do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
 
   def remove_tmux_session(session),
-    do: Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
+    do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
 
   def set_new_session_delay(ms),
-    do: Agent.update(__MODULE__, &Map.put(&1, :new_session_delay_ms, ms))
+    do: Agent.update(server(), &Map.put(&1, :new_session_delay_ms, ms))
 
   # Force `tmux kill-session` to fail. The message atoms mimic tmux's own
   # "session/server already gone" exits — every one of these kill_session must
@@ -285,28 +320,28 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_kill_session_failure(:not_found),
     do:
       Agent.update(
-        __MODULE__,
+        server(),
         &Map.put(&1, :kill_session_failure, {"can't find session: nope", 1})
       )
 
   def set_kill_session_failure(:no_such),
     do:
       Agent.update(
-        __MODULE__,
+        server(),
         &Map.put(&1, :kill_session_failure, {"no such session: shuttle-x", 1})
       )
 
   def set_kill_session_failure(:no_server),
     do:
       Agent.update(
-        __MODULE__,
+        server(),
         &Map.put(&1, :kill_session_failure, {"no server running on /tmp/tmux-501/default", 1})
       )
 
   def set_kill_session_failure(enabled) when is_boolean(enabled),
     do:
       Agent.update(
-        __MODULE__,
+        server(),
         &Map.put(&1, :kill_session_failure, enabled && {"tmux: hung up", 1})
       )
 
@@ -318,7 +353,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_contract_level(level, exit_status \\ 0) when is_binary(level),
     do:
       Agent.update(
-        __MODULE__,
+        server(),
         &(&1 |> Map.put(:contract_level, level) |> Map.put(:contract_exit, exit_status))
       )
 
@@ -328,16 +363,16 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_host_json(output, exit_status \\ 0) when is_binary(output),
     do:
       Agent.update(
-        __MODULE__,
+        server(),
         &(&1 |> Map.put(:host_json, output) |> Map.put(:host_exit, exit_status))
       )
 
-  def commands, do: Agent.get(__MODULE__, & &1.commands)
+  def commands, do: Agent.get(server(), & &1.commands)
 
   # What `shuttle reopen` answers: `{output, exit_status}`. Unset, a reopen
   # succeeds silently without touching the fiber.
   def set_reopen_result(output, exit_status),
-    do: Agent.update(__MODULE__, &Map.put(&1, :reopen_result, {output, exit_status}))
+    do: Agent.update(server(), &Map.put(&1, :reopen_result, {output, exit_status}))
 
   # Shuttle inlines a resolved `shuttle.resolved.agent` on fiber reads and serves
   # the registry through `shuttle agents [resolve]`. The daemon consumes those
@@ -375,7 +410,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   @impl true
   def cmd(command, args, opts) do
-    Agent.update(__MODULE__, fn state ->
+    Agent.update(server(), fn state ->
       %{state | commands: state.commands ++ [{command, args}]}
     end)
 
@@ -392,7 +427,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
       # test dispatches as before; `set_wrapper_missing(true)` makes the login
       # shell find nothing, the shape a real missing wrapper produces.
       command == "bash" and match?(["-lc", _], args) ->
-        if Agent.get(__MODULE__, &Map.get(&1, :wrapper_missing, false)) do
+        if Agent.get(server(), &Map.get(&1, :wrapper_missing, false)) do
           {"", 1}
         else
           {"file\n", 0}
@@ -401,17 +436,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "shuttle" and args == ["contract"] ->
         level =
           Agent.get(
-            __MODULE__,
+            server(),
             &Map.get(&1, :contract_level, Integer.to_string(Shuttle.Contract.expected_level()))
           )
 
-        {level, Agent.get(__MODULE__, &Map.get(&1, :contract_exit, 0))}
+        {level, Agent.get(server(), &Map.get(&1, :contract_exit, 0))}
 
-      # `shuttle [-C s] accept|resume <id> --local` — shuttle's
-      # lifecycle writer. Mirror its document effect on both surfaces (the
-      # fiber map `shuttle ls`/`show` answer from, and the real file): a pinned
-      # accept re-parks to `status: open`, everything else re-arms to `active`;
-      # the verdict and closed-at clear; a standing re-arm concludes the run.
+      # Question clearing changes both the discovery map and the document.
       command == "shuttle" and match?(["ask", _, "--clear"], drop_cli_store(args)) ->
         ["ask", id, "--clear"] = drop_cli_store(args)
         path = fiber(id)["path"]
@@ -425,12 +456,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
           File.write!(path, prefix <> "---\n" <> updated <> "---\n" <> body)
         end
 
-        Agent.update(__MODULE__, fn state ->
+        Agent.update(server(), fn state ->
           update_in(state.fibers[id]["shuttle"], &Map.delete(&1 || %{}, "ask"))
         end)
 
         {"cleared question #{id}\n", 0}
 
+      # Lifecycle writes mirror the CLI on the discovery map and document.
       command == "shuttle" and lifecycle_write?(args) ->
         [verb, id, "--local"] = drop_cli_store(args)
         apply_lifecycle_write(verb, id)
@@ -451,7 +483,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
       # arms the fiber — concluding a standing role's run only under
       # --conclude-run.
       command == "shuttle" and match?(["reopen" | _], drop_cli_store(args)) ->
-        case Agent.get(__MODULE__, &Map.get(&1, :reopen_result)) do
+        case Agent.get(server(), &Map.get(&1, :reopen_result)) do
           nil ->
             ["reopen", id | flags] = drop_cli_store(args)
 
@@ -476,7 +508,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end
 
       command == "shuttle" and args == ["host", "--json"] ->
-        Agent.get(__MODULE__, fn state ->
+        Agent.get(server(), fn state ->
           {Map.get(state, :host_json, ~s({"id": "mock-host"})), Map.get(state, :host_exit, 0)}
         end)
 
@@ -493,12 +525,23 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {Jason.encode!(record), 0}
 
       command in ["felt", "shuttle"] and String.contains?(full_args, "ls") and
-          Agent.get(__MODULE__, &Map.get(&1, :listing_timeout, false)) ->
+          Agent.get(server(), &Map.get(&1, :listing_timeout, false)) ->
         {"#{command} #{full_args} timed out after 60000ms", :timeout}
 
+      command in ["felt", "shuttle"] and String.contains?(full_args, "ls") and
+          is_integer(Agent.get(server(), &Map.get(&1, :listing_error))) ->
+        {"simulated listing failure", Agent.get(server(), &Map.get(&1, :listing_error))}
+
       command in ["felt", "shuttle"] and String.contains?(full_args, "ls") ->
-        delay_ms = Agent.get(__MODULE__, &Map.get(&1, :ls_delay_ms, 0))
-        if delay_ms > 0, do: Process.sleep(delay_ms)
+        case Agent.get_and_update(server(), &Map.pop(&1, :ls_hold)) do
+          holder when is_pid(holder) ->
+            send(holder, {:ls_held, self()})
+            receive do: (:release_ls -> :ok)
+
+          nil ->
+            delay_ms = Agent.get(server(), &Map.get(&1, :ls_delay_ms, 0))
+            if delay_ms > 0, do: Process.sleep(delay_ms)
+        end
 
         show_all =
           case Enum.find_index(args, &(&1 in ["-s", "--status"])) do
@@ -506,21 +549,38 @@ defmodule Shuttle.Test.FeltStoreRunner do
             idx -> Enum.at(args, idx + 1) == "all"
           end
 
-        fibers =
-          Agent.get(__MODULE__, fn state ->
-            entries = Map.values(state.fibers)
+        ids_from =
+          case Enum.find_index(args, &(&1 == "--ids-from")) do
+            nil ->
+              nil
 
-            if show_all do
-              entries
-            else
-              Enum.filter(entries, fn fiber ->
-                Map.get(fiber, "status") in ["open", "active"]
-              end)
-            end
+            index ->
+              args
+              |> Enum.at(index + 1)
+              |> File.read!()
+              |> String.split("\n", trim: true)
+              |> MapSet.new()
+          end
+
+        fibers =
+          Agent.get(server(), fn state ->
+            entries = Map.values(state.fibers)
+            aliases = state.ids_from_aliases
+
+            entries
+            |> Enum.filter(fn fiber ->
+              id = Map.get(fiber, "id")
+
+              queried =
+                is_nil(ids_from) or MapSet.member?(ids_from, id) or
+                  Enum.any?(ids_from || [], &(Map.get(aliases, &1) == id))
+
+              (show_all or Map.get(fiber, "status") in ["open", "active"]) and queried
+            end)
           end)
 
         json = Jason.encode!(Enum.map(fibers, &for_cli(command, &1)))
-        warning? = Agent.get(__MODULE__, & &1.ls_stderr_warning)
+        warning? = Agent.get(server(), & &1.ls_stderr_warning)
 
         if warning? and Keyword.get(opts, :stderr_to_stdout) do
           {"warning: failed to parse unrelated fiber\n" <> json, 0}
@@ -531,14 +591,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command in ["felt", "shuttle"] and String.contains?(full_args, "show") and
           String.contains?(full_args, "--field shuttle") ->
         fiber_id = extract_fiber_id(args)
-        shuttle = Agent.get(__MODULE__, & &1.shuttle)
+        shuttle = Agent.get(server(), & &1.shuttle)
         {Map.get(shuttle, fiber_id, ""), 0}
 
       command in ["felt", "shuttle"] and String.contains?(full_args, "show") ->
         # `shuttle show --json` includes the resolved Shuttle facet alongside
         # the parsed fiber fields. The mock returns the corresponding fiber map.
         fiber_id = extract_fiber_id(args)
-        fibers = Agent.get(__MODULE__, & &1.fibers)
+        fibers = Agent.get(server(), & &1.fibers)
 
         case Map.get(fibers, fiber_id) do
           nil -> {"fiber not found", 1}
@@ -546,7 +606,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end
 
       command == "ps" ->
-        Agent.get_and_update(__MODULE__, fn state ->
+        Agent.get_and_update(server(), fn state ->
           case Map.get(state, :lingering) do
             {session, scans} when scans == :until_signalled or scans > 0 ->
               line = "#{@linger_pid} 1 bash -l /tmp/shuttle-run-#{session}.1.sh\n"
@@ -559,12 +619,12 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end)
 
       command == "kill" ->
-        Agent.update(__MODULE__, &Map.delete(&1, :lingering))
+        Agent.update(server(), &Map.delete(&1, :lingering))
         {"", 0}
 
       command == "tmux" and hd(args) == "has-session" ->
         session = Enum.at(args, 2)
-        sessions = Agent.get(__MODULE__, & &1.tmux_sessions)
+        sessions = Agent.get(server(), & &1.tmux_sessions)
 
         if tmux_session_exists?(sessions, session) do
           {"", 0}
@@ -575,14 +635,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "tmux" and hd(args) == "new-session" ->
         session = Enum.at(args, 3)
         add_tmux_session(session)
-        delay_ms = Agent.get(__MODULE__, &Map.get(&1, :new_session_delay_ms, 0))
+        delay_ms = Agent.get(server(), &Map.get(&1, :new_session_delay_ms, 0))
         if delay_ms > 0, do: Process.sleep(delay_ms)
         {"", 0}
 
       command == "tmux" and hd(args) == "kill-session" ->
         session = Enum.at(args, 2)
 
-        case Agent.get(__MODULE__, &Map.get(&1, :kill_session_failure, false)) do
+        case Agent.get(server(), &Map.get(&1, :kill_session_failure, false)) do
           {output, status} ->
             # An absence answer means the session really is gone from tmux.
             if Shuttle.Tmux.absence_message?(output), do: remove_tmux_session(session)
@@ -591,7 +651,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
           false ->
             remove_tmux_session(session)
 
-            Agent.update(__MODULE__, fn state ->
+            Agent.update(server(), fn state ->
               case Map.pop(state, :worker_linger) do
                 {nil, state} -> state
                 {scans, state} -> Map.put(state, :lingering, {session, scans})
@@ -604,7 +664,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "tmux" and hd(args) == "rename-session" ->
         ["rename-session", "-t", "=" <> old_name, new_name] = args
 
-        Agent.update(__MODULE__, fn state ->
+        Agent.update(server(), fn state ->
           if MapSet.member?(state.tmux_sessions, old_name) do
             sessions = state.tmux_sessions |> MapSet.delete(old_name) |> MapSet.put(new_name)
             %{state | tmux_sessions: sessions}
@@ -616,15 +676,15 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {"", 0}
 
       command == "tmux" and hd(args) == "ls" and
-          Agent.get(__MODULE__, &Map.get(&1, :tmux_ls_timeout, false)) ->
+          Agent.get(server(), &Map.get(&1, :tmux_ls_timeout, false)) ->
         {"tmux ls timed out after 10000ms", :timeout}
 
       command == "tmux" and hd(args) == "ls" and
-          Agent.get(__MODULE__, &Map.get(&1, :tmux_server_missing, false)) ->
+          Agent.get(server(), &Map.get(&1, :tmux_server_missing, false)) ->
         {"error connecting to /tmp/tmux-501/default (No such file or directory)", 1}
 
       command == "tmux" and hd(args) == "ls" ->
-        sessions = Agent.get(__MODULE__, & &1.tmux_sessions)
+        sessions = Agent.get(server(), & &1.tmux_sessions)
         output = sessions |> MapSet.to_list() |> Enum.join("\n")
         {output, 0}
 
@@ -656,10 +716,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
   end
 
   defp expand_env(raw),
-    do: Regex.replace(~r/\$(\w+)/, raw, fn _, name -> System.get_env(name, "") end)
+    do: Regex.replace(~r/\$(\w+)/, raw, fn _, name -> Shuttle.Env.get(name, "") end)
 
   defp lifecycle_write?(args),
-    do: match?([verb, _id, "--local"] when verb in ["accept", "resume"], drop_cli_store(args))
+    do:
+      match?(
+        [verb, _id, "--local"] when verb in ["accept", "resume", "rest"],
+        drop_cli_store(args)
+      )
 
   defp drop_cli_store(["-C", _store | rest]), do: rest
   defp drop_cli_store(args), do: args
@@ -667,12 +731,15 @@ defmodule Shuttle.Test.FeltStoreRunner do
   defp apply_lifecycle_write(verb, id, conclude? \\ true) do
     fiber = fiber(id) || %{"id" => id, "shuttle" => %{}}
     kind = get_in(fiber, ["shuttle", "kind"])
-    status = if verb == "accept" and kind == "pinned", do: "open", else: "active"
+    status = if verb == "rest", do: "open", else: "active"
+
+    if verb == "rest",
+      do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
 
     if conclude? and kind == "standing",
       do: put_shuttle_fields(id, %{"handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())})
 
-    Agent.update(__MODULE__, fn state ->
+    Agent.update(server(), fn state ->
       update_in(state.fibers[id], fn fiber ->
         fiber |> Map.put("status", status) |> Map.drop(["tempered", "closed-at"])
       end)

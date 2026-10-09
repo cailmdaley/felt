@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import { columnIndexAtX, overlayDueEdits } from './ChronicleView.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { card as baseCard } from '../testFixtures.js'
@@ -23,81 +24,70 @@ const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
   baseCard({ status: 'active', ...over })
 
 describe('columnIndexAtX — the drag snap math', () => {
-  const trackLeft = 100
-  const dayW = 24
-  const dayCount = 30
-
-  it('places the cursor in the column it sits over', () => {
-    expect(columnIndexAtX(trackLeft, trackLeft, dayW, dayCount)).toBe(0)
-    expect(columnIndexAtX(trackLeft + dayW, trackLeft, dayW, dayCount)).toBe(1)
-    expect(columnIndexAtX(trackLeft + dayW * 5 + 3, trackLeft, dayW, dayCount)).toBe(5)
+  it('floors the cursor into the column it sits over, clamped to a real column', () => {
+    // Cursors land on quarter pixels, which binary floats hold exactly, so the
+    // column edges stay exact while the cursor still falls between pixels. A
+    // cursor anywhere in [left + k·w, left + (k+1)·w) must answer k — floored,
+    // never rounded to the nearer edge — and a cursor past either end the
+    // nearest real column. A width of 0 is a track not measured yet: still a
+    // real column, never a division by zero. An empty track answers 0, never a
+    // negative index.
+    fc.assert(fc.property(
+      fc.integer({ min: -500, max: 500 }), fc.integer({ min: 0, max: 40 }),
+      fc.integer({ min: 0, max: 31 }), fc.integer({ min: -8000, max: 8000 }).map((q) => q / 4),
+      (trackLeft, dayW, dayCount, offset) => {
+        const at = columnIndexAtX(trackLeft + offset, trackLeft, dayW, dayCount)
+        expect(Number.isInteger(at)).toBe(true)
+        expect(at).toBeGreaterThanOrEqual(0)
+        expect(at).toBeLessThan(Math.max(dayCount, 1))
+        if (dayW === 0 || dayCount === 0) return
+        if (offset < 0) expect(at).toBe(0)
+        else if (offset >= dayW * dayCount) expect(at).toBe(dayCount - 1)
+        else {
+          expect(trackLeft + at * dayW).toBeLessThanOrEqual(trackLeft + offset)
+          expect(trackLeft + offset).toBeLessThan(trackLeft + (at + 1) * dayW)
+        }
+      },
+    ), { seed: 0xd1a95, numRuns: 200 })
   })
 
-  it('floors within a column rather than rounding to the nearer edge', () => {
-    // Anywhere in [trackLeft + 2*dayW, trackLeft + 3*dayW) is still column 2.
-    expect(columnIndexAtX(trackLeft + dayW * 2, trackLeft, dayW, dayCount)).toBe(2)
-    expect(columnIndexAtX(trackLeft + dayW * 2.99, trackLeft, dayW, dayCount)).toBe(2)
-  })
-
-  it('clamps a cursor past either end to the nearest real column', () => {
-    expect(columnIndexAtX(trackLeft - 500, trackLeft, dayW, dayCount)).toBe(0)
-    expect(columnIndexAtX(trackLeft + dayW * dayCount + 500, trackLeft, dayW, dayCount)).toBe(
-      dayCount - 1,
-    )
-  })
-
-  it('never divides by zero when the day width has not been measured yet', () => {
-    expect(() => columnIndexAtX(trackLeft + 50, trackLeft, 0, dayCount)).not.toThrow()
-    expect(Number.isFinite(columnIndexAtX(trackLeft + 50, trackLeft, 0, dayCount))).toBe(true)
-  })
-
-  it('answers column 0 for an empty track rather than a negative index', () => {
-    expect(columnIndexAtX(trackLeft, trackLeft, dayW, 0)).toBe(0)
+  it('keeps a cursor short of the next edge in its own column, and moves it on the edge', () => {
+    expect(columnIndexAtX(100 + 24 * 2.99, 100, 24, 30)).toBe(2)
+    expect(columnIndexAtX(100 + 24 * 3 - 0.01, 100, 24, 30)).toBe(2)
+    expect(columnIndexAtX(100 + 24 * 3, 100, 24, 30)).toBe(3)
+    expect(columnIndexAtX(100 + 24 * 2, 100, 24, 30)).toBe(2)
   })
 })
 
 describe('overlayDueEdits — the optimistic due-mark overlay', () => {
-  it('leaves cards untouched when there are no pending edits', () => {
-    const cards = [card({ id: 'a', due: '2026-08-01' })]
-    const { cards: out, confirmed } = overlayDueEdits(cards, new Map())
-    expect(out).toEqual(cards)
-    expect(confirmed).toEqual([])
-  })
+  const DATES = ['2026-08-01', '2026-08-05', '2026-08-20'] as const
+  const ids = ['a', 'b', 'c', 'd']
+  // Some cards carry no due at all: a drag in flight against a card whose due
+  // was cleared some other way still holds until the daemon answers THIS edit.
+  const served = fc.subarray(ids).chain((present) => fc.tuple(
+    fc.constant(present),
+    fc.array(fc.option(fc.constantFrom(...DATES), { nil: undefined }), {
+      minLength: present.length, maxLength: present.length,
+    }),
+  )).map(([present, dues]) => present.map((id, i) => card({ id, due: dues[i] })))
+  // Edits may name ids the served list does not carry.
+  const pending = fc.dictionary(fc.constantFrom(...ids, 'z'), fc.constantFrom(...DATES))
+    .map((o) => new Map(Object.entries(o)))
 
-  it('patches a card whose id has a pending edit, and leaves others alone', () => {
-    const a = card({ id: 'a', due: '2026-08-01' })
-    const b = card({ id: 'b', due: '2026-08-05' })
-    const edits = new Map([['a', '2026-08-20']])
-    const { cards: out, confirmed } = overlayDueEdits([a, b], edits)
-    expect(out.find((c) => c.id === 'a')?.due).toBe('2026-08-20')
-    expect(out.find((c) => c.id === 'b')?.due).toBe('2026-08-05')
-    expect(confirmed).toEqual([])
-    // The original array is untouched — a fresh object stands in for the edit.
-    expect(a.due).toBe('2026-08-01')
-  })
+  it('patches every card with a pending edit, confirms the ones already echoed, and touches nothing else', () => {
+    fc.assert(fc.property(served, pending, (cards, edits) => {
+      const before = structuredClone(cards)
+      const { cards: out, confirmed } = overlayDueEdits(cards, edits)
 
-  it('reports a card confirmed once the served due already matches the edit', () => {
-    const a = card({ id: 'a', due: '2026-08-20' }) // the daemon has caught up
-    const edits = new Map([['a', '2026-08-20']])
-    const { cards: out, confirmed } = overlayDueEdits([a], edits)
-    expect(out[0].due).toBe('2026-08-20')
-    expect(confirmed).toEqual(['a'])
-  })
-
-  it('does not confirm an edit for a card the daemon has not echoed yet', () => {
-    const a = card({ id: 'a', due: '2026-08-01' })
-    const edits = new Map([['a', '2026-08-20']])
-    const { confirmed } = overlayDueEdits([a], edits)
-    expect(confirmed).toEqual([])
-  })
-
-  it('holds an edit even for a card that has since lost its due entirely', () => {
-    // A drag in flight against a card whose due was cleared some other way —
-    // the overlay still wins until the daemon's answer to THIS edit lands.
-    const a = card({ id: 'a', due: undefined })
-    const edits = new Map([['a', '2026-08-20']])
-    const { cards: out, confirmed } = overlayDueEdits([a], edits)
-    expect(out[0].due).toBe('2026-08-20')
-    expect(confirmed).toEqual([])
+      expect(cards, 'the served cards are never mutated').toEqual(before)
+      expect(out).toHaveLength(cards.length)
+      cards.forEach((c, i) => {
+        const edit = edits.get(c.id)
+        if (edit === undefined) expect(out[i], `${c.id} has no edit`).toBe(c)
+        else expect(out[i], `${c.id} shows its edit`).toEqual({ ...c, due: edit })
+      })
+      // Confirmed once the served due already matches — and only then.
+      expect(confirmed).toEqual(cards.filter((c) => edits.has(c.id) && edits.get(c.id) === c.due).map((c) => c.id))
+    }), { seed: 0x0e71a7, numRuns: 200 })
   })
 })

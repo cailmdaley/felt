@@ -112,7 +112,7 @@ hand-written block without judging it; use `shuttle check` to validate the
 schema and `shuttle status` to inspect dispatch eligibility. A block without
 `status: active` does not dispatch.
 
-## The three kinds
+## The two kinds
 
 The shuttle CLI validates `shuttle.kind` (`internal/shuttle/schema.go`); felt
 preserves it as opaque frontmatter.
@@ -120,8 +120,14 @@ preserves it as opaque frontmatter.
 ### `oneshot`
 
 The default, and the kind most work wants. Dispatches on the next poll while
-`status: active`. Redispatches after every clean handoff until a human closes
-it.
+`status: active`. Redispatches after every clean handoff until a worker or a
+human closes it or puts it to rest.
+
+A oneshot need not have a finish line. A hub you come back to — a debug
+intake, a practice — is a oneshot that rests between sessions: `status: open`
+with `horizon: stashed`, drawn in the board's Resting band, and started by hand
+when you want it. A worker puts it there with `shuttle rest` when the session
+ends with nothing to review; see [Lifecycle](lifecycle.md).
 
 ```bash
 shuttle install <fiber> --project-dir "$PWD"
@@ -140,32 +146,37 @@ shuttle computes due-ness from the cron expression against now, and stores
 nothing. So no dispatch can silently consume a slot. The
 `active → closed → active` document transition records that an occurrence ran.
 
-A standing role carries at most one unaccepted work product. While a run waits
+A standing constitution carries at most one unaccepted work product. While a run waits
 for review, scheduled runs do not fire and ad-hoc dispatch refuses. Accepting it
-(`shuttle accept`) re-arms the role for the schedule's next tick and
+(`shuttle accept`) re-arms it for the schedule's next tick and
 keeps the outcome, which stays the card's headline until the next run writes
 its own.
 
-### `pinned`
+Oneshots alone make a coherent system. Ignore standing until you want it.
 
-A schedule-less perennial interface — a status hub, a debug intake. A `schedule`
-on a pinned block fails validation.
+A stored `kind: pinned`, from before Resting held every constitution at rest,
+is still read, as `oneshot`; `shuttle check` warns about it, and
+`scripts/migrate-pinned.py` rewrites it.
+
+### Seats
+
+A constitution can be a **seat** of a role: `shuttle.seat: <role>` names a
+charter under `roles/`, and a worker there sits in that office — the cmbx
+chair, the vizier, a chief of staff on one of two machines. A seat is a oneshot
+or a standing constitution like any other; the field changes where the board
+draws it at rest (the Roles band rather than Drafts or Resting) and what it
+means, never its lifecycle. A role may have any number of seats, and the
+charter itself stays host-free and is never dispatched.
 
 ```bash
-shuttle pin <fiber> --project-dir "$PWD"
+shuttle seat <fiber> cmbx-chair     # or --clear
 ```
 
-It rests on the board's pinned strip until a human starts it. Once running it
-joins the ordinary lifecycle: a deliberate handoff relaunches a fresh successor,
-a dirty death or idle exit parks it back to the strip, a close-out lands in
-Awaiting review.
-
-Oneshots alone make a coherent system. Ignore standing and pinned until you want
-them.
+`shuttle check` warns when a seat names a role with no charter.
 
 ### Changing kind
 
-`install`, `pin`, and `repeat` refuse to clobber an existing block. To convert,
+`install` and `repeat` refuse to clobber an existing block. To convert,
 use `shuttle reshape`:
 
 ```bash
@@ -176,10 +187,10 @@ shuttle reshape <fiber> standing --schedule "0 9 * * 1" --tz UTC
 schedule (`shuttle reshape <fiber> --schedule "0 7 * * *"`). Reshape
 changes only `kind` and the schedule, and leaves the rest of the block —
 including the daemon-owned `runtime:` keys — untouched. It never
-touches felt's lifecycle fields (`status`, `tempered`, `outcome`), so a role
-sitting in Awaiting review can be reshaped in place without being requeued. A
+touches felt's lifecycle fields (`status`, `tempered`, `outcome`), so a
+constitution sitting in Awaiting review can be reshaped in place without being requeued. A
 `standing` target needs a schedule, from `--schedule` or echoed from the
-existing block; a `oneshot` or `pinned` target drops the schedule, and passing
+existing block; a `oneshot` target drops the schedule, and passing
 `--schedule`/`--tz` against one is an error.
 
 ## Agent selection
@@ -229,7 +240,7 @@ list the daemon evaluates.
   hostname — consulted once and then written to that file, so the name cannot
   drift. shuttle offers no `"local"`
   default and no wildcard. An absent host leaves the fiber unowned and
-  ineligible on every daemon. `install`, `repeat`, and `pin` stamp it by
+  ineligible on every daemon. `install` and `repeat` stamp it by
   default.
 - **`status: active`** — the sole dispatch gate. `open` marks a draft or a
   pause. `closed` marks awaiting review or a terminus.

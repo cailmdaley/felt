@@ -74,10 +74,12 @@ relevant role and collaborator content locally. The request's top-level
 
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
 fields, and runs the matching `shuttle <action>` on the owning host:
-`install`, `pin`, `repeat`, `reshape`, `pause`, `resume`, `accept`,
-`set-model`, `set-agent`, `set-outcome` or `uninstall`. `accept` and `resume`
-run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
-owning daemon's Poller, serialized with its state changes, which then refreshes
+`install`, `repeat`, `reshape`, `pause`, `rest`, `resume`, `accept`, `close`, `reopen`,
+`set-model`, `set-agent`, `seat` (`role`, or `clear: true`), `set-outcome` or
+`uninstall`. `accept`, `resume` and
+`rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
+owning daemon's Poller, serialized with its state changes — a rest then stops
+any live worker through its backend — which then refreshes
 that fiber's document cache; a poll read in flight sees the old document or
 the new one, whose status and `handed_off_at` land in one atomic write. The
 outcome is always kept. A success is 200 with the Shuttle CLI's output as
@@ -542,7 +544,7 @@ here" rather than as a missing file.
 | Route | Purpose |
 |---|---|
 | `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
-| `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing roles, boot quarantine, contract check and `poll_health` |
+| `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing constitutions, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |

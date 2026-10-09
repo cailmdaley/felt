@@ -1,24 +1,35 @@
-.ws-verdict-toasts {
-  position: fixed; z-index: calc(var(--ws-reader-layer) + 10); bottom: calc(var(--ws-stage-inset) + var(--ws-label-height) + var(--ws-inset) + var(--ws-line-width));
-  left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px;
-  width: max-content; max-width: calc(100vw - 24px); pointer-events: none;
+/* A verdict's undo window is drawn where the verdict was given: the
+   controls that gave it keep their footprint but give way to one quiet
+   line, the verdict in its pigment and "undo z", in the status line's mono
+   capitals. It fades through its last moments, so its going is not a
+   surprise; a host rebuilt mid-window joins the fade where it stands. */
+[data-verdict-pending] { position: relative; }
+[data-verdict-pending] > :not(.ws-verdict-undo) { visibility: hidden; }
+.ws-verdict-undo {
+  position: absolute; inset: 0; display: flex; align-items: center; gap: var(--ws-small-gap);
+  white-space: nowrap; pointer-events: auto; text-box: trim-both cap alphabetic;
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase;
+  animation: ws-verdict-leave 600ms ease calc(var(--ws-verdict-left, 4000ms) - 600ms) forwards;
 }
-.ws-verdict-toast {
-  pointer-events: auto; padding: 8px 16px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-radius);
-  background: var(--ws-paper); color: var(--ws-ink); box-shadow: var(--ws-float); font: var(--ws-prose-size)/1.4 var(--ws-serif);
-  animation: ws-verdict-arrive 180ms ease;
+.ws-verdict-undo[data-fresh] {
+  animation: ws-verdict-arrive 160ms ease, ws-verdict-leave 600ms ease calc(var(--ws-verdict-left, 4000ms) - 600ms) forwards;
 }
-.ws-verdict-toast button {
-  border: 0; border-bottom: 1px solid var(--ws-hairline); color: var(--ws-ink); background: transparent;
-  font: var(--ws-label-size)/1.4 var(--ws-serif); min-height: 36px; cursor: pointer;
+.ws-verdict-undo button {
+  border: 0; padding: 0; color: inherit; background: transparent; cursor: pointer;
+  font: inherit; letter-spacing: inherit; text-transform: inherit;
 }
-.ws-verdict-toast button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
-@keyframes ws-verdict-arrive { from { opacity: 0; transform: translateY(6px); } }
+.ws-verdict-undo button:hover { color: var(--ws-ink); }
+.ws-verdict-undo kbd { font: inherit; text-transform: none; }
+.ws-verdict-undo button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
+/* The fiber page's pair sits at its line's right end; so does the line. */
+.kbn-ctl-verdict > .ws-verdict-undo { justify-content: flex-end; }
+/* On a Desk card the line takes the card's foot (KanbanModal.css). */
+@keyframes ws-verdict-arrive { from { opacity: 0; } }
+@keyframes ws-verdict-leave { to { opacity: .3; } }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-verdict-toasts { bottom: calc(var(--ws-thumb-height) + 12px + env(safe-area-inset-bottom)); }
-  .ws-verdict-toast button { min-height: 44px; min-width: 44px; }
+  .ws-verdict-undo button { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin-block: -12px; }
 }
-@media (prefers-reduced-motion: reduce) { .ws-verdict-toast { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ws-verdict-undo, .ws-verdict-undo[data-fresh] { animation: none; } }
 
 /* Verdict verbs wear their pigment wherever the workspace offers them (the
    recipe and pigments live with the Desk's, in KanbanModal.css). */
@@ -32,6 +43,58 @@
   outline: 2px solid var(--verdict-pigment); outline-offset: 2px;
 }
 .ws-verdict-word { color: var(--verdict-ink); }
-.ws-verdict-toast[data-verdict] { border-left: 3px solid var(--verdict-edge); }
-.ws-verdict-toast[data-verdict='tempered'] { --verdict-edge: color-mix(in srgb, var(--kbn-tempered) 55%, var(--ws-paper)); }
-.ws-verdict-toast[data-verdict='discarded'] { --verdict-edge: color-mix(in srgb, var(--kbn-discarded) 55%, var(--ws-paper)); }
+/* The fiber page's status line: the kicker, the roles, the worker pill, then
+   Temper and Discard at the line's right end. It is one line on a wide page;
+   the roles give way when it runs out. Outside review the pair is two verbs in
+   their pigments, plated only under the pointer; awaiting review they are
+   the page's plates, verdigris and the Desk's deletion red. The line is
+   centred on its glyphs: the kicker's box is trimmed to its small capitals
+   and the pill's words to their capitals, so their middles meet. */
+.ws-fiber-prose .ws-prose-header { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
+.ws-fiber-prose .ws-prose-status { flex: none; text-box: trim-both ex alphabetic; }
+/* The roster's roles, left of the pill and in its register: mono capitals,
+   muted, a middot between two, cut with an ellipsis when the line runs out:
+   they give way, so a worker arriving never pushes the verdicts off the line.
+   Each opens its role's page; the link firms under the pointer the way the
+   pill does, with no underline at rest. */
+.ws-fiber-prose .ws-fiber-roles {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-box: trim-both cap alphabetic;
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase;
+}
+.ws-fiber-roles .ws-fiber-role + .ws-fiber-role::before { content: '·'; margin-inline: var(--ws-small-gap); }
+.ws-fiber-prose .ws-fiber-roles a.kbn-wikilink-live { color: inherit; text-decoration: none; }
+.ws-fiber-prose .ws-fiber-roles a.kbn-wikilink-live:is(:hover, :focus-visible) {
+  color: var(--ws-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+}
+.ws-fiber-prose .ws-fiber-acts {
+  flex: 1 0 auto; display: flex; align-items: center; gap: var(--ws-gap);
+  font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: normal; letter-spacing: 0; text-transform: none; color: var(--ws-ink);
+}
+.ws-fiber-acts .ws-fiber-worker { display: contents; }
+.ws-fiber-acts .ws-fiber-worker[hidden] { display: none; }
+.ws-fiber-acts .kbn-ctl-verdict { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.ws-fiber-acts .kbn-ctl-verdict[hidden] { display: none; }
+.ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+  min-height: var(--ws-control-height); padding: 0 10px; border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius);
+  background: transparent; font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; cursor: pointer;
+}
+.ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) { background: transparent; border-color: transparent !important; }
+.ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); border-color: transparent !important; }
+.ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-verdict { gap: 8px; }
+.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+  min-height: 36px; padding: 0 16px; background: var(--verdict-tint); border-color: var(--verdict-edge) !important;
+}
+.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
+  background: var(--verdict-tint-strong); border-color: var(--verdict-pigment) !important;
+}
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  /* The phone's top bar carries the worker's dot; its status line carries the verdicts alone, at a full target.
+     When the kicker, the roles and the verdicts outgrow the line, the verdicts take a line of their own. */
+  .ws-fiber-prose .ws-prose-header { flex-wrap: wrap; }
+  .ws-fiber-prose .ws-fiber-acts { flex: 1 1 auto; }
+  .ws-fiber-acts .ws-fiber-worker { display: none; }
+  .ws-reader .ws-fiber-acts[data-column] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
+    min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px; border-color: var(--verdict-edge) !important;
+  }
+  .ws-fiber-acts .kbn-ctl-verdict { gap: var(--ws-small-gap); }
+}

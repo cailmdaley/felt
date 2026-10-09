@@ -13,7 +13,7 @@ defmodule Shuttle.AppWorkers do
   and can subsequently be claimed by exactly one fiber.
   """
 
-  def client, do: Application.get_env(:shuttle, :codex_app_client, Shuttle.CodexApp)
+  def client, do: Shuttle.Env.app(:codex_app_client, Shuttle.CodexApp)
   def ref(id), do: "codex-app:" <> id
   def id("codex-app:" <> id), do: id
   def id(_), do: nil
@@ -27,7 +27,7 @@ defmodule Shuttle.AppWorkers do
   end
 
   def root do
-    Application.get_env(:shuttle, :app_workers_dir, Path.join(Shuttle.data_dir(), "app-workers"))
+    Shuttle.Env.app(:app_workers_dir, Path.join(Shuttle.data_dir(), "app-workers"))
   end
 
   def get(id) when is_binary(id) do

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func adapters() map[string]adapter {
@@ -16,7 +17,13 @@ func adapters() map[string]adapter {
 	}
 }
 
-func Discover(ctx context.Context, host string) Directory {
+// adapterDiscoveryTimeout caps each harness's discovery. It sits well inside
+// the daemon's 10s cap on `shuttle sessions --local` and a peer's 12s cap on
+// `/api/v1/peers`, so on a loaded host a slow harness comes back as that
+// harness's gap while the other harnesses' sessions still reach the fleet.
+const adapterDiscoveryTimeout = 5 * time.Second
+
+func Discover(ctx context.Context, env *sysenv.Env, host string) Directory {
 	d := Directory{Host: host, Sessions: []Session{}, Gaps: []Gap{}}
 	if validatePart("host", host) != nil {
 		d.Gaps = append(d.Gaps, Gap{Host: host, Harness: "*", Error: "invalid host"})
@@ -33,9 +40,9 @@ func Discover(ctx context.Context, host string) Directory {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			child, cancel := context.WithTimeout(ctx, 8*time.Second)
+			child, cancel := context.WithTimeout(ctx, adapterDiscoveryTimeout)
 			defer cancel()
-			ss, err := a.discover(child, host)
+			ss, err := a.discover(child, env, host)
 			ch <- result{name, ss, err}
 		}()
 	}
@@ -51,7 +58,7 @@ func Discover(ctx context.Context, host string) Directory {
 	return d
 }
 
-func Send(ctx context.Context, host string, req Request) (Receipt, error) {
+func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Receipt, error) {
 	addr, err := ParseAddress(req.Address)
 	if err != nil {
 		return rejected(req, "validation", err.Error()), err
@@ -68,12 +75,12 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		err := errCode("unsupported_harness", "unsupported harness %q", addr.Harness)
 		return rejected(req, "none", err.Error()), err
 	}
-	return withDedup(ctx, req, func(sendCtx context.Context) dedupSendResult {
+	return withDedup(ctx, env, req, func(sendCtx context.Context) dedupSendResult {
 		if err := sendCtx.Err(); err != nil {
 			receipt := rejected(req, "validation", err.Error())
 			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
 		}
-		files, err := materializeAttachments(req.MessageID, req.Attachments)
+		files, err := materializeAttachments(env, req.MessageID, req.Attachments)
 		if err != nil {
 			receipt := rejected(req, "attachments", err.Error())
 			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "cannot store attachments: %v", err)}
@@ -92,9 +99,9 @@ func Send(ctx context.Context, host string, req Request) (Receipt, error) {
 		delivery.Attachments = nil
 		var result dedupSendResult
 		if detailed, ok := a.(dedupMetadataSender); ok {
-			result.Receipt, result.Err, result.Metadata = detailed.sendWithDedupMetadata(sendCtx, addr, delivery)
+			result.Receipt, result.Err, result.Metadata = detailed.sendWithDedupMetadata(sendCtx, env, addr, delivery)
 		} else {
-			result.Receipt, result.Err = a.send(sendCtx, addr, delivery)
+			result.Receipt, result.Err = a.send(sendCtx, env, addr, delivery)
 		}
 		result.Receipt.Files = files
 		return result
@@ -137,8 +144,8 @@ func rejected(r Request, transport, detail string) Receipt {
 // dataDir is shuttle.DataDir. With no home directory to expand against it is
 // /.shuttle, which no unprivileged process can write, so every store below it
 // fails loudly instead of landing relative to the working directory.
-func dataDir() string {
-	if dir, err := shuttle.DataDir(); err == nil {
+func dataDir(env *sysenv.Env) string {
+	if dir, err := shuttle.DataDir(env); err == nil {
 		return dir
 	}
 	return "/.shuttle"

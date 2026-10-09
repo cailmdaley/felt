@@ -1,0 +1,258 @@
+/* The board's palette: every pigment and material the board, the reader's
+ * chrome, the temporal views and the forms paint with. No other board sheet
+ * writes a colour literal (`test/paletteLiterals.test.ts` holds that line); they
+ * name a token here, or mix two of them.
+ *
+ * Light values sit on :root. `appearance.ts` marks <html> with
+ * `data-ws-appearance` (light | dark) and `data-ws-dark-theme`
+ * (night-chart | lamplight); the dark blocks below re-ink the same tokens so
+ * the chrome is the room the dark constitution page is read in.
+ */
+:root {
+
+  /* ── THE BOARD'S PIGMENTS ──────────────────────────────────────────────
+     One meaning per colour, one colour per meaning. Declared here because the
+     rule cannot hold if each sheet keeps its own copy of a hex — which is
+     exactly how it broke: the temporal views settled on cinnabar for a message
+     of yours while the Desk and the Chronicle went on marking the same fact in
+     verdigris, and the same human/agent distinction ended up drawn three
+     different ways on three surfaces.
+
+     THE FOUR AXES, and they are orthogonal on purpose — a mark can be about an
+     actor and a time and a verdict at once, and each axis has its own pigment
+     so the three claims never have to share one:
+
+       WHO ACTED       cinnabar for you, cobalt for the machine
+       WHEN / OWED     gold — now, due, waiting on you
+       VERDICT         verdigris — tempered, and the column that awaits one
+       MACHINERY       iron gall — rules, bullets, chrome, anything muted
+
+     A hue outside these is a claim the data never made. */
+
+  /* Shared neutral materials: iron gall carries text and chrome, never an actor. */
+  --kbn-ink: #1B1611;
+  --kbn-ink-muted: #7A6F5C;
+
+  /* YOU. A message you sent, a role you drive, a human actor. The attention
+     tick on the Chronicle, the glyph on a pin. */
+  --kbn-you: #BC4538;
+
+  /* THE MACHINE. Agent work of every kind: the chronicle's spells, an agent
+     glyph, a worker in the air. */
+  --kbn-agent: #3D5BA0;
+
+  /* NOW, AND WHAT IS OWED. The now-thread, a due date, a worker with its hand
+     up, the drag band. Gold is the board's "attend to this, at this time". */
+  --kbn-owed: #9A7B35;
+  --kbn-owed-ink: color-mix(in srgb, var(--kbn-owed) 70%, var(--kbn-ink) 30%);
+  --kbn-owed-bright: #C49333;
+
+  /* THE VERDICT — and the ONE meaning verdigris keeps. A fiber tempered, and
+     the column where finished work waits to be judged. It earns its place by
+     being orthogonal to both other axes: whether work came out well is a
+     different question from who did it or when, and no other pigment answers
+     it. Human actors, workers aloft and due dates belong to the axes above
+     and never wear it. */
+  --kbn-tempered: #3F8278;
+  --kbn-tempered-ink: #2E6862;
+  /* The verdict's other pole: a fiber discarded to compost, in the deletion
+     red. It marks the Discard verb and the discarded state, never an actor. */
+  --kbn-discarded: #A84A3E;
+  --kbn-discarded-ink: #8E3A2F;
+
+  /* ── THE BOARD'S MATERIALS ─────────────────────────────────────────────
+     The surfaces the pigments sit on, shared by the Desk and the document
+     workspace so the two cannot drift apart. Parchment is the desk; the
+     column sheet is rag laid on it; the plate is the deeper sheet a column
+     head or a selection sits on; card paper is what a card (and a document,
+     a card opened) is printed on. Iron gall is every piece of chrome and
+     text, at four strengths; the ochre rule is the hairline. */
+  --kbn-parchment: #EDE2CE;
+  --kbn-sheet: #F2E8D2;
+  --kbn-plate: #E8DCC1;
+  --kbn-paper: #FBF6E9;
+  --kbn-hairline: #E4DACB;
+  --kbn-rule: color-mix(in srgb, var(--kbn-owed-bright) 22%, transparent);
+  --kbn-rule-strong: color-mix(in srgb, var(--kbn-owed-bright) 32%, transparent);
+  --kbn-ink-soft: #3A332A;
+  --kbn-ink-faint: #A89B83;
+
+  /* LOC ACCOUNTING — a fifth axis, orthogonal to the four above: how much a
+     change weighed has nothing to say about who made it, when, or whether it
+     was judged sound. Diffstat convention, not the board's WHO-ACTED reds —
+     cinnabar stays a claim about you specifically, and a deletion is not
+     always yours. Muted, git-diff hues rather than the bright ANSI pair, so
+     the figure sits at the same quiet register as the rest of a stat line. */
+  --kbn-diff-add: #4B7A3E;
+  --kbn-diff-del: #A84A3E;
+
+  /* The brighter stocks. Paper-bright is a lifted sheet (a pending card, a
+     popover); rag is the porch's page; blank is the brightest field, where
+     you type. On-pigment is text set on a solid pigment; shade is the colour
+     of every cast shadow. */
+  --kbn-paper-bright: #FFFBED;
+  --kbn-rag: #FFFCF5;
+  --kbn-blank: #FFFFFF;
+  --kbn-on-pigment: #FFFFFF;
+  --kbn-shade: #1B1611;
+
+  /* THE FORMS' STOCK — Capture, Stash, Settings and the dialogs: a cooler
+     paper field and band, inked in graphite rather than iron gall. */
+  --kbn-form-paper: #F4F0E8;
+  --kbn-form-well: #EFEAE0;
+  --kbn-form-band: #E5DED2;
+  --kbn-graphite: #2E2A26;
+  --kbn-graphite-deep: #4C453F;
+  --kbn-graphite-soft: #5C544D;
+  --kbn-graphite-muted: #7A7068;
+  --kbn-graphite-faint: #9A8E80;
+  --kbn-graphite-pale: #B5A998;
+
+  /* Iron gall between its four strengths. */
+  --kbn-ink-sepia: #2A231A;
+  --kbn-ink-umber: #4A4033;
+  --kbn-ink-dun: #8A7C64;
+
+  /* Gold set as text: the owed pigment deepened toward ink, strongest last. */
+  --kbn-owed-deep: #8C6A24;
+  --kbn-owed-dark: #7A6028;
+  --kbn-owed-umber: #6E5A2E;
+  --kbn-owed-sepia: #4A3C1C;
+  /* Gilt is gold laid as a rule (a blockquote's edge); ochre is a warning
+     that the frontmatter, not a person, raised. */
+  --kbn-gilt: #C2963B;
+  --kbn-ochre: #9A6A2E;
+
+  /* An error the board reports in words, and the red of a failure it shows. */
+  --kbn-error: #8B3A28;
+  --kbn-alarm: #B24E3C;
+  /* The machine's cobalt deepened, for a border or a pressed control. */
+  --kbn-agent-deep: #2C4378;
+
+  /* Grounds that stay dark in either appearance: the board's toast, and a
+     code block set in the prose. Each carries its own ink. */
+  --kbn-toast: var(--kbn-ink);
+  --kbn-toast-ink: var(--kbn-form-paper);
+  --kbn-toast-edge: transparent;
+  --kbn-code-ground: var(--kbn-graphite);
+  --kbn-code-ink: var(--kbn-hairline);
+  /* A recessed sheet: the Drafts column and its cards, a cold cluster. On
+     paper it is the plate; dark stock sinks it below the desk instead. */
+  --kbn-recess: var(--kbn-plate);
+
+  /* MACHINERY HUES. A queued card waits behind another (violet); a standing
+     role sleeps on its cron (slate); a launch is held by the daemon (steel). */
+  --kbn-queue: #6B4E71;
+  --kbn-slate: #4A606E;
+  --kbn-held: #5A698C;
+}
+
+/* ── DARK: the shared derivations ──────────────────────────────────────
+   Each derived token becomes a mix of the dark bases, so a ramp that deepens
+   toward ink on paper brightens toward ink on the dark stock, and both dark
+   themes share one set of rules. */
+:root[data-ws-appearance='dark'] {
+  color-scheme: dark;
+  --kbn-rag: color-mix(in srgb, var(--kbn-paper) 50%, var(--kbn-paper-bright));
+  --kbn-form-paper: var(--kbn-paper);
+  --kbn-form-well: var(--kbn-sheet);
+  --kbn-form-band: var(--kbn-plate);
+  --kbn-graphite: var(--kbn-ink);
+  --kbn-graphite-deep: var(--kbn-ink-soft);
+  --kbn-graphite-soft: color-mix(in srgb, var(--kbn-ink-soft) 50%, var(--kbn-ink-muted));
+  --kbn-graphite-muted: var(--kbn-ink-muted);
+  --kbn-graphite-faint: color-mix(in srgb, var(--kbn-ink-muted) 50%, var(--kbn-ink-faint));
+  --kbn-graphite-pale: var(--kbn-ink-faint);
+  --kbn-ink-sepia: var(--kbn-ink);
+  --kbn-ink-umber: var(--kbn-ink-soft);
+  --kbn-ink-dun: color-mix(in srgb, var(--kbn-ink-muted) 70%, var(--kbn-ink-faint));
+  --kbn-owed-deep: color-mix(in srgb, var(--kbn-owed) 85%, var(--kbn-ink));
+  --kbn-owed-dark: color-mix(in srgb, var(--kbn-owed) 75%, var(--kbn-ink));
+  --kbn-owed-umber: color-mix(in srgb, var(--kbn-owed) 65%, var(--kbn-ink));
+  --kbn-owed-sepia: color-mix(in srgb, var(--kbn-owed) 50%, var(--kbn-ink));
+  --kbn-gilt: var(--kbn-owed);
+  --kbn-ochre: color-mix(in srgb, var(--kbn-owed-bright) 70%, var(--kbn-you));
+  --kbn-error: color-mix(in srgb, var(--kbn-you) 80%, var(--kbn-ink));
+  --kbn-alarm: var(--kbn-you);
+  --kbn-agent-deep: color-mix(in srgb, var(--kbn-agent) 80%, var(--kbn-ink));
+  --kbn-on-pigment: var(--kbn-parchment);
+  --kbn-shade: #000000;
+  /* The toast is the brightest sheet in the room; a code block is a well
+     sunk a step below the page it sits on. */
+  --kbn-toast: var(--kbn-blank);
+  --kbn-toast-ink: var(--kbn-ink);
+  --kbn-toast-edge: var(--kbn-hairline);
+  --kbn-code-ground: color-mix(in srgb, var(--kbn-paper) 55%, var(--kbn-parchment));
+  --kbn-code-ink: var(--kbn-ink-soft);
+  --kbn-recess: color-mix(in srgb, var(--kbn-parchment) 84%, var(--kbn-shade));
+}
+
+/* NIGHT CHART — navy-black stock, parchment ink, gold ornament. The desk is
+   the chart's ground, so the bar above an open page is the page's own room;
+   a card is a sheet lifted a little off it, lighter as it rises. Also the
+   dark default before a theme is named. */
+:root[data-ws-appearance='dark'] {
+  --kbn-parchment: #0A1019;
+  --kbn-sheet: #0D141D;
+  --kbn-paper: #16202B;
+  --kbn-paper-bright: #1A2430;
+  --kbn-blank: #1E2935;
+  --kbn-plate: #1D2733;
+  --kbn-hairline: #363C43;
+  /* Controls on dark stock (darkControls.css): a plate lifted a step off the
+     paper in the stock's own hue, its hover a step further, and an edge that
+     holds 3:1 against the paper so a button's bounds read without its label. */
+  --kbn-lift: #232F3D;
+  --kbn-lift-hover: #2B3949;
+  --kbn-lift-edge: #6B7381;
+  --kbn-ink: #F4EBDD;
+  --kbn-ink-soft: #E5DAC7;
+  --kbn-ink-muted: #A69C8A;
+  --kbn-ink-faint: #97907F;
+  --kbn-you: #F08A78;
+  --kbn-agent: #9EB5F4;
+  --kbn-owed: #E0C081;
+  --kbn-owed-bright: #F3CC74;
+  --kbn-tempered: #5FA88C;
+  --kbn-tempered-ink: #86C2A8;
+  --kbn-discarded: #E58A7C;
+  --kbn-discarded-ink: #F2A99D;
+  --kbn-diff-add: #9CCB8C;
+  --kbn-diff-del: #E58A7C;
+  --kbn-queue: #C7A6CF;
+  --kbn-slate: #9DB6C4;
+  --kbn-held: #A9B6DC;
+}
+
+/* LAMPLIGHT — aubergine-charcoal stock, cream ink, candle amber. */
+:root[data-ws-appearance='dark'][data-ws-dark-theme='lamplight'] {
+  --kbn-parchment: #0F0B0F;
+  --kbn-sheet: #130F13;
+  --kbn-paper: #1C171C;
+  --kbn-paper-bright: #201A20;
+  --kbn-blank: #241D23;
+  --kbn-plate: #272026;
+  --kbn-hairline: #33292F;
+  --kbn-lift: #2D242B;
+  --kbn-lift-hover: #372C34;
+  --kbn-lift-edge: #76696F;
+  --kbn-ink: #F3E9D8;
+  --kbn-ink-soft: #E0D2BC;
+  --kbn-ink-muted: #A89A86;
+  --kbn-ink-faint: #94877A;
+  --kbn-you: #F19B92;
+  --kbn-agent: #AEBCF0;
+  --kbn-owed: #ECBD76;
+  --kbn-owed-bright: #F6CA6E;
+  --kbn-tempered: #6FA48C;
+  --kbn-tempered-ink: #97C4A8;
+  --kbn-discarded: #E8978C;
+  --kbn-discarded-ink: #F4B2A8;
+  --kbn-diff-add: #A9D098;
+  --kbn-diff-del: #E8978C;
+  --kbn-queue: #D0AFD2;
+  --kbn-slate: #ACBCC6;
+  --kbn-held: #B4BDE0;
+}
+
+html[data-ws-appearance='dark'], html[data-ws-appearance='dark'] body { background-color: var(--kbn-parchment); }

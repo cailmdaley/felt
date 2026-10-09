@@ -8,23 +8,25 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 func TestBootstrapSupervisorStoreFreshHomeAndReinstall(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, home := envWithHome(t)
+	a := newApp(env)
 	registry := filepath.Join(home, ".config", "shuttle", "stores.json")
-	t.Setenv("SHUTTLE_STORES_FILE", registry)
+	env.Set("SHUTTLE_STORES_FILE", registry)
 	options := supervisorOptions{StoresFile: registry}
 	cwd := t.TempDir()
-	if err := bootstrapSupervisorStore(options, cwd); err != nil {
+	if err := a.bootstrapSupervisorStore(options, cwd); err != nil {
 		t.Fatal(err)
 	}
 	root := filepath.Join(home, "felt")
 	if !felt.NewStorage(root).Exists() {
 		t.Fatal("default store missing")
 	}
-	stores, err := registeredFeltStores()
+	stores, err := a.registeredFeltStores()
 	if err != nil || !reflect.DeepEqual(stores, []string{root}) {
 		t.Fatalf("stores %v: %v", stores, err)
 	}
@@ -32,7 +34,7 @@ func TestBootstrapSupervisorStoreFreshHomeAndReinstall(t *testing.T) {
 	if err := os.WriteFile(sentinel, []byte("keep me\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrapSupervisorStore(options, cwd); err != nil {
+	if err := a.bootstrapSupervisorStore(options, cwd); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(sentinel)
@@ -42,15 +44,17 @@ func TestBootstrapSupervisorStoreFreshHomeAndReinstall(t *testing.T) {
 }
 
 func TestBootstrapSupervisorStorePreservesOperatorConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, config := range []string{"", `[]`, `{"version":1,"felt_stores":[]}`, `{"felt_stores":["/operator/store"],"extra":true}`, "invalid json"} {
 		t.Run(config, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
+			t.Parallel()
+			env, home := envWithHome(t)
+			a := newApp(env)
 			registry := filepath.Join(home, "stores.json")
 			if err := os.WriteFile(registry, []byte(config), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := bootstrapSupervisorStore(supervisorOptions{StoresFile: registry}, t.TempDir()); err != nil {
+			if err := a.bootstrapSupervisorStore(supervisorOptions{StoresFile: registry}, t.TempDir()); err != nil {
 				t.Fatal(err)
 			}
 			actual, _ := os.ReadFile(registry)
@@ -63,10 +67,11 @@ func TestBootstrapSupervisorStorePreservesOperatorConfiguration(t *testing.T) {
 		})
 	}
 	t.Run("fixed stores", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
+		t.Parallel()
+		env, home := envWithHome(t)
+		a := newApp(env)
 		registry := filepath.Join(home, "stores.json")
-		if err := bootstrapSupervisorStore(supervisorOptions{StoresFile: registry, Stores: "/fixed/store"}, t.TempDir()); err != nil {
+		if err := a.bootstrapSupervisorStore(supervisorOptions{StoresFile: registry, Stores: "/fixed/store"}, t.TempDir()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(registry); !os.IsNotExist(err) {
@@ -76,19 +81,20 @@ func TestBootstrapSupervisorStorePreservesOperatorConfiguration(t *testing.T) {
 }
 
 func TestBootstrapSupervisorStoreReusesCurrentProject(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Parallel()
+	env, home := envWithHome(t)
+	a := newApp(env)
 	project, storage := newStore(t)
 	child := filepath.Join(project, "subdir")
 	if err := os.MkdirAll(child, 0755); err != nil {
 		t.Fatal(err)
 	}
 	registry := filepath.Join(home, "stores.json")
-	t.Setenv("SHUTTLE_STORES_FILE", registry)
-	if err := bootstrapSupervisorStore(supervisorOptions{StoresFile: registry}, child); err != nil {
+	env.Set("SHUTTLE_STORES_FILE", registry)
+	if err := a.bootstrapSupervisorStore(supervisorOptions{StoresFile: registry}, child); err != nil {
 		t.Fatal(err)
 	}
-	stores, err := registeredFeltStores()
+	stores, err := a.registeredFeltStores()
 	if err != nil || !reflect.DeepEqual(stores, []string{project}) || !storage.Exists() {
 		t.Fatalf("project stores %v: %v", stores, err)
 	}
@@ -98,16 +104,16 @@ func TestBootstrapSupervisorStoreReusesCurrentProject(t *testing.T) {
 }
 
 func TestDaemonInstallPreviewDoesNotBootstrapStoreAndHonorsStoresEnvironment(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
-	t.Setenv("AGENT_STORES", "")
-	t.Setenv("SHUTTLE_STORES", "/explicit/store")
-	t.Setenv("SHUTTLE_RELEASE", writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release")).Dir)
-	unsetEnv(t, "SHUTTLE_CODEX_SOCKET")
-	unsetEnv(t, "CODEX_HOME")
-	stubLoginEnv(t, loginEnv{Path: "/bin"})
-	release, err := findDaemonRelease()
+	t.Parallel()
+	env, home := envWithHome(t)
+	env.Set("SHUTTLE_STORES_FILE", filepath.Join(home, "stores.json"))
+	env.Set("AGENT_STORES", "")
+	env.Set("SHUTTLE_STORES", "/explicit/store")
+	env.Set("SHUTTLE_RELEASE", writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release")).Dir)
+	env.Unset("SHUTTLE_CODEX_SOCKET")
+	env.Unset("CODEX_HOME")
+	a := stubLoginEnv(env, loginEnv{Path: "/bin"})
+	release, err := a.findDaemonRelease()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +125,7 @@ func TestDaemonInstallPreviewDoesNotBootstrapStoreAndHonorsStoresEnvironment(t *
 			t.Fatal(err)
 		}
 	}
-	out, stderr, err := executeCLI(t, t.TempDir(), "daemon", "install", "--print")
+	out, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "install", "--print")
 	if err != nil {
 		t.Fatalf("preview: %v %s", err, stderr)
 	}
@@ -134,29 +140,30 @@ func TestDaemonInstallPreviewDoesNotBootstrapStoreAndHonorsStoresEnvironment(t *
 }
 
 func TestBootstrapDirectoryHonorsExplicitStore(t *testing.T) {
+	t.Parallel()
 	project, _ := newStore(t)
-	old := changeDir
-	t.Cleanup(func() { changeDir = old })
-	changeDir = project
-	root, err := supervisorBootstrapDirectory()
+	a := newApp(testEnv(t))
+	a.dir = project
+	root, err := a.supervisorBootstrapDirectory()
 	if err != nil || root != project {
 		t.Fatalf("explicit store %q %v", root, err)
 	}
-	changeDir = t.TempDir()
-	if _, err := supervisorBootstrapDirectory(); err == nil {
+	a.dir = t.TempDir()
+	if _, err := a.supervisorBootstrapDirectory(); err == nil {
 		t.Fatal("invalid explicit store accepted")
 	}
 }
 
 func TestSupervisorPreservesInstalledFixedStores(t *testing.T) {
+	t.Parallel()
 	for _, osName := range []string{"Darwin", "Linux"} {
 		t.Run(osName, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("HOME", home)
-			unsetEnv(t, "AGENT_STORES")
-			unsetEnv(t, "SHUTTLE_STORES")
-			unsetEnv(t, "SHUTTLE_CODEX_SOCKET")
-			unsetEnv(t, "CODEX_HOME")
+			t.Parallel()
+			env, home := envWithHome(t)
+			for _, key := range []string{"AGENT_STORES", "SHUTTLE_STORES", "SHUTTLE_CODEX_SOCKET", "CODEX_HOME"} {
+				env.Unset(key)
+			}
+			a := newApp(env)
 			path := filepath.Join(home, "Library", "LaunchAgents", "test.plist")
 			source := `<plist><dict><key>EnvironmentVariables</key><dict><key>SHUTTLE_STORES</key><string>/existing/store</string></dict></dict></plist>`
 			if osName == "Linux" {
@@ -170,21 +177,32 @@ func TestSupervisorPreservesInstalledFixedStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			options := supervisorOptions{OS: osName, Label: "test"}
-			if err := resolveSupervisorCodex(&options); err != nil {
+			if err := a.resolveSupervisorCodex(&options); err != nil {
 				t.Fatal(err)
 			}
 			if options.Stores != "/existing/store" {
 				t.Fatalf("lost installed stores %q", options.Stores)
 			}
 			options.Stores, options.StoresSet = "", true
-			if err := resolveSupervisorCodex(&options); err != nil || options.Stores != "" {
+			if err := a.resolveSupervisorCodex(&options); err != nil || options.Stores != "" {
 				t.Fatalf("explicit empty ignored: %q %v", options.Stores, err)
 			}
 			options.StoresSet = false
-			t.Setenv("SHUTTLE_STORES", "")
-			if err := resolveSupervisorCodex(&options); err != nil || options.Stores != "" {
+			env.Set("SHUTTLE_STORES", "")
+			if err := a.resolveSupervisorCodex(&options); err != nil || options.Stores != "" {
 				t.Fatalf("environment reset ignored: %q %v", options.Stores, err)
 			}
 		})
 	}
+}
+
+// envWithHome is a test env and its (empty) home directory.
+func envWithHome(t *testing.T) (*sysenv.Env, string) {
+	t.Helper()
+	env := testEnv(t)
+	home, err := env.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env, home
 }

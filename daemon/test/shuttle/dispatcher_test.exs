@@ -1,5 +1,6 @@
 defmodule Shuttle.DispatcherTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Shuttle.Dispatcher
   alias Shuttle.Test.FiberUid
@@ -125,6 +126,11 @@ defmodule Shuttle.DispatcherTest do
       },
       "tests/closed" => %{
         status: "closed",
+        tags: ["constitution"],
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
+      "tests/resting" => %{
+        status: "open",
         tags: ["constitution"],
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
@@ -387,6 +393,8 @@ defmodule Shuttle.DispatcherTest do
 
     def start_link(_ \\ []), do: Agent.start_link(fn -> {:ok, []} end, name: __MODULE__)
 
+    def reset, do: Agent.update(__MODULE__, fn _ -> {:ok, []} end)
+
     def set_result(result), do: Agent.update(__MODULE__, fn {_r, l} -> {result, l} end)
 
     def launches, do: Agent.get(__MODULE__, fn {_r, l} -> l end)
@@ -410,7 +418,7 @@ defmodule Shuttle.DispatcherTest do
 
   # The one darwin gate in `Shuttle.TmuxServer`, injectable so both branches run
   # on either platform.
-  defp set_os_type(os_type), do: Application.put_env(:shuttle, :os_type, os_type)
+  defp set_os_type(os_type), do: Shuttle.Test.Env.put_app_env(:os_type, os_type)
 
   # ── Setup ──
 
@@ -424,11 +432,10 @@ defmodule Shuttle.DispatcherTest do
     # bare CI environment it returns [] → `default_felt_store/0` is nil, and a
     # dispatch has no store to read the fiber from.
     # Pin a store here so store resolution is deterministic regardless of the
-    # host's felt config; delete on exit so the setting never leaks to other
-    # suites (the persistent_term cache in configured_stores/0 is keyed by the
-    # base config, so a differing base on the next suite recomputes cleanly).
-    prev_stores = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", "/tmp")
+    # host's felt config, in this test's scope (the persistent_term cache in
+    # configured_stores/0 is keyed by the base config, so a differing base in
+    # another test recomputes cleanly).
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", "/tmp")
 
     sessions_file =
       Path.join(
@@ -436,24 +443,12 @@ defmodule Shuttle.DispatcherTest do
         "shuttle-dispatcher-ledger-#{System.unique_integer([:positive])}.jsonl"
       )
 
-    prev_sessions_file = System.get_env("SHUTTLE_SESSIONS_FILE")
-    System.put_env("SHUTTLE_SESSIONS_FILE", sessions_file)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", sessions_file)
 
     start_supervised!(StubKitty)
-    Application.put_env(:shuttle, :kitty_impl, StubKitty)
+    Shuttle.Test.Env.put_app_env(:kitty_impl, StubKitty)
 
     on_exit(fn ->
-      if prev_stores,
-        do: System.put_env("SHUTTLE_STORES", prev_stores),
-        else: System.delete_env("SHUTTLE_STORES")
-
-      Application.delete_env(:shuttle, :kitty_impl)
-      Application.delete_env(:shuttle, :os_type)
-
-      if prev_sessions_file,
-        do: System.put_env("SHUTTLE_SESSIONS_FILE", prev_sessions_file),
-        else: System.delete_env("SHUTTLE_SESSIONS_FILE")
-
       File.rm(sessions_file)
       File.rm(sessions_file <> ".1")
     end)
@@ -512,7 +507,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "role and surface metadata select the skill's exit semantics" do
-    assert Dispatcher.render_prompt("tests/a", kind: "pinned") =~ "Kind: pinned"
+    assert Dispatcher.render_prompt("tests/a", kind: "standing") =~ "Kind: standing"
     assert Dispatcher.render_prompt("tests/a", surface: "app") =~ "surface: app"
     assert Dispatcher.render_prompt("tests/a") =~ "Kind: oneshot"
   end
@@ -568,6 +563,21 @@ defmodule Shuttle.DispatcherTest do
     refute Dispatcher.render_prompt("tests/a") =~ "Collaboration:"
     refute Dispatcher.render_resume_prompt("tests/a") =~ "Collaboration:"
     refute Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~ "Collaboration:"
+
+    for prompt <- [
+          Dispatcher.render_prompt("tests/a", collaboration: {:ok, nil}, felt_store: "/tmp/loom"),
+          Dispatcher.render_resume_prompt("tests/a",
+            collaboration: {:ok, nil},
+            felt_store: "/tmp/loom"
+          ),
+          Dispatcher.render_standing_run_prompt("tests/a", "run-1",
+            collaboration: {:ok, nil},
+            felt_store: "/tmp/loom"
+          )
+        ] do
+      assert prompt =~
+               ~r"Collaboration: no roster; role store: (/private)?/tmp/loom"
+    end
   end
 
   test "readable collaboration prompts name a singleton actor and hide multi-role rosters" do
@@ -787,24 +797,53 @@ defmodule Shuttle.DispatcherTest do
     refute prompt =~ "Fiber: ai-futures/shuttle/constitution-shuttle-ctl-ux-fixes"
   end
 
-  test "session_name/2 keys the canonical name by uid (rename-safe, collision-free)" do
-    uid = "01KTHDNZS287ZSSG8X8V59XKWB"
-    assert Dispatcher.session_name("tests/haiku", uid) == "haiku-#{uid}-shuttle"
-    assert Dispatcher.session_name("a/b/c", uid) == "c-#{uid}-shuttle"
+  # Crockford base32, the alphabet a felt ULID is written in (no I, L, O, U).
+  @crockford Enum.concat([?0..?9, ?A..?H, [?J, ?K, ?M, ?N], ?P..?T, ?V..?Z])
+
+  defp ulid, do: StreamData.string(@crockford, length: 26)
+
+  defp fiber_segment, do: StreamData.string([?a..?z, ?0..?9, ?-], min_length: 1, max_length: 12)
+
+  property "a ULID uid names the worker <leaf>-<uid>-shuttle, the name shuttle_session?/1 recognizes" do
+    # Keyed by uid, the name is rename-safe and collision-free; the leaf keeps
+    # it legible.
+    check all(
+            segments <- StreamData.list_of(fiber_segment(), min_length: 1, max_length: 4),
+            trailing <- StreamData.member_of(["", "/"]),
+            uid <- ulid(),
+            max_runs: 100
+          ) do
+      name = Dispatcher.session_name(Enum.join(segments, "/") <> trailing, uid)
+
+      assert name == "#{List.last(segments)}-#{uid}-shuttle"
+      assert Dispatcher.shuttle_session?(name)
+      assert Shuttle.ULID.from_tmux(name) == uid
+    end
   end
 
-  test "session_name/2 has no name for a fiber without a ULID uid" do
-    assert Dispatcher.session_name("tests/haiku", nil) == nil
-    assert Dispatcher.session_name("tests/haiku", "") == nil
-    assert Dispatcher.session_name("tests/haiku", "not-a-ulid") == nil
-  end
+  property "a uid that is not a ULID has no worker name" do
+    not_ulid =
+      StreamData.one_of([
+        StreamData.member_of([nil, "", "not-a-ulid"]),
+        # One character outside Crockford base32.
+        StreamData.bind(ulid(), fn uid ->
+          StreamData.bind(StreamData.integer(0..25), fn i ->
+            StreamData.map(StreamData.member_of(~w(I L O U a z -)), fn c ->
+              String.slice(uid, 0, i) <> c <> String.slice(uid, (i + 1)..-1//1)
+            end)
+          end)
+        end),
+        # One character too few or too many.
+        StreamData.map(ulid(), &String.slice(&1, 0, 25)),
+        StreamData.map(ulid(), &(&1 <> "0"))
+      ])
 
-  test "the name session_name/2 produces is exactly the name shuttle_session?/1 recognizes" do
+    check all(uid <- not_ulid, max_runs: 100) do
+      assert Dispatcher.session_name("tests/haiku", uid) == nil, inspect(uid)
+      refute Dispatcher.shuttle_session?("haiku-#{uid}-shuttle"), inspect(uid)
+    end
+
     uid = "01KTHDNZS287ZSSG8X8V59XKWB"
-    name = Dispatcher.session_name("tests/haiku", uid)
-
-    assert Dispatcher.shuttle_session?(name)
-    assert Shuttle.ULID.from_tmux(name) == uid
 
     for other <- ["haiku-shuttle", "haiku-01J-shuttle", "capture-deadbeef", "resume-#{uid}"] do
       refute Dispatcher.shuttle_session?(other), "#{other} must not read as a worker session"
@@ -853,69 +892,56 @@ defmodule Shuttle.DispatcherTest do
     assert probe_at < spawn_at
   end
 
-  test "dispatch refuses loudly and spawns no tmux session when the wrapper does not resolve" do
-    MockRunner.set_wrapper_kind("claude", :missing)
+  test "every launch path refuses a wrapper bash -l cannot run, and only that wrapper" do
+    # {path, launch, what it returns once the preflight passes}. tests/haiku
+    # carries no session, so a resume that passes the preflight stops at the
+    # missing id — after the point a missing wrapper must already have refused.
+    spawned? = fn ->
+      Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+    end
 
-    assert {:error, {:wrapper_unresolved, message}} =
-             Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    paths = [
+      {"dispatch", fn -> Dispatcher.dispatch("tests/haiku", runner: MockRunner) end,
+       &(&1 == {:ok, FiberUid.session("tests/haiku")} and spawned?.())},
+      {"resume",
+       fn -> Dispatcher.dispatch("tests/haiku", runner: MockRunner, resume_mode: "previous") end,
+       &(&1 == {:error, :missing_session_id})},
+      {"capture", fn -> Dispatcher.capture("an idea", runner: MockRunner, work_dir: "/tmp") end,
+       &(match?({:ok, %{session: _}}, &1) and spawned?.())}
+    ]
 
-    # The message is the whole deliverable: it must name the wrapper, say where
-    # it was looked for, and point at the fix.
-    assert message =~ "claude"
-    assert message =~ "bash -l"
-    assert message =~ "agents.json"
+    # {what `type -t claude` finds in a login bash, the refusal's fragments
+    # (nil: the launch proceeds)}. The message is the whole deliverable: it
+    # names the wrapper, where it was looked for, and the fix. An alias probes
+    # "resolved" but a NON-interactive login bash does not expand it, so it dies
+    # at launch just the same. A wedged login shell is no evidence of absence
+    # (Shuttle.Runner's contract): the launch proceeds and the spawn reports
+    # whatever it actually finds.
+    kinds = [
+      {"file", nil},
+      {"function", nil},
+      {:wedged, nil},
+      {:missing, ["`claude`", "bash -l", "agents.json"]},
+      {"alias", ["`claude`", "ALIAS", "does not expand aliases"]}
+    ]
 
-    # No zombie: the session must never have been created.
-    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
-    assert MockRunner.tmux_sessions() == MapSet.new()
-  end
+    for {path, launch, proceeded?} <- paths, {kind, refusal} <- kinds do
+      MockRunner.reset()
+      MockRunner.set_wrapper_kind("claude", kind)
+      result = launch.()
+      row = "#{path} with a #{inspect(kind)} wrapper: #{inspect(result)}"
 
-  test "dispatch refuses a wrapper that resolves only as a shell alias" do
-    # `type` reports an alias, but the run script is a NON-interactive login
-    # bash, which does not expand aliases — so an alias probes "resolved" and
-    # still dies at launch. Same silent failure, so it gets the same refusal.
-    MockRunner.set_wrapper_kind("claude", "alias")
+      if refusal do
+        assert {:error, {:wrapper_unresolved, message}} = result, row
+        for fragment <- refusal, do: assert(message =~ fragment, row)
 
-    assert {:error, {:wrapper_unresolved, message}} =
-             Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-
-    assert message =~ "ALIAS"
-    assert message =~ "does not expand aliases"
-    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
-  end
-
-  test "a wedged login shell does not read as a missing wrapper" do
-    # A timeout is never evidence of absence (Shuttle.Runner's contract). An
-    # overloaded machine whose login shell is slow must not have every dispatch
-    # refused with "your wrapper is missing" — the dispatch proceeds and the
-    # spawn reports whatever it actually finds.
-    MockRunner.set_wrapper_kind("claude", :wedged)
-
-    assert Dispatcher.dispatch("tests/haiku", runner: MockRunner) ==
-             {:ok, FiberUid.session("tests/haiku")}
-
-    assert Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
-  end
-
-  test "a resume is preflighted too — a missing wrapper cannot spawn a resume session" do
-    # Resume renders the same wrapper token into the same login-bash script, so
-    # it fails exactly the same way and must be guarded on the same path.
-    MockRunner.set_wrapper_kind("claude", :missing)
-
-    assert {:error, {:wrapper_unresolved, _}} =
-             Dispatcher.dispatch("tests/haiku", runner: MockRunner, resume_mode: "previous")
-
-    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
-  end
-
-  test "capture refuses to spawn when the wrapper does not resolve" do
-    MockRunner.set_wrapper_kind("claude", :missing)
-
-    assert {:error, {:wrapper_unresolved, message}} =
-             Dispatcher.capture("an idea", runner: MockRunner, work_dir: "/tmp")
-
-    assert message =~ "claude"
-    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+        # No zombie: the session must never have been created.
+        refute spawned?.(), row
+        assert MockRunner.tmux_sessions() == MapSet.new(), row
+      else
+        assert proceeded?.(result), row
+      end
+    end
   end
 
   test "a work_dir that is not on this host is named, not blamed on the wrapper" do
@@ -1011,6 +1037,17 @@ defmodule Shuttle.DispatcherTest do
   test "dispatch refuses closed fiber" do
     result = Dispatcher.dispatch("tests/closed", runner: MockRunner)
     assert {:error, :closed} = result
+  end
+
+  # The tick chose its fibers from an earlier read; a pause or rest that lands
+  # before the launch leaves the fiber `open`, and the launch's fresh read must
+  # refuse it rather than start a worker on work just put down.
+  test "an unforced dispatch refuses any fiber its fresh read finds not active" do
+    assert {:error, :not_active} = Dispatcher.dispatch("tests/resting", runner: MockRunner)
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
   end
 
   test "dispatch with force: true on a closed fiber shells out to shuttle reopen" do
@@ -1270,80 +1307,49 @@ defmodule Shuttle.DispatcherTest do
   # Shuttle resolves the axes; these assert the daemon renders an already-resolved
   # record's effort/chrome/headless into each CLI's native flag form.
 
-  test "claude effort renders --effort and chrome renders --chrome" do
-    agent =
-      resolved(%{
+  test "resolved effort and chrome render through each harness's native flags" do
+    bases = %{
+      "claude" => %{
         "id" => "claude-opus",
         "cli" => "claude",
         "wrapper" => "claude",
-        "model" => "opus",
-        "effort" => "xhigh",
-        "chrome" => true
-      })
-
-    cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ "--effort 'xhigh'"
-    assert cmd =~ "--chrome"
-  end
-
-  test "claude with the resolved default effort renders it, no chrome" do
-    agent =
-      resolved(%{
-        "id" => "claude-opus",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "opus",
-        "effort" => "xhigh"
-      })
-
-    cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ "--effort 'xhigh'"
-    refute cmd =~ "--chrome"
-  end
-
-  test "pi renders effort as :level suffix on the model" do
-    agent =
-      resolved(%{
+        "model" => "opus"
+      },
+      "pi" => %{
         "id" => "pi-kimi",
         "cli" => "pi",
         "wrapper" => "pi",
-        "model" => "moonshotai/kimi-latest",
-        "effort" => "high"
-      })
-
-    cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ "--model 'moonshotai/kimi-latest:high'"
-    refute cmd =~ "--effort"
-  end
-
-  test "codex renders effort via -c model_reasoning_effort" do
-    agent =
-      resolved(%{
+        "model" => "moonshotai/kimi-latest"
+      },
+      "codex" => %{
         "id" => "codex",
         "cli" => "codex",
         "wrapper" => "codex",
-        "model" => "gpt-5.5-codex",
-        "effort" => "high"
-      })
+        "model" => "gpt-5.5-codex"
+      }
+    }
 
-    cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ ~s(-c model_reasoning_effort='high')
-  end
+    # {harness, resolved axes, fragments rendered, fragments absent}
+    for {cli, axes, present, absent} <- [
+          {"claude", %{"effort" => "xhigh", "chrome" => true}, ["--effort 'xhigh'", "--chrome"],
+           []},
+          {"claude", %{"effort" => "xhigh"}, ["--effort 'xhigh'"], ["--chrome"]},
+          {"claude", %{"chrome" => true}, ["--model 'opus'", "--chrome"], ["--effort"]},
+          {"claude", %{}, ["--model 'opus'"], ["--effort", "--chrome"]},
+          # pi carries effort as a :level suffix on the model.
+          {"pi", %{"effort" => "high"}, ["--model 'moonshotai/kimi-latest:high'"], ["--effort"]},
+          {"pi", %{}, ["--model 'moonshotai/kimi-latest' "], ["--effort", ":high"]},
+          {"codex", %{"effort" => "high"}, ["-c model_reasoning_effort='high'"], ["--effort"]},
+          {"codex", %{}, ["--model 'gpt-5.5-codex'"], ["model_reasoning_effort"]}
+        ] do
+      cmd = Agents.build_command(resolved(Map.merge(bases[cli], axes)), "hi")
 
-  test "resolved chrome renders --chrome" do
-    # Shuttle resolved the claude-opus base with chrome:true; the daemon renders it.
-    agent =
-      resolved(%{
-        "id" => "claude-opus",
-        "cli" => "claude",
-        "wrapper" => "claude",
-        "model" => "opus",
-        "chrome" => true
-      })
+      for fragment <- present,
+          do: assert(cmd =~ fragment, "#{cli} #{inspect(axes)} lacks #{fragment}: #{cmd}")
 
-    cmd = Agents.build_command(agent, "hi")
-    assert cmd =~ "--model 'opus'"
-    assert cmd =~ "--chrome"
+      for fragment <- absent,
+          do: refute(cmd =~ fragment, "#{cli} #{inspect(axes)} renders #{fragment}: #{cmd}")
+    end
   end
 
   test "resolved headless renders -p print mode with bypass permissions" do
@@ -1404,51 +1410,8 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Resume command shape ──
 
-  test "build_resume_command for claude with empty prompt: --resume only, no stdin pipe" do
-    agent = claude_sonnet()
-
-    cmd = Agents.build_resume_command(agent, "abc-123", "")
-    assert cmd =~ "claude"
-    assert cmd =~ "--resume 'abc-123'"
-    refute cmd =~ "<<<"
-  end
-
-  test "build_resume_command for claude with prompt: pipes via here-string" do
-    agent = claude_sonnet()
-
-    cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
-    assert cmd =~ "--resume 'abc-123'"
-    assert cmd =~ "<<< 'address the typo'"
-  end
-
-  test "build_resume_command for claude with whitespace-only prompt: treated as empty" do
-    agent = claude_sonnet()
-
-    cmd = Agents.build_resume_command(agent, "abc-123", "   \n  ")
-    refute cmd =~ "<<<"
-  end
-
-  test "build_resume_command for codex with prompt: positional arg" do
-    agent = codex()
-
-    cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
-    assert cmd =~ "codex"
-    assert cmd =~ "resume 'abc-123'"
-    assert cmd =~ "'address the typo'"
-    refute cmd =~ "<<<"
-  end
-
-  test "build_resume_command for codex with empty prompt: resume only" do
-    agent = codex()
-
-    cmd = Agents.build_resume_command(agent, "abc-123", "")
-    assert cmd =~ "resume 'abc-123'"
-    # No trailing prompt arg.
-    assert String.trim_trailing(cmd) |> String.ends_with?("'abc-123'")
-  end
-
-  test "build_resume_command for pi with prompt: positional arg" do
-    agent =
+  test "a resume keeps the session handle and sends only a nonblank prompt, on each harness's channel" do
+    pi =
       resolved(%{
         "id" => "pi-kimi",
         "cli" => "pi",
@@ -1457,35 +1420,40 @@ defmodule Shuttle.DispatcherTest do
         "model" => "moonshotai/kimi-latest"
       })
 
-    cmd = Agents.build_resume_command(agent, "abc-123", "address the typo")
-    assert cmd =~ "--session 'abc-123'"
-    assert cmd =~ "'address the typo'"
-    # stdin would flip pi into print mode; the message must stay positional.
-    refute cmd =~ "<<<"
-  end
+    # {agent, session handle, how a prompt follows it}. claude reads the next
+    # turn from a here-string; codex and pi take it positionally — stdin would
+    # flip pi into print mode.
+    for {agent, handle, channel} <- [
+          {claude_sonnet(), "--resume 'abc-123'", "<<< "},
+          {codex(), "resume 'abc-123'", ""},
+          {pi, "--session 'abc-123'", ""}
+        ],
+        # {prompt, its shell-escaped form when it is sent}; `:omitted` is the
+        # two-argument form.
+        {prompt, sent} <- [
+          {:omitted, nil},
+          {"", nil},
+          {"   \n  ", nil},
+          {"address the typo", "'address the typo'"},
+          {"it's", "'it'\\''s'"}
+        ] do
+      cmd =
+        if prompt == :omitted,
+          do: Agents.build_resume_command(agent, "abc-123"),
+          else: Agents.build_resume_command(agent, "abc-123", prompt)
 
-  test "build_resume_command for pi with empty prompt: session only" do
-    agent =
-      resolved(%{
-        "id" => "pi-kimi",
-        "cli" => "pi",
-        "wrapper" => "pi",
-        "provider" => "openrouter",
-        "model" => "moonshotai/kimi-latest"
-      })
+      row = "#{agent.id}, prompt #{inspect(prompt)}: #{cmd}"
 
-    cmd = Agents.build_resume_command(agent, "abc-123", "")
-    assert cmd =~ "--session 'abc-123'"
-    assert String.trim_trailing(cmd) |> String.ends_with?("'abc-123'")
-    refute cmd =~ "<<<"
-  end
+      assert String.starts_with?(cmd, agent.wrapper <> " "), row
 
-  test "build_resume_command/2 default-arg form still works (zero-arg prompt)" do
-    agent = claude_sonnet()
-
-    cmd = Agents.build_resume_command(agent, "abc-123")
-    assert cmd =~ "--resume 'abc-123'"
-    refute cmd =~ "<<<"
+      if sent do
+        assert String.ends_with?(cmd, "#{handle} #{channel}#{sent}"), row
+        if channel == "", do: refute(cmd =~ "<<<", row)
+      else
+        assert String.ends_with?(cmd, handle), row
+        refute cmd =~ "<<<", row
+      end
+    end
   end
 
   # ── Resume prompt rendering ──
@@ -1547,15 +1515,13 @@ defmodule Shuttle.DispatcherTest do
   end
 
   describe "check_resume_intent — oneshot resume-on-no-handoff discriminator (frontmatter)" do
-    # The continuation state lives in the fiber's `shuttle:` block (the substrate
-    # that replaced the per-host marker files): `dispatched_at`/`session_uuid` the
-    # daemon stamps at dispatch, `handed_off_at` the worker stamps at clean exit.
-    # The decision is a pure read off the polled fiber map — no SHUTTLE_DATA_DIR,
-    # no marker files.
+    # The continuation state lives in the fiber's `shuttle:` block:
+    # `dispatched_at`/`session_uuid` the daemon stamps at dispatch,
+    # `handed_off_at` the worker stamps at clean exit. The decision is a pure
+    # read off the polled fiber map.
     setup do
       # A fiber dispatched at a fixed past instant, carrying the resumable session
-      # id — the daemon-at-spawn state. Clean-exit tests add a newer
-      # `handed_off_at`; dirty-death tests leave it absent.
+      # id — the daemon-at-spawn state.
       dispatched_at = "2026-06-20T18:00:00.000000Z"
       %{dispatched_at: dispatched_at, session_uuid: "aaaa-bbbb-cccc-dddd"}
     end
@@ -1572,92 +1538,53 @@ defmodule Shuttle.DispatcherTest do
       end
     end
 
-    defp intent(fiber, age_s, opts \\ []),
-      do:
-        Dispatcher.check_resume_intent(
-          fiber,
-          Keyword.merge([transcript: transcript(age_s), now: @now], opts)
-        )
+    defp intent(fiber, age_s),
+      do: Dispatcher.check_resume_intent(fiber, transcript: transcript(age_s), now: @now)
 
-    test "a died-without-handoff session with a warm transcript is resumed", ctx do
-      assert {:previous, "aaaa-bbbb-cccc-dddd"} = intent(dispatched_fiber(ctx), 60)
+    # Every combination of what the decision reads, against the rule as the
+    # docs state it. `runtime` is what the daemon stamped: a session and its
+    # dispatch, a session with no dispatch time, a dispatch whose session id was
+    # never learned, or nothing. Transcript ages are seconds before @now, an
+    # hour after the 18:00 dispatch: 45 * 60 is the warm window's edge, 3600 the
+    # dispatch's own second, 3601 a predecessor's transcript.
+    test "the continuation follows resume_mode, kind, session, handoff, surface and transcript",
+         ctx do
+      for mode <- [nil, "previous", "fresh", "continue"],
+          kind <- ["oneshot", "pinned", "standing"],
+          runtime <- [:dispatched, :undated, :no_session, :never],
+          handoff <- [:none, :before_dispatch, :at_dispatch, :after_dispatch],
+          surface <- [nil, "app"],
+          age <- [nil, 60, 45 * 60, 45 * 60 + 1, 3600, 3601] do
+        fiber = continuation_fiber(ctx, kind, runtime, handoff, surface)
+        session = if runtime in [:dispatched, :undated], do: ctx.session_uuid
+        test_pid = self()
 
-      # The window's edge is still warm (45 minutes by default).
-      assert {:previous, _} = intent(dispatched_fiber(ctx), 45 * 60)
-    end
+        lookup = fn id ->
+          send(test_pid, {:looked_up, id})
+          transcript(age).(id)
+        end
 
-    test "a died-without-handoff session with a cold transcript goes fresh, naming it", ctx do
-      assert {:cold, "aaaa-bbbb-cccc-dddd", "/t/aaaa-bbbb-cccc-dddd.jsonl"} =
-               intent(dispatched_fiber(ctx), 45 * 60 + 1)
-    end
+        opts = [transcript: lookup, now: @now] ++ if(mode, do: [resume_mode: mode], else: [])
+        clean? = runtime in [:undated, :never] or handoff in [:at_dispatch, :after_dispatch]
+        {expected, looks?} = expected_continuation(mode, kind, session, clean?, surface, age)
 
-    test "a died-without-handoff session with no transcript on this host goes fresh", ctx do
-      assert {:cold, "aaaa-bbbb-cccc-dddd", nil} = intent(dispatched_fiber(ctx), nil)
+        row =
+          "mode #{inspect(mode)}, #{kind}, #{runtime}, handoff #{handoff}, " <>
+            "surface #{inspect(surface)}, transcript age #{inspect(age)}"
+
+        assert Dispatcher.check_resume_intent(fiber, opts) == expected, row
+
+        if looks?,
+          do: assert_received({:looked_up, ^session}, row),
+          else: refute_received({:looked_up, _}, row)
+      end
     end
 
     test "the warm window is one application setting", ctx do
-      Application.put_env(:shuttle, :resume_warm_window_s, 10)
-      on_exit(fn -> Application.delete_env(:shuttle, :resume_warm_window_s) end)
+      Shuttle.Test.Env.put_app_env(:resume_warm_window_s, 10)
 
       assert {:previous, _} = intent(dispatched_fiber(ctx), 10)
       assert {:cold, _, _} = intent(dispatched_fiber(ctx), 11)
-    end
-
-    test "a clean handoff goes fresh without looking at the transcript", ctx do
-      fiber = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
-      assert :fresh = intent(fiber, 60, transcript: fn _ -> flunk("looked up") end)
-    end
-
-    test "an app conversation resumes unless handed off, whatever its transcript", ctx do
-      app = dispatched_fiber(ctx, %{"surface" => "app"})
-      untouched = fn _ -> flunk("app surface looked up a transcript") end
-
-      assert {:previous, "aaaa-bbbb-cccc-dddd"} = intent(app, nil, transcript: untouched)
-
-      handed_off =
-        dispatched_fiber(ctx, %{
-          "surface" => "app",
-          "handed_off_at" => "2026-06-20T18:05:00.000000Z"
-        })
-
-      assert :fresh = intent(handed_off, nil, transcript: untouched)
-    end
-
-    test "explicit resume_mode wins over the transcript's temperature", ctx do
-      assert {:previous, "aaaa-bbbb-cccc-dddd"} =
-               intent(dispatched_fiber(ctx), 10 * 3600, resume_mode: "previous")
-
-      assert {:previous, "aaaa-bbbb-cccc-dddd"} =
-               intent(dispatched_fiber(ctx), nil, resume_mode: "previous")
-
-      refute match?({:previous, _}, intent(dispatched_fiber(ctx), 60, resume_mode: "fresh"))
-    end
-
-    test "a transcript older than the dispatch is not this dispatch's session", ctx do
-      # dispatched_at is 18:00; a transcript last written at 17:59:59 belongs to
-      # a predecessor whose id a codex/pi launch never replaced. Plain fresh, no
-      # cut-off note — the marker's id says nothing about the latest run.
-      assert :fresh = intent(dispatched_fiber(ctx), 3601)
-      assert :fresh = intent(dispatched_fiber(ctx), 3601, resume_mode: "fresh")
-      assert :fresh = intent(dispatched_fiber(ctx), 3601, resume_mode: "continue")
-
-      # Written in the dispatch's own second still counts as this session's.
-      assert {:cold, _, _} = intent(dispatched_fiber(ctx), 3600)
-    end
-
-    test "resume_mode=continue applies the no-handoff rule to every kind", ctx do
-      pinned = dispatched_fiber(ctx, %{"kind" => "pinned"})
-      assert {:previous, "aaaa-bbbb-cccc-dddd"} = intent(pinned, 60, resume_mode: "continue")
-      assert {:cold, _, _} = intent(pinned, 45 * 60 + 1, resume_mode: "continue")
-
-      handed_off =
-        dispatched_fiber(ctx, %{"kind" => "standing", "handed_off_at" => "2026-06-20T18:05:00Z"})
-
-      assert :fresh = intent(handed_off, 60, resume_mode: "continue")
-
-      # Nothing to resume is fresh, never the Resume button's missing-id error.
-      assert :fresh =
-               intent(%{"shuttle" => %{"kind" => "oneshot"}}, 60, resume_mode: "continue")
     end
 
     test "resolve_resume_intent passes the transcript lookup through", ctx do
@@ -1668,61 +1595,60 @@ defmodule Shuttle.DispatcherTest do
                )
     end
 
-    test "starts fresh when the worker left a clean handoff (handed_off_at >= dispatched_at)",
-         ctx do
-      # The worker stamped `handed_off_at` at or after the dispatch → clean close →
-      # next worker starts fresh.
-      fiber = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
-      assert :fresh = Dispatcher.check_resume_intent(fiber)
+    # The rule, in the order it decides: "previous" resumes the stamped session
+    # or names its absence; the autonomous loop resumes only oneshots; with no
+    # session, or a clean handoff since dispatch (presumed when there is no
+    # dispatch time), the next worker starts fresh; an app conversation lives in
+    # the App Server and resumes unless "fresh" was asked for. Only past those
+    # does the transcript decide — the only time it is looked up.
+    defp expected_continuation(mode, kind, session, clean?, surface, age) do
+      cond do
+        mode == "previous" and session != nil -> {{:previous, session}, false}
+        mode == "previous" -> {{:error, :missing_session_id}, false}
+        mode == nil and kind == "standing" -> {:fresh, false}
+        session == nil or clean? -> {:fresh, false}
+        surface == "app" and mode == "fresh" -> {:fresh, false}
+        surface == "app" -> {{:previous, session}, false}
+        true -> {by_transcript(mode, session, age), true}
+      end
     end
 
-    test "resume_mode=fresh never resumes, but names a cut-off session", ctx do
-      # "New session" always means a new session — even over a warm transcript
-      # the autonomous rule would resume. The prompt still names what was cut off.
-      assert {:cold, "aaaa-bbbb-cccc-dddd", "/t/aaaa-bbbb-cccc-dddd.jsonl"} =
-               intent(dispatched_fiber(ctx), 60, resume_mode: "fresh")
+    # A transcript not on this host, or past the warm window (or any, for
+    # "fresh"), is a cut-off session the prompt names; one written before the
+    # dispatch is a predecessor's, and says nothing about this run.
+    defp by_transcript(_mode, session, nil), do: {:cold, session, nil}
+    defp by_transcript(_mode, _session, age) when age > 3600, do: :fresh
 
-      assert {:cold, _, nil} = intent(dispatched_fiber(ctx), nil, resume_mode: "fresh")
+    defp by_transcript(mode, session, age) when age <= 45 * 60 and mode != "fresh",
+      do: {:previous, session}
 
-      clean = dispatched_fiber(ctx, %{"handed_off_at" => "2026-06-20T18:05:00.000000Z"})
-      assert :fresh = intent(clean, 60, resume_mode: "fresh")
+    defp by_transcript(_mode, session, _age), do: {:cold, session, "/t/#{session}.jsonl"}
 
-      app = dispatched_fiber(ctx, %{"surface" => "app"})
-      assert :fresh = intent(app, 60, resume_mode: "fresh")
+    # The polled fiber map for one row: `handed_off_at` is set relative to the
+    # 18:00 dispatch, and an absent value is an absent key.
+    defp continuation_fiber(ctx, kind, runtime, handoff, surface) do
+      runtime_block =
+        if runtime != :never do
+          reject_nil(%{
+            "session_uuid" => if(runtime in [:dispatched, :undated], do: ctx.session_uuid),
+            "dispatched_at" => if(runtime in [:dispatched, :no_session], do: ctx.dispatched_at),
+            "handed_off_at" =>
+              %{
+                none: nil,
+                before_dispatch: "2026-06-20T17:59:00.000000Z",
+                at_dispatch: ctx.dispatched_at,
+                after_dispatch: "2026-06-20T18:05:00.000000Z"
+              }[handoff]
+          })
+        end
+
+      %{
+        "shuttle" =>
+          reject_nil(%{"kind" => kind, "surface" => surface, "runtime" => runtime_block})
+      }
     end
 
-    test "resume_mode=previous resumes the shuttle block's session", ctx do
-      # The human clicked "Resume previous". The session id comes from
-      # `shuttle.session_uuid` the daemon stamped (the worker never knew its UUID).
-      assert {:previous, "aaaa-bbbb-cccc-dddd"} =
-               Dispatcher.check_resume_intent(dispatched_fiber(ctx),
-                 resume_mode: "previous"
-               )
-    end
-
-    test "resume_mode=previous with no session_uuid surfaces the missing-id error", _ctx do
-      # "Resume previous" but the fiber carries no `session_uuid` → there is no
-      # session to resume. Surface :missing_session_id rather than silently
-      # starting fresh ("New session" is the explicit fresh path).
-      fiber = %{"shuttle" => %{"kind" => "oneshot"}}
-
-      assert {:error, :missing_session_id} =
-               Dispatcher.check_resume_intent(fiber, resume_mode: "previous")
-    end
-
-    test "a standing role is never auto-resumed (fresh even with no handoff)", ctx do
-      # Scope guard: only oneshots use this mechanism. A standing role dispatches
-      # discrete scheduled occurrences — always fresh.
-      fiber = dispatched_fiber(ctx, %{"kind" => "standing"})
-      assert :fresh = Dispatcher.check_resume_intent(fiber)
-    end
-
-    test "no prior session (first run) starts fresh", _ctx do
-      # No `session_uuid`/`dispatched_at` on the fiber → no session id to resume →
-      # fresh.
-      fiber = %{"shuttle" => %{"kind" => "oneshot"}}
-      assert :fresh = Dispatcher.check_resume_intent(fiber)
-    end
+    defp reject_nil(map), do: Map.reject(map, fn {_key, value} -> is_nil(value) end)
   end
 
   test "resume reloads current constitution and skills" do
@@ -2203,136 +2129,85 @@ defmodule Shuttle.DispatcherTest do
   # So on darwin an absent server is started through kitty, or the dispatch is
   # refused outright.
 
-  describe "tmux server preflight" do
-    test "darwin with no server asks kitty first, then spawns the worker" do
-      set_os_type({:unix, :darwin})
-      MockRunner.set_tmux_server(:absent)
+  test "the tmux server preflight starts a missing macOS server through kitty or refuses" do
+    # kitty forks a server holding an anchor session that deliberately is NOT a
+    # `-shuttle` name, so nothing adopts it.
+    anchor = ~w(tmux new-session -d -s shuttle-anchor -- sh -c) ++ ["exec sleep 2147483647"]
+    refute Dispatcher.shuttle_session?("shuttle-anchor")
+    no_kitty = {:error, "no live kitty remote-control socket"}
 
-      assert {:ok, session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    # {os, what `tmux ls` says, kitty's answer, outcome, kitty launches,
+    # exit-empty disarmed before the worker's new-session?}.
+    #   - A server kitty just forked, or one a human started, is disarmed so it
+    #     cannot exit between `tmux ls` and the worker's `new-session` — which
+    #     would then fork a daemon-rooted server, the outcome this preflight
+    #     exists to prevent.
+    #   - With no reachable kitty the dispatch is refused outright: a server
+    #     forked here would poison every worker on it.
+    #   - An unreadable `tmux ls` is uncertainty: it never blocks, and touches
+    #     nothing, since there may be no server there to harden.
+    #   - Off macOS an absent server is not the daemon's business.
+    rows = [
+      {:darwin, :absent, :ok, :spawned, [anchor], true},
+      {:darwin, :absent, no_kitty, :refused, [anchor], false},
+      {:darwin, :present, :ok, :spawned, [], true},
+      {:darwin, :timeout, :ok, :spawned, [], false},
+      {:linux, :absent, :ok, :spawned, [], false},
+      {:linux, :present, :ok, :spawned, [], false}
+    ]
 
-      # kitty was asked to fork a server holding the anchor session, and the
-      # anchor deliberately is NOT a `-shuttle` name (nothing must adopt it).
-      assert [argv] = StubKitty.launches()
+    paths = [
+      {"dispatch", fn -> Dispatcher.dispatch("tests/haiku", runner: MockRunner) end},
+      {"capture",
+       fn ->
+         Dispatcher.capture("an idea", runner: MockRunner, work_dir: "/tmp", felt_store: "/tmp")
+       end}
+    ]
 
-      assert argv == [
-               "tmux",
-               "new-session",
-               "-d",
-               "-s",
-               "shuttle-anchor",
-               "--",
-               "sh",
-               "-c",
-               "exec sleep 2147483647"
-             ]
+    for {os, server, kitty, outcome, launches, disarmed?} <- rows, {path, launch} <- paths do
+      MockRunner.reset()
+      StubKitty.reset()
+      set_os_type({:unix, os})
+      MockRunner.set_tmux_server(server)
+      StubKitty.set_result(kitty)
 
-      refute Dispatcher.shuttle_session?("shuttle-anchor")
-
-      # …and it happened BEFORE the worker's own `tmux new-session`.
+      result = launch.()
       commands = MockRunner.commands()
-      kitty_at = Enum.find_index(commands, fn {cmd, _} -> cmd == "kitty" end)
+      row = "#{path} on #{os}, server #{server}, kitty #{inspect(kitty)}: #{inspect(result)}"
 
-      new_session_at =
-        Enum.find_index(commands, fn
-          {"tmux", ["new-session" | _]} -> true
-          _ -> false
-        end)
+      at = fn pattern -> Enum.find_index(commands, &pattern.(&1)) end
+      new_session_at = at.(&match?({"tmux", ["new-session" | _]}, &1))
+      kitty_at = at.(&match?({"kitty", _}, &1))
+      disarm_at = at.(&(&1 == {"tmux", ["set-option", "-s", "exit-empty", "off"]}))
 
-      assert is_integer(kitty_at)
-      assert is_integer(new_session_at)
-      assert kitty_at < new_session_at
+      assert StubKitty.launches() == launches, row
 
-      # `exit-empty` is disarmed on the server kitty just forked, so it cannot
-      # die between here and the worker's own `new-session`.
-      assert Enum.any?(commands, &(&1 == {"tmux", ["set-option", "-s", "exit-empty", "off"]}))
+      case outcome do
+        :spawned ->
+          # The worker's session comes back, never the anchor kitty forked.
+          assert {:ok, spawned} = result, row
 
-      assert session =~ "-shuttle"
-    end
+          case path do
+            "dispatch" -> assert spawned == FiberUid.session("tests/haiku"), row
+            "capture" -> assert spawned.session =~ ~r/\Acapture-/, row
+          end
 
-    test "darwin with no server and no reachable kitty refuses the dispatch outright" do
-      set_os_type({:unix, :darwin})
-      MockRunner.set_tmux_server(:absent)
-      StubKitty.set_result({:error, "no live kitty remote-control socket"})
+          assert is_integer(new_session_at), row
+          if launches != [], do: assert(kitty_at < new_session_at, row)
 
-      assert {:error, {:tmux_server_unavailable, message}} =
-               Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+        :refused ->
+          assert {:error, {:tmux_server_unavailable, message}} = result, row
+          assert message =~ "kitty", row
+          assert message =~ "erlexec", row
+          assert new_session_at == nil, row
+          assert MockRunner.tmux_sessions() == MapSet.new(), row
+      end
 
-      assert message =~ "kitty"
-      assert message =~ "erlexec"
-
-      # Nothing spawned: the refusal is the whole point — a server forked here
-      # would poison every worker on it.
-      refute Enum.any?(MockRunner.commands(), fn
-               {"tmux", ["new-session" | _]} -> true
-               _ -> false
-             end)
-
-      assert MockRunner.tmux_sessions() == MapSet.new()
-    end
-
-    test "darwin with a server already running never touches kitty, but disarms exit-empty" do
-      set_os_type({:unix, :darwin})
-      MockRunner.set_tmux_server(:present)
-
-      assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-      assert StubKitty.launches() == []
-
-      # The race this closes: a human-started server with no anchor session
-      # exits the moment its last session goes away, which can happen between
-      # `tmux ls` answering `:present` and the worker's `new-session` — and that
-      # `new-session` would then fork a daemon-rooted server, the one outcome
-      # this whole preflight exists to prevent.
-      commands = MockRunner.commands()
-      assert Enum.any?(commands, &(&1 == {"tmux", ["set-option", "-s", "exit-empty", "off"]}))
-
-      exit_empty_at =
-        Enum.find_index(commands, &(&1 == {"tmux", ["set-option", "-s", "exit-empty", "off"]}))
-
-      new_session_at =
-        Enum.find_index(commands, fn
-          {"tmux", ["new-session" | _]} -> true
-          _ -> false
-        end)
-
-      assert exit_empty_at < new_session_at
-    end
-
-    test "linux keeps today's behaviour exactly — an absent server is not the daemon's business" do
-      set_os_type({:unix, :linux})
-      MockRunner.set_tmux_server(:absent)
-
-      assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-      assert StubKitty.launches() == []
-    end
-
-    test "an unreadable tmux ls is uncertainty, and uncertainty never blocks" do
-      set_os_type({:unix, :darwin})
-      MockRunner.set_tmux_server(:timeout)
-
-      assert {:ok, _session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-      assert StubKitty.launches() == []
-
-      # And uncertainty touches nothing: there may be no server there to harden.
-      refute Enum.any?(MockRunner.commands(), fn
-               {"tmux", ["set-option" | _]} -> true
-               _ -> false
-             end)
-    end
-
-    test "capture refuses identically" do
-      set_os_type({:unix, :darwin})
-      MockRunner.set_tmux_server(:absent)
-      StubKitty.set_result({:error, "no live kitty remote-control socket"})
-
-      assert {:error, {:tmux_server_unavailable, message}} =
-               Dispatcher.capture("an idea",
-                 runner: MockRunner,
-                 work_dir: "/tmp",
-                 felt_store: "/tmp"
-               )
-
-      assert message =~ "kitty"
-      assert MockRunner.tmux_sessions() == MapSet.new()
+      if disarmed? do
+        assert disarm_at < new_session_at, row
+      else
+        refute Enum.any?(commands, &match?({"tmux", ["set-option" | _]}, &1)), row
+      end
     end
   end
 
@@ -2343,29 +2218,14 @@ defmodule Shuttle.DispatcherTest do
   defp iso_now, do: DateTime.to_iso8601(DateTime.utc_now())
 
   # A oneshot fiber map carrying the daemon-at-dispatch shuttle fields (session
-  # uuid + dispatched_at from the test context), nested under shuttle.runtime.
-  # `extra` merges over the
-  # whole shuttle map for config keys (e.g. `kind: standing`) EXCEPT the
-  # runtime-key names, which route into the nested runtime block instead (e.g.
-  # a clean-exit test's `handed_off_at`).
-  @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id)
-
-  defp dispatched_fiber(ctx, extra \\ %{}) do
-    {runtime_extra, config_extra} = Map.split(extra, @runtime_key_names)
-
+  # uuid + dispatched_at from the test context), nested under shuttle.runtime:
+  # a session that ended without a handoff.
+  defp dispatched_fiber(ctx) do
     %{
-      "shuttle" =>
-        Map.merge(
-          %{
-            "kind" => "oneshot",
-            "runtime" =>
-              Map.merge(
-                %{"session_uuid" => ctx.session_uuid, "dispatched_at" => ctx.dispatched_at},
-                runtime_extra
-              )
-          },
-          config_extra
-        )
+      "shuttle" => %{
+        "kind" => "oneshot",
+        "runtime" => %{"session_uuid" => ctx.session_uuid, "dispatched_at" => ctx.dispatched_at}
+      }
     }
   end
 end

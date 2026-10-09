@@ -44,10 +44,10 @@ defmodule Shuttle do
   """
   @spec data_dir() :: String.t()
   def data_dir do
-    case String.trim(System.get_env("SHUTTLE_DATA_DIR", "")) do
-      "" -> Path.join(System.user_home!(), ".shuttle")
-      "~" -> System.user_home!()
-      "~/" <> rest -> System.user_home!() <> "/" <> rest
+    case String.trim(Shuttle.Env.get("SHUTTLE_DATA_DIR", "")) do
+      "" -> Path.join(Shuttle.Env.home(), ".shuttle")
+      "~" -> Shuttle.Env.home()
+      "~/" <> rest -> Shuttle.Env.home() <> "/" <> rest
       dir -> dir
     end
   end
@@ -60,7 +60,7 @@ defmodule Shuttle do
   """
   @spec state_path(String.t(), String.t()) :: String.t()
   def state_path(env_var, leaf) do
-    case String.trim(System.get_env(env_var, "")) do
+    case String.trim(Shuttle.Env.get(env_var, "")) do
       "" -> Path.join(data_dir(), leaf)
       path -> path
     end
@@ -76,7 +76,7 @@ defmodule Shuttle do
   """
   @spec listen() :: String.t()
   def listen do
-    case Application.get_env(:shuttle, :listen) do
+    case Shuttle.Env.app(:listen) do
       value when is_binary(value) -> value
       _ -> Shuttle.Host.listen()
     end
@@ -92,7 +92,7 @@ defmodule Shuttle do
   """
   @spec host_class() :: Shuttle.Host.class()
   def host_class do
-    case Application.get_env(:shuttle, :host_class) do
+    case Shuttle.Env.app(:host_class) do
       class when class in [:single_user, :shared_multi_user, :exposed] -> class
       _ -> Shuttle.Host.class()
     end
@@ -174,6 +174,12 @@ defmodule Shuttle.Application do
     core = [
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
+      # Shares one felt read among concurrent board requests for the same
+      # fiber, and among concurrent misses for a store's listing.
+      Shuttle.SingleFlight,
+      # Owns the ETS tables of fiber addresses, polled and learned, so a read
+      # by UID goes through a known `{store, id}` instead of a store walk.
+      Shuttle.FiberAddresses,
       Shuttle.Meeting.Control,
       # Owns the ETS table past sessions' bridge URLs are cached in, keyed on
       # each transcript's {mtime, size}. Pure cache: a restart costs one
@@ -182,12 +188,15 @@ defmodule Shuttle.Application do
       # Owns the ETS table for the session-to-fiber peer index; ledger appends
       # invalidate it by file token without persistent_term global GC.
       Shuttle.Messaging.SessionFiberCache,
+      # Owns the ETS table of large files' content digests, keyed on each
+      # file version. Pure cache: a restart costs one re-read per file.
+      ShuttleWeb.FileDigests,
       ShuttleWeb.PeerGateThrottle
     ]
 
     optional =
       for {flag, mod} <- @optional_children,
-          Application.get_env(:shuttle, flag, true),
+          Shuttle.Env.app(flag, true),
           do: optional_child(mod)
 
     # The endpoint binds before any synchronous child that may walk stores,
@@ -227,9 +236,9 @@ defmodule Shuttle.Application do
   # started its listener, before any potentially slow optional child starts.
   @doc false
   def restrict_bound_socket do
-    server? = Keyword.get(Application.get_env(:shuttle, ShuttleWeb.Endpoint, []), :server, true)
+    server? = Keyword.get(Shuttle.Env.app(ShuttleWeb.Endpoint, []), :server, true)
 
-    case Application.get_env(:shuttle, :listen) do
+    case Shuttle.Env.app(:listen) do
       "unix://" <> path when server? -> Shuttle.Host.restrict_bound_socket!(path)
       _ -> :ok
     end
@@ -240,7 +249,7 @@ defmodule Shuttle.Application do
   # way to make a production daemon log its requests without rebuilding. An
   # unknown value keeps the configured level and says so.
   @doc false
-  def configure_log_level(value \\ System.get_env("SHUTTLE_LOG_LEVEL")) do
+  def configure_log_level(value \\ Shuttle.Env.get("SHUTTLE_LOG_LEVEL")) do
     wanted = value |> to_string() |> String.trim() |> String.downcase()
     levels = Logger.levels() ++ [:all, :none]
 
@@ -265,7 +274,7 @@ defmodule Shuttle.Application do
       {:ok, _pid} = started ->
         restrict_bound_socket()
 
-        if Keyword.get(Application.get_env(:shuttle, ShuttleWeb.Endpoint, []), :server, true) do
+        if Keyword.get(Shuttle.Env.app(ShuttleWeb.Endpoint, []), :server, true) do
           listen = Shuttle.listen()
           class = Shuttle.host_class()
 
@@ -295,13 +304,22 @@ defmodule Shuttle.Application do
   # only the lowest-ranked input to its single-user default.
   @doc false
   def configure_endpoint do
-    if System.get_env("SHUTTLE_PEER_UID") do
+    Enum.each(endpoint_settings(), fn {key, value} ->
+      Application.put_env(:shuttle, key, value)
+    end)
+  end
+
+  # The `:shuttle` app env `configure_endpoint/0` writes, resolved without
+  # writing it.
+  @doc false
+  def endpoint_settings do
+    if Shuttle.Env.get("SHUTTLE_PEER_UID") do
       Logger.warning(
         "SHUTTLE_PEER_UID is set; it overrides the effective uid when shared TCP peer gating is active"
       )
     end
 
-    existing = Application.get_env(:shuttle, ShuttleWeb.Endpoint, [])
+    existing = Shuttle.Env.app(ShuttleWeb.Endpoint, [])
     http = Keyword.get(existing, :http, [])
     server? = Keyword.get(existing, :server, true)
 
@@ -326,12 +344,6 @@ defmodule Shuttle.Application do
     {peer_gate, peer_gate_expected_uid, peer_gate_uid_source} =
       configure_peer_gate(class, listen, listen_string, server?)
 
-    Application.put_env(:shuttle, :listen, listen_string)
-    Application.put_env(:shuttle, :host_class, class)
-    Application.put_env(:shuttle, :peer_gate, peer_gate)
-    Application.put_env(:shuttle, :peer_gate_expected_uid, peer_gate_expected_uid)
-    Application.put_env(:shuttle, :peer_gate_uid_source, peer_gate_uid_source)
-
     merged =
       Keyword.merge(existing,
         http: Keyword.merge(http, bind),
@@ -341,7 +353,14 @@ defmodule Shuttle.Application do
         secret_key_base: secret_key_base(existing)
       )
 
-    Application.put_env(:shuttle, ShuttleWeb.Endpoint, merged)
+    [
+      {:listen, listen_string},
+      {:host_class, class},
+      {:peer_gate, peer_gate},
+      {:peer_gate_expected_uid, peer_gate_expected_uid},
+      {:peer_gate_uid_source, peer_gate_uid_source},
+      {ShuttleWeb.Endpoint, merged}
+    ]
   end
 
   defp configure_peer_gate(:exposed, {:tcp, _ip, _port}, listen_string, true) do
@@ -350,7 +369,7 @@ defmodule Shuttle.Application do
   end
 
   defp configure_peer_gate(:shared_multi_user, {:tcp, _ip, _port}, listen_string, true) do
-    proc_root = Application.get_env(:shuttle, :proc_net_root, "/proc")
+    proc_root = Shuttle.Env.app(:proc_net_root, "/proc")
 
     unless Shuttle.ProcNetTcp.readable?(proc_root) do
       raise ArgumentError,
@@ -380,7 +399,7 @@ defmodule Shuttle.Application do
   # function: persist to ~/.config/shuttle/secret_key_base with 0600 on first boot.
   defp secret_key_base(existing) do
     Keyword.get(existing, :secret_key_base) ||
-      System.get_env("SHUTTLE_SECRET_KEY_BASE") ||
+      Shuttle.Env.get("SHUTTLE_SECRET_KEY_BASE") ||
       Base.encode64(:crypto.strong_rand_bytes(48))
   end
 end

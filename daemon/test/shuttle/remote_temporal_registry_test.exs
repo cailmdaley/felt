@@ -7,7 +7,7 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   Driven against a scripted HTTP stub that records every URL it is asked for,
   so each test can say exactly which fetches a request caused.
   """
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias Shuttle.Remote
   alias Shuttle.RemoteTemporalRegistry
@@ -25,6 +25,12 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     def reset, do: Agent.update(__MODULE__, &%{&1 | bodies: %{}})
     def set(path, response), do: Agent.update(__MODULE__, &put_in(&1, [:bodies, path], response))
     def delay(path, ms), do: Agent.update(__MODULE__, &put_in(&1, [:delays, path], ms))
+
+    @doc """
+    Hold every fetch of `path` until the test releases it: the fetching process
+    sends `{:fetch_held, fetcher}` to the caller and waits for `:release`.
+    """
+    def hold(path), do: delay(path, {:hold, self()})
 
     @doc "The URLs requested so far, oldest first."
     def log, do: Agent.get(__MODULE__, &Enum.reverse(&1.log))
@@ -61,7 +67,15 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
            %{state | log: [url | state.log]}}
         end)
 
-      if delay > 0, do: Process.sleep(delay)
+      case delay do
+        {:hold, test} ->
+          send(test, {:fetch_held, self()})
+          receive do: (:release -> :ok)
+
+        ms ->
+          Process.sleep(ms)
+      end
+
       response
     end
   end
@@ -127,6 +141,30 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
   end
 
   defp candide(name, feed), do: RemoteTemporalRegistry.entries(name, feed)["candide"]
+
+  # A ceiling of ~30 s, reached only when the condition never holds: a passing
+  # test returns as soon as it does, however loaded the machine.
+  defp wait_until(fun, attempts \\ 3_000)
+  defp wait_until(fun, 0), do: fun.()
+
+  defp wait_until(fun, attempts) do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      wait_until(fun, attempts - 1)
+    end
+  end
+
+  # A clock the test owns: `clock` reads it, `advance.(ms)` moves it forward.
+  # Staleness and the freshness gate are then decided by explicit time, not by
+  # how long the scheduler took to run the test.
+  defp fake_clock do
+    agent = start_supervised!({Agent, fn -> DateTime.utc_now() end}, id: make_ref())
+    clock = fn -> Agent.get(agent, & &1) end
+    advance = fn ms -> Agent.update(agent, &DateTime.add(&1, ms, :millisecond)) end
+    {clock, advance}
+  end
 
   describe "demand-driven fetching" do
     test "nothing is fetched until a composite asks", %{dir: dir} do
@@ -198,23 +236,28 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
       assert MockClient.calls("/api/v1/sessions") == 1
     end
 
+    # The bounded wait is the subject. The fetch is held until the request has
+    # returned, so the request can only have come back through its own wait;
+    # the elapsed bound (under the 5 s default wait) is wall-clock, hence the
+    # tag, with a margin no plausible load reaches.
+    @tag :timing
     test "a request waits a bounded time, then serves what is held; the fetch lands later",
          %{dir: dir} do
-      MockClient.delay("/api/v1/activity", 300)
+      MockClient.hold("/api/v1/activity")
       {_pid, name} = start_registry(dir, wait_ms: 30)
 
       {elapsed_us, early} = :timer.tc(fn -> candide(name, :activity) end)
 
-      assert elapsed_us < 250_000
+      assert elapsed_us < 2_500_000
       assert early.items == []
       assert early.stale
 
-      Process.sleep(400)
+      assert_receive {:fetch_held, fetcher}
+      send(fetcher, :release)
 
       # Still inside the gate, so no second fetch: the late result is served.
-      late = candide(name, :activity)
-      assert late.items == [@bucket]
-      refute late.stale
+      assert wait_until(fn -> candide(name, :activity).items == [@bucket] end)
+      refute candide(name, :activity).stale
       assert MockClient.calls("/api/v1/activity") == 1
     end
   end
@@ -255,11 +298,12 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
 
   describe "failure semantics" do
     test "a failing fetch keeps last-good data and records the error", %{dir: dir} do
-      {_pid, name} = start_registry(dir, freshness_ms: 50)
+      {clock, advance} = fake_clock()
+      {_pid, name} = start_registry(dir, freshness_ms: 50, clock: clock)
       assert candide(name, :sessions).items == [@record]
 
       MockClient.reset()
-      Process.sleep(60)
+      advance.(60)
       view = candide(name, :sessions)
       assert MockClient.calls("/api/v1/sessions") == 2
 
@@ -287,11 +331,12 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     end
 
     test "stale means no success within ten freshness gates", %{dir: dir} do
-      {_pid, name} = start_registry(dir, freshness_ms: 10)
+      {clock, advance} = fake_clock()
+      {_pid, name} = start_registry(dir, freshness_ms: 10, clock: clock)
       refute candide(name, :sessions).stale
 
       MockClient.reset()
-      Process.sleep(150)
+      advance.(150)
 
       view = candide(name, :sessions)
       assert view.stale

@@ -1,4 +1,6 @@
 import { readThumbnailMetadata } from '../FileViewerPanel.js'
+import { liveFileWatched } from '../LiveFileRefresh.js'
+import { RESOURCE_PRIORITY } from '../documentResources.js'
 import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, titleIsCurrent } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
@@ -8,38 +10,28 @@ import type { WorkspaceDocument } from './documents.js'
  * Markdown heading, then PDF Info, then ID3 or Vorbis tags.
  */
 const TITLED: Partial<Record<WorkspaceDocument['kind'], number>> = { html: 0, text: 1, pdf: 2, audio: 3 }
-/** At most this many peeks are in flight; the rest wait by kind, then index order. */
-const CONCURRENT = 2
 /** A peek that could not read waits this long before a render may try it again. */
 export const PROBE_RETRY_MS = 60_000
 /** The version each document was last peeked at; a changed file is peeked again. */
-const probed = new Map<string, string>()
+const probed = new Map<string, { version: string }>()
 /** Probe memory stays bounded across a long session; the oldest entries are forgotten first. */
 const PROBED_LIMIT = 2000
-const queue: Array<{ rank: number; run: () => Promise<void> }> = []
-let running = 0
 
-function pump(): void {
-  while (running < CONCURRENT && queue.length) {
-    const job = queue.shift()!
-    running++
-    void job.run().finally(() => { running--; pump() })
-  }
-}
-
-/**
- * The index names pages by their declared titles, so it reads each titled
- * document's first 64 KiB once per version, independent of any thumbnail
- * (revalidating any title recalled from an earlier visit),
- * ahead of the stage's images and frames competing for the same connections.
- */
 /** What the channel knows of a document's version: its modification time and its latest receipt. */
 export function documentVersion(doc: WorkspaceDocument): string {
   const sent = doc.provenance.reduce((latest, p) => p.kind === 'sent' && Number.isFinite(p.time) ? Math.max(latest, p.time) : latest, 0)
   return `${doc.modifiedAt ?? ''}|${sent || ''}`
 }
 
+/**
+ * Pages are named by their declared titles, so each titled document's first
+ * 64 KiB is read once per version (revalidating any title recalled from an
+ * earlier visit), reports first, through the shared peek. A report or text
+ * page mounted in the same render reads its whole body and names itself, so it
+ * is not peeked as well.
+ */
 export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDocument[]): void {
+  const jobs: Array<{ rank: number; run: () => Promise<void> }> = []
   for (const doc of documents) {
     const rank = TITLED[doc.kind]
     if (rank === undefined) continue
@@ -47,24 +39,34 @@ export function probeDocumentTitles(shuttleBase: string, documents: WorkspaceDoc
     const seen = probed.get(doc.key)
     // A title read this session (by this probe or the page's own load) stands until the
     // document's version moves; one recalled from an earlier visit is revalidated.
-    if (seen === version) continue
+    if (seen?.version === version) continue
+    // An owner file time arriving for the same receipts names the version already peeked.
+    if (seen?.version.startsWith('|') && version.endsWith(seen.version)) { seen.version = version; continue }
+    const entry = { version }
     probed.delete(doc.key)
-    probed.set(doc.key, version)
+    probed.set(doc.key, entry)
     if (probed.size > PROBED_LIMIT) probed.delete(probed.keys().next().value!)
     if (seen === undefined && titleIsCurrent(doc.key)) continue
-    queue.push({ rank, run: async () => {
+    // A version that moved past an earlier peek is read fresh, not from the shared peek.
+    const fresh = seen !== undefined
+    jobs.push({ rank, run: async () => {
+      const src = fileBytesUrl(shuttleBase, doc.path, doc.owner)
+      // A page mounted in the same render reads these bytes in full and names itself.
+      await Promise.resolve()
+      if ((doc.kind === 'html' || doc.kind === 'text') && liveFileWatched(src)) return
       let read = false
-      await readThumbnailMetadata(fileBytesUrl(shuttleBase, doc.path, doc.owner), new AbortController().signal, (source, etag) => {
+      await readThumbnailMetadata(src, new AbortController().signal, (source, etag) => {
         read = true
         // A newer version's peek supersedes this one.
-        if (probed.get(doc.key) !== version) return
+        if (probed.get(doc.key) !== entry) return
         const text = doc.kind === 'html' || doc.kind === 'text'
         cacheDocumentTitle(doc.key, doc.path, text && typeof source !== 'string' ? new TextDecoder().decode(source) : source, etag)
-      }, 'high')
+      }, RESOURCE_PRIORITY.title, fresh)
       // A peek that could not read (an unreachable owner, a refused request) is tried again on a later render.
-      if (!read) setTimeout(() => { if (probed.get(doc.key) === version) probed.delete(doc.key) }, PROBE_RETRY_MS)
+      if (!read) setTimeout(() => { if (probed.get(doc.key) === entry) probed.delete(doc.key) }, PROBE_RETRY_MS)
     } })
   }
-  queue.sort((a, b) => a.rank - b.rank)
-  pump()
+  // Reports first: the shared peek queue keeps arrival order within a priority.
+  jobs.sort((a, b) => a.rank - b.rank)
+  for (const job of jobs) void job.run()
 }

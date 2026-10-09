@@ -8,9 +8,9 @@ defmodule ShuttleWeb.LifecycleController do
   identical `/lifecycle` (origin stripped) and relayed verbatim. The local
   branch delegates to Shuttle CLI verbs, so the validated offline frontmatter
   writer remains the single implementation of
-  install/pause/resume/repeat/pin/accept/close/reopen/set-model/set-agent/set-outcome/uninstall.
+  install/pause/rest/resume/repeat/accept/close/reopen/set-model/set-agent/seat/set-outcome/uninstall.
 
-  `install`/`repeat`/`pin` are CREATE verbs — they refuse a fiber that already
+  `install`/`repeat` are CREATE verbs — they refuse a fiber that already
   carries a shuttle block. Changing the SHAPE of an existing block (its kind,
   and the schedule that a `standing` kind implies) is its own surgical verb,
   `reshape`, alongside `set-model`/`set-agent`/`set-outcome`: it rewrites only
@@ -25,17 +25,17 @@ defmodule ShuttleWeb.LifecycleController do
 
   alias Shuttle.{FeltStores, LifecycleService, OriginRouter, RemoteFiberRegistry}
 
-  @allowed ~w(install pause resume repeat pin reshape accept close reopen set-model set-agent set-outcome uninstall)
+  @allowed ~w(install pause rest resume repeat reshape accept close reopen set-model set-agent seat set-outcome uninstall)
 
-  @kinds ~w(oneshot standing pinned)
+  @kinds ~w(oneshot standing)
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
         result = OriginRouter.forward(remote, "/api/v1/lifecycle", conn.body_params)
-        # The forwarded verb (pin/uninstall/…) mutated the remote's loom mirror;
+        # The forwarded verb (rest/uninstall/…) mutated the remote's loom mirror;
         # invalidate the RemoteFiberRegistry feed cache so the board reflects it
-        # before the next remote poll — otherwise pinning a remote-owned role
+        # before the next remote poll — otherwise resting a remote-owned card
         # snaps back until a manual refresh.
         RemoteFiberRegistry.refresh_after_forward(remote.name, result)
         relay_text(conn, result)
@@ -69,9 +69,18 @@ defmodule ShuttleWeb.LifecycleController do
   # Shuttle's writer inside the Poller, serialized with its state changes.
   defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
+  # rest, too: written inside the Poller, so no tick that read the fiber
+  # `active` launches a worker after it, and the Poller stops a live one.
+  defp execute("rest", %{"fiber" => fiber}), do: lifecycle(:rest, fiber)
+
+  defp execute("seat", %{"fiber" => fiber} = params) do
+    with {:ok, ["seat", ^fiber | args]} <- args_for("seat", params) do
+      :seat |> LifecycleService.transition(fiber, args) |> clean_result()
+    end
+  end
 
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install pin repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
+       when action in ~w(install repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
@@ -126,15 +135,6 @@ defmodule ShuttleWeb.LifecycleController do
     {:ok, add_string_flag(args, "--project-dir", params["project_dir"])}
   end
 
-  defp args_for("pin", %{"fiber" => fiber} = params) do
-    {:ok,
-     ["pin", fiber]
-     |> add_string_flag("--model", params["model"])
-     |> add_string_flag("--surface", params["surface"])
-     |> add_string_flag("--project-dir", params["project_dir"])
-     |> add_string_flag("--host", params["host"])}
-  end
-
   defp args_for("repeat", %{"fiber" => fiber, "schedule" => schedule} = params) do
     {:ok,
      ["repeat", fiber, "--schedule", schedule, "--tz", Map.get(params, "tz", "UTC")]
@@ -146,7 +146,7 @@ defmodule ShuttleWeb.LifecycleController do
   # reshape is the surgical shape edit on an EXISTING block: kind, and the
   # schedule a standing kind carries. `kind` is an optional POSITIONAL right
   # after the fiber — omitted, the CLI keeps the current kind (a schedule-only
-  # edit passes none). Only the three legal kinds reach the CLI; anything else
+  # edit passes none). Only the legal kinds reach the CLI; anything else
   # is rejected here rather than forwarded as an arbitrary positional.
   defp args_for("reshape", %{"fiber" => fiber} = params) do
     with {:ok, kind} <- reshape_kind(params["kind"]) do
@@ -195,6 +195,14 @@ defmodule ShuttleWeb.LifecycleController do
 
     {:ok, add_string_flag(args, "--project-dir", params["project_dir"])}
   end
+
+  # seat names the role a constitution is a seat of, or clears it. The role
+  # resolves on this host's CLI, against the roles/ charters in its store.
+  defp args_for("seat", %{"fiber" => fiber, "clear" => true}),
+    do: {:ok, ["seat", fiber, "--clear"]}
+
+  defp args_for("seat", %{"fiber" => fiber, "role" => role}) when is_binary(role) and role != "",
+    do: {:ok, ["seat", fiber, role]}
 
   # The outcome string round-trips as a single argv element, so multi-line
   # values (block scalars) survive without stdin piping. set-outcome refuses a

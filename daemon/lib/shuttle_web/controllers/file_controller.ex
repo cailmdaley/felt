@@ -30,8 +30,12 @@ defmodule ShuttleWeb.FileController do
   while `/file-info` reports `exists: false`; neither 500s the reader.
 
   **Conditional and range reads on both owner legs.** Small GETs use a content
-  digest; files above one MiB use a weak size/mtime/inode validator without
-  reading their bytes. Small HEADs omit the digest rather than read the body.
+  digest. A whole GET of a larger document (up to 64 MiB, not media) uses its
+  digest too, read once per settled version by `ShuttleWeb.FileDigests`;
+  other reads of files above one MiB use that remembered digest or a weak
+  size/mtime/inode validator without reading their bytes. A whole GET never
+  honours the weak validator once it has the digest, so a same-second rewrite
+  cannot be answered 304. Small HEADs omit the digest rather than read the body.
   `If-None-Match` can return a bodyless 304; byte ranges return 206 or 416,
   and `If-Range` dates can authorize a range while weak entity tags cannot. The
   owner-routed leg forwards these request headers and relays the owner's
@@ -47,6 +51,7 @@ defmodule ShuttleWeb.FileController do
   alias Shuttle.OriginRouter
 
   @digest_limit 1024 * 1024
+  @hash_limit 64 * 1024 * 1024
   @range_limit 4 * 1024 * 1024
 
   @media_types %{
@@ -170,7 +175,14 @@ defmodule ShuttleWeb.FileController do
   defp serve_with_validators(conn, path, stat) do
     cond do
       stat.size > @digest_limit ->
-        etag = ~s(W/"stat-#{stat.mtime}-#{stat.size}-#{stat.inode}")
+        metadata = ~s(W/"stat-#{stat.mtime}-#{stat.size}-#{stat.inode}")
+
+        etag =
+          case large_digest(conn, path, stat) do
+            nil -> metadata
+            digest -> ~s(W/"sha256-#{digest}")
+          end
+
         serve_representation(conn, path, nil, stat.mtime, stat.size, etag)
 
       head_request?(conn) ->
@@ -185,6 +197,26 @@ defmodule ShuttleWeb.FileController do
           {:error, _reason} ->
             file_not_found(conn)
         end
+    end
+  end
+
+  # A large document a reader polls whole is named by its content digest, read
+  # once per settled version (`ShuttleWeb.FileDigests`), so an unchanged poll is
+  # a 304 instead of the whole file again. Media and ranged reads stay bounded:
+  # they use a remembered digest when there is one and never read to make one.
+  defp large_digest(conn, path, stat) do
+    whole_document? =
+      not head_request?(conn) and get_req_header(conn, "range") == [] and
+        stat.size <= @hash_limit and
+        not Map.has_key?(@media_types, String.downcase(Path.extname(path)))
+
+    if whole_document? do
+      case ShuttleWeb.FileDigests.digest(path, stat) do
+        {:ok, digest} -> digest
+        :error -> nil
+      end
+    else
+      ShuttleWeb.FileDigests.lookup(path, stat)
     end
   end
 

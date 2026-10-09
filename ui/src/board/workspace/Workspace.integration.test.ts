@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { card } from '../testFixtures.js'
-import type { KanbanCard } from '../KanbanTypes.js'
+import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import { Workspace } from './Workspace.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
+import { resetLanes } from '../requestLanes.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -58,6 +59,15 @@ const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
 }
 // Microtask depth varies with the Node runtime (undici fetch/Response hops), so drain generously.
 const flush = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
+/** The Board's receipt feed has named alpha's report before the channel opens. */
+const feedNamesReport = async (): Promise<void> => {
+  const original = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/sent-files/all/')
+    ? new Response(JSON.stringify({ files: [{ fullPath: '/notes/alpha/report.html', uid: 'alpha', host: 'host-a', timestamp: Date.now(), sessionId: 'session-two' }] }))
+    : original(input, init))
+  workspace.overview.refresh()
+  await flush()
+}
 const changed = vi.fn()
 const visibility = vi.fn<(active: boolean) => void>()
 
@@ -100,10 +110,53 @@ beforeEach(() => {
   visibility.mockClear()
   workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
-afterEach(() => { workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
-  it('replaces key verdicts with clicks and commits only the live identity after a move', async () => {
+  it('names the roster the feed carries and repaints the page when it changes', async () => {
+    const original = cards[0]
+    const roles = (): string[] => [...document.querySelectorAll('.ws-fiber-role')].map(role => role.textContent ?? '')
+    try {
+      // The body read carries no roster; the feed's card does, and it holds across the read.
+      cards[0] = { ...original, roles: ['surveyor'] }
+      workspace.open(cards[0]); await flush(); await flush()
+      expect(roles()).toEqual(['surveyor'])
+      cards[0] = { ...original, roles: ['surveyor', 'scribe'] }
+      workspace.update(); await flush()
+      expect(roles()).toEqual(['surveyor', 'scribe'])
+      cards[0] = original
+      workspace.update(); await flush()
+      expect(roles()).toEqual([])
+    } finally { cards[0] = original }
+  })
+
+  it('gives a role page its holds from the feed and none of a constitution\'s controls', async () => {
+    const original = cards[0]
+    const role = card({ id: 'roles/surveyor', uid: 'surveyor-uid', name: 'Surveyor', originId: 'host-a', fiberDir: '/roles/surveyor', path: 'roles/surveyor/surveyor.md' })
+    cards[0] = { ...original, shuttleKind: 'oneshot', roles: ['surveyor'] }
+    bodyCards = [...cards, role]
+    onTestFinished(() => { cards[0] = original })
+    const holds = (): string[] => [...document.querySelectorAll('.ws-role-hold-name')].map(name => name.textContent ?? '')
+    workspace.open(role); await flush(); await flush()
+    expect(holds()).toEqual(['Alpha'])
+    const page = document.querySelector<HTMLElement>('.ws-fiber-prose')!
+    for (const chrome of ['.ws-dock', '.kbn-detail-controls', '.kbn-ctl-history-toggle', '.kbn-detail-directive', '.kbn-ctl-verdict']) {
+      expect(page.querySelector(chrome), chrome).toBeNull()
+    }
+    // A role is outside the feed; its holds still follow the feed's rosters.
+    cards[0] = { ...original, shuttleKind: 'oneshot' }
+    workspace.update(); await flush()
+    expect(holds()).toEqual([])
+    expect(document.querySelector('[data-part="role-holds"]')).toBeNull()
+    cards[0] = { ...original, shuttleKind: 'oneshot', roles: ['surveyor'] }
+    workspace.update(); await flush()
+    document.querySelector<HTMLButtonElement>('.ws-role-hold')!.click()
+    await flush(); await flush()
+    expect(document.querySelector('.ws-selected [data-part="fiber-title"]')?.textContent).toBe('Alpha')
+    expect(document.querySelector('.ws-fiber-prose .ws-dock')).not.toBeNull()
+  })
+
+  it('draws a key verdict in place of the pair, takes a click verdict after undo, and commits only the live identity after a move', async () => {
     workspace.dispose()
     const reviewing = card({ id: 'work/review', uid: 'stable-review', name: 'Review', originId: 'host-a',
       path: 'work/review/review.md', fiberDir: '/notes/review', status: 'closed', shuttleKind: 'oneshot' })
@@ -114,14 +167,19 @@ describe('workspace reader integration', () => {
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(reviewing); await flush()
     vi.useFakeTimers()
+    const pair = document.querySelector<HTMLElement>('.ws-fiber-acts .kbn-ctl-verdict')!
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
+    expect(pair.dataset.verdictPending).toBe('discarded')
+    expect(pair.querySelector(':scope > .ws-verdict-undo')?.textContent).toBe('Discarded·undo z')
     vi.advanceTimersByTime(3000)
-    document.querySelector<HTMLButtonElement>('.ws-review-plate .kbn-ctl-temper')!.click()
+    pair.querySelector<HTMLButtonElement>('.ws-verdict-undo button')!.click()
+    expect(pair.hasAttribute('data-verdict-pending')).toBe(false)
+    pair.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!.click()
     expect(commit).not.toHaveBeenCalled()
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
-    expect(document.querySelector('.ws-verdict-toast')?.textContent).toMatch(/^Tempered/)
+    expect(document.querySelectorAll('.ws-fiber-acts .ws-verdict-undo')).toHaveLength(1)
+    expect(pair.querySelector('.ws-verdict-undo')?.textContent).toMatch(/^Tempered/)
     live = { ...reviewing, id: 'elsewhere/renamed', path: 'elsewhere/renamed/renamed.md', fiberDir: '/notes/renamed' }
-    vi.advanceTimersByTime(5999)
+    vi.advanceTimersByTime(3999)
     expect(commit).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(commit).toHaveBeenCalledExactlyOnceWith(live, 'tempered')
@@ -139,13 +197,61 @@ describe('workspace reader integration', () => {
     workspace.open(reviewing); await flush()
     vi.useFakeTimers()
     workspace.queueVerdict(reviewing, 'composted')
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(1)
+    expect(document.querySelectorAll('.ws-fiber-acts .ws-verdict-undo')).toHaveLength(1)
     live = change === 'removed' ? [] : [{ ...reviewing,
       ...(change === 'replacement' ? { uid: 'UID-B' } : { originId: 'host-b' }) }]
     bodyCards = live
     vi.advanceTimersByTime(6000); await flush()
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
+    expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
     expect(commit).not.toHaveBeenCalled()
+  })
+  it('a moves in-flight or draft work to review through the shared verb after an undo window, z cancels, and it is inert elsewhere', async () => {
+    workspace.dispose()
+    const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+    const open = async (fiber: KanbanCard, commit: (card: KanbanCard, target: ColumnKind) => void): Promise<HTMLElement> => {
+      bodyCards = [fiber]
+      workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [fiber], origin: () => 'Desk',
+        onVisibility: visibility, dock: new Dock('', changed, commit) })
+      workspace.open(fiber); await flush()
+      return document.querySelector<HTMLElement>('.ws-fiber-acts .kbn-ctl-verdict')!
+    }
+    const flying = card({ id: 'work/fly', uid: 'fly-uid', name: 'Fly', originId: 'host-a', status: 'active',
+      workerState: 'running', shuttleKind: 'oneshot', path: 'work/fly/fly.md', fiberDir: '/notes/fly' })
+    const commit = vi.fn<(card: KanbanCard, target: ColumnKind) => void>()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pair = await open(flying, commit)
+    vi.useFakeTimers()
+    press('a')
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(pair.dataset.verdictPending).toBe('review')
+    expect(pair.querySelector(':scope > .ws-verdict-undo')?.textContent).toBe('To review·undo z')
+    press('z')
+    expect(pair.hasAttribute('data-verdict-pending')).toBe(false)
+    vi.advanceTimersByTime(6000); await flush()
+    expect(commit).not.toHaveBeenCalled()
+    press('a')
+    vi.advanceTimersByTime(3999)
+    expect(commit).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1); await flush()
+    expect(commit).toHaveBeenCalledExactlyOnceWith(flying, 'awaitingReview')
+    // A declined worker stop queues nothing.
+    vi.useRealTimers(); workspace.dispose(); document.body.replaceChildren()
+    commit.mockClear(); confirm.mockReturnValue(false)
+    await open(flying, commit); press('a')
+    expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
+    // Inert on work already awaiting review, and on a note.
+    for (const fiber of [
+      card({ id: 'work/done', uid: 'done-uid', name: 'Done', originId: 'host-a', status: 'closed', shuttleKind: 'oneshot', path: 'work/done/done.md', fiberDir: '/notes/done' }),
+      card({ id: 'notes/plain', uid: 'plain-uid', name: 'Plain', originId: 'host-a', status: 'open', path: 'notes/plain/plain.md', fiberDir: '/notes/plain' }),
+    ]) {
+      workspace.dispose(); document.body.replaceChildren(); vi.useFakeTimers()
+      await open(fiber, commit); press('a')
+      expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
+      vi.advanceTimersByTime(6000); await flush()
+      expect(commit).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    }
+    confirm.mockRestore()
   })
   it('asks to stop a worker at gesture time and carries the answer to the delayed write', async () => {
     workspace.dispose()
@@ -161,7 +267,7 @@ describe('workspace reader integration', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     workspace.queueVerdict(app, 'composted')
     expect(confirm).toHaveBeenCalledOnce()
-    expect(document.querySelectorAll('.ws-verdict-toast')).toHaveLength(0)
+    expect(document.querySelectorAll('.ws-verdict-undo')).toHaveLength(0)
     confirm.mockReturnValue(true)
     workspace.queueVerdict(app, 'composted')
     expect(confirm).toHaveBeenCalledTimes(2)
@@ -198,23 +304,101 @@ describe('workspace reader integration', () => {
     if (result === 'same identity') expect(commit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: linked.uid, id: renamed.id, originId: linked.originId }), 'tempered')
     else expect(commit).not.toHaveBeenCalled()
   })
-  it('keeps the originating Desk column and bands through j/k and returns the current card', async () => {
+  it('groups the sidebar as Drafts, In flight\'s bands and Awaiting review wherever it opens, skipping an empty band, stepping it with j/k', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const returned = vi.fn()
+    const grouped = [{ ...cards[0], status: 'closed' }, { ...cards[1], status: 'active' }]
     workspace = new Workspace(document.body, {
-      shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility,
-      deskColumn: () => [{ card: cards[0], band: 'Stalled' }, { card: cards[1], band: 'Working' }],
+      shuttleBase: '', cards: () => grouped, origin: () => 'Board', onVisibility: visibility,
       onReturnCard: returned, dock: new Dock('', changed),
     })
-    workspace.open(cards[0]); await flush()
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Stalled', 'Working'])
+    workspace.open(grouped[0], 'Board'); await flush()
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Working', 'Awaiting review'])
     expect(document.querySelectorAll('.ws-sidebar .kbn-card')).toHaveLength(2)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true })); await flush()
     expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(returned).toHaveBeenCalledWith(expect.objectContaining({ uid: 'beta', originId: 'host-b' }))
+  })
+  it.each(['draft', 'aloft', 'holding', 'review'])('shows a %s head’s queue without putting its children in any lifecycle group or navigation count', async band => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const head = { ...cards[0], status: band === 'draft' ? 'open' : band === 'review' ? 'closed' : 'active', runtimePhase: band === 'holding' ? 'waiting' : 'working' }
+    const queued = { ...cards[1], dependsOn: [head.uid!.toUpperCase()], dependsOnShape: 'scalar' as const, foldedUnder: head.id }
+    const review = { ...queued, id: 'work/review', uid: 'review', name: 'Review', status: 'closed', dependsOn: [queued.id], foldedUnder: undefined }
+    const foldedAloft = { ...queued, id: 'work/folded-aloft', uid: 'folded-aloft', status: 'active', runtimePhase: 'working', workerState: 'running' as const, tmuxSession: 'aloft-worker', foldedUnder: undefined }
+    const foldedHolding = { ...queued, id: 'work/folded-holding', uid: 'folded-holding', status: 'active', runtimePhase: 'waiting', foldedUnder: undefined }
+    const other = { ...cards[1], id: 'work/other', uid: 'other', name: 'Other', status: 'closed' }
+    const feed = [review, head, queued, foldedAloft, foldedHolding, other]
+    bodyCards = feed
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.open(head, 'Desk'); await flush()
+    const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')]
+    expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
+    const chip = rows()[0].querySelector<HTMLButtonElement>('.kbn-card-queued')!
+    expect(chip.textContent).toBe('+4 queued')
+    chip.click()
+    expect(chip.getAttribute('aria-expanded')).toBe('true')
+    expect(rows()[0].querySelector<HTMLOListElement>('.kbn-card-queued-list')!.hidden).toBe(false)
+    rows()[0].querySelector<HTMLElement>('.kbn-card-queued-row[data-card-uid="beta"]')!.click(); await flush()
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
+    expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
+    expect([...document.querySelectorAll('.ws-sidebar-index-count')].reduce((sum, el) => sum + Number(el.textContent), 0)).toBe(2)
+    // A child opened from the peek steps from its head, never becoming a stop.
+    const press = async (key: string): Promise<void> => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush()
+    }
+    const current = (): string | undefined => rows().find(row => row.getAttribute('aria-current') === 'true')?.dataset.channelUid
+    await press('j'); expect(current()).toBe('other')
+    await press('k'); expect(current()).toBe('alpha')
+    await press('J'); expect(current()).toBe(band === 'review' ? 'alpha' : 'other')
+    await press('K'); expect(current()).toBe('alpha')
+    expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
+  })
+  it('captions In flight as its Stalled and Working bands even from an interleaved feed, and J/K stops at each', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
+      ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', runtimePhase })
+    const feed = [{ ...cards[0], status: 'closed' }, flight('w1', 'working'), flight('n1', 'waiting'), flight('w2', 'working'), flight('n2', 'blocked'), { ...cards[1], uid: 'draft', id: 'work/draft', name: 'draft' }]
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.open(feed[0], 'Desk'); await flush()
+    const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Stalled', 'Working', 'Awaiting review'])
+    const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
+    await press('K'); expect(current()).toBe('w1')
+    await press('j'); expect(current()).toBe('w2')
+    await press('K'); expect(current()).toBe('n1')
+    await press('J'); expect(current()).toBe('w2')
+    await press('J'); expect(current()).toBe('alpha')
+  })
+  it('draws one index strip naming each J/K stop and its count, marks the open group, and lands a click as J/K would', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
+      ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', runtimePhase })
+    const feed = [flight('w1', 'working'), flight('w2', 'working'), flight('n1', 'waiting'), { ...cards[0], status: 'closed' }]
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace.open(feed[3], 'Desk'); await flush()
+    const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
+    const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
+    // Empty groups draw no entry; the strip abbreviates Awaiting review, its caption does not.
+    expect(entries().map(entry => entry.textContent)).toEqual(['Stalled1', 'Working2', 'Review1'])
+    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Stalled, 1', 'Working, 2', 'Awaiting review, 1'])
+    expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title)).toEqual(['Awaiting review'])
+    entries()[1].click(); await flush()
+    expect(current()).toBe('w1')
+    expect(entries().find(entry => entry.getAttribute('aria-current') === 'location')?.title).toBe('Working')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
+    expect(current()).toBe('w2')
+    entries()[2].click(); await flush()
+    expect(current()).toBe('alpha')
+    // Back in Working, the click lands on the card last open there.
+    entries()[1].click(); await flush()
+    expect(current()).toBe('w2')
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()
@@ -251,20 +435,99 @@ describe('workspace reader integration', () => {
     expect(workspace.isActive).toBe(true)
     expect(workspace.reader.el.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
   })
+  for (const [routed, landing] of [['the report the Board feed names', 'report.html'], ['a sent file opened by address', 'table.html']] as const) {
+    it(`shows only the selected page until the body lands after ${routed}, then the strip in its final order`, async () => {
+      if (landing === 'report.html') await feedNamesReport()
+      const original = vi.mocked(fetch).getMockImplementation()!
+      let release!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).includes('/api/v1/fibers/')) await gate
+        return original(input, init)
+      })
+      const key = docKey('host-a', `/notes/alpha/${landing}`, 'host-a')
+      workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await flush()
+      const run = [workspace.reader.el.querySelector('.ws-tabs')!, workspace.reader.barPosition, workspace.reader.el.querySelector('.ws-page-ticks')!]
+      const tabs = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.classList.contains('ws-tab-anchor') ? '§' : tab.dataset.tabKey!)
+      const selected = (): string | undefined => document.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey
+      // Before the body, the selected page shows; the strip, ticks and count wait unseen, and stepping does nothing.
+      expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
+      for (const el of run) expect(el.classList.contains('ws-run-pending'), el.className).toBe(true)
+      for (const press of ['G', 'l', 'h']) document.dispatchEvent(new KeyboardEvent('keydown', { key: press, bubbles: true, cancelable: true }))
+      await flush()
+      expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
+      release(); await flush(); await flush()
+      for (const el of run) expect(el.classList.contains('ws-run-pending'), el.className).toBe(false)
+      // The body declares the report, which runs left of the fiber page; the sent table runs right.
+      expect(tabs()).toEqual([docKey('host-a', '/notes/alpha/report.html', 'host-a'), '§', docKey('host-a', '/notes/alpha/table.html', 'host-a')])
+      expect(selected()).toBe(key)
+      // Once the run lands, the same keys step through it.
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: landing === 'report.html' ? 'G' : 'g', bubbles: true, cancelable: true })); await flush()
+      expect(selected()).not.toBe(key)
+    })
+  }
+  it('shows the body as soon as it lands while the strip waits for the receipts, then the strip in its final order', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('/api/v1/sent-files?')) await gate
+      return original(input, init)
+    })
+    workspace.open(cards[0]); await flush(); await flush()
+    const strip = workspace.reader.el.querySelector('.ws-tabs')!
+    const prose = (): string => document.querySelector('.ws-prose')?.textContent ?? ''
+    // The body is in hand: its prose shows and the loading note is gone, while the run waits.
+    expect(prose()).toContain('The result is ready.')
+    expect(document.querySelector('.ws-body-status')).toBeNull()
+    expect(strip.classList.contains('ws-run-pending')).toBe(true)
+    const choice = workspace.reader.el.querySelector('.ws-page-choice')!
+    const live = workspace.reader.el.querySelector(':scope > .ws-sr-only[aria-live]')!
+    expect(choice.getAttribute('aria-disabled')).toBe('true')
+    expect(live.textContent).toBe('')
+    // A feed-poll repaint in this window keeps the strip pending.
+    workspace.update(); await flush()
+    expect(strip.classList.contains('ws-run-pending')).toBe(true)
+    release(); await flush(); await flush()
+    expect(strip.classList.contains('ws-run-pending')).toBe(false)
+    expect(choice.getAttribute('aria-disabled')).toBe('false')
+    expect(live.textContent).toBe('Note, 2 of 3')
+    const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.classList.contains('ws-tab-anchor') ? '§' : tab.dataset.tabKey!)
+    expect(tabs).toEqual([docKey('host-a', '/notes/alpha/report.html', 'host-a'), '§', docKey('host-a', '/notes/alpha/table.html', 'host-a')])
+  })
+  it('holds a sent page opened by address between the channel\'s body and its receipts', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      if (String(input).includes('/api/v1/sent-files?')) await gate
+      return original(input, init)
+    })
+    workspace.open(cards[0]); await flush(); await flush()
+    const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    workspace.open(cards[0], 'Desk', table); await flush()
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    expect(selected()).toBe(table)
+    release(); await flush(); await flush()
+    expect(selected()).toBe(table)
+  })
   it('owner-routes file mtimes in Unix seconds for embeds and body links without reordering the strip', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input)
-      if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('table.html') ? 2000000000 : 1900000000 }))
+      if (url.includes('/file-info?')) return new Response(JSON.stringify({ exists: true, modified_at: url.includes('report.html') ? 2000000000 : 1900000000 }))
       return original(input, init)
     })
+    await feedNamesReport()
     workspace.open(cards[0]); await flush()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
-    expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
+    expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
+    expect(workspace.reader.host.get(reportKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
     const order = [...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))
-    expect(order.indexOf('table.html')).toBeGreaterThan(order.indexOf('Report'))
+    // The declared report sits left of the fiber page, the sent table right; the report's newer file time moves neither.
+    expect(order).toEqual(['Report', 'Note', 'table.html'])
     const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
     expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
     document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
@@ -272,6 +535,17 @@ describe('workspace reader integration', () => {
     await flush()
     const selectedKey = document.querySelector('.ws-selected')?.getAttribute('data-key')
     expect(workspace.reader.host.get(selectedKey!)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
+  })
+  it('opens on its report while owner file times are still being read', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?') ? new Promise<Response>(() => {}) : original(input, init))
+    await feedNamesReport()
+    workspace.open(cards[0]); await flush()
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).toContain('table.html')
+    // The metadata reads wait in the quiet lane, two at a time over HTTP/1.1.
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))).toHaveLength(2)
   })
   it('loads receipts from each channel owner with conditional revalidation and last-good retention', async () => {
     const shared = [
@@ -340,7 +614,8 @@ describe('workspace reader integration', () => {
     expect(calls.filter(call => call.url.includes('/sent-files/all/composite')).every(({ url }) => !url.includes('since_ms=0'))).toBe(true)
   })
 
-  it('selects the declared report on first entry and retains the same iframe through pages, expand and return', async () => {
+  it('opens on the report the receipt feed already names, and retains the same iframe through pages, expand and return', async () => {
+    await feedNamesReport()
     workspace.open(cards[0])
     await flush()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
@@ -366,6 +641,10 @@ describe('workspace reader integration', () => {
   })
 
   it('keeps body links and embeds while placing the outcome above inline controls', async () => {
+    // Inline controls belong to a fiber on the Desk's lifecycle.
+    const original = cards[0]
+    cards[0] = { ...original, shuttleKind: 'oneshot' }
+    onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0])
     await flush()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
@@ -376,7 +655,7 @@ describe('workspace reader integration', () => {
     expect(outcome.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Note')!
+    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Constitution')!
     proseTab.click()
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
@@ -389,6 +668,7 @@ describe('workspace reader integration', () => {
   })
 
   it('toggles the sidebar without replacing the selected iframe or its window', async () => {
+    await feedNamesReport()
     workspace.open(cards[0])
     await flush()
     const frame = workspace.reader.host.get(docKey('host-a', '/notes/alpha/report.html', 'host-a'))!
@@ -470,15 +750,16 @@ describe('workspace reader integration', () => {
     workspace.update()
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
-    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *)')).toHaveLength(0)
+    expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *):not(.ws-fiber-acts *)')).toHaveLength(0)
+    expect(document.querySelectorAll('.ws-fiber-acts .kbn-card-worker')).toHaveLength(1)
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^aloft/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const button = (name: string): HTMLButtonElement => [...band.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === name)!
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
     expect(confirm).toHaveBeenCalledOnce()
     vi.useFakeTimers()
     confirm.mockReturnValue(true)
-    button('Temper').click()
+    // In flight, the status line carries the verdict pair.
+    document.querySelector<HTMLButtonElement>('.ws-fiber-acts .kbn-ctl-temper')!.click()
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(transition).not.toHaveBeenCalled()
     vi.advanceTimersByTime(6000)
@@ -496,6 +777,9 @@ describe('workspace reader integration', () => {
   })
 
   it('Escape gives inline and reader popovers first refusal, then collapses and returns', async () => {
+    const original = cards[0]
+    cards[0] = { ...original, shuttleKind: 'oneshot' }
+    onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0])
     await flush()
     const escape = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) }
@@ -586,8 +870,8 @@ describe('workspace reader integration', () => {
       card({ id: 'work/second', uid: 'second', name: 'Second', originId: 'host-b', fiberDir: '/notes/shared', path: 'work/second/second.md' }),
     ]
     bodyCards = orderedCards
-    bodyOverrides.set('host-a:first', 'First result.\n\n:::{embed} report.html\n:::\n\n:::{embed} table.html\n:::')
-    bodyOverrides.set('host-b:second', 'Second result.\n\n:::{embed} table.html\n:::\n\n:::{embed} report.html\n:::')
+    bodyOverrides.set('host-a:first', 'First result.\n\n:::{embed} report.html\n:::\n\n:::{embed} table.html\n:::\n\n:::{embed} notes.md\n:::')
+    bodyOverrides.set('host-b:second', 'Second result.\n\n:::{embed} notes.md\n:::\n\n:::{embed} table.html\n:::\n\n:::{embed} report.html\n:::')
     workspace.dispose()
     workspace = new Workspace(document.body, {
       shuttleBase: '', cards: () => orderedCards, origin: () => 'Desk', onVisibility: visibility,
@@ -597,18 +881,19 @@ describe('workspace reader integration', () => {
     await flush()
     const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.getAttribute('aria-label') ?? '')
     const firstOrder = labels()
-    expect(firstOrder).toEqual(['Note', 'shared', 'table.html'])
+    expect(firstOrder).toEqual(['notes.md', 'table.html', 'shared', 'Note'])
 
     workspace.open(orderedCards[1])
     await flush()
-    // Each channel orders its declarations as its own body does.
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
-    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('shared')
+    // Each channel orders its declarations as its own body does, its report beside the fiber page.
+    expect(labels()).toEqual(['table.html', 'notes.md', 'shared', 'Note'])
+    // Nothing named a page before the channel painted, so it stays on its own page.
+    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Note')
     const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
     note.click()
     const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
-    expect(labels()).toEqual(['Note', 'table.html', 'shared'])
+    expect(labels()).toEqual(['table.html', 'notes.md', 'shared', 'Note'])
   })
 
   it('uses the shared Reader keymap for single-step tab roving focus', async () => {
@@ -646,11 +931,9 @@ describe('workspace reader integration', () => {
   })
 
   it('uses j/k for constitution order and held arrows for document scrolling', async () => {
-    workspace.open(cards[0])
+    workspace.open(cards[1])
     await flush()
-    workspace.overview.opened(cards[1])
-    const ordered = workspace.overview.orderedCards()
-    expect(ordered.length).toBeGreaterThan(1)
+    const ordered = [cards[0], cards[1]]
     workspace.open(ordered[0])
     await flush()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true }))
@@ -660,7 +943,7 @@ describe('workspace reader integration', () => {
     await flush()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[0].name)
 
-    document.querySelector<HTMLButtonElement>('.ws-tab')!.click()
+    document.querySelector<HTMLButtonElement>('.ws-tab-anchor')!.click()
     const scroller = document.querySelector<HTMLElement>('.ws-selected .ws-prose-scroll')!
     let scrollHeight = 1800
     Object.defineProperties(scroller, {
@@ -712,6 +995,54 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(document.activeElement).toBe(control)
     expect(control.isConnected).toBe(true)
+  })
+
+  it('never moves a painted selection when the channel\'s receipts arrive late', async () => {
+    let deliver: () => void = () => {}
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/api/v1/sent-files?')
+      ? new Promise<Response>(resolve => { deliver = () => { void original(input, init).then(resolve) } }) : original(input, init))
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
+    // Nothing names a page at open: the fiber's own page paints and stays.
+    workspace.open(cards[0]); await flush()
+    expect(selected()).toBe('fiber:host-a:alpha')
+    deliver(); await flush()
+    expect(workspace.reader.host.get(reportKey)).toBeTruthy()
+    expect(selected()).toBe('fiber:host-a:alpha')
+    expect(window.location.hash).not.toContain(encodeURIComponent(reportKey))
+    // A routed page paints at once from a provisional frame, before its receipts.
+    workspace.dispose()
+    window.history.replaceState(null, '', '/')
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(tableKey)}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await flush()
+    expect(selected()).toBe(tableKey)
+    const frame = workspace.reader.host.get(tableKey)!.el
+    deliver(); await flush()
+    expect(selected()).toBe(tableKey)
+    expect(workspace.reader.host.get(tableKey)!.el).toBe(frame)
+  })
+
+  it('paints a routed page while file metadata is still unanswered', async () => {
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/file-info?') ? new Promise<Response>(() => {}) : original(input, init))
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(reportKey)}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+  })
+
+  it('sends a routed page the loaded channel does not hold to the report', async () => {
+    const gone = docKey('host-a', '/notes/alpha/gone.html', 'host-a')
+    window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(gone)}`)
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).not.toContain('gone.html')
   })
 
   it('keeps an explicit prose selection made while the body is loading', async () => {
@@ -770,27 +1101,24 @@ describe('workspace reader integration', () => {
   })
 
   it('mouse entry does not focus chrome, but keyboard entry does', async () => {
+    workspace.open(cards[1])
+    await flush()
     workspace.open(cards[0])
     await flush()
-    workspace.overview.opened(cards[1])
-    const first = workspace.overview.orderedCards()[0]
-    workspace.open(first)
-    await flush()
-    expect(document.activeElement).not.toBe(document.querySelector('.ws-return'))
+    expect(document.activeElement).not.toBe(document.querySelector('.ws-tab[aria-selected="true"]'))
     const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
     const press = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
     control.dispatchEvent(press)
     expect(press.defaultPrevented).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
     await flush()
-    expect(document.activeElement).toBe(document.querySelector('.ws-return'))
+    expect(document.activeElement).toBe(document.querySelector('.ws-tab[aria-selected="true"]'))
   })
 
-  it('keeps Alt-arrow stepping in overview order and ignores messages from unrelated frames', async () => {
-    workspace.open(cards[0])
+  it('keeps Alt-arrow stepping in sidebar order and ignores messages from unrelated frames', async () => {
+    workspace.open(cards[1])
     await flush()
-    workspace.overview.opened(cards[1])
-    const ordered = workspace.overview.orderedCards()
+    const ordered = [cards[0], cards[1]]
     const hash = window.location.hash
     window.dispatchEvent(new MessageEvent('message', { data: { type: 'shuttle-workspace-key', key: 'ArrowRight' }, source: window }))
     expect(window.location.hash).toBe(hash)

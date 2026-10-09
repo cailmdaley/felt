@@ -212,10 +212,10 @@ export function FleetSection({ shuttleBase, host, onChanged }: FleetSectionProps
                       ? `${remote.display} (${remote.name})`
                       : remote.name}
                     {remote.enabled === false && (
-                      <span style={{ color: '#7A7068' }}> · disabled</span>
+                      <span style={{ color: 'var(--kbn-graphite-muted)' }}> · disabled</span>
                     )}
                     {remote.source === 'discovered' && (
-                      <span style={{ color: '#7A7068' }}> · discovered on the tailnet</span>
+                      <span style={{ color: 'var(--kbn-graphite-muted)' }}> · discovered on the tailnet</span>
                     )}
                   </span>
                   <span className="set-row-note">{transport(remote)}</span>

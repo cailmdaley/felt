@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card, expectPinnedZone, ownerFiberResponse } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { docKey } from './documents.js'
+import { resetDocumentResources } from '../documentResources.js'
+import { resetLanes } from '../requestLanes.js'
 import { cacheDocumentTitle } from './DocumentTitles.js'
 import { Overview, overviewDayGroup, overviewHostMarks } from './Overview.js'
 import type { ChannelThemes } from './ChannelThemes.js'
@@ -80,7 +82,7 @@ beforeEach(() => {
   overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onOrder })
   document.body.append(overview.el)
 })
-afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); resetDocumentResources(); resetLanes() })
 
 describe('Overview receipt membership and identity', () => {
   it('binds retained news and folio roots by channel, releasing them on hide, removal and disposal', async () => {
@@ -123,6 +125,22 @@ describe('Overview receipt membership and identity', () => {
     first.click(); await settle()
     expect(onOpen).toHaveBeenCalledWith(cards[0], docKey('host-a', '/notes/alpha/report.html', 'host-a'))
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
+  })
+
+  it('shelves the constitutions read lately, most recent first, each opening in the reader, and hides an empty shelf', async () => {
+    overview.dispose()
+    let read: KanbanCard[] = []
+    overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen, readLately: () => read })
+    document.body.append(overview.el)
+    await refresh()
+    const shelf = overview.el.querySelector<HTMLElement>('.ws-overview-read')!
+    expect(shelf.hidden).toBe(true)
+    read = [cards[1], cards[0]]
+    overview.opened(cards[1])
+    expect(shelf.hidden).toBe(false)
+    expect([...shelf.querySelectorAll('.ws-overview-read-name')].map(el => el.textContent)).toEqual(['Beta pipeline', 'Alpha result'])
+    shelf.querySelector<HTMLButtonElement>('.ws-overview-read-item')!.click(); await settle()
+    expect(onOpen).toHaveBeenCalledWith(cards[1], undefined)
   })
 
   it('marks only receipts newer than the last time the sheet was left', async () => {
@@ -272,6 +290,27 @@ describe('Overview receipt membership and identity', () => {
     expect(onOpen.mock.calls[0][1]).toBe('bytes-host:/remote/report.html')
   })
 
+  it('remembers a confirmed missing fiber until the next visit instead of asking its owner on every poll', async () => {
+    feed.files = [receipt('missing', '/remote/report.html', now(), 'bytes-host')]
+    const reads = (): number => fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/v1/fibers/missing?')).length
+    await refresh()
+    expect(reads()).toBe(1)
+    for (let poll = 0; poll < 8; poll++) { vi.advanceTimersByTime(15000); await refresh() }
+    vi.advanceTimersByTime(3600000); await settle()
+    expect(reads()).toBe(1)
+    expect(name('other:bytes-host')).toBe('Unfiled · bytes-host')
+    overview.hide(); overview.show(); await refresh()
+    expect(reads()).toBe(2)
+  })
+
+  it('files a receipt stamped with its session id as Unfiled without asking for a fiber', async () => {
+    feed.files = [receipt('a95e80f5-9498-4c72-9fb2-3eb11118ef19', '/tmp/demo/hubble.png', now(), 'bytes-host', { sessionId: 'a95e80f5-9498-4c72-9fb2-3eb11118ef19' })]
+    await refresh()
+    for (let poll = 0; poll < 4; poll++) { vi.advanceTimersByTime(15000); await refresh() }
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/v1/fibers/'))).toHaveLength(0)
+    expect(name('other:bytes-host')).toBe('Unfiled · bytes-host')
+  })
+
   it('coalesces refresh reads and retains the sheet on feed failure', async () => {
     feed.files = [receipt('alpha', '/report.html')]; await refresh()
     const original = folio('alpha')
@@ -353,7 +392,9 @@ describe('Overview stable lenses, visits, and DOM', () => {
     await refresh(); activate(); await settle()
     const thumbnail = folio('alpha').querySelector('.ws-overview-thumb')!
     const iframe = thumbnail.querySelector('iframe')!
-    expect(iframe.src).toContain('/api/v1/file-assets/host-a/notes/alpha/report.html')
+    // The page's text from the document cache, its relative resources resolved against the owner's assets.
+    await vi.waitFor(() => expect(iframe.srcdoc).toContain('Preview text'))
+    expect(iframe.srcdoc).toContain('/api/v1/file-assets/host-a/notes/alpha/report.html')
     expect(iframe.getAttribute('sandbox')).toBe('')
     expect(iframe.inert).toBe(true); expect(iframe.tabIndex).toBe(-1)
     iframe.dispatchEvent(new Event('load')); draw()
@@ -442,6 +483,8 @@ describe('Overview thumbnail budget and safe content', () => {
     let signal: AbortSignal | undefined
     fetchMock.mockImplementation((_url: string, options: RequestInit) => { signal = options.signal as AbortSignal; return new Promise<Response>(() => {}) })
     overview.show(); draw()
+    // The thumbnail's read starts once any title peek of the same file has answered.
+    for (let turn = 0; turn < 5 && !signal; turn++) await Promise.resolve()
     expect(signal?.aborted).toBe(false)
     overview.dispose()
     expect(signal?.aborted).toBe(true)
@@ -596,7 +639,7 @@ describe('Overview news, visits and graduated density', () => {
 })
 
 describe('Overview civil days and fleet shapes', () => {
-  it('runs under both pinned non-UTC zones', () => { expectPinnedZone() })
+  it('runs under the pinned zone', () => { expectPinnedZone() })
   it('uses local midnight and calendar strides across DST, including the seven-day boundary', () => {
     const anchor = new Date(2026, 2, 30, 0, 10).getTime()
     expect(overviewDayGroup(new Date(2026, 2, 30, 0, 1).getTime(), anchor)).toBe('Today')

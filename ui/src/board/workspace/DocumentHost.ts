@@ -8,10 +8,12 @@ import {
   type FileViewerState,
 } from '../FileViewerPanel.js'
 import { refreshLiveFile } from '../LiveFileRefresh.js'
+import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { fileBytesUrl } from '../utils.js'
 import { cacheDocumentTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { AudioPage, keepAudioPosition, seekAudio, toggleAudio } from './AudioPage.js'
+import { noteAudioSketch } from './audioSketch.js'
 import { createMediaPoster, type MediaPoster } from './MediaPoster.js'
 import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
 
@@ -49,6 +51,9 @@ const RETAIN = 10
 const SCROLL_PREFIX = 'shuttle:workspace:scroll:'
 
 /** Stable frames, a fleet-wide live-document budget, and selected-only polling. */
+/** Scrollers whose position this host has written at least once. */
+const boundScrollers = new WeakSet<HTMLElement>()
+
 export class DocumentHost {
   private readonly frames = new Map<DocKey, FrameState>()
   private readonly live = new Map<DocKey, FrameState>()
@@ -330,9 +335,11 @@ export class DocumentHost {
         decorateAudio: audio => {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
             (peaks, duration) => {
+              noteAudioSketch(doc.key, peaks, duration)
               if (!this.disposed && state.revision === revision) state.poster?.setAudio(peaks, duration)
             })
           this.audioPages.set(audio, page)
+          page.setSelected(state.active)
           page.updateDocuments(this.documents)
           const changed = (): void => this.updateReferencePlayback()
           const events = ['play', 'pause', 'ended', 'timeupdate', 'durationchange', 'loadedmetadata']
@@ -434,6 +441,8 @@ export class DocumentHost {
 
   private setActive(state: FrameState, active: boolean): void {
     if (state.active === active) return
+    const audio = state.frame.viewer?.querySelector('audio')
+    if (audio) this.audioPages.get(audio)?.setSelected(active)
     if (!active) { this.saveScroll(state); this.abandonSwipe(state) }
     state.active = active
     if (active) {
@@ -486,10 +495,10 @@ export class DocumentHost {
     notice.setAttribute('role', 'status')
     const cause = document.createElement('p')
     const owner = state.frame.doc.owner
-    const unsupportedMedia = message === 'media format is not supported by this browser'
+    const unsupportedMedia = message === 'media format is not supported by this browser' || message === 'image format is not supported by this browser'
     cause.textContent = missing
       ? `Not found on ${owner}${stale ? ' — showing last loaded copy' : ''}`
-      : unsupportedMedia ? 'This browser cannot play this format'
+      : unsupportedMedia ? (message.startsWith('image') ? 'This browser cannot show this image' : 'This browser cannot play this format')
       : `${owner} is unreachable${stale ? ' — showing last loaded copy' : ''}`
     notice.append(cause)
     if (unsupportedMedia) {
@@ -537,9 +546,10 @@ export class DocumentHost {
     const doc = state.frame.doc
     const src = fileBytesUrl(this.options.shuttleBase, doc.path, doc.owner)
     try {
-      const response = await fetch(src, { method: 'HEAD', signal: controller.signal, cache: 'no-store' })
+      const info = await head(src, RESOURCE_PRIORITY.selected, { fresh: true, signal: controller.signal })
       if (this.disposed || state.controller !== controller) return
-      if (!response.ok) throw new Error(`file request failed: ${response.status}`)
+      if (!info) throw new Error('the daemon could not be reached')
+      if (!info.exists) throw new Error('file request failed: 404')
       this.clearNotice(state)
       await refreshLiveFile(src)
     } catch (error) {
@@ -549,14 +559,20 @@ export class DocumentHost {
 
   private bindScroller(state: FrameState, scroller: HTMLElement): void {
     state.stopScroll?.()
-    scroller.scrollTop = state.scroll.y
-    scroller.scrollLeft = state.scroll.x
-    // A fresh prose frame receives its reading geometry later in the same turn.
-    queueMicrotask(() => {
-      if (this.disposed || !state.frame.viewer?.contains(scroller)) return
+    // Writing a scroll offset forces layout mid-build. A scroller bound for the
+    // first time already sits at the origin, so a page opening at the top skips it.
+    const restore = state.scroll.x !== 0 || state.scroll.y !== 0 || boundScrollers.has(scroller)
+    boundScrollers.add(scroller)
+    if (restore) {
       scroller.scrollTop = state.scroll.y
       scroller.scrollLeft = state.scroll.x
-    })
+      // A fresh prose frame receives its reading geometry later in the same turn.
+      queueMicrotask(() => {
+        if (this.disposed || !state.frame.viewer?.contains(scroller)) return
+        scroller.scrollTop = state.scroll.y
+        scroller.scrollLeft = state.scroll.x
+      })
+    }
     const save = (): void => {
       this.saveScroll(state)
       if (state.active) this.options.onScroll?.(state.frame.doc.key, state.scroll.y)

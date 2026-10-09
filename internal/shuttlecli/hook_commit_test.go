@@ -3,52 +3,115 @@ package shuttlecli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
-// isolateCommits points every resolver tier at a temp tree, so no test can read
-// or write the real ~/.shuttle ledger. Returns the fake home.
-func isolateCommits(t *testing.T) string {
+// isolateCommits is an env whose every ledger resolver tier points into the
+// test's own temp tree, so no test can read or write a real ~/.shuttle
+// ledger. It returns the env and its (empty) home.
+func isolateCommits(t *testing.T) (*sysenv.Env, string) {
 	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("SHUTTLE_COMMITS_FILE", "")
-	t.Setenv("SHUTTLE_DATA_DIR", "")
-	t.Setenv("SHUTTLE_TMUX_SESSION", "test-session")
-	t.Setenv("TMUX", "")
-	return home
+	env, home := envWithHome(t)
+	env.Set("SHUTTLE_COMMITS_FILE", "")
+	env.Set("SHUTTLE_DATA_DIR", "")
+	env.Set("SHUTTLE_TMUX_SESSION", "test-session")
+	env.Set("TMUX", "")
+	return env, home
+}
+
+// commitLedger is isolateCommits with SHUTTLE_COMMITS_FILE naming a fresh
+// ledger, whose path it returns.
+func commitLedger(t *testing.T) (*sysenv.Env, string) {
+	t.Helper()
+	env, _ := isolateCommits(t)
+	path := filepath.Join(t.TempDir(), "commits.jsonl")
+	env.Set("SHUTTLE_COMMITS_FILE", path)
+	return env, path
+}
+
+// sharedRepos holds one repository per commit subject, built once for the
+// package run inside the TestMain fence directory. The hook only reads a
+// repository, so tests that never commit share it.
+var sharedRepos sync.Map // subject → *sharedRepo
+
+type sharedRepo struct {
+	once sync.Once
+	dir  string
+	err  error
+}
+
+// sharedGitRepo is a read-only repository with one commit whose subject is
+// subject, shared by every test that asks for it. A test that commits builds
+// its own with gitRepo.
+func sharedGitRepo(t *testing.T, subject string) string {
+	t.Helper()
+	requireGit(t)
+	entry, _ := sharedRepos.LoadOrStore(subject, &sharedRepo{})
+	repo := entry.(*sharedRepo)
+	repo.once.Do(func() {
+		repo.dir, repo.err = os.MkdirTemp(testFenceDir, "repo-*")
+		if repo.err == nil {
+			repo.err = initGitRepo(repo.dir, subject)
+		}
+	})
+	if repo.err != nil {
+		t.Fatal(repo.err)
+	}
+	return repo.dir
 }
 
 // gitRepo makes a throwaway repository with one commit and returns its path.
-// Identity is passed per-command: the runner's own git config must not decide
-// whether this test can commit, and a name in tracked source is what
-// lint-personal exists to catch.
 func gitRepo(t *testing.T, subject string) string {
+	t.Helper()
+	requireGit(t)
+	dir := t.TempDir()
+	if err := initGitRepo(dir, subject); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func requireGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skipf("git unavailable: %v", err)
 	}
-	dir := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
+}
+
+// initGitRepo makes dir a repository whose one commit adds a two-line a.txt.
+func initGitRepo(dir, subject string) error {
+	if err := runGit(dir, "init", "--initial-branch=main"); err != nil {
+		return err
 	}
-	run("init", "--initial-branch=main")
 	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
+		return err
 	}
-	run("add", "a.txt")
-	run("-c", "user.name=felt test", "-c", "user.email=test@example.invalid",
-		"commit", "-m", subject)
-	return dir
+	if err := runGit(dir, "add", "a.txt"); err != nil {
+		return err
+	}
+	return runGit(dir, "commit", "-m", subject)
+}
+
+// runGit runs one git command in dir. Identity is passed per-command: the
+// runner's own git config must not decide whether this test can commit, and
+// a name in tracked source is what lint-personal exists to catch.
+func runGit(dir string, args ...string) error {
+	full := append([]string{"-C", dir, "-c", "user.name=felt test", "-c", "user.email=test@example.invalid"}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return nil
 }
 
 // commitPayload is the PostToolUse envelope a Bash call produces.
@@ -62,13 +125,13 @@ func commitPayload(cwd, command string) map[string]any {
 	}
 }
 
-func writeCommit(t *testing.T, payload map[string]any) {
+func writeCommit(t *testing.T, env *sysenv.Env, payload map[string]any) {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	if err := runCommitHook(bytes.NewReader(raw)); err != nil {
+	if err := newApp(env).runCommitHook(bytes.NewReader(raw)); err != nil {
 		t.Fatalf("runCommitHook: %v", err)
 	}
 }
@@ -77,12 +140,11 @@ func writeCommit(t *testing.T, payload map[string]any) {
 // integer and `sha` a non-empty string (parse_line/3 drops anything else), plus
 // the fields /api/v1/commits serves verbatim to the board's CommitRecord.
 func TestCommitLineShape(t *testing.T) {
-	isolateCommits(t)
-	repo := gitRepo(t, "desk: cycle lens")
-	path := filepath.Join(t.TempDir(), "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
+	t.Parallel()
+	env, path := commitLedger(t)
+	repo := sharedGitRepo(t, "desk: cycle lens")
 
-	writeCommit(t, commitPayload(repo, `git commit -m "desk: cycle lens"`))
+	writeCommit(t, env, commitPayload(repo, `git commit -m "desk: cycle lens"`))
 
 	lines := readEventLines(t, path)
 	if len(lines) != 1 {
@@ -136,17 +198,16 @@ func TestCommitLineShape(t *testing.T) {
 // board's CommitRecord types these `string | null`, and an empty string would
 // render as a session that exists but has no name.
 func TestCommitProvenanceNulls(t *testing.T) {
-	isolateCommits(t)
-	repo := gitRepo(t, "anonymous")
-	path := filepath.Join(t.TempDir(), "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
-	t.Setenv("SHUTTLE_TMUX_SESSION", "")
+	t.Parallel()
+	env, path := commitLedger(t)
+	repo := sharedGitRepo(t, "subject")
+	env.Set("SHUTTLE_TMUX_SESSION", "")
 
 	payload := commitPayload(repo, "git commit -m anonymous")
 	// "unknown" is the placeholder an anonymous session carries; it names no
 	// session, so it must not be written as one.
 	payload["session_id"] = "unknown"
-	writeCommit(t, payload)
+	writeCommit(t, env, payload)
 
 	lines := readEventLines(t, path)
 	if len(lines) != 1 {
@@ -163,10 +224,9 @@ func TestCommitProvenanceNulls(t *testing.T) {
 // TestCommitRecordingCases is the matcher matrix: which payloads produce a line
 // at all.
 func TestCommitRecordingCases(t *testing.T) {
-	isolateCommits(t)
-	repo := gitRepo(t, "subject")
-	path := filepath.Join(t.TempDir(), "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
+	t.Parallel()
+	repo := sharedGitRepo(t, "subject")
+	notRepo := t.TempDir()
 
 	for _, tc := range []struct {
 		name    string
@@ -209,19 +269,18 @@ func TestCommitRecordingCases(t *testing.T) {
 		{
 			name:    "a cwd that is not a repository",
 			command: "git commit -m x",
-			mutate:  func(p map[string]any) { p["cwd"] = t.TempDir() },
+			mutate:  func(p map[string]any) { p["cwd"] = notRepo },
 			want:    0,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				t.Fatalf("reset ledger: %v", err)
-			}
+			t.Parallel()
+			env, path := commitLedger(t)
 			payload := commitPayload(repo, tc.command)
 			if tc.mutate != nil {
 				tc.mutate(payload)
 			}
-			writeCommit(t, payload)
+			writeCommit(t, env, payload)
 			if got := len(readEventLines(t, path)); got != tc.want {
 				t.Fatalf("got %d lines, want %d", got, tc.want)
 			}
@@ -233,27 +292,22 @@ func TestCommitRecordingCases(t *testing.T) {
 // command, or a `git commit` that failed and left HEAD where it was, must not
 // draw a second commit on the board.
 func TestCommitDedupe(t *testing.T) {
-	isolateCommits(t)
+	t.Parallel()
+	env, path := commitLedger(t)
 	repo := gitRepo(t, "first")
-	path := filepath.Join(t.TempDir(), "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
 
-	writeCommit(t, commitPayload(repo, "git commit -m first"))
-	writeCommit(t, commitPayload(repo, "git commit -m first"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m first"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m first"))
 	lines := readEventLines(t, path)
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines after a repeat, want 1", len(lines))
 	}
 
 	// A real second commit still lands: dedupe is per sha, not "one per repo".
-	cmd := exec.Command("git", "-C", repo,
-		"-c", "user.name=felt test", "-c", "user.email=test@example.invalid",
-		"commit", "--allow-empty", "-m", "second")
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("second commit: %v\n%s", err, out)
+	if err := runGit(repo, "commit", "--allow-empty", "-m", "second"); err != nil {
+		t.Fatalf("second commit: %v", err)
 	}
-	writeCommit(t, commitPayload(repo, "git commit --allow-empty -m second"))
+	writeCommit(t, env, commitPayload(repo, "git commit --allow-empty -m second"))
 	lines = readEventLines(t, path)
 	if len(lines) != 2 {
 		t.Fatalf("got %d lines after a second commit, want 2", len(lines))
@@ -270,10 +324,11 @@ func TestCommitDedupe(t *testing.T) {
 // the opt-in. Absent, the hook writes nothing AND creates nothing — a felt user
 // who never runs shuttle gets no surprise ~/.shuttle.
 func TestCommitWriteGate(t *testing.T) {
-	home := isolateCommits(t)
-	repo := gitRepo(t, "gated")
+	t.Parallel()
+	env, home := isolateCommits(t)
+	repo := sharedGitRepo(t, "subject")
 
-	writeCommit(t, commitPayload(repo, "git commit -m gated"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m gated"))
 	if _, err := os.Stat(filepath.Join(home, ".shuttle")); !os.IsNotExist(err) {
 		t.Fatalf("~/.shuttle was created (err=%v); the gate must not create it", err)
 	}
@@ -282,7 +337,7 @@ func TestCommitWriteGate(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, ".shuttle"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	writeCommit(t, commitPayload(repo, "git commit -m gated"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m gated"))
 	if lines := readEventLines(t, filepath.Join(home, ".shuttle", "commits.jsonl")); len(lines) != 1 {
 		t.Fatalf("got %d lines after enabling, want 1", len(lines))
 	}
@@ -291,12 +346,13 @@ func TestCommitWriteGate(t *testing.T) {
 // TestCommitDataDirTier: SHUTTLE_DATA_DIR is the middle tier and is still
 // gated — it names a directory the daemon owns, not a path the caller asked for.
 func TestCommitDataDirTier(t *testing.T) {
-	isolateCommits(t)
-	repo := gitRepo(t, "tiered")
+	t.Parallel()
+	env, _ := isolateCommits(t)
+	repo := sharedGitRepo(t, "subject")
 	dataDir := filepath.Join(t.TempDir(), "shuttle-data")
-	t.Setenv("SHUTTLE_DATA_DIR", dataDir)
+	env.Set("SHUTTLE_DATA_DIR", dataDir)
 
-	writeCommit(t, commitPayload(repo, "git commit -m tiered"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m tiered"))
 	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
 		t.Fatalf("SHUTTLE_DATA_DIR was created (err=%v); it is gated like the default", err)
 	}
@@ -304,7 +360,7 @@ func TestCommitDataDirTier(t *testing.T) {
 	if err := os.Mkdir(dataDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	writeCommit(t, commitPayload(repo, "git commit -m tiered"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m tiered"))
 	if lines := readEventLines(t, filepath.Join(dataDir, "commits.jsonl")); len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
@@ -313,12 +369,13 @@ func TestCommitDataDirTier(t *testing.T) {
 // TestCommitExplicitFileOverridesGate: SHUTTLE_COMMITS_FILE is explicit intent,
 // so it creates its parent rather than declining to write.
 func TestCommitExplicitFileOverridesGate(t *testing.T) {
-	isolateCommits(t)
-	repo := gitRepo(t, "explicit")
+	t.Parallel()
+	env, _ := isolateCommits(t)
+	repo := sharedGitRepo(t, "subject")
 	path := filepath.Join(t.TempDir(), "nested", "deeper", "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
+	env.Set("SHUTTLE_COMMITS_FILE", path)
 
-	writeCommit(t, commitPayload(repo, "git commit -m explicit"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m explicit"))
 	if lines := readEventLines(t, path); len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
@@ -327,9 +384,8 @@ func TestCommitExplicitFileOverridesGate(t *testing.T) {
 // TestCommitDegenerateInput: a tracking hook must never fail a tool call. Every
 // unusable payload is a silent, writeless pass.
 func TestCommitDegenerateInput(t *testing.T) {
-	isolateCommits(t)
-	path := filepath.Join(t.TempDir(), "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
+	t.Parallel()
+	env, path := commitLedger(t)
 
 	for _, in := range []string{
 		"", "   ", "not json", "{", `{"tool_name":`, `[]`, `"a string"`,
@@ -337,7 +393,7 @@ func TestCommitDegenerateInput(t *testing.T) {
 		`{"hook_event_name":"PostToolUse","tool_name":"Bash"}`,
 		`{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"git commit"},"cwd":"/nonexistent/path"}`,
 	} {
-		if err := runCommitHook(strings.NewReader(in)); err != nil {
+		if err := newApp(env).runCommitHook(strings.NewReader(in)); err != nil {
 			t.Fatalf("runCommitHook(%q) = %v, want nil", in, err)
 		}
 	}
@@ -349,16 +405,17 @@ func TestCommitDegenerateInput(t *testing.T) {
 // TestCommitHookIsSilent: the hook prints nothing on stdout. Claude Code parses
 // hook stdout as an envelope; any stray byte is a protocol error.
 func TestCommitHookIsSilent(t *testing.T) {
-	isolateCommits(t)
-	repo := gitRepo(t, "quiet")
-	path := filepath.Join(t.TempDir(), "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
+	t.Parallel()
+	env, path := commitLedger(t)
+	repo := sharedGitRepo(t, "subject")
 
-	out := captureStdout(t, func() {
-		writeCommit(t, commitPayload(repo, "git commit -m quiet"))
-	})
-	if out != "" {
+	streams := sysenvtest.Capture(env)
+	writeCommit(t, env, commitPayload(repo, "git commit -m quiet"))
+	if out := streams.Stdout.String(); out != "" {
 		t.Fatalf("hook wrote %q to stdout, want nothing", out)
+	}
+	if lines := readEventLines(t, path); len(lines) != 1 {
+		t.Fatalf("hook recorded %d lines, want 1: the silence must come from a hook that ran", len(lines))
 	}
 }
 
@@ -366,12 +423,11 @@ func TestCommitHookIsSilent(t *testing.T) {
 // the third keeps its own tabs — the subject is the last field, not a field
 // count.
 func TestCommitSubjectWithTabs(t *testing.T) {
-	isolateCommits(t)
-	repo := gitRepo(t, "tabbed\tsubject\there")
-	path := filepath.Join(t.TempDir(), "commits.jsonl")
-	t.Setenv("SHUTTLE_COMMITS_FILE", path)
+	t.Parallel()
+	env, path := commitLedger(t)
+	repo := sharedGitRepo(t, "tabbed\tsubject\there")
 
-	writeCommit(t, commitPayload(repo, "git commit -m tabbed"))
+	writeCommit(t, env, commitPayload(repo, "git commit -m tabbed"))
 	lines := readEventLines(t, path)
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
@@ -384,6 +440,7 @@ func TestCommitSubjectWithTabs(t *testing.T) {
 // TestParseShortstat covers the clauses git omits: a commit with only additions
 // prints no deletions clause, and each missing count reads as 0.
 func TestParseShortstat(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in                           string
 		files, insertions, deletions int

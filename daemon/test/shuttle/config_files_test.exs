@@ -12,8 +12,7 @@ defmodule Shuttle.ConfigFilesTest do
   stubbed at the shared `:felt_runner` seam, so a real CLI on the developer's
   PATH never decides whether these tests pass.
   """
-  use ExUnit.Case, async: false
-  import Shuttle.Test.EnvHelpers
+  use ExUnit.Case, async: true
 
   alias Shuttle.ConfigFiles
 
@@ -77,10 +76,6 @@ defmodule Shuttle.ConfigFilesTest do
   end
 
   setup do
-    previous_files = Enum.map(@file_vars, fn {_id, var} -> {var, System.get_env(var)} end)
-    previous_compact = Enum.map(@compact_vars, fn {_id, var} -> {var, System.get_env(var)} end)
-    previous_runner = Application.get_env(:shuttle, :felt_runner)
-
     dir =
       Path.join(System.tmp_dir!(), "shuttle-config-files-#{System.unique_integer([:positive])}")
 
@@ -89,23 +84,18 @@ defmodule Shuttle.ConfigFilesTest do
     paths =
       Map.new(@file_vars, fn {id, var} ->
         path = Path.join(dir, "#{id}.json")
-        System.put_env(var, path)
+        Shuttle.Test.Env.put_env(var, path)
         {id, Path.expand(path)}
       end)
 
     # The compact forms win over the files ENTIRELY, so an operator shell
     # exporting one would leak into every `env_override` assertion below.
-    Enum.each(@compact_vars, fn {_id, var} -> System.delete_env(var) end)
+    Enum.each(@compact_vars, fn {_id, var} -> Shuttle.Test.Env.delete_env(var) end)
 
-    Application.put_env(:shuttle, :felt_runner, MockFelt)
+    Shuttle.Test.Env.put_app_env(:felt_runner, MockFelt)
     start_supervised!(MockFelt)
 
-    on_exit(fn ->
-      File.rm_rf(dir)
-      Enum.each(previous_files, fn {var, value} -> restore_env(var, value) end)
-      Enum.each(previous_compact, fn {var, value} -> restore_env(var, value) end)
-      restore_app_env(:felt_runner, previous_runner)
-    end)
+    on_exit(fn -> File.rm_rf(dir) end)
 
     {:ok, dir: dir, paths: paths}
   end
@@ -136,13 +126,8 @@ defmodule Shuttle.ConfigFilesTest do
     end
 
     test "falls back to ~/.config/shuttle/<stem>.json when nothing overrides it" do
-      # Cleared and restored in one breath: while a `*_FILE` var is absent every
-      # other reader in the VM resolves at the developer's real config, and this
-      # suite's whole job is to never go near it.
-      previous = Enum.map(@file_vars, fn {_id, var} -> {var, System.get_env(var)} end)
-      Enum.each(@file_vars, fn {_id, var} -> System.delete_env(var) end)
+      Enum.each(@file_vars, fn {_id, var} -> Shuttle.Test.Env.delete_env(var) end)
       resolved = Map.new(ConfigFiles.ids(), &{&1, ConfigFiles.path(&1)})
-      Enum.each(previous, fn {var, value} -> restore_env(var, value) end)
 
       assert resolved == %{
                stores: Path.expand("~/.config/shuttle/stores.json"),
@@ -179,9 +164,8 @@ defmodule Shuttle.ConfigFilesTest do
     end
 
     test "names the compact env form overriding a path-list file" do
-      System.put_env("SHUTTLE_STORES", "/tmp/a,/tmp/b")
-      System.put_env("SHUTTLE_PROJECTS", "/tmp/c")
-      on_exit(fn -> Enum.each(@compact_vars, fn {_id, var} -> System.delete_env(var) end) end)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", "/tmp/a,/tmp/b")
+      Shuttle.Test.Env.put_env("SHUTTLE_PROJECTS", "/tmp/c")
 
       assert ConfigFiles.summary(:stores).env_override == %{
                var: "SHUTTLE_STORES",
@@ -198,9 +182,8 @@ defmodule Shuttle.ConfigFilesTest do
       # Even with same-named variables exported, which a confused operator will
       # do sooner or later: `SHUTTLE_REMOTES` is not a thing shuttle reads, and
       # saying it overrode the file would be a lie in the other direction.
-      System.put_env("SHUTTLE_REMOTES", "/tmp/a,/tmp/b")
-      System.put_env("SHUTTLE_AGENTS", "/tmp/c")
-      on_exit(fn -> Enum.each(["SHUTTLE_REMOTES", "SHUTTLE_AGENTS"], &System.delete_env/1) end)
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES", "/tmp/a,/tmp/b")
+      Shuttle.Test.Env.put_env("SHUTTLE_AGENTS", "/tmp/c")
 
       assert ConfigFiles.summary(:remotes).env_override == nil
       assert ConfigFiles.summary(:agents).env_override == nil
@@ -293,63 +276,68 @@ defmodule Shuttle.ConfigFilesTest do
   end
 
   describe "write/3 with an expected digest" do
-    setup %{paths: paths} do
-      File.write!(paths[:stores], @stores_doc)
-      {:ok, digest: ConfigFiles.digest(:stores)}
-    end
+    @other_doc ~s({"version":1,"felt_stores":["/tmp/other"]})
+    @replacement ~s({"version":1,"felt_stores":["/tmp/new"]})
 
-    test "a digest matching what is on disk commits", %{paths: paths, digest: digest} do
-      replacement = ~s({"version":1,"felt_stores":["/tmp/new"]})
-
-      assert {:ok, file} = ConfigFiles.write(:stores, replacement, expected_digest: digest)
-      assert file.text == replacement
-      assert File.read!(paths[:stores]) == replacement
-    end
-
-    test "a stale digest is refused and writes nothing", %{paths: paths} do
-      stale = String.duplicate("0", 64)
-
-      assert {:conflict, message} = ConfigFiles.write(:stores, "[]", expected_digest: stale)
-      assert message =~ "changed since you opened it"
-      assert File.read!(paths[:stores]) == @stores_doc
-    end
-
-    test "a digest for a file deleted underneath the editor says so", %{
-      paths: paths,
-      digest: digest
+    # The precondition is "the editor read what is on disk now": it commits
+    # exactly when the file the editor read (`nil` for none) is the file there,
+    # for a write and a removal alike. Every refusal leaves the disk untouched
+    # and names the situation — gone, or changed.
+    test "commits iff the expected digest names the file as it is now, absence included", %{
+      paths: paths
     } do
-      File.rm!(paths[:stores])
+      path = paths[:stores]
 
-      assert {:conflict, message} = ConfigFiles.write(:stores, "[]", expected_digest: digest)
-      assert message =~ "was deleted since you opened it"
-      refute File.exists?(paths[:stores])
-    end
+      digests =
+        Map.new([@stores_doc, @other_doc], fn doc ->
+          File.write!(path, doc)
+          {doc, ConfigFiles.digest(:stores)}
+        end)
 
-    test "nil against an absent file is an editor that correctly read nothing", %{paths: paths} do
-      File.rm!(paths[:stores])
+      # What the editor read, and each form its digest arrives in: an editor
+      # that read no file sends `nil`, or `""` from a form field.
+      expectations = [
+        {nil, nil},
+        {nil, ""},
+        {@stores_doc, digests[@stores_doc]},
+        {@other_doc, digests[@other_doc]}
+      ]
 
-      assert {:ok, file} = ConfigFiles.write(:stores, @stores_doc, expected_digest: nil)
-      assert file.text == @stores_doc
-      assert File.read!(paths[:stores]) == @stores_doc
-    end
+      for on_disk <- [nil, @stores_doc, @other_doc],
+          {read, expected} <- expectations,
+          text <- [@replacement, ""] do
+        row =
+          "on disk #{inspect(on_disk)}, read #{inspect(read)} (sent #{inspect(expected)}), text #{inspect(text)}"
 
-    test "nil against a file that DOES exist is a conflict", %{paths: paths} do
-      assert {:conflict, message} = ConfigFiles.write(:stores, "[]", expected_digest: nil)
-      assert message =~ "changed since you opened it"
-      assert File.read!(paths[:stores]) == @stores_doc
+        if on_disk, do: File.write!(path, on_disk), else: File.rm_rf!(path)
+
+        result = ConfigFiles.write(:stores, text, expected_digest: expected)
+        after_write = if File.exists?(path), do: File.read!(path)
+
+        if read == on_disk do
+          assert {:ok, file} = result, row
+          assert file.text == text, row
+          assert after_write == if(text == "", do: nil, else: text), row
+        else
+          assert {:conflict, message} = result, row
+
+          assert message =~
+                   if(on_disk,
+                     do: "changed since you opened it",
+                     else: "was deleted since you opened it"
+                   ),
+                 row
+
+          assert after_write == on_disk, row
+        end
+      end
     end
 
     test "the default is :any — last-write-wins, for a caller that said nothing", %{paths: paths} do
+      File.write!(paths[:stores], @stores_doc)
+
       assert {:ok, _} = ConfigFiles.write(:stores, "[]")
       assert File.read!(paths[:stores]) == "[]"
-    end
-
-    test "a stale digest refuses a REMOVAL too", %{paths: paths} do
-      stale = String.duplicate("0", 64)
-
-      assert {:conflict, message} = ConfigFiles.write(:stores, "", expected_digest: stale)
-      assert message =~ "changed since you opened it"
-      assert File.read!(paths[:stores]) == @stores_doc
     end
   end
 

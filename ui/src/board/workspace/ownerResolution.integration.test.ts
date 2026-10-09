@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
+import { resetLanes } from '../requestLanes.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { Dock } from './Dock.js'
 import { Overview } from './Overview.js'
@@ -69,6 +70,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', reads)
 })
 afterEach(() => {
+  resetLanes()
   workspace?.dispose()
   if (!workspace) overview?.dispose()
   workspace = undefined; overview = undefined
@@ -159,13 +161,15 @@ describe('Overview metadata recovery and navigation', () => {
     expect(folio('alpha')?.textContent).toContain('Live alpha')
     expect(fiberReads()).toHaveLength(1)
   })
-  it('fresh refresh retries even a confirmed miss whose folio has moved to Unfiled', async () => {
+  it('a fresh visit retries even a confirmed miss whose folio has moved to Unfiled', async () => {
     files = [receipt('alpha')]
     let healthy = false
     reads.mockImplementation(async url => url.includes('/sent-files/all/') ? json({ files }) : healthy ? json(envelope('alpha')) : json({ fibers: [] }))
     sheet().refresh(); await settle()
     expect(folio('other:owner')).not.toBeNull()
     healthy = true; overview!.refresh(); await settle()
+    expect(fiberReads()).toHaveLength(1)
+    overview!.hide(); overview!.show(); overview!.refresh(); await settle()
     expect(folio('other:owner')).toBeNull()
     expect(folio('alpha')?.textContent).toContain('Resolved alpha')
     expect(fiberReads()).toHaveLength(2)
@@ -193,7 +197,7 @@ describe('Overview metadata recovery and navigation', () => {
     expect(opens.mock.calls.map(([c]) => c.uid)).toEqual(['beta'])
     expect(fiberReads()).toHaveLength(2)
   })
-  it('prioritizes queued clicks over preloads within four reads and suppresses a superseded click', async () => {
+  it('preloads one fiber at a time, reads clicks at once and suppresses a superseded click', async () => {
     files = Array.from({ length: 7 }, (_, i) => receipt(`uid${i}`))
     const pending = new Map<string, ReturnType<typeof deferred<Response>>>()
     let active = 0, peak = 0
@@ -205,19 +209,21 @@ describe('Overview metadata recovery and navigation', () => {
       return item.promise.finally(() => { active-- })
     })
     sheet().refresh(); await settle()
-    expect([...pending.keys()]).toEqual(['uid0', 'uid1', 'uid2', 'uid3'])
-    folio('uid5')!.click(); folio('uid6')!.click(); folio('uid6')!.click()
-    expect(fiberReads()).toHaveLength(4)
-    pending.get('uid0')!.resolve(json(envelope('uid0'))); await settle()
-    expect([...pending.keys()]).toEqual(['uid0', 'uid1', 'uid2', 'uid3', 'uid6'])
+    // Over HTTP/1.1 the slow lane holds one of the six connections.
+    expect([...pending.keys()]).toEqual(['uid0'])
+    // Clicks take over their queued preloads and read at once, once each.
+    folio('uid5')!.click(); folio('uid6')!.click(); folio('uid6')!.click(); await settle()
+    expect([...pending.keys()]).toEqual(['uid0', 'uid5', 'uid6'])
     pending.get('uid6')!.resolve(json(envelope('uid6'))); await settle()
     expect(opens.mock.calls.map(([c]) => c.uid)).toEqual(['uid6'])
-    expect(pending.has('uid5')).toBe(true)
     pending.get('uid5')!.resolve(json(envelope('uid5'))); await settle()
     expect(opens.mock.calls.map(([c]) => c.uid)).toEqual(['uid6'])
-    for (const uid of ['uid1', 'uid2', 'uid3', 'uid4']) pending.get(uid)!.resolve(json(envelope(uid)))
-    await settle()
-    expect(peak).toBe(4)
+    for (const uid of ['uid0', 'uid1', 'uid2', 'uid3', 'uid4']) {
+      expect(pending.has(uid)).toBe(true)
+      expect(active).toBe(1)
+      pending.get(uid)!.resolve(json(envelope(uid))); await settle()
+    }
+    expect(peak).toBe(3)
     expect(active).toBe(0)
     expect(fiberReads()).toHaveLength(7)
     expect(new Set(fiberReads()).size).toBe(7)
@@ -277,7 +283,7 @@ describe('Workspace owner integration', () => {
     files = [receipt('alpha')]
     let healthy = false
     reads.mockImplementation(async url => url.includes('/sent-files/all/') ? json({ files }) : healthy ? json(envelope('alpha')) : json({}, 503))
-    reader(); overview!.refresh(); await settle()
+    reader().mountOverview(document.body); await settle()
     overview!.el.querySelector<HTMLButtonElement>('.ws-overview-folio')!.click(); await settle()
     expect(workspace!.isActive).toBe(true)
     expect(overview!.hasMetadata(overview!.orderedCards()[0])).toBe(false)

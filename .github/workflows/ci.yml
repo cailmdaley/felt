@@ -46,6 +46,9 @@ jobs:
       - name: Bootstrap login shell and failure handling
         run: bash scripts/test-bootstrap.sh
 
+      - name: Pinned-kind migration planning
+        run: make migrate-test
+
       # The two plugin manifests ship as one plugin; .goreleaser.yml refuses to
       # release when they disagree. Catch the drift at PR time instead.
       - name: Plugin manifests agree on version
@@ -138,9 +141,8 @@ jobs:
       - name: Check production dependency advisories
         run: npm audit --omit=dev
 
-      # npm test deliberately runs the board suite twice under pinned
-      # America/Los_Angeles and Europe/Paris offsets. The civil-day logic can
-      # pass in one timezone and fail in the other, so this is a release gate.
+      # npm test runs the board suite under a pinned America/Los_Angeles; the
+      # civil-day properties inside it cover every other zone. A release gate.
       - name: Run board tests
         run: npm test
 

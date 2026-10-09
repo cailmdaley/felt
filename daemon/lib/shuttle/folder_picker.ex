@@ -56,7 +56,7 @@ defmodule Shuttle.FolderPicker do
 
   # The available native mechanism, or `nil` when the host has none.
   defp mechanism do
-    case Application.get_env(:shuttle, :folder_picker_mechanism) do
+    case Shuttle.Env.app(:folder_picker_mechanism) do
       nil -> detect()
       :none -> nil
       forced -> forced
@@ -91,13 +91,13 @@ defmodule Shuttle.FolderPicker do
   defp display?, do: env?("DISPLAY") or env?("WAYLAND_DISPLAY")
 
   defp env?(name) do
-    case System.get_env(name) do
+    case Shuttle.Env.get(name) do
       value when is_binary(value) and value != "" -> true
       _ -> false
     end
   end
 
-  defp executable?(name), do: System.find_executable(name) != nil
+  defp executable?(name), do: Shuttle.Env.find_executable(name) != nil
 
   defp run(:osascript), do: cmd("osascript", ["-e", @applescript])
   defp run(:zenity), do: cmd("zenity", ["--file-selection", "--directory"])
@@ -135,5 +135,5 @@ defmodule Shuttle.FolderPicker do
     if stripped == "", do: "/", else: stripped
   end
 
-  defp runner, do: Application.get_env(:shuttle, :folder_picker_runner, Shuttle.Runner.Default)
+  defp runner, do: Shuttle.Env.app(:folder_picker_runner, Shuttle.Runner.Default)
 end

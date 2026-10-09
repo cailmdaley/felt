@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	osuser "os/user"
 	"path/filepath"
 	"regexp"
@@ -25,19 +24,19 @@ const defaultDaemonLabel = "io.shuttle.daemon"
 
 var templatePlaceholderPattern = regexp.MustCompile(`__[A-Z][A-Z0-9_]*__`)
 
-func newShuttleDaemonInstallCommand() *cobra.Command {
-	home, _ := os.UserHomeDir()
-	sshSocket, sshSocketSet := os.LookupEnv("AGENT_SSH_AUTH_SOCK")
-	label := os.Getenv("AGENT_LABEL")
+func (a *app) newShuttleDaemonInstallCommand() *cobra.Command {
+	home, _ := a.env.UserHomeDir()
+	sshSocket, sshSocketSet := a.env.LookupEnv("AGENT_SSH_AUTH_SOCK")
+	label := a.env.Getenv("AGENT_LABEL")
 	if label == "" {
 		label = defaultDaemonLabel
 	}
 	options := supervisorOptions{
 		Label:        label,
-		Stores:       os.Getenv("AGENT_STORES"),
-		Path:         os.Getenv("AGENT_PATH"),
-		Log:          os.Getenv("AGENT_LOG"),
-		Port:         os.Getenv("AGENT_PORT"),
+		Stores:       a.env.Getenv("AGENT_STORES"),
+		Path:         a.env.Getenv("AGENT_PATH"),
+		Log:          a.env.Getenv("AGENT_LOG"),
+		Port:         a.env.Getenv("AGENT_PORT"),
 		SSHSocket:    sshSocket,
 		SSHSocketSet: sshSocketSet,
 		OS:           supervisorOS(runtime.GOOS),
@@ -48,9 +47,9 @@ func newShuttleDaemonInstallCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !cmd.Flags().Changed("stores") {
-				options.Stores = os.Getenv("AGENT_STORES")
+				options.Stores = a.env.Getenv("AGENT_STORES")
 				if options.Stores == "" {
-					options.Stores = os.Getenv("SHUTTLE_STORES")
+					options.Stores = a.env.Getenv("SHUTTLE_STORES")
 				}
 			}
 			options.StoresSet = cmd.Flags().Changed("stores")
@@ -58,18 +57,18 @@ func newShuttleDaemonInstallCommand() *cobra.Command {
 			options.OS, _ = cmd.Flags().GetString("os")
 			if cmd.Flags().Changed("ssh-auth-sock") {
 				options.SSHSocketSet = true
-			} else if socket, ok := os.LookupEnv("AGENT_SSH_AUTH_SOCK"); ok {
+			} else if socket, ok := a.env.LookupEnv("AGENT_SSH_AUTH_SOCK"); ok {
 				options.SSHSocket, options.SSHSocketSet = socket, true
 			} else {
 				options.SSHSocket, options.SSHSocketSet = defaultDaemonSSHSocket(options.OS, home), false
 			}
 			if cmd.Flags().Changed("tmux-tmpdir") {
 				options.TmuxTmpdirSet = true
-			} else if dir, ok := os.LookupEnv("AGENT_TMUX_TMPDIR"); ok {
+			} else if dir, ok := a.env.LookupEnv("AGENT_TMUX_TMPDIR"); ok {
 				options.TmuxTmpdir, options.TmuxTmpdirSet = dir, true
 			}
 			options.CodexSocketSet = cmd.Flags().Changed("codex-socket")
-			return installDaemonSupervisor(options)
+			return a.installDaemonSupervisor(options)
 		},
 	}
 	command.Flags().StringVar(&options.Stores, "stores", options.Stores, "Fixed comma-separated store list; empty uses the editable registry")
@@ -86,8 +85,8 @@ func newShuttleDaemonInstallCommand() *cobra.Command {
 	return command
 }
 
-func newShuttleDaemonUninstallCommand() *cobra.Command {
-	label := os.Getenv("AGENT_LABEL")
+func (a *app) newShuttleDaemonUninstallCommand() *cobra.Command {
+	label := a.env.Getenv("AGENT_LABEL")
 	if label == "" {
 		label = defaultDaemonLabel
 	}
@@ -97,7 +96,7 @@ func newShuttleDaemonUninstallCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			value, _ := cmd.Flags().GetString("label")
-			return uninstallDaemonSupervisor(value)
+			return a.uninstallDaemonSupervisor(value)
 		},
 	}
 	command.Flags().StringVar(&label, "label", label, "Supervisor label to remove")
@@ -138,7 +137,7 @@ func supervisorOS(goos string) string {
 	}
 }
 
-func installDaemonSupervisor(options supervisorOptions) error {
+func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 	currentOS := supervisorOS(runtime.GOOS)
 	if options.OS != currentOS && !options.Print {
 		return errors.New("--os only applies to --print (an install must match this host)")
@@ -149,10 +148,10 @@ func installDaemonSupervisor(options supervisorOptions) error {
 	if err := validateSupervisorOptions(options); err != nil {
 		return err
 	}
-	if err := resolveSupervisorCodex(&options); err != nil {
+	if err := a.resolveSupervisorCodex(&options); err != nil {
 		return err
 	}
-	release, err := findDaemonRelease()
+	release, err := a.findDaemonRelease()
 	if err != nil {
 		return err
 	}
@@ -166,17 +165,18 @@ func installDaemonSupervisor(options supervisorOptions) error {
 	}
 	storesFile := options.StoresFile
 	if storesFile == "" {
-		storesFile, err = supervisorStoresFilePath()
+		storesFile, err = a.supervisorStoresFilePath()
 		if err != nil {
 			return err
 		}
 	}
 	options.StoresFile = storesFile
 	if options.Log == "" {
-		options.Log = defaultDaemonLog(options.OS)
+		options.Log = a.defaultDaemonLog(options.OS)
 	}
+	options.Log = a.env.Resolve(options.Log)
 	if options.Path == "" || !options.TmuxTmpdirSet {
-		login := loginEnvCapture()
+		login := a.loginEnvCapture()
 		if options.Path == "" {
 			options.Path = login.Path
 		}
@@ -184,41 +184,41 @@ func installDaemonSupervisor(options supervisorOptions) error {
 			options.TmuxTmpdir = login.TmuxTmpdir
 		}
 	}
-	options.Path = pathForDaemonSupervisor(options.Path)
+	options.Path = a.pathForDaemonSupervisor(options.Path)
 	if options.SSHSocket == "" && options.OS == "Darwin" && !options.SSHSocketSet {
-		home, _ := os.UserHomeDir()
+		home, _ := a.env.UserHomeDir()
 		options.SSHSocket = filepath.Join(home, ".ssh", "agent.sock")
 	}
 	if err := validateSupervisorOptions(options); err != nil {
 		return err
 	}
-	warnProtectedSupervisorPaths(options, release.Dir)
-	rendered, err := renderSupervisorTemplate(options.OS, string(template), options, release)
+	a.warnProtectedSupervisorPaths(options, release.Dir)
+	rendered, err := a.renderSupervisorTemplate(options.OS, string(template), options, release)
 	if err != nil {
 		return err
 	}
 	if options.Print {
-		fmt.Print(rendered)
+		fmt.Fprint(a.env.Stdout, rendered)
 		return nil
 	}
-	cwd, err := supervisorBootstrapDirectory()
+	cwd, err := a.supervisorBootstrapDirectory()
 	if err != nil {
 		return err
 	}
-	if err := bootstrapSupervisorStore(options, cwd); err != nil {
+	if err := a.bootstrapSupervisorStore(options, cwd); err != nil {
 		return err
 	}
-	if _, _, _, err := seedOwnHost(); err != nil {
-		fmt.Fprintf(os.Stderr, "⚠️  could not seed a host identity: %v\n", err)
-		fmt.Fprintln(os.Stderr, "    The daemon dispatches nothing until it can resolve one.")
+	if _, _, _, err := a.seedOwnHost(); err != nil {
+		fmt.Fprintf(a.env.Stderr, "⚠️  could not seed a host identity: %v\n", err)
+		fmt.Fprintln(a.env.Stderr, "    The daemon dispatches nothing until it can resolve one.")
 	}
 	if err := os.MkdirAll(filepath.Dir(options.Log), 0o755); err != nil {
 		return fmt.Errorf("creating daemon log directory: %w", err)
 	}
 	if options.OS == "Darwin" {
-		return installLaunchAgent(options, release, rendered)
+		return a.installLaunchAgent(options, release, rendered)
 	}
-	return installSystemdUserUnit(options, release, rendered)
+	return a.installSystemdUserUnit(options, release, rendered)
 }
 
 func validateSupervisorOptions(options supervisorOptions) error {
@@ -260,8 +260,8 @@ func defaultDaemonSSHSocket(osName, home string) string {
 
 // Explicit values override the installed supervisor; an omitted option preserves
 // installed desktop endpoints and fixed stores across reinstalls.
-func resolveSupervisorCodex(options *supervisorOptions) error {
-	home, err := os.UserHomeDir()
+func (a *app) resolveSupervisorCodex(options *supervisorOptions) error {
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return err
 	}
@@ -278,20 +278,20 @@ func resolveSupervisorCodex(options *supervisorOptions) error {
 		return fmt.Errorf("preserving supervisor settings from %s: %w", path, err)
 	}
 	if !options.StoresSet && options.Stores == "" {
-		_, agentSet := os.LookupEnv("AGENT_STORES")
-		_, shuttleSet := os.LookupEnv("SHUTTLE_STORES")
+		_, agentSet := a.env.LookupEnv("AGENT_STORES")
+		_, shuttleSet := a.env.LookupEnv("SHUTTLE_STORES")
 		if !agentSet && !shuttleSet {
 			options.Stores = previous["SHUTTLE_STORES"]
 		}
 	}
 	if !options.CodexSocketSet {
-		if value, present := os.LookupEnv("SHUTTLE_CODEX_SOCKET"); present {
+		if value, present := a.env.LookupEnv("SHUTTLE_CODEX_SOCKET"); present {
 			options.CodexSocket = value
 		} else {
 			options.CodexSocket = previous["SHUTTLE_CODEX_SOCKET"]
 		}
 	}
-	if value, present := os.LookupEnv("CODEX_HOME"); present {
+	if value, present := a.env.LookupEnv("CODEX_HOME"); present {
 		options.CodexHome = value
 	} else {
 		options.CodexHome = previous["CODEX_HOME"]
@@ -360,8 +360,8 @@ func supervisorCodexEnvironment(osName, source string) (map[string]string, error
 	}
 }
 
-func defaultDaemonLog(osName string) string {
-	home, _ := os.UserHomeDir()
+func (a *app) defaultDaemonLog(osName string) string {
+	home, _ := a.env.UserHomeDir()
 	if osName == "Darwin" {
 		return filepath.Join(home, "Library", "Logs", "shuttle.log")
 	}
@@ -391,14 +391,14 @@ func isRegularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-func renderSupervisorTemplate(osName, source string, options supervisorOptions, release daemonRelease) (string, error) {
+func (a *app) renderSupervisorTemplate(osName, source string, options supervisorOptions, release daemonRelease) (string, error) {
 	if err := validateTemplatePlaceholderSet(osName, source); err != nil {
 		return "", err
 	}
 	shuttleBin := options.ShuttleBin
 	if shuttleBin == "" {
 		var err error
-		shuttleBin, err = executablePath()
+		shuttleBin, err = a.executablePath()
 		if err != nil {
 			return "", err
 		}
@@ -577,7 +577,7 @@ func isExecutable(path string) bool {
 	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
-func pathForDaemonSupervisor(pathValue string) string {
+func (a *app) pathForDaemonSupervisor(pathValue string) string {
 	entries := cleanPathEntries(pathValue)
 	add := func(dir string) {
 		if dir == "" {
@@ -590,20 +590,20 @@ func pathForDaemonSupervisor(pathValue string) string {
 		}
 		entries = append(entries, dir)
 	}
-	if executable, err := executablePath(); err == nil {
+	if executable, err := a.executablePath(); err == nil {
 		add(filepath.Dir(executable))
 	}
-	felt, err := exec.LookPath("felt")
+	felt, err := a.env.LookPath("felt")
 	if err != nil {
 		felt = findExecutableInPath("felt", strings.Join(entries, string(os.PathListSeparator)))
 	}
 	if felt != "" {
 		add(filepath.Dir(felt))
-	} else if executable, err := executablePath(); err == nil && isExecutable(filepath.Join(filepath.Dir(executable), "felt")) {
+	} else if executable, err := a.executablePath(); err == nil && isExecutable(filepath.Join(filepath.Dir(executable), "felt")) {
 		add(filepath.Dir(executable))
 	} else {
-		fmt.Fprintln(os.Stderr, "⚠️  no felt executable was found for the supervisor PATH.")
-		fmt.Fprintln(os.Stderr, "    The daemon needs felt for fiber data; install both CLIs or pass --path.")
+		fmt.Fprintln(a.env.Stderr, "⚠️  no felt executable was found for the supervisor PATH.")
+		fmt.Fprintln(a.env.Stderr, "    The daemon needs felt for fiber data; install both CLIs or pass --path.")
 	}
 	return strings.Join(entries, string(os.PathListSeparator))
 }
@@ -629,16 +629,13 @@ type loginEnv struct {
 	TmuxTmpdir string
 }
 
-// loginEnvCapture is the capture installDaemonSupervisor uses.
-var loginEnvCapture = captureLoginEnv
-
 // captureLoginEnv runs one login shell in a scrubbed environment and reads
 // every loginEnv variable from its output. It tries the user's shell as an
 // interactive login shell, then as a plain login shell, then /bin/bash; the
 // first attempt that reports a PATH supplies every value. If none does, the
 // installing process's own environment stands in.
-func captureLoginEnv() loginEnv {
-	shell := os.Getenv("SHELL")
+func (a *app) captureLoginEnv() loginEnv {
+	shell := a.env.Getenv("SHELL")
 	base := filepath.Base(shell)
 	switch base {
 	case "bash", "zsh", "sh", "dash", "ksh", "ksh93", "mksh":
@@ -649,14 +646,14 @@ func captureLoginEnv() loginEnv {
 		shell = "/bin/bash"
 	}
 	for _, attempt := range []struct{ shell, flags string }{{shell, "-lic"}, {shell, "-lc"}, {"/bin/bash", "-lc"}} {
-		if env, ok := captureLoginEnvWith(attempt.shell, attempt.flags); ok {
+		if env, ok := a.captureLoginEnvWith(attempt.shell, attempt.flags); ok {
 			env.Path = strings.Join(cleanPathEntries(env.Path), string(os.PathListSeparator))
 			return env
 		}
 	}
 	return loginEnv{
-		Path:       strings.Join(cleanPathEntries(os.Getenv("PATH")), string(os.PathListSeparator)),
-		TmuxTmpdir: os.Getenv("TMUX_TMPDIR"),
+		Path:       strings.Join(cleanPathEntries(a.env.Getenv("PATH")), string(os.PathListSeparator)),
+		TmuxTmpdir: a.env.Getenv("TMUX_TMPDIR"),
 	}
 }
 
@@ -667,11 +664,11 @@ const (
 
 // captureLoginEnvWith runs one shell invocation and parses its fenced output.
 // It reports false unless the shell printed a PATH.
-func captureLoginEnvWith(shell, flags string) (loginEnv, bool) {
-	home, _ := os.UserHomeDir()
-	user := os.Getenv("USER")
+func (a *app) captureLoginEnvWith(shell, flags string) (loginEnv, bool) {
+	home, _ := a.env.UserHomeDir()
+	user := a.env.Getenv("USER")
 	if user == "" {
-		user = os.Getenv("LOGNAME")
+		user = a.env.Getenv("LOGNAME")
 	}
 	if user == "" {
 		if current, err := osuser.Current(); err == nil {
@@ -687,7 +684,7 @@ func captureLoginEnvWith(shell, flags string) (loginEnv, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	script := `printf '\n` + loginPathMarker + `%s\n` + loginTmuxTmpdirMarker + `%s\n' "${PATH-}" "${TMUX_TMPDIR-}"`
-	cmd := exec.CommandContext(ctx, shell, flags, script)
+	cmd := a.env.CommandContext(ctx, shell, flags, script)
 	cmd.Env = []string{
 		"HOME=" + home, "USER=" + user, "SHELL=" + shell, "TERM=xterm-256color", "TMUX=shuttle-capture",
 		"DISABLE_AUTO_UPDATE=true", "HOMEBREW_NO_AUTO_UPDATE=1",
@@ -729,18 +726,18 @@ func parseLoginEnv(output string) (loginEnv, bool) {
 	return env, true
 }
 
-func supervisorStoresFilePath() (string, error) {
-	if path := strings.TrimSpace(os.Getenv("SHUTTLE_STORES_FILE")); path != "" {
-		return expandUserPath(path)
+func (a *app) supervisorStoresFilePath() (string, error) {
+	if path := strings.TrimSpace(a.env.Getenv("SHUTTLE_STORES_FILE")); path != "" {
+		return a.expandUserPath(path)
 	}
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolving home directory: %w", err)
 	}
 	return filepath.Join(home, ".config", "shuttle", "stores.json"), nil
 }
 
-func warnProtectedSupervisorPaths(options supervisorOptions, releaseDir string) {
+func (a *app) warnProtectedSupervisorPaths(options supervisorOptions, releaseDir string) {
 	if options.OS != "Darwin" {
 		return
 	}
@@ -750,11 +747,11 @@ func warnProtectedSupervisorPaths(options supervisorOptions, releaseDir string) 
 		if store == "" {
 			continue
 		}
-		if expanded, err := expandUserPath(store); err == nil {
+		if expanded, err := a.expandUserPath(store); err == nil {
 			paths = append(paths, struct{ path, impact string }{expanded, "the daemon will start but walk no fibers — an empty board, no error."})
 		}
 	}
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return
 	}
@@ -765,22 +762,22 @@ func warnProtectedSupervisorPaths(options supervisorOptions, releaseDir string) 
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "⚠️  %s\n", item.path)
-			fmt.Fprintln(os.Stderr, "    is under a TCC-protected folder (~/Documents, ~/Desktop, ~/Downloads).")
-			fmt.Fprintln(os.Stderr, "    launchd cannot read there and Full Disk Access does not inherit, so")
-			fmt.Fprintf(os.Stderr, "    %s\n", item.impact)
-			fmt.Fprintln(os.Stderr, "    Fix: move it outside those folders (e.g. ~/felt or ~/dev).")
+			fmt.Fprintf(a.env.Stderr, "⚠️  %s\n", item.path)
+			fmt.Fprintln(a.env.Stderr, "    is under a TCC-protected folder (~/Documents, ~/Desktop, ~/Downloads).")
+			fmt.Fprintln(a.env.Stderr, "    launchd cannot read there and Full Disk Access does not inherit, so")
+			fmt.Fprintf(a.env.Stderr, "    %s\n", item.impact)
+			fmt.Fprintln(a.env.Stderr, "    Fix: move it outside those folders (e.g. ~/felt or ~/dev).")
 		}
 	}
 }
 
-func installLaunchAgent(options supervisorOptions, release daemonRelease, rendered string) error {
+func (a *app) installLaunchAgent(options supervisorOptions, release daemonRelease, rendered string) error {
 	if supervisorInstallStopsDaemon(options.Label) {
-		if err := stopDaemonRelease(release); err != nil {
+		if err := a.stopDaemonRelease(release); err != nil {
 			return err
 		}
 	}
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return err
 	}
@@ -788,43 +785,43 @@ func installLaunchAgent(options supervisorOptions, release daemonRelease, render
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	_ = exec.Command("launchctl", "unload", path).Run()
+	_ = a.env.Command("launchctl", "unload", path).Run()
 	if err := os.WriteFile(path, []byte(rendered), 0o644); err != nil {
 		return err
 	}
-	if out, err := exec.Command("launchctl", "load", path).CombinedOutput(); err != nil {
+	if out, err := a.env.Command("launchctl", "load", path).CombinedOutput(); err != nil {
 		return fmt.Errorf("loading launchd agent: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	fmt.Printf("loaded %s → daemon will keep-alive + start at login\n", options.Label)
-	fmt.Printf("board → http://127.0.0.1:%s/\n", defaultPort(options.Port))
-	fmt.Printf("logs → %s   (launchctl list | grep shuttle to inspect)\n", options.Log)
+	fmt.Fprintf(a.env.Stdout, "loaded %s → daemon will keep-alive + start at login\n", options.Label)
+	fmt.Fprintf(a.env.Stdout, "board → http://127.0.0.1:%s/\n", defaultPort(options.Port))
+	fmt.Fprintf(a.env.Stdout, "logs → %s   (launchctl list | grep shuttle to inspect)\n", options.Log)
 	return nil
 }
 
-func installSystemdUserUnit(options supervisorOptions, release daemonRelease, rendered string) error {
-	if err := exec.Command("systemctl", "--user", "show-environment").Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "no systemd user session here (systemctl --user is unavailable or not reachable).")
-		fmt.Fprintln(os.Stderr, "Durable alternative — the tmux respawn loop:")
-		fmt.Fprintf(os.Stderr, "  %s/bin/shuttle-launch\n", release.Dir)
-		fmt.Fprintln(os.Stderr, "Or run the daemon without a supervisor:")
-		fmt.Fprintf(os.Stderr, "  SHUTTLE_RELEASE=%s shuttle daemon start   # logs → %s\n", release.Dir, options.Log)
+func (a *app) installSystemdUserUnit(options supervisorOptions, release daemonRelease, rendered string) error {
+	if err := a.env.Command("systemctl", "--user", "show-environment").Run(); err != nil {
+		fmt.Fprintln(a.env.Stderr, "no systemd user session here (systemctl --user is unavailable or not reachable).")
+		fmt.Fprintln(a.env.Stderr, "Durable alternative — the tmux respawn loop:")
+		fmt.Fprintf(a.env.Stderr, "  %s/bin/shuttle-launch\n", release.Dir)
+		fmt.Fprintln(a.env.Stderr, "Or run the daemon without a supervisor:")
+		fmt.Fprintf(a.env.Stderr, "  SHUTTLE_RELEASE=%s shuttle daemon start   # logs → %s\n", release.Dir, options.Log)
 		return errors.New("systemd user manager is unavailable")
 	}
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	if supervisorInstallStopsDaemon(options.Label) {
-		marker, err := daemonStopMarkerPath()
+		marker, err := a.daemonStopMarkerPath()
 		if err != nil {
 			return err
 		}
 		if err := touchDaemonStopMarker(marker); err != nil {
 			return fmt.Errorf("marking the requested daemon stop: %w", err)
 		}
-		_ = exec.Command("tmux", "-S", filepath.Join(home, ".shuttle", "tmux.sock"), "kill-session", "-t", "shuttle-daemon").Run()
-		_ = exec.Command("tmux", "kill-session", "-t", "shuttle-daemon").Run()
-		if err := stopDaemonRelease(release); err != nil {
+		_ = a.env.Command("tmux", "-S", filepath.Join(home, ".shuttle", "tmux.sock"), "kill-session", "-t", "shuttle-daemon").Run()
+		_ = a.env.Command("tmux", "kill-session", "-t", "shuttle-daemon").Run()
+		if err := a.stopDaemonRelease(release); err != nil {
 			return err
 		}
 	}
@@ -837,42 +834,42 @@ func installSystemdUserUnit(options supervisorOptions, release daemonRelease, re
 		return err
 	}
 	for _, args := range [][]string{{"--user", "daemon-reload"}, {"--user", "enable", unitName}, {"--user", "restart", unitName}} {
-		if out, err := exec.Command("systemctl", args...).CombinedOutput(); err != nil {
+		if out, err := a.env.Command("systemctl", args...).CombinedOutput(); err != nil {
 			return fmt.Errorf("systemctl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 		}
 	}
-	fmt.Printf("enabled %s → daemon restarts on crash + starts at login\n", unitName)
-	fmt.Printf("board → http://127.0.0.1:%s/\n", defaultPort(options.Port))
-	fmt.Printf("logs → %s   (systemctl --user status %s to inspect)\n", options.Log, unitName)
-	fmt.Printf("run 'loginctl enable-linger %s' so it survives logout and starts at boot\n", os.Getenv("USER"))
+	fmt.Fprintf(a.env.Stdout, "enabled %s → daemon restarts on crash + starts at login\n", unitName)
+	fmt.Fprintf(a.env.Stdout, "board → http://127.0.0.1:%s/\n", defaultPort(options.Port))
+	fmt.Fprintf(a.env.Stdout, "logs → %s   (systemctl --user status %s to inspect)\n", options.Log, unitName)
+	fmt.Fprintf(a.env.Stdout, "run 'loginctl enable-linger %s' so it survives logout and starts at boot\n", a.env.Getenv("USER"))
 	return nil
 }
 
-func uninstallDaemonSupervisor(label string) error {
+func (a *app) uninstallDaemonSupervisor(label string) error {
 	if label == "" {
 		label = defaultDaemonLabel
 	}
-	home, err := os.UserHomeDir()
+	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	if runtime.GOOS == "darwin" {
 		path := filepath.Join(home, "Library", "LaunchAgents", label+".plist")
-		_ = exec.Command("launchctl", "unload", path).Run()
+		_ = a.env.Command("launchctl", "unload", path).Run()
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		fmt.Printf("unloaded + removed %s\n", label)
+		fmt.Fprintf(a.env.Stdout, "unloaded + removed %s\n", label)
 		return nil
 	}
 	unitName := systemdUnitName(label)
 	unitPath := filepath.Join(home, ".config", "systemd", "user", unitName)
-	_ = exec.Command("systemctl", "--user", "disable", "--now", unitName).Run()
+	_ = a.env.Command("systemctl", "--user", "disable", "--now", unitName).Run()
 	if err := os.Remove(unitPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
-	fmt.Printf("disabled + removed %s\n", unitName)
+	_ = a.env.Command("systemctl", "--user", "daemon-reload").Run()
+	fmt.Fprintf(a.env.Stdout, "disabled + removed %s\n", unitName)
 	return nil
 }
 

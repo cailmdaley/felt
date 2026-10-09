@@ -1,7 +1,6 @@
 defmodule ShuttleWeb.LifecycleControllerTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   import Shuttle.Test.ApiConn
-  import Shuttle.Test.EnvHelpers
   import Plug.Conn
   import Phoenix.ConnTest
 
@@ -31,41 +30,41 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\ninstall\ntests/interactive\n--project-dir\n/tmp/project\n"
   end
 
-  # pin CREATES a schedule-less kind:pinned block on a fiber that has none —
-  # the board's drag-onto-the-Pinned-strip gesture for an unmanaged card (an
-  # already-managed one reshapes instead). The controller forwards model /
-  # project / host to `shuttle pin`; no schedule (a pinned block has none).
-  #
-  # `--host` here is the cross-host INSTALL TARGET, unrelated to `-C`
-  # (which names the store the id resolves against). Both ride the same argv;
-  # this locks in that they stay distinct.
-  test "pin delegates to shuttle with model, project_dir and host" do
-    store = fixture_store!("shuttle-lifecycle-pin", "tests/operator", "Operator")
+  # rest puts a card in Resting without review; the controller forwards it to
+  # `shuttle rest` with --local, like pause.
+  test "rest delegates to shuttle with --local" do
+    store = fixture_store!("shuttle-lifecycle-rest", "tests/operator", "Operator")
     args_file = install_fake_cli!()
 
     conn =
       post(
         api_conn(),
         "/api/v1/lifecycle",
-        Jason.encode!(%{
-          "action" => "pin",
-          "fiber" => "tests/operator",
-          "model" => "claude-fable",
-          "project_dir" => "/tmp/loom",
-          "host" => "dapmcw68"
-        })
+        Jason.encode!(%{"action" => "rest", "fiber" => "tests/operator"})
       )
 
     assert conn.status == 200
+    assert File.read!(args_file) == "-C\n#{store}\nrest\ntests/operator\n--local\n"
+  end
 
-    assert File.read!(args_file) ==
-             "-C\n#{store}\npin\ntests/operator\n--model\nclaude-fable\n" <>
-               "--project-dir\n/tmp/loom\n--host\ndapmcw68\n"
+  test "pin is no longer a lifecycle action" do
+    fixture_store!("shuttle-lifecycle-nopin", "tests/operator", "Operator")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "pin", "fiber" => "tests/operator"})
+      )
+
+    assert conn.status == 400
+    refute File.exists?(args_file)
   end
 
   # `reshape` is the surgical shape edit on an existing block: the kind rides as
   # an optional POSITIONAL right after the fiber, then the schedule flags. It
-  # rides the same id-resolution clause as `install` and `pin`, so the store
+  # rides the same id-resolution clause as `install`, so the store
   # flag still lands ahead of the verb.
   test "reshape delegates to shuttle with kind as a positional" do
     store = fixture_store!("shuttle-lifecycle-reshape", "tests/nightly", "Nightly")
@@ -116,9 +115,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\nreshape\ntests/cadence\n--schedule\n30 6 * * 1\n--tz\nUTC\n--local\n"
   end
 
-  # Only the three legal kinds reach the CLI — an arbitrary string is rejected
-  # here rather than forwarded as a positional felt would have to argue with.
-  test "reshape rejects a kind outside oneshot/standing/pinned" do
+  # Only the legal kinds reach the CLI — an arbitrary string, or the retired
+  # `pinned`, is rejected here rather than forwarded as a positional felt would
+  # have to argue with.
+  test "reshape rejects a kind outside oneshot/standing" do
     fixture_store!("shuttle-lifecycle-reshape-badkind", "tests/badkind", "Bad kind")
     args_file = install_fake_cli!()
 
@@ -141,12 +141,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # Regression: a project whose `.felt` symlinks INTO a subtree of the loom sees
   # its fibers under project-relative ids (`lightcone/desk`), while the loom that
   # actually owns the file sees `ai-futures/lightcone/lightcone/desk`. The board
-  # sends whichever id served the card's row. Before the fix, the pin-to-the-
-  # strip write forwarded that id raw against the default store and died with
-  # `no fiber found matching "lightcone/desk"`, stranding a de-pinned fiber in
-  # Awaiting review. The controller must resolve to the OWNING store and rewrite
-  # the id owner-relative — the gesture now posts `reshape pinned`, so the
-  # id-rewrite guard rides that verb.
+  # sends whichever id served the card's row. A write that forwarded that id raw
+  # against the default store would die with `no fiber found matching
+  # "lightcone/desk"`. The controller must resolve to the OWNING store and
+  # rewrite the id owner-relative; reshape carries the guard here.
   test "reshape rewrites a project-relative id to its owning store" do
     root =
       System.tmp_dir!()
@@ -165,13 +163,8 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.ln_s!(nested, Path.join(project, ".felt"))
 
     args_file = install_fake_cli!()
-    old_felt_stores = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", "#{loom},#{project}")
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_felt_stores)
-      File.rm_rf(root)
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", "#{loom},#{project}")
+    on_exit(fn -> File.rm_rf(root) end)
 
     conn =
       post(
@@ -180,14 +173,14 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         Jason.encode!(%{
           "action" => "reshape",
           "fiber" => "lightcone/desk",
-          "kind" => "pinned"
+          "kind" => "oneshot"
         })
       )
 
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "-C\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\npinned\n--local\n"
+             "-C\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\noneshot\n--local\n"
   end
 
   test "close and reopen delegate through the existing lifecycle endpoint" do
@@ -367,6 +360,96 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n--local\n"
   end
 
+  test "seat forwards the role, or --clear, to shuttle" do
+    store = fixture_store!("shuttle-lifecycle-seat", "tests/hub", "Hub")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{
+          "action" => "seat",
+          "fiber" => "tests/hub",
+          "role" => "cmbx-chair",
+          "clear" => false
+        })
+      )
+
+    assert conn.status == 200
+    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\ncmbx-chair\n--local\n"
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "seat", "fiber" => "tests/hub", "clear" => true})
+      )
+
+    assert conn.status == 200
+    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\n--clear\n--local\n"
+  end
+
+  defmodule SeatRunner do
+    @behaviour Shuttle.Runner
+
+    def cmd("shuttle", ["-C", _store, "seat" | _] = args, opts) do
+      send(Shuttle.Env.app(:seat_writer_observer), {:seat_writer, self(), args})
+      Shuttle.Runner.Default.cmd("shuttle", args, opts)
+    end
+
+    def cmd(command, args, opts) when command in ["felt", "shuttle"],
+      do: Shuttle.Runner.Default.cmd(command, args, opts)
+
+    def cmd(_command, _args, _opts), do: {"", 1}
+  end
+
+  test "seat set and clear execute in the Poller, serialized with lifecycle writes" do
+    store = fixture_store!("shuttle-seat-serialized", "tests/hub", "Hub")
+    install_fake_cli!()
+    Shuttle.Test.Env.put_app_env(:seat_writer_observer, self())
+    Shuttle.Test.Env.put_app_env(:felt_runner, SeatRunner)
+
+    {:ok, poller} =
+      Shuttle.Test.PollerHelpers.start_poller!(
+        runner: SeatRunner,
+        felt_stores: [store],
+        poll_interval_ms: 60_000
+      )
+
+    for {params, seat_args} <- [
+          {%{"role" => "cmbx-chair"}, ["cmbx-chair"]},
+          {%{"clear" => true}, ["--clear"]}
+        ] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(Map.merge(params, %{"action" => "seat", "fiber" => "tests/hub"}))
+        )
+
+      assert conn.status == 200
+      assert_receive {:seat_writer, writer, args}
+      assert writer == poller
+      assert args == ["-C", store, "seat", "tests/hub"] ++ seat_args ++ ["--local"]
+    end
+  end
+
+  test "seat without a role or --clear is refused before shelling" do
+    fixture_store!("shuttle-lifecycle-seat-bare", "tests/bare", "Bare")
+    args_file = install_fake_cli!()
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "seat", "fiber" => "tests/bare", "clear" => false})
+      )
+
+    assert conn.status in 400..499
+    refute File.exists?(args_file)
+  end
+
   test "set-model shells shuttle in the resolved owning store" do
     store =
       fixture_store!(
@@ -487,16 +570,13 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   # shuttle for the lifecycle write. This fixture provides both binaries so
   # tests exercise the executable boundary as well as the argv ordering.
   defp install_fake_cli!(shuttle_body \\ nil) do
-    dir =
-      System.tmp_dir!()
-      |> Path.join("shuttle-lifecycle-controller-#{System.unique_integer([:positive])}")
+    args_file =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-lifecycle-args-#{System.unique_integer([:positive])}"
+      )
 
-    File.mkdir_p!(dir)
-
-    felt_bin = Path.join(dir, "felt")
-    shuttle_bin = Path.join(dir, "shuttle")
-    args_file = Path.join(dir, "args")
-    real_felt = System.find_executable("felt") || "felt"
+    real_felt = Shuttle.Test.FakeCli.real!("felt")
 
     shuttle_body =
       shuttle_body ||
@@ -505,30 +585,19 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         printf 'ok\\n'
         """
 
-    File.write!(felt_bin, """
-    #!/bin/sh
-    exec "#{real_felt}" "$@"
-    """)
+    Shuttle.Test.FakeCli.install!(%{
+      "felt" => """
+      #!/bin/sh
+      exec "#{real_felt}" "$@"
+      """,
+      "shuttle" => """
+      #!/bin/sh
+      #{shuttle_body}
+      """
+    })
 
-    File.write!(shuttle_bin, """
-    #!/bin/sh
-    #{shuttle_body}
-    """)
-
-    File.chmod!(felt_bin, 0o755)
-    File.chmod!(shuttle_bin, 0o755)
-
-    old_path = System.get_env("PATH")
-    old_args_file = System.get_env("SHUTTLE_ARGS_FILE")
-
-    System.put_env("PATH", dir <> ":" <> (old_path || ""))
-    System.put_env("SHUTTLE_ARGS_FILE", args_file)
-
-    on_exit(fn ->
-      restore_env("PATH", old_path)
-      restore_env("SHUTTLE_ARGS_FILE", old_args_file)
-      File.rm_rf(dir)
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_ARGS_FILE", args_file)
+    on_exit(fn -> File.rm(args_file) end)
 
     args_file
   end
@@ -548,13 +617,8 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     File.mkdir_p!(fiber_dir)
     File.write!(Path.join(fiber_dir, "#{Path.basename(slug)}.md"), "---\nname: #{name}\n---\n\n")
 
-    old_felt_stores = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", store)
-
-    on_exit(fn ->
-      restore_env("SHUTTLE_STORES", old_felt_stores)
-      File.rm_rf(root)
-    end)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+    on_exit(fn -> File.rm_rf(root) end)
 
     store
   end

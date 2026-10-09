@@ -23,6 +23,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
       few hundred owned shuttle fibers. Omitted/unknown => unfiltered (every
       fiber, unowned included) — the content/search/graph readers, not the
       kanban feed.
+    * `fields=index` — keep only each fiber's `id`, `slug` and `name`, in the
+      same envelope: the wikilink and parent-picker index, a few percent of the
+      full listing's bytes. A daemon that ignores it answers the full rows,
+      which carry the same fields.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -40,23 +44,32 @@ defmodule ShuttleWeb.FiberDocumentsController do
     # remote viewers hit every 5s: serve it from the poller's in-memory cache
     # with a conditional-fetch etag. The body/content and non-shuttle variants
     # keep their direct `FiberDocuments.list/1` behavior.
-    if shuttle_only? and not with_body? do
-      serve_owner_feed(conn)
-    else
-      serve_direct(conn, with_body?, shuttle_only?)
+    cond do
+      shuttle_only? and not with_body? ->
+        serve_owner_feed(conn)
+
+      Map.get(params, "fields") == "index" ->
+        serve_direct(conn, false, shuttle_only?, &index_rows/1)
+
+      true ->
+        serve_direct(conn, with_body?, shuttle_only?, & &1)
     end
   end
 
-  defp serve_direct(conn, with_body?, shuttle_only?) do
+  defp serve_direct(conn, with_body?, shuttle_only?, shape) do
     case Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?) do
       {:ok, body} ->
-        json(conn, body)
+        json(conn, shape.(body))
 
       {:error, errors} ->
         conn
         |> put_status(:service_unavailable)
         |> json(%{error: "felt_list_failed", stores: errors})
     end
+  end
+
+  defp index_rows(%{fibers: entries} = body) do
+    %{body | fibers: Enum.map(entries, &%{fiber: Map.take(&1.fiber, ["id", "slug", "name"])})}
   end
 
   # The owner-only kanban feed, served ALWAYS from the poller's in-memory
@@ -161,8 +174,21 @@ defmodule ShuttleWeb.FiberDocumentsController do
     end
   end
 
+  # Identical concurrent reads share one lookup: a board that re-requests a
+  # fiber while the first request is still resolving costs one felt run. Only
+  # this read path coalesces whole answers. Daemon-internal reads that follow a
+  # write run their own lookup: a miss may share a store listing in flight, but
+  # the answer always comes from a fresh `show`.
+  #
+  # The board addresses fibers by UID. A UID with a known address reads through
+  # it, a direct felt read instead of a walk of the store (`Shuttle.FiberAddresses`).
   defp show_local(conn, id, with_body?, routed?) do
-    case Shuttle.FiberDocuments.get(id, with_body: with_body?) do
+    case Shuttle.SingleFlight.run({:fiber_get, id, with_body?}, fn ->
+           Shuttle.FiberDocuments.get(id,
+             with_body: with_body?,
+             address: Shuttle.FiberAddresses.lookup(id)
+           )
+         end) do
       {:ok, body} ->
         case owning_remote(body, routed?) do
           nil -> json(conn, body)

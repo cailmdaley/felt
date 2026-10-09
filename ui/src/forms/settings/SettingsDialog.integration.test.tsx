@@ -72,3 +72,19 @@ it('keeps host editing addressed to the selected host and protects edits when re
   expect(document.querySelector('h2')?.textContent).toBe('Open conversations in')
   expect(document.querySelector('select')).toBeNull()
 })
+
+it('keeps Appearance in this browser: no host picker, no host read, saved locally and applied to the root', () => {
+  click('Appearance')
+  expect(document.querySelector('h2')?.textContent).toBe('Appearance')
+  expect(document.querySelector('select')).toBeNull()
+  expect(api.index).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('saved automatically in this browser')
+  const radio = (name: string, value: string): HTMLInputElement => document.querySelector<HTMLInputElement>(`input[name="${name}"][value="${value}"]`)!
+  expect(radio('appearance-mode', 'system').checked).toBe(true)
+  expect(radio('appearance-dark', 'night-chart').checked).toBe(true)
+  act(() => radio('appearance-dark', 'lamplight').click())
+  act(() => radio('appearance-mode', 'light').click())
+  expect(radio('appearance-mode', 'light').checked).toBe(true)
+  expect(localStorage.setItem).toHaveBeenLastCalledWith('shuttle.appearance', JSON.stringify({ mode: 'light', dark: 'lamplight' }))
+  expect(document.documentElement.dataset.wsAppearance).toBe('light')
+})

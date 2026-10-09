@@ -25,7 +25,6 @@ describe('moveDestinations', () => {
       'inFlight',
       'awaitingReview',
       'stashed',
-      'pin',
       'queue',
     ])
   })
@@ -37,121 +36,63 @@ describe('moveDestinations', () => {
     expect(labels.get('inFlight')).toBe('In flight')
     expect(labels.get('awaitingReview')).toBe('Awaiting review')
     expect(labels.get('stashed')).toBe('Resting')
-    expect(labels.get('pin')).toBe('Pinned')
   })
 
   it('puts the Now columns in one group and everything else in the other', () => {
     const d = moveDestinations(card({ status: 'open', shuttleKind: 'oneshot' }), 'drafts')
     expect(d.filter((x) => x.group === 'column').map((x) => x.id)).toEqual(['inFlight', 'awaitingReview'])
-    expect(d.filter((x) => x.group === 'other').map((x) => x.id)).toEqual(['stashed', 'pin', 'queue'])
+    expect(d.filter((x) => x.group === 'other').map((x) => x.id)).toEqual(['stashed', 'queue'])
   })
 
-  // `transition`'s one no-op guard, `fromKind === target`.
-  it('never offers the column the card already sits in', () => {
-    expect(ids(card({ shuttleKind: 'oneshot' }), 'inFlight')).not.toContain('inFlight')
-    expect(ids(card({ status: 'open' }), 'drafts')).not.toContain('drafts')
-    const closed = card({ status: 'closed' })
-    expect(ids(closed, 'awaitingReview')).not.toContain('awaitingReview')
-    expect(ids(closed, 'awaitingReview')).toContain('drafts')
-  })
+  // One row per guard the menu mirrors: the card's state, where the board has
+  // it, and the exact menu that state earns. Exact lists, so an entry that
+  // appears where no drop would commit fails as loudly as one that vanishes.
+  const menus: [guard: string, state: Partial<KanbanCard>, column: Parameters<typeof moveDestinations>[1], menu: string[]][] = [
+    // `transition`'s one no-op guard, `fromKind === target`; the desk is
+    // likewise withheld from a card already on it.
+    ['a one-shot in In flight is not offered In flight or the desk', { shuttleKind: 'oneshot' }, 'inFlight',
+      ['drafts', 'awaitingReview', 'stashed', 'queue']],
+    // Resting from In flight: the board's rest, the worker's `shuttle rest`
+    // said by hand.
+    ['a live one-shot is offered Resting — put down without review', { shuttleKind: 'oneshot', workerState: 'running', tmuxSession: 'w' }, 'inFlight',
+      ['drafts', 'awaitingReview', 'stashed', 'queue']],
+    ['a block-less draft is not offered Drafts', { status: 'open' }, 'drafts',
+      ['inFlight', 'awaitingReview', 'stashed', 'queue']],
+    // Awaiting review is a plain lifecycle drop with no gate of its own, so it
+    // is offered from every column but its own; a closed card is off the desk.
+    ['an awaiting card is offered every other column and the desk', { status: 'closed' }, 'awaitingReview',
+      ['drafts', 'inFlight', 'now', 'stashed', 'queue']],
+    ['a closed card that still carries the now horizon is offered the desk', { status: 'closed', effectiveHorizon: 'now', shuttleKind: 'oneshot' }, 'awaitingReview',
+      ['drafts', 'inFlight', 'now', 'stashed', 'queue']],
+    ['a tempered card is offered Awaiting review and both surfaces', { status: 'closed', tempered: true }, 'tempered',
+      ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed', 'queue']],
+    ['a resting card is not offered Resting', { status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed' }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'now', 'queue']],
+    // setSurface compares the card's `cold` against the gesture's, and a menu
+    // Rest carries none, so clearing the flag is the move.
+    ['a resting cold card is offered Resting', { status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', cold: true }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed', 'queue']],
+    // setSurface's standing guard: "it runs on its schedule". Drag-to-In-flight
+    // still runs it now.
+    ['a standing constitution is withheld both surfaces', { shuttleKind: 'standing', effectiveHorizon: 'stashed' }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'queue']],
+    // The queue exit is offered on the EDGE: a card that names a predecessor is
+    // in a queue whether or not the fold happens to be drawing it under one.
+    ['an active queued card is offered the queue exit', { shuttleKind: 'oneshot', status: 'active', dependsOn: ['work/b'], dependsOnShape: 'scalar' }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'stashed', 'queue', 'unstack']],
+    ['a card on a scalar edge is offered the queue exit', { dependsOn: ['work/b'], dependsOnShape: 'scalar', foldedUnder: 'work/b' }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'stashed', 'queue', 'unstack']],
+    // stackDropVerdict: a hand-written list is a fan-in nobody may collapse.
+    ['a hand-written depends_on list is offered neither queue entry', { dependsOnShape: 'list', dependsOn: ['x', 'y'], foldedUnder: 'x' }, null,
+      ['drafts', 'inFlight', 'awaitingReview', 'stashed']],
+    ['a cycle is offered nothing: a span of time is not work', { isCycle: true }, null, []],
+  ]
 
-  // Awaiting review is a plain lifecycle drop — no gate of its own, so it is
-  // offered from every column but its own, and from the surfaces too.
-  it('offers Awaiting review from anywhere the card is not already in it', () => {
-    expect(ids(card({ shuttleKind: 'oneshot' }), 'inFlight')).toContain('awaitingReview')
-    expect(ids(card({ status: 'open' }), 'drafts')).toContain('awaitingReview')
-    expect(ids(card({ status: 'open', effectiveHorizon: 'stashed' }), null)).toContain('awaitingReview')
-    expect(ids(card({ shuttleKind: 'standing', effectiveHorizon: 'stashed' }), null)).toContain(
-      'awaitingReview',
-    )
-    expect(ids(card({ status: 'closed', tempered: true }), 'tempered')).toContain('awaitingReview')
-  })
-
-  it('says nothing at all about a cycle — a span of time is not work', () => {
-    expect(moveDestinations(card({ isCycle: true }), null)).toEqual([])
-  })
-
-  // setSurface's standing guard: "it runs on its schedule".
-  it('withholds both surfaces from a standing role, but still offers the queue', () => {
-    const d = ids(card({ shuttleKind: 'standing', effectiveHorizon: 'stashed' }), null)
-    expect(d).not.toContain('now')
-    expect(d).not.toContain('stashed')
-    expect(d).toContain('queue')
-    expect(d).toContain('inFlight') // drag-to-In-flight still runs it now
-  })
-
-  // setSurface's pinned-at-rest guard, and pinRole's "already pinned".
-  it('offers a resting pinned role the lifecycle moves, the queue, and unpin', () => {
-    const d = ids(card({ shuttleKind: 'pinned', status: 'active' }), null)
-    expect(d).toContain('inFlight')
-    expect(d).toContain('drafts')
-    expect(d).toContain('queue')
-    expect(d).toContain('unpin')
-    expect(d).not.toContain('now')
-    expect(d).not.toContain('stashed')
-  })
-
-  // pinRole ~1611: refusing this was a bug — a once-pinned card left closed
-  // could never be re-rested from the board.
-  it('lets a pinned role whose last run is closed come back to rest', () => {
-    const awaiting = card({ shuttleKind: 'pinned', status: 'closed' })
-    expect(ids(awaiting, 'awaitingReview')).toContain('pin')
-    const composted = card({ shuttleKind: 'pinned', status: 'closed', tempered: false })
-    expect(ids(composted, 'composted')).toContain('pin')
-  })
-
-  // setSurface compares the card's `cold` against the gesture's, and a menu
-  // Rest carries none — so clearing the flag IS the move.
-  it('offers Rest to a resting card that is cold', () => {
-    const cold = card({ status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', cold: true })
-    expect(ids(cold, null)).toContain('stashed')
-  })
-
-  it('offers to stop a live pinned role back onto the strip', () => {
-    const d = ids(card({ shuttleKind: 'pinned', status: 'active', workerState: 'running', tmuxSession: 'w' }), 'inFlight')
-    expect(d).toContain('pin')
-    expect(d).toContain('unpin')
-  })
-
-  it('offers the strip to a queued pinned role, even when the queue is not folded', () => {
-    for (const status of ['open', 'active'] as const) {
-      expect(ids(card({
-        shuttleKind: 'pinned', status,
-        dependsOn: ['work/b'], dependsOnShape: 'scalar',
-      }), null)).toContain('pin')
-    }
-  })
-
-  // pinRole: a block-less draft has no host or project_dir to install from.
-  it('will not pin a card with no shuttle block', () => {
-    expect(ids(card({ status: 'open' }), 'drafts')).not.toContain('pin')
-  })
-
-  // The queue exit is offered on the EDGE: a card that names a predecessor is
-  // in a queue whether or not the fold happens to be drawing it under one.
-  it('offers the queue exit to any card carrying a scalar edge', () => {
-    const d = ids(
-      card({ dependsOn: ['work/b'], dependsOnShape: 'scalar', foldedUnder: 'work/b' }),
-      null,
-    )
-    expect(d).toContain('unstack')
-  })
-
-  it('does not offer the queue exit to a card with no edge', () => {
-    expect(ids(card({ status: 'open' }), 'drafts')).not.toContain('unstack')
-  })
-
-  // stackDropVerdict: a hand-written list is a fan-in nobody may collapse.
-  it('leaves a hand-written depends_on list alone', () => {
-    const d = ids(card({ dependsOnShape: 'list', dependsOn: ['x', 'y'], foldedUnder: 'x' }), null)
-    expect(d).not.toContain('queue')
-    expect(d).not.toContain('unstack')
-  })
-
-  it('does not offer Resting to a card already sitting in it', () => {
-    const resting = card({ status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed' })
-    expect(ids(resting, null)).not.toContain('stashed')
-    expect(ids(resting, null)).toContain('now')
+  it('offers exactly the destinations each guard allows', () => {
+    const wrong = menus
+      .map(([guard, state, column, menu]) => ({ guard, menu, got: ids(card(state), column) }))
+      .filter(row => JSON.stringify(row.got) !== JSON.stringify(row.menu))
+    expect(wrong).toEqual([])
   })
 })
 

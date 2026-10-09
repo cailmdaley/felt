@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -18,23 +17,22 @@ type sessionInner struct {
 	AdditionalContext string `json:"additionalContext"`
 }
 
-var hookCmd = &cobra.Command{
-	Use:   "hook",
-	Short: "Shuttle event and commit hook adapters",
-	Long:  "Harness adapters that record Shuttle session events and commits for the daemon's activity stream.",
-}
-
-func init() {
+func (a *app) hookCmd() *cobra.Command {
+	hookCmd := &cobra.Command{
+		Use:   "hook",
+		Short: "Shuttle event and commit hook adapters",
+		Long:  "Harness adapters that record Shuttle session events and commits for the daemon's activity stream.",
+	}
 	hookCmd.GroupID = groupOperations
-	addShuttleCommand(hookCmd)
-	hookCmd.AddCommand(hookEventCmd, hookCommitCmd)
+	hookCmd.AddCommand(a.hookEventCmd(), a.hookCommitCmd())
+	return hookCmd
 }
 
 // harnessFor uses the transcript location shared by Claude Code and pi; an
 // empty or unrelated path identifies the Codex hook format.
-func harnessFor(transcriptPath string) string {
-	home, _ := os.UserHomeDir()
-	claudeDir := os.Getenv("CLAUDE_CONFIG_DIR")
+func (a *app) harnessFor(transcriptPath string) string {
+	home, _ := a.env.UserHomeDir()
+	claudeDir := a.env.Getenv("CLAUDE_CONFIG_DIR")
 	if claudeDir == "" {
 		claudeDir = filepath.Join(home, ".claude")
 	}

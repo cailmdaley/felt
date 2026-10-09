@@ -1,10 +1,10 @@
 import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
-import { confirmWorkerStop } from './Verdicts.js'
+import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import { MEETING_MODES, type MeetingMode } from '../../forms/meetingApi.js'
-import { meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
+import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../../forms/executionSurface.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
@@ -16,7 +16,8 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { fiberPageColumn } from './fiberPageState.js'
+import { fiberPageColumn, verdictReachable } from './fiberPageState.js'
+import { workerPlate } from './workerPlate.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import './tokens.css'
@@ -81,6 +82,10 @@ export interface MeetingJoinControl {
   join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>): Promise<MeetingJoinResult>
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
+  /** Stop (or dismiss, once failed) the recording: the board's one stop path. */
+  stop?(meeting: MeetingRecord): void | Promise<void>
+  /** Whether a stop for `meeting` has been asked and not yet observed. */
+  stopRequested?(meeting: MeetingRecord): boolean
 }
 
 export interface SessionWindow {
@@ -164,24 +169,25 @@ export function sessionWindow(
 }
 
 /**
- * Whether the board places this card by its `due:` day. A standing role is
- * placed by its cron and an active pinned role rests on the Pinned strip —
- * neither is ever sorted by due, so neither shows or edits one.
+ * Whether the board places this card by its `due:` day. A standing
+ * constitution is placed by its cron and is never sorted by due, so it
+ * neither shows nor edits one.
  */
-function placedByDue(card: Pick<KanbanCard, 'shuttleKind' | 'status'>): boolean {
-  return !(card.shuttleKind === 'standing' || (card.shuttleKind === 'pinned' && card.status === 'active'))
+function placedByDue(card: Pick<KanbanCard, 'shuttleKind'>): boolean {
+  return card.shuttleKind !== 'standing'
 }
 
 /**
  * What the folded settings strip says about a card, as data — the strip is a
  * reading of the fiber, not a label for the controls under it.
  *
- *   claude-fable medium · pinned · ada-workstation:~/dev/felt   Sep 26 01:38 → 02:40 · 1h 2m ✓
+ *   claude-fable medium · weekdays 9:00 · ada-workstation:~/dev/felt   Sep 26 01:38 → 02:40 · 1h 2m ✓
  *
  * `actor` is the agent id (cobalt) on a shuttle card and `me` (cinnabar) on a
- * human one, the same word the board card prints. `cadence` is said only when
- * it isn't the default: a pinned role says so, a standing one speaks its cron,
- * a one-shot says nothing. `place` is `host:dir` with the home directory
+ * human one, the same word the board card prints. `seat` names the role a
+ * seat belongs to (`seat of vizier`). `cadence` is said only when
+ * it isn't the default: a standing constitution speaks its cron, a one-shot
+ * says nothing. `place` is `host:dir` with the home directory
  * folded to `~`. `due` is dropped where the board never reads it
  * ({@link placedByDue}).
  */
@@ -189,6 +195,7 @@ export interface StripFacts {
   actor: { text: string; agent: boolean }
   effort?: string
   chrome: boolean
+  seat?: { text: string; title: string }
   cadence?: { text: string; title?: string }
   place?: { text: string; title: string }
   due?: string
@@ -203,8 +210,6 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
     cadence = spoken
       ? { text: spoken, title: `cron: ${card.shuttleSchedule}${card.shuttleTz ? ` (${card.shuttleTz})` : ''}` }
       : { text: card.shuttleSchedule }
-  } else if (card.shuttleKind === 'pinned') {
-    cadence = { text: 'pinned' }
   }
   const dir = card.shuttleProjectDir?.replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~')
   const placeText = [card.shuttleHost, dir].filter(Boolean).join(':')
@@ -215,6 +220,9 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
     actor: { text: agent ? (card.shuttleAgent ?? 'agent') : 'me', agent },
     effort: agent ? card.shuttleEffort : undefined,
     chrome: agent && card.shuttleChrome === true,
+    seat: card.shuttleSeat
+      ? { text: `seat of ${card.shuttleSeat}`, title: `A seat of roles/${card.shuttleSeat}: a worker here sits in that office.` }
+      : undefined,
     cadence,
     place,
     due: card.due && placedByDue(card) ? formatDue(card.due) : undefined,
@@ -253,6 +261,7 @@ function buildStrip(card: KanbanCard): HTMLElement {
     who.append(el)
   }
   line.append(who)
+  if (facts.seat) put('kbn-ctl-cadence kbn-ctl-seat', facts.seat.text, facts.seat.title)
   if (facts.cadence) put('kbn-ctl-cadence', facts.cadence.text, facts.cadence.title)
   if (facts.place) put('kbn-ctl-place', facts.place.text, facts.place.title)
   if (facts.due) put('kbn-ctl-due', `due ${facts.due}`)
@@ -269,6 +278,9 @@ function buildStrip(card: KanbanCard): HTMLElement {
   }
   return strip
 }
+
+/** The meeting kind last picked, offered first by every composer this session. */
+let lastMeetingMode: MeetingMode = MEETING_MODES[0].value
 
 function ctlButton(label: string, cls: string): HTMLButtonElement {
   const btn = document.createElement('button')
@@ -406,6 +418,8 @@ export interface DockOptions {
 export class Dock {
   private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
+  private headRoot: HTMLElement | null = null
+  private headWorkerKey: string | null = null
   private card: KanbanCard | null = null
   private searchDebounce: number | null = null
   private fiberIndex: Promise<Array<{ id: string; name: string }>> | null = null
@@ -414,19 +428,20 @@ export class Dock {
   private transcriptCard: KanbanCard | null = null
   private transcriptPane: HTMLElement | null = null
   private transcriptBand: TranscriptBand | null = null
+  private verdictMenu: HTMLDetailsElement | null = null
   private meetingPaint: (() => void) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
   private guidance: HTMLElement | null = null
-  private dismissMeeting: (() => boolean) | null = null
+  private meetingArmed: () => boolean = () => false
+  private meetingStart: (() => void) | null = null
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
   private composerSend: ComposerSend | null = null
   private composerError: HTMLElement | null = null
   private composerPaint: (() => void) | null = null
   private actPaint: (() => void) | null = null
-  private verdictMenu: HTMLDetailsElement | null = null
   private freshButton: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
@@ -439,7 +454,7 @@ export class Dock {
   private readonly shuttleBase: string
   private readonly onSaved: () => void
   private readonly onTransition: (card: KanbanCard, target: ColumnKind) => void
-  private queueVerdict?: (card: KanbanCard, target: 'tempered' | 'composted') => void
+  private queueVerdict?: (card: KanbanCard, target: Verdict) => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
   private readonly workerPhase: (card: KanbanCard) => boolean
@@ -470,6 +485,22 @@ export class Dock {
       this.root.addEventListener('click', event => event.stopPropagation())
     }
     return this.root
+  }
+
+  /**
+   * The acts the fiber page's status line carries: the worker pill, then
+   * Temper and Discard. Built once per band, so a prose repaint re-seats the
+   * same controls under the pointer and the focus.
+   */
+  get head(): HTMLElement {
+    if (!this.headRoot) {
+      this.headRoot = document.createElement('div')
+      this.headRoot.className = 'ws-fiber-acts'
+      this.headRoot.dataset.part = 'act'
+      this.headRoot.dataset.act = 'verdict'
+      this.headRoot.addEventListener('click', event => event.stopPropagation())
+    }
+    return this.headRoot
   }
 
   private later(fn: () => void, ms: number): number {
@@ -537,14 +568,15 @@ export class Dock {
 
   private dismissPopovers(): void {
     this.dismissConversation?.()
-    this.dismissMeeting?.()
     this.dismissParent?.()
   }
 
   private clear(): void {
     this.epoch++
     this.dismissPopovers()
-    this.dismissConversation = this.dismissMeeting = this.dismissParent = null
+    this.dismissConversation = this.dismissParent = null
+    this.meetingArmed = () => false
+    this.meetingStart = null
     for (const dispose of this.composerDisposers.splice(0)) dispose()
     if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
     this.searchDebounce = null
@@ -553,6 +585,7 @@ export class Dock {
     this.card = this.workerPillCard = this.transcriptCard = null
     this.transcriptBand?.dispose()
     this.transcriptBand = null
+    this.verdictMenu = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -560,7 +593,6 @@ export class Dock {
     this.composerSend = null
     this.composerError = null
     this.composerPaint = this.actPaint = null
-    this.verdictMenu = null
     this.freshButton = null
     this.settingsSync = null
     this.historySync = null
@@ -568,12 +600,34 @@ export class Dock {
     this.savesPending = 0
     this.blockedDispatches.clear()
     this.root?.replaceChildren()
+    this.headRoot?.replaceChildren()
+    this.headWorkerKey = null
+  }
+
+  /**
+   * Focus the composer without moving the page under it. Only a field out of
+   * view scrolls its page, and then to the page's top when the field fits on
+   * the first screen, so the kicker and title stay whole.
+   */
+  focusComposer(): boolean {
+    const field = this.root?.querySelector<HTMLTextAreaElement>('.kbn-detail-directive')
+    if (!field) return false
+    field.focus({ preventScroll: true })
+    let scroller = field.parentElement
+    while (scroller && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement
+    if (!scroller) return true
+    const view = scroller.getBoundingClientRect()
+    const box = field.getBoundingClientRect()
+    if (box.top >= view.top && box.bottom <= view.bottom) return true
+    const fromTop = box.bottom - view.top + scroller.scrollTop
+    scroller.scrollTop = fromTop <= scroller.clientHeight ? 0 : scroller.scrollTop + box.top - view.top - box.height
+    return true
   }
 
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
-    return Boolean(this.dismissConversation?.() || this.dismissMeeting?.() || this.dismissParent?.())
+    return Boolean(this.dismissConversation?.() || this.dismissParent?.())
   }
 
 
@@ -598,7 +652,16 @@ export class Dock {
     state.className = 'kbn-detail-transcript-state'
     const title = document.createElement('span')
     title.className = 'kbn-detail-transcript-title'
-    meta.append(dot, state, title)
+    const stop = document.createElement('button')
+    stop.type = 'button'
+    stop.className = 'kbn-detail-transcript-stop'
+    stop.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const current = this.meeting?.current()
+      if (!current || this.meeting?.stopRequested?.(current)) return
+      void this.meeting?.stop?.(current)
+    })
+    meta.append(dot, state, title, stop)
     const list = document.createElement('ol')
     list.className = 'kbn-detail-transcript-lines'
     list.setAttribute('aria-label', 'Transcript')
@@ -621,8 +684,16 @@ export class Dock {
     if (!pane || !card) return
     const meeting = this.meeting?.current() ?? null
     const hosted = meetingHostCard(meeting, [card]) !== null
-    pane.hidden = !hosted || meeting === null || meeting.tail.length === 0
+    pane.hidden = !hosted || meeting === null
     if (!meeting || !hosted) return
+    const actions = this.meeting?.stop ? meetingActions(meeting, this.meeting.stopRequested?.(meeting) ?? false) : null
+    const stop = pane.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
+    stop.hidden = !actions
+    if (actions) {
+      stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
+      stop.disabled = actions.stopDisabled
+    }
+    pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = meeting.tail.length === 0
     for (const st of ['starting', 'loading', 'live', 'stopping', 'failed']) {
       pane.classList.toggle(`kbn-detail-transcript-${st}`, meeting.state === st)
     }
@@ -648,6 +719,19 @@ export class Dock {
     }) : null
   }
 
+  /** The status line's pill, rebuilt only when what it says or opens changes, keeping its focus. */
+  private paintHeadWorker(card: KanbanCard, slot: HTMLElement): void {
+    const pill = this.workerPillFor(card)
+    const plate = pill ? workerPlate(card, pill, this.workerPhase(card)) : null
+    const key = plate ? JSON.stringify([plate.outerHTML, card.tmuxSession, card.sessionLink, card.sessionUuid]) : null
+    if (key === this.headWorkerKey) return
+    this.headWorkerKey = key
+    const focused = slot.contains(document.activeElement)
+    slot.replaceChildren(...(plate ? [plate] : []))
+    slot.hidden = !plate
+    if (focused) plate?.focus({ preventScroll: true })
+  }
+
   /** Keyboard opening activates the exact destination used by the worker pill. */
   openConversation(card: KanbanCard): boolean {
     const pill = this.workerPillFor(card)
@@ -657,24 +741,25 @@ export class Dock {
   }
 
   /** All control bands share the workspace's identity-keyed undo queue. */
-  setVerdictQueue(queue?: (card: KanbanCard, target: 'tempered' | 'composted') => void): void {
+  setVerdictQueue(queue?: (card: KanbanCard, target: Verdict) => void): void {
     this.queueVerdict = queue
     for (const band of this.bands.values()) band.setVerdictQueue(queue)
   }
 
-  verdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
+  verdict(card: KanbanCard, target: Verdict): void {
     if (this.queueVerdict) this.queueVerdict(card, target)
     else if (confirmWorkerStop(card, target)) this.commitVerdict(card, target)
   }
 
   /** Only the expired undo queue calls this in the workspace. */
-  commitVerdict(card: KanbanCard, target: 'tempered' | 'composted'): void {
+  commitVerdict(card: KanbanCard, target: Verdict): void {
     this.onTransition(card, target)
   }
 
   verdictControlsFor(card: KanbanCard): HTMLElement {
     const row = document.createElement('div')
     row.className = 'kbn-ctl-verdict'
+    markVerdictHost(row, card)
     for (const [label, cls, target] of [
       ['Temper', 'kbn-ctl-temper', 'tempered'],
       ['Discard', 'kbn-ctl-discard', 'composted'],
@@ -684,18 +769,6 @@ export class Dock {
       row.append(control)
     }
     return row
-  }
-
-  /** The compact verdict pair the navbar and the phone's page sheet carry
-   *  while the fiber awaits review, reachable from any page. */
-  verdictPlateFor(card: KanbanCard): HTMLElement {
-    const plate = document.createElement('div')
-    plate.className = 'ws-review-plate'
-    plate.dataset.part = 'act'; plate.dataset.act = 'verdict'
-    plate.setAttribute('role', 'group')
-    plate.setAttribute('aria-label', 'Awaiting review')
-    plate.append(this.verdictControlsFor(card))
-    return plate
   }
 
   /** Refresh controls without replacing drafts or folded fields. */
@@ -853,6 +926,11 @@ export class Dock {
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot'
     const verdict = this.verdictControlsFor(card)
+    verdict.setAttribute('role', 'group')
+    verdict.setAttribute('aria-label', 'Verdict')
+    const worker = document.createElement('span')
+    worker.className = 'ws-fiber-worker'
+    this.head.replaceChildren(worker, verdict)
     const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
     const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
     const menu = document.createElement('details')
@@ -870,20 +948,23 @@ export class Dock {
     this.verdictMenu = menu
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
+    // Review and live verdicts sit on the status line. Drafts and resting
+    // constitutions keep their verdicts in a menu below the transcript.
     this.actPaint = () => {
       const column = fiberPageColumn(card)
       this.el.dataset.column = column
-      const review = column === 'awaitingReview'
-      if (review) {
-        if (this.transcriptBand?.el.parentElement === body) {
-          if (verdict.previousElementSibling !== this.transcriptBand.el) this.transcriptBand.el.after(verdict)
-        } else if (verdict.parentElement !== body) body.prepend(verdict)
-        if (temper.parentElement !== verdict) verdict.append(temper, discard)
-        menu.remove()
-      } else {
+      this.head.dataset.column = column
+      const reachable = verdictReachable(card)
+      verdict.hidden = !reachable
+      this.paintHeadWorker(card, worker)
+      if (reachable && column !== 'inFlight' && column !== 'awaitingReview') {
         verdict.remove()
         if (temper.parentElement !== choices) choices.append(temper, discard)
         if (menu.parentElement !== foot) foot.append(menu)
+      } else {
+        if (verdict.parentElement !== this.head) this.head.append(verdict)
+        if (temper.parentElement !== verdict) verdict.append(temper, discard)
+        menu.remove()
       }
     }
     this.actPaint()
@@ -899,17 +980,42 @@ export class Dock {
     const message = document.createElement('textarea')
     message.className = 'kbn-detail-directive'
     message.rows = 1
-    message.placeholder = 'What should the worker do next?'
+    message.placeholder = ''
     message.setAttribute('aria-label', 'Message for the next worker')
-    // The resting composer is one line; focus or a draft gives it room to grow.
+    // The field is one line, focused or not; only text that wraps grows it.
+    // The text always has the field's whole width: while it fits beside the
+    // verbs they ride its line, and once it would reach them (or holds a line
+    // break) they drop to a row of their own inside the field's foot. The
+    // decision measures the text against the room beside the verbs, so it is
+    // the same on either side of the switch and never flickers.
+    let ruler: CanvasRenderingContext2D | null = null
+    const stack = (): void => {
+      if (!box.isConnected || !box.clientWidth) return
+      ruler ??= document.createElement('canvas').getContext?.('2d') ?? null
+      if (!ruler) return
+      const text = getComputedStyle(message), field = getComputedStyle(box)
+      ruler.font = `${text.fontStyle} ${text.fontWeight} ${text.fontSize} ${text.fontFamily}`
+      const room = box.clientWidth - parseFloat(field.paddingLeft) - parseFloat(field.paddingRight)
+        - foot.offsetWidth - (parseFloat(field.columnGap) || 0) - parseFloat(text.paddingLeft) - parseFloat(text.paddingRight)
+      const longest = Math.max(0, ...message.value.split('\n').map(line => ruler!.measureText(line).width))
+      box.classList.toggle('kbn-ctl-composer-stacked', message.value.includes('\n') || longest > room)
+    }
     const fit = (): void => {
-      box.classList.toggle('kbn-ctl-composer-draft', Boolean(message.value))
-      message.style.height = 'auto'
-      if (message.value || message === document.activeElement) message.style.height = `${message.scrollHeight}px`
+      stack()
+      message.style.height = ''
+      if (message.value && message.scrollHeight > message.clientHeight) message.style.height = `${message.scrollHeight}px`
     }
     message.addEventListener('input', fit)
-    message.addEventListener('focus', fit)
-    message.addEventListener('blur', fit)
+    // The draft belongs to its constitution and outlives a reload in this
+    // browser; a send that lands empties the field and so drops it.
+    const draftStore = `shuttle:composer-draft:${JSON.stringify([card.originId, card.uid ?? card.id])}`
+    try { message.value = localStorage.getItem(draftStore) ?? '' } catch { /* storage unavailable */ }
+    if (message.value) requestAnimationFrame(fit)
+    message.addEventListener('input', () => {
+      try { if (message.value) localStorage.setItem(draftStore, message.value); else localStorage.removeItem(draftStore) } catch { /* storage unavailable */ }
+    })
+    window.addEventListener('resize', fit)
+    this.composerDisposers.push(() => window.removeEventListener('resize', fit))
 
     // Two lines under the box: a send's outcome (and the project-directory
     // prompt a refused start raises), and the images turned away. Neither
@@ -943,9 +1049,8 @@ export class Dock {
       resume.classList.toggle('kbn-ctl-secondary', resumable)
       resume.title = resumable ? 'Resume the previous session (⌥↵)' : ''
       resume.hidden = !resumable
-      message.placeholder = fiberPageColumn(card) === 'awaitingReview'
-        ? resumable ? 'Reply and resume…' : 'Reply and start…'
-        : 'What should the worker do next?'
+      message.placeholder = this.meetingArmed() ? 'A note for the meeting (optional)'
+        : ''
     }
     this.composerPaint()
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
@@ -1018,10 +1123,14 @@ export class Dock {
     foot.className = 'kbn-ctl-composer-foot'
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
-    const meeting = this.meeting ? this.buildMeeting(card, err, send) : null
-    if (meeting) meeting.classList.add('kbn-ctl-microphone')
+    // With Meeting on, its own verb stands in for New session and Resume.
+    const meeting = this.meeting ? this.buildMeeting(card, err, send, armed => {
+      sends.hidden = armed
+      this.composerPaint?.()
+      fit()
+    }) : null
     sends.append(fresh, resume)
-    foot.append(sends)
+    foot.append(...(meeting ? [meeting] : []), sends)
 
     this.composerSend = send
     this.composerError = err
@@ -1042,13 +1151,21 @@ export class Dock {
     })
 
     message.addEventListener('keydown', event => {
+      // Escape steps out of the field and hands the keys back to the reader;
+      // the draft stays.
+      if (event.key === 'Escape' && !event.isComposing && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault(); event.stopPropagation()
+        message.blur()
+        return
+      }
       if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
+      if (this.meetingArmed()) { this.meetingStart?.(); return }
       const resumeSession = event.altKey && Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
     })
-    box.append(...(meeting ? [meeting] : []), message, strip.el, foot)
+    box.append(message, strip.el, foot)
     wrap.append(box, imageErr, err)
     return wrap
   }
@@ -1064,82 +1181,98 @@ export class Dock {
   }
 
   /**
-   * Meeting, for this constitution: a verb that asks one question first.
-   * Meeting opens a menu, Call, Room or Phone, and picking one starts the
-   * recording on the daemon — nothing records before that pick; Phone opens
-   * this tab's mic in the pick's gesture and keeps its controls on the board. The
-   * composer's message, with its images' lines, becomes the meeting's note,
-   * and the worker — live or
-   * not — receives the meeting as a joined constitution.
+   * Meeting, for this constitution: a switch in the composer's control row.
+   * Off by default. On, it shows the meeting's kind (Call, Room, Phone) and
+   * the composer's verbs become one, Start meeting, which records on the
+   * daemon — nothing records before that press; Phone opens this tab's mic in
+   * the press's gesture and keeps its controls on the board. The composer's
+   * message, with its images' lines, becomes the meeting's note, and the
+   * worker — live or not — receives the meeting as a joined constitution.
    *
-   * One meeting records at a time. While any does, the verb stays in its
-   * place, inert, naming the recording on hover; it is absent only where
-   * hark is not available. It follows the board's meeting poll.
+   * One meeting records at a time. While any does, the switch stays in its
+   * place, off and inert, naming the recording on hover; it is absent only
+   * where hark is not available. It follows the board's meeting poll.
+   * `onArm` hears the switch so the composer can trade its verbs.
    */
-  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend): HTMLElement {
+  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: (armed: boolean) => void = () => {}): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
-    const opener = ctlButton('Meeting', 'kbn-ctl-meet-btn')
-    opener.setAttribute('aria-haspopup', 'menu')
-    opener.setAttribute('aria-expanded', 'false')
-    const menu = document.createElement('div')
-    menu.className = 'kbn-ctl-menu'
-    menu.setAttribute('role', 'menu')
-    menu.setAttribute('aria-label', 'Meeting kind')
-    menu.hidden = true
-
-    let release: Release | null = null
-    const setOpen = (open: boolean): void => {
-      if (open === !menu.hidden) return
-      menu.hidden = !open
-      release?.(); release = null
-      if (open) release = anchorPopover(menu, opener, { placement: 'below-start' })
-      opener.setAttribute('aria-expanded', String(open))
-      wrap.classList.toggle('kbn-ctl-meet-open', open)
+    const toggle = document.createElement('label')
+    toggle.className = 'kbn-ctl-meet-switch'
+    const input = document.createElement('input')
+    input.type = 'checkbox'
+    input.setAttribute('role', 'switch')
+    const track = document.createElement('span')
+    track.className = 'kbn-ctl-meet-track'
+    track.setAttribute('aria-hidden', 'true')
+    const word = document.createElement('span')
+    word.textContent = 'Meeting'
+    toggle.append(input, track, word)
+    const modes = segmented<MeetingMode>('Meeting kind', MEETING_MODES.map(({ value, label }) => [value, label] as const), lastMeetingMode)
+    modes.el.classList.add('kbn-ctl-meet-modes')
+    modes.onPick(mode => { lastMeetingMode = mode })
+    const verb = ctlButton('', 'kbn-ctl-send kbn-ctl-meet-start')
+    verb.setAttribute('aria-label', 'Start meeting')
+    // The phone's narrow row drops the noun the switch beside it already says.
+    const verbFace = (busy: boolean): void => {
+      if (busy) { verb.textContent = 'Starting…'; return }
+      const noun = document.createElement('span')
+      noun.className = 'kbn-ctl-meet-noun'
+      noun.textContent = ' meeting'
+      verb.replaceChildren('Start', noun, ' ↵')
     }
-    this.composerDisposers.push(() => { release?.(); release = null })
+    verbFace(false)
 
-    this.dismissMeeting = () => {
-      if (menu.hidden) return false
-      setOpen(false)
-      if (opener.isConnected) opener.focus()
-      return true
-    }
     let starting = false
+    const arm = (on: boolean): void => {
+      input.checked = on
+      wrap.classList.toggle('kbn-ctl-meet-on', on)
+      modes.el.hidden = verb.hidden = !on
+      onArm(on)
+    }
+    arm(false)
+    input.addEventListener('change', () => arm(input.checked))
+    this.meetingArmed = () => input.checked && !input.disabled
+
+
     const paint = (): void => {
       const control = this.meeting
       if (!control) return
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
       wrap.hidden = !control.canJoin() && !recording
-      opener.disabled = starting || send.busy() || !control.canJoin()
-      opener.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
-      if (opener.disabled) setOpen(false)
+      const held = starting || send.busy() || !control.canJoin()
+      input.disabled = held
+      modes.setDisabled(held)
+      verb.disabled = held
+      toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
+      if (!control.canJoin() && input.checked && !starting) arm(false)
     }
     this.meetingPaint = paint
 
-    const start = (mode: MeetingMode): void => {
-      if (starting || send.busy() || !this.meeting?.canJoin()) return
-      setOpen(false)
+    const start = (): void => {
+      if (!input.checked || starting || send.busy() || !this.meeting?.canJoin()) return
       starting = true
       send.setBusy(true)
-      opener.textContent = 'Starting…'
+      verbFace(true)
       err.style.display = 'none'
-      // The join is called inside the pick's gesture, so Phone can open the
+      // The join is called inside the press's gesture, so Phone can open the
       // mic; it resolves the note (uploading any images) after that.
       const epoch = this.epoch
       let joined: Promise<MeetingJoinResult>
-      try { joined = this.meeting!.join(card, mode, send.compose) }
+      try { joined = this.meeting!.join(card, modes.value, send.compose) }
       catch (error) { joined = Promise.reject(error) }
+      let began = false
       void joined.then(({ error, delivered }) => {
         if (epoch !== this.epoch) return
         if (error) {
           err.textContent = error
           err.style.display = ''
-        } else if (delivered) {
+        } else {
+          began = true
           // A recording whose worker never received the note keeps it, and
           // its images, for another try.
-          send.sent()
+          if (delivered) send.sent()
         }
       }).catch((error: unknown) => {
         if (epoch !== this.epoch) return
@@ -1147,54 +1280,18 @@ export class Dock {
         err.style.display = ''
       }).finally(() => {
         starting = false
-        opener.textContent = 'Meeting'
+        verbFace(false)
+        if (began && epoch === this.epoch) arm(false)
         send.setBusy(false)
       })
     }
-    const items = MEETING_MODES.map(({ value, label }) => {
-      const item = document.createElement('button')
-      item.type = 'button'
-      item.className = 'kbn-ctl-menu-item'
-      item.setAttribute('role', 'menuitem')
-      item.textContent = label
-      item.addEventListener('click', (e) => {
-        e.stopPropagation()
-        start(value)
-      })
-      return item
-    })
-    menu.append(...items)
-
-    opener.addEventListener('click', (e) => {
+    this.meetingStart = start
+    verb.addEventListener('click', (e) => {
       e.stopPropagation()
-      const opening = menu.hidden
-      setOpen(opening)
-      if (opening) items[0].focus()
-    })
-    menu.addEventListener('keydown', (e) => {
-      const at = items.indexOf(document.activeElement as HTMLButtonElement)
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault()
-        const step = e.key === 'ArrowDown' ? 1 : -1
-        items[(at + step + items.length) % items.length].focus()
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        e.stopPropagation()
-        setOpen(false)
-        opener.focus()
-      }
-    })
-    // Focus moving to another control (Tab away) closes the menu; focus
-    // dropping to nothing does not. WebKit gives a clicked button no focus, so
-    // pressing Room blurs Call to the body before Room's click lands — closing
-    // then would hide Room under the pointer and swallow the pick. Presses
-    // outside close the menu when focus moves to another control.
-    menu.addEventListener('focusout', (e) => {
-      const to = e.relatedTarget as Node | null
-      if (to && !wrap.contains(to)) setOpen(false)
+      start()
     })
 
-    wrap.append(opener, menu)
+    wrap.append(toggle, modes.el, verb)
     paint()
     return wrap
   }
@@ -1316,7 +1413,7 @@ export class Dock {
 
     // ── Kind + cron ──────────────────────────────────────────────────────
     // The card's kind is read straight through — an absent block reads as
-    // one-shot — so a pinned card shows Pinned and One-shot unpins it.
+    // one-shot.
     const baseline = {
       kind: (card.shuttleKind ?? 'oneshot') as ShuttleKind,
       schedule: card.shuttleSchedule ?? '',
@@ -1324,7 +1421,7 @@ export class Dock {
     }
     const kind = segmented<ShuttleKind>(
       'Kind',
-      [['oneshot', 'One-shot'], ['standing', 'Standing'], ['pinned', 'Pinned']],
+      [['oneshot', 'One-shot'], ['standing', 'Standing']],
       baseline.kind,
     )
 
@@ -1379,9 +1476,8 @@ export class Dock {
       })
     }
 
-    // One-shot and Pinned commit on the click: neither needs anything the
-    // user hasn't given, and neither throws away what a re-toggle can't
-    // restore.
+    // One-shot commits on the click: it needs nothing the user hasn't given,
+    // and throws away nothing a re-toggle can't restore.
     //
     // PROMOTING to Standing does NOT commit on the click. The toggle reveals
     // and seeds the cron (`0 9 * * 1-5`, Europe/Paris) — seeding is not
@@ -1389,12 +1485,6 @@ export class Dock {
     // blur or Enter (`commitSchedule`). A promotion abandoned mid-toggle stays
     // one-shot on the wire: a schedule is something you state, never
     // something you're given.
-    //
-    // PINNING HERE IS SHAPE-ONLY, unlike the board's drag onto the Pinned
-    // strip, which kills a live worker, reshapes, then pauses. The drag
-    // targets a surface where things are at rest; this control edits a field
-    // and says nothing about now. So it posts the reshape alone, and the read
-    // model places the card.
     let kindRevision = 0
     const commitKind = (value: ShuttleKind, revision: number): void => {
       if (value === baseline.kind && !this.savesPending) return
@@ -1450,6 +1540,13 @@ export class Dock {
         abandoningPromotion = false
       })
     }
+    // The keyboard twin of that mousedown: an arrow off a staged Standing
+    // moves focus to the next segment before it picks it, and that focus move
+    // is the cron field's blur. Captured ahead of the group's own handler.
+    kind.el.addEventListener('keydown', (e) => {
+      const arrow = e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+      if (arrow && kind.value === 'standing' && baseline.kind !== 'standing') abandoningPromotion = true
+    }, true)
 
     // Schedule + tz commit on blur and Enter — `input` would patch mid-typed
     // cron fragments. This is ALSO where a promotion to Standing lands, which
@@ -1467,7 +1564,7 @@ export class Dock {
       const promoting = baseline.kind !== 'standing'
       if (!promoting && schedule === baseline.schedule && tz === baseline.tz) return
       if (!schedule) {
-        errorEl.textContent = 'A standing role needs a cron expression.'
+        errorEl.textContent = 'A standing constitution needs a cron expression.'
         errorEl.style.display = ''
         return
       }
@@ -1499,9 +1596,8 @@ export class Dock {
    * timeline renders `DRAG_HORIZON_DAYS` (14) ahead — and the way a resting
    * card gets a day to come back on, so on a resting card the field is named
    * for that: Returns. A cycle's due is its band's closing edge: Ends. A
-   * standing role (placed by its cron) and a resting pinned role (on the
-   * Pinned strip) are never sorted by `due:`, so the field is absent while
-   * the card is either.
+   * standing constitution (placed by its cron) is never sorted by `due:`, so
+   * the field is absent on one.
    */
   private buildCardFields(
     card: KanbanCard,
@@ -2338,7 +2434,7 @@ export class Dock {
           // one), so it takes the create path — `install`/`repeat`, no reshape
           // flag. Current block state comes from the card.
           // The fallback PRESERVES the card's current kind — a schedule/tz-only
-          // patch must never quietly unpin a pinned role on its way past.
+          // patch must never quietly change the kind on its way past.
           const targetKind: ShuttleKind = changes.shuttleKind ?? card.shuttleKind ?? 'oneshot'
 
           const schedule =
@@ -2363,10 +2459,7 @@ export class Dock {
             )
           } else if (targetKind === 'standing') {
             // Below here the card has NO block yet, so there is nothing to
-            // reshape and the create verbs take over. `pinned` never reaches
-            // this arm: the kind control is hidden until the card is
-            // shuttle-managed, and pinning a block-less card is refused on the
-            // board too (`pinRole` banners "promote it first").
+            // reshape and the create verbs take over.
             await this.postJson('/api/v1/lifecycle', {
               action: 'repeat', origin, fiber: fiberId,
               // Undefined when the block carries none, which a paused install

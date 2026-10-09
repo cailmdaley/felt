@@ -20,6 +20,8 @@
  * OS or asks the human to type the path on the selected host.
  */
 
+import '../board/palette.css'
+import '../board/darkControls.css'
 import { createRoot, type Root } from 'react-dom/client'
 import { loadFeed, type LoadedFeed } from './projectFeed'
 import type { Project } from './projectModel'

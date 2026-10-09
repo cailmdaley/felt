@@ -11,7 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 type piAdapter struct{}
@@ -59,49 +62,30 @@ type piJob struct {
 	PiSessionID                              string `json:"piSessionId"`
 }
 
-func conferStateDir() string {
-	if p := os.Getenv("SHUTTLE_CONFER_STATE_DIR"); p != "" {
+func conferStateDir(env *sysenv.Env) string {
+	if p := env.Getenv("SHUTTLE_CONFER_STATE_DIR"); p != "" {
 		return p
 	}
-	h, _ := os.UserHomeDir()
+	h, _ := env.UserHomeDir()
 	return filepath.Join(h, ".local/state/confer-agent")
 }
 func liveSocket(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && st.Mode()&os.ModeSocket != 0
 }
-func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
-	hookSessions := mailboxSessions("pi", host)
-	nativeSessions := piNativeSessions(host)
+func (piAdapter) discover(ctx context.Context, env *sysenv.Env, host string) ([]Session, error) {
+	hookSessions := mailboxSessions(env, "pi", host)
+	nativeSessions := piNativeSessions(env, host)
 	nativeIDs := make(map[string]bool, len(nativeSessions))
 	for _, session := range nativeSessions {
 		nativeIDs[session.ID] = true
 	}
-	root := conferStateDir()
 	ss := mergeSessions(nativeSessions, hookSessions)
+	jobs, err := liveConferJobs(ctx, conferStateDir(env), func(string) bool { return true })
 	var conferSessions []Session
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".json") || filepath.Base(filepath.Dir(path)) != "jobs" {
-			return nil
-		}
-		b, e := readBounded(path, 512<<10)
-		if e != nil {
-			return nil
-		}
-		var j piJob
-		if json.Unmarshal(b, &j) != nil || j.ID == "" || j.SocketPath == "" || !liveSocket(j.SocketPath) {
-			return nil
-		}
+	for _, j := range jobs {
 		if nativeIDs[j.SessionID] || nativeIDs[j.PiSessionID] {
-			return nil
+			continue
 		}
 		addr, _ := FormatAddress(host, "pi", j.ID)
 		state := j.Phase
@@ -109,39 +93,20 @@ func (piAdapter) discover(ctx context.Context, host string) ([]Session, error) {
 			state = j.Status
 		}
 		conferSessions = append(conferSessions, Session{Address: addr, Host: host, Harness: "pi", ID: j.ID, Title: j.Name, CWD: j.CWD, State: state, Capabilities: []string{"wake"}})
-		return nil
-	})
-	if os.IsNotExist(err) {
-		return ss, nil
 	}
 	return mergeSessions(ss, conferSessions), err
 }
-func findPi(ctx context.Context, id string) (piJob, error) {
-	var matches []piJob
-	err := filepath.WalkDir(conferStateDir(), func(path string, d os.DirEntry, err error) error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() || filepath.Base(path) != id+".json" || filepath.Base(filepath.Dir(path)) != "jobs" {
-			return nil
-		}
-		b, e := readBounded(path, 512<<10)
-		if e != nil {
-			return nil
-		}
-		var j piJob
-		if json.Unmarshal(b, &j) == nil && j.ID == id && liveSocket(j.SocketPath) {
-			matches = append(matches, j)
-		}
-		return nil
-	})
+
+func findPi(ctx context.Context, env *sysenv.Env, id string) (piJob, error) {
+	jobs, err := liveConferJobs(ctx, conferStateDir(env), func(name string) bool { return name == id+".json" })
 	if err != nil {
 		return piJob{}, err
+	}
+	var matches []piJob
+	for _, j := range jobs {
+		if j.ID == id {
+			matches = append(matches, j)
+		}
 	}
 	if len(matches) == 0 {
 		return piJob{}, fmt.Errorf("live Confer job %q not found", id)
@@ -151,17 +116,90 @@ func findPi(ctx context.Context, id string) (piJob, error) {
 	}
 	return matches[0], nil
 }
-func (piAdapter) send(ctx context.Context, a Address, r Request) (Receipt, error) {
+
+// conferReadConcurrency bounds parallel job-record reads. On a network home
+// directory each open costs a round trip, so reads overlap rather than queue.
+const conferReadConcurrency = 16
+
+// liveConferJobs returns the Confer jobs under root whose records parse and
+// whose socket is live. Confer keeps one record per job at
+// <root>/<workspace>/jobs/<job>.json, beside a <job>/ directory of session
+// state that discovery never needs, so only those two directory levels are
+// listed. keep filters record file names before they are read. A missing root
+// is no jobs; a cancelled context returns what was read with its error.
+func liveConferJobs(ctx context.Context, root string, keep func(string) bool) ([]piJob, error) {
+	workspaces, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var paths []string
+	for _, ws := range workspaces {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !ws.IsDir() {
+			continue
+		}
+		dir := filepath.Join(root, ws.Name(), "jobs")
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") && keep(e.Name()) {
+				paths = append(paths, filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	results := make([]*piJob, len(paths))
+	sem := make(chan struct{}, conferReadConcurrency)
+	var wg sync.WaitGroup
+	for i, path := range paths {
+		if ctx.Err() != nil {
+			break
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
+			b, err := readBounded(path, 512<<10)
+			if err != nil {
+				return
+			}
+			var j piJob
+			if json.Unmarshal(b, &j) != nil || j.ID == "" || j.SocketPath == "" || !liveSocket(j.SocketPath) {
+				return
+			}
+			results[i] = &j
+		}()
+	}
+	wg.Wait()
+	var jobs []piJob
+	for _, j := range results {
+		if j != nil {
+			jobs = append(jobs, *j)
+		}
+	}
+	return jobs, ctx.Err()
+}
+func (piAdapter) send(ctx context.Context, env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if !r.Wake {
-		if MailboxAvailable("pi", a.ID, a.Host) {
-			return queueMailbox(a, r)
+		if MailboxAvailable(env, "pi", a.ID, a.Host) {
+			return queueMailbox(env, a, r)
 		}
 		return rejected(r, "pi-rpc+unix-socket", "Confer messages can start a turn; wake is required"), errCode("wake_required", "Confer requires wake=true")
 	}
-	if piNativeAvailable(a.ID, a.Host) {
-		return sendPiNative(ctx, a, r)
+	if piNativeAvailable(env, a.ID, a.Host) {
+		return sendPiNative(ctx, env, a, r)
 	}
-	j, err := findPi(ctx, a.ID)
+	j, err := findPi(ctx, env, a.ID)
 	if err != nil {
 		return rejected(r, "pi-rpc+unix-socket", err.Error()), errCode("session_not_found", "%v", err)
 	}

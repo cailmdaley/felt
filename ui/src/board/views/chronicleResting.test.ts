@@ -22,6 +22,8 @@
 import { describe, expect, it } from 'vitest'
 import { buildRows, type ChronicleRow } from './ChronicleView.js'
 import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
+import { collectCards } from './ViewRegistry.js'
+import type { ActivityBucket } from './TemporalData.js'
 import {
   card as baseCard,
   dayAt,
@@ -29,6 +31,7 @@ import {
   response,
   TODAY_DAY,
   TODAY_IDX,
+  noonOf,
 } from '../testFixtures.js'
 
 const card = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -42,6 +45,36 @@ const restingResponse = (resting: readonly KanbanCard[]): KanbanResponse =>
 function rows(cards: KanbanCard[], response: KanbanResponse): ChronicleRow[] {
   return buildRows(response, cards, new Map(), DAY_INDEX, TODAY_IDX, TODAY_DAY, {})
 }
+
+describe('resting seats on the Chronicle', () => {
+  const dueSeat = card({ id: 'seats/due', shuttleSeat: 'vizier', due: dayAt(3) })
+  const standingSeat = card({
+    id: 'seats/standing', shuttleSeat: 'vizier', shuttleKind: 'standing',
+    status: 'active', nextLaunchAt: noonOf(dayAt(4)),
+  })
+  const workedSeat = card({ id: 'seats/worked', shuttleSeat: 'vizier' })
+  const seats = [dueSeat, standingSeat, workedSeat]
+
+  it('collects Roles cards once, including cards projected onto another surface', () => {
+    const resp = response({ roles: seats, timeline: { past: [], futureDated: [standingSeat] } })
+    expect(collectCards(resp).map((c) => c.id).sort()).toEqual(seats.map((c) => c.id).sort())
+  })
+
+  it('includes seat deadlines, standing firings and attributed activity in rows', () => {
+    const resp = response({ roles: seats })
+    const bucket: ActivityBucket = {
+      m: Date.parse(noonOf(TODAY_DAY)), s: 'session', cwd: null, k: 'agent', n: 2,
+    }
+    const built = buildRows(resp, seats, new Map([[workedSeat.id, [bucket]]]),
+      DAY_INDEX, TODAY_IDX, TODAY_DAY, {})
+    expect(built.find((r) => r.cardId === dueSeat.id)?.dueIdx).toBe(TODAY_IDX + 3)
+    expect(built.find((r) => r.cardId === standingSeat.id)?.launchIdx).toBe(TODAY_IDX + 4)
+    expect(built.find((r) => r.cardId === workedSeat.id)?.days.has(TODAY_DAY)).toBe(true)
+    const throughContext = buildRows(resp, collectCards(resp), new Map([[workedSeat.id, [bucket]]]),
+      DAY_INDEX, TODAY_IDX, TODAY_DAY, {})
+    expect(throughContext.map((r) => r.cardId).sort()).toEqual(seats.map((c) => c.id).sort())
+  })
+})
 
 describe('a snoozed, workless fiber on Resting', () => {
   it('gets a row for a future due date (the ordinary snooze)', () => {

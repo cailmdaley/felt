@@ -2,20 +2,29 @@ package feltcli
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
-
-var treeDepth int
 
 // listForOutput lists fibers the way the active output mode needs them: --json
 // carries mod times, and a --has filter that only names frontmatter keys is
 // pushed into the walk so unrelated fibers skip a full YAML parse.
+func frontmatterFieldsForOutput(hasFields []string) []string {
+	frontmatterFields, canPrefilter := frontmatterPrefilterFields(hasFields)
+	if canPrefilter {
+		return frontmatterFields
+	}
+	return nil
+}
+
 func listForOutput(storage *felt.Storage, hasFields []string, jsonMode bool) ([]*felt.Felt, error) {
 	frontmatterFields, canPrefilter := frontmatterPrefilterFields(hasFields)
 	prefilter := canPrefilter && len(frontmatterFields) > 0
@@ -32,7 +41,9 @@ func listForOutput(storage *felt.Storage, hasFields []string, jsonMode bool) ([]
 }
 
 // NewLsCmd builds the shared fiber-listing command for a Felt-compatible view.
-func NewLsCmd(view ViewOptions) *cobra.Command {
+// It reads the store through env and writes to the output stream its root
+// command was given (the felt root sets it from env).
+func NewLsCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var lsStatus string
 	var lsTags []string
 	var lsRecent int
@@ -40,6 +51,7 @@ func NewLsCmd(view ViewOptions) *cobra.Command {
 	var lsExact bool
 	var lsRegex bool
 	var lsHasFields []string
+	var lsIDsFrom string
 	var lsJSONFields []string
 	var lsVerbose bool
 	command := &cobra.Command{
@@ -51,7 +63,7 @@ in the name, outcome, extra frontmatter text, or id; exact matches on name, id,
 or basename sort first. --body also searches bodies. -r matches the whole query
 as one regular expression, which is how to ask for a literal phrase.
 
-A filter (query, -t, --has-field) widens to every status and counts closed
+A filter (query, -t, --has-field, --ids-from) widens to every status and counts closed
 matches in a trailing hint instead of printing them, unless -s names the
 statuses.
 
@@ -66,10 +78,11 @@ felt find searches the rest of it.`,
   felt ls --json --json-field id,status   machine-readable, two fields`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			storage, _, err := felt.RequireStore(view.directory())
+			storage, _, err := felt.RequireStore(env, view.directory())
 			if err != nil {
 				return err
 			}
+			out := env.Stdout
 			query := ""
 			if len(args) == 1 {
 				query = plainQuery(args[0], lsRegex)
@@ -80,7 +93,27 @@ felt find searches the rest of it.`,
 				return fmt.Errorf("--json-field requires --json")
 			}
 
-			felts, err := listForOutput(storage, hasFields, view.jsonOutput())
+			var felts []*felt.Felt
+			idOrder := map[string]int(nil)
+			if lsIDsFrom == "" {
+				felts, err = listForOutput(storage, hasFields, view.jsonOutput())
+			} else {
+				data, readErr := os.ReadFile(lsIDsFrom)
+				if readErr != nil {
+					return fmt.Errorf("reading ids from %s: %w", lsIDsFrom, readErr)
+				}
+				ids := strings.Split(string(data), "\n")
+				idOrder = make(map[string]int, len(ids))
+				for _, id := range ids {
+					id = strings.TrimSuffix(id, "\r")
+					if strings.TrimSpace(id) != "" {
+						if _, exists := idOrder[id]; !exists {
+							idOrder[id] = len(idOrder)
+						}
+					}
+				}
+				felts, err = storage.ListMetadataByIDs(ids, frontmatterFieldsForOutput(hasFields), view.jsonOutput())
+			}
 			if err != nil {
 				return err
 			}
@@ -88,7 +121,7 @@ felt find searches the rest of it.`,
 			// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
 			// widen to all statuses. Bare `ls` stays open+active (actionable view).
 			statusExplicit := cmd.Flags().Changed("status")
-			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || query != "" || lsRecent > 0
+			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || query != "" || lsRecent > 0 || lsIDsFrom != ""
 
 			// A search widens past open+active so untracked fibers can match, but a
 			// store accumulates far more closed work than live work and the closed
@@ -96,7 +129,7 @@ felt find searches the rest of it.`,
 			// printed. -n is exempt: it sorts by closed-at precisely to surface
 			// what was recently finished.
 			suppressClosed := !statusExplicit && lsRecent == 0 &&
-				(query != "" || len(lsTags) > 0 || len(hasFields) > 0)
+				(query != "" || len(lsTags) > 0 || len(hasFields) > 0 || lsIDsFrom != "")
 
 			search, err := compileSearch(query, lsStatus, !statusExplicit && hasFilters,
 				lsTags, hasFields, lsExact, lsRegex, lsBody, lsVerbose)
@@ -125,10 +158,15 @@ felt find searches the rest of it.`,
 				if len(filtered) > lsRecent {
 					filtered = filtered[:lsRecent]
 				}
-			} else if query == "" {
+			} else if query == "" && lsIDsFrom == "" {
 				// Default: sort by creation time (skip for search results to preserve relevance)
 				sort.Slice(filtered, func(i, j int) bool {
 					return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
+				})
+			}
+			if idOrder != nil {
+				sort.SliceStable(filtered, func(i, j int) bool {
+					return idOrder[filtered[i].ID] < idOrder[filtered[j].ID]
 				})
 			}
 
@@ -153,9 +191,9 @@ felt find searches the rest of it.`,
 					if err != nil {
 						return err
 					}
-					return outputJSON(projected)
+					return writeJSON(out, projected)
 				}
-				return outputJSON(filtered)
+				return writeJSON(out, filtered)
 			}
 
 			// Closed suppression is a human-output concern only: --json is the wire
@@ -171,25 +209,25 @@ felt find searches the rest of it.`,
 
 			if len(shown) == 0 {
 				if query != "" {
-					fmt.Printf("No fibers matching %q\n", query)
+					fmt.Fprintf(out, "No fibers matching %q\n", query)
 				} else {
-					fmt.Println("No fibers found")
+					fmt.Fprintln(out, "No fibers found")
 				}
 			} else {
 				for _, f := range shown {
-					fmt.Print(formatFeltTwoLine(f, collapsed[f.ID]))
+					fmt.Fprint(out, formatFeltTwoLine(f, collapsed[f.ID]))
 				}
 			}
 
 			if closedSuppressed > 0 {
-				fmt.Printf("\n(+%d closed — add -s closed)\n", closedSuppressed)
+				fmt.Fprintf(out, "\n(+%d closed — add -s closed)\n", closedSuppressed)
 			}
 
 			// Show count of hidden fibers when the default filter is active
 			if !statusExplicit && !hasFilters {
 				hidden := len(felts) - len(filtered)
 				if hidden > 0 {
-					fmt.Printf("\n(%d more — use -s all to see everything)\n", hidden)
+					fmt.Fprintf(out, "\n(%d more — use -s all to see everything)\n", hidden)
 				}
 			}
 
@@ -200,7 +238,7 @@ felt find searches the rest of it.`,
 			// memoized symlink-eval and an ancestor walk — no outer ids are read.
 			if (hasFilters || statusExplicit) && !view.jsonOutput() {
 				if outerRoot, _, ok := storage.EnclosingStore(); ok {
-					fmt.Printf("\n(view-local — `felt find` searches the whole store at %s)\n", outerRoot)
+					fmt.Fprintf(out, "\n(view-local — `felt find` searches the whole store at %s)\n", outerRoot)
 				}
 			}
 
@@ -216,18 +254,13 @@ felt find searches the rest of it.`,
 	command.Flags().BoolVarP(&lsExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
 	command.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
 	command.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
+	command.Flags().StringVar(&lsIDsFrom, "ids-from", "", "Read fiber ids from a file (one id per line) without walking the store")
 	command.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only these top-level fields (repeatable or comma-separated)")
 	command.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
 	if view.Binary != "" && view.Binary != "felt" {
 		command.Example = strings.ReplaceAll(command.Example, "felt ls", view.commandName("ls"))
 	}
 	return command
-}
-
-var lsCmd = NewLsCmd(ViewOptions{})
-
-func init() {
-	rootCmd.AddCommand(lsCmd)
 }
 
 // lsSearch is one compiled query: the flags and the regex, applied by apply()
@@ -675,58 +708,64 @@ type ContainmentNode struct {
 	Children []*ContainmentNode `json:"children,omitempty"`
 }
 
-// tree command - containment hierarchy
-var treeCmd = &cobra.Command{
-	Use:   "tree [id]",
-	Short: "Show the containment tree",
-	Long: `Draws fibers by nesting, every status included: the whole view, or with an id
+// treeCmd draws the containment hierarchy.
+func (a *app) treeCmd() *cobra.Command {
+	var treeDepth int
+	command := &cobra.Command{
+		Use:   "tree [id]",
+		Short: "Show the containment tree",
+		Long: `Draws fibers by nesting, every status included: the whole view, or with an id
 that fiber's subtree, from the enclosing store when it lives there. A branch
 cut at the depth limit shows how many fibers lie below it; --json is always
 the full tree.`,
-	Example: `  felt tree analysis -L 2`,
-	Args:    cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		storage, _, err := felt.RequireStore(changeDir)
-		if err != nil {
-			return err
-		}
-
-		// Resolve the argument before listing anything: an id that names a
-		// fiber in the enclosing store draws THAT store's tree — the fiber is
-		// real, it just is not in this view — so the ref decides which store
-		// gets walked, and the walk happens exactly once either way.
-		target := felt.Ref{Storage: storage}
-		if len(args) == 1 {
-			target, err = felt.ResolveRef(storage, "", args[0])
+		Example: `  felt tree analysis -L 2`,
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			storage, _, err := felt.RequireStore(a.env, a.dir)
 			if err != nil {
 				return err
 			}
-		}
 
-		felts, err := listForOutput(target.Storage, nil, jsonOutput)
-		if err != nil {
-			return err
-		}
-
-		roots := buildContainmentTree(felts)
-		if len(args) == 1 {
-			node := findContainmentNode(roots, target.ID)
-			if node == nil {
-				return fmt.Errorf("fiber %s not found in tree", target.ID)
+			// Resolve the argument before listing anything: an id that names a
+			// fiber in the enclosing store draws THAT store's tree — the fiber is
+			// real, it just is not in this view — so the ref decides which store
+			// gets walked, and the walk happens exactly once either way.
+			target := felt.Ref{Storage: storage}
+			if len(args) == 1 {
+				target, err = felt.ResolveRef(storage, "", args[0])
+				if err != nil {
+					return err
+				}
 			}
-			roots = []*ContainmentNode{node}
-		}
 
-		if jsonOutput {
-			return outputJSON(roots)
-		}
+			felts, err := listForOutput(target.Storage, nil, a.json)
+			if err != nil {
+				return err
+			}
 
-		for i, root := range roots {
-			printContainmentNode(root, "", i == len(roots)-1, 0)
-		}
+			roots := buildContainmentTree(felts)
+			if len(args) == 1 {
+				node := findContainmentNode(roots, target.ID)
+				if node == nil {
+					return fmt.Errorf("fiber %s not found in tree", target.ID)
+				}
+				roots = []*ContainmentNode{node}
+			}
 
-		return nil
-	},
+			if a.json {
+				return a.outputJSON(roots)
+			}
+
+			for i, root := range roots {
+				printContainmentNode(a.env.Stdout, root, "", i == len(roots)-1, 0, treeDepth)
+			}
+
+			return nil
+		},
+	}
+	command.GroupID = groupSearch
+	command.Flags().IntVarP(&treeDepth, "depth", "L", 0, "Maximum nesting depth to display (1 = direct children only; 0 = unlimited)")
+	return command
 }
 
 // buildContainmentTree constructs a tree from fiber IDs based on path nesting.
@@ -800,7 +839,9 @@ func countDescendants(node *ContainmentNode) int {
 	return n
 }
 
-func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth int) {
+// printContainmentNode draws node and its subtree to w, eliding what lies
+// below maxDepth (0 draws everything).
+func printContainmentNode(w io.Writer, node *ContainmentNode, prefix string, last bool, depth, maxDepth int) {
 	connector := "├── "
 	if last {
 		connector = "└── "
@@ -809,7 +850,7 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 		connector = ""
 	}
 
-	fmt.Printf("%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), treeDisplayID(node.ID), node.Name)
+	fmt.Fprintf(w, "%s%s%s %s  %s\n", prefix, connector, felt.StatusIcon(node.Status), treeDisplayID(node.ID), node.Name)
 
 	var childPrefix string
 	if prefix == "" {
@@ -822,20 +863,14 @@ func printContainmentNode(node *ContainmentNode, prefix string, last bool, depth
 
 	// At the depth limit the subtree is elided; say how much was left out so
 	// the truncation is visible rather than silent.
-	if treeDepth > 0 && depth+1 > treeDepth {
+	if maxDepth > 0 && depth+1 > maxDepth {
 		if hidden := countDescendants(node); hidden > 0 {
-			fmt.Printf("%s└── … (%d more below)\n", childPrefix, hidden)
+			fmt.Fprintf(w, "%s└── … (%d more below)\n", childPrefix, hidden)
 		}
 		return
 	}
 
 	for i, child := range node.Children {
-		printContainmentNode(child, childPrefix, i == len(node.Children)-1, depth+1)
+		printContainmentNode(w, child, childPrefix, i == len(node.Children)-1, depth+1, maxDepth)
 	}
-}
-
-func init() {
-	treeCmd.GroupID = groupSearch
-	rootCmd.AddCommand(treeCmd)
-	treeCmd.Flags().IntVarP(&treeDepth, "depth", "L", 0, "Maximum nesting depth to display (1 = direct children only; 0 = unlimited)")
 }

@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import {
   localHits,
   mergeHits,
@@ -20,23 +21,51 @@ const CARDS = [
 ]
 
 describe('localHits', () => {
+  // A two-letter alphabet in both cases, so a short query lands on names and
+  // ids often, as exact, prefix and substring matches all at once.
+  const text = (chars: string[], min: number) =>
+    fc.array(fc.constantFrom(...chars), { minLength: min, maxLength: 5 }).map((cs) => cs.join(''))
+  const cards = fc.uniqueArray(
+    fc.record({ id: text(['a', 'b', '/'], 1), name: text(['a', 'b', 'A', 'B', ' '], 0) }),
+    { selector: (c) => c.id, maxLength: 8 },
+  )
+  const query = fc.tuple(text([' '], 0), text(['a', 'b', 'A', 'B'], 1), text([' '], 0))
+    .map(([before, q, after]) => before + q + after)
+
+  it('finds every card whose name or id holds the query, says where, and ranks tighter matches first', () => {
+    fc.assert(fc.property(cards, query, (deck, q) => {
+      const needle = q.trim().toLowerCase()
+      const hits = localHits(deck, q)
+      const byId = new Map(deck.map((c) => [c.id, c]))
+
+      const holds = (s: string) => s.toLowerCase().includes(needle)
+      expect(new Set(hits.map((h) => h.id))).toEqual(
+        new Set(deck.filter((c) => holds(c.name) || holds(c.id)).map((c) => c.id)))
+      for (const h of hits) {
+        const c = byId.get(h.id)!
+        expect(h.where).toEqual([...(holds(c.name) ? ['name'] : []), ...(holds(c.id) ? ['id'] : [])])
+        expect(h).toMatchObject({ name: c.name || c.id, excerpt: null, onBoard: true })
+      }
+      // Each kind of match sits above every looser one: the hits that match
+      // exactly, then those that at least open their name with the query, then
+      // those that at least hold it in their name, each form a head of the list.
+      const exact = (c: { id: string; name: string }) => c.name.toLowerCase() === needle || c.id.toLowerCase() === needle
+      const opensName = (c: { id: string; name: string }) => exact(c) || c.name.toLowerCase().startsWith(needle)
+      const inName = (c: { id: string; name: string }) => opensName(c) || holds(c.name)
+      for (const [kind, matches] of [['exact', exact], ['name prefix', opensName], ['name', inName]] as const) {
+        const flags = hits.map((h) => matches(byId.get(h.id)!))
+        expect(flags, `${kind} matches lead`).toEqual([...flags].sort((a, b) => Number(b) - Number(a)))
+      }
+      // Case and surrounding space are not part of the question.
+      expect(localHits(deck, `  ${q.toUpperCase()} `)).toEqual(hits)
+    }), { seed: 0x5ea2c4, numRuns: 200 })
+  })
+
   it('matches name and id, and says which', () => {
     const [hit] = localHits(CARDS, 'search')
     expect(hit.id).toBe('felt/board/search-bar')
     expect(hit.where).toEqual(['name', 'id'])
     expect(hit.onBoard).toBe(true)
-  })
-
-  it('matches on the id alone', () => {
-    expect(localHits(CARDS, 'daemon').map((h) => h.id)).toEqual(['felt/daemon/poller'])
-  })
-
-  it('is case-insensitive and ignores surrounding space', () => {
-    expect(localHits(CARDS, '  RAILS ').map((h) => h.id)).toEqual(['felt/board/rails'])
-  })
-
-  it('answers nothing for a blank query rather than everything', () => {
-    expect(localHits(CARDS, '   ')).toEqual([])
   })
 
   it('ranks an exact name above a prefix above a substring', () => {
@@ -46,6 +75,10 @@ describe('localHits', () => {
       { id: 'a/three', name: 'the poller weeps' },
     ]
     expect(localHits(cards, 'poller').map((h) => h.id)).toEqual(['a/two', 'a/one', 'a/three'])
+  })
+
+  it('answers nothing for a blank query rather than everything', () => {
+    expect(localHits(CARDS, '   ')).toEqual([])
   })
 })
 

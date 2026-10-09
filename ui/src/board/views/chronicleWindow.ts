@@ -7,7 +7,8 @@
  * and the timeline keeps going until it hits a cap.
  *
  * PURE, AND DELIBERATELY SO. Every function here takes numbers and civil-day
- * strings and returns numbers and civil-day strings. Nothing reads the DOM,
+ * strings (and, where an instant meets a day, a `Zone` defaulting to the
+ * host's) and returns numbers and civil-day strings. Nothing reads the DOM,
  * nothing reads the clock, nothing fetches. That is what lets the two properties
  * this feature lives or dies by be tested without a browser:
  *
@@ -26,8 +27,14 @@
  * that much longer — never `days × 86_400_000`.
  */
 
-import { railCivilDay } from '../civilDay.js'
-import { railBounds, shiftCivilDay } from './railTime.js'
+import {
+  hostZone,
+  RAIL_START_HOUR,
+  railBounds,
+  railCivilDay,
+  shiftCivilDay,
+  type Zone,
+} from '../civilDay.js'
 
 // ── Shape ────────────────────────────────────────────────────────────────────
 
@@ -41,7 +48,7 @@ export interface DayRange {
 }
 
 /** How far the timeline may reach. A year of history is more than anyone
- *  scrolls; eight weeks ahead is past every standing role's next firing. */
+ *  scrolls; eight weeks ahead is past every standing constitution's next firing. */
 export const MAX_PAST_DAYS = 365
 export const MAX_FUTURE_DAYS = 56
 
@@ -66,9 +73,8 @@ export const LIVE_QUANTUM_MS = 5 * 60_000
 
 // ── Civil-day arithmetic ─────────────────────────────────────────────────────
 //
-// Strides go through a NOON anchor (see `shiftCivilDay` in ./railTime.js),
-// because midnight is the one wall-clock time a spring-forward day can lack.
-// Differences go through UTC parsing, which is exact for civil days precisely
+// Strides and differences are pure calendar arithmetic (`shiftCivilDay` in
+// ../civilDay.ts, and `daysBetween` below): exact for civil days precisely
 // because no zone enters either side.
 
 /**
@@ -89,8 +95,11 @@ export function windowOf(first: string, last: string): DayRange {
 }
 
 /** The furthest the window may ever reach, measured from the rail's today. */
-export function windowLimits(nowMs: number): { earliest: string; latest: string } {
-  const today = railCivilDay(nowMs)
+export function windowLimits(
+  nowMs: number,
+  z: Zone = hostZone(),
+): { earliest: string; latest: string } {
+  const today = railCivilDay(nowMs, RAIL_START_HOUR, z)
   return { earliest: shiftCivilDay(today, -MAX_PAST_DAYS), latest: shiftCivilDay(today, MAX_FUTURE_DAYS) }
 }
 
@@ -131,10 +140,11 @@ export function planExtension(
   window: DayRange,
   probe: ScrollProbe,
   nowMs: number,
+  z: Zone = hostZone(),
 ): ExtensionPlan | null {
   if (probe.dayWidthPx <= 0 || window.length <= 0) return null
   const trigger = EDGE_TRIGGER_DAYS * probe.dayWidthPx
-  const { earliest, latest } = windowLimits(nowMs)
+  const { earliest, latest } = windowLimits(nowMs, z)
 
   if (probe.scrollLeft <= trigger) {
     const room = daysBetween(earliest, window.first)
@@ -223,7 +233,11 @@ export function chunkBounds(chunkIndex: number): { first: string; last: string }
  * array from just the chunks fetched on this pass and the older days render
  * empty — a wiring mistake that reads as a fetch bug.
  */
-export function activityChunks(window: DayRange, nowMs: number): ActivityChunk[] {
+export function activityChunks(
+  window: DayRange,
+  nowMs: number,
+  z: Zone = hostZone(),
+): ActivityChunk[] {
   if (window.length <= 0) return []
   const cap = Math.ceil(nowMs / LIVE_QUANTUM_MS) * LIVE_QUANTUM_MS
   const out: ActivityChunk[] = []
@@ -232,8 +246,8 @@ export function activityChunks(window: DayRange, nowMs: number): ActivityChunk[]
 
   for (let index = firstChunk; index <= lastChunk; index += 1) {
     const { first, last } = chunkBounds(index)
-    const fromMs = railBounds(first).startMs
-    const rawEnd = railBounds(last).endMs
+    const fromMs = railBounds(first, z).startMs
+    const rawEnd = railBounds(last, z).endMs
     if (fromMs >= cap) continue // wholly in the future — nothing happened there
     const live = cap < rawEnd
     out.push({

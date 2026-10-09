@@ -46,14 +46,15 @@ describe('folioScrollTarget', () => {
 })
 
 describe('band collapse state', () => {
-  it('defaults to Pinned open, Resting folded', () => {
-    expect(DEFAULT_BAND_STATE).toEqual({ pinned: true, resting: false })
+  it('defaults to Roles open and Resting folded', () => {
+    expect(DEFAULT_BAND_STATE).toEqual({ roles: true, resting: false })
     expect(parseBandState(null)).toEqual(DEFAULT_BAND_STATE)
   })
 
   it('falls back per key on partial or malformed payloads', () => {
-    expect(parseBandState('{"resting":true}')).toEqual({ pinned: true, resting: true })
-    expect(parseBandState('{"pinned":"yes"}')).toEqual(DEFAULT_BAND_STATE)
+    expect(parseBandState('{"resting":false}')).toEqual({ roles: true, resting: false })
+    expect(parseBandState('{"roles":false,"resting":true}')).toEqual({ roles: false, resting: true })
+    expect(parseBandState('{"resting":"yes"}')).toEqual(DEFAULT_BAND_STATE)
     expect(parseBandState('not json')).toEqual(DEFAULT_BAND_STATE)
     expect(parseBandState('[]')).toEqual(DEFAULT_BAND_STATE)
   })
@@ -64,7 +65,7 @@ describe('band collapse state', () => {
       getItem: (k: string) => map.get(k) ?? null,
       setItem: (k: string, v: string) => void map.set(k, v),
     }
-    const next: BandState = { pinned: false, resting: true }
+    const next: BandState = { roles: false, resting: true }
     writeBandState(next, store)
     expect(readBandState(store)).toEqual(next)
   })
@@ -75,6 +76,6 @@ describe('band collapse state', () => {
       setItem: () => { throw new Error('denied') },
     }
     expect(readBandState(store)).toEqual(DEFAULT_BAND_STATE)
-    expect(() => writeBandState({ pinned: false, resting: false }, store)).not.toThrow()
+    expect(() => writeBandState({ roles: true, resting: false }, store)).not.toThrow()
   })
 })

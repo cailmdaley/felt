@@ -113,7 +113,7 @@ export function buildKanbanResponseFromComposite(
     now: surfaces.now,
     timeline: surfaces.timeline,
     stash: surfaces.stash,
-    pinned: surfaces.pinned,
+    roles: surfaces.roles,
     folded: surfaces.folded,
     cycles: surfaces.cycles,
     totals: surfaceTotals(surfaces),
@@ -231,22 +231,21 @@ type AssembledSurfaces = {
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
-  pinned: KanbanCard[];
+  roles: KanbanCard[];
   folded: KanbanCard[];
   cycles: KanbanCard[];
 };
 
 /**
  * The columns whose cards are DRAWN with their queue — the three desk columns
- * plus the scheduled/Resting and pinned surfaces. A head on one of these can
+ * plus the scheduled/Resting surfaces. A head on one of these can
  * hold a fold; a head in the past lane (tempered, composted) or a cycle cannot,
  * so work queued behind finished work stands in its own column rather than
  * being tucked under something nobody is looking at.
  */
-const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
+export const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
   'drafts',
   'scheduled',
-  'pinned',
   'inFlight',
   'awaitingReview',
 ]);
@@ -265,15 +264,15 @@ function assembleSurfaces(
 ): AssembledSurfaces {
   const drafts: KanbanCard[] = [];
   const scheduled: KanbanCard[] = [];
-  const pinned: KanbanCard[] = [];
   const inFlight: KanbanCard[] = [];
   const awaitingReview: KanbanCard[] = [];
   const tempered: KanbanCard[] = [];
   const composted: KanbanCard[] = [];
   const cycles: KanbanCard[] = [];
+  const roles: KanbanCard[] = [];
 
   const buckets: Record<KanbanColumn, KanbanCard[]> = {
-    drafts, scheduled, pinned, inFlight, awaitingReview, tempered, composted, cycles,
+    drafts, scheduled, inFlight, awaitingReview, tempered, composted, cycles, roles,
   };
   // THE FOLD. A card queued behind another is not a card of its own on this
   // board: it is drawn under its head, wherever the head is drawn, reachable
@@ -326,10 +325,12 @@ function assembleSurfaces(
   folded.sort(byCreatedAtDesc);
 
   scheduled.sort(byCreatedAtDesc);
-  // Desk has no persisted human arrangement; pinned launchers use creation
-  // order, just like drafts. Neither activity nor a renamed path moves them.
-  pinned.sort(byCreatedAtDesc);
+  // Desk has no persisted human arrangement; drafts use creation order.
+  // Neither activity nor a renamed path moves them.
   drafts.sort(byCreatedAtDesc);
+  // Seats read like a shelf of offices: alphabetical, so a launcher stays
+  // where the hand expects it whatever was used last.
+  roles.sort(byNameAsc);
   // A card moves only when it crosses a Question / Stalled / Working seam.
   // Activity age and phase changes within a band do not change its position.
   inFlight.sort(byInFlightBand);
@@ -366,10 +367,14 @@ function assembleSurfaces(
     now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
     timeline: { past, futureDated },
     stash,
-    pinned,
+    roles,
     folded,
     cycles,
   };
+}
+
+function byNameAsc(a: KanbanCard, b: KanbanCard): number {
+  return a.name.localeCompare(b.name) || byCardIdentity(a, b);
 }
 
 /**
@@ -400,14 +405,14 @@ function assembleSurfaces(
  *                            `awaitingReview` and belongs in that column, not
  *                            asleep in Resting. Accept re-arms it (`shuttle
  *                            accept` → `status:active`) and it lands back here.
- *   a running standing role → the liveness branch sends it to `inFlight`.
+ *   a running standing constitution → the liveness branch sends it to `inFlight`.
  */
 export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return [];
   return [...resp.stash, ...resp.timeline.futureDated];
 }
 
-/** True when this card is a standing role asleep between runs — armed, no live
+/** True when this card is a standing constitution asleep between runs — armed, no live
  *  worker, waiting on its own cron. The Resting region says so differently from
  *  a snooze, and `nextLaunchAt` is the day it names. */
 export function isSleepingOnSchedule(card: KanbanCard): boolean {
@@ -443,7 +448,7 @@ export interface CycleLens {
  * Membership is `cycleMembership` — derived, never assigned: `due:` inside the
  * span, or "in flight right now".
  *
- * GHOSTS come from Resting. A resting card is off the desk by choice, but if it
+ * GHOSTS come from Resting and Roles. A resting card is off the desk by choice, but if it
  * is due inside the cycle you are looking at, it is part of that chapter's
  * work and hiding it would make the lens lie about its own count.
  */
@@ -467,12 +472,11 @@ export function deriveCycleLens(
     }
   }
 
-  // Ghosts are drawn from the same set the Resting region draws, so the lens and
-  // the region can never disagree about who is at rest. A standing role joins a
+  // Both resting bands contribute ghosts. A standing constitution joins a
   // cycle only if it carries a `due:` of its own — a cron is a cadence, not a
   // commitment to a chapter.
   const ghosts: CycleLensGhost[] = [];
-  for (const card of restingCards(resp)) {
+  for (const card of [...restingCards(resp), ...resp.roles]) {
     // A resting card is never in flight — that is what resting means — so only
     // the `due:` rung can admit it.
     if (!cycleMembership({ due: card.due }, span, nowMs)) continue;
@@ -562,6 +566,7 @@ function toCard(
     theme: f.theme,
     due: f.due,
     tags: f.tags,
+    roles: f.roles,
     createdAt: f.createdAt,
     closedAt: f.closedAt,
     modifiedAt: f.modifiedAt,
@@ -592,6 +597,7 @@ function toCard(
     shuttleSurface: f.shuttleSurface,
     shuttleHost: f.shuttleHost,
     shuttleKind: f.shuttleKind,
+    shuttleSeat: f.shuttleSeat,
     shuttleSchedule: f.shuttleSchedule?.expr,
     shuttleTz: f.shuttleSchedule?.tz,
     shuttleProjectDir: f.shuttleProjectDir,
@@ -677,7 +683,7 @@ export function surfaceTotals(s: {
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
-  pinned: KanbanCard[];
+  roles: KanbanCard[];
 }): KanbanResponse['totals'] {
   return {
     drafts: s.now.drafts.length,
@@ -686,7 +692,7 @@ export function surfaceTotals(s: {
     past: s.timeline.past.length,
     futureDated: s.timeline.futureDated.length,
     stash: s.stash.length,
-    pinned: s.pinned.length,
+    roles: s.roles.length,
   };
 }
 
@@ -723,7 +729,7 @@ function originStaleness(name: string, origin: CompositeOrigin): KanbanOriginSta
 // an offset, so a lexicographic compare orders by LOCAL WALL CLOCK.
 // `2026-07-27T09:00:00-07:00` sorts below `2026-07-27T18:00:00+02:00` although
 // both name the same instant, which sank every Berkeley-created fiber below
-// older Paris work in Drafts, the Past lane and the Pinned strip. See
+// older Paris work in Drafts and the Past lane. See
 // civilDay.ts. `due:` is the exception — a civil day, keyed by its local
 // midnight, not by an instant.
 
@@ -744,6 +750,9 @@ export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
 
 export type InFlightBand = 'question' | 'stalled' | 'working';
 
+/** In flight's bands in drawn order, with the caption each surface gives them. */
+export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['question', 'Question'], ['stalled', 'Stalled'], ['working', 'Working']];
+
 export function inFlightBand(card: KanbanCard): InFlightBand {
   if (card.ask) return 'question';
   return card.runtimePhase === 'waiting' || card.runtimePhase === 'blocked' || card.runtimePhase === 'attention'
@@ -763,7 +772,7 @@ export function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {
 }
 
 export function byDueAtAsc(a: KanbanCard, b: KanbanCard): number {
-  // Soonest first. A standing role sorts by its next launch (an instant); a
+  // Soonest first. A standing constitution sorts by its next launch (an instant); a
   // dated card by the civil day its `due:` names, keyed to local midnight so
   // the two are comparable on one axis.
   const aT = a.nextLaunchAt ? instantMs(a.nextLaunchAt) : dueSortMs(a.due);

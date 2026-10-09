@@ -1,5 +1,6 @@
 defmodule Shuttle.KittyTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Shuttle.Kitty
 
@@ -25,11 +26,9 @@ defmodule Shuttle.KittyTest do
       # The destination comes from the fleet file, not from the host id: here
       # they differ, which is the case that catches a reader who assumed the
       # routing name doubles as an ssh host.
-      Application.put_env(:shuttle, :remotes, [
+      Shuttle.Test.Env.put_app_env(:remotes, [
         %{name: "hub-a", port: 4001, ssh: "hub-a-login"}
       ])
-
-      on_exit(fn -> Application.put_env(:shuttle, :remotes, []) end)
 
       assert Kitty.attach_command("shuttle-foo-bar", "hub-a") ==
                {:ok, ["ssh", "-tt", "hub-a-login", "tmux", "attach", "-t", "=shuttle-foo-bar"]}
@@ -39,11 +38,9 @@ defmodule Shuttle.KittyTest do
       # The mesh-VPN shape. `ssh hub-a` would be a guess at a destination the
       # operator deliberately did not give, so attach refuses and names the
       # reason rather than failing slowly inside ssh.
-      Application.put_env(:shuttle, :remotes, [
+      Shuttle.Test.Env.put_app_env(:remotes, [
         %{name: "hub-a", url: "https://hub-a.example.ts.net", tunnel: %{manager: "none"}}
       ])
-
-      on_exit(fn -> Application.put_env(:shuttle, :remotes, []) end)
 
       assert {:error, reason} = Kitty.attach_command("shuttle-foo-bar", "hub-a")
       assert reason =~ "no ssh path to hub-a"
@@ -63,52 +60,33 @@ defmodule Shuttle.KittyTest do
   end
 
   describe "pick_socket/1" do
-    test "prefers the quick-access panel — the user's worker-terminal surface" do
-      candidates = [
-        {"/tmp/kitty-100", 100, :normal},
-        {"/tmp/kitty-200", 200, :panel}
-      ]
+    # A candidate is `{path, mtime, kind}`. The rule: the most-recently-touched
+    # live panel (the user's worker-terminal surface), else the most-recently-
+    # touched normal window, else nil. A `:dead` socket — a stale
+    # `/tmp/kitty-<pid>` left by a gone process, the cause of the
+    # `connect: no such file` launch failure — is never chosen, however recent.
+    property "picks the newest panel, else the newest normal window, never a dead socket" do
+      check all(
+              mtimes <- uniq_list_of(integer(1..1_000), max_length: 6),
+              kinds <- list_of(member_of([:panel, :normal, :dead]), length: length(mtimes))
+            ) do
+        candidates =
+          Enum.zip_with(mtimes, kinds, fn m, kind -> {"/tmp/kitty-#{m}", m, kind} end)
 
-      assert Kitty.pick_socket(candidates) == {"unix:/tmp/kitty-200", :panel}
-    end
+        newest = fn kind ->
+          candidates
+          |> Enum.filter(&(elem(&1, 2) == kind))
+          |> Enum.max_by(&elem(&1, 1), fn -> nil end)
+        end
 
-    test "among panels the most-recently-touched wins" do
-      candidates = [
-        {"/tmp/kitty-100", 100, :panel},
-        {"/tmp/kitty-300", 300, :panel},
-        {"/tmp/kitty-200", 200, :panel}
-      ]
+        expected =
+          case newest.(:panel) || newest.(:normal) do
+            {path, _m, kind} -> {"unix:" <> path, kind}
+            nil -> nil
+          end
 
-      assert Kitty.pick_socket(candidates) == {"unix:/tmp/kitty-300", :panel}
-    end
-
-    test "falls back to a normal window when no panel is listening" do
-      candidates = [
-        {"/tmp/kitty-100", 100, :normal},
-        {"/tmp/kitty-300", 300, :normal}
-      ]
-
-      assert Kitty.pick_socket(candidates) == {"unix:/tmp/kitty-300", :normal}
-    end
-
-    test "dead sockets are never chosen" do
-      # A stale `/tmp/kitty-<pid>` left by a gone process — the cause of the
-      # `connect: no such file` launch failure.
-      candidates = [{"/tmp/kitty-999", 999, :dead}]
-      assert Kitty.pick_socket(candidates) == nil
-    end
-
-    test "a live panel beats a more-recent dead socket" do
-      candidates = [
-        {"/tmp/kitty-100", 100, :panel},
-        {"/tmp/kitty-999", 999, :dead}
-      ]
-
-      assert Kitty.pick_socket(candidates) == {"unix:/tmp/kitty-100", :panel}
-    end
-
-    test "nil when there are no sockets at all" do
-      assert Kitty.pick_socket([]) == nil
+        assert Kitty.pick_socket(candidates) == expected, inspect(candidates)
+      end
     end
   end
 end

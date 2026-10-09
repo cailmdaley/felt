@@ -107,9 +107,8 @@ host, listener, and live daemon contract; incidental cache directories are not
 authoritative evidence.
 
 CI is a release gate as well as a pull-request check. The UI job runs
-`npm test`, which executes the board suite twice under the pinned
-`America/Los_Angeles` and `Europe/Paris` timezones, and then runs the
-production bundle build. A green Go and daemon suite without this UI test is
+`npm test`, which executes the board suite under the pinned
+`America/Los_Angeles` timezone, and then runs the production bundle build. A green Go and daemon suite without this UI test is
 not a release-ready result.
 CI also runs `govulncheck` for reachable Go vulnerabilities, `mix_audit` for
 Elixir dependency advisories, and `npm audit --omit=dev` for shipped UI

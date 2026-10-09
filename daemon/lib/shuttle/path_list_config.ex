@@ -39,28 +39,53 @@ defmodule Shuttle.PathListConfig do
   @doc "The list from `<ENV>` when set and non-empty, else from the file."
   @spec configured(spec()) :: path_list()
   def configured(spec) do
-    case from_env(spec) do
-      [_ | _] = paths -> paths
-      [] -> registered(spec)
+    case read_configured(spec) do
+      {:ok, paths} -> paths
+      {:error, _reason} -> []
     end
   end
 
-  @doc "The persisted list, or `[]` when the file is absent or unparseable."
+  @doc """
+  `configured/1`, except that a file which exists but cannot be read is
+  `{:error, reason}` rather than `[]`. A read fails transiently when the
+  process is out of file descriptors; a caller that caches the list uses this
+  to keep its last good answer instead of caching an empty one.
+  """
+  @spec read_configured(spec()) :: {:ok, path_list()} | {:error, File.posix()}
+  def read_configured(spec) do
+    case from_env(spec) do
+      [_ | _] = paths -> {:ok, paths}
+      [] -> read_registered(spec)
+    end
+  end
+
+  @doc "The persisted list, or `[]` when the file is absent, unreadable or unparseable."
   @spec registered(spec()) :: path_list()
   def registered(spec) do
-    path = config_path(spec)
+    case read_registered(spec) do
+      {:ok, paths} -> paths
+      {:error, _reason} -> []
+    end
+  end
+
+  @doc "The persisted list, `{:error, reason}` when the file exists but cannot be read."
+  @spec read_registered(spec()) :: {:ok, path_list()} | {:error, File.posix()}
+  def read_registered(spec) do
     key = spec.json_key
 
-    with true <- File.exists?(path),
-         {:ok, content} <- File.read(path),
-         {:ok, decoded} <- Jason.decode(content) do
-      case decoded do
-        %{^key => paths} when is_list(paths) -> normalize(paths)
-        paths when is_list(paths) -> normalize(paths)
-        _ -> []
-      end
-    else
-      _ -> []
+    case File.read(config_path(spec)) do
+      {:ok, content} ->
+        case Jason.decode(content) do
+          {:ok, %{^key => paths}} when is_list(paths) -> {:ok, normalize(paths)}
+          {:ok, paths} when is_list(paths) -> {:ok, normalize(paths)}
+          _ -> {:ok, []}
+        end
+
+      {:error, reason} when reason in [:enoent, :enotdir, :eisdir] ->
+        {:ok, []}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -110,15 +135,15 @@ defmodule Shuttle.PathListConfig do
   """
   @spec config_path(spec()) :: String.t()
   def config_path(spec) do
-    case System.get_env(spec.config_env) do
-      v when is_binary(v) and v != "" -> Path.expand(v)
-      _ -> Path.expand(spec.default_path)
+    case Shuttle.Env.get(spec.config_env) do
+      v when is_binary(v) and v != "" -> Shuttle.Env.expand(v)
+      _ -> Shuttle.Env.expand(spec.default_path)
     end
   end
 
   # The compact comma-separated `<ENV>` form, or `[]`.
   defp from_env(spec) do
-    case System.get_env(spec.env) do
+    case Shuttle.Env.get(spec.env) do
       v when is_binary(v) and v != "" -> v |> String.split(",") |> normalize()
       _ -> []
     end
@@ -140,7 +165,7 @@ defmodule Shuttle.PathListConfig do
     |> Enum.filter(&is_binary/1)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
-    |> Enum.map(&Path.expand/1)
+    |> Enum.map(&Shuttle.Env.expand/1)
     |> Enum.uniq()
   end
 end

@@ -13,6 +13,7 @@ interface BoardInternals {
   fetchAndRender(): Promise<void>
   workspace: Workspace
   deskEl: HTMLElement
+  lensCycleId: string | null
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
 }
 let board: KanbanModal
@@ -27,10 +28,10 @@ const child = card({ id: 'child', uid: 'child-uid', dependsOn: ['head'], foldedU
 const data = () => response({
   now: {
     drafts: [card({ id: 'd1', uid: 'draft-uid' }), card({ id: 'd2' })],
-    inFlight: [head, card({ id: 'working', status: 'active', runtimePhase: 'working' })],
+    inFlight: [card({ id: 'working', status: 'active', runtimePhase: 'working' }), head],
     awaitingReview: [card({ id: 'review', status: 'closed' })],
   },
-  folded: [child], pinned: [card({ id: 'pinned', shuttleKind: 'pinned' })],
+  folded: [child],
   stash: [card({ id: 'resting', effectiveHorizon: 'stashed' })],
 })
 function draw(value: KanbanResponse): void { inside.lastResponse = value; inside.render(value) }
@@ -64,6 +65,15 @@ beforeEach(() => {
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('Desk keyboard selection', () => {
+  it('gives Escape in the bar\'s Find to the field before releasing an engaged lens', () => {
+    inside.lensCycleId = 'season'
+    const find = document.querySelector<HTMLInputElement>('.kbn-viewtabs-find input')!
+    find.focus(); find.value = 'mask'
+    press('Escape', {}, find)
+    expect(inside.lensCycleId).toBe('season')
+    expect(find.value).toBe('')
+    expect(document.activeElement).not.toBe(find)
+  })
   it('leaves initial focus alone and selects the top review card with the first j or k', () => {
     expect(document.activeElement).not.toBe(document.querySelector('.kbn-col-head'))
     expect(selected()).toBeUndefined()
@@ -98,7 +108,7 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector('.ws-switcher')).toBeNull()
     expect(press('/', {}, input).defaultPrevented).toBe(false)
   })
-  it('moves through both flight bands, the three columns, Pinned and Resting without wrapping', () => {
+  it('moves through both flight bands, the three columns and Resting without wrapping', () => {
     press('j'); expect(selected()).toBe('review')
     press('h'); expect(selected()).toBe('head-uid')
     press('j'); expect(selected()).toBe('working')
@@ -106,36 +116,39 @@ describe('Desk keyboard selection', () => {
     press('g'); expect(selected()).toBe('head-uid')
     press('G'); expect(selected()).toBe('working')
     press('ArrowRight'); expect(selected()).toBe('review')
-    press('l'); expect(selected()).toBe('pinned')
     press('l'); expect(selected()).toBe('resting')
     press('l'); expect(selected()).toBe('resting')
-    press('h'); expect(selected()).toBe('pinned')
-    press('u'); expect(selected()).toBe('pinned')
+    press('h'); expect(selected()).toBe('review')
+    press('u'); expect(selected()).toBe('review')
     press('Escape'); expect(selected()).toBeUndefined()
   })
   it('treats a folded queue as one stop and expanded members as stops', () => {
-    press('j'); press('h'); press('j'); expect(selected()).toBe('working')
-    press('k')
+    press('j'); press('h'); expect(selected()).toBe('head-uid')
+    press('j'); expect(selected()).toBe('working')
+    press('k'); expect(selected()).toBe('head-uid')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('j'); expect(selected()).toBe('child-uid')
     press('j'); expect(selected()).toBe('working')
-    press('k'); press('Enter')
+    press('k'); expect(selected()).toBe('child-uid')
+    press('k'); expect(selected()).toBe('head-uid')
+    press('j'); press('Enter')
     expect(window.location.hash).toContain('child-uid')
   })
-  it('carries the same navigable flight column into the reader, without hidden queue members', () => {
+  it('opens the reader on one grouped sidebar, and keeps the flight column for the cards that fly', () => {
     press('j'); press('h'); press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['head-uid', 'working'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Stalled', 'Working', 'Awaiting review'])
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     expect(document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued-list')!.hidden).toBe(false)
     expect(inside.workspace.isActive).toBe(false)
     expect(inside.workspaceColumn(head).map(entry => entry.card.uid ?? entry.card.id)).toEqual(['head-uid', 'child-uid', 'working'])
   })
-  it('includes expanded queue members in the reader column', () => {
+  it('keeps the grouped sidebar whether or not a queue is expanded on the Desk', () => {
     press('j'); press('h')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['head-uid', 'child-uid', 'working'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')
@@ -170,6 +183,21 @@ describe('Desk keyboard selection', () => {
     updated.now.drafts.reverse()
     draw(updated)
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardOrigin).toBe('b')
+  })
+  it('keeps the selection painted through a poll without scrolling the Desk out from under the pointer', () => {
+    for (const phone of [false, true]) {
+      mobile = phone
+      draw(data())
+      press('j'); press('j')
+      const chosen = selected()
+      intoView.mockClear(); scroll.mockClear()
+      const polled = data()
+      polled.now.inFlight.reverse()
+      draw(polled)
+      expect(selected()).toBe(chosen)
+      expect(intoView).not.toHaveBeenCalled()
+      expect(scroll).not.toHaveBeenCalled()
+    }
   })
   it('pages the phone to the selected column and opens folded lower bands, with reduced motion', () => {
     mobile = true; reduced = true

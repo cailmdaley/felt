@@ -1,8 +1,8 @@
-# Standing Roles
+# Standing Constitutions
 
-A standing role is an **installed responsibility** — a cron-scheduled fiber that the daemon dispatches recurrently. One fiber, one durable concern, one place the user looks. Email triage. Daily PR survey. Weekly inbox catch-up. The pattern: the human writes the constitution once; shuttle dispatches a worker on the schedule; each run writes its work product into `outcome` and exits to awaiting-review; the human accepts; the cycle repeats.
+A standing constitution is an **installed responsibility** — a cron-scheduled fiber that the daemon dispatches recurrently. One fiber, one durable concern, one place the user looks. Email triage. Daily PR survey. Weekly inbox catch-up. The pattern: the human writes the constitution once; shuttle dispatches a worker on the schedule; each run writes its work product into `outcome` and exits to awaiting-review; the human accepts; the cycle repeats.
 
-This reference covers what is specific to standing roles. Board gestures, columns, and verbs are shared across kinds and live in [operating.md](operating.md).
+This reference covers what is specific to standing constitutions. Board gestures, columns, and verbs are shared across kinds and live in [operating.md](operating.md).
 
 ---
 
@@ -44,7 +44,7 @@ service (`shuttle.runtime.dispatched_at` or `handed_off_at`) — nothing due is
 stored, so a manual ad-hoc dispatch **cannot consume the next
 scheduled slot** (the slot is computed, never a stored timestamp a dispatch
 could spend). While a run awaits review (`status: closed` + untempered),
-scheduled runs do not fire and ad-hoc dispatch refuses — a standing role has
+scheduled runs do not fire and ad-hoc dispatch refuses — a standing constitution has
 at most one unaccepted work product.
 
 Two verbs, two scopes: **`shuttle accept` closes a run** (re-arms and
@@ -82,7 +82,7 @@ It closes because the run is over, not because you asked to stop.
 
 | Trigger | Behavior |
 |---|---|
-| Scheduled cron dispatch | **Always fresh** — standing roles never auto-resume |
+| Scheduled cron dispatch | **Always fresh** — standing constitutions never auto-resume |
 | Ad-hoc dispatch (kanban drag, `--ad-hoc`) | **Always fresh** |
 | Kanban modal **Resume** on an awaiting run | Resume — the button carries `resume_mode: previous`; session id from `shuttle.runtime.session_uuid` |
 | Daemon recovery / orphan adoption | Fresh |

@@ -3,7 +3,6 @@ package shuttlecli
 import (
 	"fmt"
 	"io"
-	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -22,12 +21,13 @@ import (
 // /api/v1/state/composite) lives in shuttle_status_cross_host.go; this is the
 // local view only.
 
-var (
-	statusIncludeOrphans bool
-	statusAll            bool
-	statusRemote         string
-	statusClosed         bool
-)
+// statusOptions are the flags of shuttle status.
+type statusOptions struct {
+	includeOrphans bool
+	all            bool
+	remote         string
+	closed         bool
+}
 
 // FiberStatus is one row of the status output. Origin is reserved for the
 // cross-host rows the 3.3 daemon-HTTP arm adds; it is empty for every local row.
@@ -53,13 +53,15 @@ type shuttleEntry struct {
 	Block   *shuttle.Block
 }
 
-var statusCmd = &cobra.Command{
-	Use:   "status [fiber]",
-	Short: "Status overview, or a detailed report for one fiber",
-	Long: `With no argument, prints a table of every fiber with a shuttle: block in the
+func (a *app) statusCmd() *cobra.Command {
+	var statusOpts statusOptions
+	statusCmd := &cobra.Command{
+		Use:   "status [fiber]",
+		Short: "Status overview, or a detailed report for one fiber",
+		Long: `With no argument, prints a table of every fiber with a shuttle: block in the
 stores this machine dispatches (-C when set, else SHUTTLE_STORES, else the
 ~/.config/shuttle/stores.json registry). State is running (read from tmux), idle,
-scheduled (a standing role), paused (a draft), or closed. next_due_at comes
+scheduled (a standing constitution), paused (a draft), or closed. next_due_at comes
 from the daemon, so only the cross-host table (--all, --remote) fills it.
 
 With a fiber, prints the block's key fields, any running worker, and whether
@@ -73,136 +75,150 @@ The daemon's boot quarantine can still hold an eligible fiber until
 
   shuttle status                 # the table
   shuttle status <fiber>         # one fiber`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// The single-fiber report is a local read of one fiber, so the flags that
-		// shape the multi-fiber walk have nothing to act on.
-		if len(args) == 1 {
-			for _, flag := range []string{"all", "remote", "include-orphans"} {
-				if cmd.Flags().Changed(flag) {
-					return fmt.Errorf("--%s applies to the status table, not to a single fiber; drop it or drop the fiber argument", flag)
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// The single-fiber report is a local read of one fiber, so the flags that
+			// shape the multi-fiber walk have nothing to act on.
+			if len(args) == 1 {
+				for _, flag := range []string{"all", "remote", "include-orphans"} {
+					if cmd.Flags().Changed(flag) {
+						return fmt.Errorf("--%s applies to the status table, not to a single fiber; drop it or drop the fiber argument", flag)
+					}
+				}
+				return a.runStatusOneFiber(args[0])
+			}
+
+			// Cross-host paths route through the local daemon; --remote and --all are
+			// mutually exclusive (--remote NAME implies "filter to one").
+			if statusOpts.all || statusOpts.remote != "" {
+				return a.runStatusCrossHost(statusOpts)
+			}
+
+			stores, err := a.shuttleStores()
+			if err != nil {
+				return err
+			}
+			entries, err := a.listShuttleFibersAcrossStores(stores)
+			if err != nil {
+				return fmt.Errorf("listing fibers: %w", err)
+			}
+
+			live := a.liveTmuxSessions()
+			owners := sessionOwnerMap(entries)
+
+			rows := make([]FiberStatus, 0, len(entries))
+			seenSessions := map[string]bool{}
+			for _, entry := range entries {
+				session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
+				running := session != "" && live[session] && owners[session] == entry.FiberID
+				if running {
+					seenSessions[session] = true
+				}
+				rows = append(rows, FiberStatus{
+					FiberID: entry.FiberID,
+					Kind:    entry.Block.Kind,
+					Agent:   entry.Block.Agent,
+					State:   computeState(entry.Block, entry.Status, running),
+					Running: running,
+					Session: session,
+				})
+			}
+
+			// Optionally surface live sessions not matched to any shuttle: facet.
+			if statusOpts.includeOrphans {
+				for session := range live {
+					if !seenSessions[session] {
+						rows = append(rows, FiberStatus{
+							FiberID: session,
+							State:   "running",
+							Running: true,
+							Session: session,
+						})
+					}
 				}
 			}
-			return runStatusOneFiber(args[0])
-		}
 
-		// Cross-host paths route through the local daemon; --remote and --all are
-		// mutually exclusive (--remote NAME implies "filter to one").
-		if statusAll || statusRemote != "" {
-			return runStatusCrossHost()
-		}
+			sort.Slice(rows, func(i, j int) bool { return rows[i].FiberID < rows[j].FiberID })
 
-		stores, err := shuttleStores()
-		if err != nil {
-			return err
-		}
-		entries, err := listShuttleFibersAcrossStores(stores)
-		if err != nil {
-			return fmt.Errorf("listing fibers: %w", err)
-		}
-
-		live := liveTmuxSessions()
-		owners := sessionOwnerMap(entries)
-
-		rows := make([]FiberStatus, 0, len(entries))
-		seenSessions := map[string]bool{}
-		for _, entry := range entries {
-			session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
-			running := session != "" && live[session] && owners[session] == entry.FiberID
-			if running {
-				seenSessions[session] = true
+			if a.json {
+				return a.outputJSON(rows)
 			}
-			rows = append(rows, FiberStatus{
-				FiberID: entry.FiberID,
-				Kind:    entry.Block.Kind,
-				Agent:   entry.Block.Agent,
-				State:   computeState(entry.Block, entry.Status, running),
-				Running: running,
-				Session: session,
-			})
-		}
-
-		// Optionally surface live sessions not matched to any shuttle: facet.
-		if statusIncludeOrphans {
-			for session := range live {
-				if !seenSessions[session] {
-					rows = append(rows, FiberStatus{
-						FiberID: session,
-						State:   "running",
-						Running: true,
-						Session: session,
-					})
-				}
-			}
-		}
-
-		sort.Slice(rows, func(i, j int) bool { return rows[i].FiberID < rows[j].FiberID })
-
-		if jsonOutput {
-			return outputJSON(rows)
-		}
-		// A daemon-forked tmux server poisons every worker on it with macOS
-		// permission prompts charged to the daemon's binary — a state whose only
-		// visible symptom names nothing the human owns, so the overview says it
-		// out loud. Deliberately NOT in `shuttle ps`, which is parsed.
-		printTmuxOriginWarning()
-		printStatusTable(rows)
-		return nil
-	},
+			// A daemon-forked tmux server poisons every worker on it with macOS
+			// permission prompts charged to the daemon's binary — a state whose only
+			// visible symptom names nothing the human owns, so the overview says it
+			// out loud. Deliberately NOT in `shuttle ps`, which is parsed.
+			a.printTmuxOriginWarning()
+			a.printStatusTable(rows, statusOpts.closed)
+			return nil
+		},
+	}
+	statusCmd.Flags().BoolVar(&statusOpts.closed, "closed", false,
+		"Also list closed fibers (hidden from the table by default; --json always includes them)")
+	statusCmd.Flags().BoolVar(&statusOpts.includeOrphans, "include-orphans", false,
+		"Also list live shuttle tmux sessions with no matching shuttle: facet")
+	statusCmd.Flags().BoolVar(&statusOpts.all, "all", false,
+		"Show local plus all configured remotes (queries daemon /api/v1/state/composite)")
+	statusCmd.Flags().StringVar(&statusOpts.remote, "remote", "",
+		"Show only the named remote (queries daemon /api/v1/state/composite)")
+	statusCmd.MarkFlagsMutuallyExclusive("all", "remote")
+	return statusCmd
 }
 
-var psCmd = &cobra.Command{
-	Use:   "ps",
-	Short: "Live tmux worker sessions",
-	Long:  "Prints one line per live shuttle tmux worker session (and the fiber it owns, when resolvable).",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		live := liveTmuxSessions()
-		if len(live) == 0 {
-			if jsonOutput {
-				return outputJSON([]map[string]string{})
-			}
-			fmt.Println("no live shuttle workers")
-			return nil
-		}
-
-		// Best-effort owner attribution: a listing failure leaves sessions
-		// unattributed rather than failing ps (the live set is the point).
-		owners := map[string]string{}
-		if stores, err := shuttleStores(); err == nil {
-			if entries, err := listShuttleFibersAcrossStores(stores); err == nil {
-				owners = sessionOwnerMap(entries)
-			}
-		}
-
-		type row struct{ session, fiberID string }
-		rows := make([]row, 0, len(live))
-		for session := range live {
-			rows = append(rows, row{session: session, fiberID: owners[session]})
-		}
-		sort.Slice(rows, func(i, j int) bool { return rows[i].session < rows[j].session })
-
-		if jsonOutput {
-			out := make([]map[string]string, len(rows))
-			for i, r := range rows {
-				item := map[string]string{"session": r.session}
-				if r.fiberID != "" {
-					item["fiber_id"] = r.fiberID
+func (a *app) psCmd() *cobra.Command {
+	psCmd := &cobra.Command{
+		Use:   "ps",
+		Short: "Live tmux worker sessions",
+		Long:  "Prints one line per live shuttle tmux worker session (and the fiber it owns, when resolvable).",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			live := a.liveTmuxSessions()
+			if len(live) == 0 {
+				if a.json {
+					return a.outputJSON([]map[string]string{})
 				}
-				out[i] = item
+				fmt.Fprintln(a.env.Stdout, "no live shuttle workers")
+				return nil
 			}
-			return outputJSON(out)
-		}
 
-		for _, r := range rows {
-			if r.fiberID != "" {
-				fmt.Printf("%-40s  %s\n", r.session, r.fiberID)
-			} else {
-				fmt.Println(r.session)
+			// Best-effort owner attribution: a listing failure leaves sessions
+			// unattributed rather than failing ps (the live set is the point).
+			owners := map[string]string{}
+			if stores, err := a.shuttleStores(); err == nil {
+				if entries, err := a.listShuttleFibersAcrossStores(stores); err == nil {
+					owners = sessionOwnerMap(entries)
+				}
 			}
-		}
-		return nil
-	},
+
+			type row struct{ session, fiberID string }
+			rows := make([]row, 0, len(live))
+			for session := range live {
+				rows = append(rows, row{session: session, fiberID: owners[session]})
+			}
+			sort.Slice(rows, func(i, j int) bool { return rows[i].session < rows[j].session })
+
+			if a.json {
+				out := make([]map[string]string, len(rows))
+				for i, r := range rows {
+					item := map[string]string{"session": r.session}
+					if r.fiberID != "" {
+						item["fiber_id"] = r.fiberID
+					}
+					out[i] = item
+				}
+				return a.outputJSON(out)
+			}
+
+			for _, r := range rows {
+				if r.fiberID != "" {
+					fmt.Fprintf(a.env.Stdout, "%-40s  %s\n", r.session, r.fiberID)
+				} else {
+					fmt.Fprintln(a.env.Stdout, r.session)
+				}
+			}
+			return nil
+		},
+	}
+	return psCmd
 }
 
 // ---- single-fiber report ---------------------------------------------------
@@ -211,8 +227,8 @@ var psCmd = &cobra.Command{
 // then the question the report exists to answer — will the daemon dispatch this,
 // and if not, what moves it. Read-only, and it never locks: a fiber can be
 // inspected while a worker holds it.
-func runStatusOneFiber(query string) error {
-	f, _, err := shuttleResolveFiber(query, false)
+func (a *app) runStatusOneFiber(query string) error {
+	f, _, err := a.shuttleResolveFiber(query, false)
 	if err != nil {
 		return err
 	}
@@ -221,14 +237,14 @@ func runStatusOneFiber(query string) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("fiber %s has no shuttle: block (use 'shuttle install' / 'repeat' / 'pin' to create one)", query)
+		return fmt.Errorf("fiber %s has no shuttle: block (use 'shuttle install' / 'repeat' to create one)", query)
 	}
 
 	statusNow := f.Status
 	armed := statusNow == felt.StatusActive
-	session, running := liveWorkerSession(f)
+	session, running := a.liveWorkerSession(f)
 
-	if jsonOutput {
+	if a.json {
 		out := map[string]any{
 			"fiber_id": f.ID,
 			"kind":     block.Kind,
@@ -236,7 +252,7 @@ func runStatusOneFiber(query string) error {
 			"status":   statusNow,
 			"armed":    armed,
 			"running":  running,
-			"dispatch": dispatchAssessment(f.ID, f.UID, statusNow, block),
+			"dispatch": a.dispatchAssessment(f.ID, f.UID, statusNow, block),
 		}
 		if block.Agent != "" {
 			out["agent"] = block.Agent
@@ -250,16 +266,16 @@ func runStatusOneFiber(query string) error {
 		if running {
 			out["session"] = session
 		}
-		return outputJSON(out)
+		return a.outputJSON(out)
 	}
 
-	fmt.Printf("shuttle: fiber %s\n\n", f.ID)
-	writeBlockSummary(os.Stdout, block, statusNow, armed)
+	fmt.Fprintf(a.env.Stdout, "shuttle: fiber %s\n\n", f.ID)
+	writeBlockSummary(a.env.Stdout, block, statusNow, armed)
 	if running {
-		fmt.Printf("  worker:      running (tmux %s)\n", session)
+		fmt.Fprintf(a.env.Stdout, "  worker:      running (tmux %s)\n", session)
 	}
-	fmt.Println("")
-	fmt.Println(dispatchAssessment(f.ID, f.UID, statusNow, block))
+	fmt.Fprintln(a.env.Stdout, "")
+	fmt.Fprintln(a.env.Stdout, a.dispatchAssessment(f.ID, f.UID, statusNow, block))
 	return nil
 }
 
@@ -270,7 +286,7 @@ func runStatusOneFiber(query string) error {
 // without a project_dir still dispatches — its worker starts in the felt
 // store — but no verb arms it again until it has one, so every call named
 // here carries the --project-dir it would need.
-func dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) string {
+func (a *app) dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) string {
 	noProjectDir := strings.TrimSpace(block.ProjectDir) == ""
 	arm := func(verb string) string {
 		if noProjectDir {
@@ -280,7 +296,7 @@ func dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) st
 	}
 	switch statusNow {
 	case felt.StatusActive:
-		own, _ := resolveOwnHost("")
+		own, _ := a.resolveOwnHost("")
 		var verdict string
 		switch {
 		case !isSessionULID(uid):
@@ -309,9 +325,9 @@ func dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) st
 
 // liveWorkerSession reports the tmux session holding this fiber's worker, if
 // one is live. A fiber without a uid has no session name and so no worker.
-func liveWorkerSession(f *felt.Felt) (string, bool) {
+func (a *app) liveWorkerSession(f *felt.Felt) (string, bool) {
 	session := shuttleTmuxSessionName(f.ID, f.UID)
-	if session != "" && tmuxSessionExists(session) {
+	if session != "" && a.tmuxSessionExists(session) {
 		return session, true
 	}
 	return "", false
@@ -356,7 +372,7 @@ func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed 
 // otherwise double-count it. A per-store failure is non-fatal: log to stderr and
 // continue, matching the daemon's best-effort per-store scan; only an all-stores
 // failure surfaces an error.
-func listShuttleFibersAcrossStores(stores []string) ([]shuttleEntry, error) {
+func (a *app) listShuttleFibersAcrossStores(stores []string) ([]shuttleEntry, error) {
 	if len(stores) == 0 {
 		return nil, fmt.Errorf("no felt stores configured")
 	}
@@ -364,9 +380,9 @@ func listShuttleFibersAcrossStores(stores []string) ([]shuttleEntry, error) {
 	seen := map[string]bool{}
 	var firstErr error
 	for _, store := range stores {
-		entries, err := listShuttleFibers(store)
+		entries, err := a.listShuttleFibers(store)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "shuttle: store %q: %v\n", store, err)
+			fmt.Fprintf(a.env.Stderr, "shuttle: store %q: %v\n", store, err)
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -394,7 +410,7 @@ func listShuttleFibersAcrossStores(stores []string) ([]shuttleEntry, error) {
 // frontmatter carries a top-level shuttle: key, and keeps those with a
 // well-formed (typed-decodable) shuttle facet. A malformed block is skipped (it
 // is not a dispatchable role), matching the daemon's is_map + decode gate.
-func listShuttleFibers(store string) ([]shuttleEntry, error) {
+func (a *app) listShuttleFibers(store string) ([]shuttleEntry, error) {
 	storage := felt.NewStorage(store)
 	felts, err := storage.ListMetadataHavingFrontmatterFields([]string{shuttle.FacetKey})
 	if err != nil {
@@ -411,7 +427,7 @@ func listShuttleFibers(store string) ([]shuttleEntry, error) {
 		// and round-trips into a daemon-routed write verb. Falls back to felt's
 		// native id if the path is not under a resolvable .felt store.
 		id := f.ID
-		if canonical, err := canonicalFiberID(f.Path); err == nil && canonical != "" {
+		if canonical, err := a.canonicalFiberID(f.Path); err == nil && canonical != "" {
 			id = canonical
 		}
 		entries = append(entries, shuttleEntry{
@@ -474,24 +490,24 @@ func computeState(b *shuttle.Block, status string, running bool) string {
 // server was forked by the Shuttle daemon, and the advisory when it is rooted
 // by an app other than kitty; silence in every other case (including every
 // non-darwin host, where the attribution does not exist).
-func printTmuxOriginWarning() {
+func (a *app) printTmuxOriginWarning() {
 	if runtime.GOOS != "darwin" {
 		return
 	}
-	report := detectTmuxOrigin()
+	report := a.detectTmuxOrigin()
 	if report.Origin == tmuxOriginDaemonBorn {
-		fmt.Printf("tmux server: daemon-born — %s\n", tmuxOriginRepair)
+		fmt.Fprintf(a.env.Stdout, "tmux server: daemon-born — %s\n", tmuxOriginRepair)
 	}
 	if warning := tmuxOriginWarning(report); warning != "" {
-		fmt.Printf("warning: %s\n", warning)
+		fmt.Fprintf(a.env.Stdout, "warning: %s\n", warning)
 	}
 }
 
 // hideClosedRows drops closed rows from a table render unless --closed asked
 // for them, returning the survivors and the count hidden. The JSON arm never
 // calls this: a parsed listing stays complete.
-func hideClosedRows(rows []FiberStatus) ([]FiberStatus, int) {
-	if statusClosed {
+func hideClosedRows(rows []FiberStatus, showClosed bool) ([]FiberStatus, int) {
+	if showClosed {
 		return rows, 0
 	}
 	kept := rows[:0:0]
@@ -506,28 +522,28 @@ func hideClosedRows(rows []FiberStatus) ([]FiberStatus, int) {
 	return kept, hidden
 }
 
-func printHiddenClosedTrailer(hidden int) {
+func (a *app) printHiddenClosedTrailer(hidden int) {
 	if hidden > 0 {
-		fmt.Printf("(%d closed hidden; --closed to show)\n", hidden)
+		fmt.Fprintf(a.env.Stdout, "(%d closed hidden; --closed to show)\n", hidden)
 	}
 }
 
-func printStatusTable(rows []FiberStatus) {
-	rows, hidden := hideClosedRows(rows)
+func (a *app) printStatusTable(rows []FiberStatus, showClosed bool) {
+	rows, hidden := hideClosedRows(rows, showClosed)
 	if len(rows) == 0 {
-		fmt.Println("no shuttle fibers")
-		printHiddenClosedTrailer(hidden)
+		fmt.Fprintln(a.env.Stdout, "no shuttle fibers")
+		a.printHiddenClosedTrailer(hidden)
 		return
 	}
-	fmt.Printf("%-50s  %-9s  %-14s  %-18s  %s\n", "FIBER", "KIND", "STATE", "NEXT_DUE_AT", "AGENT")
-	fmt.Println(strings.Repeat("─", 110))
+	fmt.Fprintf(a.env.Stdout, "%-50s  %-9s  %-14s  %-18s  %s\n", "FIBER", "KIND", "STATE", "NEXT_DUE_AT", "AGENT")
+	fmt.Fprintln(a.env.Stdout, strings.Repeat("─", 110))
 	for _, r := range rows {
 		agent := shuttleNonEmpty(r.Agent, "(default)")
 		next := shuttleNonEmpty(r.NextDueAt, "-")
-		fmt.Printf("%-50s  %-9s  %-14s  %-18s  %s\n",
+		fmt.Fprintf(a.env.Stdout, "%-50s  %-9s  %-14s  %-18s  %s\n",
 			shuttleTruncateID(r.FiberID, 50), r.Kind, r.State, next, agent)
 	}
-	printHiddenClosedTrailer(hidden)
+	a.printHiddenClosedTrailer(hidden)
 }
 
 // shuttleTruncateID truncates a fiber id to n runes, keeping the SUFFIX (the leaf
@@ -537,22 +553,4 @@ func shuttleTruncateID(s string, n int) string {
 		return s
 	}
 	return "…" + s[len(s)-(n-1):]
-}
-
-func registerShuttleStatusFlags() {
-	statusCmd.Flags().BoolVar(&statusClosed, "closed", false,
-		"Also list closed fibers (hidden from the table by default; --json always includes them)")
-	statusCmd.Flags().BoolVar(&statusIncludeOrphans, "include-orphans", false,
-		"Also list live shuttle tmux sessions with no matching shuttle: facet")
-	statusCmd.Flags().BoolVar(&statusAll, "all", false,
-		"Show local plus all configured remotes (queries daemon /api/v1/state/composite)")
-	statusCmd.Flags().StringVar(&statusRemote, "remote", "",
-		"Show only the named remote (queries daemon /api/v1/state/composite)")
-	statusCmd.MarkFlagsMutuallyExclusive("all", "remote")
-}
-
-func init() {
-	registerShuttleStatusFlags()
-	addShuttleCommand(statusCmd)
-	addShuttleCommand(psCmd)
 }

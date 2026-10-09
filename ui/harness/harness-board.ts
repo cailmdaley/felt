@@ -36,7 +36,7 @@
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
-import { installWorkspaceNativeURLs, WORKSPACE_HOST, workspaceExample } from './workspace-fixtures.js'
+import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, workspaceExample } from './workspace-fixtures.js'
 import { WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION, workspaceTranscriptBytes, type TranscriptScenario } from './transcript-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
@@ -62,7 +62,7 @@ const search = new URLSearchParams(window.location.search)
 const example = search.get('example')
 const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'workspace' ? workspaceExample(now, transcriptScenario) : null
+const workspaceFixture = example === 'workspace' || example === 'music' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
@@ -84,7 +84,7 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || 
       state: 'live',
       title: 'Shear telecon',
       mirror_host: 'project-host',
-      fiber: meetingScenario === 'joined' ? 'work/spt3g_papers/bmodes-2d/run' : null,
+      fiber: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run') : null,
       scribe_session_uuid: meetingScenario === 'scribe' ? '6bc045dc-92e0-473a-bf9e-e1cc263223bc' : null,
       started_at: iso(-13 * 60_000 - 12_000),
       tail: MOCK_TAIL,
@@ -148,7 +148,7 @@ const shuttleBlockWithRun = (dispatchedMsAgo: number, ranForMs: number) => ({
   },
 })
 
-/** A standing role's block — the chip trail renders its cron humanized. */
+/** A standing constitution's block — the chip trail renders its cron humanized. */
 const standingBlock = (expr: string) => ({
   ...shuttleBlock('standing'),
   schedule: { expr, tz: 'Europe/Paris' },
@@ -211,7 +211,11 @@ interface MockFiber {
    *  frontmatter felt preserves and re-emits; `KanbanFiber` reads it as
    *  `Fiber.start` and the read model turns it into `cycleStart`. */
   start?: string
-  shuttle?: ReturnType<typeof shuttleBlock> & { surface?: string }
+  shuttle?: ReturnType<typeof shuttleBlock> & {
+    surface?: string
+    seat?: string
+    schedule?: { expr: string; tz: string }
+  }
 }
 
 const fiber = (f: MockFiber) => ({
@@ -267,7 +271,7 @@ const DRAFTS: MockFiber[] = [
 ]
 
 // In flight: the older, busy run belongs in Working; the newer paused
-// reimbursement belongs in Needs you. Activity age does not rank either band.
+// reimbursement belongs in Stalled. Activity age does not rank either band.
 const IN_FLIGHT: MockFiber[] = [
   {
     id: 'work/spt3g_papers/bmodes-2d/run',
@@ -383,7 +387,7 @@ const RESTING: MockFiber[] = [
   })),
 ]
 
-// A standing role, for the humanized-cron summary in the fiber controls.
+// A standing constitution, for the humanized-cron summary in the fiber controls.
 const STANDING: MockFiber[] = [
   {
     id: 'loom/email/morning-post/run',
@@ -397,13 +401,38 @@ const STANDING: MockFiber[] = [
 ]
 
 /**
- * PINNED — resting `kind:pinned` umbrella roles, parked on the Desk's launcher
- * band. Enough of them to wrap the band several rows deep, because the band
- * has no row cap and no "+N more" pager (a role you reach for daily should
- * never be on page 2). None carry a `uid` — the band never joins a pinned chip
- * to the activity plane, only Chronicle does.
+ * ROLE SEATS — constitutions carrying `shuttle.seat`, drawn in the Roles band
+ * while they rest. Two share an office (chief of staff on two machines), and
+ * one is a standing seat asleep on its cron, so the band shows both hints.
  */
-const PINNED: MockFiber[] = [
+const ROLE_SEATS: MockFiber[] = [
+  { id: 'science/cmbx', name: 'cmbx chair', seat: 'cmbx-chair' },
+  { id: 'science/survey/north', name: 'Survey chair · north', seat: 'chief-of-staff' },
+  { id: 'science/survey/south', name: 'Survey chair · south', seat: 'chief-of-staff' },
+  { id: 'life/vizier', name: 'Vizier', seat: 'vizier' },
+  { id: 'life/music', name: 'Music — the composer\'s desk', seat: 'composer' },
+].map(({ id, name, seat }): MockFiber => ({
+  id,
+  name,
+  status: 'open',
+  outcome: `${name}: at rest.`,
+  shuttle: { ...shuttleBlock('oneshot'), seat },
+}))
+ROLE_SEATS.push({
+  id: 'loom/morning-post',
+  name: 'Morning post',
+  status: 'active',
+  outcome: 'Morning post: sleeping until tomorrow.',
+  shuttle: { ...shuttleBlock('standing'), seat: 'vizier', schedule: { expr: '0 7 * * *', tz: 'Europe/Paris' } },
+})
+
+/**
+ * RESTING — constitutions put down between sessions (`status: open` +
+ * `horizon: stashed`). Enough of them to fill several Resting clusters. None
+ * carry a `uid` — Resting never joins a row to the activity plane, only
+ * Chronicle does.
+ */
+const SEATS: MockFiber[] = [
   'null-suite/quick launch',
   'euclid triage',
   'photo-z recalibrate',
@@ -419,12 +448,12 @@ const PINNED: MockFiber[] = [
   'cluster richness',
   'mask audit',
 ].map((name, i) => ({
-  id: `roles/pinned-${i}`,
+  id: `seats/seat-${i}`,
   name,
-  status: 'active',
-  outcome: `Launcher role: ${name}.`,
-  tags: ['pinned'],
-  shuttle: shuttleBlock('pinned'),
+  status: 'open',
+  horizon: 'stashed',
+  outcome: `Resting seat: ${name}.`,
+  shuttle: shuttleBlock('oneshot'),
 }))
 
 /**
@@ -579,19 +608,19 @@ const MOCK_FEED = {
     },
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
-    ...PINNED.map(fiber),
-    // An older pinned role with a live Codex app worker that raised its hand.
-    // It sits BELOW the newer waiting reimbursement inside Needs you, not at
+    ...ROLE_SEATS.map(fiber),
+    ...SEATS.map(fiber),
+    // An older seat with a live Codex app worker that raised its hand.
+    // It sits BELOW the newer waiting reimbursement inside Stalled, not at
     // the top by urgency. No tmux session: liveness and the app link are native.
     {
       ...fiber({
-        id: 'roles/pinned-app',
-        name: 'codex app role',
+        id: 'seats/seat-app',
+        name: 'codex app seat',
         status: 'active',
         created_at: iso(-7 * 86_400_000),
         outcome: 'The app worker needs a decision about the next run.',
-        tags: ['pinned'],
-        shuttle: { ...shuttleBlock('pinned'), agent: 'codex-sol', surface: 'app' },
+        shuttle: { ...shuttleBlock('oneshot'), agent: 'codex-sol', surface: 'app' },
       }),
       origin: 'ada-workstation',
       runtime: {
@@ -1281,6 +1310,16 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         },
       }] })
     }
+    const note = NOTE_FIBERS.find(row => row.id === id)
+    if (note) {
+      return json({ fibers: [{
+        origin: WORKSPACE_HOST,
+        felt_store: '/fixture-store/workspace',
+        path: `.felt/${id}/${id.split('/').at(-1)}.md`,
+        dir: `/fixture-store/workspace/.felt/${id}`,
+        fiber: { id, uid: note.uid, name: note.name, status: 'open', outcome: note.outcome, body: note.body, tags: id.startsWith('roles/') ? ['role'] : ['workspace'] },
+      }] })
+    }
     return json({ fibers: [] }, 404)
   }
   if (docsExample && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
@@ -1302,8 +1341,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   // The parent picker's index: the feed's rows plus a sibling of the null-test
   // run, so its picker offers a parent before anything is typed.
-  if (url.endsWith('/api/v1/fibers')) {
-    if (workspaceFixture) return json({ fibers: [...workspaceFixture.feed.fibers, { fiber: { id: 'research/workspace/method-note', name: 'Method note' } }] })
+  if (url.endsWith('/api/v1/fibers?fields=index')) {
+    if (workspaceFixture) return json({ fibers: [...workspaceFixture.feed.fibers, { fiber: { id: 'research/workspace/method-note', name: 'Method note' } }, ...NOTE_FIBERS.map(({ id, name }) => ({ fiber: { id, name } }))] })
     if (docsExample) return json({ fibers: docsExample.feed.fibers })
     return json({ fibers: [...MOCK_FEED.fibers, { fiber: { id: 'work/spt3g_papers/bmodes-2d/null-suite', name: 'Null-test suite' } }] })
   }
@@ -1512,7 +1551,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // A text card's body. Images, pages and PDFs load by URL, not through
   // fetch, so offline they stay faces.
   if (url.includes('/api/v1/file')) {
-    if (workspaceFixture) return workspaceFixture.fileResponse(url, method, init?.headers)
+    if (workspaceFixture) {
+      const response = workspaceFixture.fileResponse(url, method, init?.headers)
+      ;(request as Record<string, unknown>).status = response.status
+      return response
+    }
     return new Response('# Daily digest\n\nThree cosmic-shear papers and one CMB-lensing cross-correlation.\n', {
       headers: { 'Content-Type': 'text/plain' },
     })

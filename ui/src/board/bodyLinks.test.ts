@@ -7,31 +7,7 @@
 // the regex escaper to the DOM path was checked against a real browser.)
 
 import { describe, expect, it } from 'vitest'
-import { cacheBustUrl, fileInfoUrl, renderMarkdown } from './utils.js'
-
-describe('live artifact URL helpers', () => {
-  it('routes metadata probes through the owning daemon', () => {
-    expect(fileInfoUrl('http://d:4000', '/tmp/a b.html', 'candide')).toBe(
-      'http://d:4000/api/v1/file-info?path=%2Ftmp%2Fa%20b.html&origin=candide',
-    )
-  })
-
-  it('replaces a prior cache-bust marker instead of growing the URL', () => {
-    expect(cacheBustUrl('/api/v1/file?path=%2Fx&_shuttle_refresh=1', 42)).toBe(
-      '/api/v1/file?path=%2Fx&_shuttle_refresh=42',
-    )
-  })
-
-  it('rewrites an existing marker without leaving a dangling separator', () => {
-    expect(cacheBustUrl('/x?_shuttle_refresh=1&a=2', 7)).toBe('/x?_shuttle_refresh=7&a=2')
-  })
-
-  it('preserves an absolute daemon base', () => {
-    expect(cacheBustUrl('http://d:4000/api/v1/file?path=%2Ftmp%2Fr.html', 9)).toBe(
-      'http://d:4000/api/v1/file?path=%2Ftmp%2Fr.html&_shuttle_refresh=9',
-    )
-  })
-})
+import { renderMarkdown } from './utils.js'
 
 describe('relative links in a fiber body', () => {
   const opts = { basePath: '/home/ada/loom/.felt/proj', originId: 'local' }

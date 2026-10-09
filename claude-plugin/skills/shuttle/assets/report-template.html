@@ -29,6 +29,11 @@
   load-bearing, not a convenience. (A richer viewer may overlay its own
   palette tokens with identical values — harmless.)
 
+  Light and dark follow the viewer automatically: every colour is a
+  token on :root, redefined below for prefers-color-scheme: dark (and
+  for an explicit data-theme on <html>). Use the tokens, never raw hex,
+  and new rules inherit both palettes.
+
   Everything between EXAMPLE fences below is fabricated sample content,
   there to show the register. Delete it as you write; never leave a
   sample number standing.
@@ -48,19 +53,67 @@
      and IBM Plex Mono are not installed. -->
 <style>
   :root {
+    color-scheme: light;
     --parchment: #EDE2CE;
     --rag: #FBF6E9;
     --ink: #1B1611;
-    --ink-muted: #7A6F5C;
-    --cinnabar: #BC4538;
+    --ink-muted: #6B604E;
+    --cinnabar: #A93B2F;
     --cinnabar-faint: rgba(188, 69, 56, 0.10);
     --teal: #3F8278;
     --cobalt: #3D5BA0;
     --ochre: #C49333;
+    --hedge: #7A5612;
     --rule: #C5B89E;
     --tooth: rgba(197, 184, 158, 0.45);
+    --code-bg: rgba(196, 147, 51, 0.12);
+    --mat: #FBF6E9;
+    --mat-edge: #C5B89E;
+    --mat-pad: 0px;
     --serif: 'EB Garamond', Georgia, serif;
     --mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
+  }
+  /* Dark: warm aubergine-charcoal stock and cream ink, after Shuttle's
+     Lamplight theme. White-backed plots sit on a cream mat, a placed print. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --parchment: #191419;
+      --rag: #221B21;
+      --ink: #F3E9D8;
+      --ink-muted: #C4B39C;
+      --cinnabar: #EE8A7C;
+      --cinnabar-faint: rgba(238, 138, 124, 0.12);
+      --teal: #8FCBBF;
+      --cobalt: #AEBCF0;
+      --ochre: #E3B86F;
+      --hedge: #E3B86F;
+      --rule: #4B3B46;
+      --tooth: rgba(75, 59, 70, 0.5);
+      --code-bg: rgba(240, 196, 130, 0.10);
+      --mat: #EFE6D6;
+      --mat-edge: #5A4853;
+      --mat-pad: 8px;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --parchment: #191419;
+    --rag: #221B21;
+    --ink: #F3E9D8;
+    --ink-muted: #C4B39C;
+    --cinnabar: #EE8A7C;
+    --cinnabar-faint: rgba(238, 138, 124, 0.12);
+    --teal: #8FCBBF;
+    --cobalt: #AEBCF0;
+    --ochre: #E3B86F;
+    --hedge: #E3B86F;
+    --rule: #4B3B46;
+    --tooth: rgba(75, 59, 70, 0.5);
+    --code-bg: rgba(240, 196, 130, 0.10);
+    --mat: #EFE6D6;
+    --mat-edge: #5A4853;
+    --mat-pad: 8px;
   }
   html, body { margin: 0; padding: 0; }
   body {
@@ -87,7 +140,7 @@
   p { margin: 0 0 16px; }
   ul, ol { margin: 0 0 16px; padding-left: 22px; }
   li { margin-bottom: 8px; }
-  code { font-family: var(--mono); font-size: 0.92em; background: rgba(196, 147, 51, 0.12); padding: 1px 5px; border-radius: 2px; }
+  code { font-family: var(--mono); font-size: 0.92em; background: var(--code-bg); padding: 1px 5px; border-radius: 2px; }
   hr { border: none; border-top: 1px solid var(--rule); margin: 40px 0; }
   hr.short { width: 80px; margin: 32px 0; border-top-width: 2px; border-top-color: var(--cinnabar); }
   blockquote { margin: 16px 0; padding-left: 20px; border-left: 2px solid var(--ochre); font-style: italic; }
@@ -96,12 +149,22 @@
   /* The page has no reading-column cap, so cap the figure instead — a
      600px plot upscaled to a 1800px viewport reads as mush. */
   figure { margin: 24px 0; max-width: 900px; }
-  figure img { display: block; width: auto; max-width: 100%; height: auto; background: var(--rag); border: 1px solid var(--rule); }
+  figure img { display: block; box-sizing: content-box; width: auto; max-width: calc(100% - 2 * var(--mat-pad)); height: auto; padding: var(--mat-pad); background: var(--mat); border: 1px solid var(--mat-edge); border-radius: calc(var(--mat-pad) / 2); }
   figcaption { font-size: 16px; color: var(--ink-muted); margin-top: 8px; }
   /* Working-number marker. Standalone, at the END of a claim — never
      dropped mid-clause, where it reads as a badge interrupting a sentence.
      Hedging inside a sentence stays prose. */
-  .hedge { color: var(--ochre); font-family: var(--mono); font-size: 0.78em; letter-spacing: 0.08em; text-transform: uppercase; }
+  .hedge { color: var(--hedge); font-family: var(--mono); font-size: 0.78em; letter-spacing: 0.08em; text-transform: uppercase; }
+  pre { font-family: var(--mono); font-size: 14px; line-height: 1.5; background: var(--code-bg); padding: 12px 16px; border-radius: 3px; overflow-x: auto; margin: 0 0 16px; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  a { color: var(--cobalt); }
+  table { border-collapse: collapse; margin: 16px 0 24px; font-size: 16px; }
+  th, td { text-align: left; padding: 6px 14px 6px 0; border-bottom: 1px solid var(--tooth); }
+  th { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); border-bottom-color: var(--rule); }
+  td.num { font-family: var(--mono); font-size: 14px; font-variant-numeric: tabular-nums; }
+  /* A callout carries the one thing a skimming reader must not miss. */
+  .callout { margin: 20px 0; padding: 12px 18px; background: var(--cinnabar-faint); border-left: 2px solid var(--cinnabar); }
+  .callout > :last-child { margin-bottom: 0; }
   .depth { font-size: 16px; }
   .depth code { font-size: 0.88em; }
 </style>
@@ -163,6 +226,18 @@
     <p>Against 200 seeds the NaMaster Gaussian diagonal is low by 20–35% in the first
     two tomographic bins and within 5% above z ≈ 0.8. Every σ in this report therefore
     uses the ensemble. Numbers: <code>results/cov_compare.json</code>.</p>
+
+    <table>
+      <tr><th>bin</th><th>z range</th><th>ensemble / Gaussian</th></tr>
+      <tr><td>1</td><td>0.1–0.4</td><td class="num">1.35</td></tr>
+      <tr><td>2</td><td>0.4–0.8</td><td class="num">1.21</td></tr>
+      <tr><td>3–5</td><td>0.8–2.0</td><td class="num">≤ 1.05</td></tr>
+    </table>
+
+    <div class="callout"><p>Every σ below is ensemble-derived; do not quote the Gaussian
+    error bars from earlier drafts.</p></div>
+
+    <pre><code>python scripts/cov_compare.py --seeds 200 --out results/cov_compare.json</code></pre>
 
     <figure>
       <!-- ALWAYS a data URI. Read the PNG, base64 it, paste it in place

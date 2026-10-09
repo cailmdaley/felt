@@ -4,17 +4,19 @@ import { ChannelThemes } from '../src/board/workspace/ChannelThemes.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
-import { chromium, type Browser, type Page } from 'playwright-core'
+import { type Page } from 'playwright-core'
+import { getBrowser, sharedBrowserAvailable } from '../e2e/browser.mjs'
 
 // Native @scope, layers, nesting and computed custom properties require CSSOM.
 const chrome = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-let browser: Browser
+const canUseBrowser = existsSync(chrome) || await sharedBrowserAvailable()
+let browser: Awaited<ReturnType<typeof getBrowser>> | undefined
 let page: Page
 let sharedDefaults: string
-const native = it.skipIf(!existsSync(chrome))
+const native = it.skipIf(!canUseBrowser)
 beforeAll(async () => {
-  if (!existsSync(chrome)) return
-  browser = await chromium.launch({ executablePath: chrome, headless: true })
+  if (!canUseBrowser) return
+  browser = await getBrowser({ executablePath: chrome })
   page = await browser.newPage()
   const defaults = { '--ws-paper': 'white', '--ws-ink': 'black', '--known': '12px', '--ws-stage-inset': '28px', '--ws-strip-h': '32px',
     '--ws-serif': 'Georgia, serif', '--ws-focus': '#BC4538', '--kbn-agent': '#3D5BA0', '--kbn-you': '#BC4538', '--kbn-owed': '#9A7B35', '--kbn-tempered-ink': '#2E6862' }
@@ -26,7 +28,7 @@ beforeAll(async () => {
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
   await page.addScriptTag({ type: 'module', content: code + '\nglobalThis.compileTheme = scopeTheme;' })
 })
-afterAll(async () => { await browser?.close() })
+afterAll(async () => { await browser?.close() }, 30_000)
 
 native('isolates nested themed, Plain and same-channel boundaries with own layered variables winning', async () => {
   const facts = await page.evaluate(sharedDefaults => {
@@ -105,40 +107,30 @@ native('serializes escaped custom-property names without escaping the channel', 
   expect(facts).toEqual({ opacity: '0.75', own: '1', act: '' })
 })
 
-native('keeps standalone toast material and ACT pigments independent of channel author CSS', async () => {
+native('keeps ACT pigments independent of channel author CSS', async () => {
   const surface = readFileSync(resolve('src/board/workspace/themes/surface.css'), 'utf8')
-  const toastCss = readFileSync(resolve('src/board/workspace/verdicts.css'), 'utf8')
-  const facts = await page.evaluate(({ sharedDefaults, surface, toastCss }) => {
+  const facts = await page.evaluate(({ sharedDefaults, surface }) => {
     const compile = (globalThis as unknown as { compileTheme(css: string, scope: string, ns: string): string }).compileTheme
     document.head.querySelectorAll('style').forEach(el => el.remove())
     document.body.innerHTML = `<section class="ws-reader" data-ws-theme="dark" data-ws-theme-boundary>
       <div data-part="act" data-act="worker" class="worker"><button>Worker</button></div>
       <div class="ws-constitution-card" data-ws-theme-boundary><button class="kbn-card-worker">Plain worker</button></div>
-      </section><div class="ws-verdict-toasts"><div class="ws-verdict-toast" data-part="act" data-act="toast" data-ws-act-material>Tempered <button>Undo</button></div></div>`
+      </section>`
     const add = (css: string): void => { const style = document.createElement('style'); style.textContent = css; document.head.append(style) }
     add(`:root { --ws-paper: white; --ws-ink: black; --ws-serif: Georgia, serif; --ws-radius: 10px; }
       .worker button { color: var(--ws-agent); font-family: var(--ws-serif); }
       .kbn-card-worker { color: black; }
       .ws-constitution-card { display: grid; width: 280px; padding: 12px; }`)
-    add(surface); add(sharedDefaults); add(toastCss)
+    add(surface); add(sharedDefaults)
     add(compile(':scope { --ws-paper: rgb(20, 36, 39); --ws-ink: rgb(240, 237, 225); --ws-agent: red; --ws-verdict: red; --custom: 1; font-family: fantasy; } button { color: red; }', '[data-ws-theme="dark"]', 'dark'))
-    const reader = document.querySelector<HTMLElement>('.ws-reader')!, toast = document.querySelector<HTMLElement>('.ws-verdict-toast')!
-    const material = getComputedStyle(reader)
-    toast.style.setProperty('--ws-paper', material.getPropertyValue('--ws-paper'))
-    toast.style.setProperty('--ws-ink', material.getPropertyValue('--ws-ink'))
-    const style = getComputedStyle(toast), undo = getComputedStyle(toast.querySelector('button')!)
+    const reader = document.querySelector<HTMLElement>('.ws-reader')!
     const worker = getComputedStyle(reader.querySelector('.worker button')!)
     const plain = getComputedStyle(reader.querySelector('.ws-constitution-card')!)
     const plainWorker = getComputedStyle(reader.querySelector('.kbn-card-worker')!)
-    const facts = { paper: style.backgroundColor, ink: style.color, undo: undo.color, font: undo.fontFamily, custom: style.getPropertyValue('--custom').trim(),
+    return { custom: getComputedStyle(reader.querySelector('.worker')!).getPropertyValue('--custom').trim(),
       worker: worker.color, workerFont: worker.fontFamily,
       plain: { display: plain.display, width: plain.width, padding: plain.padding, worker: plainWorker.color } }
-    reader.removeAttribute('data-ws-theme')
-    return { ...facts, afterNavigation: getComputedStyle(toast).backgroundColor }
-  }, { sharedDefaults, surface, toastCss })
-  expect(facts.paper).toBe('rgb(20, 36, 39)'); expect(facts.ink).toBe('rgb(240, 237, 225)')
-  expect(facts.afterNavigation).toBe(facts.paper)
-  expect(facts.undo).not.toBe('rgb(255, 0, 0)'); expect(facts.font).not.toContain('fantasy')
+  }, { sharedDefaults, surface })
   expect(facts.custom).toBe(''); expect(facts.worker).not.toBe('rgb(255, 0, 0)'); expect(facts.workerFont).not.toContain('fantasy')
   expect(facts.plain).toEqual({ display: 'grid', width: '280px', padding: '12px', worker: 'rgb(0, 0, 0)' })
 }, 15000)

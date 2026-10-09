@@ -15,9 +15,8 @@ import (
 // (status / tempered / closed-at) is never touched, and the daemon-owned
 // runtime keys survive.
 //
-// They also carry the atomicity guarantee the retired `--reshape` flag used to
-// own: a rejected shape change leaves the fiber byte-identical on disk. The
-// no-clobber default it also owned is now the create verbs' one refusal policy,
+// They also pin atomicity: a rejected shape change leaves the fiber
+// byte-identical on disk. The no-clobber policy belongs to the create verbs,
 // tested in TestShuttleCreate_RefusesExistingBlock.
 
 // standingRole is the seed block these tests reshape from.
@@ -33,12 +32,14 @@ func standingRole(pdir string) map[string]any {
 // closes: a role parked in Awaiting review changes kind in place, keeps its
 // verdict and its runtime keys, and sheds the now-meaningless schedule.
 func TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber(t *testing.T) {
-	withOwnHost(t, "testhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "role", felt.StatusClosed, standingRole(t.TempDir()), &yes)
 
-	out, err := runCommand(t, dir, "reshape", "role", "oneshot")
+	out, err := runIn(t, env, dir, "reshape", "role", "oneshot")
 	if err != nil {
 		t.Fatalf("reshape: %v\n%s", err, out)
 	}
@@ -77,11 +78,13 @@ func TestShuttleReshapeVerb_StandingToOneshotOnClosedFiber(t *testing.T) {
 // TestShuttleReshapeVerb_ToStandingRequiresSchedule: nothing to echo, so the
 // standing target must ask for one rather than write an invalid block.
 func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
-	withOwnHost(t, "testhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
-	out, err := runCommand(t, dir, "reshape", "role", "standing")
+	out, err := runIn(t, env, dir, "reshape", "role", "standing")
 	if err == nil {
 		t.Fatalf("reshape to standing without a schedule must fail; out=%s", out)
 	}
@@ -97,11 +100,13 @@ func TestShuttleReshapeVerb_ToStandingRequiresSchedule(t *testing.T) {
 // TestShuttleReshapeVerb_ToStandingWithSchedule: the schedule lands, tz falls
 // back to UTC when the block has none to echo, and the next occurrence prints.
 func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
-	withOwnHost(t, "testhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
-	out, err := runCommand(t, dir, "reshape", "role", "standing", "--schedule", "0 9 * * 1-5")
+	out, err := runIn(t, env, dir, "reshape", "role", "standing", "--schedule", "0 9 * * 1-5")
 	if err != nil {
 		t.Fatalf("reshape: %v\n%s", err, out)
 	}
@@ -123,11 +128,13 @@ func TestShuttleReshapeVerb_ToStandingWithSchedule(t *testing.T) {
 // TestShuttleReshapeVerb_ScheduleOnlyEdit: no kind argument re-times a standing
 // role in place, keeping both its kind and (with --tz omitted) its timezone.
 func TestShuttleReshapeVerb_ScheduleOnlyEdit(t *testing.T) {
-	withOwnHost(t, "testhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, standingRole(t.TempDir()), nil)
 
-	out, err := runCommand(t, dir, "reshape", "role", "--schedule", "0 7 * * *")
+	out, err := runIn(t, env, dir, "reshape", "role", "--schedule", "0 7 * * *")
 	if err != nil {
 		t.Fatalf("reshape: %v\n%s", err, out)
 	}
@@ -144,7 +151,9 @@ func TestShuttleReshapeVerb_ScheduleOnlyEdit(t *testing.T) {
 // its own, so help does not advertise UTC beside "the block's existing tz";
 // omitted, a re-time keeps the block's tz, and a block with none gets UTC.
 func TestShuttleReshapeVerb_TZDefaultIsTheBlocks(t *testing.T) {
-	help, _, err := executeCLI(t, "", "reshape", "--help")
+	t.Parallel()
+	env := testEnv(t)
+	help, _, err := executeIn(t, env, "", "reshape", "--help")
 	if err != nil {
 		t.Fatalf("reshape --help: %v", err)
 	}
@@ -152,12 +161,12 @@ func TestShuttleReshapeVerb_TZDefaultIsTheBlocks(t *testing.T) {
 		t.Fatalf("reshape --help advertises a UTC default for --tz:\n%s", help)
 	}
 
-	withOwnHost(t, "testhost")
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, map[string]any{
 		"kind": "oneshot", "host": "testhost", "project_dir": t.TempDir(), "agent": "claude-sonnet",
 	}, nil)
-	if out, err := runCommand(t, dir, "reshape", "role", "standing", "--schedule", "0 7 * * *"); err != nil {
+	if out, err := runIn(t, env, dir, "reshape", "role", "standing", "--schedule", "0 7 * * *"); err != nil {
 		t.Fatalf("reshape to standing: %v\n%s", err, out)
 	}
 	if b, _, _ := shuttle.BlockOf(mustRead(t, storage, "role")); b.Schedule == nil || b.Schedule.TZ != "UTC" {
@@ -168,13 +177,16 @@ func TestShuttleReshapeVerb_TZDefaultIsTheBlocks(t *testing.T) {
 // TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds: a schedule-less
 // target must not be handed a recurrence it would silently ignore.
 func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
-	for _, kind := range []string{"oneshot", "pinned"} {
+	t.Parallel()
+	for _, kind := range []string{"oneshot"} {
 		t.Run(kind, func(t *testing.T) {
-			withOwnHost(t, "testhost")
+			t.Parallel()
+			env := testEnv(t)
+			ownHost(t, env, "testhost")
 			dir, storage := newStore(t)
 			seedShuttleRole(t, storage, "role", felt.StatusActive, standingRole(t.TempDir()), nil)
 
-			out, err := runCommand(t, dir, "reshape", "role", kind, "--schedule", "0 9 * * 1-5")
+			out, err := runIn(t, env, dir, "reshape", "role", kind, "--schedule", "0 9 * * 1-5")
 			if err == nil {
 				t.Fatalf("--schedule with kind=%s must fail; out=%s", kind, out)
 			}
@@ -192,15 +204,17 @@ func TestShuttleReshapeVerb_ScheduleRejectedForScheduleLessKinds(t *testing.T) {
 // TestShuttleReshapeVerb_RequiresExistingBlock: reshape edits, it never
 // creates — and says which verb does.
 func TestShuttleReshapeVerb_RequiresExistingBlock(t *testing.T) {
-	withOwnHost(t, "testhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "note", felt.StatusOpen)
 
-	out, err := runCommand(t, dir, "reshape", "note", "oneshot")
+	out, err := runIn(t, env, dir, "reshape", "note", "oneshot")
 	if err == nil {
 		t.Fatalf("reshape on a block-less fiber must fail; out=%s", out)
 	}
-	for _, verb := range []string{"install", "repeat", "pin"} {
+	for _, verb := range []string{"install", "repeat"} {
 		if !strings.Contains(err.Error(), verb) {
 			t.Fatalf("error should point at %s; err=%v", verb, err)
 		}
@@ -211,9 +225,11 @@ func TestShuttleReshapeVerb_RequiresExistingBlock(t *testing.T) {
 // TestShuttleRepeat_RefusesRemoteOwned: a mutator never writes a fiber another
 // daemon owns.
 func TestShuttleReshapeVerb_RefusesRemoteOwned(t *testing.T) {
-	withOwnHost(t, "macbook")
-	writeRemotes(t, `{"version":1,"remotes":[]}`)
-	t.Setenv("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "macbook")
+	writeRemotesIn(t, env, `{"version":1,"remotes":[]}`)
+	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "remote", felt.StatusActive, map[string]any{
 		"kind": "standing", "agent": "claude-opus", "host": "cineca",
@@ -221,7 +237,7 @@ func TestShuttleReshapeVerb_RefusesRemoteOwned(t *testing.T) {
 	}, nil)
 	before, _ := os.ReadFile(storage.Path("remote"))
 
-	_, err := runCommand(t, dir, "reshape", "remote", "oneshot")
+	_, err := runIn(t, env, dir, "reshape", "remote", "oneshot")
 	if err == nil {
 		t.Fatal("reshape on a cineca-owned role from macbook must be refused")
 	}
@@ -237,13 +253,15 @@ func TestShuttleReshapeVerb_RefusesRemoteOwned(t *testing.T) {
 // TestShuttleReshapeVerb_InvalidKind: the kind enum is the verb's whole
 // subject, so a bogus value fails before the write.
 func TestShuttleReshapeVerb_InvalidKind(t *testing.T) {
-	withOwnHost(t, "testhost")
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, storage := newStore(t)
 	seedShuttleRole(t, storage, "role", felt.StatusActive, oneshot(), nil)
 
 	before, _ := os.ReadFile(storage.Path("role"))
 
-	out, err := runCommand(t, dir, "reshape", "role", "recurring")
+	out, err := runIn(t, env, dir, "reshape", "role", "recurring")
 	if err == nil {
 		t.Fatalf("an invalid kind must fail; out=%s", out)
 	}
@@ -262,16 +280,19 @@ func TestShuttleReshapeVerb_InvalidKind(t *testing.T) {
 // it means something — a create verb on a fiber with NO block would be ARMING
 // something already closed out, which needs an explicit reopen.
 func TestShuttleCreate_FreshInstallStillRefusesClosed(t *testing.T) {
+	t.Parallel()
 	for _, args := range [][]string{
 		{"install", "role"},
 		{"repeat", "role", "--schedule", "0 9 * * 1-5"},
 	} {
 		t.Run(args[0], func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
 			dir, storage := newStore(t)
 			pdir := t.TempDir()
 			seedPlainFiber(t, storage, "role", felt.StatusClosed)
 
-			out, err := runCommand(t, dir, append(append([]string{}, args...), "--host", "testhost", "--project-dir", pdir)...)
+			out, err := runIn(t, env, dir, append(append([]string{}, args...), "--host", "testhost", "--project-dir", pdir)...)
 			if err == nil {
 				t.Fatalf("fresh %s on a closed fiber must refuse; out=%s", args[0], out)
 			}

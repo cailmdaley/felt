@@ -13,7 +13,7 @@
  * What a row draws for work that is owed but not yet done.
  *
  *   ◴ due      a card whose `due:` names this civil day
- *   ◐ launch   a standing role's next firing, an instant
+ *   ◐ launch   a standing constitution's next firing, an instant
  *
  * NOT closure (✓ tempered · ✗ discarded · ◦ awaiting a verdict) and not the
  * Kanban card-kind glyphs. Those are different claims that happen to share ink.
@@ -29,15 +29,15 @@ export const MARK_GLYPH: Record<MarkKind, string> = { due: '◴', launch: '◐' 
  *
  * This is the Desk's column vocabulary seen from the side: the same six
  * answers `classifyFiber` gives, minus the surface question of which strip a
- * card lands on. `resting` folds three ways of being off the desk — snoozed
- * (`horizon:stashed`), a pinned role at rest, an armed standing role between
- * firings — because from a row on the chronicle they are one claim: nothing is
- * owed here now, and it comes back on its own.
+ * card lands on. `resting` folds two ways of being off the desk — snoozed
+ * (`horizon:stashed`) and an armed standing constitution between firings —
+ * because from a row on the chronicle they are one claim: nothing is owed here
+ * now.
  *
  *   ◇ draft            written, not armed
  *   ▶ in flight        a worker is running, or the fiber is armed to run
  *   ◦ awaiting review  closed, no verdict yet
- *   ⏾ resting          snoozed, pinned at rest, or waiting on its cron
+ *   ⏾ resting          put down, or waiting on its cron
  *   ✓ tempered         closed and kept
  *   ✗ discarded        closed and let go
  *
@@ -89,7 +89,7 @@ export interface StateBearing {
   status: string
   tempered?: boolean
   workerState?: 'running' | 'blocked'
-  shuttleKind?: 'oneshot' | 'standing' | 'pinned'
+  shuttleKind?: 'oneshot' | 'standing'
   effectiveHorizon?: 'now' | 'stashed'
 }
 
@@ -99,7 +99,7 @@ export interface StateBearing {
  * Closed is asked FIRST and unconditionally: a fiber that ended still carries
  * whatever `shuttle:` block ran it, and reading the block first would show a
  * finished fiber as in flight forever. After that a live worker outranks
- * everything — a running pinned or snoozed fiber is running, whatever it does
+ * everything — a running resting or standing fiber is running, whatever it does
  * between workers.
  */
 export function cardState(card: StateBearing): LifecycleState {
@@ -110,9 +110,8 @@ export function cardState(card: StateBearing): LifecycleState {
   }
   if (card.workerState !== undefined) return 'inFlight'
   if (card.effectiveHorizon === 'stashed') return 'resting'
-  if (card.shuttleKind === 'pinned') return 'resting'
   if (card.status === 'active') {
-    // An armed standing role fires on its own cron; nothing is owed until it
+    // An armed standing constitution fires on its own cron; nothing is owed until it
     // does. Only a one-shot that is `active` is genuinely underway.
     return card.shuttleKind === 'standing' ? 'resting' : 'inFlight'
   }

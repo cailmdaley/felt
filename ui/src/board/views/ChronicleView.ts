@@ -52,7 +52,6 @@ import {
   type DiffTotal,
   type LifecycleState,
 } from './vocabulary.js'
-import { civilDayNoon, shiftCivilDay } from './railTime.js'
 import {
   foldActiveMinutes,
   isOriginStale,
@@ -66,13 +65,22 @@ import type { KanbanCard, KanbanResponse } from '../KanbanTypes.js'
 import { hasLiveWorker } from '../KanbanTypes.js'
 import { buildTimelineDays, type TimelineDay } from '../KanbanSurfaces.js'
 import {
-  civilDayToLocalDate,
+  civilDayAt,
+  civilDaySpan,
   dueCivilDay,
   dueSortMs,
+  formatCivilDay,
   formatSpanMinutes,
+  hostZone,
   instantMs,
   isoDayLocal,
+  RAIL_START_HOUR,
+  railBounds,
   railCivilDay,
+  railDayReader,
+  shiftCivilDay,
+  wallClock,
+  type Zone,
 } from '../civilDay.js'
 import {
   daysBetween,
@@ -149,14 +157,10 @@ const TODAY_ANCHOR = VISIBLE_PAST_DAYS / VISIBLE_DAYS
  * is `RAIL_START_HOUR` in ../civilDay.js, which `railCivilDay` defaults to.
  */
 
-/** The current rail as a local Date at noon — the shape `buildTimelineDays`
- *  wants, and noon-anchored because midnight is the one wall-clock time a
- *  spring-forward day can lack. */
-export function railDate(nowMs: number): Date {
-  const d = civilDayToLocalDate(railCivilDay(nowMs))
-  if (!d) return new Date(nowMs)
-  d.setHours(12, 0, 0, 0)
-  return d
+/** Noon of the current rail's day — "now" for a cycle band, anchored at noon
+ *  so it sits squarely inside the rail's column whatever the hour. */
+export function railNoonMs(nowMs: number, z: Zone = hostZone()): number {
+  return civilDayAt(railCivilDay(nowMs, RAIL_START_HOUR, z), 12, z) ?? nowMs
 }
 
 /** Origin for a write with no card origin behind it — a cycle being created.
@@ -203,11 +207,15 @@ export interface DayCell {
  * evening west of Greenwich and half of every morning east of it, and which
  * mis-slices the 23- and 25-hour days at a DST transition.
  */
-export function aggregateByCivilDay(buckets: readonly ActivityBucket[]): Map<string, DayCell> {
+export function aggregateByCivilDay(
+  buckets: readonly ActivityBucket[],
+  z: Zone = hostZone(),
+): Map<string, DayCell> {
   const out = new Map<string, DayCell>()
+  const railDay = railDayReader(z)
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
-    const day = railCivilDay(b.m)
+    const day = railDay(b.m)
     let cell = out.get(day)
     if (!cell) {
       cell = { agent: 0, attention: 0 }
@@ -254,12 +262,16 @@ const MINUTE_MS = 60_000
  * not just that the day was worked. Same rail-day discipline as
  * {@link aggregateByCivilDay}, same two kinds folded into one claim.
  */
-export function spellsByCivilDay(buckets: readonly ActivityBucket[]): Map<string, DaySpell[]> {
+export function spellsByCivilDay(
+  buckets: readonly ActivityBucket[],
+  z: Zone = hostZone(),
+): Map<string, DaySpell[]> {
   const byDay = new Map<string, ActivityBucket[]>()
+  const railDay = railDayReader(z)
   for (const b of buckets) {
     if (!Number.isFinite(b.m)) continue
     if (b.k !== 'agent' && b.k !== 'attention') continue
-    const day = railCivilDay(b.m)
+    const day = railDay(b.m)
     const list = byDay.get(day)
     if (list) list.push(b)
     else byDay.set(day, [b])
@@ -311,22 +323,20 @@ export function spellHeight(work: number, peak: number): number {
 /**
  * Where inside its rail day an instant sits, 0..1. The rail opens at 6am of
  * the day it is named for ({@link RAIL_START_HOUR}), so 6am → 0 and the next
- * 6am → 1. A DST rail is 23 or 25 wall-clock hours; the fraction drifts a few
- * percent that night and nothing downstream cares at half-a-day-column scale.
+ * 6am → 1. A DST rail is 23 or 25 hours long, and the fraction is of that.
  */
 function railFrac(ms: number, day: string): number {
-  const noon = civilDayNoon(day)?.getTime()
-  if (noon === undefined) return 0
-  const start = noon - 6 * 3_600_000
-  return clamp((ms - start) / DAY_MS_CONST, 0, 1)
+  const { startMs, endMs } = railBounds(day)
+  if (endMs <= startMs) return 0
+  return clamp((ms - startMs) / (endMs - startMs), 0, 1)
 }
 
 const DAY_MS_CONST = 86_400_000
 
 /** `07:42` in the browser's zone — the tooltip's clock. */
 function hhmm(ms: number): string {
-  const d = new Date(ms)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const { hour, minute } = wallClock(ms)
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
 }
 
 // ── Cycles ───────────────────────────────────────────────────────────────────
@@ -417,7 +427,7 @@ export function readCycleBand(
   card: CycleCard,
   days: readonly TimelineDay[],
   dayIndex: Map<string, number>,
-  nowMs: number = railDate(Date.now()).getTime(),
+  nowMs: number = railNoonMs(Date.now()),
 ): Omit<CycleBand, 'lane'> | null {
   const first = days[0]?.iso
   const last = days[days.length - 1]?.iso
@@ -529,7 +539,7 @@ export function buildCycleBands(
   cards: readonly CycleCard[],
   days: readonly TimelineDay[],
   dayIndex: Map<string, number>,
-  nowMs: number = railDate(Date.now()).getTime(),
+  nowMs: number = railNoonMs(Date.now()),
 ): CycleBand[] {
   const placed: Array<Omit<CycleBand, 'lane'>> = []
   for (const card of cards) {
@@ -896,7 +906,7 @@ function buildFiberRow(
   // and the comparator below for why a never-worked, no-due fiber sinks
   // instead of floating on how recently it was created.
   let workMs = instantMs(card.closedAt) ?? 0
-  for (const day of days.keys()) workMs = Math.max(workMs, civilDayNoon(day)?.getTime() ?? 0)
+  for (const day of days.keys()) workMs = Math.max(workMs, civilDayAt(day, 12) ?? 0)
 
   const dueMs = dueSortMs(card.due)
   let dueMsEquivalent = 0
@@ -942,8 +952,8 @@ function buildFiberRow(
  * after a working directory teaches the page's unit wrong.
  *
  * The fiber set is "anything with activity in the window" ∪ "anything still
- * open" — the three Now lanes, the pinned strip, the two future timeline
- * pools, AND Resting ({@link restingCards}: snoozed work plus a standing role
+ * open" — the three Now lanes, the two future timeline
+ * pools, AND Resting ({@link restingCards}: snoozed work plus a standing constitution
  * asleep on its cron). So an idle-but-open fiber still shows its lifeline, a
  * scheduled one still shows its ◴/◐ in the future region, a snoozed one keeps
  * its promise on the calendar even while parked off the Desk, and a closed one
@@ -1002,21 +1012,22 @@ export function buildRows(
   todayDay: string,
   origins: TemporalOrigins,
 ): ChronicleRow[] {
-  const todayNoonMs = civilDayNoon(todayDay)?.getTime() ?? Date.now()
+  const todayNoonMs = civilDayAt(todayDay, 12) ?? Date.now()
   const byId = new Map(cards.map((c) => [c.id, c]))
   const include = new Set<string>(attribution.keys())
   for (const card of [
     ...response.now.drafts,
     ...response.now.inFlight,
     ...response.now.awaitingReview,
-    ...response.pinned,
     ...response.timeline.futureDated,
     // Resting — see the doc comment above this function. `restingCards`
-    // already carries `timeline.futureDated` too (a standing role asleep on
+    // already carries `timeline.futureDated` too (a standing constitution asleep on
     // its cron); re-adding those ids here is a harmless no-op on the Set, and
     // calling the one shared function is what keeps this list from drifting
     // out of step with the Desk's own Resting region.
     ...restingCards(response),
+    // Seats at rest have their own Desk band, but keep their calendar rows.
+    ...response.roles,
     // FOLDED cards. The Desk draws them under their head rather than in a
     // column of their own, and that is a Desk reading, not a claim that the
     // work is gone: a never-run draft filed behind something else still belongs
@@ -1062,12 +1073,11 @@ function peakSpellWork(rows: readonly ChronicleRow[]): number {
 
 // ── Geometry helpers ─────────────────────────────────────────────────────────
 
-/** A civil day as `14 Jul`. Materialized as a LOCAL date — never `new Date` on
- *  a civil day, which reads it as UTC midnight and labels it a day early west
+/** A civil day as `14 Jul`. Said as a civil day — never `new Date` on a
+ *  civil day, which reads it as UTC midnight and labels it a day early west
  *  of Greenwich. */
 function prettyDay(day: string): string {
-  const d = civilDayToLocalDate(day)
-  return d ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : day
+  return formatCivilDay(day, { day: 'numeric', month: 'short' }) ?? day
 }
 
 /**
@@ -1081,8 +1091,7 @@ function isMonthStart(day: string): boolean {
 /** A civil day's month, named. `long` for the sticky bearing, `short` for the
  *  inline mark at a boundary column, which is one day-column wide. */
 function monthName(day: string, style: 'long' | 'short'): string {
-  const d = civilDayToLocalDate(day)
-  return d ? d.toLocaleDateString(undefined, { month: style }) : day.slice(0, 7)
+  return formatCivilDay(day, { month: style }) ?? day.slice(0, 7)
 }
 
 /** The month bearing for a column, with the year when it is not this one —
@@ -1552,15 +1561,15 @@ class ChronicleView implements TemporalView {
     // the next one lands 15s later and the gesture is over in seconds.
     if (this.draft !== null || this.editing) return
     // Two different "now"s, and conflating them costs half a day of activity.
-    // The COLUMNS are laid out around the current rail (noon-anchored, possibly
-    // yesterday's date before 6am); the activity reaches the real present as
+    // The COLUMNS are laid out around the current rail (yesterday's date
+    // before 6am); the activity reaches the real present as
     // of the last sweep.
     const nowMs = Date.now()
     const today = railCivilDay(nowMs)
     const days = buildTimelineDays(
       daysBetween(window.first, today),
       daysBetween(today, window.last),
-      railDate(nowMs),
+      today,
     )
     const buckets = this.feeds.buckets(window)
     this.origins = this.feeds.origins()
@@ -1651,7 +1660,6 @@ class ChronicleView implements TemporalView {
       response.now.drafts,
       response.now.inFlight,
       response.now.awaitingReview,
-      response.pinned,
       response.timeline.futureDated,
       // Folding and unfolding move a card between `folded` and a column, so a
       // poll whose only change is one of those has to repaint.
@@ -2051,8 +2059,7 @@ class ChronicleView implements TemporalView {
 
     const fromDay = days[band.startIdx].iso
     const toDay = days[band.endIdx].iso
-    const fromMs = civilDayToLocalDate(fromDay)?.getTime() ?? 0
-    const toMs = (civilDayToLocalDate(toDay)?.getTime() ?? 0) + 86_399_000
+    const [fromMs, toMs] = civilDaySpan(fromDay, toDay)
     const spanDays = band.endIdx - band.startIdx + 1
     const future = fromMs > Date.now()
 
@@ -3217,7 +3224,7 @@ class ChronicleView implements TemporalView {
       0,
       this.currentDays.length - 1,
     )
-    const text = monthBearing(this.currentDays[idx].iso, new Date().getFullYear())
+    const text = monthBearing(this.currentDays[idx].iso, Number(isoDayLocal(Date.now()).slice(0, 4)))
     if (el.textContent === text) return
     el.textContent = text
   }
@@ -3320,7 +3327,7 @@ class ChronicleView implements TemporalView {
       num.textContent = day.label
       cell.append(dow, num)
 
-      const spoken = civilDayToLocalDate(day.iso)?.toLocaleDateString(undefined, {
+      const spoken = formatCivilDay(day.iso, {
         weekday: 'long',
         month: 'long',
         day: 'numeric',

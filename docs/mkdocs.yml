@@ -81,6 +81,7 @@ nav:
       - Event stream and ledgers: dev/event-stream.md
       - Releasing: dev/releasing.md
       - Codebase layout and tests: dev/layout.md
+      - Writing tests: dev/testing.md
       - Artwork: dev/artwork.md
   - Reference:
       - CLI: reference/cli.md

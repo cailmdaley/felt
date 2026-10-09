@@ -1,6 +1,5 @@
 defmodule Shuttle.LifecycleStoreTest do
-  use ExUnit.Case
-  import Shuttle.Test.EnvHelpers
+  use ExUnit.Case, async: true
 
   alias Shuttle.LifecycleStore
 
@@ -21,63 +20,25 @@ defmodule Shuttle.LifecycleStoreTest do
     end
   end
 
-  describe "pinned roles are interactive interfaces (park at open on session end)" do
-    test "park flips an active pinned role back to the strip (active → open), pinned-only" do
-      # The pinned worker-exit closer: a pinned role's session ending parks it
-      # back to the strip (status:open), the mirror of mark_awaiting's standing
-      # close (status:closed). Pinned-only — it rejects a standing/oneshot block
-      # by kind so the exit path can't park the wrong thing.
-      with_pinned_role(
-        fn fiber_id, path ->
-          assert read_frontmatter(path)["status"] == "active"
-          assert {:ok, message} = LifecycleStore.park(fiber_id)
-          assert message =~ "parked"
-          assert read_frontmatter(path)["status"] == "open"
-        end,
-        status: "active"
-      )
-    end
-
-    test "park is idempotent on an already-parked role and rejects a standing role" do
-      with_pinned_role(
-        fn fiber_id, _path ->
-          assert {:ok, msg} = LifecycleStore.park(fiber_id)
-          assert msg =~ "already parked"
-        end,
-        status: "open"
-      )
-    end
-
-    test "mark_awaiting rejects a pinned role (standing worker-exit closer is standing-only)" do
-      # mark_awaiting is the STANDING worker-exit closer (writes status:closed).
-      # A pinned worker exit is handled differently (park / redispatch), so
-      # mark_awaiting rejects a pinned block by KIND — even in the awaiting-shaped
-      # status:closed + untempered state a standing role would accept from.
-      with_pinned_role(
-        fn fiber_id, path ->
-          assert {:error, msg} = LifecycleStore.mark_awaiting(fiber_id)
-          assert msg =~ "standing"
-          # Untouched: mark_awaiting did not close it.
-          assert read_frontmatter(path)["status"] == "closed"
-        end,
-        status: "closed"
-      )
-    end
-
-    test "rearm starts a parked pinned role (open → active) for force-dispatch" do
-      # The board's strip → In-flight "start" gesture force-dispatches a parked
-      # (status:open) pinned role; maybe_force_rearm → rearm writes open → active
-      # so the role both spawns now AND keeps looping. rearm covers pinned because
-      # a pinned role is perennial (its active state re-dispatches).
-      with_pinned_role(
-        fn fiber_id, path ->
-          assert read_frontmatter(path)["status"] == "open"
-          assert {:ok, message} = LifecycleStore.rearm(fiber_id)
-          assert message =~ "re-armed"
-          assert read_frontmatter(path)["status"] == "active"
-        end,
-        status: "open"
-      )
+  describe "the standing-only writers refuse a oneshot" do
+    # mark_awaiting (the standing worker-exit closer) and rearm (the
+    # force-dispatch re-arm) belong to the cron lifecycle. A oneshot — and a
+    # legacy `kind: pinned`, read as one — is refused by kind and left alone.
+    for kind <- ["oneshot", "pinned"] do
+      test "mark_awaiting and rearm leave a #{kind} document untouched" do
+        with_oneshot_doc(
+          fn fiber_id, path ->
+            before = File.read!(path)
+            assert {:error, msg} = LifecycleStore.mark_awaiting(fiber_id)
+            assert msg =~ "standing"
+            assert {:error, msg} = LifecycleStore.rearm(fiber_id)
+            assert msg =~ "standing"
+            assert File.read!(path) == before
+          end,
+          status: "open",
+          kind: unquote(kind)
+        )
+      end
     end
   end
 
@@ -220,13 +181,11 @@ defmodule Shuttle.LifecycleStoreTest do
 
     File.write!(path, original)
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", loom)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("science/cmbx", path, original)
     after
-      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end
@@ -329,22 +288,20 @@ defmodule Shuttle.LifecycleStoreTest do
     Body.
     """)
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", loom)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("life/french/practice", path)
     after
-      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end
 
-  # Pinned variant of with_doc_awaiting_role: a schedule-less pinned block. The
-  # pinned role's parked rest state is status:open on the strip (Option D);
-  # status:active is the looping state.
-  defp with_pinned_role(fun, opts) do
+  # Schedule-less variant of with_doc_awaiting_role: a oneshot block (or the
+  # legacy kind passed as :kind).
+  defp with_oneshot_doc(fun, opts) do
     status = Keyword.get(opts, :status, "open")
+    kind = Keyword.get(opts, :kind, "oneshot")
     tempered = Keyword.get(opts, :tempered, nil)
 
     loom =
@@ -364,7 +321,7 @@ defmodule Shuttle.LifecycleStoreTest do
     name: Operator
     status: #{status}
     #{tempered_line}shuttle:
-      kind: pinned
+      kind: #{kind}
       host: testhost
       agent: claude-opus
     ---
@@ -372,13 +329,11 @@ defmodule Shuttle.LifecycleStoreTest do
     Body.
     """)
 
-    prev_loom = System.get_env("SHUTTLE_STORES")
-    System.put_env("SHUTTLE_STORES", loom)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
     try do
       fun.("ai-futures/tokenmaxxing/operator", path)
     after
-      restore_env("SHUTTLE_STORES", prev_loom)
       File.rm_rf(loom)
     end
   end

@@ -5,17 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-var shuttleSendFileCmd = &cobra.Command{
-	Use:   "send-file <path> [path...]",
-	Short: "Publish local artifacts to Shuttle's sent-files surface",
-	Long: `Record an explicit file delivery on this host. Files remain on their owning
+func (a *app) shuttleSendFileCmd() *cobra.Command {
+	shuttleSendFileCmd := &cobra.Command{
+		Use:   "send-file <path> [path...]",
+		Short: "Publish local artifacts to Shuttle's sent-files surface",
+		Long: `Record an explicit file delivery on this host. Files remain on their owning
 host and Shuttle serves them through its existing owner-routed file surface.
 All paths must be readable regular files; validation completes before recording.
 
@@ -25,33 +25,31 @@ PI_SESSION_ID; else this tmux session's latest local session-ledger entry. A Shu
 name also associates the delivery with its fiber. Outside a harness, supply
 --session explicitly. Recording works while the daemon is offline; it does not
 acknowledge that a client has downloaded the file.`,
-	Args: cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		session, _ := cmd.Flags().GetString("session")
-		files, err := sendFiles(args, session)
-		if err != nil {
-			return err
-		}
-		for _, path := range files {
-			fmt.Fprintln(cmd.OutOrStdout(), "Recorded file:", path)
-		}
-		return nil
-	},
-}
-
-func init() {
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			session, _ := cmd.Flags().GetString("session")
+			files, err := a.sendFiles(args, session)
+			if err != nil {
+				return err
+			}
+			for _, path := range files {
+				fmt.Fprintln(a.env.Stdout, "Recorded file:", path)
+			}
+			return nil
+		},
+	}
 	shuttleSendFileCmd.Flags().String("session", "", "Native session ID (otherwise detected from environment or tmux ledger)")
-	addShuttleCommand(shuttleSendFileCmd)
+	return shuttleSendFileCmd
 }
 
-func sendFiles(paths []string, session string) ([]string, error) {
+func (a *app) sendFiles(paths []string, session string) ([]string, error) {
 	files := make([]string, 0, len(paths))
 	seen := map[string]bool{}
 	for _, path := range paths {
 		if strings.TrimSpace(path) == "" {
 			return nil, fmt.Errorf("empty file path")
 		}
-		abs, err := filepath.Abs(path)
+		abs, err := a.env.Abs(path)
 		if err != nil {
 			return nil, err
 		}
@@ -79,31 +77,31 @@ func sendFiles(paths []string, session string) ([]string, error) {
 			seen[abs] = true
 		}
 	}
-	tmux := currentTmuxSession()
+	tmux := a.currentTmuxSession()
 	session = strings.TrimSpace(session)
 	if session == "" {
-		_, session = harnessSessionFromEnv()
+		_, session = a.harnessSessionFromEnv()
 	}
 	if session == "" {
-		session = sendFileLedgerSession(tmux)
+		session = a.sendFileLedgerSession(tmux)
 	}
 	if session == "" {
 		return nil, fmt.Errorf("no session identity; supply --session or run inside a harness session")
 	}
-	origin, err := resolveOwnHost("")
+	origin, err := a.resolveOwnHost("")
 	if err != nil {
 		return nil, err
 	}
-	cwd, err := os.Getwd()
+	cwd, err := a.env.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	timestamp := eventNow().UnixMilli()
+	timestamp := a.eventNow().UnixMilli()
 	event := struct {
 		eventLine
 		Files []string `json:"files"`
 	}{eventLine: eventLine{
-		ID:        session + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(eventRand()),
+		ID:        session + "-" + strconv.FormatInt(timestamp, 10) + "-" + strconv.Itoa(a.eventRand()),
 		Timestamp: timestamp, Type: "file_sent", SessionID: session,
 		CWD: cwd, TmuxSession: tmux, OriginName: origin,
 	}, Files: files}
@@ -114,22 +112,22 @@ func sendFiles(paths []string, session string) ([]string, error) {
 	if len(line) > eventMaxLineBytes {
 		return nil, fmt.Errorf("delivery exceeds %d bytes; send fewer files at once", eventMaxLineBytes)
 	}
-	sink, enabled := eventsSink()
+	sink, enabled := a.eventsSink()
 	if !enabled {
 		return nil, fmt.Errorf("Shuttle event recording is disabled or its state directory is missing")
 	}
-	if err := appendEventLine(sink, line); err != nil {
+	if err := a.appendEventLine(sink, line); err != nil {
 		return nil, fmt.Errorf("record delivery: %w", err)
 	}
 	return files, nil
 }
 
 // Use only this host's actual tmux association; cwd is not session identity.
-func sendFileLedgerSession(tmux string) string {
+func (a *app) sendFileLedgerSession(tmux string) string {
 	if tmux == "" {
 		return ""
 	}
-	path, _ := shuttleStatePath("SHUTTLE_SESSIONS_FILE", "sessions.jsonl")
+	path, _ := a.shuttleStatePath("SHUTTLE_SESSIONS_FILE", "sessions.jsonl")
 	f, err := os.Open(path)
 	if err != nil {
 		return ""

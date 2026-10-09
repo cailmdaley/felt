@@ -93,7 +93,6 @@ describe('channel theme lifetime and owner reads', () => {
     expect(defaults).toContain(':where([data-ws-theme-boundary]:not(.ws-reader))')
     expect(defaults).toContain('@layer shuttle-theme-defaults')
     expect(defaults).toContain('--ws-paper: white;')
-    expect(defaults).toContain('[data-ws-act-material]')
     themes.togglePlain(card)
     expect(el.hasAttribute('data-ws-theme-boundary')).toBe(true)
     expect(el.hasAttribute('data-ws-theme')).toBe(false)
@@ -130,20 +129,6 @@ describe('channel theme lifetime and owner reads', () => {
       expect(events).toHaveLength(4)
     } finally { document.removeEventListener('workspace-theme-change', listener) }
   })
-  it('returns material only from a currently bound, non-Plain reader', () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })))
-    const reader = root(), folio = root()
-    reader.className = 'ws-reader'
-    reader.style.setProperty('--ws-paper', 'rgb(1, 2, 3)')
-    reader.style.setProperty('--ws-ink', 'rgb(250, 251, 252)')
-    themes.bind(reader, card); themes.bind(folio, card)
-    expect(themes.material(reader)).toEqual({ paper: 'rgb(1, 2, 3)', ink: 'rgb(250, 251, 252)' })
-    expect(themes.material(folio)).toBeUndefined()
-    themes.togglePlain(card); expect(themes.material(reader)).toBeUndefined()
-    themes.togglePlain(card); themes.unbind(reader)
-    expect(themes.material(reader)).toBeUndefined()
-  })
-
   it('coalesces reader and folio reads, revalidates by ETag only on the refresh cadence', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(new Response(':scope { --ws-paper: white; }', { headers: { ETag: '"one"' } }))
       .mockResolvedValueOnce(new Response(null, { status: 304 }))
@@ -207,5 +192,70 @@ describe('channel theme lifetime and owner reads', () => {
     expect(themeScopeId('first')).toBe(themeScopeId('first'))
     expect(themeScopeId('first')).not.toBe(themeScopeId('second'))
     expect(themeScopeId('🌟')).not.toBe(themeScopeId('🌙'))
+  })
+})
+
+describe('appearance', () => {
+  type Listener = () => void
+  let systemDark = true
+  const listeners = new Set<Listener>()
+  const setSystem = (dark: boolean): void => { systemDark = dark; for (const listener of listeners) listener() }
+  async function fresh() {
+    vi.resetModules()
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      get matches() { return query.includes('dark') && systemDark },
+      addEventListener: (_: string, listener: Listener) => listeners.add(listener),
+      removeEventListener: (_: string, listener: Listener) => listeners.delete(listener),
+    }))
+    const appearance = await import('../appearance.js')
+    const { ChannelThemes: Themes } = await import('./ChannelThemes.js')
+    themes.dispose()
+    themes = new Themes('https://daemon.invalid')
+    return appearance
+  }
+  afterEach(() => { listeners.clear(); systemDark = true; history.replaceState(null, '', '/'); vi.resetModules() })
+  const bound = (theme: string, uid = theme): HTMLElement => { const el = root(); themes.bind(el, { ...card, uid, theme }); return el }
+  const names = (roots: HTMLElement[]): Array<string | undefined> => roots.map(el => el.dataset.wsThemeName)
+
+  it('gives each declared theme way to the resolved scheme, following the system live', async () => {
+    const appearance = await fresh()
+    const roots = ['portolan', 'blueprint', 'laboratory-paper', 'night-chart', 'lamplight'].map(theme => bound(theme))
+    expect(names(roots)).toEqual(['night-chart', 'night-chart', 'night-chart', 'night-chart', 'lamplight'])
+    expect(document.documentElement.dataset.wsAppearance).toBe('dark')
+    const changed = vi.fn()
+    roots[3].addEventListener('workspace-theme-change', changed)
+    setSystem(false)
+    expect(names(roots)).toEqual(['portolan', 'blueprint', 'laboratory-paper', 'portolan', 'portolan'])
+    expect(document.documentElement.dataset.wsAppearance).toBe('light')
+    await vi.waitFor(() => expect(changed).toHaveBeenCalled())
+    appearance.saveAppearance({ mode: 'dark', dark: 'lamplight' })
+    expect(names(roots)).toEqual(['lamplight', 'lamplight', 'lamplight', 'night-chart', 'lamplight'])
+    setSystem(true); setSystem(false)
+    expect(names(roots), 'Dark ignores the system').toEqual(['lamplight', 'lamplight', 'lamplight', 'night-chart', 'lamplight'])
+    appearance.saveAppearance({ mode: 'light', dark: 'lamplight' })
+    setSystem(true)
+    expect(names(roots), 'Light ignores the system').toEqual(['portolan', 'blueprint', 'laboratory-paper', 'portolan', 'portolan'])
+    expect(document.documentElement.dataset.wsAppearance).toBe('light')
+  })
+
+  it('layers a custom theme.css over whichever base the appearance resolves', async () => {
+    const appearance = await fresh()
+    appearance.saveAppearance({ mode: 'dark', dark: 'lamplight' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(':scope { --custom-marker: 1 }', { headers: { ETag: 'custom' } })))
+    const reader = root()
+    themes.bind(reader, { ...card, theme: 'portolan' }, 'reader')
+    const sheet = (): string => document.querySelector(`style[data-ws-theme-sheet="${reader.dataset.wsTheme}"]`)?.textContent ?? ''
+    await vi.waitFor(() => expect(sheet()).toContain('--custom-marker'))
+    expect(reader.dataset.wsThemeName).toBe('lamplight')
+    appearance.saveAppearance({ mode: 'light', dark: 'lamplight' })
+    expect(reader.dataset.wsThemeName).toBe('portolan')
+    expect(sheet(), 'the custom layer survives the base change').toContain('--custom-marker')
+  })
+
+  it('shows a previewed theme as named whatever the appearance', async () => {
+    history.replaceState(null, '', '/?theme-preview=previewed:night-chart')
+    const appearance = await fresh()
+    appearance.saveAppearance({ mode: 'light', dark: 'lamplight' })
+    expect(bound('portolan', 'previewed').dataset.wsThemeName).toBe('night-chart')
   })
 })

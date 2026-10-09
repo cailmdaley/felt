@@ -57,7 +57,6 @@ describe('queue row drop on a card', () => {
       stopDragAutoScroll: stopAutoScroll,
       transition,
       setSurface: () => {},
-      pin: () => {},
       stack,
       stackQueueRow,
       reorderQueue: () => {},

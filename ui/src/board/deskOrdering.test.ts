@@ -14,7 +14,7 @@ import {
 import { buildDependents, queuedBehind } from './KanbanRules.js'
 import { clusterStashCards, sortDatedByReturn, splitStashByReturn } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import { dueCivilDay, instantMs } from './civilDay.js'
+import { dueCivilDay, instantMs, zone } from './civilDay.js'
 import { card } from './testFixtures.js'
 
 const NOW = Date.parse('2026-10-05T12:00:00Z')
@@ -60,7 +60,7 @@ function surfaceOrder(r: KanbanResponse): unknown {
   return {
     drafts: identities(r.now.drafts), inFlight: identities(r.now.inFlight), review: identities(r.now.awaitingReview),
     past: identities(r.timeline.past), future: identities(r.timeline.futureDated),
-    pinned: identities(r.pinned), stash: identities(r.stash), folded: identities(r.folded),
+    stash: identities(r.stash), folded: identities(r.folded),
   }
 }
 
@@ -160,7 +160,7 @@ describe('Desk comparators', () => {
 
 describe('the composite Desk is independent of entry and origin order', () => {
   const dates = [NEW, SAME, OLD, '', 'not a date', '2026-02-30T09:00:00Z']
-  const entries = ['draft', 'review', 'tempered', 'discarded', 'pinned', 'rest', 'flight'].flatMap((lane) =>
+  const entries = ['draft', 'review', 'tempered', 'discarded', 'rest', 'flight'].flatMap((lane) =>
     dates.map((createdAt, i) => {
       const origin = i % 2 ? 'beta' : 'alpha'
       const e = entry(`${lane}/${i}`, {
@@ -168,7 +168,7 @@ describe('the composite Desk is independent of entry and origin order', () => {
         status: ['review', 'tempered', 'discarded'].includes(lane) ? 'closed' : lane === 'flight' ? 'active' : 'open',
         tempered: lane === 'tempered' ? true : lane === 'discarded' ? false : undefined,
         closedAt: ['review', 'tempered', 'discarded'].includes(lane) ? createdAt : undefined,
-        shuttleKind: lane === 'pinned' ? 'pinned' : 'oneshot',
+        shuttleKind: 'oneshot',
         horizon: lane === 'rest' ? 'stashed' : undefined,
       }, origin)
       if (lane === 'flight') e.runtime = { state: 'running', phase: i % 2 ? 'working' : 'waiting', lastActivityAt: NOW - i * 1000 }
@@ -191,7 +191,6 @@ describe('the composite Desk is independent of entry and origin order', () => {
     const baseline = buildKanbanResponseFromComposite(feed(entries), { nowMs: NOW })
     expect(baseline.now.drafts.filter((c) => c.id === 'shared/local-id')).toHaveLength(2)
     expect(baseline.now.drafts.filter((c) => c.id === 'old/local-id')).toHaveLength(2)
-    expect(ids(baseline.pinned)).toEqual(['pinned/0', 'pinned/1', 'pinned/2', 'pinned/3', 'pinned/4', 'pinned/5'])
     expect(ids(baseline.timeline.futureDated)).toEqual(['future/late', 'future/early'])
     for (let seed = 1; seed <= 40; seed++) {
       const result = buildKanbanResponseFromComposite(feed(entries, seed), { nowMs: NOW })
@@ -287,14 +286,19 @@ describe('Resting group order', () => {
       card({ id: 'project/cron', uid: 'f', shuttleKind: 'standing', status: 'active',
         nextLaunchAt: '2026-10-06T22:00:00-07:00' }),
     ]
-    // The cron is before Oct 7's local midnight in Los Angeles, after it in Paris.
-    const expectedWarm = new Date(2026, 9, 7).getTime() < Date.parse(dated[5].nextLaunchAt!)
-      ? ['project/new-soon', 'project/old-soon', 'project/cron', 'project/new-later', 'project/invalid']
-      : ['project/cron', 'project/new-soon', 'project/old-soon', 'project/new-later', 'project/invalid']
-    for (let seed = 1; seed <= 40; seed++) {
-      const clusters = sortDatedByReturn(clusterStashCards(shuffled(dated, seed)))
-      expect(ids(clusters[0].cards)).toEqual(expectedWarm)
-      expect(ids(clusters[1].cards)).toEqual(['project/cold'])
+    // The cron is before Oct 7's midnight in Los Angeles, after it in Paris:
+    // a due sorts at the start of its civil day in the reader's zone, a cron
+    // at its instant.
+    const expectedWarm = {
+      'America/Los_Angeles': ['project/cron', 'project/new-soon', 'project/old-soon', 'project/new-later', 'project/invalid'],
+      'Europe/Paris': ['project/new-soon', 'project/old-soon', 'project/cron', 'project/new-later', 'project/invalid'],
+    }
+    for (const [id, warm] of Object.entries(expectedWarm)) {
+      for (let seed = 1; seed <= 40; seed++) {
+        const clusters = sortDatedByReturn(clusterStashCards(shuffled(dated, seed)), zone(id))
+        expect(ids(clusters[0].cards)).toEqual(warm)
+        expect(ids(clusters[1].cards)).toEqual(['project/cold'])
+      }
     }
   })
 })

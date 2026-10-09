@@ -10,6 +10,7 @@ defmodule Shuttle.FiberDocuments do
   """
 
   alias Shuttle.FeltStores
+  alias Shuttle.SingleFlight
 
   @type entry :: %{
           required(:felt_store) => String.t(),
@@ -26,7 +27,7 @@ defmodule Shuttle.FiberDocuments do
   # `kanban_fields/0`) so cache entries build directly from candidate rows.
   @kanban_fields ~w(id uid name status tags created_at closed_at modified_at
                     outcome due horizon cold kind priority depends_on tempered
-                    shuttle start theme path report_path)
+                    shuttle collaboration start theme path report_path)
 
   @doc "The kanban metadata field names the owner feed projects from felt JSON."
   @spec kanban_fields() :: [String.t()]
@@ -183,9 +184,9 @@ defmodule Shuttle.FiberDocuments do
     * **Scan fallback** — for a symlink-traversed fiber (loom's `.felt/shapepipe`
       → a separate project store) the canonical id drops the store prefix, so
       `show <canonical-id>` misses. We enumerate the store with the same CLI and
-      match on the canonical id. This costs a full list daemon-side but still
-      returns a single fiber over the wire, and only fires for the handful of
-      symlinked-out projects.
+      match on the canonical id. It also runs for every id no store resolves,
+      so it lists metadata only and stats nothing: one `ls` per store, then a
+      `show` of the matched fiber.
 
   Returns the same `{:ok, %{host, felt_stores, fibers: […]}}` envelope as
   `list/1` with zero or one fiber, so the client reuses the same response parser.
@@ -204,9 +205,29 @@ defmodule Shuttle.FiberDocuments do
     stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
     with_body? = cli == "felt" and Keyword.get(opts, :with_body, false)
 
-    case fast_lookup(stores, id, with_body?, cli) do
+    with :miss <- address_lookup(stores, id, Keyword.get(opts, :address), with_body?, cli),
+         :miss <- fast_lookup(stores, id, with_body?, cli) do
+      scan_lookup(stores, id, with_body?, cli)
+    else
       {:ok, entry} -> {:ok, envelope(stores, [entry])}
-      :miss -> scan_lookup(stores, id, with_body?, cli)
+    end
+  end
+
+  # A caller that knows where felt can read a UID names that `{store, id}`
+  # as `:address` (`Shuttle.FiberAddresses`): felt shows an id directly, where
+  # a UID costs a walk of the whole store. The answer counts only when it
+  # carries the requested UID, so a stale address falls through to the lookup
+  # by UID.
+  defp address_lookup(_stores, _id, nil, _with_body?, _cli), do: :miss
+
+  defp address_lookup(stores, id, {store, address}, with_body?, cli) do
+    with true <- store in stores,
+         {:ok, [%{fiber: %{"uid" => uid}} = entry | _]} when is_binary(uid) <-
+           show_store(store, address, with_body?, cli),
+         true <- String.upcase(uid) == String.upcase(id) do
+      {:ok, entry}
+    else
+      _ -> :miss
     end
   end
 
@@ -240,6 +261,7 @@ defmodule Shuttle.FiberDocuments do
       {output, 0} ->
         case Jason.decode(output) do
           {:ok, %{} = fiber} ->
+            learn_address(store, fiber)
             fiber = if with_body?, do: fiber, else: Map.delete(fiber, "body")
             # The single-fiber path may not carry the native `report_path`
             # field, so it stats for report existence. The high-volume list path
@@ -255,11 +277,28 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  # Enumerate each store and match the requested canonical id. Reuses list_store
-  # so the entry shape (canonical id, store-relative path, report_path) is
-  # byte-identical to the list endpoint.
+  # felt's `id` here is the traversal id `show` resolves in this store; the
+  # canonical slug can differ across a symlinked substore.
+  defp learn_address(store, %{"uid" => uid, "id" => id}) when is_binary(uid) and is_binary(id),
+    do: Shuttle.FiberAddresses.learn(uid, store, id)
+
+  defp learn_address(_store, _fiber), do: :ok
+
+  # Enumerate each store and match the requested canonical id. The listing
+  # carries no bodies and the match is made on in-memory entries: every miss
+  # lands here, so its cost is one metadata `ls` per store, never a body dump or
+  # a stat per fiber, and concurrent misses share that listing. The listing only
+  # picks the fiber; the answer comes from a fresh `show` of its felt traversal
+  # id, which resolves directly.
   defp scan_lookup(stores, id, with_body?, cli) do
-    results = Enum.map(stores, &list_store(&1, with_body?, :all, cli))
+    results =
+      Enum.map(stores, fn store ->
+        with {:ok, rows} <-
+               SingleFlight.run({:fiber_ls, cli, store}, fn -> ls_rows(store, cli) end) do
+          {:ok, Enum.map(rows, &{store, &1})}
+        end
+      end)
+
     errors = Enum.flat_map(results, &store_errors/1)
 
     match =
@@ -268,16 +307,42 @@ defmodule Shuttle.FiberDocuments do
         {:ok, rows} -> rows
         _ -> []
       end)
-      |> Enum.find(&entry_matches_id?(&1, id))
+      |> Enum.find(fn {store, row} ->
+        Enum.any?(entry_for(store, row, :field), &entry_matches_id?(&1, id))
+      end)
 
-    cond do
-      match != nil -> {:ok, envelope(stores, [match])}
-      errors != [] -> {:error, errors}
-      true -> {:ok, envelope(stores, [])}
+    case match do
+      {store, row} ->
+        case matched_entry(store, row, with_body?, cli) do
+          {:ok, entry} -> {:ok, envelope(stores, [entry])}
+          {:error, error} -> {:error, [error]}
+        end
+
+      nil when errors != [] ->
+        {:error, errors}
+
+      nil ->
+        {:ok, envelope(stores, [])}
+    end
+  end
+
+  defp matched_entry(store, %{"id" => traversal_id}, with_body?, cli) do
+    case show_store(store, traversal_id, with_body?, cli) do
+      {:ok, [entry | _]} -> {:ok, entry}
+      _ -> {:error, %{felt_store: store, error: "#{cli} show #{traversal_id} failed after ls"}}
     end
   end
 
   defp list_store(store, with_body?, mode, cli \\ "felt") do
+    with {:ok, rows} <- ls_rows(store, cli, with_body?) do
+      # A metadata listing carries felt's native `report_path`, so its rows are
+      # never stat'ed; `ls --body` omits that field, so a body listing stats.
+      report_mode = if with_body?, do: :stat, else: :field
+      {:ok, rows |> filter_rows(mode) |> Enum.flat_map(&entry_for(store, &1, report_mode))}
+    end
+  end
+
+  defp ls_rows(store, cli, with_body? \\ false) do
     args = if cli == "shuttle", do: ["ls", "-s", "all", "-j"], else: list_args(with_body?)
 
     # Do NOT fold stderr into stdout: the CLIs can report warnings for stray
@@ -292,7 +357,11 @@ defmodule Shuttle.FiberDocuments do
     # request.
     case runner().cmd(cli, args, cd: store) do
       {output, 0} ->
-        decode_store(store, output, mode, cli)
+        case Jason.decode(output) do
+          {:ok, rows} when is_list(rows) -> {:ok, rows}
+          {:ok, _} -> {:error, %{felt_store: store, error: "#{cli} ls returned non-list JSON"}}
+          {:error, error} -> {:error, %{felt_store: store, error: Exception.message(error)}}
+        end
 
       {output, status} ->
         {:error, %{felt_store: store, status: status, error: String.trim(output)}}
@@ -337,25 +406,11 @@ defmodule Shuttle.FiberDocuments do
   # included. Neither variant narrows. The narrowed kanban projection lives in
   # `Shuttle.Poller`'s walk (`kanban_walks/0` + `kanban_fields/0`), which is what
   # builds the owner feed; this direct path serves only the unfiltered readers.
-  # `mode` still reaches `decode_store/3`, where `filter_rows(:owned)` applies
+  # `mode` still reaches `list_store/4`, where `filter_rows(:owned)` applies
   # the owner predicate in memory.
   defp list_args(true), do: ["ls", "-s", "all", "-j", "--body"]
 
   defp list_args(false), do: ["ls", "-s", "all", "-j"]
-
-  defp decode_store(store, output, mode, cli) do
-    with {:ok, decoded} when is_list(decoded) <- Jason.decode(output) do
-      rows = filter_rows(decoded, mode)
-      # The direct list reader (content/search/graph + `body=true`) is not the
-      # Lustre-scale owner-feed hot path, so it keeps the `:stat` report fallback
-      # for CLI surfaces that do not carry the native field. The owner feed
-      # builds entries through `entries_for_fiber/2` (:field), which never stats.
-      {:ok, rows |> Enum.flat_map(&entry_for(store, &1, :stat))}
-    else
-      {:ok, _} -> {:error, %{felt_store: store, error: "#{cli} ls returned non-list JSON"}}
-      {:error, error} -> {:error, %{felt_store: store, error: Exception.message(error)}}
-    end
-  end
 
   defp filter_rows(rows, :owned) do
     own_host_id = own_host_id()
@@ -545,7 +600,7 @@ defmodule Shuttle.FiberDocuments do
   # (dir-contained, symlinked-flat substore, entry point) with no served-store-
   # prefix coupling. `:error` when felt carries no `path`.
   defp fiber_dir(%{"path" => path}) when is_binary(path) and path != "" do
-    {:ok, Path.dirname(Path.expand(path))}
+    {:ok, Path.dirname(Shuttle.Env.expand(path))}
   end
 
   defp fiber_dir(_fiber), do: :error

@@ -135,6 +135,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
       :window_ms,
       :freshness_ms,
       :wait_ms,
+      :clock,
       reload_from_file?: false,
       # name => %{remote: %Remote{}, feeds: %{feed => feed_state}}
       entries: %{},
@@ -161,11 +162,18 @@ defmodule Shuttle.RemoteTemporalRegistry do
     * `:freshness_ms` — the freshness gate. Defaults to #{@freshness_ms} ms.
     * `:wait_ms` — how long a request waits for its fetches. Defaults to
       #{@wait_ms} ms.
+    * `:clock` — zero-arity fun returning the current `DateTime`, read for every
+      attempt, success and staleness decision. Defaults to
+      `&DateTime.utc_now/0`; tests pass a fake clock they advance.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: name)
+    # `name: nil` starts an unnamed instance (tests address theirs through
+    # `Shuttle.Env.server/1`).
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   # The default on-disk home for the per-feed caches, honoring the same env
@@ -181,7 +189,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   — callers tolerate this for graceful degradation.
   """
   @spec entries(feed()) :: %{String.t() => view()}
-  def entries(feed), do: entries(__MODULE__, feed)
+  def entries(feed), do: entries(Shuttle.Env.server(__MODULE__), feed)
 
   @spec entries(GenServer.server(), feed()) :: %{String.t() => view()}
   def entries(server, feed) when feed in @feeds do
@@ -194,7 +202,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   prime the registry deterministically against a stub client.
   """
   @spec refresh_now() :: :ok
-  def refresh_now, do: refresh_now(__MODULE__)
+  def refresh_now, do: refresh_now(Shuttle.Env.server(__MODULE__))
 
   @spec refresh_now(GenServer.server()) :: :ok
   def refresh_now(server),
@@ -231,6 +239,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
       window_ms: Keyword.get(opts, :window_ms, @window_ms),
       freshness_ms: Keyword.get(opts, :freshness_ms, @freshness_ms),
       wait_ms: Keyword.get(opts, :wait_ms, @wait_ms),
+      clock: Keyword.get(opts, :clock, &DateTime.utc_now/0),
       entries: Map.new(remotes, &{&1.name, restore(&1, persisted)})
     }
 
@@ -273,7 +282,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
           acc
           |> stamp_attempt(name, feed)
-          |> apply_result(name, feed, window, result, DateTime.utc_now())
+          |> apply_result(name, feed, window, result, now(acc))
       end
 
     {:reply, :ok, state}
@@ -285,7 +294,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
     state
     |> finish_task(ref)
-    |> apply_result(name, feed, window, result, DateTime.utc_now())
+    |> apply_result(name, feed, window, result, now(state))
     |> settle_waiters()
     |> then(&{:noreply, &1})
   end
@@ -302,7 +311,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
         state
         |> finish_task(ref)
-        |> apply_result(name, feed, window, {:error, reason}, DateTime.utc_now())
+        |> apply_result(name, feed, window, {:error, reason}, now(state))
         |> settle_waiters()
         |> then(&{:noreply, &1})
     end
@@ -322,6 +331,8 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
+  defp now(%State{clock: clock}), do: clock.()
+
   # ── Fleet reload ──
 
   defp reload_remotes(%State{} = state),
@@ -330,7 +341,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   # ── Fetch orchestration ──
 
   defp start_due_fetches(%State{} = state, feed) do
-    now_ms = System.system_time(:millisecond)
+    now_ms = DateTime.to_unix(now(state), :millisecond)
 
     Enum.reduce(state.entries, state, fn {name, entry}, acc ->
       if Map.has_key?(acc.in_flight, {name, feed}) or
@@ -369,7 +380,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   end
 
   defp stamp_attempt(%State{} = state, name, feed) do
-    now = DateTime.utc_now()
+    now = now(state)
     entry = put_feed(state.entries[name], feed, &%{&1 | last_attempt_at: now})
     %{state | entries: Map.put(state.entries, name, entry)}
   end
@@ -403,8 +414,8 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   # ── Fetching ──
 
-  defp fetch_window(%State{window_ms: width}, :activity),
-    do: activity_window(DateTime.utc_now(), width)
+  defp fetch_window(%State{window_ms: width} = state, :activity),
+    do: activity_window(now(state), width)
 
   defp fetch_window(_state, _feed), do: nil
 
@@ -505,7 +516,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   # ── Views ──
 
   defp build_view(%State{} = state, feed) do
-    now = DateTime.utc_now()
+    now = now(state)
     stale_after_ms = state.freshness_ms * @stale_after_gates
 
     Map.new(state.entries, fn {name, entry} ->

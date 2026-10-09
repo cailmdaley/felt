@@ -4,8 +4,9 @@ import type { FileViewerOptions } from '../FileViewerPanel.js'
 import type { Channel, WorkspaceDocument } from './documents.js'
 import { DocumentHost, withWorkspaceKeyBridge } from './DocumentHost.js'
 import { Reader } from './Reader.js'
-import { buildChannel } from './documents.js'
+import { buildChannel, proseDocument } from './documents.js'
 import { connectDocumentFrame, envelope } from './DocumentBridge.js'
+import { resetDocumentResources } from '../documentResources.js'
 
 const render = vi.hoisted(() => ({
   calls: [] as Array<{ viewer: HTMLElement; path: string; owner: string; options: FileViewerOptions; frame?: (frame: HTMLIFrameElement, refreshed: boolean) => void; text?: (pane: HTMLElement) => void }>,
@@ -23,7 +24,7 @@ vi.mock('../FileViewerPanel.js', () => ({
   }),
   disposeFileViewer: render.dispose, suspendFileViewer: render.suspend, resumeFileViewer: render.resume, loadFileViewerOnce: render.once,
 }))
-vi.mock('../LiveFileRefresh.js', () => ({ refreshLiveFile: render.refresh }))
+vi.mock('../LiveFileRefresh.js', () => ({ refreshLiveFile: render.refresh, liveFileWatched: () => false }))
 
 const doc = (n: number, owner = 'host-a'): WorkspaceDocument => ({
   key: `${owner}:/doc/${n}.html`, owner, path: `/doc/${n}.html`, name: `${n}.html`, kind: 'html', provenance: [],
@@ -40,9 +41,9 @@ beforeEach(() => {
   track = document.createElement('div')
   document.body.append(track)
   host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame, onScroll })
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 200 })))
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: true, size: 1, modified_at: 1 }))))
 })
-afterEach(() => { host.dispose(); vi.unstubAllGlobals() })
+afterEach(() => { host.dispose(); vi.unstubAllGlobals(); resetDocumentResources() })
 const ready = async (call = render.calls.at(-1)!) => {
   call.options.onState!({ status: 'ready' })
   await Promise.resolve()
@@ -64,10 +65,10 @@ describe('say it once label bars', () => {
     }
     try {
       const first = buildChannel(input)
-      reader.show(first, first.documents[0].key, 'Board')
-      const fiber = reader.host.get(first.documents[0].key)!
+      reader.show(first, proseDocument(first)!.key, 'Board')
+      const fiber = reader.host.get(proseDocument(first)!.key)!
       const page = fiber.viewer
-      const report = reader.host.get(first.documents[1].key)!
+      const report = reader.host.get(first.documents.find(d => d.name === 'report.html')!.key)!
       const reportViewer = report.viewer
       const calls = render.calls.length
       expect(fiber.label.querySelector('.ws-label-title')?.textContent).toBe('')
@@ -75,11 +76,11 @@ describe('say it once label bars', () => {
       expect(fiber.label.textContent).toContain('Last changed 1h ago')
       expect(fiber.label.textContent).not.toMatch(/Constitution|fiber page|Task name|host-a/)
       expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago')
-      expect(reader.host.get(first.documents[2].key)!.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago · host-b')
+      expect(reader.host.get(first.documents.find(d => d.name === 'foreign.pdf')!.key)!.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1h ago · host-b')
       expect(reader.el.querySelector('.ws-labelbar .ws-agent')).toBeNull()
       const next = buildChannel({ ...input, modifiedAt: new Date(now - 120000).toISOString(),
         sent: [...input.sent, { path: '/report.html', time: now - 60000, worker: 'sol' }], previous: first })
-      reader.show(next, next.documents[0].key, 'Board')
+      reader.show(next, proseDocument(next)!.key, 'Board')
       expect(fiber.label.textContent).toContain('Last changed 2m ago')
       expect(report.label.querySelector('.ws-provenance')?.textContent).toBe('sent 1m ago · 2 receipts')
       expect(fiber.viewer).toBe(page)
@@ -87,7 +88,7 @@ describe('say it once label bars', () => {
       expect(prose).toHaveBeenCalledTimes(1)
       expect(render.calls).toHaveLength(calls)
       const unknown = buildChannel({ ...input, modifiedAt: undefined, previous: next })
-      reader.show(unknown, unknown.documents[0].key, 'Board')
+      reader.show(unknown, proseDocument(unknown)!.key, 'Board')
       expect(fiber.label.textContent).toContain('Last changed unknown')
       expect(fiber.viewer).toBe(page)
     } finally { reader.dispose() }
@@ -385,11 +386,31 @@ describe('refresh and failure states', () => {
     expect(frame.content.textContent).toContain('host-a is unreachable — showing last loaded copy')
     expect(frame.content.querySelector('button')!.textContent).toBe('Retry')
     host.refresh(docs[0].key)
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(render.refresh).toHaveBeenCalledWith('/api/v1/file?path=%2Fdoc%2F0.html&origin=host-a')
+    await vi.waitFor(() => expect(render.refresh).toHaveBeenCalledWith('/api/v1/file?path=%2Fdoc%2F0.html&origin=host-a'))
     expect(frame.viewer).toBe(viewer)
     expect(frame.el.classList.contains('ws-stale')).toBe(false)
+  })
+
+  it('cancels a retry check when its page goes, rather than leaving it to hold a request', async () => {
+    const signals: AbortSignal[] = []
+    vi.stubGlobal('fetch', vi.fn((_src: string, init?: RequestInit) => { signals.push(init!.signal!); return new Promise<Response>(() => {}) }))
+    host.setChannel([docs[0]], docs[0].key)
+    await ready()
+    host.refresh(docs[0].key)
+    await vi.waitFor(() => expect(signals).toHaveLength(1))
+    expect(signals[0].aborted).toBe(false)
+    host.dispose()
+    expect(signals[0].aborted).toBe(true)
+  })
+
+  it('offers a download for an image this browser cannot decode', async () => {
+    const image = { ...docs[0], kind: 'image' as const, path: '/figure.heic', name: 'figure.heic' }
+    host.setChannel([image], image.key)
+    render.calls.at(-1)!.options.onState!({ status: 'error', error: new Error('image format is not supported by this browser'), hasContent: false })
+    await Promise.resolve()
+    const content = host.get(image.key)!.content
+    expect(content.textContent).toContain('This browser cannot show this image')
+    expect(content.querySelector('a')!.download).toBe('figure.heic')
   })
 
   it('keeps native media visible until replacement readiness and retains it if the replacement fails', async () => {

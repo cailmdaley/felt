@@ -1,49 +1,45 @@
 defmodule Shuttle.FeltStoresTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Shuttle.FeltStores
 
-  setup do
-    prev = System.get_env("SHUTTLE_STORES")
-
-    on_exit(fn ->
-      case prev do
-        nil -> System.delete_env("SHUTTLE_STORES")
-        v -> System.put_env("SHUTTLE_STORES", v)
-      end
-    end)
-
-    :ok
-  end
-
   describe "empty resolution (the de-loom invariant)" do
-    setup do
-      prev_file = System.get_env("SHUTTLE_STORES_FILE")
-
-      on_exit(fn ->
-        case prev_file do
-          nil -> System.delete_env("SHUTTLE_STORES_FILE")
-          v -> System.put_env("SHUTTLE_STORES_FILE", v)
-        end
-      end)
-
-      :ok
-    end
-
     test "configured_stores/0 is [] when nothing is configured — no implicit ~/loom default" do
-      System.delete_env("SHUTTLE_STORES")
+      Shuttle.Test.Env.delete_env("SHUTTLE_STORES")
       # An explicit override at an absent path keeps resolution genuinely empty
       # instead of reading the user's real ~/.config/shuttle/stores.json.
-      System.put_env("SHUTTLE_STORES_FILE", Path.join(tmp_dir(), "absent.json"))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES_FILE", Path.join(tmp_dir(), "absent.json"))
 
       assert FeltStores.configured_stores() == []
     end
 
     test "SHUTTLE_STORES env still wins over an absent registry" do
-      System.put_env("SHUTTLE_STORES_FILE", Path.join(tmp_dir(), "absent.json"))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES_FILE", Path.join(tmp_dir(), "absent.json"))
       store = tmp_dir()
-      System.put_env("SHUTTLE_STORES", store)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
 
+      assert FeltStores.configured_stores() == [Path.expand(store)]
+    end
+
+    # Under EMFILE the registry exists but cannot be opened. Caching `[]` from
+    # that read made every later request re-walk the store tree inline.
+    test "an unreadable registry keeps the last good expansion" do
+      Shuttle.Test.Env.delete_env("SHUTTLE_STORES")
+      store = tmp_dir()
+      File.mkdir_p!(Path.join(store, ".felt"))
+      registry = Path.join(tmp_dir(), "stores.json")
+      File.write!(registry, Jason.encode!(%{"felt_stores" => [store]}))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES_FILE", registry)
+
+      assert FeltStores.configured_stores() == [Path.expand(store)]
+
+      File.chmod!(registry, 0o000)
+      on_exit(fn -> File.chmod(registry, 0o644) end)
+
+      assert FeltStores.configured_stores() == [Path.expand(store)]
+      assert FeltStores.refresh_expanded_stores() == [Path.expand(store)]
+
+      File.chmod!(registry, 0o644)
       assert FeltStores.configured_stores() == [Path.expand(store)]
     end
   end
@@ -52,7 +48,7 @@ defmodule Shuttle.FeltStoresTest do
     test "resolves a loom-resident fiber by its full store-relative slug" do
       loom = tmp_dir()
       write_fiber(Path.join(loom, ".felt"), ["ai-futures", "portolan", "debug"])
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert {:ok, host} = FeltStores.store_for_fiber("ai-futures/portolan/debug")
       assert Path.expand(host) == Path.expand(loom)
@@ -61,7 +57,7 @@ defmodule Shuttle.FeltStoresTest do
     test "resolves a nested fiber by its full slug, and felt fuzzy-matches the bare leaf" do
       loom = tmp_dir()
       write_fiber(Path.join(loom, ".felt"), ["a", "b"])
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert {:ok, _} = FeltStores.store_for_fiber("a/b")
 
@@ -85,7 +81,7 @@ defmodule Shuttle.FeltStoresTest do
       File.mkdir_p!(Path.join(loom, ".felt"))
       write_fiber(Path.join(project, ".felt"), ["review-ngmix-v2-pr740"])
       File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert {:ok, host} = FeltStores.store_for_fiber("review-ngmix-v2-pr740")
       assert same_dir?(host, project)
@@ -100,7 +96,7 @@ defmodule Shuttle.FeltStoresTest do
       felt = Path.join(loom, ".felt")
       File.mkdir_p!(felt)
       File.write!(Path.join(felt, "flat-fiber.md"), "---\nname: Flat\n---\n\nBody.\n")
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert {:ok, host} = FeltStores.store_for_fiber("flat-fiber")
       assert Path.expand(host) == Path.expand(loom)
@@ -116,7 +112,7 @@ defmodule Shuttle.FeltStoresTest do
       File.mkdir_p!(pfelt)
       File.write!(Path.join(pfelt, "sp-validation-restructuring.md"), "---\nname: SP\n---\n")
       File.ln_s!(pfelt, Path.join([loom, ".felt", "sp_validation"]))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert {:ok, host} = FeltStores.store_for_fiber("sp-validation-restructuring")
       assert same_dir?(host, project)
@@ -126,7 +122,7 @@ defmodule Shuttle.FeltStoresTest do
       loom = tmp_dir()
       uid = "01KTCWJ8F2DF0VY3E6W92Q7H8M"
       write_fiber(Path.join(loom, ".felt"), ["tests", "uid-card"], id: uid)
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert {:ok, %{store: host, fiber_id: "tests/uid-card", uid: ^uid, path: path}} =
                FeltStores.resolve_fiber(uid)
@@ -139,7 +135,7 @@ defmodule Shuttle.FeltStoresTest do
     test "returns :not_found for an unknown fiber" do
       loom = tmp_dir()
       File.mkdir_p!(Path.join(loom, ".felt"))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert {:error, :not_found} = FeltStores.store_for_fiber("does-not-exist")
     end
@@ -156,7 +152,7 @@ defmodule Shuttle.FeltStoresTest do
       File.mkdir_p!(Path.join(loom, ".felt"))
       File.mkdir_p!(Path.join(project, ".felt"))
       File.ln_s!(Path.join(project, ".felt"), Path.join([loom, ".felt", "shapepipe"]))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       hosts = FeltStores.configured_stores()
 
@@ -176,7 +172,7 @@ defmodule Shuttle.FeltStoresTest do
       File.mkdir_p!(nested)
       File.mkdir_p!(Path.join(project, ".felt"))
       File.ln_s!(Path.join(project, ".felt"), Path.join(nested, "shapepipe"))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       hosts = FeltStores.configured_stores()
 
@@ -200,7 +196,7 @@ defmodule Shuttle.FeltStoresTest do
       # A genuine substore link, but parked behind a symlinked gateway directory.
       File.ln_s!(Path.join(project, ".felt"), Path.join(inner, "shapepipe"))
       File.ln_s!(elsewhere, Path.join([loom, ".felt", "gateway"]))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       hosts = FeltStores.configured_stores()
 
@@ -218,7 +214,7 @@ defmodule Shuttle.FeltStoresTest do
       File.mkdir_p!(Path.join(project, ".felt"))
       link = Path.join([loom, ".felt", "shapepipe"])
       File.ln_s!(Path.join(project, ".felt"), link)
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert length(FeltStores.configured_stores()) == 2
       File.rm!(link)
@@ -226,7 +222,7 @@ defmodule Shuttle.FeltStoresTest do
       assert length(FeltStores.configured_stores()) == 2
 
       # Age the published entry past the refresh cadence, as the clock would.
-      key = {FeltStores, :expanded_stores}
+      key = Shuttle.Env.scope_key({FeltStores, :expanded_stores})
       {base, expanded, walked_at} = :persistent_term.get(key)
       :persistent_term.put(key, {base, expanded, walked_at - 600_000})
 
@@ -238,7 +234,7 @@ defmodule Shuttle.FeltStoresTest do
       loom = tmp_dir()
       File.mkdir_p!(Path.join(loom, ".felt"))
       File.ln_s!("/no/such/path/.felt", Path.join([loom, ".felt", "ghost"]))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert FeltStores.configured_stores() == [Path.expand(loom)]
     end
@@ -248,7 +244,7 @@ defmodule Shuttle.FeltStoresTest do
       other = tmp_dir()
       File.mkdir_p!(Path.join(loom, ".felt"))
       File.ln_s!(other, Path.join([loom, ".felt", "not-a-substore"]))
-      System.put_env("SHUTTLE_STORES", loom)
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", loom)
 
       assert FeltStores.configured_stores() == [Path.expand(loom)]
     end
@@ -266,7 +262,7 @@ defmodule Shuttle.FeltStoresTest do
 
       alias_link = Path.join(tmp_dir(), "alias")
       File.ln_s!(project, alias_link)
-      System.put_env("SHUTTLE_STORES", "#{loom},#{alias_link}")
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", "#{loom},#{alias_link}")
 
       hosts = FeltStores.configured_stores()
 
@@ -288,7 +284,7 @@ defmodule Shuttle.FeltStoresTest do
       project = Path.join(parent, "lightcone")
       File.mkdir_p!(Path.join(project, ".felt"))
       File.ln_s!(Path.join(project, ".felt"), Path.join(parent, ".felt"))
-      System.put_env("SHUTTLE_STORES", "#{parent},#{project}")
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", "#{parent},#{project}")
 
       hosts = FeltStores.configured_stores()
 
@@ -324,13 +320,8 @@ defmodule Shuttle.FeltStoresTest do
       end
     end
 
-    setup do
-      on_exit(fn -> Application.delete_env(:shuttle, :felt_stores_runner) end)
-      :ok
-    end
-
     test "resolve_fiber/2 and store_for_fiber/2 report {:error, :timeout}, not :not_found" do
-      Application.put_env(:shuttle, :felt_stores_runner, TimeoutRunner)
+      Shuttle.Test.Env.put_app_env(:felt_stores_runner, TimeoutRunner)
       store = tmp_dir()
 
       assert {:error, :timeout} = FeltStores.resolve_fiber("some/fiber", [store])
@@ -338,7 +329,7 @@ defmodule Shuttle.FeltStoresTest do
     end
 
     test "a positive resolution from another store wins over a wedged one" do
-      Application.put_env(:shuttle, :felt_stores_runner, SplitRunner)
+      Shuttle.Test.Env.put_app_env(:felt_stores_runner, SplitRunner)
       wedged = Path.join(tmp_dir(), "wedged")
       healthy = tmp_dir()
       File.mkdir_p!(Path.join(wedged, ".felt"))

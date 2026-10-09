@@ -139,7 +139,7 @@ defmodule Shuttle.SessionResume do
   """
   @spec live_sessions() :: [String.t()]
   def live_sessions do
-    Shuttle.Poller.snapshot(Shuttle.Poller, 5_000)
+    Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), 5_000)
     |> Map.get(:eligible, [])
     |> Enum.flat_map(fn row ->
       app = [row[:session_uuid], row[:transcript_session_uuid]]
