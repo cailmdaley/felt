@@ -1,6 +1,6 @@
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import { TranscriptModel, type Turn } from './model.js'
+import { TranscriptModel, segments, type Step, type Turn } from './model.js'
 import type { Entry } from './records.js'
 
 const entry: fc.Arbitrary<Entry> = fc.oneof(
@@ -90,5 +90,40 @@ describe('TranscriptModel', () => {
         expect(snapshot(chunked.turns)).toEqual(snapshot(whole.turns))
       },
     ))
+  })
+})
+
+describe('segments', () => {
+  it('sets each agent message apart and folds the work between messages into runs', () => {
+    const step = (kind: 'text' | 'thinking'): Step => ({ kind, text: kind })
+    const tool: Step = { kind: 'tool', id: 'a', name: 'Bash', input: {}, version: 0 }
+    expect(segments([])).toEqual([])
+    expect(segments([step('thinking'), tool, step('text'), step('text'), tool])).toEqual([
+      { kind: 'steps', start: 0, end: 2 },
+      { kind: 'text', index: 2 },
+      { kind: 'text', index: 3 },
+      { kind: 'steps', start: 4, end: 5 },
+    ])
+  })
+
+  it('covers every step exactly once, in order', () => {
+    const steps = fc.array(fc.constantFrom<Step>(
+      { kind: 'text', text: 't' }, { kind: 'thinking', text: 'th' }, { kind: 'tool', id: 'x', name: 'Read', input: {}, version: 0 },
+    ))
+    fc.assert(fc.property(steps, (list) => {
+      const covered: number[] = []
+      for (const part of segments(list)) {
+        if (part.kind === 'text') {
+          expect(list[part.index].kind).toBe('text')
+          covered.push(part.index)
+        } else {
+          for (let i = part.start; i < part.end; i++) {
+            expect(list[i].kind).not.toBe('text')
+            covered.push(i)
+          }
+        }
+      }
+      expect(covered).toEqual(list.map((_, index) => index))
+    }))
   })
 })
