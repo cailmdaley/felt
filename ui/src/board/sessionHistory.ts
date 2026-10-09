@@ -225,6 +225,8 @@ export function linkRequests(
 export interface SessionHistoryContext extends TargetContext {
   shuttleBase: string
   uid: string
+  /** Open this row's native transcript in the board reader. */
+  onRead?: (record: SessionRecord) => void
   /** Where a failed terminal open is said. */
   onError?: (message: string) => void
 }
@@ -351,9 +353,22 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     if (record.host && record.host !== ctx.fiberHost) put('kbn-ctl-session-host', record.host)
     if (record.session === ctx.liveSession) put('kbn-ctl-session-live', 'live')
 
-    const targets = sessionTargets(record, links.get(record.session), ctx)
+    const link = links.get(record.session)
+    const targets = sessionTargets(record, link, ctx)
     const primary = targetEl(targets.primary, 'kbn-ctl-session-link')
     li.append(primary)
+    if (ctx.onRead && link?.availability !== 'transcript_missing') {
+      const read = document.createElement('button')
+      read.type = 'button'
+      read.className = 'kbn-ctl-session-alt kbn-ctl-session-read'
+      read.textContent = 'read'
+      read.title = 'Read this session transcript'
+      read.addEventListener('click', (event) => {
+        event.stopPropagation()
+        ctx.onRead?.(record)
+      })
+      li.append(read)
+    }
     for (const extra of targets.extras) li.append(targetEl(extra, 'kbn-ctl-session-alt'))
     if (targets.guidance) put('kbn-ctl-session-opening-note', targets.guidance)
     // The whole row is its primary action, as the Aloft pill is.

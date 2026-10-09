@@ -241,7 +241,13 @@ exit 1 means rejected, unknown, or another command error.`,
 			} else {
 				fmt.Fprintf(a.env.Stdout, "%s %s (%s)\n", receipt.Status, receipt.Address, receipt.MessageID)
 			}
-			return messageReceiptError(id, receipt, err)
+			if deliveryErr := messageReceiptError(id, receipt, err); deliveryErr != nil {
+				return deliveryErr
+			}
+			if !messageOpts.requestJSON && len(args) > 0 {
+				return a.clearMessagedFiberAsk(args[0])
+			}
+			return nil
 		},
 	}
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.file, "file", "", "read message text from a file ('-' for stdin)")

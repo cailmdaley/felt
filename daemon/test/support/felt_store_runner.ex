@@ -442,11 +442,27 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
         {level, Agent.get(server(), &Map.get(&1, :contract_exit, 0))}
 
-      # `shuttle [-C s] accept|resume <id> --local` — shuttle's
-      # lifecycle writer. Mirror its document effect on both surfaces (the
-      # fiber map `shuttle ls`/`show` answer from, and the real file): a pinned
-      # accept re-parks to `status: open`, everything else re-arms to `active`;
-      # the verdict and closed-at clear; a standing re-arm concludes the run.
+      # Question clearing changes both the discovery map and the document.
+      command == "shuttle" and match?(["ask", _, "--clear"], drop_cli_store(args)) ->
+        ["ask", id, "--clear"] = drop_cli_store(args)
+        path = fiber(id)["path"]
+
+        if is_binary(path) do
+          [prefix, frontmatter, body] = String.split(File.read!(path), "---\n", parts: 3)
+
+          updated =
+            Shuttle.FrontmatterEdit.apply(frontmatter, [{:delete_nested, "shuttle", "ask"}])
+
+          File.write!(path, prefix <> "---\n" <> updated <> "---\n" <> body)
+        end
+
+        Agent.update(server(), fn state ->
+          update_in(state.fibers[id]["shuttle"], &Map.delete(&1 || %{}, "ask"))
+        end)
+
+        {"cleared question #{id}\n", 0}
+
+      # Lifecycle writes mirror the CLI on the discovery map and document.
       command == "shuttle" and lifecycle_write?(args) ->
         [verb, id, "--local"] = drop_cli_store(args)
         apply_lifecycle_write(verb, id)

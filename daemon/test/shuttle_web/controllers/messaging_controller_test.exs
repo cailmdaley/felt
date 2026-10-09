@@ -9,6 +9,17 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
   defmodule Runner do
     @behaviour Shuttle.Runner
+
+    def cmd("felt", ["-C", store, "show", "work/worker", "-j"], _opts) do
+      {Jason.encode!(%{id: "work/worker", path: Path.join(store, ".felt/work/worker/worker.md")}),
+       0}
+    end
+
+    def cmd("shuttle", ["-C", store, "ask", "work/worker", "--clear"], _opts) do
+      send(Process.whereis(ShuttleWeb.MessagingControllerTest.Client), {:cleared_ask, store})
+      {"cleared\n", 0}
+    end
+
     def cmd("shuttle", ["sessions", "--local", "--json"], _opts) do
       {Jason.encode!(%{
          sessions: [%{address: "shuttle://actual/codex/native%2Fid", harness: "codex"}]
@@ -233,6 +244,47 @@ defmodule ShuttleWeb.MessagingControllerTest do
     on_exit(fn -> File.rm_rf(app_workers_dir) end)
 
     {:ok, host: host, ledger_path: ledger_path, app_workers_dir: app_workers_dir}
+  end
+
+  test "successful owner delivery clears the session's fiber question, not failed delivery", %{
+    host: host,
+    ledger_path: path
+  } do
+    store = Path.join(System.tmp_dir!(), "messaging-ask-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(store, ".felt"))
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+    Shuttle.Test.Env.put_app_env(:felt_stores_runner, Runner)
+    on_exit(fn -> File.rm_rf(store) end)
+
+    write_jsonl!(path, [
+      %{"session" => "native/id", "fiber" => "work/worker", "host" => host, "at" => 1}
+    ])
+
+    for id <- [
+          "accepted",
+          "queued",
+          "submitted",
+          "context_added",
+          "unknown",
+          "refused",
+          "malformed-local"
+        ] do
+      result =
+        Shuttle.Messaging.send_message(%{
+          "address" => "shuttle://local/codex/native%2Fid",
+          "text" => "Use the conservative cut.",
+          "message_id" => id,
+          "wake" => id != "context_added"
+        })
+
+      assert match?({:ok, _, _}, result)
+
+      if id in ["accepted", "queued", "submitted", "context_added"] do
+        assert_receive {:cleared_ask, ^store}
+      else
+        refute_receive {:cleared_ask, _}
+      end
+    end
   end
 
   test "local discovery includes the fiber from its session ledger", %{

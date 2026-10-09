@@ -222,7 +222,7 @@ export class Workspace {
 
   /**
    * The sidebar is one grouped list wherever the reader was opened from:
-   * Drafts, then In flight's Aloft and Holding bands, then Awaiting review,
+   * Drafts, then In flight's Question, Stalled and Working bands, then Awaiting review,
    * each in the Desk's own order. Queued children are reached through their
    * head's peek, not these groups or their J/K stops and index counts.
    */

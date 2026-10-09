@@ -57,9 +57,9 @@ interface CompositeRuntime {
   agent?: string;
   sessionUuid?: string;
   /** Owner-served activity category — one of `"attention"` (raised its hand —
-   * "needs you", in the Holding band), `"waiting"` (paused at a stop — "waiting
-   * for you" once idle ≥60s, Holding too), `"working"` (mid-tool — busy, in the
-   * Aloft band, no chip). Absent until the worker's first hook event (or, for an app worker,
+   * "stalled"), `"waiting"` (paused at a stop — "waiting for you"
+   * once idle ≥60s), `"working"` (mid-tool — busy, in the Working band, no
+   * chip). Absent until the worker's first hook event (or, for an app worker,
    * while its launch is not running). */
   phase?: string;
   /** Real ms timestamp of this live session's most-recent hook event of ANY

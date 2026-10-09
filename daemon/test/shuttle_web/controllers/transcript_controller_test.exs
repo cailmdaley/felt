@@ -58,6 +58,66 @@ defmodule ShuttleWeb.TranscriptControllerTest do
            ]
   end
 
+  test "raw offset returns the requested byte slice and size metadata", %{bytes: bytes} do
+    offset = 12
+
+    conn =
+      local_conn()
+      |> get("/api/v1/transcript/raw", %{"session" => @session, "offset" => "#{offset}"})
+
+    assert response(conn, 200) == binary_part(bytes, offset, byte_size(bytes) - offset)
+    assert get_resp_header(conn, "x-transcript-offset") == [Integer.to_string(offset)]
+
+    assert get_resp_header(conn, "x-transcript-byte-count") == [
+             Integer.to_string(byte_size(bytes))
+           ]
+
+    assert get_resp_header(conn, "x-transcript-sha256") == []
+  end
+
+  test "raw offset at EOF returns an empty body", %{bytes: bytes} do
+    offset = byte_size(bytes)
+
+    conn =
+      local_conn()
+      |> get("/api/v1/transcript/raw", %{"session" => @session, "offset" => "#{offset}"})
+
+    assert response(conn, 200) == ""
+    assert get_resp_header(conn, "x-transcript-offset") == [Integer.to_string(offset)]
+    assert get_resp_header(conn, "x-transcript-byte-count") == [Integer.to_string(offset)]
+  end
+
+  test "raw offset past EOF returns a 416 receipt", %{bytes: bytes} do
+    size = byte_size(bytes)
+    offset = size + 1
+
+    assert %{
+             "session" => @session,
+             "availability" => "available_local",
+             "byte_count" => ^size
+           } =
+             local_conn()
+             |> get("/api/v1/transcript/raw", %{"session" => @session, "offset" => "#{offset}"})
+             |> json_response(416)
+  end
+
+  test "raw offset must be a non-negative decimal integer" do
+    assert %{"error" => "offset must be a non-negative integer"} =
+             local_conn()
+             |> get("/api/v1/transcript/raw", %{"session" => @session, "offset" => "-1"})
+             |> json_response(400)
+  end
+
+  test "offset on a missing transcript retains the missing receipt" do
+    assert %{"availability" => "transcript_missing"} =
+             local_conn()
+             |> get("/api/v1/transcript/raw", %{
+               "session" => "11111111-2222-3333-4444-555555555555",
+               "offset" => "0"
+             })
+             |> json_response(404)
+  end
+
   test "invalid UUID is a 400 and unknown valid UUID is transcript_missing" do
     assert %{"error" => "session must be a UUID"} =
              local_conn()
@@ -121,6 +181,29 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       assert get_resp_header(conn, "x-transcript-sha256") == [
                Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
              ]
+    end
+
+    test "raw remote offset is forwarded and relayed without a slice digest" do
+      StubGetFileClient.set_response({:ok, 200, "application/x-ndjson", "tail"})
+
+      conn =
+        local_conn()
+        |> get("/api/v1/transcript/raw", %{
+          "session" => @session,
+          "host" => "candide",
+          "offset" => "42"
+        })
+
+      assert response(conn, 200) == "tail"
+      assert get_resp_header(conn, "x-transcript-offset") == ["42"]
+      assert get_resp_header(conn, "x-transcript-sha256") == []
+
+      query =
+        StubGetFileClient.last().url |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
+
+      assert query["session"] == @session
+      assert query["offset"] == "42"
+      assert query["host"] == "local"
     end
 
     test "unreachable host is explicit" do

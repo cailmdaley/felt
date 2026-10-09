@@ -28,6 +28,41 @@ async function open(p, expected = 'calibration-report') {
   await tab(p, 'calibration-report').waitFor({ state: 'attached' })
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(expected))
 }
+
+test('The Dock follows a live transcript by byte offset', async p => {
+  await p.goto(`${url}&transcript=live`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Constitution')
+  const band = p.locator('.ws-transcript')
+  await band.waitFor()
+  await p.locator('.ws-transcript-live-label').waitFor({ state: 'visible' })
+  await p.getByText(/The literal tag stays text/).waitFor()
+  const first = await p.evaluate(() => window.__harness.requests.find(request => request.url.includes('/api/v1/transcript/raw')))
+  const firstUrl = new URL(first.url, 'file:///')
+  assert.equal(firstUrl.searchParams.get('session'), 'c1a5e0d2-5b8f-4c1e-9a7e-2f3d4b5c6a71')
+  assert.equal(firstUrl.searchParams.get('offset'), '0')
+  assert.equal(firstUrl.searchParams.get('host'), 'umber-workstation')
+
+  await p.clock.fastForward(3100)
+  const transcriptRequests = await p.evaluate(() => window.__harness.requests.filter(request => request.url.includes('/api/v1/transcript/raw')))
+  assert.ok(transcriptRequests.length >= 2, `live poll requests: ${JSON.stringify(transcriptRequests)}`)
+  await p.getByText('Live worker update 1: the next fictional validation batch is in progress.').waitFor()
+  assert.ok(Number(new URL(transcriptRequests.at(-1).url, 'file:///').searchParams.get('offset')) > 0, 'the second read requests only the appended bytes')
+})
+
+test('The large transcript initially renders only its last turn', async p => {
+  await p.goto(`${url}&transcript=large`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Constitution')
+  const band = p.locator('.ws-transcript')
+  await band.waitFor()
+  await p.getByText('Fixture bin 3000 is within the review tolerance; retain the measured value and continue.').waitFor()
+  assert.equal(await band.locator('.ws-transcript-turn').count(), 1)
+  const earlier = band.locator('.ws-transcript-earlier')
+  assert.match(await earlier.innerText(), /earlier turns/i)
+  await earlier.click()
+  assert.equal(await band.locator('.ws-transcript-turn').count(), 13)
+})
 async function choose(p, label) {
   if (await p.locator('.ws-page-choice').isVisible()) {
     await p.locator('.ws-page-choice').click()
@@ -976,7 +1011,7 @@ test('j/k step constitutions in the sidebar order from a Board-opened reader, th
   const sidebar = p.locator('.ws-sidebar')
   await sidebar.waitFor()
   // One grouped list wherever the reader opens: drafts, work in flight, then review.
-  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Aloft', 'Awaiting review'])
+  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Working', 'Awaiting review'])
   const rows = sidebar.locator('.ws-channel-row')
   const names = await rows.locator('.ws-channel-name').allTextContents()
   await rows.first().click()
@@ -1002,7 +1037,7 @@ test('The sidebar strip names the J/K stops; every jump and strip click shows th
   await open(p)
   const sidebar = p.locator('.ws-sidebar').first()
   const strip = sidebar.locator('.ws-sidebar-index-entry')
-  assert.deepEqual(await strip.allTextContents(), [`Drafts${drafts.length}`, `Aloft${flight.length}`, `Review${review.length}`])
+  assert.deepEqual(await strip.allTextContents(), [`Drafts${drafts.length}`, `Working${flight.length}`, `Review${review.length}`])
   assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Review${review.length}`])
   const list = sidebar.locator('.ws-channel-list')
   assert.ok(await list.evaluate(el => el.scrollHeight > el.clientHeight + 100), 'the short viewport makes the list scroll')
@@ -1022,14 +1057,14 @@ test('The sidebar strip names the J/K stops; every jump and strip click shows th
     return view
   }
   await appFocus(p)
-  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Aloft')
+  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Working')
   await p.keyboard.press('Shift+K'); await landed(drafts[0], 'Drafts')
   await p.keyboard.press('j'); await landed(drafts[1], 'Drafts')
   await p.keyboard.press('Shift+J'); await p.keyboard.press('Shift+J')
   const atReview = await landed(name, 'Awaiting review')
   assert.ok(atReview.scrolled > 0, 'the list scrolled down to reach review')
-  // Upward from review, K must bring Aloft's caption back into view, not just its card.
-  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Aloft')
+  // Upward from review, K must bring Working's caption back into view, not just its card.
+  await p.keyboard.press('Shift+K'); await landed(flight[0], 'Working')
   await strip.filter({ hasText: 'Drafts' }).click(); await landed(drafts[1], 'Drafts')
   assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Drafts${drafts.length}`])
   await strip.filter({ hasText: 'Review' }).click(); await landed(name, 'Awaiting review')
@@ -1053,7 +1088,7 @@ test('Wide reader takes the Desk column as cards, steps visibly, and returns sel
   await open(p)
   const sidebar = p.locator('.ws-sidebar').first()
   assert.ok(await sidebar.isVisible(), 'wide desktop defaults open')
-  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Aloft', 'Awaiting review'], 'the sidebar groups drafts, work in flight and review')
+  assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Working', 'Awaiting review'], 'the sidebar groups drafts, work in flight and review')
   assert.deepEqual(await sidebar.locator('.ws-channel-name').allTextContents(), names, 'in Desk order')
   assert.equal(await sidebar.locator('.kbn-card').count(), names.length, 'sidebar uses the Desk paper renderer')
   assert.equal(await column.locator('.ws-sidebar-source').count(), review.length, "the opened card's column flies its cards into their places")
@@ -2898,7 +2933,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
     await window.__harness.modal.fetchAndRender()
   }), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
-  // A worker crossing between Aloft and Holding renames its strip entry; that is the strip's job.
+  // A worker crossing between Working and Stalled renames its strip entry; that is the strip's job.
   await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control', '.ws-sidebar-index'], settle: 100 })
 }, viewport)
 

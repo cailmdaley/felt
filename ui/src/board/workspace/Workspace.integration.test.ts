@@ -314,7 +314,7 @@ describe('workspace reader integration', () => {
       onReturnCard: returned, dock: new Dock('', changed),
     })
     workspace.open(grouped[0], 'Board'); await flush()
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Aloft', 'Awaiting review'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Working', 'Awaiting review'])
     expect(document.querySelectorAll('.ws-sidebar .kbn-card')).toHaveLength(2)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true })); await flush()
     expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
@@ -357,7 +357,7 @@ describe('workspace reader integration', () => {
     await press('K'); expect(current()).toBe('alpha')
     expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
   })
-  it('captions In flight as its Aloft and Holding bands even from an interleaved feed, and J/K stops at each', async () => {
+  it('captions In flight as its Stalled and Working bands even from an interleaved feed, and J/K stops at each', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
@@ -366,13 +366,13 @@ describe('workspace reader integration', () => {
     workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await flush()
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'w1', 'w2', 'n1', 'n2', 'alpha'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Aloft', 'Holding', 'Awaiting review'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Stalled', 'Working', 'Awaiting review'])
     const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
-    await press('K'); expect(current()).toBe('n1')
-    await press('j'); expect(current()).toBe('n2')
     await press('K'); expect(current()).toBe('w1')
-    await press('J'); expect(current()).toBe('n2')
+    await press('j'); expect(current()).toBe('w2')
+    await press('K'); expect(current()).toBe('n1')
+    await press('J'); expect(current()).toBe('w2')
     await press('J'); expect(current()).toBe('alpha')
   })
   it('draws one index strip naming each J/K stop and its count, marks the open group, and lands a click as J/K would', async () => {
@@ -386,18 +386,18 @@ describe('workspace reader integration', () => {
     const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     // Empty groups draw no entry; the strip abbreviates Awaiting review, its caption does not.
-    expect(entries().map(entry => entry.textContent)).toEqual(['Aloft2', 'Holding1', 'Review1'])
-    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Aloft, 2', 'Holding, 1', 'Awaiting review, 1'])
+    expect(entries().map(entry => entry.textContent)).toEqual(['Stalled1', 'Working2', 'Review1'])
+    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Stalled, 1', 'Working, 2', 'Awaiting review, 1'])
     expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title)).toEqual(['Awaiting review'])
-    entries()[0].click(); await flush()
+    entries()[1].click(); await flush()
     expect(current()).toBe('w1')
-    expect(entries().find(entry => entry.getAttribute('aria-current') === 'location')?.title).toBe('Aloft')
+    expect(entries().find(entry => entry.getAttribute('aria-current') === 'location')?.title).toBe('Working')
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
     expect(current()).toBe('w2')
     entries()[2].click(); await flush()
     expect(current()).toBe('alpha')
-    // Back in Aloft, the click lands on the card last open there.
-    entries()[0].click(); await flush()
+    // Back in Working, the click lands on the card last open there.
+    entries()[1].click(); await flush()
     expect(current()).toBe('w2')
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {

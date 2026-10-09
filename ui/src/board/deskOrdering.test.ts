@@ -143,18 +143,18 @@ describe('Desk comparators', () => {
       card({ id: 'working-new', runtimePhase: 'working', createdAt: NEW, lastActivityAt: 1 }),
       card({ id: 'unobserved-old', createdAt: OLD, status: 'active' }),
     ]
-    const expected = ['working-new', 'unobserved-old', 'waiting-new', 'attention-old']
+    const expected = ['waiting-new', 'attention-old', 'working-new', 'unobserved-old']
     for (let seed = 1; seed <= 40; seed++) {
       expect(ids(shuffled(workers, seed).sort(byInFlightBand))).toEqual(expected)
       const changed = workers.map((c) => ({
         ...c, lastActivityAt: seed * 100,
-        runtimePhase: inFlightBand(c) === 'holding' ? (seed % 2 ? 'blocked' : 'waiting') : 'retrying',
+        runtimePhase: inFlightBand(c) === 'stalled' ? (seed % 2 ? 'blocked' : 'waiting') : 'retrying',
       }))
       expect(ids(shuffled(changed, seed).sort(byInFlightBand))).toEqual(expected)
     }
     workers[2].runtimePhase = 'waiting'
     expect(ids(workers.sort(byInFlightBand)))
-      .toEqual(['unobserved-old', 'waiting-new', 'working-new', 'attention-old'])
+      .toEqual(['waiting-new', 'working-new', 'attention-old', 'unobserved-old'])
   })
 })
 

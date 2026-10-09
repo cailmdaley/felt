@@ -136,6 +136,8 @@ func SetConfig(f *felt.Felt, block *Block) error {
 	if encoded.Kind != yaml.MappingNode {
 		return fmt.Errorf("shuttle: encoded config block is not a mapping")
 	}
+	// Questions are worker state, not configuration; preserve the live node.
+	felt.RemoveMappingKey(&encoded, "ask")
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if configKeys[strings.TrimSpace(node.Content[i].Value)] {
 			continue

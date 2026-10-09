@@ -65,7 +65,8 @@
 .ws-sidebar-toggle[aria-expanded='true'] .ws-toggle-column { opacity: .35; }
 .ws-sidebar-toggle:hover, .ws-sidebar-toggle[aria-expanded='true'] { color: var(--ws-ink) !important; }
 .ws-sidebar-toggle:hover { background: var(--ws-hover); }
-/* In the reader the dot takes the room's own pigments. */
+/* In the reader the worker state is mono capitals and the dot takes the room's own pigments. */
+.ws-reader .kbn-card-worker .ws-worker-state { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
 .ws-reader .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-machine); }
 .ws-reader .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
 .ws-reader .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--ws-you); }

@@ -34,7 +34,7 @@
   font-size: var(--ws-label-size);
 }
 .ws-dock-body { display: grid; grid-template-columns: minmax(0, 1fr) auto 12px auto; align-items: center; gap: var(--ws-small-gap); padding-top: var(--ws-small-gap); }
-.ws-dock-body > :is(.kbn-ctl-compose, .kbn-detail-transcript, .kbn-detail-controls-open, .kbn-ctl-history-open) { grid-column: 1 / -1; }
+.ws-dock-body > :is(.kbn-ctl-compose, .kbn-detail-transcript, .ws-transcript, .kbn-detail-controls-open, .kbn-ctl-history-open) { grid-column: 1 / -1; }
 .ws-dock .kbn-detail-controls {
   display: flex;
   flex-direction: column;
@@ -330,6 +330,10 @@
 .ws-dock .kbn-ctl-history-toggle { font: var(--ws-label-size)/1.4 var(--ws-serif) !important; }
 .ws-dock .kbn-ctl-verdict { grid-column: 1 / -1; display: flex; gap: 8px; margin-bottom: 8px; }
 .ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 36px; padding-inline: 16px; }
+.ws-dock .kbn-ctl-verdict-menu { position: relative; }
+.ws-dock .kbn-ctl-verdict-menu summary { cursor: pointer; display: grid; place-items: center; min-width: 36px; min-height: 36px; list-style: none; font: var(--ws-section-size)/1 var(--ws-serif); }
+.ws-dock .kbn-ctl-verdict-menu summary::-webkit-details-marker { display: none; }
+.ws-dock .kbn-ctl-verdict-menu .kbn-ctl-menu { gap: 4px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 44px; min-width: 44px; }
+  .ws-dock .kbn-ctl-verdict .kbn-ctl-btn, .ws-dock .kbn-ctl-verdict-menu summary { min-height: 44px; min-width: 44px; }
 }

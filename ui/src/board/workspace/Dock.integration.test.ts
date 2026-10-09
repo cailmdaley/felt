@@ -246,11 +246,14 @@ describe('state-shaped act zone', () => {
     band = dock.bandFor(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
   })
-  it('seats the verdicts on the status line in every unverdicted column, retaining a draft across runtime changes', () => {
+  it("keeps review and live verdicts on the status line, the transcript above the composer, and draft verdicts in its menu", () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
+    const children = [...band.el.querySelector('.ws-dock-body')!.children]
+    expect(children[0].classList.contains('ws-transcript')).toBe(true)
+    expect(children[1].classList.contains('kbn-ctl-compose')).toBe(true)
     expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
     expect(band.head.dataset.column).toBe('awaitingReview')
     expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
@@ -259,14 +262,16 @@ describe('state-shaped act zone', () => {
     dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
-    // In flight the pair stays on the status line beside the worker; the act zone is the composer alone.
+    // In flight the pair sits beside the worker; drafts keep it in the menu.
     expect(band.head.dataset.column).toBe('inFlight')
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
     expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
+    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
+    expect(band.el.querySelectorAll('.kbn-ctl-verdict-menu .kbn-ctl-temper,.kbn-ctl-verdict-menu .kbn-ctl-discard')).toHaveLength(2)
     dock.syncRuntime({ ...review, status: 'closed', tempered: true })
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
+    expect(band.el.querySelector('.kbn-ctl-verdict-menu')).toBeNull()
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
   })

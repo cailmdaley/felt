@@ -124,7 +124,7 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
     expect(wrong).toEqual([])
   })
 
-  it('sorts a blocked launch into Holding, below a busy worker', () => {
+  it('sorts a blocked launch into Stalled, above a busy worker', () => {
     const feed = parseCompositeFeed({
       host: 'laptop',
       fibers: ['busy', 'stuck'].map((id) => ({
@@ -137,6 +137,6 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
       origins: { laptop: { kind: 'local', stale: false, fiber_count: 2 } },
     })
     const resp = buildKanbanResponseFromComposite(feed, { nowMs: 1_790_727_600_000 })
-    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['busy', 'stuck'])
+    expect(resp.now.inFlight.map((c) => c.id)).toEqual(['stuck', 'busy'])
   })
 })

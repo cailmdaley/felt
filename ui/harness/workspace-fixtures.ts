@@ -5,6 +5,7 @@ import webmData from './fixtures/test.webm?inline'
 import imageData from './fixtures/figure.png?inline'
 import pdfData from './fixtures/native.pdf?inline'
 import type { ActivityBucket, CommitRecord, SessionRecord, TemporalFetchers } from '../src/board/views/index.js'
+import { WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION } from './transcript-fixtures.js'
 
 export const WORKSPACE_HOST = 'umber-workstation'
 export const WORKSPACE_REMOTE = 'basalt-login-02'
@@ -149,7 +150,8 @@ export const MUSIC_NAME = 'Music'
 export const MUSIC_TRACKS = 19
 
 /** `music` adds a listening channel: a report and nineteen recordings, the shape of a real album review. */
-export function workspaceExample(now: number, options: { music?: boolean } = {}): WorkspaceExample {
+export function workspaceExample(now: number, options: { music?: boolean; transcriptScenario?: string | null } = {}): WorkspaceExample {
+  const { transcriptScenario = null } = options
   const minute = 60_000
   const day = 86_400_000
   const project = '/fixture-store/workspace'
@@ -163,7 +165,7 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
       id: WORKSPACE_ID,
       uid: WORKSPACE_UID,
       name: WORKSPACE_NAME,
-      status: 'closed',
+      status: transcriptScenario === 'live' ? 'active' : 'closed',
       age: 0.1,
       outcome: 'The response passes the null test at every scale; the report and source products are ready for review.',
       host: WORKSPACE_HOST,
@@ -270,9 +272,25 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
           agent: 'claude-opus',
           effort: 'high',
           project_dir: project,
-          ...(fiber.id === WORKSPACE_ID ? { runtime: { session_uuid: 'c1a5e0d2-5b8f-4c1e-9a7e-2f3d4b5c6a71', dispatched_at: iso(-3 * 60 * minute), handed_off_at: iso(-2 * 60 * minute) } } : {}),
+          ...(fiber.id === WORKSPACE_ID ? { runtime: {
+            session_uuid: WORKSPACE_LATEST_SESSION,
+            dispatched_at: iso(-3 * 60 * minute),
+            ...(transcriptScenario === 'live' ? {} : { handed_off_at: iso(-2 * 60 * minute) }),
+          } } : {}),
         },
       },
+    }
+    if (fiber.id === WORKSPACE_ID && transcriptScenario === 'live') {
+      entry.runtime = {
+        state: 'running',
+        phase: 'working',
+        surface: 'cli',
+        tmux_session: 'fixture-transcript-worker',
+        session_uuid: WORKSPACE_LATEST_SESSION,
+        agent: 'claude-opus',
+        last_activity_at: now - 5_000,
+        started_at: now - 3 * minute,
+      }
     }
     if (fiber.id === 'pipeline/spin/remote-review') {
       entry.runtime = {
@@ -397,8 +415,8 @@ export function workspaceExample(now: number, options: { music?: boolean } = {})
     'pipeline/spin/transfer-check': 'Compare the transfer functions at both map resolutions.',
   }
   const sessions: SessionRecord[] = [
-    { at: now - 3 * 60 * minute, fiber: WORKSPACE_ID, uid: WORKSPACE_UID, session: 'workspace-session-latest', harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' },
-    { at: now - 8 * 60 * minute, fiber: WORKSPACE_ID, uid: WORKSPACE_UID, session: 'workspace-session-earlier', harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'resume' },
+    { at: now - 3 * 60 * minute, fiber: WORKSPACE_ID, uid: WORKSPACE_UID, session: WORKSPACE_LATEST_SESSION, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'dispatch' },
+    { at: now - 8 * 60 * minute, fiber: WORKSPACE_ID, uid: WORKSPACE_UID, session: WORKSPACE_EARLIER_SESSION, harness: 'claude-code', agent: 'claude-opus', host: WORKSPACE_HOST, tmux: null, kind: 'resume' },
   ]
   const buckets: ActivityBucket[] = []
   const commits: CommitRecord[] = []

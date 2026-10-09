@@ -199,6 +199,7 @@ func (a *app) rootCmd() *cobra.Command {
 	for _, command := range []*cobra.Command{
 		a.shuttleAgentsCmd(),
 		a.assignCmd(),
+		a.askCmd(),
 		a.shuttleCheckCmd(),
 		a.claimCmd(),
 		a.codexDesktopBridgeCmd(),

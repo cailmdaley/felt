@@ -26,7 +26,8 @@ defmodule Shuttle.Contract do
   # Level 7: the daemon shells `shuttle rest <fiber>`; `shuttle pin` is gone.
   # Level 8: the daemon shells `shuttle seat <fiber> <role>|--clear`.
   # Level 9: discovery uses `shuttle ls --ids-from` for hot-set reads.
-  @expected_level 9
+  # Level 10: the daemon clears worker questions with `shuttle ask <fiber> --clear`.
+  @expected_level 10
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()

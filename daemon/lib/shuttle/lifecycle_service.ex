@@ -1,6 +1,10 @@
 defmodule Shuttle.LifecycleService do
   @moduledoc """
-  The daemon's serialized writers for `accept`, `resume`, `rest` and `seat`.
+  The daemon's serialized writers for `accept`, `resume`, `rest`, `seat`
+  and worker-question clearing.
+
+  `:clear_ask` shells `shuttle ask <fiber> --clear` through the same serialized
+  write and document-cache refresh path as `accept` and `resume`.
 
   Seat edits share the Poller's write boundary so they cannot overwrite a
   concurrent worker-exit lifecycle write.
@@ -26,12 +30,12 @@ defmodule Shuttle.LifecycleService do
 
   alias Shuttle.{FeltStores, Poller}
 
-  @type verb :: :accept | :resume | :rest | :seat
+  @type verb :: :accept | :resume | :rest | :seat | :clear_ask
 
   @spec transition(verb(), String.t(), [String.t()]) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
   def transition(verb, identifier, args \\ [])
-      when verb in [:accept, :resume, :rest, :seat] and is_binary(identifier) do
+      when verb in [:accept, :resume, :rest, :seat, :clear_ask] and is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <-
            FeltStores.resolve_fiber_or_error(identifier) do
       if is_pid(GenServer.whereis(Shuttle.Env.server(Poller))) do
@@ -48,6 +52,11 @@ defmodule Shuttle.LifecycleService do
   verb-specific arguments such as a seat's role or `--clear`.
   """
   @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()
+  def write(:clear_ask, fiber_id, opts) do
+    opts = Keyword.delete(opts, :args)
+    Shuttle.CLI.run_lifecycle("ask", fiber_id, ["--clear"], opts)
+  end
+
   def write(verb, fiber_id, opts) when verb in [:accept, :resume, :rest, :seat] do
     {args, opts} = Keyword.pop(opts, :args, [])
     Shuttle.CLI.run_lifecycle(Atom.to_string(verb), fiber_id, args, opts)

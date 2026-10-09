@@ -211,6 +211,71 @@ describe('minified production document keyboard bridge', () => {
     expect(app).toHaveBeenCalledExactlyOnceWith('back', expect.objectContaining({ key: 'Escape' }))
   })
 
+  it('exits native fullscreen without forwarding, then sends Reveal Escape through the board chain', async () => {
+    reportHtml = `<html><body><div class="reveal">Slides</div><script>
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          document.querySelector('.reveal').classList.toggle('overview');
+          e.preventDefault();
+        }
+      });
+    </script></body></html>`
+    const frame = await report()
+    expect(frame.allowFullscreen).toBe(true)
+    const doc = frame.contentDocument!
+    let fullscreen: Element | null = doc.documentElement
+    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, get: () => fullscreen })
+    const exit = vi.fn(() => { fullscreen = null; return Promise.resolve() })
+    Object.defineProperty(doc, 'exitFullscreen', { configurable: true, value: exit })
+
+    expect(press(frame, 'Escape').defaultPrevented).toBe(true)
+    expect(exit).toHaveBeenCalledOnce()
+    expect(app).not.toHaveBeenCalled()
+    expect(messages).not.toHaveBeenCalled()
+    expect(doc.querySelector('.overview')).toBeNull()
+    press(frame, 'Escape')
+    expect(app).toHaveBeenCalledExactlyOnceWith('back', expect.objectContaining({ key: 'Escape', target: track }))
+    expect(doc.querySelector('.overview')).toBeNull()
+
+    // Native browsers can consume the first key entirely; fullscreenchange
+    // alone must not dismiss, or swallow the next independent Escape.
+    fullscreen = doc.documentElement
+    doc.dispatchEvent(new Event('fullscreenchange'))
+    fullscreen = null
+    doc.dispatchEvent(new Event('fullscreenchange'))
+    expect(app).toHaveBeenCalledOnce()
+    press(frame, 'Escape')
+    expect(app).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps Reveal overview, overlays and editable Escape local, without toggling overview on held Escape', async () => {
+    reportHtml = `<html><body><div class="reveal overview"><input></div><script>
+      document.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape' || e.target.tagName === 'INPUT') return;
+        var deck = document.querySelector('.reveal');
+        var overlay = deck.querySelector('.overlay');
+        if (overlay) overlay.remove(); else deck.classList.toggle('overview');
+        e.preventDefault();
+      });
+    </script></body></html>`
+    const frame = await report()
+    const deck = frame.contentDocument!.querySelector('.reveal')!
+    press(frame, 'Escape')
+    expect(deck.classList.contains('overview')).toBe(false)
+    expect(app).not.toHaveBeenCalled()
+    deck.innerHTML += '<div class="overlay">Help</div>'
+    press(frame, 'Escape')
+    expect(deck.querySelector('.overlay')).toBeNull()
+    expect(app).not.toHaveBeenCalled()
+    press(frame, 'Escape', {}, 'input')
+    press(frame, 'Escape', {}, 'body', false)
+    press(frame, 'Escape', { repeat: true })
+    expect(app).not.toHaveBeenCalled()
+    expect(deck.classList.contains('overview')).toBe(false)
+    press(frame, 'Escape')
+    expect(app).toHaveBeenCalledExactlyOnceWith('back', expect.objectContaining({ key: 'Escape' }))
+  })
+
   it('leaves editable fields and their descendants alone, including command and alt chords', async () => {
     reportHtml = `<html><head></head><body>
       <input id="input"><textarea id="textarea"></textarea><select id="select"><option>One</option></select>

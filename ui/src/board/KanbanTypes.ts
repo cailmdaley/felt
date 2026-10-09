@@ -87,13 +87,16 @@ export interface KanbanCard {
   tmuxSession?: string
   /**
    * What the live worker is doing, for the chips and the In-flight sort:
-   * `working` (busy mid-tool — the Aloft band, no chip), `waiting` (paused at
-   * a stop — "waiting for you" once idle ≥60s), `attention` (raised its hand —
-   * "needs you"), or `blocked` (the worker is `workerState: 'blocked'`, with
-   * `launchError`); the last three sit in the Holding band, below Aloft. Absent when there
+   * `working` (busy mid-tool — the Working band, no chip), `waiting`
+   * (paused at a stop — "waiting for you" once idle ≥60s), `attention` (raised
+   * a harness attention signal — "stalled"), or `blocked` (the worker is
+   * `workerState: 'blocked'` — in the Stalled band with `launchError`). An
+   * outstanding `ask` puts any worker in Question above Stalled. Absent when there
    * is no worker, or before a live worker's first activity event.
    */
   runtimePhase?: string
+  /** Non-blocking request for the human's view; the worker keeps working. */
+  ask?: { text: string; at: string }
   /** Durable explanation for a blocked app launch. */
   launchError?: string
   /**

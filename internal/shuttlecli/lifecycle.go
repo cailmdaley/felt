@@ -352,6 +352,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			}
 
 			if standingAwaiting(f, block) {
+				if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
+					return err
+				}
 				if err := rearmStanding(f); err != nil {
 					return err
 				}
@@ -367,6 +370,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
 			}
 			f.Status = felt.StatusActive
+			if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
+				return err
+			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
@@ -681,6 +687,9 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 				arm = func(f *felt.Felt, _ string) error { return rearmStanding(f) }
 			}
 			if err := arm(f, status); err != nil {
+				return err
+			}
+			if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 				return err
 			}
 			if err := st.Write(f); err != nil {

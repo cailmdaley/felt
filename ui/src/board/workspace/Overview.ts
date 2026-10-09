@@ -187,7 +187,7 @@ interface ChangeRow {
   change: Change
 }
 const needsYou = (card: KanbanCard): number => fiberPageColumn(card) === 'awaitingReview' ? 0
-  : fiberPageColumn(card) === 'inFlight' && inFlightBand(card) === 'holding' ? 1 : 2
+  : fiberPageColumn(card) === 'inFlight' && inFlightBand(card) !== 'working' ? 1 : 2
 function changeSummary(change: Change): string {
   const parts = [change.review ? '→ awaiting review' : '', change.outcome ? 'outcome changed' : ''].filter(Boolean)
   const kinds = new Map<string, number>()

@@ -331,7 +331,7 @@ function assembleSurfaces(
   // Seats read like a shelf of offices: alphabetical, so a launcher stays
   // where the hand expects it whatever was used last.
   roles.sort(byNameAsc);
-  // A card moves only when it crosses the visible Aloft / Holding seam.
+  // A card moves only when it crosses a Question / Stalled / Working seam.
   // Activity age and phase changes within a band do not change its position.
   inFlight.sort(byInFlightBand);
   awaitingReview.sort(byClosedAtDesc);
@@ -588,6 +588,7 @@ function toCard(
     held,
     heldSince,
     mirroredOrigins: entry.mirroredOrigins,
+    ask: f.shuttleAsk,
     dispatchedAt: f.shuttleDispatchedAt,
     handedOffAt: f.shuttleHandedOffAt,
     shuttleAgent: f.shuttleAgent,
@@ -747,22 +748,21 @@ export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
   return descByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || byCardIdentity(a, b);
 }
 
-/** Aloft: the worker is at work. Holding: a live worker stopped, waiting on the human. */
-export type InFlightBand = 'aloft' | 'holding';
+export type InFlightBand = 'question' | 'stalled' | 'working';
 
 /** In flight's bands in drawn order, with the caption each surface gives them. */
-export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['aloft', 'Aloft'], ['holding', 'Holding']];
+export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['question', 'Question'], ['stalled', 'Stalled'], ['working', 'Working']];
 
 export function inFlightBand(card: KanbanCard): InFlightBand {
+  if (card.ask) return 'question';
   return card.runtimePhase === 'waiting' || card.runtimePhase === 'blocked' || card.runtimePhase === 'attention'
-    ? 'holding'
-    : 'aloft';
+    ? 'stalled'
+    : 'working';
 }
 
 export function byInFlightBand(a: KanbanCard, b: KanbanCard): number {
-  const aBand = inFlightBand(a);
-  const bBand = inFlightBand(b);
-  return (aBand === bBand ? 0 : aBand === 'aloft' ? -1 : 1) || byCreatedAtDesc(a, b);
+  const order: Record<InFlightBand, number> = { question: 0, stalled: 1, working: 2 };
+  return order[inFlightBand(a)] - order[inFlightBand(b)] || byCreatedAtDesc(a, b);
 }
 
 export function byClosedAtDesc(a: KanbanCard, b: KanbanCard): number {

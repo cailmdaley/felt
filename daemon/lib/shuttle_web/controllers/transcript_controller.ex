@@ -3,7 +3,8 @@ defmodule ShuttleWeb.TranscriptController do
   Native transcript provenance and byte transfer:
 
     * `GET /api/v1/transcript?session=…` returns an availability receipt;
-    * `GET /api/v1/transcript/raw?session=…` returns the exact JSONL bytes.
+    * `GET /api/v1/transcript/raw?session=…` returns the exact JSONL bytes;
+      `offset=N` returns a byte slice for incremental reads.
 
   The host is selected explicitly with `host=`, or from the session ledger.
   Remote requests use the same SSH-routed transport as other host-local reads.
@@ -40,10 +41,11 @@ defmodule ShuttleWeb.TranscriptController do
   end
 
   def raw(conn, params) do
-    with {:ok, session} <- session_param(params) do
+    with {:ok, session} <- session_param(params),
+         {:ok, offset} <- offset_param(params) do
       case target_host(params, session) do
-        :local -> local_bytes(conn, session)
-        {:remote, %Remote{} = remote} -> remote_bytes(conn, session, remote)
+        :local -> local_bytes(conn, session, offset)
+        {:remote, %Remote{} = remote} -> remote_bytes(conn, session, remote, offset)
         {:unreachable, host} -> unavailable(conn, session, :host_unreachable, host)
       end
     else
@@ -56,7 +58,7 @@ defmodule ShuttleWeb.TranscriptController do
     |> receipt_map()
   end
 
-  defp local_bytes(conn, session) do
+  defp local_bytes(conn, session, nil) do
     case Transcript.bytes(session) do
       {:ok, path} ->
         {byte_count, sha256} = Transcript.digest(path)
@@ -69,6 +71,38 @@ defmodule ShuttleWeb.TranscriptController do
 
       {:error, status} ->
         unavailable(conn, session, status, Poller.own_host_id())
+    end
+  end
+
+  defp local_bytes(conn, session, offset) when is_integer(offset) do
+    case Transcript.path(session) do
+      path when is_binary(path) ->
+        case File.stat(path) do
+          {:ok, %File.Stat{size: size}} when offset <= size ->
+            conn
+            |> put_resp_content_type("application/x-ndjson", nil)
+            |> put_resp_header("x-transcript-offset", Integer.to_string(offset))
+            |> put_resp_header("x-transcript-byte-count", Integer.to_string(size))
+            |> send_file(200, path, offset, size - offset)
+
+          {:ok, %File.Stat{size: size}} ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(
+              416,
+              Jason.encode!(%{
+                session: session,
+                availability: "available_local",
+                byte_count: size
+              })
+            )
+
+          {:error, _reason} ->
+            unavailable(conn, session, :transcript_missing, Poller.own_host_id())
+        end
+
+      nil ->
+        unavailable(conn, session, :transcript_missing, Poller.own_host_id())
     end
   end
 
@@ -97,12 +131,21 @@ defmodule ShuttleWeb.TranscriptController do
     end
   end
 
-  defp remote_bytes(conn, session, %Remote{} = remote) do
+  defp remote_bytes(conn, session, %Remote{} = remote, offset) do
     query = %{"session" => session, "host" => "local"}
+
+    query =
+      if is_integer(offset), do: Map.put(query, "offset", Integer.to_string(offset)), else: query
 
     case OriginRouter.forward_get(remote, "/api/v1/transcript/raw", query,
            forward_timeout_ms: @transfer_timeout_ms
          ) do
+      {:forwarded, 200, content_type, body} when is_integer(offset) ->
+        conn
+        |> put_resp_content_type(content_type, nil)
+        |> put_resp_header("x-transcript-offset", Integer.to_string(offset))
+        |> send_resp(200, body)
+
       {:forwarded, 200, content_type, body} ->
         {byte_count, sha256} = digest_bytes(body)
 
@@ -167,6 +210,21 @@ defmodule ShuttleWeb.TranscriptController do
   defp http_status(:transcript_missing), do: 404
   defp http_status(:identity_pending), do: 409
   defp http_status(:host_unreachable), do: 503
+
+  defp offset_param(params) do
+    case Map.fetch(params, "offset") do
+      :error ->
+        {:ok, nil}
+
+      {:ok, value} when is_binary(value) ->
+        if Regex.match?(~r/\A\d+\z/, value),
+          do: {:ok, String.to_integer(value)},
+          else: {:error, "offset must be a non-negative integer"}
+
+      {:ok, _} ->
+        {:error, "offset must be a non-negative integer"}
+    end
+  end
 
   defp digest_bytes(bytes) when is_binary(bytes) do
     {byte_size(bytes), :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)}

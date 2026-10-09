@@ -10,6 +10,7 @@ import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, p
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
 import { buildSessionHistory } from '../sessionHistory.js'
+import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptBand.js'
 import { coarsePointer } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
@@ -34,6 +35,16 @@ interface ComposerSend {
 function workerIdentity(card: KanbanCard): string {
   return JSON.stringify([card.workerState, card.workerSurface, card.sessionUuid, card.tmuxSession, card.runtimePhase])
 }
+function latestTarget(card: KanbanCard): TranscriptTarget | null {
+  return card.sessionUuid ? {
+    session: card.sessionUuid,
+    host: card.shuttleHost,
+    agent: card.workerAgent ?? card.shuttleAgent,
+    live: hasLiveWorker(card),
+    at: instantMs(card.dispatchedAt),
+  } : null
+}
+
 function clockTime(ms: number): string {
   // 24-hour regardless of locale: the line is a mono strip where two times sit
   // side by side, and `11:59 AM · 03:35 PM` is both wider and harder to subtract
@@ -416,6 +427,8 @@ export class Dock {
   private pendingStartPrompt: { cardId: string; body: DispatchFailureBody } | null = null
   private transcriptCard: KanbanCard | null = null
   private transcriptPane: HTMLElement | null = null
+  private transcriptBand: TranscriptBand | null = null
+  private verdictMenu: HTMLDetailsElement | null = null
   private meetingPaint: (() => void) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
@@ -570,6 +583,9 @@ export class Dock {
     this.searchRenderToken++
     this.fiberIndex = null
     this.card = this.workerPillCard = this.transcriptCard = null
+    this.transcriptBand?.dispose()
+    this.transcriptBand = null
+    this.verdictMenu = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -610,6 +626,7 @@ export class Dock {
 
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
+    if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
     return Boolean(this.dismissConversation?.() || this.dismissParent?.())
   }
 
@@ -782,6 +799,7 @@ export class Dock {
       this.composerPaint?.()
     }
     this.workerPillCard = card
+    this.transcriptBand?.follow(latestTarget(card))
     this.paintGuidance(card)
   }
 
@@ -808,8 +826,11 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    const compose = shuttleManaged ? this.buildComposer(card) : null
-    if (compose) body.append(compose)
+    if (shuttleManaged) {
+      this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase })
+      body.append(this.transcriptBand.el)
+      body.append(this.buildComposer(card))
+    }
     body.append(this.buildTranscriptPane(card))
 
     const settings = document.createElement('div')
@@ -869,6 +890,18 @@ export class Dock {
         shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
         liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession,
         desktop: atDesktop(navigator.userAgent, coarsePointer()),
+        onRead: this.transcriptBand ? record => {
+          const transcript = this.transcriptBand
+          if (!transcript) return
+          transcript.read({
+            session: record.session,
+            host: record.host ?? undefined,
+            agent: record.agent ?? record.harness ?? undefined,
+            live: record.session === (hasLiveWorker(card) ? card.sessionUuid : undefined),
+            at: record.at,
+          })
+          transcript.el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        } : undefined,
         onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
       })
       history?.replaceWith(next)
@@ -898,17 +931,41 @@ export class Dock {
     const worker = document.createElement('span')
     worker.className = 'ws-fiber-worker'
     this.head.replaceChildren(worker, verdict)
+    const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
+    const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
+    const menu = document.createElement('details')
+    menu.className = 'kbn-ctl-verdict-menu'
+    const more = document.createElement('summary')
+    more.textContent = '⋯'; more.setAttribute('aria-label', 'Fiber actions')
+    const choices = document.createElement('div'); choices.className = 'kbn-ctl-menu'
+    menu.append(more, choices)
+    let release: Release | null = null
+    menu.addEventListener('toggle', () => {
+      release?.(); release = null
+      if (menu.open && menu.isConnected) release = anchorPopover(choices, more, { placement: 'below-end' })
+    })
+    this.composerDisposers.push(() => { release?.(); release = null })
+    this.verdictMenu = menu
     foot.append(errorEl, statusEl)
     body.append(settings, ...(history ? [history as HTMLElement] : []), foot)
-    // The status line carries the worker and, for every fiber without a
-    // verdict, Temper and Discard: plates while it awaits review, quiet
-    // verbs otherwise. The act zone below is the composer alone.
+    // Review and live verdicts sit on the status line. Drafts and resting
+    // constitutions keep their verdicts in a menu below the transcript.
     this.actPaint = () => {
       const column = fiberPageColumn(card)
       this.el.dataset.column = column
       this.head.dataset.column = column
-      verdict.hidden = !verdictReachable(card)
+      const reachable = verdictReachable(card)
+      verdict.hidden = !reachable
       this.paintHeadWorker(card, worker)
+      if (reachable && column !== 'inFlight' && column !== 'awaitingReview') {
+        verdict.remove()
+        if (temper.parentElement !== choices) choices.append(temper, discard)
+        if (menu.parentElement !== foot) foot.append(menu)
+      } else {
+        if (verdict.parentElement !== this.head) this.head.append(verdict)
+        if (temper.parentElement !== verdict) verdict.append(temper, discard)
+        menu.remove()
+      }
     }
     this.actPaint()
   }

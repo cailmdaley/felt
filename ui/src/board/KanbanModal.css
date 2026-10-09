@@ -1271,7 +1271,7 @@
   display: flex; flex-direction: column;
   gap: 8px;
 }
-/* Quiet captions mark the only ordering seam inside In flight. Both bands
+/* Quiet captions mark the ordering seams inside In flight. All bands
    share one scroller and retain the cards' own attention/status signals. */
 .kbn-flight-band {
   flex: 0 0 auto;
@@ -1287,15 +1287,20 @@
   letter-spacing: 0.06em;
   color: var(--kbn-ink-muted);
 }
-.kbn-flight-band[data-flight-band="holding"] .kbn-flight-caption {
+.kbn-flight-band[data-flight-band="question"] .kbn-flight-caption,
+.kbn-flight-band[data-flight-band="stalled"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
 /* The gold edge is painted inside the card's own 1 px border, so a card
    crossing into the band changes colour, never size. A background layer
    leaves the card's shadows to whichever surface draws it. */
-.kbn-flight-band[data-flight-band="holding"] .kbn-card {
+.kbn-flight-band[data-flight-band="question"] .kbn-card,
+.kbn-flight-band[data-flight-band="stalled"] .kbn-card {
   border-left-color: var(--kbn-owed);
   background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
+}
+.kbn-card-question {
+  color: var(--kbn-owed-ink);
 }
 .kbn-flight-band + .kbn-flight-band {
   margin-top: 4px;
