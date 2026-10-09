@@ -188,8 +188,8 @@ describe('phasePillLabel', () => {
   })
 
   it('clocks attention only once it has gone an hour unanswered', () => {
-    expect(phasePillLabel('attention', NOW - 4 * 60_000, NOW)).toBe('☞︎ stalled')
-    expect(phasePillLabel('attention', NOW - 90 * 60_000, NOW)).toBe('☞︎ stalled · 1h')
+    expect(phasePillLabel('attention', NOW - 4 * 60_000, NOW)).toBe('☞︎ at a prompt')
+    expect(phasePillLabel('attention', NOW - 90 * 60_000, NOW)).toBe('☞︎ at a prompt · 1h')
   })
 
   it('falls back to the bare label with no activity stamp', () => {

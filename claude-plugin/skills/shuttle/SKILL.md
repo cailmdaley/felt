@@ -69,7 +69,9 @@ To put a todo on the board, give it a shuttle block; the board shows nothing els
 
 A worker leaves in one of three ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. It **closes**, moving the card to **Awaiting review**, and nobody is launched; the human then tempers the card (accepts it), discards it, or resumes it. Or it **rests**, putting the card in **Resting** with no review, to be started again by hand. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times. Not every constitution has a finish line: a hub or a seat the human comes back to — a chair, a practice, a debug intake — is a oneshot that rests between sessions.
 
-The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. **Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
+The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. In flight has two bands, **Question** then **Working**.
+Questions include agent-raised asks and workers needing human input; a harness attention signal reads **at a prompt** on the card.
+**Chronicle** shows where the time went, and the **Board** tab lays out every file workers sent.
 
 ## Working a constitution
 

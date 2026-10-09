@@ -1303,15 +1303,13 @@
   letter-spacing: 0.06em;
   color: var(--kbn-ink-muted);
 }
-.kbn-flight-band[data-flight-band="question"] .kbn-flight-caption,
-.kbn-flight-band[data-flight-band="stalled"] .kbn-flight-caption {
+.kbn-flight-band[data-flight-band="question"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
 /* The gold edge is painted inside the card's own 1 px border, so a card
    crossing into the band changes colour, never size. A background layer
    leaves the card's shadows to whichever surface draws it. */
-.kbn-flight-band[data-flight-band="question"] .kbn-card,
-.kbn-flight-band[data-flight-band="stalled"] .kbn-card {
+.kbn-flight-band[data-flight-band="question"] .kbn-card {
   border-left-color: var(--kbn-owed);
   background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
 }

@@ -357,7 +357,7 @@ describe('workspace reader integration', () => {
     await press('K'); expect(current()).toBe('alpha')
     expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
   })
-  it('captions In flight as its Stalled and Working bands even from an interleaved feed, and J/K stops at each', async () => {
+  it('captions In flight as its Question and Working bands even from an interleaved feed, and J/K stops at each', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
@@ -367,7 +367,7 @@ describe('workspace reader integration', () => {
     workspace.open(feed[0], 'Desk'); await flush()
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Stalled', 'Working', 'Awaiting review'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Question', 'Working', 'Awaiting review'])
     const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
     await press('K'); expect(current()).toBe('w1')
     await press('j'); expect(current()).toBe('w2')
@@ -386,8 +386,8 @@ describe('workspace reader integration', () => {
     const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     // Empty groups draw no entry; the strip abbreviates Awaiting review, its caption does not.
-    expect(entries().map(entry => entry.textContent)).toEqual(['Stalled1', 'Working2', 'Review1'])
-    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Stalled, 1', 'Working, 2', 'Awaiting review, 1'])
+    expect(entries().map(entry => entry.textContent)).toEqual(['Question1', 'Working2', 'Review1'])
+    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Question, 1', 'Working, 2', 'Awaiting review, 1'])
     expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title)).toEqual(['Awaiting review'])
     entries()[1].click(); await flush()
     expect(current()).toBe('w1')
