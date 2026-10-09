@@ -67,12 +67,16 @@ defmodule ShuttleWeb.TranscriptController do
         |> put_resp_content_type("application/x-ndjson", nil)
         |> put_resp_header("x-transcript-byte-count", Integer.to_string(byte_count))
         |> put_resp_header("x-transcript-sha256", sha256)
-        |> send_file(200, path)
+        |> send_slice(path, 0, byte_count)
 
       {:error, status} ->
         unavailable(conn, session, status, Poller.own_host_id())
     end
   end
+
+  # Bandit raises on a zero-length sendfile, which a poll at EOF asks for.
+  defp send_slice(conn, _path, _offset, 0), do: send_resp(conn, 200, "")
+  defp send_slice(conn, path, offset, length), do: send_file(conn, 200, path, offset, length)
 
   defp local_bytes(conn, session, offset) when is_integer(offset) do
     case Transcript.path(session) do
@@ -83,7 +87,7 @@ defmodule ShuttleWeb.TranscriptController do
             |> put_resp_content_type("application/x-ndjson", nil)
             |> put_resp_header("x-transcript-offset", Integer.to_string(offset))
             |> put_resp_header("x-transcript-byte-count", Integer.to_string(size))
-            |> send_file(200, path, offset, size - offset)
+            |> send_slice(path, offset, size - offset)
 
           {:ok, %File.Stat{size: size}} ->
             conn
