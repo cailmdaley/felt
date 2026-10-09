@@ -1972,7 +1972,10 @@ export class Dock {
 
     btn.disabled = false
     btn.textContent = original
-    this.finishRequeue(card, body.tmux_session)
+    // A message resumed into a live terminal worker was typed into its
+    // conversation; the human stays here rather than being sent to the tab.
+    const typedIntoLive = mode === 'previous' && text.trim() !== '' && hasLiveWorker(card)
+    this.finishRequeue(card, typedIntoLive ? undefined : body.tmux_session)
     return true
   }
 

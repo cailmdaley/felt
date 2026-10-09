@@ -2765,6 +2765,11 @@ defmodule Shuttle.Poller do
     state = cut_open_session_for_fresh(state, fiber_id, runtime_key, uid, opts)
 
     current = running_worker(state, fiber_id)
+    message = Keyword.get(opts, :user_message)
+
+    paste_into =
+      if Keyword.get(opts, :resume_mode) == "previous" and is_binary(message),
+        do: live_tmux_session(state, fiber_id, uid)
 
     cond do
       current != nil and Shuttle.AppWorkers.app?(current.session) and
@@ -2787,6 +2792,14 @@ defmodule Shuttle.Poller do
           {:reply, {:ok, current.session}, %{state | running: Map.put(state.running, key, meta)}}
         else
           error -> {:reply, error, state}
+        end
+
+      is_binary(paste_into) ->
+        # Resume with a message on a live terminal worker: the message is the
+        # human's next turn, typed into the conversation as they would type it.
+        case Shuttle.Tmux.paste(state.runner, paste_into, message) do
+          :ok -> {:reply, {:ok, paste_into}, state}
+          {:error, reason} -> {:reply, {:error, {:paste_failed, reason}}, state}
         end
 
       open_session?(state, fiber_id, runtime_key, uid) ->
@@ -3848,6 +3861,17 @@ defmodule Shuttle.Poller do
   # check_not_running.
   defp already_running_session?(%State{} = state, session) do
     Shuttle.WorkerBackend.present?(state.runner, session)
+  end
+
+  # The fiber's live tmux worker session, or nil (none, or an app worker).
+  defp live_tmux_session(%State{} = state, fiber_id, uid) do
+    case live_session_for_fiber(state, fiber_id, uid) do
+      session when is_binary(session) ->
+        if Shuttle.AppWorkers.app?(session), do: nil, else: session
+
+      _ ->
+        nil
+    end
   end
 
   # Does this daemon track a worker for the fiber? Matched by slug and by

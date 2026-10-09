@@ -1530,6 +1530,56 @@ defmodule Shuttle.PollerTest do
     assert Shuttle.Tmux.present?(MockRunner, session)
   end
 
+  test "Resume with a message on a live session types it into the conversation as the human's turn" do
+    fiber_id = "tests/resume-paste"
+    uid = "01JZ00000000000000000000RP"
+
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
+
+    MockRunner.set_shuttle(
+      fiber_id,
+      "kind: oneshot\nagent: claude-sonnet\nhost: test-host\n",
+      "active"
+    )
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_resume_paste,
+        runner: MockRunner,
+        own_host_id: "test-host",
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    Application.put_env(:shuttle, :paste_submit_delay_ms, 0)
+    on_exit(fn -> Application.delete_env(:shuttle, :paste_submit_delay_ms) end)
+
+    assert {:ok, session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
+    before = length(MockRunner.commands())
+
+    assert {:ok, ^session} =
+             Poller.dispatch_fiber(poller, fiber_id,
+               force: true,
+               ad_hoc: true,
+               resume_mode: "previous",
+               user_message: "line one\nline two"
+             )
+
+    commands = MockRunner.commands() |> Enum.drop(before)
+
+    assert Enum.any?(commands, &match?({"tmux", ["load-buffer" | _]}, &1))
+    assert {"tmux", ["send-keys", "-t", session, "Enter"]} in commands
+
+    assert Enum.any?(commands, fn
+             {"tmux", ["paste-buffer", "-p", "-d", "-b", _, "-t", ^session]} -> true
+             _ -> false
+           end)
+
+    refute Enum.any?(commands, &match?({"tmux", ["kill-session" | _]}, &1))
+    refute Enum.any?(commands, &match?({"tmux", ["new-session" | _]}, &1))
+  end
+
   test "snapshot remains responsive while poll cycle is reading felt" do
     fiber = make_fiber("tests/slow-felt-read")
     MockRunner.set_fiber("tests/slow-felt-read", fiber)
