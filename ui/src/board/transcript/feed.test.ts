@@ -167,3 +167,25 @@ describe('TranscriptFeed', () => {
     reader.dispose()
   })
 })
+
+describe('TranscriptFeed default fetch', () => {
+  it('calls the global fetch unbound, as browsers require', async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = function (this: unknown) {
+      // A browser's fetch throws "Illegal invocation" when called as a method.
+      if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation')
+      return Promise.resolve(new Response('', { status: 200 }))
+    } as typeof fetch
+    try {
+      const statuses: string[] = []
+      const feed = new TranscriptFeed({
+        shuttleBase: '', session: 's',
+        onEntries: () => {}, onReset: () => {}, onStatus: (s) => statuses.push(s),
+      })
+      await feed.read()
+      expect(statuses).not.toContain('error')
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+})
