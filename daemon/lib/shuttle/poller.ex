@@ -1699,14 +1699,17 @@ defmodule Shuttle.Poller do
                                                                    modes} ->
         previous = Map.get(state.discovery, store, %{})
         now = System.system_time(:millisecond)
-        full? = Map.fetch!(discovery_plan, store) == :full
+        scan = Map.fetch!(discovery_plan, store)
+        full? = scan != :hot
         started = System.monotonic_time(:millisecond)
         hot_ids = hot_ids_for_store(store, previous, state)
 
         result =
-          if full?,
-            do: list_shuttle_fibers(store, state, nil, state.full_scan_timeout_ms),
-            else: list_shuttle_fibers(store, state, hot_ids, nil)
+          case scan do
+            :full -> list_shuttle_fibers(store, state, nil, nil)
+            :full_slow -> list_shuttle_fibers(store, state, nil, state.full_scan_timeout_ms)
+            :hot -> list_shuttle_fibers(store, state, hot_ids, nil)
+          end
 
         duration = System.monotonic_time(:millisecond) - started
         retained = Map.get(state.last_known_listings, store, [])
@@ -1758,7 +1761,10 @@ defmodule Shuttle.Poller do
                     last_full_duration_ms: duration,
                     last_full_completed_at: Map.get(previous, :last_full_completed_at),
                     next_full_due_at:
-                      now + max(state.full_scan_min_interval_ms, 5 * max(duration, 1)),
+                      if(is_nil(Map.get(previous, :last_full_completed_at)),
+                        do: now,
+                        else: now + max(state.full_scan_min_interval_ms, 5 * max(duration, 1))
+                      ),
                     last_full_timed_out: true
                   }
                 else
@@ -1845,13 +1851,23 @@ defmodule Shuttle.Poller do
   @doc false
   def discovery_plan(%State{} = state, stores, now_ms) do
     Map.new(stores, fn store ->
+      previous = Map.get(state.discovery, store, %{})
+
       mode =
-        if full_scan_due?(Map.get(state.discovery, store, %{}), state, now_ms),
-          do: :full,
-          else: :hot
+        if full_scan_due?(previous, state, now_ms) do
+          if slow_full_scan?(previous, state), do: :full_slow, else: :full
+        else
+          :hot
+        end
 
       {store, mode}
     end)
+  end
+
+  defp slow_full_scan?(previous, state) do
+    Map.get(previous, :mode) == :hot or
+      Map.get(previous, :last_full_timed_out, false) or
+      Map.get(previous, :last_full_duration_ms, 0) > state.full_scan_budget_ms
   end
 
   defp poll_stall_timeout(state, discovery_plan) do
@@ -1860,7 +1876,8 @@ defmodule Shuttle.Poller do
     planned_ms =
       Enum.reduce(state.felt_stores, 0, fn store, total ->
         case Map.fetch!(discovery_plan, store) do
-          :full -> total + 3 * state.full_scan_timeout_ms
+          :full -> total + 3 * cmd_timeout_ms
+          :full_slow -> total + 3 * state.full_scan_timeout_ms
           :hot -> total + cmd_timeout_ms
         end
       end)

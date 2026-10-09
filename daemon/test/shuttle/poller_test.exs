@@ -1578,8 +1578,8 @@ defmodule Shuttle.PollerTest do
 
     health = Poller.snapshot(poller).poll_health
     assert health.state == "idle"
-    assert health.stall_timeout_ms == 2_701_000
-    assert health.stall_timeout_ms > :sys.get_state(poller, @state_timeout).full_scan_timeout_ms
+    assert health.stall_timeout_ms == 600_000
+    assert health.stall_timeout_ms < :sys.get_state(poller, @state_timeout).full_scan_timeout_ms
     assert health.discovery[MockRunner.felt_root()].mode == :full
     assert health.stalls == 0
     assert health.last_stalled_at == nil
@@ -1590,6 +1590,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.set_fiber("tests/stalled-read", fiber)
     MockRunner.set_shuttle("tests/stalled-read", oneshot_shuttle())
     MockRunner.set_ls_delay(2_000)
+    Env.put_app_env(:cmd_timeout_ms, 1)
 
     {:ok, poller} =
       start_poller!(
@@ -6112,7 +6113,13 @@ defmodule Shuttle.PollerTest do
     settle_poller!(poller)
 
     :sys.replace_state(poller, fn state ->
-      slow = %{mode: :hot, last_full_duration_ms: 100, next_full_due_at: 0}
+      slow = %{
+        mode: :hot,
+        last_full_duration_ms: 100,
+        last_full_completed_at: System.system_time(:millisecond) - 60_000,
+        next_full_due_at: 0
+      }
+
       %{state | discovery: Map.put(state.discovery, MockRunner.felt_root(), slow)}
     end)
 
@@ -6310,12 +6317,19 @@ defmodule Shuttle.PollerTest do
         runner: MockRunner,
         poll_interval_ms: 60_000,
         max_concurrent_workers: 0,
-        full_scan_timeout_ms: 100,
+        full_scan_timeout_ms: 120_000,
         full_scan_min_interval_ms: 60_000,
+        stall_timeout_ms: 1,
         felt_stores: [MockRunner.felt_root()]
       )
 
     settle_poller!(poller)
+
+    state = :sys.get_state(poller, @state_timeout)
+    info = state.discovery[MockRunner.felt_root()]
+    assert info.mode == :hot
+    assert info.next_full_due_at <= System.system_time(:millisecond)
+    assert state.stall_timeout_ms == 3 * 120_000 + 1_000
 
     listings =
       Enum.filter(MockRunner.commands(), fn
@@ -6326,6 +6340,44 @@ defmodule Shuttle.PollerTest do
     assert length(listings) >= 2
     refute Enum.any?(listings, fn {_cmd, args} -> "--ids-from" in args end)
     assert Poller.snapshot(poller).poll_health.discovery[MockRunner.felt_root()].mode == :hot
+
+    MockRunner.set_listing_timeout(false)
+    commands_before = length(MockRunner.commands())
+    sync_poll_cycle!(poller)
+    retry = Enum.drop(MockRunner.commands(), commands_before)
+
+    assert Enum.any?(retry, fn {cmd, args} -> cmd == "shuttle" and "--has-field" in args end)
+
+    refute Enum.any?(retry, fn {cmd, args} ->
+             cmd == "shuttle" and "--ids-from" in args
+           end)
+  end
+
+  @tag :adaptive_discovery
+  test "a fast full scan keeps the configured watchdog bound" do
+    id = "tests/discovery-fast-watchdog"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_fast_watchdog,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        stall_timeout_ms: 300_000,
+        full_scan_timeout_ms: 900_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    sync_poll_cycle!(poller)
+
+    state = :sys.get_state(poller, @state_timeout)
+    info = state.discovery[MockRunner.felt_root()]
+    assert info.mode == :full
+    assert info.last_full_duration_ms <= state.full_scan_budget_ms
+    assert state.stall_timeout_ms == 300_000
   end
 
   @tag :adaptive_discovery
@@ -6455,7 +6507,7 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
     state = :sys.get_state(poller, @state_timeout)
-    assert state.stall_timeout_ms == 3 * state.full_scan_timeout_ms + 60_000 + 1_000
+    assert state.stall_timeout_ms == 4 * 60_000 + 1_000
   end
 
   defp notify_worker_exit(poller, fiber_id) do
