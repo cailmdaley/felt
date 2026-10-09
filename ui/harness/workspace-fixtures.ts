@@ -12,6 +12,8 @@ export const WORKSPACE_REMOTE = 'basalt-login-02'
 export const WORKSPACE_UID = '01KVBR1F9BWBVKF97473PV67K8'
 export const WORKSPACE_NAME = 'Calibrate the shear response'
 export const WORKSPACE_ID = 'research/workspace/calibration-report'
+import { OVERSIZED_IMAGE } from './oversized-image.js'
+
 export const WORKSPACE_REPORT = '/fixture-store/workspace/.felt/research/workspace/calibration-report/report.html'
 
 export interface WorkspaceFileFixture {
@@ -324,7 +326,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
   // A reveal.js-style deck and a script-driven carousel own their sideways gestures.
   const pageGestures = `<div id="gesture-deck" style="touch-action:pan-y;height:120px;background:#eee8dc">Deck</div><div id="gesture-carousel" style="height:120px;background:#e4ece4">Carousel</div><script>document.getElementById('gesture-carousel').addEventListener('touchmove',e=>e.preventDefault(),{passive:false})</script>`
   const longReport = Array.from({ length: 80 }, (_, index) => (index === 40 ? pageGestures : '') + reportLine(index)).join('\n')
-  const reportHTML = `<!doctype html><html><head><meta charset="utf-8"><title>Calibration report</title><style>body{font:16px/1.5 sans-serif;margin:32px}h1{color:#514637}@media (prefers-color-scheme: dark){body{background:#16181d;color:#e6e0d4}h1{color:#e8cf9a}}</style></head><body><h1 id="report-sentinel">Calibration report</h1><p id="report-identity"></p><p>Read <code>brief.md</code> and <a href="../../../../deliverables/brief.md">the field note</a>; listen to <code>tone.mp3</code> or <code>tone.wav</code>.</p>${wideTable}${longReport}<script>document.getElementById('report-identity').textContent='instance:'+crypto.randomUUID()</script></body></html>`
+  const reportHTML = `<!doctype html><html><head><meta charset="utf-8"><title>Calibration report</title><style>body{font:16px/1.5 sans-serif;margin:32px}h1{color:#514637}@layer report{.authored-media{max-width:42%;height:123px}}@media (prefers-color-scheme: dark){body{background:#16181d;color:#e6e0d4}h1{color:#e8cf9a}}</style></head><body><h1 id="report-sentinel">Calibration report</h1><p id="report-identity"></p><p>Read <code>brief.md</code> and <a href="../../../../deliverables/brief.md">the field note</a>; listen to <code>tone.mp3</code> or <code>tone.wav</code>.</p><p>Embedded screenshot, 3000 × 600 pixels:</p><img id="oversized-report-image" src="${OVERSIZED_IMAGE}" width="3000" height="600" alt="Wide screenshot gradient">${wideTable}${longReport}<script>document.getElementById('report-identity').textContent='instance:'+crypto.randomUUID()</script></body></html>`
   const file = (owner: string, path: string, mime: string, body: Blob | string): WorkspaceFileFixture => ({
     owner,
     path,
@@ -351,7 +353,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     `),
     file(WORKSPACE_HOST, `${project}/.felt/research/workspace/mask-validation/theme.css`, 'text/css', '{ ] broken css'),
     file(WORKSPACE_HOST, report, 'text/html', reportHTML),
-    file(WORKSPACE_HOST, notes, 'text/markdown', '# Field note\n\nThe transfer ratio is consistent with unity in the validation range.\n\n| ell | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 1000 | 1100 | 1200 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| ratio | 0.998 | 1.003 | 1.001 | 0.999 | 1.002 | 1.000 | 0.997 | 1.004 | 1.001 | 0.998 | 1.002 | 1.000 |\n\nRead [the report](../.felt/research/workspace/calibration-report/report.html), or listen to `tone.mp3`.\n'),
+    file(WORKSPACE_HOST, notes, 'text/markdown', `![Wide screenshot gradient](${OVERSIZED_IMAGE})\n\n` + '# Field note\n\nThe transfer ratio is consistent with unity in the validation range.\n\n| ell | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900 | 1000 | 1100 | 1200 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n| ratio | 0.998 | 1.003 | 1.001 | 0.999 | 1.002 | 1.000 | 0.997 | 1.004 | 1.001 | 0.998 | 1.002 | 1.000 |\n\nRead [the report](../.felt/research/workspace/calibration-report/report.html), or listen to `tone.mp3`.\n'),
     file(WORKSPACE_HOST, readme, 'text/plain', 'Fixture text document.\n\nThis body is served by the mocked file route.\nListen to `tone.mp3`.\n'),
     file(WORKSPACE_HOST, code, 'text/x-python', 'def response(ell, transfer):\n    return ell * transfer\n'),
     file(WORKSPACE_HOST, linkedText, 'text/csv', 'ell,response\n100,0.998\n200,1.003\n'),
@@ -400,6 +402,8 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       ':::',
       '',
       '## Validation notes',
+      '',
+      `![Wide screenshot gradient](${OVERSIZED_IMAGE})`,
       '',
       'Read the [mask table](tables/mask.csv) alongside the report.',
       '',
