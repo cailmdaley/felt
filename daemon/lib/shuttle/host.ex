@@ -119,6 +119,27 @@ defmodule Shuttle.Host do
     end
   end
 
+  @doc "Full-scan budget from host.json, falling back to the configured default."
+  @spec full_scan_budget_ms(non_neg_integer()) :: non_neg_integer()
+  def full_scan_budget_ms(default) when is_integer(default) and default >= 0 do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, %{"full_scan_budget_ms" => budget}} when is_integer(budget) and budget >= 0 ->
+        budget
+
+      {:ok, %{"full_scan_budget_ms" => value}} ->
+        Logger.warning(
+          ~s(#{path}: "full_scan_budget_ms" must be a non-negative integer, got #{inspect(value)}; using #{default})
+        )
+
+        default
+
+      _ ->
+        default
+    end
+  end
+
   @doc "`resolve/1`, raising `ArgumentError` with the message on a refusal."
   @spec resolve!(pos_integer()) :: settings()
   def resolve!(fallback_port \\ @default_port) do

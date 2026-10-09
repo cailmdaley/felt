@@ -47,6 +47,25 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert File.read!(args_file) == "-C\n#{store}\nrest\ntests/operator\n--local\n"
   end
 
+  test "dated and undated rest pass the date through the serialized writer" do
+    store = fixture_store!("shuttle-rest-date", "tests/operator", "Operator")
+    args_file = install_fake_cli!()
+
+    for until <- ["2099-06-12", ""] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{"action" => "rest", "fiber" => "tests/operator", "until" => until})
+        )
+
+      assert conn.status == 200
+
+      assert File.read!(args_file) ==
+               "-C\n#{store}\nrest\ntests/operator\n--until\n#{until}\n--local\n"
+    end
+  end
+
   test "pin is no longer a lifecycle action" do
     fixture_store!("shuttle-lifecycle-nopin", "tests/operator", "Operator")
     args_file = install_fake_cli!()

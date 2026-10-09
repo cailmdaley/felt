@@ -101,7 +101,8 @@ a force-dispatch skips the wait.
 
 Every snapshot carries `poll_health`: `state` is `reading` or `idle`,
 `stall_timeout_ms` is the watchdog bound (300 seconds),
-and `stalls` plus `last_stalled_at` show whether a world read was reaped. Slow
+`full_scan_budget_ms` is the effective per-host discovery budget, and `stalls`
+plus `last_stalled_at` show whether a world read was reaped. Slow
 store and remote discovery run in one supervised, unlinked task while the
 poller continues serving its cached state. At the bound the task is killed, a
 new cycle is scheduled, and any late token from the abandoned read is ignored.

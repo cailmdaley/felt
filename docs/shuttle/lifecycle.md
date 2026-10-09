@@ -73,6 +73,10 @@ reads as a question.
 any verdict, concludes the run and stops the worker: the card goes back to
 Resting, its outcome the session's report, and starts again by hand. This is
 how a hub or a seat — a constitution with no finish line — ends a session.
+On the Desk's focused card or a constitution page, press **s** to open a small date popover.
+Enter with an empty date rests undated; choosing a date rests until that day.
+The same operation is `shuttle rest <fiber> --until YYYY-MM-DD` (or `--until ''` for no date).
+It works in any state and stops a live worker through the owning daemon's serialized rest lifecycle.
 
 **4. More work, not blocked?** Leave the fiber active and just hand off. The
 daemon starts a fresh worker next tick, and it lands on your `## Status`.
@@ -214,8 +218,10 @@ marker. Only such a host needs the exception, so it is off unless the host opts
 in, in `~/.config/shuttle/host.json` (or `$SHUTTLE_HOST_CONFIG_FILE`):
 
 ```json
-{"class": "shared-multi-user", "quarantine_auto_release": true}
+{"class": "shared-multi-user", "quarantine_auto_release": true, "full_scan_budget_ms": 0}
 ```
+
+`full_scan_budget_ms` is an optional non-negative integer read once at daemon boot. It overrides the 10,000 ms default that selects adaptive discovery: after a full listing, a scan slower than this budget puts the store in hot mode until its next scheduled full scan. Set it to `0` to keep the store hot after its first full listing; full scans still run at `full_scan_min_interval_ms` cadence. The effective value is reported in `poll_health`. This is useful on shared login nodes where repeated full scans should be paced even when a scan happens to finish quickly.
 
 On any other host a SIGKILL is an out-of-memory kill or a person's `kill -9`,
 and holding is the right answer. With the key absent or anything but `true`,

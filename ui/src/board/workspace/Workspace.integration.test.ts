@@ -113,6 +113,29 @@ beforeEach(() => {
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('workspace reader integration', () => {
+  it('s on the constitution page requests rest, not the sidebar', async () => {
+    workspace.dispose()
+    const onRest = vi.fn()
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
+    workspace.open(cards[0]); await flush(); await flush()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
+    expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
+  })
+  it('a Question opens its report rather than the previously selected prose', async () => {
+    workspace.open(cards[0]); await flush(); await flush()
+    const prose = document.querySelector<HTMLElement>('[data-key="fiber:host-a:alpha"]')!
+    prose.click(); await flush()
+    workspace.openQuestion(cards[0]); await flush(); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key'))
+      .toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+  })
+
+  it('a Question without a report opens its constitution', async () => {
+    bodyOverrides.set('host-b:beta', 'A question without a report.')
+    workspace.openQuestion(cards[1]); await flush(); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-b:beta')
+  })
+
   it('names the roster the feed carries and repaints the page when it changes', async () => {
     const original = cards[0]
     const roles = (): string[] => [...document.querySelectorAll('.ws-fiber-role')].map(role => role.textContent ?? '')
@@ -357,7 +380,7 @@ describe('workspace reader integration', () => {
     await press('K'); expect(current()).toBe('alpha')
     expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
   })
-  it('captions In flight as its Stalled and Working bands even from an interleaved feed, and J/K stops at each', async () => {
+  it('captions In flight as its Question and Working bands even from an interleaved feed, and J/K stops at each', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
@@ -367,7 +390,7 @@ describe('workspace reader integration', () => {
     workspace.open(feed[0], 'Desk'); await flush()
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Stalled', 'Working', 'Awaiting review'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Question', 'Working', 'Awaiting review'])
     const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
     await press('K'); expect(current()).toBe('w1')
     await press('j'); expect(current()).toBe('w2')
@@ -386,8 +409,8 @@ describe('workspace reader integration', () => {
     const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     // Empty groups draw no entry; the strip abbreviates Awaiting review, its caption does not.
-    expect(entries().map(entry => entry.textContent)).toEqual(['Stalled1', 'Working2', 'Review1'])
-    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Stalled, 1', 'Working, 2', 'Awaiting review, 1'])
+    expect(entries().map(entry => entry.textContent)).toEqual(['Question1', 'Working2', 'Review1'])
+    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Question, 1', 'Working, 2', 'Awaiting review, 1'])
     expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title)).toEqual(['Awaiting review'])
     entries()[1].click(); await flush()
     expect(current()).toBe('w1')

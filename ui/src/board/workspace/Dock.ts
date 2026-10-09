@@ -1050,13 +1050,19 @@ export class Dock {
       resume.classList.toggle('kbn-ctl-secondary', resumable)
       resume.title = resumable ? 'Resume the previous session (⌥↵)' : ''
       resume.hidden = !resumable
+      // A live worker is resumed only to hand it a message; attaching to it
+      // is the terminal action's.
+      const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
+      if (!busy && !this.blockedDispatches.has(resume)) resume.disabled = idle
       message.placeholder = this.meetingArmed() ? 'A note for the meeting (optional)'
         : ''
     }
     this.composerPaint()
+    message.addEventListener('input', () => this.composerPaint?.())
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
       busy = on
       for (const verb of [fresh, resume]) if (verb !== except) verb.disabled = on
+      if (!on) this.composerPaint?.()
       for (const control of err.querySelectorAll<HTMLInputElement | HTMLButtonElement>('.kbn-start-prompt input, .kbn-start-prompt button')) control.disabled = on
       strip.setFrozen(on)
       if (epoch === this.epoch) this.meetingPaint?.()
@@ -1066,7 +1072,7 @@ export class Dock {
     const admit = (files: File[]): void => {
       if (busy) showImageError('Wait for the send to finish before adding images.')
       else showImageError(images.add(files))
-      strip.paint()
+      strip.paint(); this.composerPaint?.()
     }
     message.addEventListener('paste', (e) => {
       const files = pastedImageFiles(e.clipboardData)
@@ -1946,7 +1952,9 @@ export class Dock {
     }
 
     if (res.status === 409) {
-      if (body.tmux_session) {
+      // A message the worker did not take stays in the composer.
+      if (body.tmux_session && text.trim() === '') {
+        btn.textContent = original
         this.finishRequeue(card, body.tmux_session)
         return true
       }
@@ -1973,7 +1981,10 @@ export class Dock {
 
     btn.disabled = false
     btn.textContent = original
-    this.finishRequeue(card, body.tmux_session)
+    // A message resumed into a live terminal worker was typed into its
+    // conversation; the human stays here rather than being sent to the tab.
+    const typedIntoLive = mode === 'previous' && text.trim() !== '' && hasLiveWorker(card)
+    this.finishRequeue(card, typedIntoLive ? undefined : body.tmux_session)
     return true
   }
 

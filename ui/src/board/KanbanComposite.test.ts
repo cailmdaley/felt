@@ -124,7 +124,7 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
     expect(wrong).toEqual([])
   })
 
-  it('sorts a blocked launch into Stalled, above a busy worker', () => {
+  it('sorts a blocked launch into Question, above a busy worker', () => {
     const feed = parseCompositeFeed({
       host: 'laptop',
       fibers: ['busy', 'stuck'].map((id) => ({

@@ -214,6 +214,7 @@ describe('Dock booting dispatch rejection', () => {
 describe('Dock dispatch recovery', () => {
   it.each(['New session', 'Resume'])('re-enables %s after a sessionless conflict only when worker state changes', async name => {
     vi.mocked(fetch).mockResolvedValue(response({}, 409))
+    band.el.querySelector<HTMLTextAreaElement>('textarea')!.value = 'a message'
     const verb = button(name)
     const label = verb.textContent
     verb.click()
@@ -227,6 +228,25 @@ describe('Dock dispatch recovery', () => {
     // The verb names the state it now stands in: a live session makes a fresh start "New session ↵".
     expect(verb.textContent).toBe(name === 'Resume' ? label : 'New session ↵')
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
+  })
+
+  it('holds Resume on a live worker until there is a message to hand it', () => {
+    dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+    const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    draft.value = ''; draft.dispatchEvent(new Event('input'))
+    expect(button('Resume').disabled).toBe(true)
+    draft.value = 'next turn'; draft.dispatchEvent(new Event('input'))
+    expect(button('Resume').disabled).toBe(false)
+  })
+
+  it('keeps a message the live worker refused, and restores the verb', async () => {
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }, 409))
+    const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    draft.value = 'do not lose me'; draft.dispatchEvent(new Event('input'))
+    button('Resume').click()
+    await flush()
+    expect(draft.value).toBe('do not lose me')
+    expect(button('Resume').textContent).not.toBe('Resuming…')
   })
 })
 

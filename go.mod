@@ -2,7 +2,7 @@ module github.com/cailmdaley/felt
 
 go 1.23.4
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	github.com/gorilla/websocket v1.5.3

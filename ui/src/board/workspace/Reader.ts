@@ -40,6 +40,7 @@ export interface ReaderOptions {
   onVerdict?(verdict: Verdict): void
   onCompose?(): void
   onConversation?(card: KanbanCard): void
+  onRest?(card: KanbanCard, anchor: HTMLElement): void
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
@@ -1065,6 +1066,9 @@ export class Reader {
     else if (intent === 'compose') this.opts.onCompose?.()
     else if (intent === 'conversation') {
       if (this.currentCard) this.opts.onConversation?.(this.currentCard)
+    }
+    else if (intent === 'rest') {
+      if (this.currentCard) this.opts.onRest?.(this.currentCard, this.el)
     }
     else if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'find') {

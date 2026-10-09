@@ -51,6 +51,7 @@ func NewLsCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var lsExact bool
 	var lsRegex bool
 	var lsHasFields []string
+	var lsAny []string
 	var lsIDsFrom string
 	var lsJSONFields []string
 	var lsVerbose bool
@@ -88,6 +89,7 @@ felt find searches the rest of it.`,
 				query = plainQuery(args[0], lsRegex)
 			}
 			hasFields := splitListFlag(lsHasFields)
+			anyFilters := splitListFlag(lsAny)
 			jsonFields := splitListFlag(lsJSONFields)
 			if len(jsonFields) > 0 && !view.jsonOutput() {
 				return fmt.Errorf("--json-field requires --json")
@@ -96,7 +98,11 @@ felt find searches the rest of it.`,
 			var felts []*felt.Felt
 			idOrder := map[string]int(nil)
 			if lsIDsFrom == "" {
-				felts, err = listForOutput(storage, hasFields, view.jsonOutput())
+				prefilterFields := hasFields
+				if len(anyFilters) > 0 {
+					prefilterFields = nil
+				}
+				felts, err = listForOutput(storage, prefilterFields, view.jsonOutput())
 			} else {
 				data, readErr := os.ReadFile(lsIDsFrom)
 				if readErr != nil {
@@ -121,7 +127,7 @@ felt find searches the rest of it.`,
 			// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
 			// widen to all statuses. Bare `ls` stays open+active (actionable view).
 			statusExplicit := cmd.Flags().Changed("status")
-			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || query != "" || lsRecent > 0 || lsIDsFrom != ""
+			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || len(anyFilters) > 0 || query != "" || lsRecent > 0 || lsIDsFrom != ""
 
 			// A search widens past open+active so untracked fibers can match, but a
 			// store accumulates far more closed work than live work and the closed
@@ -129,10 +135,10 @@ felt find searches the rest of it.`,
 			// printed. -n is exempt: it sorts by closed-at precisely to surface
 			// what was recently finished.
 			suppressClosed := !statusExplicit && lsRecent == 0 &&
-				(query != "" || len(lsTags) > 0 || len(hasFields) > 0 || lsIDsFrom != "")
+				(query != "" || len(lsTags) > 0 || len(hasFields) > 0 || len(anyFilters) > 0 || lsIDsFrom != "")
 
 			search, err := compileSearch(query, lsStatus, !statusExplicit && hasFilters,
-				lsTags, hasFields, lsExact, lsRegex, lsBody, lsVerbose)
+				lsTags, hasFields, anyFilters, lsExact, lsRegex, lsBody, lsVerbose)
 			if err != nil {
 				return err
 			}
@@ -159,8 +165,13 @@ felt find searches the rest of it.`,
 					filtered = filtered[:lsRecent]
 				}
 			} else if query == "" && lsIDsFrom == "" {
-				// Default: sort by creation time (skip for search results to preserve relevance)
-				sort.Slice(filtered, func(i, j int) bool {
+				// Keep each OR arm's listing together in filter order, then retain
+				// the ordinary creation-time order within that arm.
+				sort.SliceStable(filtered, func(i, j int) bool {
+					ri, rj := anyFilterIndex(filtered[i], anyFilters), anyFilterIndex(filtered[j], anyFilters)
+					if ri != rj {
+						return ri < rj
+					}
 					return filtered[i].CreatedAt.Before(filtered[j].CreatedAt)
 				})
 			}
@@ -254,6 +265,7 @@ felt find searches the rest of it.`,
 	command.Flags().BoolVarP(&lsExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
 	command.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
 	command.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
+	command.Flags().StringArrayVar(&lsAny, "any", nil, "Match any field:<name> or tag:<tag> filter (repeatable)")
 	command.Flags().StringVar(&lsIDsFrom, "ids-from", "", "Read fiber ids from a file (one id per line) without walking the store")
 	command.Flags().StringArrayVar(&lsJSONFields, "json-field", nil, "With --json, emit only these top-level fields (repeatable or comma-separated)")
 	command.Flags().BoolVarP(&lsVerbose, "verbose", "v", false, "List every match flat, without collapsing matches under a matching ancestor")
@@ -273,6 +285,7 @@ type lsSearch struct {
 	re              *regexp.Regexp
 	effectiveStatus string
 	hasFields       []string
+	anyFilters      []string
 	tags            []string
 	exact           bool
 	regex           bool
@@ -284,8 +297,14 @@ type lsSearch struct {
 // find call it, so the two verbs cannot drift in what a query means.
 // widen asks for the every-status-but-closed reading a filter implies; the
 // caller decides, because ls counts -n as a filter and find has no -n.
-func compileSearch(query string, status string, widen bool, tags, hasFields []string, exact, regex, body, verbose bool) (lsSearch, error) {
+func compileSearch(query string, status string, widen bool, tags, hasFields, anyFilters []string, exact, regex, body, verbose bool) (lsSearch, error) {
 	var re *regexp.Regexp
+	for _, filter := range anyFilters {
+		kind, value, ok := strings.Cut(filter, ":")
+		if !ok || value == "" || (kind != "field" && kind != "tag") {
+			return lsSearch{}, fmt.Errorf("--any filter %q must be field:<name> or tag:<tag>", filter)
+		}
+	}
 	if regex && query != "" {
 		compiled, err := regexp.Compile("(?i)" + query)
 		if err != nil {
@@ -304,6 +323,7 @@ func compileSearch(query string, status string, widen bool, tags, hasFields []st
 		re:              re,
 		effectiveStatus: effectiveStatus,
 		hasFields:       hasFields,
+		anyFilters:      anyFilters,
 		tags:            tags,
 		exact:           exact,
 		regex:           regex,
@@ -354,10 +374,37 @@ func finish(matches, exact []*felt.Felt, suppressClosed, collapse bool) (shown, 
 	return shown, matches, collapsedCounts, closed
 }
 
+func anyFilterIndex(f *felt.Felt, filters []string) int {
+	for i, filter := range filters {
+		if matchesAnyFilter(f, []string{filter}) {
+			return i
+		}
+	}
+	return len(filters)
+}
+
+func matchesAnyFilter(f *felt.Felt, filters []string) bool {
+	for _, filter := range filters {
+		kind, value, _ := strings.Cut(filter, ":")
+		switch kind {
+		case "field":
+			if feltHasField(f, value) {
+				return true
+			}
+		case "tag":
+			if f.HasTag(value) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // apply splits felts into exact matches (printed first), ordinary matches,
 // and — with --body — the fibers whose body still has to be read.
 func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCandidates []*felt.Felt) {
 	query, queryLower, terms, re, effectiveStatus, hasFields := search.query, search.queryLower, search.terms, search.re, search.effectiveStatus, search.hasFields
+	anyFilters := search.anyFilters
 	tags, exact, regex, body := search.tags, search.exact, search.regex, search.body
 	for _, f := range felts {
 		if effectiveStatus != "all" && effectiveStatus != "" {
@@ -386,6 +433,10 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 			if !hasAll {
 				continue
 			}
+		}
+
+		if len(anyFilters) > 0 && !matchesAnyFilter(f, anyFilters) {
+			continue
 		}
 
 		if len(hasFields) > 0 {

@@ -40,7 +40,7 @@ export class TranscriptFeed {
     this.shuttleBase = opts.shuttleBase.replace(/\/$/, '')
     this.session = opts.session
     this.host = opts.host
-    this.fetcher = opts.fetch ?? fetch
+    this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init))
     this.onEntries = opts.onEntries
     this.onReset = opts.onReset
     this.onStatus = opts.onStatus

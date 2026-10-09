@@ -99,6 +99,39 @@ defmodule Shuttle.HostTest do
     end
   end
 
+  describe "full_scan_budget_ms/1" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "shuttle-host-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      %{host_file: Path.join(dir, "host.json")}
+    end
+
+    test "uses the host integer override, including zero", %{host_file: file} do
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+
+      for {body, want} <- [
+            {~s({"full_scan_budget_ms":0}), 0},
+            {~s({"full_scan_budget_ms":12000}), 12000},
+            {~s({"class":"shared-multi-user"}), 10000}
+          ] do
+        File.write!(file, body)
+        assert Host.full_scan_budget_ms(10000) == want, body
+      end
+    end
+
+    test "rejects a negative or non-integer override", %{host_file: file} do
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+
+      for body <- [~s({"full_scan_budget_ms":-1}), ~s({"full_scan_budget_ms":"fast"})] do
+        File.write!(file, body)
+
+        assert capture_log(fn -> assert Host.full_scan_budget_ms(10000) == 10000 end) =~
+                 "must be a non-negative integer"
+      end
+    end
+  end
+
   describe "resolve!/1" do
     test "raises with the file's path on a malformed host.json" do
       path = Path.join(@fixture_dir, "malformed.json")

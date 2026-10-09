@@ -61,7 +61,8 @@ import { moveDestinations, queueTargets } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, restingCards, surfaceTotals } from './KanbanReadModel.js'
+import { restPopover } from './RestPopover.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, inFlightBand, restingCards, surfaceTotals } from './KanbanReadModel.js'
 import {
   dueBouncesFromResting,
   nextStandingLaunch,
@@ -524,6 +525,7 @@ export class KanbanModal {
       dock: this.dock,
       find: this.findEl ?? undefined,
       focusFind: () => this.focusFind(),
+      onRest: (card, anchor) => this.openRestPopover(card, anchor),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
     this.readerSlotEl?.append(this.workspace.reader.barIndex)
@@ -555,6 +557,7 @@ export class KanbanModal {
     // its unmount() before the container (and its host) go away.
     this.activeView?.unmount()
     this.activeView = null
+    this.closeRestPopover?.()
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     document.removeEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.removeEventListener('resize', this.handleResize)
@@ -665,7 +668,8 @@ export class KanbanModal {
       ? document.activeElement
       : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
-    this.workspace?.open(card)
+    if (card.status === 'active' && inFlightBand(card) === 'question') this.workspace?.openQuestion(card)
+    else this.workspace?.open(card)
   }
 
   /** Focus the bar's Find, where the bar carries one (the phone's bottom bar does not). */
@@ -2611,6 +2615,22 @@ export class KanbanModal {
     if (this.lastResponse) this.render(this.lastResponse)
   }
 
+  private closeRestPopover?: () => void
+
+  private openRestPopover(card: KanbanCard, anchor: HTMLElement): void {
+    this.closeRestPopover?.()
+    this.closeRestPopover = restPopover(card, anchor, async until => {
+      try {
+        await this.postJson('/api/v1/lifecycle', {
+          action: 'rest', fiber: card.id, origin: card.originId, until,
+        }, 'Rest failed')
+        await this.fetchAndRender()
+      } catch (error) {
+        this.showBanner(`Rest failed: ${errText(error)}`, 'error')
+      }
+    })
+  }
+
   private handleKanbanKeyDown(e: KeyboardEvent): void {
     if (!this.body) return
     // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
@@ -2633,6 +2653,14 @@ export class KanbanModal {
     }
     if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
+      if (intent === 'rest') {
+        const address = this.deskKeyboard?.selection
+        const card = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
+        const anchor = this.deskEl?.querySelector<HTMLElement>('.kbn-key-selected')
+        if (card && anchor) this.openRestPopover(card, anchor)
+        e.preventDefault(); e.stopPropagation()
+        return
+      }
       if (intent === 'conversation') {
         const address = this.deskKeyboard?.selection
         const card = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)

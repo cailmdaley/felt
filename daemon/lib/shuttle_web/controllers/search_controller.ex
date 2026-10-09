@@ -12,9 +12,8 @@ defmodule ShuttleWeb.SearchController do
   and `--body` extends it to the markdown body. `-s all` reaches closed and
   tempered work (the chronicle's whole point is the record, not the in-flight
   slice), and `--has-field shuttle` constrains the population to fibers carrying
-  a `shuttle:` block — the same admission the kanban's primary walk uses
-  (`Shuttle.FiberDocuments.kanban_walks/0`), so a hit is always something the
-  board could in principle draw a lifeline for.
+  a `shuttle:` block — the same admission the kanban union includes, so a hit
+  is always something the board could in principle draw a lifeline for.
 
   The body itself never crosses the wire. Sending it would mean shipping a few
   hundred KB per keystroke-debounce; instead each hit carries an `excerpt` — the

@@ -71,6 +71,12 @@ defmodule ShuttleWeb.LifecycleController do
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
   # rest, too: written inside the Poller, so no tick that read the fiber
   # `active` launches a worker after it, and the Poller stops a live one.
+  defp execute("rest", %{"fiber" => fiber, "until" => until}) when is_binary(until),
+    do: LifecycleService.transition(:rest, fiber, ["--until", until]) |> clean_result()
+
+  defp execute("rest", %{"until" => _}),
+    do: {:error, "until must be a YYYY-MM-DD string or empty"}
+
   defp execute("rest", %{"fiber" => fiber}), do: lifecycle(:rest, fiber)
 
   defp execute("seat", %{"fiber" => fiber} = params) do

@@ -267,8 +267,14 @@ func (e *daemonUnansweredError) Unwrap() error { return e.err }
 // Poller's state changes. The daemon's plain-text response is returned on
 // success. A transport failure after the connection was made is a
 // *daemonUnansweredError, not a transport error.
-func (a *app) postLifecycle(action, fiberID string) (string, error) {
-	body, err := json.Marshal(map[string]string{"action": action, "fiber": fiberID})
+func (a *app) postLifecycle(action, fiberID string, fields ...map[string]any) (string, error) {
+	payload := map[string]any{"action": action, "fiber": fiberID}
+	for _, extra := range fields {
+		for key, value := range extra {
+			payload[key] = value
+		}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("encoding lifecycle request: %w", err)
 	}

@@ -100,6 +100,43 @@ defmodule Shuttle.Tmux do
   def present?(runner, session), do: session_status(runner, session) != :gone
 
   @doc """
+  Types `text` into tmux session `session` as the human's next message, then
+  submits it.
+
+  The text goes in as one bracketed paste (`paste-buffer -p`), so its
+  newlines stay inside the message instead of each submitting a line, and
+  then Enter submits it. A pane left in copy mode is returned to its
+  application first, so the Enter reaches the harness. The pause before Enter
+  lets the harness finish taking the paste.
+  """
+  @spec paste(module(), String.t(), String.t()) :: :ok | {:error, String.t()}
+  def paste(runner, session, text) when is_binary(text) do
+    buffer = "shuttle-paste-" <> Integer.to_string(System.unique_integer([:positive]))
+    path = Path.join(System.tmp_dir!(), buffer)
+    File.write!(path, text)
+
+    try do
+      runner.cmd("tmux", ["send-keys", "-t", session, "-X", "cancel"], stderr_to_stdout: true)
+
+      with {_, 0} <-
+             runner.cmd("tmux", ["load-buffer", "-b", buffer, path], stderr_to_stdout: true),
+           {_, 0} <-
+             runner.cmd("tmux", ["paste-buffer", "-p", "-d", "-b", buffer, "-t", session],
+               stderr_to_stdout: true
+             ),
+           :ok <- Process.sleep(Shuttle.Env.app(:paste_submit_delay_ms, 400)),
+           {_, 0} <-
+             runner.cmd("tmux", ["send-keys", "-t", session, "Enter"], stderr_to_stdout: true) do
+        :ok
+      else
+        {output, _status} -> {:error, "tmux: " <> String.trim(to_string(output))}
+      end
+    after
+      File.rm(path)
+    end
+  end
+
+  @doc """
   Stops tmux session `session` and returns once its worker is gone.
 
   `kill-session` removes the session and hangs up its pane; the run script

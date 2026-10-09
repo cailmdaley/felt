@@ -33,45 +33,12 @@ defmodule Shuttle.FiberDocuments do
   @spec kanban_fields() :: [String.t()]
   def kanban_fields, do: @kanban_fields
 
-  # The tag that marks a cycle fiber. Mirrors the client's `CYCLE_TAG`
-  # (ui/src/board/KanbanRules.ts) — a cycle is identified by its tag, not by a
-  # `shuttle:` block, which is exactly why it needs its own admission walk.
+  # The kanban's cycle tag, shared with the UI's `CYCLE_TAG`.
   @cycle_tag "cycle"
 
-  # The felt filters that TOGETHER admit every fiber the kanban can render.
-  #
-  # `--has-field` is AND across values (measured on the live store: 392 rows
-  # carry `shuttle`, 36 carry `due`, and `--has-field shuttle,due` returns
-  # their 23-row INTERSECTION), and felt has no OR, so one narrowed walk cannot
-  # express this union. Three narrow walks stay far cheaper than the one broad
-  # walk that would: on the live store the three cost ~791 KB of JSON together
-  # against 5.2 MB for `felt ls` unfiltered — the projection narrowing is the
-  # whole Lustre-scale win, and it is worth two extra shell-outs per store per
-  # 30 s tick to keep it.
-  #
-  # Each filter also implies all-statuses (verified: `--has-field due` returns
-  # the same 36 rows with and without `-s all`), matching the primary walk's
-  # long-standing omission of `-s`.
-  @kanban_walks [
-    ["--has-field", "shuttle"],
-    ["--has-field", "due"],
-    ["-t", @cycle_tag]
-  ]
-
   @doc """
-  The felt filter argument-groups whose UNION is the kanban's admitted set.
-
-  Callers run one `felt ls` per group with the `kanban_fields/0` projection and
-  dedupe the rows by `id`. The first group is the historical `shuttle:` walk;
-  the rest close the gaps it never covered (human `due:` cards, which carry no
-  `shuttle:` block, and `cycle` fibers, which carry neither).
-  """
-  @spec kanban_walks() :: [[String.t()]]
-  def kanban_walks, do: @kanban_walks
-
-  @doc """
-  True for a fiber admitted by one of the NON-shuttle walks — a human `due:`
-  card or a `cycle`-tagged fiber.
+  True for a fiber admitted by one of the non-`shuttle` arms of the kanban
+  union — a human `due:` card or a `cycle`-tagged fiber.
 
   These kinds carry no `shuttle:` block and therefore no `shuttle.host:`, so
   host-ownership cannot gate them. They belong to whichever store physically
@@ -368,35 +335,6 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  @doc """
-  Union two row lists by felt `id`, keeping the first occurrence.
-
-  Dedupes the additional rows against the primary list AND against each other:
-  `additional` is the concatenation of every aux walk, and one fiber can match
-  several of them — a `cycle`-tagged fiber that also carries a `due` is matched
-  by both aux walks and must still reach the feed once.
-
-  Rows without a usable `id` are dropped from the ADDITIONAL list only: they
-  cannot be deduped against, and every walk projects `id`, so a row missing one
-  is malformed rather than merely unusual.
-  """
-  @spec union_by_id([map()], [map()]) :: [map()]
-  def union_by_id(primary, additional) do
-    {kept, _seen} =
-      Enum.reduce(additional, {[], MapSet.new(primary, &Map.get(&1, "id"))}, fn row,
-                                                                                {acc, seen} ->
-        id = Map.get(row, "id")
-
-        if is_binary(id) and id != "" and not MapSet.member?(seen, id) do
-          {[row | acc], MapSet.put(seen, id)}
-        else
-          {acc, seen}
-        end
-      end)
-
-    primary ++ Enum.reverse(kept)
-  end
-
   # The bounded command runner. No injection seam, unlike `Shuttle.Felt` and
   # `Shuttle.FeltStores`: both callsites shell `felt` at a real store, and the
   # suite drives them that way.
@@ -404,7 +342,7 @@ defmodule Shuttle.FiberDocuments do
 
   # `with_body? == true` is the content/search reader path: every field, body
   # included. Neither variant narrows. The narrowed kanban projection lives in
-  # `Shuttle.Poller`'s walk (`kanban_walks/0` + `kanban_fields/0`), which is what
+  # `Shuttle.Poller`'s listing (`kanban_fields/0`), which is what
   # builds the owner feed; this direct path serves only the unfiltered readers.
   # `mode` still reaches `list_store/4`, where `filter_rows(:owned)` applies
   # the owner predicate in memory.
@@ -457,7 +395,7 @@ defmodule Shuttle.FiberDocuments do
   # on two hosts. A fiber physically rooted here but pinned to another host's
   # `shuttle.host:` belongs to that host's feed, never this one's mirror.
   # Host-owned shuttle work, OR one of the host-less local kinds (`due:` cards,
-  # `cycle` fibers) that `kanban_walks/0` admits. The aux kinds carry no
+  # `cycle` fibers) admitted by the kanban union. Those kinds carry no
   # `shuttle.host:` to match against, so ownership for them is "this store
   # roots it", which enumerating this store already established — and
   # `kanban_aux_admissible?/1` enforces the host-less half of that sentence, so

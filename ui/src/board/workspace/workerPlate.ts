@@ -40,6 +40,6 @@ export function workerPlate(card: KanbanCard, target: HTMLElement | null, phase 
   // The dot is the plate's first item, so it centres on the capitals beside it and stands alone where the words are hidden.
   const dot = part('ws-worker-dot')
   dot.setAttribute('aria-hidden', 'true')
-  plate.replaceChildren(dot, part('ws-worker-state', facts.state), part('ws-worker-elapsed', facts.elapsed ?? ''), ...(via ? [part('ws-worker-via', via)] : []))
+  plate.replaceChildren(dot, part('ws-worker-state', facts.state === 'attention' ? 'at a prompt' : facts.state), part('ws-worker-elapsed', facts.elapsed ?? ''), ...(via ? [part('ws-worker-via', via)] : []))
   return plate
 }
