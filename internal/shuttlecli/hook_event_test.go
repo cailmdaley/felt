@@ -927,3 +927,16 @@ func TestEmptyTmuxSessionWithoutTmux(t *testing.T) {
 		t.Fatalf("tmuxSession = %v (present=%v), want present and empty", v, present)
 	}
 }
+
+// A hook outside a known pane names no session: asking tmux without a target
+// answers with the attached client's session, which may be another worker's.
+func TestHookTmuxSessionRequiresExactPane(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_TMUX_SESSION", "")
+	env.Set("TMUX", "/tmp/socket,1,0")
+	env.Set("TMUX_PANE", "")
+	if got := newApp(env).currentTmuxSession(); got != "" {
+		t.Fatalf("inherited TMUX without a pane named session %q", got)
+	}
+}

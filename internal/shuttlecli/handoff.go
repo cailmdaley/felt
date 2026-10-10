@@ -170,17 +170,10 @@ func stampHandedOff(path string) (string, error) {
 // command (stamp the clean-exit field, then end the session) instead of a write
 // followed by a separate `kill $PPID`. Best-effort and a no-op outside tmux (e.g.
 // a manual/test invocation), so it never kills a stray shell: it asks tmux for the
-// *current* session name and kills exactly that.
+// session of its own pane ($TMUX_PANE) and kills exactly that.
 func (a *app) endOwnTmuxSession() {
-	if a.env.Getenv("TMUX") == "" {
-		return
-	}
-	name, err := a.env.Command("tmux", "display-message", "-p", "#S").Output()
-	if err != nil {
-		return
-	}
-	session := strings.TrimSpace(string(name))
-	if session == "" {
+	session, err := a.tmuxCurrentSession()
+	if err != nil || session == "" {
 		return
 	}
 	// This kills our own pane mid-call; the field is already durably on disk (the
