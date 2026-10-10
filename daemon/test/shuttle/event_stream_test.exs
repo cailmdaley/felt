@@ -311,6 +311,38 @@ defmodule Shuttle.EventStreamTest do
     end
   end
 
+  test "replacement reseed retains child work when the replacement repeats only stop", %{
+    path: path
+  } do
+    now = System.system_time(:millisecond)
+    codex = %{"harness" => "codex", "sessionId" => "parent"}
+
+    append(path, [
+      ev(
+        "post_tool_use",
+        0,
+        Map.merge(codex, %{
+          "tool" => "collaborationspawn_agent",
+          "id" => "spawn-1",
+          "timestamp" => now
+        })
+      ),
+      ev("stop", 1, Map.put(codex, "timestamp", now + 1))
+    ])
+
+    name = start(path)
+    assert waiting(name) == %{"parent" => "working"}
+
+    # The replacement omits the known spawn but repeats the stop at the same
+    # timestamp: it is a retained-prefix rebuild, not newer evidence.
+    replacement = path <> ".replacement"
+    append(replacement, [ev("stop", 1, Map.put(codex, "timestamp", now + 1))])
+    File.rename!(replacement, path)
+    _ = all(name, path)
+
+    assert waiting(name) == %{"parent" => "working"}
+  end
+
   test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
     now = System.system_time(:millisecond)
     a = "session-a"

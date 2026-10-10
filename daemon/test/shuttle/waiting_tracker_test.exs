@@ -174,6 +174,134 @@ defmodule Shuttle.WaitingTrackerTest do
     assert phase(sessions, "parent", @now + 4) == "waiting"
   end
 
+  test "Codex child tool progress preserves permission attention until a parent prompt" do
+    spawn =
+      event("post_tool_use", "parent", %{
+        "harness" => "codex",
+        "tool" => "collaborationspawn_agent",
+        "id" => "spawn-permission"
+      })
+
+    sessions = fold([spawn, event("stop", "parent", %{"harness" => "codex"})])
+
+    sessions =
+      Tracker.apply_event(
+        sessions,
+        event("notification", "parent", %{
+          "harness" => "codex",
+          "notificationKind" => "permission_prompt"
+        }),
+        @now + 1
+      )
+
+    child_tool =
+      event("pre_tool_use", "parent", %{
+        "harness" => "codex",
+        "tool" => "Bash",
+        "timestamp" => @now + 2
+      })
+
+    sessions = Tracker.apply_event(sessions, child_tool, @now + 2)
+    assert phase(sessions, "parent", @now + 2) == "attention"
+
+    done =
+      event("subagent_stop", "parent", %{
+        "harness" => "codex",
+        "id" => "done-permission",
+        "timestamp" => @now + 3
+      })
+
+    sessions = Tracker.apply_event(sessions, done, @now + 3)
+    assert phase(sessions, "parent", @now + 3) == "attention"
+
+    sessions =
+      Tracker.apply_event(
+        sessions,
+        event("user_prompt_submit", "parent", %{"harness" => "codex"}),
+        @now + 4
+      )
+
+    assert phase(sessions, "parent", @now + 4) == "working"
+    refute sessions["parent"].pending
+  end
+
+  test "replaying an identified Codex spawn after completion is entirely inert" do
+    spawn =
+      event("post_tool_use", "parent", %{
+        "harness" => "codex",
+        "tool" => "collaborationfollowup_task",
+        "id" => "spawn-once"
+      })
+
+    stopped =
+      Tracker.apply_event(fold([spawn]), event("stop", "parent", %{"harness" => "codex"}), @now)
+
+    completed =
+      Tracker.apply_event(
+        stopped,
+        event("subagent_stop", "parent", %{
+          "harness" => "codex",
+          "id" => "done-once",
+          "timestamp" => @now + 1
+        }),
+        @now + 1
+      )
+
+    assert completed["parent"].kids == 0
+    assert completed["parent"].turn == :closed
+    assert Tracker.apply_event(completed, spawn, @now + 2) == completed
+  end
+
+  test "child event ids have a 48-hour replay window and stay bounded during a long session" do
+    old_spawn =
+      event("post_tool_use", "parent", %{
+        "harness" => "codex",
+        "tool" => "collaborationspawn_agent",
+        "id" => "old-spawn"
+      })
+
+    sessions =
+      Enum.reduce(1..300, %{}, fn index, sessions ->
+        at = @now - 48 * @hour - 100 + index
+        spawn = %{old_spawn | "id" => "spawn-#{index}", "timestamp" => at}
+
+        sessions
+        |> Tracker.apply_event(spawn, at)
+        |> Tracker.apply_event(
+          event("subagent_stop", "parent", %{
+            "harness" => "codex",
+            "id" => "done-#{index}",
+            "timestamp" => at
+          }),
+          at
+        )
+      end)
+
+    later = @now + 48 * @hour + 1
+
+    current =
+      %{old_spawn | "id" => "current-spawn", "timestamp" => later}
+      |> then(&Tracker.apply_event(sessions, &1, later))
+
+    assert map_size(current["parent"].child_events) == 1
+    assert current["parent"].child_events == %{"current-spawn" => later}
+    assert Tracker.apply_event(current, %{old_spawn | "timestamp" => @now}, later) == current
+
+    closed =
+      Tracker.apply_event(current, event("stop", "parent", %{"harness" => "codex"}), later + 1)
+
+    assert Tracker.apply_event(closed, %{old_spawn | "timestamp" => @now}, later + 2) == closed
+
+    kept =
+      Tracker.apply_event(
+        current,
+        event("stop", "parent", %{"harness" => "codex", "timestamp" => later + 2}),
+        later + 2
+      )
+
+    assert Tracker.prune(kept, later + 48 * @hour + 1)["parent"].child_events == %{}
+  end
+
   test "Codex start resets children; prompts preserve them; end clears them" do
     spawn =
       event("post_tool_use", "p", %{
@@ -189,13 +317,16 @@ defmodule Shuttle.WaitingTrackerTest do
       Tracker.apply_event(sessions, event("session_start", "p", %{"harness" => "codex"}), @now)
 
     assert sessions["p"].kids == 0
+    assert sessions["p"].child_events == %{}
 
     sessions = Tracker.apply_event(sessions, spawn, @now)
+    assert sessions["p"].child_events == %{"s1" => @now}
 
     sessions =
       Tracker.apply_event(sessions, event("session_end", "p", %{"harness" => "codex"}), @now)
 
     assert sessions["p"].kids == 0
+    assert sessions["p"].child_events == %{}
     assert phase(sessions, "p") == "waiting"
   end
 
@@ -244,6 +375,28 @@ defmodule Shuttle.WaitingTrackerTest do
       |> Tracker.apply_event(event("future_hook", "a", %{"timestamp" => @now + 10}), @now + 10)
 
     assert unchanged == sessions
+  end
+
+  test "merge_known retains known state at equal timestamps and rebuilds only from newer evidence" do
+    known =
+      fold([
+        event("post_tool_use", "parent", %{
+          "harness" => "codex",
+          "tool" => "collaborationspawn_agent",
+          "id" => "known-spawn"
+        }),
+        event("stop", "parent", %{"harness" => "codex"})
+      ])
+
+    incomplete = fold([event("stop", "parent", %{"harness" => "codex"})])
+
+    newer =
+      fold([
+        event("user_prompt_submit", "parent", %{"harness" => "codex", "timestamp" => @now + 1})
+      ])
+
+    assert Tracker.merge_known(known, incomplete)["parent"] == known["parent"]
+    assert Tracker.merge_known(known, newer)["parent"] == newer["parent"]
   end
 
   test "prune and merge_known preserve the freshest known state" do

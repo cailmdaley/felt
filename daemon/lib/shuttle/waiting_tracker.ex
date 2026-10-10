@@ -10,7 +10,7 @@ defmodule Shuttle.WaitingTracker do
 
   Event timestamps are activity timestamps, not an ordering authority. Events
   fold in stream order, while `at` never moves backward when timestamps arrive
-  out of order. Event ids deduplicate child-count mutations during replay.
+  out of order. Child-event ids deduplicate replays for a 48-hour window.
   """
 
   @bg_suppress_ms 60 * 60 * 1_000
@@ -25,7 +25,7 @@ defmodule Shuttle.WaitingTracker do
               pending: false,
               at: 0,
               harness: nil,
-              child_events: MapSet.new()
+              child_events: %{}
   end
 
   @type sessions :: %{optional(String.t()) => %Session{}}
@@ -69,36 +69,55 @@ defmodule Shuttle.WaitingTracker do
   @spec prune(sessions(), integer()) :: sessions()
   def prune(sessions, now) do
     cutoff = now - @max_age_ms
-    Map.reject(sessions, fn {_id, session} -> session.at < cutoff end)
+
+    sessions
+    |> Map.reject(fn {_id, session} -> session.at < cutoff end)
+    |> Map.new(fn {id, session} -> {id, trim_child_events(session, cutoff)} end)
   end
 
-  @doc "Merges a rebuild with known state, preferring the newer activity timestamp."
+  @doc "Merges a rebuild with known state, preferring strictly newer activity."
   @spec merge_known(sessions(), sessions()) :: sessions()
   def merge_known(known, rebuilt) do
-    Map.merge(known, rebuilt, fn _id, old, new -> if new.at >= old.at, do: new, else: old end)
+    # A rebuild may see only a retained prefix, so equal-time known suffix
+    # state survives unless the files contain strictly newer evidence.
+    Map.merge(known, rebuilt, fn _id, old, new -> if new.at > old.at, do: new, else: old end)
   end
 
-  defp transition(session, "session_end", event, now) do
-    touch(session, event, now, turn: :ended, bg: 0, kids: 0, pending: false)
+  defp transition(session, type, event, now) do
+    if rejected_child_event?(session, type, event, now) do
+      :ignore
+    else
+      do_transition(session, type, event, now)
+    end
   end
 
-  defp transition(session, "session_start", event, now) do
+  defp do_transition(session, "session_end", event, now) do
+    touch(session, event, now,
+      turn: :ended,
+      bg: 0,
+      kids: 0,
+      pending: false,
+      child_events: %{}
+    )
+  end
+
+  defp do_transition(session, "session_start", event, now) do
     touch(session, event, now,
       turn: :open,
       bg: 0,
       kids: 0,
       pending: false,
-      child_events: MapSet.new()
+      child_events: %{}
     )
   end
 
-  defp transition(%Session{turn: :ended}, _type, _event, _now), do: :ignore
+  defp do_transition(%Session{turn: :ended}, _type, _event, _now), do: :ignore
 
-  defp transition(session, "user_prompt_submit", event, now) do
+  defp do_transition(session, "user_prompt_submit", event, now) do
     touch(session, event, now, turn: :open, bg: 0, pending: false)
   end
 
-  defp transition(session, "stop", event, now) do
+  defp do_transition(session, "stop", event, now) do
     touch(session, event, now,
       turn: :closed,
       bg: background_tasks(event),
@@ -106,23 +125,26 @@ defmodule Shuttle.WaitingTracker do
     )
   end
 
-  defp transition(session, "notification", event, now) do
+  defp do_transition(session, "notification", event, now) do
     pending =
       if Map.get(event, "notificationKind") == "idle_prompt", do: session.pending, else: true
 
     touch(session, event, now, turn: :closed, pending: pending)
   end
 
-  defp transition(session, type, event, now) when type in ["pre_tool_use", "post_tool_use"] do
-    session = child_started(session, type, event)
+  defp do_transition(session, type, event, now) when type in ["pre_tool_use", "post_tool_use"] do
+    session = child_started(session, type, event, now)
     keep_closed = session.turn == :closed and session.harness == "codex" and session.kids > 0
-    touch(session, event, now, turn: if(keep_closed, do: :closed, else: :open), pending: false)
+
+    touch(session, event, now,
+      turn: if(keep_closed, do: :closed, else: :open),
+      pending: if(keep_closed, do: session.pending, else: false)
+    )
   end
 
-  defp transition(session, "subagent_stop", event, now) do
-    if session.harness == "codex" and codex_event?(event, session) and session.kids > 0 and
-         first_child_event?(session, event) do
-      session = remember_child_event(session, event)
+  defp do_transition(session, "subagent_stop", event, now) do
+    if session.harness == "codex" and codex_event?(event, session) and session.kids > 0 do
+      session = remember_child_event(session, event, now)
       kids = session.kids - 1
 
       if kids == 0 and session.turn == :closed do
@@ -135,7 +157,7 @@ defmodule Shuttle.WaitingTracker do
     end
   end
 
-  defp transition(_session, _type, _event, _now), do: :ignore
+  defp do_transition(_session, _type, _event, _now), do: :ignore
 
   defp touch(session, event, now, changes) do
     at = max(session.at, event_at(event, now))
@@ -143,34 +165,64 @@ defmodule Shuttle.WaitingTracker do
     struct(session, Keyword.merge([at: at, harness: harness], changes))
   end
 
-  defp child_started(session, "post_tool_use", %{"harness" => "codex", "tool" => tool} = event)
+  defp child_started(
+         session,
+         "post_tool_use",
+         %{"harness" => "codex", "tool" => tool} = event,
+         now
+       )
        when tool in ["collaborationspawn_agent", "collaborationfollowup_task"] do
-    if first_child_event?(session, event) do
-      session
-      |> remember_child_event(event)
-      |> Map.update!(:kids, &(&1 + 1))
-    else
-      session
-    end
-  end
-
-  defp child_started(session, _type, _event), do: session
-
-  defp first_child_event?(session, event) do
-    case event["id"] do
-      id when is_binary(id) and id != "" -> not MapSet.member?(session.child_events, id)
-      _ -> true
-    end
-  end
-
-  defp remember_child_event(session, event) do
     case event["id"] do
       id when is_binary(id) and id != "" ->
-        %{session | child_events: MapSet.put(session.child_events, id)}
+        session
+        |> remember_child_event(event, now)
+        |> Map.update!(:kids, &(&1 + 1))
+
+      _ ->
+        Map.update!(session, :kids, &(&1 + 1))
+    end
+  end
+
+  defp child_started(session, _type, _event, _now), do: session
+
+  defp rejected_child_event?(session, type, event, now) do
+    if identified_child_event?(type, event) do
+      id = event["id"]
+      event_at(event, now) < now - @max_age_ms or Map.has_key?(session.child_events, id)
+    else
+      false
+    end
+  end
+
+  defp identified_child_event?("post_tool_use", %{
+         "harness" => "codex",
+         "tool" => tool,
+         "id" => id
+       })
+       when tool in ["collaborationspawn_agent", "collaborationfollowup_task"] and is_binary(id) and
+              id != "",
+       do: true
+
+  defp identified_child_event?("subagent_stop", %{"harness" => "codex", "id" => id})
+       when is_binary(id) and id != "",
+       do: true
+
+  defp identified_child_event?(_type, _event), do: false
+
+  defp remember_child_event(session, event, now) do
+    case event["id"] do
+      id when is_binary(id) and id != "" ->
+        cutoff = now - @max_age_ms
+        events = Map.put(session.child_events, id, event_at(event, now))
+        %{session | child_events: Map.reject(events, fn {_id, at} -> at < cutoff end)}
 
       _ ->
         session
     end
+  end
+
+  defp trim_child_events(session, cutoff) do
+    %{session | child_events: Map.reject(session.child_events, fn {_id, at} -> at < cutoff end)}
   end
 
   defp codex_event?(%{"harness" => "codex"}, _session), do: true
