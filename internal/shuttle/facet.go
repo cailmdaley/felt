@@ -187,8 +187,22 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 			if _, exists := flat["resolved"]; !exists {
 				flat["resolved"] = resolved
 			}
+			// A Codex block with no recorded surface and no session yet starts
+			// in the app; a block that already ran keeps the transport it ran on.
+			if surface, _ := flat["surface"].(string); surface == "" && resolved.Agent != nil &&
+				resolved.Agent.CLI == "codex" && !hasRuntimeSession(flat) {
+				flat["surface"] = "app"
+			}
 		}
 	}
 	f.SetJSONField(FacetKey, flat)
 	return nil
+}
+
+// hasRuntimeSession reports whether the flat facet records a worker session.
+func hasRuntimeSession(flat map[string]interface{}) bool {
+	runtime, _ := flat["runtime"].(map[string]interface{})
+	id, _ := runtime["session_uuid"].(string)
+	flatID, _ := flat["session_uuid"].(string)
+	return id != "" || flatID != ""
 }

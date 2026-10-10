@@ -29,8 +29,9 @@ type Block struct {
 	Host       string `json:"host,omitempty" yaml:"host,omitempty"`
 	ProjectDir string `json:"project_dir,omitempty" yaml:"project_dir,omitempty"`
 	Agent      string `json:"agent,omitempty" yaml:"agent,omitempty"`
-	// Surface selects how Codex executes. Its absence means the durable legacy
-	// behavior (the CLI); app is the ChatGPT-backed App Server transport.
+	// Surface selects how Codex executes: app is the ChatGPT-backed App Server
+	// transport, cli a tmux worker. A Codex block with no surface and no
+	// recorded session resolves to app; any other absent surface is the CLI.
 	Surface string `json:"surface,omitempty" yaml:"surface,omitempty"`
 	// Orthogonal dispatch axes layered on top of Agent (the base id). Effort is
 	// a token validated against the resolved base agent's allowed set; Chrome is
