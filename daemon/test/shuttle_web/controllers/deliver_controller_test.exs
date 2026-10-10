@@ -160,7 +160,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
   test "a live worker is messaged at its conversation instead of relaunched" do
     fiber_id = "tests/deliver-live"
-    message_live_worker(fiber_id)
+    session_uuid = message_live_worker(fiber_id)
 
     launches_before =
       Enum.count(MockRunner.commands(), fn {cmd, args} ->
@@ -183,7 +183,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert receipt["status"] == "accepted"
 
     assert_received {:message, request}
-    assert request["address"] == "shuttle://#{Poller.own_host_id()}/claude/live-session-9"
+    assert request["address"] == "shuttle://#{Poller.own_host_id()}/claude/#{session_uuid}"
     assert request["text"] == "Meeting mode (room)."
     assert request["from"] == "shuttle meeting"
     assert request["wake"] == true
@@ -197,11 +197,9 @@ defmodule ShuttleWeb.DeliverControllerTest do
   defp message_live_worker(fiber_id) do
     put_constitution(fiber_id)
     assert {:ok, _session} = Poller.dispatch_fiber(fiber_id, [])
-    MockRunner.put_shuttle_fields(fiber_id, %{"session_uuid" => "live-session-9"})
-    Poller.refresh_document(fiber_id)
-
     Env.put_app_env(:felt_runner, MessageRunner)
     Env.put_app_env(:deliver_test_pid, self())
+    Poller.session_uuid(fiber_id)
   end
 
   test "a sent message whose receipt is unconfirmed is neither delivered nor failed" do

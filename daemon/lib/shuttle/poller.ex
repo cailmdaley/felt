@@ -2234,12 +2234,13 @@ defmodule Shuttle.Poller do
             previous = cached.entry.fiber
 
             if fiber_id in [previous["id"], previous["uid"], previous["slug"]] do
-              {key,
-               %{
-                 cached
-                 | entry: %{cached.entry | fiber: fiber},
-                   modified_at: fiber["modified_at"]
-               }}
+              case Shuttle.FiberDocuments.entries_for_fiber(cached.entry.felt_store, fiber) do
+                [entry | _] ->
+                  {key, %{cached | entry: entry, modified_at: entry.fiber["modified_at"]}}
+
+                [] ->
+                  {key, cached}
+              end
             else
               {key, cached}
             end
