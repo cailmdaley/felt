@@ -52,11 +52,14 @@ defmodule ShuttleWeb.PeerGatePlug do
     assign(conn, :peer, Map.put(conn.assigns.peer, :tailscale_login, blank_to_nil(login)))
   end
 
-  defp admit_or_refuse(conn, %{uid: uid}, expected_uid) do
-    reason = refusal_reason(uid, expected_uid)
+  defp admit_or_refuse(conn, peer, expected_uid) do
+    uid = Map.get(peer, :uid)
+    uid_error = Map.get(peer, :uid_error)
+    reason = refusal_reason(uid, uid_error, expected_uid)
     peer_data = get_peer_data(conn)
+    throttle_key = if is_integer(uid), do: uid, else: uid_error
 
-    if ShuttleWeb.PeerGateThrottle.allow_warning?(uid) do
+    if ShuttleWeb.PeerGateThrottle.allow_warning?(throttle_key) do
       Logger.warning("refused TCP peer #{format_peer(peer_data)}: #{reason}")
     end
 
@@ -66,10 +69,15 @@ defmodule ShuttleWeb.PeerGatePlug do
     |> halt()
   end
 
-  defp refusal_reason(uid, expected_uid) when is_integer(uid),
+  defp refusal_reason(uid, _uid_error, expected_uid) when is_integer(uid),
     do: "uid #{uid} is not the daemon's uid #{expected_uid}"
 
-  defp refusal_reason(_uid, _expected_uid),
+  defp refusal_reason(_uid, :peer_closed, _expected_uid),
+    do:
+      "peer closed its connection before the daemon read the request " <>
+        "(its /proc TCP row has no owning socket)"
+
+  defp refusal_reason(_uid, _uid_error, _expected_uid),
     do: "peer uid unresolved: no matching /proc TCP row"
 
   defp expected_uid do

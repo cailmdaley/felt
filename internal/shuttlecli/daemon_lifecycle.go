@@ -122,14 +122,15 @@ func (a *app) shuttleDaemonReleaseCmd() *cobra.Command {
 			if version, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil && daemonVersionIsBooting(version) {
 				return errors.New("daemon is still booting; retry when /api/v1/version shows ready:true")
 			}
-			if _, err := a.daemonLifecyclePost(settings, "/api/v1/quarantine/release", nil); err == nil {
+			_, postErr := a.daemonLifecyclePost(settings, "/api/v1/quarantine/release", nil)
+			if postErr == nil {
 				fmt.Fprintln(a.env.Stdout, "quarantine released — parked launches will dispatch on the next tick")
 				return nil
 			}
 			if version, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil && daemonVersionIsBooting(version) {
 				return errors.New("daemon is still booting; retry when /api/v1/version shows ready:true")
 			}
-			return errors.New("release failed: daemon unreachable or poller not running")
+			return fmt.Errorf("release failed: %w", postErr)
 		},
 	}
 	return shuttleDaemonReleaseCmd
@@ -151,7 +152,7 @@ func (a *app) shuttleDaemonResetCmd() *cobra.Command {
 			}
 			path := "/api/v1/remotes/" + url.PathEscape(remote) + "/reset"
 			if _, err := a.daemonLifecyclePost(settings, path, nil); err != nil {
-				return errors.New("reset failed: unknown remote, breaker not tripped, or daemon unreachable")
+				return fmt.Errorf("reset failed: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "circuit breaker reset for %s — recovery cascade re-running\n", remote)
 			return nil

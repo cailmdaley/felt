@@ -5,14 +5,17 @@ defmodule ShuttleWeb.PeerPlug do
       %{
         transport: :unix | :tcp,
         uid: non_neg_integer() | nil,
+        uid_error: :peer_closed | :no_row | nil,
         forwarded: boolean(),
         tailscale_login: String.t() | nil
       }
 
   Facts only — this plug records peer data; `PeerGatePlug` separately decides
-  whether a TCP peer may continue. TCP uid comes from the established
-  client-side row in `/proc/net/tcp` or `/proc/net/tcp6`; it is `nil` when the
-  peer cannot be resolved.
+  whether a TCP peer may continue. TCP uid comes from the owned client-side
+  row in `/proc/net/tcp` or `/proc/net/tcp6` (`Shuttle.ProcNetTcp`). When it
+  cannot be resolved, `uid` is `nil` and `uid_error` says why: `:peer_closed`
+  when the client had already closed its socket, `:no_row` when no row names
+  the connection. Both are `nil` where the uid is never looked up.
 
     * `transport` — `:unix` when the listener is a unix socket
       (`Shuttle.Host`), else `:tcp`.
@@ -60,9 +63,17 @@ defmodule ShuttleWeb.PeerPlug do
     peer_data = get_peer_data(conn)
     transport = transport(peer_data)
 
+    {uid, uid_error} =
+      case transport == :tcp && peer_uid(peer_data, opts) do
+        {:ok, uid} -> {uid, nil}
+        {:error, reason} -> {nil, reason}
+        _ -> {nil, nil}
+      end
+
     assign(conn, :peer, %{
       transport: transport,
-      uid: if(transport == :tcp, do: peer_uid(peer_data, opts)),
+      uid: uid,
+      uid_error: uid_error,
       forwarded: forwarded?(conn),
       tailscale_login: if(transport == :unix, do: header(conn, "tailscale-user-login"))
     })
@@ -73,12 +84,18 @@ defmodule ShuttleWeb.PeerPlug do
 
   # Resolved only on the classes whose gate consults it: on a single-user host
   # the fact would cost a /proc/net/tcp read per request and nothing reads it.
+  # A test's `:uid_resolver` may answer a bare uid or nil as shorthand for a
+  # `Shuttle.ProcNetTcp.lookup/3` result.
   defp peer_uid(peer_data, opts) do
     listen = Shuttle.listen()
 
     case Keyword.get(opts, :uid_resolver) do
       resolver when is_function(resolver, 2) ->
-        resolver.(peer_data, listen)
+        case resolver.(peer_data, listen) do
+          uid when is_integer(uid) -> {:ok, uid}
+          nil -> {:error, :no_row}
+          result -> result
+        end
 
       nil ->
         if Keyword.get(opts, :host_class, Shuttle.host_class()) in @gated_classes do
@@ -102,18 +119,18 @@ defmodule ShuttleWeb.PeerPlug do
     key = {__MODULE__, :uid, address, port, listen, proc_root}
 
     case Process.get(key) do
-      uid when is_integer(uid) ->
-        uid
+      {:ok, _uid} = resolved ->
+        resolved
 
       nil ->
-        uid = Shuttle.ProcNetTcp.peer_uid(peer_data, listen, proc_root)
-        if is_integer(uid), do: Process.put(key, uid)
-        uid
+        result = Shuttle.ProcNetTcp.lookup(peer_data, listen, proc_root)
+        if match?({:ok, _uid}, result), do: Process.put(key, result)
+        result
     end
   end
 
   defp connection_uid(peer_data, listen, proc_root),
-    do: Shuttle.ProcNetTcp.peer_uid(peer_data, listen, proc_root)
+    do: Shuttle.ProcNetTcp.lookup(peer_data, listen, proc_root)
 
   defp forwarded?(conn) do
     Enum.any?(conn.req_headers, fn {name, _value} ->

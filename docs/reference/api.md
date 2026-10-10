@@ -581,7 +581,12 @@ exposed TCP request reaches the plug:
 ```
 
 When `/proc` cannot resolve the peer, `reason` is
-`"peer uid unresolved: no matching /proc TCP row"`. The `peer_gate` field on
+`"peer uid unresolved: no matching /proc TCP row"`. When the connection's row
+has no owning socket — the client closed it, usually after timing out, before
+the daemon read the request — `reason` is `"peer closed its connection before
+the daemon read the request (its /proc TCP row has no owning socket)"`. The
+`shuttle` CLI reports a refusal as `daemon at <url> refused this connection
+(403 peer_refused): <reason>`. The `peer_gate` field on
 `GET /version` reports whether this admission check is active for the daemon's
 bound class and listener.
 

@@ -52,6 +52,9 @@ defmodule ShuttleWeb.PeerGatePlugTest do
   defp maybe_add_login(conn, login),
     do: Plug.Conn.put_req_header(conn, "tailscale-user-login", login)
 
+  @closed_reason "peer closed its connection before the daemon read the request " <>
+                   "(its /proc TCP row has no owning socket)"
+
   # A gated TCP peer is admitted iff its resolved uid is the configured expected
   # uid: root has no exception, and an unset expected uid admits no one, not
   # even a peer whose uid is also unresolved (fails closed). Rows: peer uid,
@@ -67,7 +70,11 @@ defmodule ShuttleWeb.PeerGatePlugTest do
     {2000, @expected_uid, :exposed, "forged@example.com",
      {:refuse, "uid 2000 is not the daemon's uid 1000"}},
     {nil, @expected_uid, :shared_multi_user, nil,
-     {:refuse, "peer uid unresolved: no matching /proc TCP row"}}
+     {:refuse, "peer uid unresolved: no matching /proc TCP row"}},
+    # A client that closed its socket is named as such, not as uid 0 — and a
+    # root daemon does not mistake it for root.
+    {{:error, :peer_closed}, @expected_uid, :shared_multi_user, nil, {:refuse, @closed_reason}},
+    {{:error, :peer_closed}, 0, :shared_multi_user, nil, {:refuse, @closed_reason}}
   ]
 
   test "a gated TCP peer is admitted only with the expected uid" do
@@ -227,6 +234,53 @@ defmodule ShuttleWeb.PeerGatePlugTest do
       {refused_head, _body} = request_version(port)
       assert refused_head =~ "HTTP/1.1 403"
     end)
+  end
+
+  # The table names the client's connection only by an orphaned row (inode 0,
+  # uid 0), as the kernel prints it once a timed-out client has closed. The
+  # endpoint answers at once with a 403 that says so, rather than "uid 0".
+  @tag :tmp_dir
+  test "a real listener refuses an orphaned row as a closed peer, not as uid 0",
+       %{tmp_dir: root} do
+    table = Path.join([root, "net", "tcp"])
+    File.mkdir_p!(Path.dirname(table))
+    port = unused_port()
+    Shuttle.Test.Env.put_app_env(:listen, "tcp://127.0.0.1:#{port}")
+    Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
+    Shuttle.Test.Env.put_app_env(:peer_gate, "uid")
+    Shuttle.Test.Env.put_app_env(:peer_gate_expected_uid, 0)
+    Shuttle.Test.Env.put_app_env(:proc_net_root, root)
+
+    {:ok, server} =
+      Bandit.start_link(plug: ShuttleWeb.Endpoint, ip: @loopback, port: port, startup_log: false)
+
+    on_exit(fn -> Process.exit(server, :normal) end)
+
+    {:ok, socket} = :gen_tcp.connect(@loopback, port, [:binary, active: false], @io_timeout)
+    {:ok, {_address, client_port}} = :inet.sockname(socket)
+
+    File.write!(
+      table,
+      "  sl local_address rem_address st tx_queue rx_queue tr tm->when retrnsmt uid timeout inode\n" <>
+        "  0: #{proc_hex(@loopback)}:#{port_hex(client_port)} #{proc_hex(@loopback)}:#{port_hex(port)} 05 00000000:00000000 00:00000000 00000000 0 0 0 1\n"
+    )
+
+    log =
+      capture_log(fn ->
+        :ok =
+          :gen_tcp.send(
+            socket,
+            "GET /api/v1/version HTTP/1.1\r\nhost: localhost\r\nconnection: close\r\n\r\n"
+          )
+
+        response = recv_all(socket, "")
+        [head, body] = String.split(response, "\r\n\r\n", parts: 2)
+        assert head =~ "HTTP/1.1 403"
+        assert Jason.decode!(body) == %{"error" => "peer_refused", "reason" => @closed_reason}
+      end)
+
+    :gen_tcp.close(socket)
+    refute log =~ "uid 0"
   end
 
   defp keepalive_status(socket) do
