@@ -10,7 +10,7 @@ import { humanizeIdleAge } from '../utils.js'
  */
 export function workerPlateFacts(card: KanbanCard, now = Date.now(), phase = true): { state: string; elapsed?: string; working: boolean } {
   if (!hasLiveWorker(card)) return { state: 'no worker', working: false }
-  const variant = phase ? workerVariant(card, now) : 'aloft'
+  const variant = phase ? workerVariant(card) : 'aloft'
   const state = variant === 'attention' ? card.workerState === 'blocked' || card.runtimePhase === 'blocked' || card.launchError ? 'blocked' : 'attention' : variant
   const since = variant === 'aloft' ? card.workerStartedAt ?? Date.parse(card.dispatchedAt ?? '') : card.lastActivityAt
   const elapsed = since !== undefined && Number.isFinite(since) ? humanizeIdleAge(now - since) : undefined

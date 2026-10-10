@@ -51,10 +51,10 @@ export function workerStatusLabel(phase?: string, launchError?: string): string 
   return 'Aloft'
 }
 
-/** Idle waiting is debounced; explicit attention and failures are immediate. */
-export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'lastActivityAt' | 'launchError'>, now = Date.now()): 'aloft' | 'waiting' | 'attention' {
+/** The worker's pill follows the daemon's phase, as the board's turn bands do. */
+export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'launchError'>): 'aloft' | 'waiting' | 'attention' {
   if (card.launchError || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked') return 'attention'
-  if (card.runtimePhase === 'waiting' && now - (card.lastActivityAt ?? -Infinity) >= 60_000) return 'waiting'
+  if (card.runtimePhase === 'waiting') return 'waiting'
   return 'aloft'
 }
 

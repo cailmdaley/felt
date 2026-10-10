@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { workerStatusLabel, workerVariant, appConversationTarget, canOpenDesktopApp, validDesktopThreadLink } from './appConversation.js'
+import { inFlightBand } from './KanbanReadModel.js'
+import type { KanbanCard } from './KanbanTypes.js'
 
 const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
 const card = { desktopLink: route, shuttleHost: 'workstation', shuttleProjectDir: '/work/felt' }
@@ -64,14 +66,14 @@ describe('shared worker activity labels', () => {
 
 
 describe('shared worker appearance', () => {
-  it('uses the same minute boundary for every waiting worker', () => {
-    const waiting = { runtimePhase: 'waiting', lastActivityAt: 1000 }
-    expect(workerVariant(waiting, 60_999)).toBe('aloft')
-    expect(workerVariant(waiting, 61_000)).toBe('waiting')
-    expect(workerVariant({ runtimePhase: 'attention' }, 1000)).toBe('attention')
-    expect(workerVariant({ runtimePhase: 'blocked' }, 1000)).toBe('attention')
-    expect(workerVariant({ runtimePhase: 'working', launchError: 'failed' }, 1000)).toBe('attention')
-    expect(workerVariant({ runtimePhase: 'working' }, 1000)).toBe('aloft')
+  it('follows the phase the turn bands read', () => {
+    const card = { runtimePhase: 'waiting', lastActivityAt: 1000 } as KanbanCard
+    expect(workerVariant(card)).toBe('waiting')
+    expect(inFlightBand(card)).toBe('yourTurn')
+    expect(workerVariant({ runtimePhase: 'attention' })).toBe('attention')
+    expect(workerVariant({ runtimePhase: 'blocked' })).toBe('attention')
+    expect(workerVariant({ runtimePhase: 'working', launchError: 'failed' })).toBe('attention')
+    expect(workerVariant({ runtimePhase: 'working' })).toBe('aloft')
   })
   it('still opens ChatGPT when no desktop conversation route is available', () => {
     expect(appConversationTarget({}, true)).toMatchObject({ href: 'https://chatgpt.com/open-app', conversationSpecific: false })
