@@ -25,14 +25,15 @@ defmodule Shuttle.SessionResumeTest do
     use Agent
 
     @agents %{
-      "claude-opus" => %{
-        "id" => "claude-opus",
+      "claude-opus-headless" => %{
+        "id" => "claude-opus-headless",
         "cli" => "claude",
         "wrapper" => "claude",
         "model" => "opus",
         "effort" => "medium",
         "extra_flags" => "--permission-mode auto",
-        "headless" => true
+        "headless" => true,
+        "env" => %{"CLAUDE_CODE_PROMPT_CACHE_TTL" => "5m"}
       },
       "codex-luna" => %{
         "id" => "codex-luna",
@@ -140,7 +141,7 @@ defmodule Shuttle.SessionResumeTest do
           %{
             "session" => @claude,
             "harness" => "claude-code",
-            "agent" => "claude-opus",
+            "agent" => "claude-opus-headless",
             "at" => 1
           },
           %{"session" => @codex, "harness" => "codex", "agent" => "codex-luna", "at" => 2},
@@ -179,11 +180,11 @@ defmodule Shuttle.SessionResumeTest do
     } do
       assert {:ok, plan} = SessionResume.plan(@claude, runner: Runner)
       assert plan.tmux == "resume-" <> @claude
-      assert plan.agent == "claude-opus"
+      assert plan.agent == "claude-opus-headless"
       assert plan.cwd == project
 
       assert plan.command ==
-               "claude --model 'opus' --effort 'medium' --permission-mode auto --resume '#{@claude}'"
+               "CLAUDE_CODE_PROMPT_CACHE_TTL='5m' claude --model 'opus' --effort 'medium' --permission-mode auto --resume '#{@claude}'"
     end
 
     test "codex resumes with its subcommand, in the rollout's cwd", %{project: project} do

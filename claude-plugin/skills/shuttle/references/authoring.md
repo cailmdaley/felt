@@ -55,6 +55,8 @@ To talk to a worker later, the human resumes its card, which reopens the stored 
 Registry records accept an optional `env` string-to-string map for CLI/tmux workers, including resumes: `"env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m"}`.
 Keys must match `[A-Za-z_][A-Za-z0-9_]*`, values must contain no NUL, and shell expansion is disabled for values.
 Registry layers replace records wholesale by id; aliases inherit base environment variables and override named variables with their own `env` map.
+Resolved aliases keep their own id so capture and resume reapply all overlays.
+A resume that falls back to a bare agent because no registry record resolves carries no `env` overrides.
 The Codex app surface uses an existing App Server and does not apply per-worker environment variables.
 See the [registry configuration reference](https://cailmdaley.github.io/felt/shuttle/installation/#configuring-agents).
 

@@ -7,7 +7,8 @@ import (
 )
 
 // ResolvedAgent is the daemon-facing resolution of a block's agent: the base
-// agent record (cli/wrapper/model/...) plus the effective axes (effort/chrome/
+// harness configuration (cli/wrapper/model/...) under the selected agent's id,
+// plus the effective axes (effort/chrome/
 // headless after alias overlay + block + defaults). Rendering these into CLI
 // flags stays the daemon's job — this is the resolved INPUT to that, so the
 // daemon needs neither the embedded registry nor the alias/axis logic.
@@ -48,7 +49,7 @@ func (r *Resolved) IsEmpty() bool {
 	return r == nil || (r.Agent == nil && r.NextDue == nil && r.PrevDue == nil)
 }
 
-// NewResolvedAgent folds a base agent record and the effective axes into the
+// NewResolvedAgent folds a resolved harness record and the effective axes into the
 // daemon-facing ResolvedAgent. It is the single place this projection is made,
 // so `shuttle show -j`'s shuttle.resolved.agent (via ResolveBlock) and
 // `shuttle agents resolve` (ad-hoc, for the daemon's capture path) emit a

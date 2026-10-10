@@ -214,10 +214,10 @@ func (r *AgentRegistry) Resolve(name, blockEffort string, blockChrome bool) (Age
 		if rec.Axes != nil {
 			overlay = *rec.Axes
 		}
+		// Persist the selected alias so capture and resume can reapply all
+		// overlays when resolving the recorded launch identity.
+		base.ID = rec.ID
 		if len(rec.Env) > 0 {
-			// Keep the env-bearing alias addressable when launch metadata is
-			// persisted and subsequently resolved for capture or resume.
-			base.ID = rec.ID
 			base.Env = maps.Clone(base.Env)
 			if base.Env == nil {
 				base.Env = make(AgentEnv)

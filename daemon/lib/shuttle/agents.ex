@@ -14,6 +14,8 @@ defmodule Shuttle.Agents do
   string-keyed JSON into the atom-keyed record the command builders consume.
   """
 
+  require Logger
+
   @type agent_record :: %{
           id: String.t(),
           cli: String.t() | nil,
@@ -201,7 +203,20 @@ defmodule Shuttle.Agents do
     assignments =
       (agent[:env] || %{})
       |> Enum.sort()
-      |> Enum.map(fn {key, value} -> "#{key}=#{shell_escape(value)}" end)
+      |> Enum.flat_map(fn
+        {key, value} when is_binary(key) and is_binary(value) ->
+          if Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, key) and
+               not String.contains?(value, <<0>>) do
+            ["#{key}=#{shell_escape(value)}"]
+          else
+            Logger.warning("Skipping invalid agent env entry for key #{inspect(key)}")
+            []
+          end
+
+        {key, _value} ->
+          Logger.warning("Skipping invalid agent env entry for key #{inspect(key)}")
+          []
+      end)
 
     Enum.join(assignments ++ [command], " ")
   end

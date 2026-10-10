@@ -780,7 +780,10 @@ For example, copy the complete `claude-opus` record, change its `id` to `claude-
 ```
 
 Alias records inherit their base agent's environment and can override individual variables with their own `env` map.
+Resolved aliases retain their own id, so capture and resume reapply their environment and axis overlays.
+Interactive Chronicle resumes explicitly clear `headless` because a human is at the terminal.
 This alias overlay does not change the wholesale record replacement rule between registry layers.
+If a resume cannot resolve a registry record and falls back to a bare agent, that agent carries no `env` overrides.
 The Codex app surface connects to an existing App Server and does not set per-worker process environment variables.
 
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
