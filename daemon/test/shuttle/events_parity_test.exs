@@ -23,9 +23,9 @@ defmodule Shuttle.EventsParityTest do
   # stopping with two detached shells still running and then being hit by the
   # harness's idle timer; and a subagent stopping outside any tmux session.
   @golden Path.expand("../../../internal/shuttlecli/testdata/events_golden.jsonl", __DIR__)
-  @worker_a "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
-  @worker_b "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
-  @worker_c "background-01KVC1N5XMAAMYXDAGR4V6QABB-shuttle"
+  @worker_a "sess-a"
+  @worker_b "sess-b"
+  @worker_c "sess-d"
   @uid_a "01KVC1N5XMAAMYXDAGR4V6QA9G"
   # Just after the last event in the fixture, so nothing prunes as stale.
   @now 1_753_900_012_000
@@ -65,8 +65,8 @@ defmodule Shuttle.EventsParityTest do
       # anything. It reads as working, not as a raised hand.
       assert %{phase: "working", last_event_at: 1_753_900_010_000} = activity[@worker_c]
 
-      # The subagent line carries no tmux session, so it tracks nothing. Only
-      # `*-shuttle` sessions are worker sessions.
+      # The standalone subagent line has its own session id and no tracked
+      # Codex child state, so it does not create a waiting record.
       assert Map.keys(activity) |> Enum.sort() ==
                Enum.sort([@worker_a, @worker_b, @worker_c])
     end

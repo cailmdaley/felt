@@ -241,17 +241,16 @@ defmodule Shuttle.EventStreamTest do
       ev(
         "notification",
         -2,
-        Map.put(at.(-2), "tmuxSession", "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle")
+        at.(-2)
+        |> Map.put("tmuxSession", "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle")
+        |> Map.put("sessionId", "other-session")
       )
     ])
 
     name = start(path)
 
     # The session's last event lives only in the rotated file.
-    assert waiting(name) == %{
-             shuttle => "waiting",
-             "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle" => "attention"
-           }
+    assert waiting(name) == %{"s1" => "waiting", "other-session" => "attention"}
 
     assert sent(name, path) == ["/tmp/a.html"]
 
@@ -278,7 +277,7 @@ defmodule Shuttle.EventStreamTest do
 
     # `sent/2` catches up; `session_activity/1` reads what is held.
     assert sent(name, path) == ["/tmp/one.html", "/tmp/two.html"]
-    assert waiting(name) == %{shuttle => "working"}
+    assert waiting(name) == %{"s1" => "working"}
     assert {:ok, events} = EventStream.sent_events(name, path)
 
     assert events ==
@@ -289,7 +288,7 @@ defmodule Shuttle.EventStreamTest do
     append(path, [ev("stop", -1, at.(-1))])
 
     assert sent(name, path) == ["/tmp/two.html"]
-    assert waiting(name) == %{shuttle => "waiting"}
+    assert waiting(name) == %{"s1" => "waiting"}
   end
 
   test "session_activity answers at once while the stream is busy", %{path: path} do
@@ -297,7 +296,7 @@ defmodule Shuttle.EventStreamTest do
     shuttle = "w-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
     append(path, [ev("stop", -1, %{"timestamp" => now - @m, "tmuxSession" => shuttle})])
     name = start(path)
-    assert waiting(name) == %{shuttle => "waiting"}
+    assert waiting(name) == %{"s1" => "waiting"}
 
     # A suspended stream stands in for one mid-reseed: its mailbox is not
     # served, yet the owner feed's read neither blocks nor loses the phase.
@@ -305,7 +304,7 @@ defmodule Shuttle.EventStreamTest do
 
     try do
       {micros, activity} = :timer.tc(fn -> EventStream.session_activity(name) end)
-      assert %{^shuttle => %{phase: "waiting"}} = activity
+      assert %{"s1" => %{phase: "waiting"}} = activity
       assert micros < 1_000_000
     after
       :sys.resume(name)
@@ -314,19 +313,35 @@ defmodule Shuttle.EventStreamTest do
 
   test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
     now = System.system_time(:millisecond)
-    a = "a-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
-    b = "b-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+    a = "session-a"
+    b = "session-b"
 
     append(path, [
-      ev("notification", -3, %{"timestamp" => now - 3 * @m, "tmuxSession" => a}),
-      ev("notification", -3, %{"timestamp" => now - 3 * @m, "tmuxSession" => a})
+      ev("notification", -3, %{
+        "timestamp" => now - 3 * @m,
+        "sessionId" => a,
+        "tmuxSession" => "a-pane-shuttle"
+      }),
+      ev("notification", -3, %{
+        "timestamp" => now - 3 * @m,
+        "sessionId" => a,
+        "tmuxSession" => "a-pane-shuttle"
+      })
     ])
 
     name = start(path)
     assert waiting(name) == %{a => "attention"}
 
     # Shrunk in place: the rebuild sees only b, and still remembers a.
-    File.write!(path, ev("stop", -1, %{"timestamp" => now - @m, "tmuxSession" => b}) <> "\n")
+    File.write!(
+      path,
+      ev("stop", -1, %{
+        "timestamp" => now - @m,
+        "sessionId" => b,
+        "tmuxSession" => "b-pane-shuttle"
+      }) <> "\n"
+    )
+
     assert Enum.map(recent(name, path, now), & &1.k) == ["agent", "reply"]
     assert waiting(name) == %{a => "attention", b => "waiting"}
   end
