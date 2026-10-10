@@ -3,7 +3,8 @@ defmodule Shuttle.EventsParityTest do
   Cross-language guard on the event stream.
 
   `shuttle hook event` (Go) writes the stream; `Shuttle.EventStream` reads it and
-  `Shuttle.WaitingTracker` and `Shuttle.SentFiles` (Elixir) project it. Nothing in the type system connects the
+  `Shuttle.WaitingTracker`, `Shuttle.SessionBinding`, and `Shuttle.SentFiles`
+  (Elixir) project it. Nothing in the type system connects the
   two, so the contract is a checked-in fixture: `internal/shuttlecli/testdata/events_golden.jsonl`
   is produced byte-for-byte by `TestEventGoldenParity` in `internal/shuttlecli/hook_event_test.go`
   and parsed here.
@@ -116,6 +117,13 @@ defmodule Shuttle.EventsParityTest do
         assert is_binary(line["tmuxSession"])
         assert line["harness"] in ["claude-code", "codex"]
         assert is_binary(line["originName"])
+
+        assert line["receiverPid"] ==
+                 %{"sess-a" => 4242, "sess-b" => 4243, "sess-d" => 4244, "sess-c" => 4245}[
+                   line["sessionId"]
+                 ]
+
+        assert line["receiverBirth"] == "fixture-birth"
       end
 
       # The harness discriminator is the transcript path, and the fixture
