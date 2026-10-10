@@ -1005,7 +1005,8 @@ defmodule Shuttle.PollerTest do
         {"pi", "pi-luna", :absolute},
         {"codex", "codex", :absolute},
         {"pi", "pi-luna", :tilde},
-        {"pi", "pi-luna", :empty}
+        {"pi", "pi-luna", :empty},
+        {"codex", "codex", :old}
       ] do
     @tag :pr53_identity
     @tag :timing
@@ -1020,12 +1021,20 @@ defmodule Shuttle.PollerTest do
       Env.put_app_env(:session_capture_timeout_ms, 25)
       Env.put_app_env(:session_capture_poll_ms, 5)
       Env.put_app_env(:session_capture_retry_ms, 100)
-      boundary = DateTime.utc_now() |> DateTime.to_iso8601()
+
+      dispatched_at =
+        DateTime.add(
+          DateTime.utc_now(),
+          if(unquote(project) == :old, do: -4 * 86400, else: 0),
+          :second
+        )
+
+      boundary = DateTime.to_iso8601(dispatched_at)
       Env.put_env("HOME", Path.dirname(root))
 
       project_dir =
         case unquote(project) do
-          :absolute -> root
+          path when path in [:absolute, :old] -> root
           :tilde -> "~/#{Path.basename(root)}"
           :empty -> "\"\""
         end
@@ -1089,12 +1098,33 @@ defmodule Shuttle.PollerTest do
           {Path.join([
              root,
              "codex-sessions",
-             Calendar.strftime(Date.utc_today(), "%Y/%m/%d"),
+             Calendar.strftime(dispatched_at, "%Y/%m/%d"),
              "rollout-session.jsonl"
            ]), %{"type" => "session_meta", "payload" => header}}
         end
 
       File.mkdir_p!(Path.dirname(path))
+
+      if unquote(project) == :old do
+        for {label, candidate, prompt} <- [
+              {"wrong-cwd", Map.put(header, "cwd", Path.join(root, "other")), local_id},
+              {"too-early",
+               Map.put(
+                 header,
+                 "timestamp",
+                 DateTime.to_iso8601(DateTime.add(dispatched_at, -60, :second))
+               ), local_id},
+              {"wrong-fiber", header, "another-fiber"}
+            ] do
+          candidate = Map.put(candidate, "id", label)
+
+          File.write!(
+            Path.join(Path.dirname(path), "rollout-zzzz-#{label}.jsonl"),
+            Jason.encode!(%{"type" => "session_meta", "payload" => candidate}) <>
+              "\n" <> Jason.encode!(%{"text" => "Fiber: #{prompt}"}) <> "\n"
+          )
+        end
+      end
 
       File.write!(
         path,

@@ -1938,8 +1938,8 @@ defmodule Shuttle.Dispatcher do
   # matches cwd, recency AND content is this dispatch's session; a bare
   # newest-file pick would steal another worker's session whenever two workers
   # share a cwd.
-  defp candidate_session_files("codex", _work_dir) do
-    Shuttle.HarnessPaths.codex_session_dirs()
+  defp candidate_session_files("codex", _work_dir, dispatched_after) do
+    Shuttle.HarnessPaths.codex_session_dirs(since: dispatched_after)
     |> Enum.flat_map(fn dir ->
       case File.ls(dir) do
         {:ok, files} ->
@@ -1954,7 +1954,7 @@ defmodule Shuttle.Dispatcher do
     |> Enum.sort_by(&Path.basename/1, :desc)
   end
 
-  defp candidate_session_files("pi", work_dir) do
+  defp candidate_session_files("pi", work_dir, _dispatched_after) do
     dir = Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
 
     case File.ls(dir) do
@@ -1963,11 +1963,11 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp candidate_session_files(_cli, _work_dir), do: []
+  defp candidate_session_files(_cli, _work_dir, _dispatched_after), do: []
 
   defp find_session_file(cli, work_dir, fiber_id, dispatched_after) do
     cli
-    |> candidate_session_files(work_dir)
+    |> candidate_session_files(work_dir, dispatched_after)
     |> Enum.find(&session_matches?(cli, &1, work_dir, fiber_id, dispatched_after))
     |> case do
       nil -> {:error, :not_found}

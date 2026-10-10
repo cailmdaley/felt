@@ -921,6 +921,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     shuttle:
       kind: oneshot
       agent: codex-sol
+      surface: cli
     ---
     A codex fiber whose session UUID should be captured from its own transcript.
     """)
@@ -990,6 +991,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     shuttle:
       kind: oneshot
       agent: codex-sol
+      surface: cli
     ---
     A codex fiber whose transcript lands after local midnight.
     """)
