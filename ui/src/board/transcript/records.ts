@@ -177,8 +177,19 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
   return [...(classified ? [classified] : prompt ? [prompt] : []), ...results]
 }
 
+/** A message typed while the agent worked arrives as a queued command absorbed into the running turn. */
+function claudeQueued(record: ObjectValue): Entry[] {
+  const attachment = object(record.attachment)
+  if (attachment?.type !== 'queued_command' || (attachment.commandMode ?? 'prompt') !== 'prompt') return []
+  const text = string(attachment.prompt)
+  const classified = text ? classifiedClaudeText(text, false, timestamp(record.timestamp)) : null
+  return classified ? [classified] : []
+}
+
 function claudeRecord(record: ObjectValue): Entry[] {
-  if (!['user', 'assistant', 'system'].includes(String(record.type)) || record.isSidechain === true) return []
+  if (record.isSidechain === true) return []
+  if (record.type === 'attachment') return claudeQueued(record)
+  if (!['user', 'assistant', 'system'].includes(String(record.type))) return []
   const message = object(record.message)
   const time = timestamp(record.timestamp)
   if (record.type === 'system') {
