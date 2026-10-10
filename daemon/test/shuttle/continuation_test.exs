@@ -165,12 +165,12 @@ defmodule Shuttle.ContinuationTest do
       refute Keyword.has_key?(opts, :cd)
     end
 
-    test "write_dispatch omits --session/--run-id when empty but still stamps --dispatched-at" do
+    test "write_dispatch clears unknown session identity and omits absent run id" do
       :ok =
         Continuation.write_dispatch(RecordingRunner, "/loom", "demo/task", %{session_uuid: nil})
 
       assert [{"shuttle", args, _}] = RecordingRunner.calls()
-      refute "--session" in args
+      assert ["" | _] = Enum.drop(args, Enum.find_index(args, &(&1 == "--session")) + 1)
       refute "--run-id" in args
       assert "--dispatched-at" in args
     end

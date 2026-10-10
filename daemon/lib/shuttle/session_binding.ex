@@ -46,7 +46,13 @@ defmodule Shuttle.SessionBinding do
                   members: Enum.reduce(previous.members, state.members, &Map.put(&2, &1, key))
               }
 
-              put(state, key, id, at, previous.members)
+              members =
+                MapSet.union(
+                  previous.members,
+                  if(process, do: process.members, else: MapSet.new())
+                )
+
+              put(state, key, id, at, members)
             else
               state
             end

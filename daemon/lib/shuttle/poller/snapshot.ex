@@ -162,7 +162,12 @@ defmodule Shuttle.Poller.Snapshot do
   """
   def runtime_index(running, activity) do
     Enum.reduce(running, %{}, fn {runtime_key, meta}, acc ->
-      payload = runtime_payload(meta, activity)
+      payload =
+        runtime_payload(meta, activity)
+        |> Map.put(
+          :identity_pending,
+          Map.has_key?(meta, :session_uuid) and meta.session_uuid == nil
+        )
 
       [runtime_key, Poller.metadata_uid(meta), Poller.fiber_address(meta)]
       |> Enum.filter(&(is_binary(&1) and &1 != ""))
@@ -192,7 +197,11 @@ defmodule Shuttle.Poller.Snapshot do
             uuid =
               Shuttle.SessionBinding.current(
                 binding,
-                payload.session_uuid || get_in(fiber, ["shuttle", "runtime", "session_uuid"])
+                if(Map.get(payload, :identity_pending, false),
+                  do: nil,
+                  else:
+                    payload.session_uuid || get_in(fiber, ["shuttle", "runtime", "session_uuid"])
+                )
               )
 
             payload = Map.put(payload, :session_uuid, uuid)
@@ -208,7 +217,7 @@ defmodule Shuttle.Poller.Snapshot do
             payload
           end
 
-        Map.put(entry, :runtime, put_session_link(payload, fiber))
+        Map.put(entry, :runtime, put_session_link(Map.delete(payload, :identity_pending), fiber))
     end
   end
 
@@ -248,7 +257,12 @@ defmodule Shuttle.Poller.Snapshot do
   # on this host — the owner stamps its own rows). Omitted when the session was
   # never bridged, so a viewer renders a stamp rather than a link to nowhere.
   defp put_session_link(payload, fiber) do
-    case get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
+    uuid =
+      if payload.surface == "cli",
+        do: payload.session_uuid,
+        else: get_in(fiber, ["shuttle", "runtime", "session_uuid"])
+
+    case uuid do
       uuid when is_binary(uuid) and uuid != "" ->
         case Shuttle.SessionLink.cached_url(uuid) do
           url when is_binary(url) -> Map.put(payload, :session_link, url)

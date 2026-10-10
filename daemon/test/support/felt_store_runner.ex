@@ -221,6 +221,8 @@ defmodule Shuttle.Test.FeltStoreRunner do
   # a write path (e.g. the claim's frontmatter stamp) wrote to the real file.
   def fiber(id), do: Agent.get(server(), &Map.get(&1.fibers, id))
 
+  def set_show_missing(value), do: Agent.update(server(), &Map.put(&1, :show_missing, value))
+
   def delete_fiber(id) do
     path = get_in(fiber(id) || %{}, ["path"])
     if is_binary(path), do: File.rm(path)
@@ -399,6 +401,12 @@ defmodule Shuttle.Test.FeltStoreRunner do
       "cli" => "claude",
       "wrapper" => "claude",
       "model" => "haiku"
+    },
+    "pi-luna" => %{
+      "id" => "pi-luna",
+      "cli" => "pi",
+      "wrapper" => "pi",
+      "model" => "openai/gpt-6-luna"
     },
     "codex" => %{
       "id" => "codex",
@@ -587,6 +595,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
         else
           {json, 0}
         end
+
+      command in ["felt", "shuttle"] and String.contains?(full_args, "show") and
+          Agent.get(server(), &Map.get(&1, :show_missing, false)) ->
+        {"fixture read failure", 1}
 
       command in ["felt", "shuttle"] and String.contains?(full_args, "show") and
           String.contains?(full_args, "--field shuttle") ->

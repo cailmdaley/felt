@@ -871,6 +871,88 @@ defmodule Shuttle.Poller do
   end
 
   @impl true
+  def handle_info({:dispatched_identity, fiber_id, token, uuid}, state) do
+    case running_worker(state, fiber_id) do
+      %{identity_token: ^token} when not is_nil(token) ->
+        key = running_key(state, fiber_id)
+
+        {:noreply,
+         %{state | running: Map.update!(state.running, key, &Map.put(&1, :session_uuid, uuid))}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:fallback_started, fiber_id, token, opts}, state) do
+    worker = running_worker(state, fiber_id)
+    store = Keyword.get(opts, :felt_store)
+
+    if is_binary(store) and store != "" and worker != nil and token != nil and
+         Map.get(worker, :identity_token) == token do
+      case Shuttle.Continuation.backfill_session_uuid(state.runner, store, fiber_id, "") do
+        :ok ->
+          key = running_key(state, fiber_id)
+
+          state = %{
+            state
+            | running: Map.update!(state.running, key, &Map.put(&1, :session_uuid, nil))
+          }
+
+          {:noreply, refresh_worker_document(state, fiber_id)}
+
+        {:error, _} ->
+          {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info({:captured_session, fiber_id, token, uuid, opts}, state) do
+    worker = running_worker(state, fiber_id)
+    store = Keyword.get(opts, :felt_store)
+
+    if is_binary(store) and store != "" and worker != nil and
+         Map.get(worker, :identity_token) == token and token != nil and
+         not Map.get(worker, :identity_captured, false) do
+      # A capture initializes identity once. Succession is folded before the
+      # write so a /clear observed while capture was pending is not lost.
+      current = Shuttle.SessionBinding.current(session_bindings(), uuid)
+
+      case Shuttle.Continuation.backfill_session_uuid(
+             state.runner,
+             Keyword.get(opts, :felt_store),
+             fiber_id,
+             current
+           ) do
+        :ok ->
+          Shuttle.SessionLedger.record(
+            Keyword.merge(opts, fiber: fiber_id, session: current, kind: :dispatch)
+          )
+
+          key = running_key(state, fiber_id)
+
+          state = %{
+            state
+            | running:
+                Map.update!(
+                  state.running,
+                  key,
+                  &(&1 |> Map.put(:identity_captured, true) |> Map.put(:session_uuid, current))
+                )
+          }
+
+          {:noreply, refresh_worker_document(state, fiber_id)}
+
+        {:error, _} ->
+          {:noreply, state}
+      end
+    else
+      {:noreply, state}
+    end
+  end
+
   def handle_info({:tick, tick_token}, %{tick_token: tick_token} = state)
       when is_reference(tick_token) do
     state = %{
@@ -1020,6 +1102,7 @@ defmodule Shuttle.Poller do
       |> Map.put(:poll_check_in_progress, false)
       |> Map.put(:poll_token, nil)
       |> Map.put(:poll_task_pid, nil)
+      |> persist_session_bindings()
       |> Map.update!(:poll_cycles, &(&1 + 1))
       |> schedule_tick(state.poll_interval_ms)
 
@@ -1425,17 +1508,27 @@ defmodule Shuttle.Poller do
   # An app worker is addressed by its conversation id; any other worker by the
   # harness session the daemon stamped on the fiber.
   defp worker_session_uuid(worker, fiber) do
-    (worker && Shuttle.AppWorkers.id(worker.session)) ||
-      case fiber && get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
-        value when is_binary(value) and value != "" -> value
-        _ -> nil
-      end
+    cond do
+      worker && Shuttle.AppWorkers.id(worker.session) ->
+        Shuttle.AppWorkers.id(worker.session)
+
+      worker && Map.has_key?(worker, :session_uuid) ->
+        Map.get(worker, :session_uuid)
+
+      true ->
+        case fiber && get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
+          value when is_binary(value) and value not in ["", "unknown"] -> value
+          _ -> nil
+        end
+    end
   end
 
   defp cached_fiber(%State{} = state, fiber_id) do
     Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
       fiber = Map.get(entry, :fiber, %{})
-      if fiber_id in [Map.get(fiber, "id"), Map.get(fiber, "uid")], do: fiber
+
+      if fiber_id in [Map.get(fiber, "id"), Map.get(fiber, "uid"), Map.get(fiber, "slug")],
+        do: fiber
     end)
   end
 
@@ -2065,7 +2158,8 @@ defmodule Shuttle.Poller do
     # never leaves a stale runtime — it's already gone from `running`.
     activity = session_activity()
     index = Snapshot.runtime_index(running, activity)
-    Enum.map(entries, &Snapshot.put_runtime(&1, index))
+    binding = session_bindings()
+    Enum.map(entries, &Snapshot.put_runtime(&1, index, activity, binding))
   end
 
   # The activity source. Defaults to the host-local event stream; overridable
@@ -2075,6 +2169,86 @@ defmodule Shuttle.Poller do
     case Shuttle.Env.app(:waiting_phases_source) do
       fun when is_function(fun, 0) -> fun.()
       _ -> Shuttle.EventStream.session_activity()
+    end
+  end
+
+  defp session_bindings do
+    case Shuttle.Env.app(:session_bindings_source) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> Shuttle.EventStream.session_bindings()
+    end
+  end
+
+  defp persist_session_bindings(state) do
+    binding = session_bindings()
+
+    Enum.reduce(state.running, state, fn {key, meta}, state ->
+      fiber_id = fiber_address(meta)
+      fiber = cached_fiber(state, fiber_id)
+      anchor = worker_session_uuid(meta, fiber)
+      current = Shuttle.SessionBinding.current(binding, anchor)
+
+      if Shuttle.AppWorkers.id(meta.session) == nil and current != nil and current != anchor and
+           is_binary(Map.get(meta, :felt_store)) and Map.get(meta, :felt_store) != "" do
+        case Shuttle.Continuation.backfill_session_uuid(
+               state.runner,
+               Map.get(meta, :felt_store),
+               fiber_id,
+               current
+             ) do
+          :ok ->
+            Shuttle.SessionLedger.record(
+              fiber: fiber_id,
+              uid: metadata_uid(meta),
+              session: current,
+              tmux: meta.session,
+              harness:
+                Shuttle.SessionLedger.harness_for_cli(
+                  fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+                ),
+              kind: :resume,
+              agent: Map.get(meta, :agent_id)
+            )
+
+            state = %{
+              state
+              | running: Map.update!(state.running, key, &Map.put(&1, :session_uuid, current))
+            }
+
+            refresh_worker_document(state, fiber_id)
+
+          {:error, _} ->
+            state
+        end
+      else
+        state
+      end
+    end)
+  end
+
+  defp refresh_worker_document(state, fiber_id) do
+    case fetch_fiber_full(fiber_id, state) do
+      {:ok, fiber} ->
+        cache =
+          Map.new(state.document_cache, fn {key, cached} ->
+            previous = cached.entry.fiber
+
+            if fiber_id in [previous["id"], previous["uid"], previous["slug"]] do
+              {key,
+               %{
+                 cached
+                 | entry: %{cached.entry | fiber: fiber},
+                   modified_at: fiber["modified_at"]
+               }}
+            else
+              {key, cached}
+            end
+          end)
+
+        %{state | document_cache: cache}
+
+      {:error, _} ->
+        state
     end
   end
 
@@ -3033,8 +3207,12 @@ defmodule Shuttle.Poller do
   defp spawn_worker(state, fiber, fiber_id, runtime_key, felt_store, work_dir, opts) do
     prompt_context = dispatch_prompt_context(fiber, opts)
 
+    identity_token = make_ref()
+
     case Dispatcher.dispatch(
            fiber_id,
+           poller: state.self_ref,
+           identity_token: identity_token,
            runner: state.runner,
            work_dir: work_dir,
            prompt_context: prompt_context,
@@ -3051,10 +3229,12 @@ defmodule Shuttle.Poller do
           fiber_id
           |> new_running_meta(fiber, session, agent_id_from_fiber(fiber), felt_store)
           |> Map.merge(running_prompt_metadata(prompt_context))
+          |> Map.put(:identity_token, identity_token)
+          |> Map.put(:session_uuid, nil)
 
         case register_running(state, fiber_id, runtime_key, running_meta) do
           {:ok, state} ->
-            {state, {:ok, session}}
+            {refresh_worker_document(state, fiber_id), {:ok, session}}
 
           {:error, reason} ->
             # Watcher start failed: the worker may be alive in tmux. Record the

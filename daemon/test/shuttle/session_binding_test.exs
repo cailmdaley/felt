@@ -55,6 +55,24 @@ defmodule Shuttle.SessionBindingTest do
     assert SessionBinding.current(merged, "old") == "newest"
   end
 
+  test "loading an existing transcript unions receiver lineages across pruning" do
+    state =
+      fold([
+        event("a", "session_start", @now),
+        event("b", "session_start", @now + 1, 2),
+        event("a", "session_start", @now + 2, 2)
+      ])
+
+    assert SessionBinding.current(state, "b") == "a"
+
+    state =
+      SessionBinding.prune(state, @now + 3)
+      |> SessionBinding.apply_event(event("next", "session_start", @now + 4, 2), @now + 4)
+
+    assert SessionBinding.current(state, "a") == "next"
+    assert SessionBinding.current(state, "b") == "next"
+  end
+
   test "old stream joins directly and first receiver hook seeds succession" do
     state = fold([Map.drop(event("old", "stop", @now), ["receiverPid", "receiverBirth"])])
     assert SessionBinding.current(state, "old") == "old"
