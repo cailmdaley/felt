@@ -389,6 +389,57 @@ defmodule Shuttle.EventStreamTest do
     end
   end
 
+  @tag replay_finding_4: true
+  test "replacement accepts an unread equal-time stop after a known tool but not its prefix", %{
+    path: path
+  } do
+    now = System.system_time(:millisecond)
+    tool = ev("pre_tool_use", 0, %{"timestamp" => now, "id" => "tool-at-t"})
+    stop = ev("stop", 0, %{"timestamp" => now, "id" => "stop-at-t"})
+    append(path, [tool])
+    name = start(path)
+    assert waiting(name) == %{"s1" => "working"}
+
+    append(path <> ".replacement", [tool, stop])
+    File.rename!(path <> ".replacement", path)
+    _ = all(name, path)
+    assert waiting(name) == %{"s1" => "waiting"}
+
+    # Only the already-read prefix remains; it cannot reopen the closed turn.
+    File.write!(path, tool <> "\n")
+    _ = all(name, path)
+    assert waiting(name) == %{"s1" => "waiting"}
+  end
+
+  @tag replay_finding_4: true
+  test "equal-time suffix preserves replayed child count and restates background work once", %{
+    path: path
+  } do
+    now = System.system_time(:millisecond)
+    context = %{"harness" => "codex", "timestamp" => now}
+
+    spawn =
+      ev(
+        "post_tool_use",
+        0,
+        Map.merge(context, %{"tool" => "collaborationspawn_agent", "id" => "spawn-at-t"})
+      )
+
+    stop = ev("stop", 0, Map.merge(context, %{"id" => "stop-at-t", "backgroundTasks" => 2}))
+    append(path, [spawn])
+    name = start(path)
+
+    append(path <> ".replacement", [spawn, stop])
+    File.rename!(path <> ".replacement", path)
+    _ = all(name, path)
+    assert %{turn: :closed, kids: 1, bg: 2} = :sys.get_state(name).waiting["s1"]
+
+    append(path <> ".replacement", [spawn, stop])
+    File.rename!(path <> ".replacement", path)
+    _ = all(name, path)
+    assert %{turn: :closed, kids: 1, bg: 2} = :sys.get_state(name).waiting["s1"]
+  end
+
   test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
     now = System.system_time(:millisecond)
     a = "session-a"

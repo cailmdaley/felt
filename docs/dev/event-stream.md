@@ -24,7 +24,14 @@ socket, daemon state). Go resolves it in `shuttle.DataDir`
 **One reader, four projections.** `Shuttle.EventStream` decodes each line once and feeds four pure projections held in memory: activity (`Shuttle.Activity`), sent files (`Shuttle.SentFiles`), turn state (`Shuttle.WaitingTracker`), and session succession (`Shuttle.SessionBinding`).
 It seeds from `events.jsonl.1` then the live file in `init/1`, before the Poller starts, and afterwards reads only appended bytes.
 A rename rotation, recognized by the live path's inode moving, continues every projection: the tail of the old file is drained, then the new one is read from its start.
-An in-place shrink or an unaccountable replacement rebuilds the projections from both files, retaining known turn state and session bindings where the remaining files cannot supply newer evidence.
+An in-place shrink or an unaccountable replacement rebuilds the file projections from both files, replaying accepted turn events onto remembered session facts rather than replacing a session with an incomplete reconstruction.
+Permission, terminal state, and outstanding work survive until a transition supplies evidence clearing them.
+Each session retains event identities and ingestion sequence numbers within the 48-hour window, pruned at the existing periodic prune seam rather than scanned on every hook.
+If replay contains the session's last known transition, unseen events after it form a suffix and fold in file order, even at equal or backward timestamps.
+An earlier known transition is not enough to anchor a suffix when the actual known tail is missing.
+Without that last-transition anchor, only unseen events with strictly newer activity timestamps fold onto the remembered facts; ambiguous equal-time events leave them unchanged.
+Identities use the writer's event id, or a hash of the complete decoded event for legacy lines without an id.
+Identical no-id events are inherently indistinguishable, so replay cannot establish that a second identical legacy line is a new occurrence.
 The byte mechanics live in `Shuttle.FileTail`.
 
 **The writer is the binary; the plugin registers it.**

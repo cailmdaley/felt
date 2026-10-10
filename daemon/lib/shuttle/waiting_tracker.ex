@@ -10,7 +10,8 @@ defmodule Shuttle.WaitingTracker do
 
   Event timestamps are activity timestamps, not an ordering authority. Events
   fold in stream order, while `at` never moves backward when timestamps arrive
-  out of order. Child-event ids deduplicate replays for a 48-hour window.
+  out of order. Event identities and their ingestion order distinguish a
+  retained prefix from unread suffixes during replay, within a 48-hour window.
   """
 
   @bg_suppress_ms 60 * 60 * 1_000
@@ -25,7 +26,9 @@ defmodule Shuttle.WaitingTracker do
               pending: false,
               at: 0,
               harness: nil,
-              child_events: %{}
+              child_events: %{},
+              events: %{},
+              sequence: 0
   end
 
   @type sessions :: %{optional(String.t()) => %Session{}}
@@ -59,7 +62,7 @@ defmodule Shuttle.WaitingTracker do
 
     case transition(session, type, event, now) do
       :ignore -> sessions
-      updated -> Map.put(sessions, id, updated)
+      updated -> Map.put(sessions, id, remember_event(updated, event, now))
     end
   end
 
@@ -72,20 +75,58 @@ defmodule Shuttle.WaitingTracker do
 
     sessions
     |> Map.reject(fn {_id, session} -> session.at < cutoff end)
-    |> Map.new(fn {id, session} -> {id, trim_child_events(session, cutoff)} end)
+    |> Map.new(fn {id, session} -> {id, trim_events(session, cutoff)} end)
   end
 
-  @doc "Replays retained events onto known facts, folding only newer evidence."
+  @doc "Replays unseen suffix events onto known facts without rewinding retained prefixes."
   @spec replay_events(sessions(), [map()], integer()) :: sessions()
   def replay_events(known, events, now) do
-    Enum.reduce(events, known, fn event, sessions ->
-      timestamp = event_at(event, now)
-
-      case known[event["sessionId"]] do
-        %Session{at: at} when at >= timestamp -> sessions
-        _ -> apply_event(sessions, event, now)
+    events
+    |> Enum.group_by(& &1["sessionId"])
+    |> Enum.reduce(known, fn {id, events}, sessions ->
+      case known[id] do
+        nil -> Enum.reduce(events, sessions, &apply_event(&2, &1, now))
+        session -> replay_session(sessions, session, events, now)
       end
     end)
+  end
+
+  defp replay_session(sessions, session, events, now) do
+    # Only the last known transition anchors an unread suffix. An earlier
+    # known event can belong to an incomplete prefix missing the real tail.
+    frontier =
+      Enum.find_index(events, fn event ->
+        case session.events[event_key(event)] do
+          {sequence, _at} -> sequence == session.sequence
+          nil -> false
+        end
+      end)
+
+    events
+    |> Enum.with_index()
+    |> Enum.reduce(sessions, fn {event, index}, sessions ->
+      current = sessions[event["sessionId"]]
+      unseen = not Map.has_key?(current.events, event_key(event))
+
+      follows =
+        if is_nil(frontier),
+          do: event_at(event, now) > session.at,
+          else: index > frontier
+
+      recent = event_at(event, now) >= now - @max_age_ms
+      if unseen and follows and recent, do: apply_event(sessions, event, now), else: sessions
+    end)
+  end
+
+  defp event_key(%{"id" => id}) when is_binary(id) and id != "", do: {:id, id}
+
+  defp event_key(event),
+    do: {:content, :crypto.hash(:sha256, :erlang.term_to_binary(event, [:deterministic]))}
+
+  defp remember_event(session, event, now) do
+    sequence = session.sequence + 1
+    events = Map.put(session.events, event_key(event), {sequence, event_at(event, now)})
+    %{session | events: events, sequence: sequence}
   end
 
   defp transition(session, type, event, now) do
@@ -226,8 +267,12 @@ defmodule Shuttle.WaitingTracker do
     end
   end
 
-  defp trim_child_events(session, cutoff) do
-    %{session | child_events: Map.reject(session.child_events, fn {_id, at} -> at < cutoff end)}
+  defp trim_events(session, cutoff) do
+    %{
+      session
+      | child_events: Map.reject(session.child_events, fn {_id, at} -> at < cutoff end),
+        events: Map.reject(session.events, fn {_key, {_sequence, at}} -> at < cutoff end)
+    }
   end
 
   defp codex_event?(%{"harness" => "codex"}, _session), do: true

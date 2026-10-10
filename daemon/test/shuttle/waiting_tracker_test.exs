@@ -410,6 +410,97 @@ defmodule Shuttle.WaitingTrackerTest do
     assert restarted["parent"].turn == :open
   end
 
+  @tag replay_finding_4: true
+  test "an identified equal-time suffix follows stream order, including backward timestamps" do
+    tool = event("pre_tool_use", "a", %{"id" => "tool"})
+    stop = event("stop", "a", %{"id" => "stop", "timestamp" => @now - 1})
+    known = fold([tool])
+    replayed = Tracker.replay_events(known, [tool, stop], @now)
+    assert replayed["a"].turn == :closed
+    assert replayed["a"].at == @now
+    assert Tracker.replay_events(replayed, [tool], @now) == replayed
+    assert Tracker.replay_events(replayed, [tool, stop], @now) == replayed
+  end
+
+  @tag replay_finding_4: true
+  test "unidentified legacy lines distinguish an unread suffix by content and order" do
+    tool = event("pre_tool_use")
+    stop = event("stop")
+    known = fold([tool])
+    replayed = Tracker.replay_events(known, [tool, stop], @now)
+    assert replayed["session-a"].turn == :closed
+    assert Tracker.replay_events(replayed, [tool], @now) == replayed
+  end
+
+  test "an incomplete equal-time prefix cannot substitute an earlier anchor for the known tail" do
+    tool = event("pre_tool_use", "a", %{"id" => "tool"})
+    permission = event("notification", "a", %{"id" => "permission"})
+    unread_stop = event("stop", "a", %{"id" => "unknown-prefix-stop"})
+    known = fold([tool, permission])
+    assert Tracker.replay_events(known, [tool, unread_stop], @now) == known
+  end
+
+  test "replayed starts do not reset children and repeated unseen spawns count once" do
+    start = event("session_start", "a", %{"harness" => "codex", "id" => "start"})
+
+    spawn =
+      event("post_tool_use", "a", %{
+        "harness" => "codex",
+        "id" => "spawn",
+        "tool" => "collaborationspawn_agent"
+      })
+
+    stop = event("stop", "a", %{"harness" => "codex", "id" => "stop"})
+    known = fold([start])
+    replayed = Tracker.replay_events(known, [start, spawn, spawn, stop], @now)
+    assert %{turn: :closed, kids: 1} = replayed["a"]
+    assert Tracker.replay_events(replayed, [start, spawn, spawn, stop], @now) == replayed
+  end
+
+  test "replay identities expire with the 48-hour retention window" do
+    old = event("pre_tool_use", "a", %{"id" => "old-tool"})
+    current = event("stop", "a", %{"id" => "current-stop", "timestamp" => @now + 49 * @hour})
+    sessions = fold([old, current]) |> Tracker.prune(@now + 49 * @hour)
+    assert sessions["a"].events == %{{:id, "current-stop"} => {2, @now + 49 * @hour}}
+  end
+
+  property "equal-time full replay extends any known prefix exactly once in stream order" do
+    check all(
+            types <-
+              list_of(
+                member_of([
+                  "session_start",
+                  "pre_tool_use",
+                  "post_tool_use",
+                  "notification",
+                  "stop",
+                  "user_prompt_submit",
+                  "subagent_stop",
+                  "session_end"
+                ]),
+                min_length: 1,
+                max_length: 40
+              ),
+            split <- integer(0..40),
+            max_runs: 100
+          ) do
+      events =
+        Enum.with_index(types, fn type, index ->
+          event(type, "a", %{
+            "id" => "event-#{index}",
+            "harness" => "codex",
+            "tool" => "collaborationspawn_agent",
+            "backgroundTasks" => rem(index, 3)
+          })
+        end)
+
+      known = fold(Enum.take(events, split))
+      replayed = Tracker.replay_events(known, events, @now)
+      assert replayed == fold(events)
+      assert Tracker.replay_events(replayed, events, @now) == replayed
+    end
+  end
+
   test "prune and replay preserve unmentioned known sessions" do
     old = fold([event("stop", "old", %{"timestamp" => @now - 49 * @hour})])
     fresh = fold([event("stop", "fresh", %{"timestamp" => @now})])
