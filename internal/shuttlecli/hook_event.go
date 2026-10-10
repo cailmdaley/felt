@@ -2,12 +2,10 @@ package shuttlecli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -387,14 +385,9 @@ func (a *app) currentTmuxSession() string {
 	if s := strings.TrimSpace(a.env.Getenv("SHUTTLE_TMUX_SESSION")); s != "" {
 		return s
 	}
-	if a.env.Getenv("TMUX") == "" {
-		return ""
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	out, err := a.env.CommandContext(ctx, "tmux", "display-message", "-p", "#S").Output()
+	s, err := a.tmuxCurrentSession()
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return s
 }
