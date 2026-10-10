@@ -2958,7 +2958,8 @@ defmodule Shuttle.Poller do
 
   # The fiber's owning felt store, falling back to the first configured store
   # when resolution fails (callers need some store to shell Shuttle against).
-  defp owning_store(fiber_id, state) do
+  @doc false
+  def owning_store(fiber_id, state) do
     case store_for_fiber(fiber_id, state) do
       {:ok, h} -> h
       {:error, _} -> List.first(state.felt_stores)

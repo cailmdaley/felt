@@ -147,7 +147,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
       session: session,
       agent_id: app_record["agent_id"] || agent_id,
       uid: uid,
-      felt_store: app_record["felt_store"],
+      felt_store:
+        if(Shuttle.AppWorkers.app?(session),
+          do: app_record["felt_store"],
+          else: Poller.owning_store(fiber_id, state)
+        ),
       started_at: started_at,
       last_activity_at: started_at
     }

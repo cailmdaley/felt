@@ -1142,6 +1142,114 @@ defmodule Shuttle.PollerTest do
     assert Poller.session_uuid(poller, id) == "claimed-uuid"
   end
 
+  @tag :pr53_successor
+  test "adopted CLI persists successor into owning store and rejoins after evidence removal and restart" do
+    id = "tests/adopted-successor"
+    root = MockRunner.felt_root()
+    primary = Path.join(root, "other-store")
+    File.mkdir_p!(Path.join(primary, ".felt"))
+    boundary = "2026-10-10T12:00:00Z"
+    MockRunner.set_fiber(id, make_fiber(id))
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: pi-luna\nruntime:\n  dispatched_at: #{boundary}\n  session_uuid: A\n"
+    )
+
+    MockRunner.add_tmux_session(FiberUid.session(id))
+    Env.put_app_env(:session_bindings_source, fn -> Shuttle.SessionBinding.new() end)
+
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{
+        "A" => %{phase: "working", last_event_at: 1},
+        "B" => %{phase: "waiting", last_event_at: 2}
+      }
+    end)
+
+    opts = [
+      runner: MockRunner,
+      own_host_id: "test-host",
+      poll_interval_ms: 60_000,
+      felt_stores: [primary, root]
+    ]
+
+    {:ok, poller} = start_poller!(opts)
+    settle_poller!(poller)
+
+    assert {:ok, %{fibers: [%{runtime: %{session_uuid: "A", phase: "working"}}]}} =
+             Poller.cached_fiber_documents(poller)
+
+    # This is an adopted worker, not a worker whose dispatch supplied felt_store.
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end)
+
+    now = System.system_time(:millisecond)
+
+    binding =
+      Enum.reduce(
+        [
+          %{
+            "sessionId" => "A",
+            "type" => "stop",
+            "timestamp" => now,
+            "harness" => "pi",
+            "receiverPid" => 123,
+            "receiverBirth" => "receiver"
+          },
+          %{
+            "sessionId" => "B",
+            "type" => "session_start",
+            "timestamp" => now + 1,
+            "harness" => "pi",
+            "receiverPid" => 123,
+            "receiverBirth" => "receiver"
+          }
+        ],
+        Shuttle.SessionBinding.new(),
+        &Shuttle.SessionBinding.apply_event(&2, &1, now)
+      )
+
+    Env.put_app_env(:session_bindings_source, fn -> binding end)
+    sync_poll_cycle!(poller)
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "B"
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == boundary
+
+    successor_writes =
+      for {"shuttle", ["-C", store, "mark-runtime", ^id | flags]} <- MockRunner.commands(),
+          ["--session", "B"] in Enum.chunk_every(flags, 2, 1, :discard),
+          do: store
+
+    assert [^root] = successor_writes
+    [{_, adopted}] = Map.to_list(:sys.get_state(poller).running)
+    assert adopted.felt_store == root
+
+    assert Enum.any?(
+             Shuttle.SessionLedger.read_since(0),
+             &(&1["session"] == "B" and &1["kind"] == "resume")
+           )
+
+    assert {:ok, %{fibers: [%{runtime: %{session_uuid: "B", phase: "waiting"}}]}} =
+             Poller.cached_fiber_documents(poller)
+
+    GenServer.stop(poller)
+    # Neither binding projection nor retained anchor evidence knows A -> B anymore.
+    Env.put_app_env(:session_bindings_source, fn -> Shuttle.SessionBinding.new() end)
+
+    Env.put_app_env(:waiting_phases_source, fn ->
+      %{"B" => %{phase: "waiting", last_event_at: 2}}
+    end)
+
+    {:ok, restarted} = start_poller!(opts)
+    settle_poller!(restarted)
+    assert Poller.session_uuid(restarted, id) == "B"
+
+    assert {:ok, %{fibers: [%{runtime: %{session_uuid: "B", phase: "waiting"}}]}} =
+             Poller.cached_fiber_documents(restarted)
+
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "B"
+  end
+
   test "poll tick persists successor without changing dispatch boundary" do
     id = "tests/persist-binding"
     MockRunner.set_fiber(id, make_fiber(id))
