@@ -85,6 +85,15 @@ defmodule Shuttle.WaitingTrackerTest do
     assert last_event_at(name, "foo-01J00000000000000000000000-shuttle") == @base - 1000
   end
 
+  test "another session ending in the pane leaves the worker's stop alone", %{events: events} do
+    s = "foo-01J00000000000000000000000-shuttle"
+    line = fn type, id, ts -> Jason.encode!(%{type: type, tmuxSession: s, sessionId: id, timestamp: ts}) <> "\n" end
+    File.write!(events, line.("stop", "worker", @base - 1000) <> line.("session_end", "probe", @base), [:append])
+    name = start(events)
+    assert phase(name, s) == "waiting"
+    assert last_event_at(name, s) == @base - 1000
+  end
+
   test "a stop event yields phase \"waiting\"", %{events: events} do
     name = start(events)
     append(events, "stop", "foo-01J00000000000000000000000-shuttle")

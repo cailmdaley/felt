@@ -237,8 +237,9 @@ defmodule Shuttle.WaitingTracker do
 
   def apply_event(sessions, %{"type" => type, "tmuxSession" => session} = ev, now)
       when is_binary(type) and is_binary(session) and session != "" do
-    if Shuttle.Dispatcher.shuttle_session?(session) do
-      prev = Map.get(sessions, session)
+    prev = Map.get(sessions, session)
+
+    if Shuttle.Dispatcher.shuttle_session?(session) and not foreign_end?(prev, ev) do
       at = event_at(ev, now)
       kids = live_children(type, ev, prev)
 
@@ -281,6 +282,14 @@ defmodule Shuttle.WaitingTracker do
   def merge_known(known, rebuilt) do
     Map.merge(known, rebuilt, fn _session, old, new -> if new.at >= old.at, do: new, else: old end)
   end
+
+  # A session ending that is not the one the pane's record follows (a nested
+  # probe in the same pane) says nothing about the worker's own turn.
+  defp foreign_end?(%{session_id: tracked}, %{"type" => "session_end", "sessionId" => id})
+       when is_binary(tracked) and is_binary(id),
+       do: tracked != id
+
+  defp foreign_end?(_prev, _ev), do: false
 
   defp event_at(ev, now) do
     case Map.get(ev, "timestamp") do
