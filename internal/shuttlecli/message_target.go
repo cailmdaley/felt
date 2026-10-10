@@ -1,12 +1,14 @@
 package shuttlecli
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
@@ -29,7 +31,37 @@ func looksLikeNativeSessionID(target string) bool {
 // resolveMessageTarget canonicalizes explicit addresses, checks both session
 // sources for bare ids, and resolves other targets locally before making network
 // requests. If both a session and a fiber match, it refuses to choose.
+// Fiber resolution fails closed while a host's session ledger cannot be
+// trusted, because a newer worker there could be missing. That condition is
+// usually a daemon restarting, so resolveMessageTarget retries it every
+// messageResolveInterval for up to the app's messageResolveWait.
+const messageResolveInterval = 3 * time.Second
+
+// transientResolveError marks a resolution failure that clears on its own once
+// the remote daemon is back.
+type transientResolveError struct{ err error }
+
+func (e *transientResolveError) Error() string { return e.err.Error() }
+func (e *transientResolveError) Unwrap() error { return e.err }
+
 func (a *app) resolveMessageTarget(target string) (string, error) {
+	deadline := a.eventNow().Add(a.messageResolveWait)
+	noted := false
+	for {
+		address, err := a.resolveMessageTargetOnce(target)
+		var transient *transientResolveError
+		if err == nil || !errors.As(err, &transient) || !a.eventNow().Add(messageResolveInterval).Before(deadline) {
+			return address, err
+		}
+		if !noted {
+			fmt.Fprintf(a.env.Stderr, "waiting for %s (up to %s)\n", transient.Error(), a.messageResolveWait)
+			noted = true
+		}
+		a.daemonPause(messageResolveInterval)
+	}
+}
+
+func (a *app) resolveMessageTargetOnce(target string) (string, error) {
 	if strings.HasPrefix(target, "shuttle://") {
 		address, err := messaging.ParseAddress(target)
 		if err != nil {
@@ -96,10 +128,10 @@ func (a *app) resolveMessageTarget(target string) (string, error) {
 	}
 	if len(fiberLookup.Fibers) == 1 {
 		if ledgerErr != nil {
-			return "", fmt.Errorf("cannot resolve fiber %q: session ledger is unavailable, so its current worker cannot be verified: %w", fiberLookup.Fibers[0].ID, ledgerErr)
+			return "", &transientResolveError{fmt.Errorf("cannot resolve fiber %q: session ledger is unavailable, so its current worker cannot be verified: %w", fiberLookup.Fibers[0].ID, ledgerErr)}
 		}
 		if liveErr != nil {
-			return "", fmt.Errorf("cannot resolve fiber %q: session discovery is unavailable, so a session-id collision cannot be ruled out: %w", fiberLookup.Fibers[0].ID, liveErr)
+			return "", &transientResolveError{fmt.Errorf("cannot resolve fiber %q: session discovery is unavailable, so a session-id collision cannot be ruled out: %w", fiberLookup.Fibers[0].ID, liveErr)}
 		}
 		return a.currentFiberMessageAddress(fiberLookup.Fibers[0], ledgerRecords, ledgerOrigins, peerSessions)
 	}
@@ -260,7 +292,11 @@ func (a *app) currentFiberMessageAddress(f *felt.Felt, records []SessionProvenan
 	}
 	for _, host := range []string{worker.Host, block.Host} {
 		if problem := ledgerOriginProblem(origins, host); problem != "" {
-			return "", fmt.Errorf("cannot resolve fiber %q: the session ledger from host %q is %s, so a newer worker there could be missing; pass an explicit shuttle:// address", fiberName, host, problem)
+			err := fmt.Errorf("cannot resolve fiber %q: the session ledger from host %q is %s, so a newer worker there could be missing; pass an explicit shuttle:// address", fiberName, host, problem)
+			if problem == "stale" || strings.HasPrefix(problem, "failing") {
+				return "", &transientResolveError{err}
+			}
+			return "", err
 		}
 	}
 	harness := messaging.NormalizeHarness(worker.Harness)

@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
@@ -460,7 +462,9 @@ func TestResolveMessageTargetRefusesWhenOwningLedgerIsNotFresh(t *testing.T) {
 				Host: "old-node", Harness: "claude-code", At: 1, Kind: "dispatch",
 			}}, origins)
 
-			_, err := newApp(env).resolveMessageTarget("work/worker")
+			app := newApp(env)
+			app.messageResolveWait = 0
+			_, err := app.resolveMessageTarget("work/worker")
 			if err == nil || !strings.Contains(err.Error(), `host "new-node"`) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("expected refusal for a %s owning-host ledger, got %v", tc.name, err)
 			}
@@ -543,7 +547,9 @@ func TestResolveMessageTargetFiberFailsClosedWhenLedgerUnavailable(t *testing.T)
 		},
 	})
 
-	_, err := newApp(env).resolveMessageTarget("work/worker")
+	app := newApp(env)
+	app.messageResolveWait = 0
+	_, err := app.resolveMessageTarget("work/worker")
 	if err == nil || !strings.Contains(err.Error(), "session ledger is unavailable") ||
 		!strings.Contains(err.Error(), "ledger unavailable") {
 		t.Fatalf("expected ledger-unavailable refusal, got %v", err)
@@ -628,5 +634,51 @@ func TestResolveMessageTargetUniqueNestedSlugResolvesLikeFullPath(t *testing.T) 
 		if err != nil || got != want {
 			t.Fatalf("%s resolved to %q, %v; want %q", target, got, err, want)
 		}
+	}
+}
+
+// A host whose daemon is restarting reads stale until it is back; the sender
+// waits for it rather than being told to hunt for an address.
+func TestResolveMessageTargetWaitsForRestartingHost(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind":        "oneshot",
+		"host":        "new-node",
+		"agent":       "claude-opus",
+		"project_dir": t.TempDir(),
+		"runtime":     map[string]any{"session_uuid": "old-session"},
+	})
+	isolateMessageFiberStore(env, store)
+	records := []SessionProvenance{{
+		Fiber: "work/worker", UID: messageTargetFiberUID, Session: "old-session",
+		Host: "new-node", Harness: "claude-code", At: 1, Kind: "dispatch",
+	}}
+	peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
+	var ledgerCalls atomic.Int32
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/peers": jsonBody(string(peers)),
+		sessionsCompositePath: func(w http.ResponseWriter, r *http.Request) {
+			stale := ledgerCalls.Add(1) <= 3
+			body, _ := json.Marshal(sessionLedgerResponse{Records: records, Origins: map[string]any{
+				"new-node": map[string]any{"stale": stale, "last_error": nil},
+			}})
+			jsonBody(string(body))(w, r)
+		},
+	})
+
+	now := time.Unix(0, 0)
+	app := newApp(env)
+	app.eventNow = func() time.Time { return now }
+	app.daemonPause = func(d time.Duration) { now = now.Add(d) }
+	got, err := app.resolveMessageTarget("work/worker")
+	if err != nil {
+		t.Fatalf("expected resolution after the host recovered, got %v", err)
+	}
+	if want := "shuttle://new-node/claude/old-session"; got != want {
+		t.Fatalf("resolved %q, want %q", got, want)
+	}
+	if got := ledgerCalls.Load(); got != 4 {
+		t.Fatalf("ledger fetched %d times, want 4", got)
 	}
 }

@@ -94,6 +94,10 @@ Common paths:
 // executables and the standard streams through a.env, never through package
 // os; tests replace a probe on their own app.
 type app struct {
+	// messageResolveWait bounds how long fiber-addressed messages wait for a
+	// restarting host's session ledger to become trustworthy again.
+	messageResolveWait time.Duration
+
 	env  *sysenv.Env
 	json bool   // --json
 	dir  string // -C
@@ -146,6 +150,7 @@ func newApp(env *sysenv.Env) *app {
 		daemonLifecycleOwnerCheck: checkResolvedDaemonPortOwner,
 		daemonSignalPID:           signalDaemonPID,
 		daemonPause:               time.Sleep,
+		messageResolveWait:        90 * time.Second,
 		daemonLifecycleTimeout:    5 * time.Second,
 		eventNow:                  time.Now,
 		eventRand:                 func() int { return rand.Intn(32768) },
