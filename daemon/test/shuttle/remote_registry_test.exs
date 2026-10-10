@@ -547,8 +547,7 @@ defmodule Shuttle.RemoteRegistryTest do
 
       :ok = RemoteRegistry.poll_now(:reg_booting)
       assert [{"ssh", args}] = MockRunner.calls()
-      assert List.last(args) =~ "/api/v1/state"
-      refute List.last(args) =~ "/api/v1/version"
+      assert List.last(args) =~ "/api/v1/version"
       refute List.last(args) =~ "shuttle-launch"
 
       assert {"daemon=alive\n", 0} =
@@ -1186,9 +1185,7 @@ defmodule Shuttle.RemoteRegistryTest do
       assert [script | _] = scripts
 
       assert script =~
-               "curl --silent --show-error --max-time 15 --unix-socket '/srv/shuttle/sock/daemon.sock' http://localhost/api/v1/state"
-
-      refute script =~ "/api/v1/version"
+               "curl --silent --show-error --max-time 15 --unix-socket '/srv/shuttle/sock/daemon.sock' http://localhost/api/v1/version"
 
       refute script =~ "127.0.0.1:0"
     end

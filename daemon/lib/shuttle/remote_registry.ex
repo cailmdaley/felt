@@ -930,14 +930,17 @@ defmodule Shuttle.RemoteRegistry do
     end
   end
 
-  # Where the remote daemon answers on its own host: its unix socket when the
-  # fleet names one, else its loopback port. `remote_socket` is already free of
+  # Where the remote daemon answers liveness on its own host: its unix socket
+  # when the fleet names one, else its loopback port. `/api/v1/version` is the
+  # probe because it answers immediately while the daemon is still booting;
+  # `/api/v1/state` can block for minutes on a loaded host, and a probe that
+  # times out there gets a booting daemon restarted before it finishes. `remote_socket` is already free of
   # whitespace and `:`; single-quoting keeps any other shell metacharacter inert.
-  defp remote_state_target(%Remote{remote_socket: socket}) when is_binary(socket),
-    do: "--unix-socket '#{String.replace(socket, "'", ~S('\''))}' http://localhost/api/v1/state"
+  defp remote_liveness_target(%Remote{remote_socket: socket}) when is_binary(socket),
+    do: "--unix-socket '#{String.replace(socket, "'", ~S('\''))}' http://localhost/api/v1/version"
 
-  defp remote_state_target(%Remote{remote_port: port}),
-    do: "http://127.0.0.1:#{port}/api/v1/state"
+  defp remote_liveness_target(%Remote{remote_port: port}),
+    do: "http://127.0.0.1:#{port}/api/v1/version"
 
   # Recovery uses SSH to separate transport failure from daemon liveness. Any
   # HTTP response, including an error status during boot, proves the listener is
@@ -947,7 +950,7 @@ defmodule Shuttle.RemoteRegistry do
 
   defp ssh_check(%Remote{} = remote, runner) do
     script =
-      "if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_state_target(remote)} >/dev/null 2>&1; " <>
+      "if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_liveness_target(remote)} >/dev/null 2>&1; " <>
         "then echo daemon=alive; else echo daemon=not_running; fi"
 
     case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), script), stderr_to_stdout: true) do
@@ -996,7 +999,7 @@ defmodule Shuttle.RemoteRegistry do
   defp restart_script(%Remote{} = remote) do
     daemon =
       """
-      if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_state_target(remote)} >/dev/null 2>&1; then echo daemon=responding; else
+      if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_liveness_target(remote)} >/dev/null 2>&1; then echo daemon=responding; else
       repo=$(head -n 1 "$HOME/.shuttle/repo" 2>/dev/null || true); if [ -n "$repo" ] && [ -x "$repo/bin/shuttle-launch" ]; then SHUTTLE_DIR="$repo" "$repo/bin/shuttle-launch"; else "$HOME/.local/bin/shuttle-launch"; fi
       fi
       """
