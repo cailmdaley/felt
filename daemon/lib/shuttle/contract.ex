@@ -28,7 +28,8 @@ defmodule Shuttle.Contract do
   # Level 9: discovery uses `shuttle ls --ids-from` for hot-set reads.
   # Level 10: the daemon clears worker questions with `shuttle ask <fiber> --clear`.
   # Level 11: discovery uses `shuttle ls --any` for the kanban union.
-  @expected_level 11
+  # Resolved agent JSON carries worker environment overrides under `env`.
+  @expected_level 12
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()

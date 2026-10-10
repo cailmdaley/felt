@@ -12,13 +12,14 @@ import (
 // flags stays the daemon's job — this is the resolved INPUT to that, so the
 // daemon needs neither the embedded registry nor the alias/axis logic.
 type ResolvedAgent struct {
-	ID            string `json:"id"`
-	CLI           string `json:"cli,omitempty"`
-	Wrapper       string `json:"wrapper,omitempty"`
-	Provider      string `json:"provider,omitempty"`
-	Model         string `json:"model,omitempty"`
-	ExtraFlags    string `json:"extra_flags,omitempty"`
-	RequiresModel bool   `json:"requires_model,omitempty"`
+	ID            string   `json:"id"`
+	CLI           string   `json:"cli,omitempty"`
+	Wrapper       string   `json:"wrapper,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	ExtraFlags    string   `json:"extra_flags,omitempty"`
+	Env           AgentEnv `json:"env,omitempty"`
+	RequiresModel bool     `json:"requires_model,omitempty"`
 	// Effective axes (post-resolution).
 	Effort   string `json:"effort,omitempty"`
 	Chrome   bool   `json:"chrome,omitempty"`
@@ -64,6 +65,7 @@ func (r *AgentRegistry) NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAg
 		Provider:      rec.Provider,
 		Model:         resolveModelFamily(env, rec),
 		ExtraFlags:    rec.ExtraFlags,
+		Env:           rec.Env,
 		RequiresModel: rec.RequiresModel,
 		Effort:        axes.Effort,
 		Chrome:        axes.Chrome,

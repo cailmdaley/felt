@@ -1,7 +1,10 @@
 package shuttle
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -11,16 +14,17 @@ import (
 // AgentRecord holds the configuration for one agent harness.
 //
 // An agent is either a *base* agent (carries cli/wrapper/model and the axis
-// constraint metadata) or an *alias* record (carries AliasOf + Axes and nothing
-// else). An alias resolves to its base agent with the alias's Axes overlaid.
+// constraint metadata) or an *alias* record (carries AliasOf and optional Axes
+// and Env overlays). An alias resolves to its base agent's harness configuration.
 type AgentRecord struct {
-	ID            string `json:"id"`
-	CLI           string `json:"cli,omitempty"`
-	Wrapper       string `json:"wrapper,omitempty"`
-	Provider      string `json:"provider,omitempty"`
-	Model         string `json:"model,omitempty"`
-	ExtraFlags    string `json:"extra_flags,omitempty"`
-	RequiresModel bool   `json:"requires_model,omitempty"`
+	ID            string   `json:"id"`
+	CLI           string   `json:"cli,omitempty"`
+	Wrapper       string   `json:"wrapper,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	ExtraFlags    string   `json:"extra_flags,omitempty"`
+	Env           AgentEnv `json:"env,omitempty"`
+	RequiresModel bool     `json:"requires_model,omitempty"`
 	// Axis constraint metadata (base agents only). EffortLevels is the literal
 	// set of effort tokens this harness/model accepts — rendered through to the
 	// CLI verbatim, so each harness/model's native vocabulary lives here (Claude:
@@ -49,6 +53,41 @@ type AgentRecord struct {
 	// file's `overrides` block rather than the record itself; empty otherwise.
 	// Loader-assigned provenance, like Source.
 	DefaultEffortSource string `json:"default_effort_source,omitempty"`
+}
+
+// AgentEnv contains worker process environment overrides.
+type AgentEnv map[string]string
+
+var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// UnmarshalJSON validates names and string values before a registry is loaded.
+func (e *AgentEnv) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("env must be a string-to-string map: %w", err)
+	}
+	if raw == nil {
+		return fmt.Errorf("env must be a string-to-string map")
+	}
+	values := make(AgentEnv, len(raw))
+	for key, value := range raw {
+		if !envName.MatchString(key) {
+			return fmt.Errorf("invalid env variable name %q", key)
+		}
+		var text string
+		if string(value) == "null" {
+			return fmt.Errorf("env variable %q must be a string", key)
+		}
+		if err := json.Unmarshal(value, &text); err != nil {
+			return fmt.Errorf("env variable %q must be a string: %w", key, err)
+		}
+		if strings.ContainsRune(text, '\x00') {
+			return fmt.Errorf("env variable %q contains NUL", key)
+		}
+		values[key] = text
+	}
+	*e = values
+	return nil
 }
 
 // Axes carries the orthogonal per-fiber dispatch axes beyond base agent: effort
@@ -174,6 +213,16 @@ func (r *AgentRegistry) Resolve(name, blockEffort string, blockChrome bool) (Age
 		}
 		if rec.Axes != nil {
 			overlay = *rec.Axes
+		}
+		if len(rec.Env) > 0 {
+			// Keep the env-bearing alias addressable when launch metadata is
+			// persisted and subsequently resolved for capture or resume.
+			base.ID = rec.ID
+			base.Env = maps.Clone(base.Env)
+			if base.Env == nil {
+				base.Env = make(AgentEnv)
+			}
+			maps.Copy(base.Env, rec.Env)
 		}
 		rec = base
 	}
