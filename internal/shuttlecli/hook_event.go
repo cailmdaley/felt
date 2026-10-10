@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )
 
@@ -16,17 +17,18 @@ import (
 //
 // Appends one JSONL line per harness hook event to the stream the shuttle
 // daemon tails (see shuttle_events.go for the path and the write gate).
-// Two readers consume it, and only these fields:
+// EventStream decodes each line once and feeds pure projections:
 //
-//   - daemon/lib/shuttle/waiting_tracker.ex — `type`, `tmuxSession`, `timestamp`,
-//     plus the two fields that say whether an idle-looking session is really
-//     waiting on a HUMAN: `notificationKind` and `backgroundTasks`.
-//     Last-event-wins per session, so duplicate lines are idempotent.
+//   - daemon/lib/shuttle/waiting_tracker.ex — `type`, `sessionId`, `timestamp`,
+//     `harness`, `tool`, `id`, `notificationKind` and `backgroundTasks` drive
+//     explicit per-session turn state.
+//   - daemon/lib/shuttle/session_binding.ex — `sessionId`, `harness`,
+//     `receiverPid` and `receiverBirth` identify receiver succession.
 //   - daemon/lib/shuttle/sent_files.ex — `tool == "SendUserFile"`, `toolInput.files`,
 //     `sessionId`, `cwd`, `timestamp`, `tmuxSession`; deduped by path.
 //
-// Everything else on the line (`id`, `harness`, `originName`) is written for
-// operators reading the raw stream and for readers not yet written.
+// Activity also consumes event timestamps, types and machine-prompt flags.
+// Origin and terminal names provide context for operators and artifacts.
 //
 // Recording is silent and never blocks a tool call. The command also offers
 // queued peer context on supported Claude and Codex hooks through runEventAndMessageHook.
@@ -106,14 +108,16 @@ type eventHookInput struct {
 // by internal/shuttlecli/testdata/events_golden.jsonl, which the Elixir readers parse in
 // daemon/test/shuttle/events_parity_test.exs — change either side and that test fails.
 type eventLine struct {
-	ID          string `json:"id"`
-	Timestamp   int64  `json:"timestamp"`
-	Type        string `json:"type"`
-	SessionID   string `json:"sessionId"`
-	CWD         string `json:"cwd"`
-	TmuxSession string `json:"tmuxSession"`
-	Harness     string `json:"harness"`
-	OriginName  string `json:"originName"`
+	ID            string `json:"id"`
+	Timestamp     int64  `json:"timestamp"`
+	Type          string `json:"type"`
+	SessionID     string `json:"sessionId"`
+	CWD           string `json:"cwd"`
+	TmuxSession   string `json:"tmuxSession"`
+	Harness       string `json:"harness"`
+	OriginName    string `json:"originName"`
+	ReceiverPID   int    `json:"receiverPid,omitempty"`
+	ReceiverBirth string `json:"receiverBirth,omitempty"`
 	// Machine marks a prompt the harness injected rather than one a person
 	// typed — see machinePrompt. Omitted when false, so an ordinary event's
 	// line is byte-identical to what it has always been.
@@ -263,6 +267,16 @@ func (a *app) renderEventLine(stdin io.Reader) (string, bool) {
 		Harness:     a.harnessFor(input.TranscriptPath),
 		OriginName:  origin,
 	}
+	if input.Harness == "claude" || input.Harness == "codex" || input.Harness == "pi" {
+		line.Harness = messaging.LedgerHarnessName(input.Harness)
+	}
+	pid := input.NativePID
+	if line.Harness != "pi" {
+		pid = a.eventReceiverPID()
+	}
+	if birth := a.eventProcessBirth(pid); pid > 0 && birth != "" {
+		line.ReceiverPID, line.ReceiverBirth = pid, birth
+	}
 	if eventType == "user_prompt_submit" && machinePrompt(input.Prompt) {
 		line.Machine = true
 	}
@@ -374,8 +388,8 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 }
 
 // currentTmuxSession names the tmux session this hook fired inside — the
-// carrier of the fiber ULID for every dispatched worker, so it is the join key
-// between the stream and the board.
+// carrier of the fiber ULID for dispatched CLI workers. It provides artifact
+// and terminal context; turn phases join only by harness session UUID.
 //
 // SHUTTLE_TMUX_SESSION wins when set (the dispatcher knows the name it chose,
 // and reading it costs nothing). Otherwise ask tmux, but only inside tmux and

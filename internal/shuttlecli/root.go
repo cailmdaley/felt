@@ -16,6 +16,7 @@ import (
 
 	"github.com/cailmdaley/felt/internal/clistreams"
 	"github.com/cailmdaley/felt/internal/feltcli"
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
@@ -132,8 +133,10 @@ type app struct {
 	// daemonLifecycleTimeout bounds the lifecycle POST resume and accept send.
 	daemonLifecycleTimeout time.Duration
 	// eventNow and eventRand stamp and break ties between hook events.
-	eventNow  func() time.Time
-	eventRand func() int
+	eventNow          func() time.Time
+	eventRand         func() int
+	eventReceiverPID  func() int
+	eventProcessBirth func(int) string
 	// httpProxy picks the proxy for a daemon request that is not the local
 	// socket: net/http's ProxyFromEnvironment.
 	httpProxy func(*http.Request) (*url.URL, error)
@@ -153,6 +156,8 @@ func newApp(env *sysenv.Env) *app {
 		messageResolveWait:        90 * time.Second,
 		daemonLifecycleTimeout:    5 * time.Second,
 		eventNow:                  time.Now,
+		eventReceiverPID:          messaging.HookReceiverPID,
+		eventProcessBirth:         messaging.ProcessBirthToken,
 		eventRand:                 func() int { return rand.Intn(32768) },
 		httpProxy:                 http.ProxyFromEnvironment,
 		versionProbeTimeout:       3 * time.Second,

@@ -882,6 +882,8 @@ func TestEventGoldenParity(t *testing.T) {
 		}
 		a := newApp(env)
 		a.eventNow, a.eventRand = now, rand
+		a.eventReceiverPID = func() int { return 4242 }
+		a.eventProcessBirth = func(int) string { return "fixture-birth" }
 		line, ok := a.renderEventLine(bytes.NewReader(raw))
 		if !ok {
 			t.Fatalf("payload recorded nothing: %v", ev.payload)
