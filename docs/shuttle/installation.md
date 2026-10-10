@@ -850,10 +850,13 @@ transport" describe direct TCP access for classes that permit it.
 
 On a `shared-multi-user` host that uses TCP, `PeerGatePlug` protects the
 listener before static assets or request-body parsing. It resolves the
-client-side established connection row in `/proc/net/tcp` or `/proc/net/tcp6`
-by matching the peer address and ephemeral port as the local endpoint and the
-daemon's address and port as the remote endpoint. A peer is admitted only
-when the row's uid is the daemon's effective uid. A foreign uid or an
+client-side connection row in `/proc/net/tcp` or `/proc/net/tcp6` by
+matching the peer address and ephemeral port as the local endpoint and the
+daemon's address and port as the remote endpoint. A row counts only when an
+owning socket backs it (nonzero inode): a client that has already closed its
+socket leaves an orphaned row the kernel prints as uid 0, and the gate reports
+that as a closed peer, never as root. A peer is admitted only when the row's
+uid is the daemon's effective uid. A foreign uid, a closed peer or an
 unresolved row receives HTTP 403 with `error: "peer_refused"`; request headers
 cannot bypass the gate. This admits a same-user userspace `tailscaled` and
 refuses a co-tenant connecting directly. The `tailscale_login` header is

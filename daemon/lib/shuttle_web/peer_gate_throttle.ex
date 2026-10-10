@@ -25,8 +25,13 @@ defmodule ShuttleWeb.PeerGateThrottle do
   end
 
   @doc false
-  def allow_warning?(uid, now_ms \\ System.monotonic_time(:millisecond)) do
-    key = if is_integer(uid), do: {:uid, uid}, else: :unresolved
+  # `uid_or_reason` is the refused uid, or why none was resolved (`:peer_closed`,
+  # `:no_row`); each throttles separately.
+  def allow_warning?(uid_or_reason, now_ms \\ System.monotonic_time(:millisecond)) do
+    key =
+      if is_integer(uid_or_reason),
+        do: {:uid, uid_or_reason},
+        else: {:unresolved, uid_or_reason}
 
     case :ets.insert_new(@table, {key, now_ms}) do
       true ->

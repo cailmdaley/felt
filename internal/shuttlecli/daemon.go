@@ -168,7 +168,26 @@ type daemonStatusError struct {
 }
 
 func (e daemonStatusError) Error() string {
+	if reason, ok := e.peerRefusal(); ok {
+		return fmt.Sprintf("daemon at %s refused this connection (%d peer_refused): %s", e.url, e.status, reason)
+	}
 	return fmt.Sprintf("daemon at %s returned %d: %s", e.url, e.status, e.body)
+}
+
+// peerRefusal reports the daemon peer gate's reason when the response is its
+// refusal: a 403 whose body is {"error":"peer_refused","reason":...}.
+func (e daemonStatusError) peerRefusal() (string, bool) {
+	if e.status != http.StatusForbidden {
+		return "", false
+	}
+	var body struct {
+		Error  string `json:"error"`
+		Reason string `json:"reason"`
+	}
+	if json.Unmarshal([]byte(e.body), &body) != nil || body.Error != "peer_refused" || body.Reason == "" {
+		return "", false
+	}
+	return body.Reason, true
 }
 
 // getDaemon and postDaemon are the CLI's only HTTP transport to a shuttle

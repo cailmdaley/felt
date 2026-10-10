@@ -27,10 +27,33 @@ defmodule Shuttle.ProcNetTcp do
   and the closing states that follow them, still name one uniquely-bound live
   connection and carry its owner's true uid, so accepting them does not weaken
   the four-tuple match.
+
+  ## A row whose socket was closed
+
+  The same closing states also hold *orphaned* sockets. Once the client
+  process closes its descriptor, the kernel keeps the connection draining in
+  `FIN_WAIT1`/`FIN_WAIT2`/`CLOSING`/`LAST_ACK` with no `struct socket` behind
+  it, and prints inode 0 and uid 0 for the row (measured on a 5.14 kernel: a
+  client that half-closes keeps its uid and inode; the same client after
+  `close()` reads `05`, uid 0, inode 0; every inode-0 row on a busy login node
+  read uid 0). The requesting process is gone, so the row names nobody. A
+  matching row with inode 0 (orphan, `TIME_WAIT` or `SYN_RECV` alike) is
+  reported as `{:error, :peer_closed}`, never as uid 0. A client lands here
+  when it gives up, usually on a timeout, before the daemon reads its request,
+  so a stream of these means requests waited too long, not that someone else
+  connected.
   """
 
-  # Rows whose socket has an owning process. See "Which TCP states carry a uid".
+  # States whose row can have an owning process; the row also needs a nonzero
+  # inode. See "Which TCP states carry a uid" and "A row whose socket was closed".
   @uid_bearing_states ~w(01 04 05 08 09 0B)
+
+  @typedoc """
+  A lookup's answer: the owning uid; `:peer_closed` when the connection's row
+  has no owning socket because the client closed it; or `:no_row` when no row
+  names the connection, or the tables or listener could not be read.
+  """
+  @type lookup :: {:ok, non_neg_integer()} | {:error, :peer_closed | :no_row}
 
   @doc "Whether `/proc/net/tcp` can be read under `proc_root`."
   @spec readable?(String.t()) :: boolean()
@@ -41,47 +64,59 @@ defmodule Shuttle.ProcNetTcp do
     end
   end
 
-  @doc "Resolve the peer uid for a Plug peer-data map and the listener URL."
-  @spec peer_uid(map(), String.t(), String.t()) :: non_neg_integer() | nil
-  def peer_uid(peer_data, listen, proc_root \\ "/proc") do
+  @doc "Look up the peer's uid for a Plug peer-data map and the listener URL."
+  @spec lookup(map(), String.t(), String.t()) :: lookup()
+  def lookup(peer_data, listen, proc_root \\ "/proc") do
     with %{address: peer_address, port: peer_port} <- peer_data,
          {:ok, {:tcp, listen_address, listen_port}} <- Shuttle.Host.parse_listen(listen) do
       proc_root
       |> read_tables()
-      |> Enum.find_value(&uid_from_data(&1, peer_address, peer_port, listen_address, listen_port))
+      |> Enum.map(&lookup_data(&1, peer_address, peer_port, listen_address, listen_port))
+      |> strongest()
     else
-      _ -> nil
+      _ -> {:error, :no_row}
     end
   end
 
   @doc """
-  Resolve a uid from proc table text, without filesystem or platform access.
+  Look up a uid in proc table text, without filesystem or platform access.
 
   `peer_address` and `listen_address` are Erlang IPv4/IPv6 tuples; `peer_port`
-  and `listen_port` are integers.
+  and `listen_port` are integers. An owned row wins over an orphaned one.
   """
-  @spec uid_from_data(String.t(), tuple(), non_neg_integer(), tuple(), non_neg_integer()) ::
-          non_neg_integer() | nil
-  def uid_from_data(data, peer_address, peer_port, listen_address, listen_port) do
+  @spec lookup_data(String.t(), tuple(), non_neg_integer(), tuple(), non_neg_integer()) ::
+          lookup()
+  def lookup_data(data, peer_address, peer_port, listen_address, listen_port) do
     with {:ok, peer} <- endpoint(peer_address, peer_port),
          {:ok, listener} <- endpoint(listen_address, listen_port) do
       needles = :binary.compile_pattern(port_needles(peer_port))
 
       data
       |> String.split("\n")
-      |> Enum.find_value(fn line ->
-        case :binary.match(line, needles) != :nomatch and parse_row(line) do
-          %{state: state, local: local, remote: remote, uid: uid}
-          when state in @uid_bearing_states ->
-            if endpoint_matches?(local, peer) and endpoint_matches?(remote, listener), do: uid
-
-          _ ->
-            nil
+      |> Enum.map(fn line ->
+        with true <- :binary.match(line, needles) != :nomatch,
+             %{local: local, remote: remote} = row <- parse_row(line),
+             true <- endpoint_matches?(local, peer) and endpoint_matches?(remote, listener) do
+          classify(row)
+        else
+          _ -> {:error, :no_row}
         end
       end)
+      |> strongest()
     else
-      _ -> nil
+      _ -> {:error, :no_row}
     end
+  end
+
+  defp classify(%{inode: 0}), do: {:error, :peer_closed}
+  defp classify(%{state: state, uid: uid}) when state in @uid_bearing_states, do: {:ok, uid}
+  defp classify(_row), do: {:error, :no_row}
+
+  # An owned row is the answer; failing one, an orphaned row says the client
+  # left; failing that, nothing names the connection.
+  defp strongest(results) do
+    Enum.find(results, &match?({:ok, _uid}, &1)) ||
+      Enum.find(results, {:error, :no_row}, &(&1 == {:error, :peer_closed}))
   end
 
   # A login node's table holds thousands of rows and the gate reads it on every
@@ -100,11 +135,23 @@ defmodule Shuttle.ProcNetTcp do
 
   defp parse_row(line) do
     case String.split(line) do
-      [_slot, local, remote, state, _tx_queue, _timer, _retrnsmt, uid_text | _] ->
+      [
+        _slot,
+        local,
+        remote,
+        state,
+        _queues,
+        _timer,
+        _retrnsmt,
+        uid_text,
+        _timeout,
+        inode_text | _
+      ] ->
         with {:ok, local} <- parse_endpoint(local),
              {:ok, remote} <- parse_endpoint(remote),
-             {:ok, uid} <- decimal(uid_text) do
-          %{local: local, remote: remote, state: String.upcase(state), uid: uid}
+             {:ok, uid} <- decimal(uid_text),
+             {:ok, inode} <- decimal(inode_text) do
+          %{local: local, remote: remote, state: String.upcase(state), uid: uid, inode: inode}
         else
           _ -> nil
         end

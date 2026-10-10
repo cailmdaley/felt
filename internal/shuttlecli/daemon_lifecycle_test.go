@@ -219,6 +219,43 @@ func TestDaemonResetEscapesRemoteName(t *testing.T) {
 	}
 }
 
+// The daemon's peer gate answers a refused TCP peer with 403
+// {"error":"peer_refused","reason":...}; the CLI names the refusal and its
+// reason instead of echoing JSON.
+func TestDaemonPeerRefusalSurfacesItsReason(t *testing.T) {
+	t.Parallel()
+	reason := "uid 0 is not the daemon's uid 1000"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, `{"error":"peer_refused","reason":%q}`, reason)
+	}))
+	defer server.Close()
+	env := testEnv(t)
+	env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
+	_, _, err := executeIn(t, env, t.TempDir(), "daemon", "reset", "one")
+	if err == nil {
+		t.Fatal("reset succeeded against a refusing daemon")
+	}
+	want := "refused this connection (403 peer_refused): " + reason
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %q, want it to contain %q", err, want)
+	}
+}
+
+func TestDaemonStatusErrorKeepsOtherBodiesVerbatim(t *testing.T) {
+	t.Parallel()
+	for _, e := range []daemonStatusError{
+		{url: "u", status: 403, body: `{"error":"forbidden"}`},
+		{url: "u", status: 500, body: `{"error":"peer_refused","reason":"x"}`},
+		{url: "u", status: 403, body: "not json"},
+	} {
+		if got, want := e.Error(), fmt.Sprintf("daemon at u returned %d: %s", e.status, e.body); got != want {
+			t.Errorf("Error() = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestShuttleVersionPrefersLiveDaemonAndFallsBackToRelease(t *testing.T) {
 	t.Parallel()
 	t.Run("live", func(t *testing.T) {
