@@ -16,7 +16,7 @@ import (
 // ----------------------------------------------------------------------------
 //
 // Appends one JSONL line per harness hook event to the stream the shuttle
-// daemon tails (see shuttle_events.go for the path and the write gate).
+// daemon tails (see events.go for the path and the write gate).
 // EventStream decodes each line once and feeds pure projections:
 //
 //   - daemon/lib/shuttle/waiting_tracker.ex — `type`, `sessionId`, `timestamp`,
@@ -73,8 +73,7 @@ var eventTypes = map[string]string{
 
 // eventMaxLineBytes bounds one encoded line. Past it, `toolInput` is replaced
 // by the file paths it carried plus a `truncated` marker — a Write of a large
-// file would otherwise park the whole body in the stream, which is what grew
-// the maintainer's file to 23 MB. Both readers keep working: WaitingTracker
+// file would otherwise park the whole body in the stream. Readers keep working: WaitingTracker
 // never looks at toolInput, and SentFiles needs only `files`, which survives.
 const eventMaxLineBytes = 8 << 10
 
@@ -119,17 +118,14 @@ type eventLine struct {
 	ReceiverPID   int    `json:"receiverPid,omitempty"`
 	ReceiverBirth string `json:"receiverBirth,omitempty"`
 	// Machine marks a prompt the harness injected rather than one a person
-	// typed — see machinePrompt. Omitted when false, so an ordinary event's
-	// line is byte-identical to what it has always been.
+	// typed — see machinePrompt. Omitted when false.
 	Machine bool `json:"machine,omitempty"`
 	// NotificationKind carries the harness's `notification_type` through. The
 	// idle timeout and a permission request arrive as the same event `type`,
 	// and this is the only thing that tells them apart.
 	NotificationKind string `json:"notificationKind,omitempty"`
 	// BackgroundTasks is how much work a `stop` or `subagent_stop` left
-	// running — see countBackgroundTasks. Zero is the
-	// overwhelmingly common case and is omitted, so an ordinary line is
-	// byte-identical to what it has always been.
+	// running — see countBackgroundTasks. Omitted when zero.
 	BackgroundTasks int             `json:"backgroundTasks,omitempty"`
 	Tool            string          `json:"tool,omitempty"`
 	ToolInput       json.RawMessage `json:"toolInput,omitempty"`
@@ -142,11 +138,6 @@ type eventLine struct {
 // PREFIXES, not a search. An injected prompt is a wrapper around its payload,
 // so the marker is always at the front; matching anywhere in the text would
 // demote a real message that quoted one of these.
-// Measured against the recorded history when a cinnabar spine turned out to be
-// claiming a message nobody wrote: of ~2400 unflagged prompts on this host, 935
-// were injections. The `<task-notification` / `<teammate-message` pair caught
-// most; the rest were the four groups added below, and a dispatched worker's
-// opening prompt was the single largest ongoing leak.
 var machinePromptPrefixes = []string{
 	"[Shuttle message ",
 	"<task-notification",

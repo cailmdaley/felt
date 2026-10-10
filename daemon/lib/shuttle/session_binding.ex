@@ -1,10 +1,11 @@
 defmodule Shuttle.SessionBinding do
   @moduledoc """
   Receiver succession inferred from explicit session starts, never from panes.
-  A known UUID anchors a worker to the first receiver observed for that UUID.
-  Other receivers cannot acquire that UUID, and ordinary hooks cannot switch
-  a receiver's current session. Missing receiver metadata preserves direct UUID
-  joins. Evidence survives session ends and is retained for 48 hours of activity.
+  A known UUID anchors a worker to its receiver process lifetime.
+  A newer explicit session start can resume a lineage member in a new receiver
+  and retire its predecessor; ordinary hooks cannot transfer ownership or switch
+  the current session. Missing receiver metadata preserves direct UUID joins.
+  Evidence survives session ends and is retained for 48 hours of activity.
   """
 
   @max_age_ms 48 * 60 * 60 * 1000
