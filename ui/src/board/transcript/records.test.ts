@@ -27,6 +27,14 @@ describe('normalizeRecord', () => {
     expect(normalizeRecord({ type: 'attachment', message: { content: 'ignored' } })).toEqual([])
   })
 
+  it('reads a message typed mid-turn as a prompt', () => {
+    expect(normalizeRecord({
+      type: 'attachment', timestamp: '2026-10-10T09:45:58.484Z',
+      attachment: { type: 'queued_command', prompt: 'switch the embed order', commandMode: 'prompt', origin: { kind: 'human' } },
+    })).toEqual([expect.objectContaining({ kind: 'prompt', text: 'switch the embed order', dispatch: false })])
+    expect(normalizeRecord({ type: 'attachment', attachment: { type: 'queued_command', prompt: 'ls', commandMode: 'bash' } })).toEqual([])
+  })
+
   it('classifies Claude prompts, injected context, and notifications', () => {
     expect(normalizeRecord({
       type: 'user', message: { content: '  <system-reminder>do not show</system-reminder> Measure the shear response.' },
