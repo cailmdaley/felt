@@ -72,39 +72,10 @@
   font: var(--ws-small-size)/1.4 var(--ws-mono);
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-fact[hidden] { display: none; }
-/* Context: a hairline track filled to its share of the window, ochre once
-   the window is nearly spent. */
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-meter {
-  position: relative;
-  width: 40px;
-  height: 4px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--ws-ink-muted) 22%, transparent);
-}
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-meter-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: calc(var(--ws-context-share, 0) * 100%);
-  border-radius: inherit;
-  background: var(--ws-ink-muted);
-}
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-meter-high .ws-transcript-meter-fill { background: var(--kbn-owed-bright, var(--ws-ink)); }
-/* Cache: a dot of the owed gilt, draining clockwise as the entry ages;
-   cold, an empty ring. */
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-cache {
-  --ws-cache-pigment: var(--kbn-owed-bright, var(--ws-ink));
-  box-sizing: border-box;
-  width: 9px;
-  height: 9px;
-  border: 1.25px solid var(--ws-cache-pigment);
-  border-radius: 50%;
-  background: conic-gradient(var(--ws-cache-pigment) calc(var(--ws-cache-left, 1) * 1turn), transparent 0);
-}
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-cache-cold {
-  border-color: color-mix(in srgb, var(--ws-ink-muted) 70%, transparent);
-  background: transparent;
-}
+/* Cache: a word, gilt while warm and the held blue once cold. Context
+   carries its own tint (paintFacts). */
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-cache[data-cache='warm'] { color: var(--kbn-owed); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-cache[data-cache='cold'] { color: var(--kbn-held); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-chevron {
   flex: none;
   width: 0;

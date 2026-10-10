@@ -73,18 +73,13 @@ const ANCHOR_MARGIN = 8
 /** How close to the anchor a reader must stay to keep following new messages. */
 const FOLLOW_SLACK = 24
 
-/** A warm cache dot drains on this cadence. */
-const CACHE_REPAINT_MS = 15_000
-/** The share of the window past which the context meter takes the owed ochre. */
-const CONTEXT_HIGH = 0.8
-
 /**
- * Claude transcripts record no context window. Its meter is drawn against
- * the standard 200k window, or 1M once the context has outgrown that.
+ * The window a session's context is read against. Claude transcripts record
+ * none; Claude sessions run with a million-token window.
  */
-export function assumedWindow(model: string | undefined, context: number | undefined): number | undefined {
-  if (context === undefined || !model?.startsWith('claude')) return undefined
-  return context > 200_000 ? 1_000_000 : 200_000
+export function contextWindow(recorded: number | undefined, model: string | undefined): number | undefined {
+  if (recorded) return recorded
+  return model?.startsWith('claude') ? 1_000_000 : undefined
 }
 
 /** Two corners pulled apart: the full transcript opens over the page. */
@@ -342,7 +337,6 @@ export class TranscriptBand {
   private readonly headRow: HTMLElement
   private readonly cacheFact: HTMLElement
   private readonly contextFact: HTMLElement
-  private readonly contextFill: HTMLElement
   private sessions: HTMLElement | null = null
   private cacheTimer: number | null = null
   private readonly openButton: HTMLButtonElement
@@ -422,8 +416,6 @@ export class TranscriptBand {
     this.liveLabel.textContent = 'live'
     this.contextFact = document.createElement('span')
     this.contextFact.className = 'ws-transcript-fact ws-transcript-context'
-    this.contextFill = document.createElement('span')
-    this.contextFill.className = 'ws-transcript-meter-fill'
     this.cacheFact = document.createElement('span')
     this.cacheFact.className = 'ws-transcript-fact ws-transcript-cache'
     this.head.append(chevron, this.label, this.reading, this.liveDot, this.liveLabel, this.contextFact, this.cacheFact)
@@ -706,11 +698,9 @@ export class TranscriptBand {
   }
 
   /**
-   * The session's two usage facts, drawn small enough to sit in the head line.
-   * Context is a meter filled to its share of the window; the exact count is
-   * its hover. The cache is a dot, filled while warm and emptying as the
-   * entry ages, hollow once cold. Expiry is independent of transcript polling
-   * and the band's folded/live state.
+   * The session's two usage facts, as words in the head line. Context is its
+   * token count, tinted from verdigris toward red as it fills the window. The
+   * cache says warm or cold; it repaints when a warm entry expires.
    */
   private paintFacts(): void {
     this.clearCacheTimer()
@@ -719,52 +709,33 @@ export class TranscriptBand {
     const now = Date.now()
     const warm = until !== undefined && until > now
     this.cacheFact.hidden = until === undefined
-    this.cacheFact.classList.toggle('ws-transcript-cache-cold', !warm)
-    const cacheSaid = until === undefined ? '' : warm ? `Cache warm until ${clock(until).text}` : `Cache cold since ${clock(until).text}`
-    this.cacheFact.title = until === undefined ? '' : `${cacheSaid} (estimated from Claude cache usage; expiry ${clock(until).title})`
-    this.cacheFact.setAttribute('aria-label', cacheSaid)
     this.cacheFact.dataset.cache = until === undefined ? '' : warm ? 'warm' : 'cold'
-    const ttl = stats.cacheTtl ?? 300_000
-    this.cacheFact.style.setProperty('--ws-cache-left', warm ? String(Math.min(1, (until! - now) / ttl)) : '0')
+    this.cacheFact.textContent = until === undefined ? '' : warm ? 'warm' : 'cold'
+    this.cacheFact.title = until === undefined ? ''
+      : `${warm ? `Cache warm until ${clock(until).text}` : `Cache cold since ${clock(until).text}`} (estimated from Claude cache usage)`
     if (warm) {
       this.cacheTimer = window.setTimeout(() => {
         this.cacheTimer = null
         if (!this.disposed) this.paintFacts()
-      }, Math.min(until! - now, CACHE_REPAINT_MS))
+      }, until! - now)
     }
     const context = stats.context
-    const assumed = stats.window ? undefined : assumedWindow(stats.model ?? this.target?.agent, context)
-    const window_ = stats.window ?? assumed
-    const count = (n: number): string => new Intl.NumberFormat('en-US').format(n)
     this.contextFact.hidden = context === undefined
-    const metered = context !== undefined && !!window_
-    this.contextFact.classList.toggle('ws-transcript-meter', metered)
     if (context === undefined) {
-      this.contextFact.replaceChildren()
+      this.contextFact.textContent = ''
       this.contextFact.title = ''
-      this.contextFact.removeAttribute('aria-label')
-      this.contextFact.removeAttribute('role')
+      this.contextFact.style.removeProperty('color')
       return
     }
-    const said = `Context ${tokenLabel(context)}${window_ ? ` of ${assumed ? '~' : ''}${tokenLabel(window_)}` : ''}`
-    this.contextFact.setAttribute('aria-label', said)
-    const windowSaid = !window_ ? '; session window not recorded'
-      : assumed ? `; the session does not record its window, so the meter assumes ${count(window_)} tokens`
-      : ` of a ${count(window_)}-token window`
-    this.contextFact.title = `${said}: last recorded input ${count(context)} tokens${windowSaid}`
-    if (metered) {
-      const share = Math.min(1, context / window_!)
-      this.contextFact.setAttribute('role', 'meter')
-      this.contextFact.setAttribute('aria-valuemin', '0')
-      this.contextFact.setAttribute('aria-valuemax', String(window_))
-      this.contextFact.setAttribute('aria-valuenow', String(context))
-      this.contextFact.style.setProperty('--ws-context-share', String(share))
-      this.contextFact.classList.toggle('ws-transcript-meter-high', share >= CONTEXT_HIGH)
-      this.contextFact.replaceChildren(this.contextFill)
+    const window_ = contextWindow(stats.window, stats.model ?? this.target?.agent)
+    const count = (n: number): string => new Intl.NumberFormat('en-US').format(n)
+    this.contextFact.textContent = tokenLabel(context)
+    this.contextFact.title = `Context: ${count(context)} tokens${window_ ? ` of a ${count(window_)}-token window` : ''}`
+    if (window_) {
+      const share = Math.round(Math.min(1, context / window_) * 100)
+      this.contextFact.style.color = `color-mix(in oklch, var(--kbn-alarm) ${share}%, var(--kbn-tempered))`
     } else {
-      this.contextFact.removeAttribute('role')
-      this.contextFact.classList.remove('ws-transcript-meter-high')
-      this.contextFact.textContent = tokenLabel(context)
+      this.contextFact.style.removeProperty('color')
     }
   }
 

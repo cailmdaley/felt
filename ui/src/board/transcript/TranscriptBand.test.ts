@@ -172,25 +172,19 @@ describe('TranscriptBand', () => {
     await settle()
     const cache = band.el.querySelector<HTMLElement>('.ws-transcript-cache')!
     expect(cache.hidden).toBe(false)
-    expect(cache.getAttribute('aria-label')).toMatch(/^Cache warm until \d\d:\d\d$/)
+    expect(cache.title).toMatch(/^Cache warm until \d\d:\d\d/)
     expect(cache.dataset.cache).toBe('warm')
-    expect(cache.classList.contains('ws-transcript-cache-cold')).toBe(false)
-    const left = Number(cache.style.getPropertyValue('--ws-cache-left'))
-    expect(left).toBeGreaterThan(0)
-    expect(left).toBeLessThanOrEqual(1)
-    // Claude records no window: the meter is drawn against an assumed 200k.
+    expect(cache.textContent).toBe('warm')
+    // Claude records no window: its context is read against a million tokens.
     const context = band.el.querySelector<HTMLElement>('.ws-transcript-context')!
-    expect(context.getAttribute('role')).toBe('meter')
-    expect(context.getAttribute('aria-label')).toBe('Context 53.3k of ~200k')
-    expect(context.title).toContain('assumes 200,000 tokens')
-    expect(context.textContent).toBe('')
-    vi.advanceTimersByTime(60_000)
-    expect(Number(cache.style.getPropertyValue('--ws-cache-left'))).toBeLessThan(left)
+    expect(context.textContent).toBe('53.3k')
+    expect(context.title).toContain('1,000,000-token window')
+    expect(context.style.color).toContain('5%')
     band.el.querySelector<HTMLButtonElement>('.ws-transcript-head')!.click()
     vi.advanceTimersByTime(3_600_000)
-    expect(cache.getAttribute('aria-label')).toMatch(/^Cache cold since \d\d:\d\d$/)
+    expect(cache.title).toMatch(/^Cache cold since \d\d:\d\d/)
     expect(cache.dataset.cache).toBe('cold')
-    expect(cache.classList.contains('ws-transcript-cache-cold')).toBe(true)
+    expect(cache.textContent).toBe('cold')
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
@@ -200,7 +194,7 @@ describe('TranscriptBand', () => {
     const band = makeBand(fixtureFetch({ [latestId]: [captured(claudeUsage)[0]], [earlierId]: records('Hello', 'Hi') }))
     band.follow(target(latestId))
     await settle()
-    expect(band.el.querySelector('.ws-transcript-cache')?.getAttribute('aria-label')).toMatch(/^Cache cold since /)
+    expect(band.el.querySelector('.ws-transcript-cache')?.textContent).toBe('cold')
     band.read(target(earlierId))
     await settle()
     expect(band.el.querySelector<HTMLElement>('.ws-transcript-cache')!.hidden).toBe(true)
@@ -220,16 +214,15 @@ describe('TranscriptBand', () => {
     band.follow(target(latestId))
     await settle()
     const context = band.el.querySelector<HTMLElement>('.ws-transcript-context')!
-    expect(context.getAttribute('aria-label')).toBe('Context 20.9k of 258.4k')
-    expect(context.getAttribute('aria-valuenow')).toBe('20915')
+    expect(context.textContent).toBe('20.9k')
+    expect(context.style.color).toContain('8%')
     expect(context.title).toContain('258,400-token window')
     expect(band.el.querySelector<HTMLElement>('.ws-transcript-cache')!.hidden).toBe(true)
     band.read(target(earlierId))
     await settle()
-    // Pi records no window and is no Claude model: the count stands in for the meter.
-    expect(context.getAttribute('role')).toBeNull()
+    // Pi records no window and is no Claude model: the count stands untinted.
     expect(context.textContent).toBe('16.8k')
-    expect(context.getAttribute('aria-label')).toBe('Context 16.8k')
+    expect(context.style.color).toBe('')
     expect(band.el.querySelector<HTMLElement>('.ws-transcript-cache')!.hidden).toBe(true)
   })
 
@@ -251,7 +244,7 @@ describe('TranscriptBand', () => {
     vi.advanceTimersByTime(3000)
     await settle()
     expect(context.hidden).toBe(false)
-    expect(context.getAttribute('aria-label')).toBe('Context 43k of 258.4k')
+    expect(context.textContent).toBe('43k')
   })
 
   it('omits stale context after compaction without post usage and omits both facts without usage', async () => {
