@@ -1,5 +1,6 @@
 defmodule Shuttle.WaitingTrackerTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Shuttle.WaitingTracker, as: Tracker
 
@@ -25,6 +26,45 @@ defmodule Shuttle.WaitingTrackerTest do
 
     assert Map.keys(sessions) == ["raw-session-id"]
     assert phase(sessions, "raw-session-id") == "waiting"
+  end
+
+  # Mutation: key apply_event/3 by tmuxSession to make this isolation law fail.
+  property "other sessions in the worker's pane cannot change its state or timestamp" do
+    check all(
+            types <-
+              list_of(
+                member_of([
+                  "session_start",
+                  "pre_tool_use",
+                  "post_tool_use",
+                  "user_prompt_submit",
+                  "notification",
+                  "stop",
+                  "subagent_stop",
+                  "session_end"
+                ]),
+                max_length: 40
+              ),
+            max_runs: 100
+          ) do
+      pane = "worker-01J00000000000000000000000-shuttle"
+      parent = event("stop", "worker", %{"tmuxSession" => pane, "timestamp" => @now - 1})
+      initial = fold([parent])
+
+      result =
+        Enum.reduce(types, initial, fn type, sessions ->
+          Tracker.apply_event(
+            sessions,
+            event(type, "nested-probe", %{"tmuxSession" => pane, "harness" => "codex"}),
+            @now
+          )
+        end)
+
+      assert result["worker"] == initial["worker"]
+
+      assert Tracker.phases(result, @now)["worker"] ==
+               %{phase: "waiting", last_event_at: @now - 1}
+    end
   end
 
   test "turn transitions derive working, waiting, attention, and terminal states" do
