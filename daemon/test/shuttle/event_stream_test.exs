@@ -343,6 +343,52 @@ defmodule Shuttle.EventStreamTest do
     assert waiting(name) == %{"parent" => "working"}
   end
 
+  for {label, initial, suffix, expected} <- [
+        {"permission with a live child",
+         [
+           {"post_tool_use", %{"tool" => "collaborationspawn_agent", "id" => "spawn"}},
+           {"stop", %{}},
+           {"notification", %{"notificationKind" => "permission_prompt"}}
+         ], {"pre_tool_use", %{"tool" => "Bash"}}, "attention"},
+        {"ended session", [{"session_end", %{}}], {"pre_tool_use", %{"tool" => "Bash"}},
+         "waiting"},
+        {"outstanding child",
+         [
+           {"post_tool_use", %{"tool" => "collaborationspawn_agent", "id" => "spawn"}},
+           {"stop", %{}}
+         ], {"notification", %{"notificationKind" => "idle_prompt"}}, "working"},
+        {"background work", [{"stop", %{"backgroundTasks" => 2}}],
+         {"notification", %{"notificationKind" => "idle_prompt"}}, "working"}
+      ] do
+    @tag replay_finding_3: true
+    test "partial replacement preserves #{label} when newer progress cannot clear it", %{
+      path: path
+    } do
+      now = System.system_time(:millisecond)
+      context = %{"harness" => "codex", "timestamp" => now}
+      initial = unquote(Macro.escape(initial))
+      {type, attrs} = unquote(Macro.escape(suffix))
+
+      append(
+        path,
+        Enum.map(initial, fn {type, attrs} -> ev(type, 0, Map.merge(context, attrs)) end)
+      )
+
+      name = start(path)
+      assert waiting(name) == %{"s1" => unquote(expected)}
+
+      line = ev(type, 0, Map.merge(context, Map.put(attrs, "timestamp", now + 1)))
+      append(path <> ".replacement", [line])
+      File.rename!(path <> ".replacement", path)
+      _ = all(name, path)
+
+      assert waiting(name) == %{"s1" => unquote(expected)}
+      state = :sys.get_state(name)
+      if unquote(label) == "outstanding child", do: assert(state.waiting["s1"].kids == 1)
+      if unquote(label) == "background work", do: assert(state.waiting["s1"].bg == 2)
+    end
+  end
+
   test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
     now = System.system_time(:millisecond)
     a = "session-a"

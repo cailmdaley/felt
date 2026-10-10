@@ -75,12 +75,17 @@ defmodule Shuttle.WaitingTracker do
     |> Map.new(fn {id, session} -> {id, trim_child_events(session, cutoff)} end)
   end
 
-  @doc "Merges a rebuild with known state, preferring strictly newer activity."
-  @spec merge_known(sessions(), sessions()) :: sessions()
-  def merge_known(known, rebuilt) do
-    # A rebuild may see only a retained prefix, so equal-time known suffix
-    # state survives unless the files contain strictly newer evidence.
-    Map.merge(known, rebuilt, fn _id, old, new -> if new.at > old.at, do: new, else: old end)
+  @doc "Replays retained events onto known facts, folding only newer evidence."
+  @spec replay_events(sessions(), [map()], integer()) :: sessions()
+  def replay_events(known, events, now) do
+    Enum.reduce(events, known, fn event, sessions ->
+      timestamp = event_at(event, now)
+
+      case known[event["sessionId"]] do
+        %Session{at: at} when at >= timestamp -> sessions
+        _ -> apply_event(sessions, event, now)
+      end
+    end)
   end
 
   defp transition(session, type, event, now) do

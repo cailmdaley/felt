@@ -50,9 +50,9 @@ defmodule Shuttle.EventStream do
 
   Anything else — the live file shrinking in place, or replaced by a file the
   stream cannot account for — rebuilds every projection from the two files.
-  The waiting and binding maps keep what they already knew across that rebuild: a session
-  the new files do not mention stays known, and a record never moves back to
-  an older event (`Shuttle.WaitingTracker.merge_known/2`).
+  The waiting and binding maps keep what they already knew across that rebuild.
+  Retained turn events replay onto remembered facts, rather than replacing a
+  whole session with an incomplete reconstruction (`Shuttle.WaitingTracker.replay_events/3`).
 
   ## Reads
 
@@ -106,6 +106,7 @@ defmodule Shuttle.EventStream do
       sent_rotated: [],
       sent_live: [],
       waiting: %{},
+      seed_events: nil,
       binding: SessionBinding.new()
     ]
   end
@@ -338,9 +339,9 @@ defmodule Shuttle.EventStream do
 
   # ── Following the file ──
 
-  # Both files from scratch into empty projections, as a consistent pair — see
-  # the moduledoc's "Seed, then follow".
-  defp seed(%State{events_file: path} = state, binding \\ SessionBinding.new()) do
+  # Read a consistent pair, rebuilding file projections while turn events
+  # replay onto known facts. See the moduledoc's "Seed, then follow".
+  defp seed(%State{events_file: path} = state, binding \\ SessionBinding.new(), known \\ %{}) do
     {lines, offset, inode} = FileTail.snapshot(path)
     state.seed_hook.()
     now = state.clock.()
@@ -350,23 +351,29 @@ defmodule Shuttle.EventStream do
       | activity: Activity.new_acc(),
         sent_rotated: [],
         sent_live: [],
-        waiting: %{},
+        waiting: known,
+        seed_events: [],
         binding: binding
     }
 
     from_rotated = fold_file(empty, rotated(path), &ingest_event(&2, &1, now))
 
     if inode != nil and FileTail.inode(rotated(path)) == inode do
-      seed(state, binding)
+      seed(state, binding, known)
     else
       state = ingest(%{from_rotated | sent_rotated: from_rotated.sent_live, sent_live: []}, lines)
-      waiting = WaitingTracker.prune(state.waiting, now)
+
+      waiting =
+        known
+        |> WaitingTracker.replay_events(Enum.reverse(state.seed_events), now)
+        |> WaitingTracker.prune(now)
 
       settle(%{
         state
         | offset: offset,
           inode: inode,
           waiting: waiting,
+          seed_events: nil,
           binding: SessionBinding.prune(state.binding, now)
       })
     end
@@ -374,12 +381,7 @@ defmodule Shuttle.EventStream do
 
   # A rebuild from the two files that keeps what the waiting map already knew.
   defp reseed(%State{waiting: known, binding: binding} = state) do
-    state = seed(state, binding)
-
-    %{
-      state
-      | waiting: WaitingTracker.merge_known(known, state.waiting)
-    }
+    seed(state, binding, known)
   end
 
   defp follow(%State{events_file: path, inode: followed} = state) do
@@ -448,16 +450,20 @@ defmodule Shuttle.EventStream do
   defp ingest_event(state, event, now) do
     binding = SessionBinding.apply_event(state.binding, event, now)
 
-    waiting =
-      if SessionBinding.accept_event?(binding, event),
-        do: WaitingTracker.apply_event(state.waiting, event, now),
-        else: state.waiting
+    state =
+      if SessionBinding.accept_event?(binding, event) do
+        case state.seed_events do
+          nil -> %{state | waiting: WaitingTracker.apply_event(state.waiting, event, now)}
+          events -> %{state | seed_events: [event | events]}
+        end
+      else
+        state
+      end
 
     %{
       state
       | activity: Activity.fold_event(state.activity, event),
         sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
-        waiting: waiting,
         binding: binding
     }
   end

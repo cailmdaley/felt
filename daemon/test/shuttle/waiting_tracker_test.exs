@@ -377,7 +377,7 @@ defmodule Shuttle.WaitingTrackerTest do
     assert unchanged == sessions
   end
 
-  test "merge_known retains known state at equal timestamps and rebuilds only from newer evidence" do
+  test "replay retains equal-time state and folds newer clearing evidence onto known facts" do
     known =
       fold([
         event("post_tool_use", "parent", %{
@@ -388,22 +388,41 @@ defmodule Shuttle.WaitingTrackerTest do
         event("stop", "parent", %{"harness" => "codex"})
       ])
 
-    incomplete = fold([event("stop", "parent", %{"harness" => "codex"})])
+    incomplete = [event("stop", "parent", %{"harness" => "codex"})]
 
-    newer =
-      fold([
-        event("user_prompt_submit", "parent", %{"harness" => "codex", "timestamp" => @now + 1})
-      ])
+    newer = [
+      event("user_prompt_submit", "parent", %{"harness" => "codex", "timestamp" => @now + 1})
+    ]
 
-    assert Tracker.merge_known(known, incomplete)["parent"] == known["parent"]
-    assert Tracker.merge_known(known, newer)["parent"] == newer["parent"]
+    assert Tracker.replay_events(known, incomplete, @now)["parent"] == known["parent"]
+    updated = Tracker.replay_events(known, newer, @now + 1)
+    assert updated["parent"].turn == :open
+    assert updated["parent"].kids == 1
+
+    restarted =
+      Tracker.replay_events(
+        updated,
+        [event("session_start", "parent", %{"timestamp" => @now + 2})],
+        @now + 2
+      )
+
+    assert restarted["parent"].kids == 0
+    assert restarted["parent"].turn == :open
   end
 
-  test "prune and merge_known preserve the freshest known state" do
+  test "prune and replay preserve unmentioned known sessions" do
     old = fold([event("stop", "old", %{"timestamp" => @now - 49 * @hour})])
     fresh = fold([event("stop", "fresh", %{"timestamp" => @now})])
     assert Tracker.prune(Map.merge(old, fresh), @now) == fresh
-    assert Tracker.merge_known(fresh, old)["fresh"] == fresh["fresh"]
-    assert Tracker.merge_known(fresh, old)["old"] == old["old"]
+
+    replayed =
+      Tracker.replay_events(
+        fresh,
+        [event("stop", "old", %{"timestamp" => @now - 49 * @hour})],
+        @now
+      )
+
+    assert replayed["fresh"] == fresh["fresh"]
+    assert replayed["old"] == old["old"]
   end
 end
