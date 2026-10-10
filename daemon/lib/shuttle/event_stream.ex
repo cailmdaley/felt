@@ -2,14 +2,16 @@ defmodule Shuttle.EventStream do
   @moduledoc """
   The one reader of this host's hook-event stream (`~/.shuttle/events.jsonl`)
   and its rotated sibling `events.jsonl.1`. It reads each line once, decodes it
-  once, and hands the decoded event to three pure projections it holds in
+  once, and hands the decoded event to four pure projections it holds in
   memory:
 
     * `Shuttle.Activity` — the per-minute activity fold behind
       `GET /api/v1/activity`;
     * `Shuttle.SentFiles` — the sent-file events behind `/api/v1/sent-files`;
-    * `Shuttle.WaitingTracker` — the last event per worker session, which the
-      poller stamps onto running cards as `last_event_at` and `phase`.
+    * `Shuttle.WaitingTracker` — explicit turn state per harness session UUID,
+      stamped onto running cards as `last_event_at` and `phase`;
+    * `Shuttle.SessionBinding` — receiver-process succession joining the
+      worker's persisted UUID to its current harness session.
 
   Every projection is a pure function of a prefix of the stream: the bytes
   below a given offset never change between rotations, so following the file
@@ -44,11 +46,11 @@ defmodule Shuttle.EventStream do
     * the sent-file events are kept as two segments, one per file, so after a
       rotation the old live segment becomes the rotated one and the segment
       the overwritten `.1` held is dropped — exactly what the two files hold;
-    * the waiting map is last-event-wins, so it simply carries on.
+    * the waiting machine and receiver succession projection carry on.
 
   Anything else — the live file shrinking in place, or replaced by a file the
   stream cannot account for — rebuilds every projection from the two files.
-  The waiting map keeps what it already knew across that rebuild: a session
+  The waiting and binding maps keep what they already knew across that rebuild: a session
   the new files do not mention stays known, and a record never moves back to
   an older event (`Shuttle.WaitingTracker.merge_known/2`).
 
@@ -73,7 +75,7 @@ defmodule Shuttle.EventStream do
 
   require Logger
 
-  alias Shuttle.{Activity, FileTail, SentFiles, WaitingTracker}
+  alias Shuttle.{Activity, FileTail, SentFiles, WaitingTracker, SessionBinding}
 
   @poll_interval_ms 1_000
   # A catch-up read that lands during a reseed waits for it; the seed of a
@@ -103,7 +105,8 @@ defmodule Shuttle.EventStream do
       offset: 0,
       sent_rotated: [],
       sent_live: [],
-      waiting: %{}
+      waiting: %{},
+      binding: SessionBinding.new()
     ]
   end
 
@@ -161,7 +164,7 @@ defmodule Shuttle.EventStream do
   @doc """
   `Shuttle.WaitingTracker.phases/2` of the published waiting map, at the
   stream's clock: `session => %{last_event_at: ms, phase: phase}` over every
-  tracked `*-shuttle` session. An ETS read, never a call, so it answers at once
+  tracked harness session UUID. An ETS read, never a call, so it answers at once
   even while the stream is mid-reseed. A stream that is not running is `%{}`.
   """
   @spec session_activity(atom()) ::
@@ -174,6 +177,16 @@ defmodule Shuttle.EventStream do
   rescue
     # No table: the stream is not running under this name.
     ArgumentError -> %{}
+  end
+
+  @doc "Receiver succession projection, read without entering the stream mailbox."
+  def session_bindings(server \\ __MODULE__) do
+    case :ets.lookup(server, :binding) do
+      [{:binding, binding}] -> binding
+      [] -> SessionBinding.new()
+    end
+  rescue
+    ArgumentError -> SessionBinding.new()
   end
 
   @doc "The file this stream follows — for tests and diagnostics."
@@ -310,7 +323,13 @@ defmodule Shuttle.EventStream do
   @impl true
   def handle_info(:poll, state) do
     state = follow(state)
-    state = %{state | waiting: WaitingTracker.prune(state.waiting, state.clock.())}
+
+    state = %{
+      state
+      | waiting: WaitingTracker.prune(state.waiting, state.clock.()),
+        binding: SessionBinding.prune(state.binding, state.clock.())
+    }
+
     schedule_poll(state.poll_interval_ms)
     {:noreply, publish(state)}
   end
@@ -321,27 +340,46 @@ defmodule Shuttle.EventStream do
 
   # Both files from scratch into empty projections, as a consistent pair — see
   # the moduledoc's "Seed, then follow".
-  defp seed(%State{events_file: path} = state) do
+  defp seed(%State{events_file: path} = state, binding \\ SessionBinding.new()) do
     {lines, offset, inode} = FileTail.snapshot(path)
     state.seed_hook.()
     now = state.clock.()
 
-    empty = %{state | activity: Activity.new_acc(), sent_rotated: [], sent_live: [], waiting: %{}}
+    empty = %{
+      state
+      | activity: Activity.new_acc(),
+        sent_rotated: [],
+        sent_live: [],
+        waiting: %{},
+        binding: binding
+    }
+
     from_rotated = fold_file(empty, rotated(path), &ingest_event(&2, &1, now))
 
     if inode != nil and FileTail.inode(rotated(path)) == inode do
-      seed(state)
+      seed(state, binding)
     else
       state = ingest(%{from_rotated | sent_rotated: from_rotated.sent_live, sent_live: []}, lines)
       waiting = WaitingTracker.prune(state.waiting, now)
-      settle(%{state | offset: offset, inode: inode, waiting: waiting})
+
+      settle(%{
+        state
+        | offset: offset,
+          inode: inode,
+          waiting: waiting,
+          binding: SessionBinding.prune(state.binding, now)
+      })
     end
   end
 
   # A rebuild from the two files that keeps what the waiting map already knew.
-  defp reseed(%State{waiting: known} = state) do
-    state = seed(state)
-    %{state | waiting: WaitingTracker.merge_known(known, state.waiting)}
+  defp reseed(%State{waiting: known, binding: binding} = state) do
+    state = seed(state, binding)
+
+    %{
+      state
+      | waiting: WaitingTracker.merge_known(known, state.waiting)
+    }
   end
 
   defp follow(%State{events_file: path, inode: followed} = state) do
@@ -408,11 +446,19 @@ defmodule Shuttle.EventStream do
   end
 
   defp ingest_event(state, event, now) do
+    binding = SessionBinding.apply_event(state.binding, event, now)
+
+    waiting =
+      if SessionBinding.accept_event?(binding, event),
+        do: WaitingTracker.apply_event(state.waiting, event, now),
+        else: state.waiting
+
     %{
       state
       | activity: Activity.fold_event(state.activity, event),
         sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
-        waiting: WaitingTracker.apply_event(state.waiting, event, now)
+        waiting: waiting,
+        binding: binding
     }
   end
 
@@ -427,10 +473,11 @@ defmodule Shuttle.EventStream do
 
   # The waiting map `session_activity/1` reads, with the clock its phases are
   # read against. Written only when the map changed.
-  defp publish(%State{waiting: waiting, published: waiting} = state), do: state
+  defp publish(%State{waiting: waiting, binding: binding, published: {waiting, binding}} = state),
+    do: state
 
-  defp publish(%State{table: table, waiting: waiting, clock: clock} = state) do
-    :ets.insert(table, {:waiting, waiting, clock})
-    %{state | published: waiting}
+  defp publish(%State{table: table, waiting: waiting, binding: binding, clock: clock} = state) do
+    :ets.insert(table, [{:waiting, waiting, clock}, {:binding, binding}])
+    %{state | published: {waiting, binding}}
   end
 end
