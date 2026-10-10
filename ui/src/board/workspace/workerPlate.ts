@@ -11,16 +11,17 @@ import { humanizeIdleAge } from '../utils.js'
 export function workerPlateFacts(card: KanbanCard, now = Date.now(), phase = true): { state: string; elapsed?: string; working: boolean } {
   if (!hasLiveWorker(card)) return { state: 'no worker', working: false }
   const variant = phase ? workerVariant(card) : 'aloft'
-  const state = variant === 'attention' ? card.workerState === 'blocked' || card.runtimePhase === 'blocked' || card.launchError ? 'blocked' : 'attention' : variant
+  const identity = phase && (card.runtimePhase === 'identity_pending' || card.runtimePhase === 'identity_failed')
+  const state = identity ? card.runtimePhase! : variant === 'attention' ? card.workerState === 'blocked' || card.runtimePhase === 'blocked' || card.launchError ? 'blocked' : 'attention' : variant
   const since = variant === 'aloft' ? card.workerStartedAt ?? Date.parse(card.dispatchedAt ?? '') : card.lastActivityAt
-  const elapsed = since !== undefined && Number.isFinite(since) ? humanizeIdleAge(now - since) : undefined
+  const elapsed = !identity && since !== undefined && Number.isFinite(since) ? humanizeIdleAge(now - since) : undefined
   // The owner reports working for foreground and detached work alike. Unknown,
-  // waiting (even within the pill's debounce) and attention never breathe.
+  // waiting and attention never breathe.
   return { state, elapsed, working: card.workerState === 'running' && card.runtimePhase === 'working' }
 }
 
 /** The plate's word for a state whose data name is not what the reader is told. */
-const PLATE_WORDS: Record<string, string> = { attention: 'at a prompt', waiting: 'your turn' }
+const PLATE_WORDS: Record<string, string> = { attention: 'at a prompt', waiting: 'your turn', identity_pending: 'Identifying session', identity_failed: 'Session attribution failed' }
 
 /**
  * Decorate the real conversation target, never a second opening mechanism:

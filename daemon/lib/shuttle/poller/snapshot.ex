@@ -162,12 +162,7 @@ defmodule Shuttle.Poller.Snapshot do
   """
   def runtime_index(running, activity) do
     Enum.reduce(running, %{}, fn {runtime_key, meta}, acc ->
-      payload =
-        runtime_payload(meta, activity)
-        |> Map.put(
-          :identity_pending,
-          Map.has_key?(meta, :session_uuid) and meta.session_uuid == nil
-        )
+      payload = runtime_payload(meta, activity)
 
       [runtime_key, Poller.metadata_uid(meta), Poller.fiber_address(meta)]
       |> Enum.filter(&(is_binary(&1) and &1 != ""))
@@ -206,18 +201,26 @@ defmodule Shuttle.Poller.Snapshot do
 
             payload = Map.put(payload, :session_uuid, uuid)
 
-            case Map.get(activity, uuid) do
-              %{last_event_at: at, phase: phase} ->
+            cond do
+              Map.get(payload, :identity_pending, false) ->
+                Map.put(
+                  payload,
+                  :phase,
+                  if(payload[:identity_error], do: "identity_failed", else: "identity_pending")
+                )
+
+              Map.has_key?(activity, uuid) ->
+                %{last_event_at: at, phase: phase} = Map.fetch!(activity, uuid)
                 payload |> Map.put(:last_activity_at, at) |> Map.put(:phase, phase)
 
-              _ ->
+              true ->
                 Map.delete(payload, :phase)
             end
           else
             payload
           end
 
-        Map.put(entry, :runtime, put_session_link(Map.delete(payload, :identity_pending), fiber))
+        Map.put(entry, :runtime, put_session_link(payload, fiber))
     end
   end
 
@@ -300,6 +303,27 @@ defmodule Shuttle.Poller.Snapshot do
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }
+    |> put_identity(meta)
+  end
+
+  defp put_identity(payload, meta) do
+    pending =
+      payload.surface == "cli" and Map.has_key?(meta, :session_uuid) and meta.session_uuid == nil
+
+    payload = Map.put(payload, :identity_pending, pending)
+
+    cond do
+      pending and meta[:identity_error] ->
+        payload
+        |> Map.put(:identity_error, meta.identity_error)
+        |> Map.put(:phase, "identity_failed")
+
+      pending ->
+        Map.put(payload, :phase, "identity_pending")
+
+      true ->
+        payload
+    end
   end
 
   # The feed's `runtime` payload: the shared worker fields plus activity.

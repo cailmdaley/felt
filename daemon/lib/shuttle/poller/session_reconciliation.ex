@@ -160,6 +160,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
         %{state | running: running}
         |> Poller.note_running(runtime_key)
+        |> Poller.acquire_worker_identity(fiber_id, fiber)
 
       {:error, reason} ->
         Logger.warning("Failed to adopt session #{session}: #{inspect(reason)}")

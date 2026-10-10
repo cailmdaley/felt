@@ -761,7 +761,8 @@ export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [
  * turn.
  */
 export function isQuestion(card: KanbanCard): boolean {
-  return !!card.ask || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked';
+  return !!card.ask || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked'
+    || card.runtimePhase === 'identity_pending' || card.runtimePhase === 'identity_failed';
 }
 
 /**

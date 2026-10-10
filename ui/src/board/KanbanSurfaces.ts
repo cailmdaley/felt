@@ -148,6 +148,8 @@ const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
   starting: { label: '▸ starting', title: 'The app conversation is starting.' },
   running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
   blocked: { label: 'blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
+  identity_pending: { label: 'Identifying session', title: 'The worker is live; Shuttle is acquiring its session UUID before attributing turn state.' },
+  identity_failed: { label: 'Session attribution failed', title: 'The worker is live but its turn state is unknown. Shuttle retries identity acquisition; an explicit session claim can repair it.' },
 }
 
 /** Below this, an attention chip carries no clock: a worker that just raised

@@ -56,6 +56,15 @@ A pane name remains transport context for terminals, sent files, and activity; s
 The worker's `shuttle.runtime.session_uuid` is the binding anchor.
 Claude launches with a daemon-generated UUID supplied through `--session-id`, and resume and claim paths supply their known session id.
 Fresh Codex and Pi launches use the dispatcher's transcript capture to learn their UUID; until capture succeeds, the worker has no hook-derived phase.
+Re-adoption restarts capture from the durable dispatch boundary and owning project directory, resolving the same project-local fiber address used in the launch prompt.
+Resume-to-fresh fallback signals live under the host data directory, keyed by the worker handle and dispatch boundary.
+Re-adoption restores their monitor or observes an already-started fallback; an observed fallback invalidates the in-memory predecessor even when clearing the durable UUID fails.
+Successful capture records explicit fallback completion only after the acquired UUID is persisted.
+Session succession alone cannot complete a pending fallback; later restarts keep the acquired identity only when acquisition completed.
+Capture attempts time out after two minutes and retry after 30 seconds while the worker remains unattributed.
+The owner snapshot and board expose `identity_pending` (Identifying session) or `identity_failed` (Session attribution failed), never Working, for that live worker.
+A timeout also carries `identity_error`; the failure remains visible during retries until acquisition succeeds.
+An existing-worker claim with an explicit UUID repairs missing identity without moving `dispatched_at` or replacing an already-known UUID.
 There is no first-hook or first-session-in-the-pane fallback.
 The runtime timestamp falls back to the worker's liveness timestamp when no session state is available.
 Codex app workers retain their App Server's native phase signal.

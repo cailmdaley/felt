@@ -16,6 +16,31 @@ defmodule Shuttle.PollerTest do
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
   alias Shuttle.Test.Env
 
+  defmodule IdentityRunner do
+    def cmd("felt", ["-C", _dir, "show", _id, "-j"] = args, opts) do
+      case MockRunner.cmd("felt", args, opts) do
+        {json, 0} ->
+          fiber = Jason.decode!(json)
+
+          {Jason.encode!(Map.put(fiber, "id", Shuttle.Env.app(:identity_prompt_id, fiber["id"]))),
+           0}
+
+        other ->
+          other
+      end
+    end
+
+    def cmd(command, args, opts) do
+      if command == "shuttle" and "mark-runtime" in args and
+           Enum.chunk_every(args, 2, 1, :discard) |> Enum.member?(["--session", ""]) and
+           Shuttle.Env.app(:identity_clear_fail, false) do
+        {"identity clear failed", 1}
+      else
+        MockRunner.cmd(command, args, opts)
+      end
+    end
+  end
+
   # Every `:sys.get_state/2` on a Poller waits this long: on a loaded machine
   # a Poller applying a cycle can take longer than the 5 s default to answer,
   # and that is "not yet", not a failure.
@@ -976,6 +1001,147 @@ defmodule Shuttle.PollerTest do
              runtime.session_uuid
   end
 
+  for {cli, agent} <- [{"pi", "pi-luna"}, {"codex", "codex"}] do
+    @tag :pr53_identity
+    @tag :timing
+    test "restart retries #{cli} identity capture after a visible timeout" do
+      cli = unquote(cli)
+      id = "tests/recover-#{cli}"
+      local_id = "constitution/recover-#{cli}"
+      Env.put_app_env(:identity_prompt_id, local_id)
+      root = MockRunner.felt_root()
+      Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(root, "pi-sessions"))
+      Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", Path.join(root, "codex-sessions"))
+      Env.put_app_env(:session_capture_timeout_ms, 25)
+      Env.put_app_env(:session_capture_poll_ms, 5)
+      Env.put_app_env(:session_capture_retry_ms, 100)
+      boundary = DateTime.utc_now() |> DateTime.to_iso8601()
+      MockRunner.set_fiber(id, make_fiber(id))
+
+      MockRunner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: #{unquote(agent)}\nproject_dir: #{root}\nruntime:\n  dispatched_at: #{boundary}\n"
+      )
+
+      MockRunner.add_tmux_session(FiberUid.session(id))
+
+      Env.put_app_env(:waiting_phases_source, fn ->
+        %{FiberUid.session(id) => %{phase: "working", last_event_at: 1}}
+      end)
+
+      opts = [
+        runner: IdentityRunner,
+        own_host_id: "test-host",
+        poll_interval_ms: 60_000,
+        felt_stores: [root]
+      ]
+
+      {:ok, first} = start_poller!(opts)
+      settle_poller!(first)
+      assert {:ok, %{fibers: [%{runtime: pending}]}} = Poller.cached_fiber_documents(first)
+      assert pending.identity_pending
+      assert pending.phase in ["identity_pending", "identity_failed"]
+      assert pending.session_uuid == nil
+
+      assert_eventually(fn ->
+        assert {:ok, %{fibers: [%{runtime: %{phase: "identity_failed", identity_error: error}}]}} =
+                 Poller.cached_fiber_documents(first)
+
+        assert error =~ "timed out"
+
+        assert [%{identity_pending: true, phase: "identity_failed"}] =
+                 Poller.snapshot(first).eligible
+      end)
+
+      GenServer.stop(first)
+      # Another restart must retry, even though the previous daemon exhausted capture.
+      {:ok, poller} = start_poller!(opts)
+      settle_poller!(poller)
+
+      assert_eventually(fn ->
+        assert {:ok, %{fibers: [%{runtime: %{phase: "identity_failed"}}]}} =
+                 Poller.cached_fiber_documents(poller)
+      end)
+
+      [{_, worker}] = Map.to_list(:sys.get_state(poller).running)
+      uuid = "recovered-#{cli}"
+      header = %{"id" => uuid, "cwd" => root, "timestamp" => boundary}
+
+      {path, event} =
+        if cli == "pi" do
+          {Path.join(Shuttle.HarnessPaths.pi_sessions_dir(root), "session.jsonl"),
+           Map.put(header, "type", "session")}
+        else
+          {Path.join([
+             root,
+             "codex-sessions",
+             Calendar.strftime(Date.utc_today(), "%Y/%m/%d"),
+             "rollout-session.jsonl"
+           ]), %{"type" => "session_meta", "payload" => header}}
+        end
+
+      File.mkdir_p!(Path.dirname(path))
+
+      File.write!(
+        path,
+        Jason.encode!(event) <> "\n" <> Jason.encode!(%{"text" => "Fiber: #{local_id}"}) <> "\n"
+      )
+
+      # The timeout's scheduled retry must find the late transcript without a manual retry.
+      assert_eventually(fn -> assert Poller.session_uuid(poller, id) == uuid end)
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == uuid
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == boundary
+      assert {:ok, %{fibers: [%{runtime: recovered}]}} = Poller.cached_fiber_documents(poller)
+      refute recovered.identity_pending
+      refute Map.has_key?(recovered, :identity_error)
+      refute recovered[:phase] == "working"
+      # A timeout/callback from an earlier attempt cannot unbind acquired identity.
+      send(poller, {:identity_capture_failed, id, worker.identity_token, "late timeout"})
+      send(poller, {:captured_session, id, worker.identity_token, "stale", [felt_store: root]})
+      assert Poller.session_uuid(poller, id) == uuid
+    end
+  end
+
+  @tag :pr53_identity
+  test "existing-worker claim repairs missing identity without moving dispatch boundary" do
+    id = "tests/claim-missing-identity"
+    root = MockRunner.felt_root()
+    boundary = "2026-10-10T12:00:00Z"
+    MockRunner.set_fiber(id, make_fiber(id))
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: pi-luna\nproject_dir: #{root}\nruntime:\n  dispatched_at: #{boundary}\n"
+    )
+
+    MockRunner.add_tmux_session(FiberUid.session(id))
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        own_host_id: "test-host",
+        poll_interval_ms: 60_000,
+        felt_stores: [root]
+      )
+
+    settle_poller!(poller)
+
+    [{_, pending_worker}] = Map.to_list(:sys.get_state(poller).running)
+
+    assert {:ok, _} =
+             Poller.claim_session(poller, id, FiberUid.session(id), session_uuid: "claimed-uuid")
+
+    assert Poller.session_uuid(poller, id) == "claimed-uuid"
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "claimed-uuid"
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == boundary
+
+    assert {:ok, _} =
+             Poller.claim_session(poller, id, FiberUid.session(id), session_uuid: "different")
+
+    send(poller, {:fallback_started, id, pending_worker.identity_token, [felt_store: root]})
+    assert Poller.session_uuid(poller, id) == "claimed-uuid"
+  end
+
   test "poll tick persists successor without changing dispatch boundary" do
     id = "tests/persist-binding"
     MockRunner.set_fiber(id, make_fiber(id))
@@ -1089,7 +1255,8 @@ defmodule Shuttle.PollerTest do
     send(poller, {:fallback_started, id, worker.identity_token, opts})
     assert {:ok, %{fibers: [%{runtime: pending}]}} = Poller.cached_fiber_documents(poller)
     assert pending.session_uuid == nil
-    refute Map.has_key?(pending, :phase)
+    assert pending.identity_pending
+    assert pending.phase == "identity_pending"
     assert Poller.session_uuid(poller, id) == nil
     sync_poll_cycle!(poller)
     assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == ""
@@ -1099,6 +1266,149 @@ defmodule Shuttle.PollerTest do
     send(poller, {:captured_session, id, make_ref(), "wrong-launch", opts})
     assert Poller.session_uuid(poller, id) == "captured"
     assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "captured"
+  end
+
+  for failure <- [
+        :restart_before_fallback,
+        :fallback_while_down,
+        :clear_write_failure,
+        :succession_before_fallback
+      ] do
+    @tag pr53_fallback_succession: failure == :succession_before_fallback
+    @tag fallback_failure: failure
+    @tag :pr53_fallback_recovery
+    @tag :timing
+    test "resume fallback recovers after #{failure}", %{fallback_failure: failure} do
+      id = "tests/fallback-#{failure}"
+      root = MockRunner.felt_root()
+      Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(root, "pi-sessions"))
+      Env.put_app_env(:session_capture_timeout_ms, 25)
+      Env.put_app_env(:session_capture_poll_ms, 5)
+      Env.put_app_env(:session_capture_retry_ms, 100)
+      MockRunner.set_fiber(id, make_fiber(id))
+
+      MockRunner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: pi-luna\nruntime:\n  session_uuid: predecessor\n  dispatched_at: 2020-01-01T00:00:00Z\n",
+        "open"
+      )
+
+      opts = [
+        runner: IdentityRunner,
+        own_host_id: "test-host",
+        poll_interval_ms: 60_000,
+        felt_stores: [root]
+      ]
+
+      {:ok, first} = start_poller!(opts)
+      settle_poller!(first)
+
+      assert {:ok, session} =
+               Poller.dispatch_fiber(first, id, force: true, resume_mode: "previous")
+
+      boundary = get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"])
+
+      {"tmux", args} =
+        Enum.find(MockRunner.commands(), fn {cmd, args} ->
+          cmd == "tmux" and match?(["new-session", "-d", "-s", ^session | _], args)
+        end)
+
+      assert [_, signal] = Regex.run(~r/\|\| \{ touch '([^']+)';/, File.read!(List.last(args)))
+
+      if failure == :succession_before_fallback do
+        now = System.system_time(:millisecond)
+
+        binding =
+          Enum.reduce(
+            [
+              %{
+                "sessionId" => "predecessor",
+                "type" => "stop",
+                "timestamp" => now,
+                "harness" => "pi",
+                "receiverPid" => 123,
+                "receiverBirth" => "receiver"
+              },
+              %{
+                "sessionId" => "successor",
+                "type" => "session_start",
+                "timestamp" => now + 1,
+                "harness" => "pi",
+                "receiverPid" => 123,
+                "receiverBirth" => "receiver"
+              }
+            ],
+            Shuttle.SessionBinding.new(),
+            &Shuttle.SessionBinding.apply_event(&2, &1, now)
+          )
+
+        Env.put_app_env(:session_bindings_source, fn -> binding end)
+        sync_poll_cycle!(first)
+        assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "successor"
+      end
+
+      poller =
+        if failure in [
+             :restart_before_fallback,
+             :fallback_while_down,
+             :succession_before_fallback
+           ] do
+          GenServer.stop(first)
+          if failure == :fallback_while_down, do: File.touch!(signal)
+          {:ok, restarted} = start_poller!(opts)
+          settle_poller!(restarted)
+
+          if failure == :restart_before_fallback,
+            do: assert(Poller.session_uuid(restarted, id) == "predecessor")
+
+          restarted
+        else
+          Env.put_app_env(:identity_clear_fail, true)
+          first
+        end
+
+      File.touch!(signal)
+
+      assert_eventually(fn ->
+        assert Poller.session_uuid(poller, id) == nil
+
+        assert {:ok, %{fibers: [%{runtime: %{phase: "identity_failed", identity_pending: true}}]}} =
+                 Poller.cached_fiber_documents(poller)
+      end)
+
+      if failure == :clear_write_failure do
+        assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) ==
+                 "predecessor"
+
+        Env.put_app_env(:identity_clear_fail, false)
+      end
+
+      sessions = Shuttle.HarnessPaths.pi_sessions_dir(root)
+      File.mkdir_p!(sessions)
+
+      header = %{
+        "type" => "session",
+        "id" => "fresh-fallback",
+        "cwd" => root,
+        "timestamp" => boundary
+      }
+
+      File.write!(
+        Path.join(sessions, "fallback.jsonl"),
+        Jason.encode!(header) <> "\nFiber: #{id}\n"
+      )
+
+      assert_eventually(fn -> assert Poller.session_uuid(poller, id) == "fresh-fallback" end)
+
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) ==
+               "fresh-fallback"
+
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == boundary
+      GenServer.stop(poller)
+      {:ok, last} = start_poller!(opts)
+      settle_poller!(last)
+      assert Poller.session_uuid(last, id) == "fresh-fallback"
+    end
   end
 
   test "failed Pi resume signal clears identity and captures the fresh fallback" do
@@ -1139,7 +1449,8 @@ defmodule Shuttle.PollerTest do
     File.touch!(signal)
     assert wait_until(fn -> Poller.session_uuid(poller, id) == nil end)
     assert {:ok, %{fibers: [%{runtime: pending}]}} = Poller.cached_fiber_documents(poller)
-    refute Map.has_key?(pending, :phase)
+    assert pending.identity_pending
+    assert pending.phase == "identity_pending"
     sessions = Shuttle.HarnessPaths.pi_sessions_dir(root)
     File.mkdir_p!(sessions)
 
@@ -1157,7 +1468,9 @@ defmodule Shuttle.PollerTest do
 
     assert wait_until(fn -> Poller.session_uuid(poller, id) == "fallback-uuid" end)
     assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "fallback-uuid"
-    assert wait_until(fn -> not File.exists?(Path.dirname(signal)) end)
+
+    # The launch-scoped signal survives daemon death; a captured UUID no longer matches its predecessor.
+    assert File.exists?(signal)
   end
 
   test "owner feed omits runtime for an owned fiber with no live worker" do

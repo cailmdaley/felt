@@ -45,6 +45,8 @@ export function appConversationTarget(
 }
 
 export function workerStatusLabel(phase?: string, launchError?: string): string {
+  if (phase === 'identity_pending') return 'Identifying session'
+  if (phase === 'identity_failed') return 'Session attribution failed'
   if (launchError || phase === 'blocked') return 'Blocked'
   if (phase === 'attention') return 'At a prompt'
   if (phase === 'waiting') return 'Your turn'
@@ -53,7 +55,7 @@ export function workerStatusLabel(phase?: string, launchError?: string): string 
 
 /** The worker's pill follows the daemon's phase, as the board's turn bands do. */
 export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'launchError'>): 'aloft' | 'waiting' | 'attention' {
-  if (card.launchError || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked') return 'attention'
+  if (card.launchError || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked' || card.runtimePhase === 'identity_pending' || card.runtimePhase === 'identity_failed') return 'attention'
   if (card.runtimePhase === 'waiting') return 'waiting'
   return 'aloft'
 }
@@ -101,7 +103,11 @@ export function terminalWorkerPill(
   const label = workerStatusLabel(takesOver ? card.runtimePhase : undefined)
   const idleMs = card.lastActivityAt !== undefined ? Date.now() - card.lastActivityAt : Infinity
   const age = Number.isFinite(idleMs) ? ` ${humanizeIdleAge(idleMs)} ago` : ''
-  const state = !takesOver
+  const state = card.runtimePhase === 'identity_pending'
+    ? 'Worker is live; acquiring session identity. Turn state is unknown.'
+    : card.runtimePhase === 'identity_failed'
+      ? 'Worker is live; session attribution failed. Retrying acquisition; an explicit session claim can repair it.'
+    : !takesOver
     ? 'Worker aloft'
     : card.runtimePhase === 'attention'
       ? `Worker raised its hand${age}`

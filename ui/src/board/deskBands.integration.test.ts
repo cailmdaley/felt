@@ -87,6 +87,17 @@ describe('cycle members at rest', () => {
 })
 
 describe('In flight bands', () => {
+  it.each([
+    ['identity_pending', 'Identifying session'],
+    ['identity_failed', 'Session attribution failed'],
+  ])('renders %s visibly rather than as Working', (phase, label) => {
+    const data = workerFeed([phase])
+    const root = renderer(data).renderNowSection(data.now, {})
+    expect(flightOrder(root)).toEqual([
+      { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['worker-0'] },
+    ])
+    expect(root.querySelector('.ws-worker-state')?.textContent).toBe(label)
+  })
   it('ranks asks and attention first in Your turn, drawn as questions, with at a prompt for harness attention', () => {
     const feed = parseCompositeFeed({
       host: 'desk',
