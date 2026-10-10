@@ -2244,7 +2244,7 @@ defmodule Shuttle.Poller do
       worker = worker |> Map.put(:session_uuid, uuid) |> Map.put(:identity_token, token)
       state = %{state | running: Map.put(state.running, key, worker)}
       store = owning_store(fiber_id, state)
-      work_dir = get_in(fiber, ["shuttle", "project_dir"]) || store
+      work_dir = declared_project_dir(Map.get(fiber, "shuttle")) || store
 
       opts = [
         poller: state.self_ref,

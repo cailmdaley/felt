@@ -1001,10 +1001,15 @@ defmodule Shuttle.PollerTest do
              runtime.session_uuid
   end
 
-  for {cli, agent} <- [{"pi", "pi-luna"}, {"codex", "codex"}] do
+  for {cli, agent, project} <- [
+        {"pi", "pi-luna", :absolute},
+        {"codex", "codex", :absolute},
+        {"pi", "pi-luna", :tilde},
+        {"pi", "pi-luna", :empty}
+      ] do
     @tag :pr53_identity
     @tag :timing
-    test "restart retries #{cli} identity capture after a visible timeout" do
+    test "restart retries #{cli} identity capture with #{project} project path after a visible timeout" do
       cli = unquote(cli)
       id = "tests/recover-#{cli}"
       local_id = "constitution/recover-#{cli}"
@@ -1016,11 +1021,20 @@ defmodule Shuttle.PollerTest do
       Env.put_app_env(:session_capture_poll_ms, 5)
       Env.put_app_env(:session_capture_retry_ms, 100)
       boundary = DateTime.utc_now() |> DateTime.to_iso8601()
+      Env.put_env("HOME", Path.dirname(root))
+
+      project_dir =
+        case unquote(project) do
+          :absolute -> root
+          :tilde -> "~/#{Path.basename(root)}"
+          :empty -> "\"\""
+        end
+
       MockRunner.set_fiber(id, make_fiber(id))
 
       MockRunner.set_shuttle(
         id,
-        "kind: oneshot\nagent: #{unquote(agent)}\nproject_dir: #{root}\nruntime:\n  dispatched_at: #{boundary}\n"
+        "kind: oneshot\nagent: #{unquote(agent)}\nproject_dir: #{project_dir}\nruntime:\n  dispatched_at: #{boundary}\n"
       )
 
       MockRunner.add_tmux_session(FiberUid.session(id))
