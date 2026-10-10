@@ -530,6 +530,8 @@ describe('Dock session history', () => {
     })
     const toggle = (): HTMLButtonElement => band.el.querySelector('.kbn-ctl-history-toggle')!
     const historyReads = (): number => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/sessions/composite')).length
+    // The session list rides the transcript's head line, not a line of its own.
+    expect(toggle().closest('.ws-transcript-headrow')).not.toBeNull()
     toggle().focus(); toggle().click()
     await flush()
     expect(historyReads()).toBe(1)

@@ -73,6 +73,23 @@ const ANCHOR_MARGIN = 8
 /** How close to the anchor a reader must stay to keep following new messages. */
 const FOLLOW_SLACK = 24
 
+/** A warm cache dot drains on this cadence. */
+const CACHE_REPAINT_MS = 15_000
+/** The share of the window past which the context meter takes the owed ochre. */
+const CONTEXT_HIGH = 0.8
+
+/**
+ * Claude transcripts record no context window. Its meter is drawn against
+ * the standard 200k window, or 1M once the context has outgrown that.
+ */
+export function assumedWindow(model: string | undefined, context: number | undefined): number | undefined {
+  if (context === undefined || !model?.startsWith('claude')) return undefined
+  return context > 200_000 ? 1_000_000 : 200_000
+}
+
+/** Two corners pulled apart: the full transcript opens over the page. */
+const EXPAND_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9"/></svg>'
+
 function createButton(className: string, text: string): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
@@ -322,8 +339,11 @@ export class TranscriptBand {
   private readonly reading: HTMLElement
   private readonly liveDot: HTMLElement
   private readonly liveLabel: HTMLElement
+  private readonly headRow: HTMLElement
   private readonly cacheFact: HTMLElement
   private readonly contextFact: HTMLElement
+  private readonly contextFill: HTMLElement
+  private sessions: HTMLElement | null = null
   private cacheTimer: number | null = null
   private readonly openButton: HTMLButtonElement
   private readonly latestButton: HTMLButtonElement
@@ -383,8 +403,12 @@ export class TranscriptBand {
 
     const headRow = document.createElement('div')
     headRow.className = 'ws-transcript-headrow'
+    this.headRow = headRow
     this.head = createButton('ws-transcript-head', '')
     this.head.setAttribute('aria-expanded', String(!this.folded))
+    const chevron = document.createElement('span')
+    chevron.className = 'ws-transcript-chevron'
+    chevron.setAttribute('aria-hidden', 'true')
     this.label = document.createElement('span')
     this.label.className = 'kbn-ctl-label ws-transcript-label'
     this.label.textContent = 'Transcript'
@@ -396,21 +420,22 @@ export class TranscriptBand {
     this.liveLabel = document.createElement('span')
     this.liveLabel.className = 'ws-transcript-live-label'
     this.liveLabel.textContent = 'live'
-    const chevron = document.createElement('span')
-    chevron.className = 'ws-transcript-chevron'
-    chevron.setAttribute('aria-hidden', 'true')
-    chevron.textContent = '▾'
-    this.cacheFact = document.createElement('span')
-    this.cacheFact.className = 'ws-transcript-fact ws-transcript-cache'
     this.contextFact = document.createElement('span')
     this.contextFact.className = 'ws-transcript-fact ws-transcript-context'
-    this.head.append(this.label, this.reading, this.liveDot, this.liveLabel, this.cacheFact, this.contextFact, chevron)
-    this.openButton = createButton('ws-transcript-open-full', 'Full transcript')
-    this.openButton.setAttribute('aria-expanded', 'false')
-    headRow.append(this.head, this.openButton)
-
+    this.contextFill = document.createElement('span')
+    this.contextFill.className = 'ws-transcript-meter-fill'
+    this.cacheFact = document.createElement('span')
+    this.cacheFact.className = 'ws-transcript-fact ws-transcript-cache'
+    this.head.append(chevron, this.label, this.reading, this.liveDot, this.liveLabel, this.contextFact, this.cacheFact)
     this.latestButton = createButton('ws-transcript-latest', '← latest')
     this.latestButton.hidden = true
+    this.openButton = createButton('ws-transcript-open-full', '')
+    this.openButton.setAttribute('aria-expanded', 'false')
+    this.openButton.setAttribute('aria-label', 'Full transcript')
+    this.openButton.title = 'Open the full transcript'
+    this.openButton.innerHTML = EXPAND_ICON
+    headRow.append(this.head, this.latestButton, this.openButton)
+
     this.note = document.createElement('p')
     this.note.className = 'ws-transcript-note'
     this.note.hidden = true
@@ -454,7 +479,7 @@ export class TranscriptBand {
     this.scroller.append(this.earlierButton, this.list)
     this.pane.append(panelHead, this.scroller)
 
-    this.el.append(headRow, this.latestButton, this.note, this.body)
+    this.el.append(headRow, this.note, this.body)
 
     this.head.addEventListener('click', () => this.toggleFold())
     this.openButton.addEventListener('click', () => this.openFull())
@@ -645,7 +670,6 @@ export class TranscriptBand {
     const stats = this.model.stats()
     const target = this.target
     const when = stats.startedAt ?? target?.at
-    this.label.textContent = `Transcript${this.pinned && target && when !== undefined ? ` · ${sessionWhen(when)}` : ''}`
     const pieces: string[] = []
     const agent = this.agentName()
     if (target?.agent ?? stats.model) pieces.push(agent)
@@ -657,7 +681,23 @@ export class TranscriptBand {
     this.liveLabel.hidden = !target?.live
     this.paintFacts()
     this.latestButton.hidden = !(this.pinned && this.latest && target && !this.sameTarget(target, this.latest))
-    this.el.hidden = !target && !this.pinned
+    // With no session to read, the line keeps only the session list.
+    this.head.hidden = this.openButton.hidden = !target
+    this.el.hidden = !target && !this.pinned && !this.sessions
+  }
+
+  /**
+   * Seat the fiber's session list on the head line, beside the reader it
+   * feeds: its toggle sits at the line's right end and its rows unfold
+   * under the line. A later list replaces this one where it stands.
+   */
+  mountSessions(sessions: HTMLElement): void {
+    if (this.disposed) return
+    sessions.classList.add('ws-transcript-sessions')
+    if (this.sessions?.isConnected && this.sessions !== sessions) this.sessions.replaceWith(sessions)
+    else if (!sessions.isConnected || sessions.parentElement !== this.headRow) this.headRow.insertBefore(sessions, this.openButton)
+    this.sessions = sessions
+    this.paintHead()
   }
 
   private clearCacheTimer(): void {
@@ -665,27 +705,67 @@ export class TranscriptBand {
     this.cacheTimer = null
   }
 
-  /** Expiry is independent of transcript polling and the band's folded/live state. */
+  /**
+   * The session's two usage facts, drawn small enough to sit in the head line.
+   * Context is a meter filled to its share of the window; the exact count is
+   * its hover. The cache is a dot, filled while warm and emptying as the
+   * entry ages, hollow once cold. Expiry is independent of transcript polling
+   * and the band's folded/live state.
+   */
   private paintFacts(): void {
     this.clearCacheTimer()
     const stats = this.model.stats()
     const until = stats.cacheUntil
-    const warm = until !== undefined && until > Date.now()
+    const now = Date.now()
+    const warm = until !== undefined && until > now
     this.cacheFact.hidden = until === undefined
     this.cacheFact.classList.toggle('ws-transcript-cache-cold', !warm)
-    this.cacheFact.textContent = warm ? `Cache warm until ${clock(until!).text}` : 'Cache cold'
-    this.cacheFact.title = until === undefined ? '' : `Estimated from Claude cache usage; expiry ${clock(until).title}`
+    const cacheSaid = until === undefined ? '' : warm ? `Cache warm until ${clock(until).text}` : `Cache cold since ${clock(until).text}`
+    this.cacheFact.title = until === undefined ? '' : `${cacheSaid} (estimated from Claude cache usage; expiry ${clock(until).title})`
+    this.cacheFact.setAttribute('aria-label', cacheSaid)
+    this.cacheFact.dataset.cache = until === undefined ? '' : warm ? 'warm' : 'cold'
+    const ttl = stats.cacheTtl ?? 300_000
+    this.cacheFact.style.setProperty('--ws-cache-left', warm ? String(Math.min(1, (until! - now) / ttl)) : '0')
     if (warm) {
       this.cacheTimer = window.setTimeout(() => {
         this.cacheTimer = null
         if (!this.disposed) this.paintFacts()
-      }, Math.min(until! - Date.now(), 2_147_483_647))
+      }, Math.min(until! - now, CACHE_REPAINT_MS))
     }
-    this.contextFact.hidden = stats.context === undefined
-    this.contextFact.textContent = stats.context === undefined ? ''
-      : `Context ${tokenLabel(stats.context)}${stats.window ? ` / ${tokenLabel(stats.window)}` : ''}`
-    this.contextFact.title = stats.context === undefined ? ''
-      : `Last recorded input: ${new Intl.NumberFormat('en-US').format(stats.context)} tokens${stats.window ? `; window ${new Intl.NumberFormat('en-US').format(stats.window)} tokens` : '; session window not recorded'}`
+    const context = stats.context
+    const assumed = stats.window ? undefined : assumedWindow(stats.model ?? this.target?.agent, context)
+    const window_ = stats.window ?? assumed
+    const count = (n: number): string => new Intl.NumberFormat('en-US').format(n)
+    this.contextFact.hidden = context === undefined
+    const metered = context !== undefined && !!window_
+    this.contextFact.classList.toggle('ws-transcript-meter', metered)
+    if (context === undefined) {
+      this.contextFact.replaceChildren()
+      this.contextFact.title = ''
+      this.contextFact.removeAttribute('aria-label')
+      this.contextFact.removeAttribute('role')
+      return
+    }
+    const said = `Context ${tokenLabel(context)}${window_ ? ` of ${assumed ? '~' : ''}${tokenLabel(window_)}` : ''}`
+    this.contextFact.setAttribute('aria-label', said)
+    const windowSaid = !window_ ? '; session window not recorded'
+      : assumed ? `; the session does not record its window, so the meter assumes ${count(window_)} tokens`
+      : ` of a ${count(window_)}-token window`
+    this.contextFact.title = `${said}: last recorded input ${count(context)} tokens${windowSaid}`
+    if (metered) {
+      const share = Math.min(1, context / window_!)
+      this.contextFact.setAttribute('role', 'meter')
+      this.contextFact.setAttribute('aria-valuemin', '0')
+      this.contextFact.setAttribute('aria-valuemax', String(window_))
+      this.contextFact.setAttribute('aria-valuenow', String(context))
+      this.contextFact.style.setProperty('--ws-context-share', String(share))
+      this.contextFact.classList.toggle('ws-transcript-meter-high', share >= CONTEXT_HIGH)
+      this.contextFact.replaceChildren(this.contextFill)
+    } else {
+      this.contextFact.removeAttribute('role')
+      this.contextFact.classList.remove('ws-transcript-meter-high')
+      this.contextFact.textContent = tokenLabel(context)
+    }
   }
 
   private agentName(): string {
