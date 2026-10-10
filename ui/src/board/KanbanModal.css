@@ -1722,13 +1722,15 @@
 }
 /* THE VERDICT PLATE — one recipe wherever a verdict is offered: the Desk
    card, the fiber page's act zone, the review plate and the undo toast.
-   Temper wears verdigris, Discard the deletion red. Ink, tint and border are
+   Temper wears verdigris, Discard the deletion red, Rest the held steel
+   blue of a launch that waits. Ink, tint and border are
    mixed against the paper and ink in force, so a theme's paper (which the act
    zone keeps) never leaves the verb illegible. */
 :is(.kbn-action-tempered, .kbn-ctl-temper, .ws-verdict-word[data-verdict='tempered']) { --verdict-pigment: var(--kbn-tempered); }
 :is(.kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word[data-verdict='discarded']) { --verdict-pigment: var(--kbn-discarded); }
+.kbn-ctl-rest { --verdict-pigment: color-mix(in srgb, var(--kbn-held) 55%, var(--kbn-agent)); }
 .ws-verdict-word[data-verdict='review'] { --verdict-pigment: var(--ws-ink-muted, var(--kbn-ink)); }
-:is(.kbn-action-tempered, .kbn-ctl-temper, .kbn-action-discard, .kbn-ctl-discard, .ws-verdict-word) {
+:is(.kbn-action-tempered, .kbn-ctl-temper, .kbn-action-discard, .kbn-ctl-discard, .kbn-ctl-rest, .ws-verdict-word) {
   --verdict-ink: color-mix(in srgb, var(--verdict-pigment) 72%, var(--ws-ink, var(--kbn-ink)));
   --verdict-tint: color-mix(in srgb, var(--verdict-pigment) 12%, var(--ws-paper, var(--kbn-paper)));
   --verdict-tint-strong: color-mix(in srgb, var(--verdict-pigment) 24%, var(--ws-paper, var(--kbn-paper)));

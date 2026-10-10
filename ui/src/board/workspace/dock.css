@@ -329,7 +329,7 @@
 .ws-dock .kbn-ctl-btn, .ws-dock .kbn-ctl-sends .kbn-ctl-btn, .ws-dock .kbn-ctl-foot .kbn-ctl-btn,
 .ws-dock .kbn-ctl-history-toggle { font: var(--ws-label-size)/1.4 var(--ws-serif) !important; }
 .ws-dock .kbn-ctl-verdict { grid-column: 1 / -1; display: flex; gap: 8px; margin-bottom: 8px; }
-.ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 36px; padding-inline: 16px; }
+.ws-dock .kbn-ctl-verdict .kbn-ctl-btn { min-height: 28px; padding-inline: 12px; }
 .ws-dock .kbn-ctl-verdict-menu { position: relative; }
 .ws-dock .kbn-ctl-verdict-menu summary { cursor: pointer; display: grid; place-items: center; min-width: 36px; min-height: 36px; list-style: none; font: var(--ws-section-size)/1 var(--ws-serif); }
 .ws-dock .kbn-ctl-verdict-menu summary::-webkit-details-marker { display: none; }

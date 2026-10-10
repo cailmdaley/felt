@@ -920,11 +920,15 @@ export class Dock {
             live: record.session === (hasLiveWorker(card) ? card.sessionUuid : undefined),
             at: record.at,
           })
+          // The list folds away so the chosen session reads under its line.
+          const fold = history?.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
+          if (fold?.getAttribute('aria-expanded') === 'true') fold.click()
           transcript.el.scrollIntoView({ block: 'start', behavior: 'smooth' })
         } : undefined,
         onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
       })
-      history?.replaceWith(next)
+      if (this.transcriptBand) this.transcriptBand.mountSessions(next)
+      else history?.replaceWith(next)
       history = next
       const unfold = next.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')!
       if (open) unfold.click()
@@ -970,7 +974,9 @@ export class Dock {
     foot.append(errorEl, statusEl)
     // The transcript reads below every control, so the composer and its
     // verbs stay at the top of the dock however long the worker has talked.
-    body.append(settings, ...(history ? [history as HTMLElement] : []), foot, ...(this.transcriptBand ? [this.transcriptBand.el] : []))
+    // The session list rides the transcript's head line when there is one.
+    const looseHistory = history && !this.transcriptBand ? [history as HTMLElement] : []
+    body.append(settings, ...looseHistory, foot, ...(this.transcriptBand ? [this.transcriptBand.el] : []))
     // Review and live verdicts sit on the status line. Drafts and resting
     // constitutions keep their verdicts in a menu on the controls row.
     this.actPaint = () => {
