@@ -136,6 +136,8 @@ defmodule Shuttle.Dispatcher do
 
         resume_intent ->
           create_worker(fiber_id, agent, work_dir, runner, prompt_context, resume_intent,
+            poller: Keyword.get(opts, :poller),
+            identity_token: Keyword.get(opts, :identity_token),
             felt_store: felt_store,
             surface: get_in(fiber, ["shuttle", "surface"]) || "cli",
             uid: uid,
@@ -1354,20 +1356,10 @@ defmodule Shuttle.Dispatcher do
             resume_prompt = render_resume_prompt(fiber_id, prompt_opts)
             resume_command = Agents.build_resume_command(agent, session_id, resume_prompt)
 
-            # Try resume; fall back to a fresh launch if the harness can't resume the
-            # target session. claude --resume exits non-zero ("No conversation found")
-            # when the on-disk transcript is gone — without a fallback the worker dies
-            # in <1s and, because the daemon keeps re-selecting the same id from
-            # history, the fiber flaps forever and can never be launched (the
-            # own-words deadlock). The fallback reuses the SAME session id, so
-            # `claude --session-id <id>` recreates the transcript under it and the next
-            # resume succeeds — the fiber self-heals. `||` keeps the resume failure
-            # non-fatal under `set -e`; harness-agnostic (no knowledge of where any CLI
-            # stores transcripts — the run itself reports success or failure).
-            # The fallback prompt must NOT carry the lineage line: the "previous"
-            # session here is the very session_id the fallback relaunches under —
-            # and the fallback only fires because its transcript is GONE, so the
-            # line would send the worker hunting for a file that does not exist.
+            # Failed resumes fall back to a fresh launch. Claude reuses the
+            # requested UUID; Codex/Pi choose a new UUID, whose capture starts
+            # only after the private fallback signal appears. The fallback
+            # prompt omits lineage to a transcript the harness cannot resume.
             fallback_command =
               fresh_fallback_command(
                 agent,
@@ -1377,7 +1369,18 @@ defmodule Shuttle.Dispatcher do
                 Keyword.delete(prompt_opts, :previous_session)
               )
 
-            command = "#{resume_command} || #{fallback_command}"
+            resumed_at = DateTime.utc_now()
+
+            fallback_signal =
+              if agent.cli in ["codex", "pi"],
+                do: private_fallback_signal(session, resumed_at, session_id),
+                else: nil
+
+            command =
+              if fallback_signal,
+                do:
+                  "#{resume_command} || { touch #{shell_single_quote(fallback_signal)}; #{fallback_command}; }",
+                else: "#{resume_command} || #{fallback_command}"
 
             # claude --resume shows an interactive "you're about to use a
             # previous session" warning that only an Enter keypress at the
@@ -1398,29 +1401,52 @@ defmodule Shuttle.Dispatcher do
                 fiber_path: Keyword.get(opts, :fiber_path)
               )
 
-            # Resuming is a dispatch boundary too: stamp a FRESH dispatched_at
-            # (same session_id — resuming doesn't change session identity, and the
-            # fresh-fallback path above reuses it as well) so the continuation
-            # heuristic compares a subsequent clean-exit or died-mid-window against
-            # THIS run, not the run being resumed. The session id is already known
-            # synchronously here (it's the resume target itself), unlike fresh
-            # codex/pi dispatch — no capture/backfill needed, one synchronous stamp
-            # same as fresh dispatch.
-            spawn_and_record(session, work_dir, run_script, runner, fn ->
-              record_dispatch_session(
-                fiber_id,
-                session_id,
-                runner,
-                Keyword.merge(opts,
-                  felt_store: felt_store,
-                  run_id: Keyword.get(opts, :run_id),
-                  tmux: session,
-                  harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-                  uid: Keyword.get(opts, :uid),
-                  ledger_kind: :resume
+            # Resume stamps a fresh dispatch boundary with the requested UUID.
+            # A Codex/Pi fallback clears it and captures its new identity without
+            # moving that boundary.
+            result =
+              spawn_and_record(session, work_dir, run_script, runner, fn ->
+                record_dispatch_session(
+                  fiber_id,
+                  session_id,
+                  runner,
+                  Keyword.merge(opts,
+                    felt_store: felt_store,
+                    run_id: Keyword.get(opts, :run_id),
+                    tmux: session,
+                    harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                    uid: Keyword.get(opts, :uid),
+                    ledger_kind: :resume,
+                    dispatched_at: DateTime.to_iso8601(resumed_at)
+                  )
                 )
-              )
-            end)
+
+                if fallback_signal do
+                  fallback_opts =
+                    Keyword.merge(opts,
+                      felt_store: felt_store,
+                      tmux: session,
+                      harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                      uid: Keyword.get(opts, :uid),
+                      fallback_signal: fallback_signal
+                    )
+
+                  monitor_resume_fallback(
+                    fiber_id,
+                    agent.cli,
+                    work_dir,
+                    resumed_at,
+                    runner,
+                    fallback_signal,
+                    fallback_opts
+                  )
+                end
+              end)
+
+            if fallback_signal != nil and match?({:error, _}, result),
+              do: File.rm_rf(Path.dirname(fallback_signal))
+
+            result
 
           refused ->
             refused
@@ -1601,23 +1627,161 @@ defmodule Shuttle.Dispatcher do
     # Task.start) so tests can enumerate and kill stragglers before tearing
     # down the tmp dirs the backfill writes into.
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      deadline = System.monotonic_time(:millisecond) + @session_capture_timeout_ms
+      deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
 
-      case capture_session_uuid(cli, work_dir, capture_fiber_id, dispatched_after, deadline) do
-        {:ok, uuid} ->
-          backfill_session_uuid(fiber_id, uuid, runner, opts)
-
-        {:error, reason} ->
-          Logger.warning(
-            "Could not capture session UUID for #{fiber_id} (#{cli}): #{reason}. " <>
-              "Resume previous will be unavailable."
-          )
-      end
+      capture_and_backfill(
+        fiber_id,
+        cli,
+        work_dir,
+        capture_fiber_id,
+        dispatched_after,
+        runner,
+        opts,
+        deadline
+      )
     end)
   end
 
   defp store_session_id(fiber_id, :none, runner, opts),
     do: record_dispatch_session(fiber_id, nil, runner, opts)
+
+  defp private_fallback_signal(session, dispatched_at, predecessor) do
+    path = fallback_signal_path(session, DateTime.to_iso8601(dispatched_at))
+    File.mkdir_p!(Path.dirname(path))
+    File.chmod!(Path.dirname(path), 0o700)
+    File.write!(Path.join(Path.dirname(path), "predecessor"), predecessor)
+    path
+  end
+
+  defp fallback_signal_path(session, boundary) do
+    key = :crypto.hash(:sha256, session <> "\n" <> boundary) |> Base.encode16(case: :lower)
+    Path.join([Shuttle.data_dir(), "identity-fallbacks", key, "started"])
+  end
+
+  @doc false
+  def pending_resume_fallback(session, boundary) when is_binary(boundary) do
+    path = fallback_signal_path(session, boundary)
+    dir = Path.dirname(path)
+
+    if File.exists?(Path.join(dir, "predecessor")) and
+         not File.exists?(Path.join(dir, "completed")),
+       do: path
+  end
+
+  def pending_resume_fallback(_session, _boundary), do: nil
+
+  @doc false
+  def complete_resume_fallback(nil, _uuid), do: :ok
+
+  def complete_resume_fallback(signal, uuid) do
+    case File.write(Path.join(Path.dirname(signal), "completed"), uuid) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Could not complete fallback identity acquisition: #{inspect(reason)}")
+    end
+  end
+
+  @doc false
+  def monitor_resume_fallback(fiber_id, cli, work_dir, dispatched_at, runner, signal, opts) do
+    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+      if await_fallback(
+           signal,
+           Keyword.fetch!(opts, :tmux),
+           runner,
+           System.monotonic_time(:millisecond)
+         ) do
+        case Keyword.get(opts, :poller) do
+          nil ->
+            Shuttle.Continuation.backfill_session_uuid(
+              runner,
+              Keyword.fetch!(opts, :felt_store),
+              fiber_id,
+              ""
+            )
+
+          poller ->
+            send(poller, {:fallback_started, fiber_id, Keyword.get(opts, :identity_token), opts})
+        end
+
+        deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
+        capture_fiber_id = prompt_fiber_id(fiber_id, work_dir, runner)
+
+        capture_and_backfill(
+          fiber_id,
+          cli,
+          work_dir,
+          capture_fiber_id,
+          dispatched_at,
+          runner,
+          opts,
+          deadline
+        )
+      end
+    end)
+  end
+
+  defp await_fallback(path, session, runner, next_liveness_check) do
+    now = System.monotonic_time(:millisecond)
+
+    cond do
+      File.exists?(path) ->
+        true
+
+      now >= next_liveness_check ->
+        case runner.cmd("tmux", ["has-session", "-t", session], stderr_to_stdout: true) do
+          {_, 0} ->
+            :timer.sleep(@session_capture_poll_ms)
+            await_fallback(path, session, runner, now + 10_000)
+
+          _ ->
+            false
+        end
+
+      true ->
+        :timer.sleep(@session_capture_poll_ms)
+        await_fallback(path, session, runner, next_liveness_check)
+    end
+  end
+
+  defp capture_and_backfill(
+         fiber_id,
+         cli,
+         work_dir,
+         capture_fiber_id,
+         dispatched_after,
+         runner,
+         opts,
+         deadline
+       ) do
+    case capture_session_uuid(cli, work_dir, capture_fiber_id, dispatched_after, deadline) do
+      {:ok, uuid} ->
+        case Keyword.get(opts, :poller) do
+          nil ->
+            backfill_session_uuid(fiber_id, uuid, runner, opts)
+
+          poller ->
+            send(
+              poller,
+              {:captured_session, fiber_id, Keyword.get(opts, :identity_token), uuid, opts}
+            )
+        end
+
+      {:error, reason} ->
+        if poller = Keyword.get(opts, :poller) do
+          send(
+            poller,
+            {:identity_capture_failed, fiber_id, Keyword.get(opts, :identity_token), reason}
+          )
+        end
+
+        Logger.warning(
+          "Could not capture session UUID for #{fiber_id} (#{cli}): #{reason}. " <>
+            "Resume previous will be unavailable."
+        )
+    end
+  end
 
   # Stamp `{session_uuid, dispatched_at, run_id}` into the fiber's
   # `shuttle.runtime` block by shelling `shuttle mark-runtime`. At the next
@@ -1632,7 +1796,8 @@ defmodule Shuttle.Dispatcher do
     write_runtime_marker(fiber_id, uuid, opts, "dispatch marker", fn store ->
       Shuttle.Continuation.write_dispatch(runner, store, fiber_id, %{
         session_uuid: uuid,
-        run_id: Keyword.get(opts, :run_id)
+        run_id: Keyword.get(opts, :run_id),
+        dispatched_at: Keyword.get(opts, :dispatched_at)
       })
     end)
   end
@@ -1657,6 +1822,13 @@ defmodule Shuttle.Dispatcher do
             # here — its line comes from the backfill, once the pairing is
             # actually known.
             append_session_ledger(fiber_id, uuid, opts)
+
+            if poller = Keyword.get(opts, :poller) do
+              send(
+                poller,
+                {:dispatched_identity, fiber_id, Keyword.get(opts, :identity_token), uuid}
+              )
+            end
 
           {:error, reason} ->
             Logger.warning(
@@ -1721,11 +1893,34 @@ defmodule Shuttle.Dispatcher do
   # thread from the same project while Shuttle dispatches a worker. Require
   # the transcript to be new enough for this dispatch and to contain Shuttle's
   # fiber prompt before accepting its UUID.
+  @doc false
+  def retry_session_capture(fiber_id, cli, work_dir, dispatched_after, runner, opts) do
+    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+      deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
+
+      capture_fiber_id = prompt_fiber_id(fiber_id, work_dir, runner)
+
+      capture_and_backfill(
+        fiber_id,
+        cli,
+        work_dir,
+        capture_fiber_id,
+        dispatched_after,
+        runner,
+        opts,
+        deadline
+      )
+    end)
+  end
+
+  defp capture_timeout_ms,
+    do: Shuttle.Env.app(:session_capture_timeout_ms, @session_capture_timeout_ms)
+
   defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
     if System.monotonic_time(:millisecond) >= deadline do
       {:error, "timed out waiting for session file"}
     else
-      :timer.sleep(@session_capture_poll_ms)
+      :timer.sleep(Shuttle.Env.app(:session_capture_poll_ms, @session_capture_poll_ms))
 
       case find_session_file(cli, work_dir, fiber_id, dispatched_after) do
         {:ok, path} ->
@@ -1743,8 +1938,8 @@ defmodule Shuttle.Dispatcher do
   # matches cwd, recency AND content is this dispatch's session; a bare
   # newest-file pick would steal another worker's session whenever two workers
   # share a cwd.
-  defp candidate_session_files("codex", _work_dir) do
-    Shuttle.HarnessPaths.codex_session_dirs()
+  defp candidate_session_files("codex", _work_dir, dispatched_after) do
+    Shuttle.HarnessPaths.codex_session_dirs(since: dispatched_after)
     |> Enum.flat_map(fn dir ->
       case File.ls(dir) do
         {:ok, files} ->
@@ -1759,7 +1954,7 @@ defmodule Shuttle.Dispatcher do
     |> Enum.sort_by(&Path.basename/1, :desc)
   end
 
-  defp candidate_session_files("pi", work_dir) do
+  defp candidate_session_files("pi", work_dir, _dispatched_after) do
     dir = Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
 
     case File.ls(dir) do
@@ -1768,11 +1963,11 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp candidate_session_files(_cli, _work_dir), do: []
+  defp candidate_session_files(_cli, _work_dir, _dispatched_after), do: []
 
   defp find_session_file(cli, work_dir, fiber_id, dispatched_after) do
     cli
-    |> candidate_session_files(work_dir)
+    |> candidate_session_files(work_dir, dispatched_after)
     |> Enum.find(&session_matches?(cli, &1, work_dir, fiber_id, dispatched_after))
     |> case do
       nil -> {:error, :not_found}

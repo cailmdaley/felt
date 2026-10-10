@@ -209,8 +209,8 @@ defmodule Shuttle.Continuation do
   resolves it from that store.
 
   `dispatched_at` is set to now (RFC3339 UTC) unless the caller supplied one.
-  `session_uuid` is passed only when non-empty (a codex/pi claim with no scraped
-  UUID still stamps `dispatched_at`, the run-window anchor). `run_id` is passed
+  `session_uuid` is passed on every dispatch. An unknown fresh UUID clears the
+  predecessor, so no phase or resume identity is borrowed during capture. `run_id` is passed
   only when present (a plain oneshot omits it), as is `meeting`, the launch id
   of the meeting a claimed capture scribes.
 
@@ -224,7 +224,7 @@ defmodule Shuttle.Continuation do
              is_map(fields) do
     flags =
       [{"--dispatched-at", Map.get(fields, :dispatched_at) || iso_now()}]
-      |> add_flag("--session", Map.get(fields, :session_uuid))
+      |> Kernel.++([{"--session", Map.get(fields, :session_uuid) || ""}])
       |> add_flag("--run-id", Map.get(fields, :run_id))
       |> add_flag("--meeting", Map.get(fields, :meeting))
 
@@ -246,7 +246,7 @@ defmodule Shuttle.Continuation do
           :ok | {:error, term()}
   def backfill_session_uuid(runner, felt_store, fiber_id, uuid)
       when is_binary(felt_store) and felt_store != "" and is_binary(fiber_id) and fiber_id != "" and
-             is_binary(uuid) and uuid != "" do
+             is_binary(uuid) do
     mark_runtime(runner, felt_store, fiber_id, [{"--session", uuid}])
   end
 

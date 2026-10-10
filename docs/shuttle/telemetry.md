@@ -152,9 +152,8 @@ A composite's validator adds each remote's cached copy of the feed.
 The `304` is a bandwidth saving, not a cost model. A validator over
 `events.jsonl` moves every few seconds on a busy host, so no route over it
 relies on one: `Shuttle.EventStream` reads `events.jsonl.1` and `events.jsonl`
-once at boot and holds three projections in memory — the activity fold, the
-sent-file events and each session's last event — then reads only what has been
-appended since its last poll, following a rotation by the file's inode. That is
+once at boot and holds four projections in memory: activity, sent-file events, per-session turn state, and session succession.
+It then reads only what has been appended since its last poll, following a rotation by the file's inode. That is
 what makes a request cost a `stat` and an in-memory read rather than a full
 re-stream. A sent file therefore stays on the trail through one rotation and
 leaves it with the second.

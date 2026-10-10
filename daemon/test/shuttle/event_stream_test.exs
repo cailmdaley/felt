@@ -241,17 +241,16 @@ defmodule Shuttle.EventStreamTest do
       ev(
         "notification",
         -2,
-        Map.put(at.(-2), "tmuxSession", "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle")
+        at.(-2)
+        |> Map.put("tmuxSession", "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle")
+        |> Map.put("sessionId", "other-session")
       )
     ])
 
     name = start(path)
 
     # The session's last event lives only in the rotated file.
-    assert waiting(name) == %{
-             shuttle => "waiting",
-             "other-01KTHDNZS287ZSSG8X8V59XKW9-shuttle" => "attention"
-           }
+    assert waiting(name) == %{"s1" => "waiting", "other-session" => "attention"}
 
     assert sent(name, path) == ["/tmp/a.html"]
 
@@ -278,7 +277,7 @@ defmodule Shuttle.EventStreamTest do
 
     # `sent/2` catches up; `session_activity/1` reads what is held.
     assert sent(name, path) == ["/tmp/one.html", "/tmp/two.html"]
-    assert waiting(name) == %{shuttle => "working"}
+    assert waiting(name) == %{"s1" => "working"}
     assert {:ok, events} = EventStream.sent_events(name, path)
 
     assert events ==
@@ -289,7 +288,7 @@ defmodule Shuttle.EventStreamTest do
     append(path, [ev("stop", -1, at.(-1))])
 
     assert sent(name, path) == ["/tmp/two.html"]
-    assert waiting(name) == %{shuttle => "waiting"}
+    assert waiting(name) == %{"s1" => "waiting"}
   end
 
   test "session_activity answers at once while the stream is busy", %{path: path} do
@@ -297,7 +296,7 @@ defmodule Shuttle.EventStreamTest do
     shuttle = "w-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
     append(path, [ev("stop", -1, %{"timestamp" => now - @m, "tmuxSession" => shuttle})])
     name = start(path)
-    assert waiting(name) == %{shuttle => "waiting"}
+    assert waiting(name) == %{"s1" => "waiting"}
 
     # A suspended stream stands in for one mid-reseed: its mailbox is not
     # served, yet the owner feed's read neither blocks nor loses the phase.
@@ -305,28 +304,173 @@ defmodule Shuttle.EventStreamTest do
 
     try do
       {micros, activity} = :timer.tc(fn -> EventStream.session_activity(name) end)
-      assert %{^shuttle => %{phase: "waiting"}} = activity
+      assert %{"s1" => %{phase: "waiting"}} = activity
       assert micros < 1_000_000
     after
       :sys.resume(name)
     end
   end
 
-  test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
+  test "replacement reseed retains child work when the replacement repeats only stop", %{
+    path: path
+  } do
     now = System.system_time(:millisecond)
-    a = "a-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
-    b = "b-01KTS261GJMMRDRHS2QDMEFV3K-shuttle"
+    codex = %{"harness" => "codex", "sessionId" => "parent"}
 
     append(path, [
-      ev("notification", -3, %{"timestamp" => now - 3 * @m, "tmuxSession" => a}),
-      ev("notification", -3, %{"timestamp" => now - 3 * @m, "tmuxSession" => a})
+      ev(
+        "post_tool_use",
+        0,
+        Map.merge(codex, %{
+          "tool" => "collaborationspawn_agent",
+          "id" => "spawn-1",
+          "timestamp" => now
+        })
+      ),
+      ev("stop", 1, Map.put(codex, "timestamp", now + 1))
+    ])
+
+    name = start(path)
+    assert waiting(name) == %{"parent" => "working"}
+
+    # The replacement omits the known spawn but repeats the stop at the same
+    # timestamp: it is a retained-prefix rebuild, not newer evidence.
+    replacement = path <> ".replacement"
+    append(replacement, [ev("stop", 1, Map.put(codex, "timestamp", now + 1))])
+    File.rename!(replacement, path)
+    _ = all(name, path)
+
+    assert waiting(name) == %{"parent" => "working"}
+  end
+
+  for {label, initial, suffix, expected} <- [
+        {"permission with a live child",
+         [
+           {"post_tool_use", %{"tool" => "collaborationspawn_agent", "id" => "spawn"}},
+           {"stop", %{}},
+           {"notification", %{"notificationKind" => "permission_prompt"}}
+         ], {"pre_tool_use", %{"tool" => "Bash"}}, "attention"},
+        {"ended session", [{"session_end", %{}}], {"pre_tool_use", %{"tool" => "Bash"}},
+         "waiting"},
+        {"outstanding child",
+         [
+           {"post_tool_use", %{"tool" => "collaborationspawn_agent", "id" => "spawn"}},
+           {"stop", %{}}
+         ], {"notification", %{"notificationKind" => "idle_prompt"}}, "working"},
+        {"background work", [{"stop", %{"backgroundTasks" => 2}}],
+         {"notification", %{"notificationKind" => "idle_prompt"}}, "working"}
+      ] do
+    @tag replay_finding_3: true
+    test "partial replacement preserves #{label} when newer progress cannot clear it", %{
+      path: path
+    } do
+      now = System.system_time(:millisecond)
+      context = %{"harness" => "codex", "timestamp" => now}
+      initial = unquote(Macro.escape(initial))
+      {type, attrs} = unquote(Macro.escape(suffix))
+
+      append(
+        path,
+        Enum.map(initial, fn {type, attrs} -> ev(type, 0, Map.merge(context, attrs)) end)
+      )
+
+      name = start(path)
+      assert waiting(name) == %{"s1" => unquote(expected)}
+
+      line = ev(type, 0, Map.merge(context, Map.put(attrs, "timestamp", now + 1)))
+      append(path <> ".replacement", [line])
+      File.rename!(path <> ".replacement", path)
+      _ = all(name, path)
+
+      assert waiting(name) == %{"s1" => unquote(expected)}
+      state = :sys.get_state(name)
+      if unquote(label) == "outstanding child", do: assert(state.waiting["s1"].kids == 1)
+      if unquote(label) == "background work", do: assert(state.waiting["s1"].bg == 2)
+    end
+  end
+
+  @tag replay_finding_4: true
+  test "replacement accepts an unread equal-time stop after a known tool but not its prefix", %{
+    path: path
+  } do
+    now = System.system_time(:millisecond)
+    tool = ev("pre_tool_use", 0, %{"timestamp" => now, "id" => "tool-at-t"})
+    stop = ev("stop", 0, %{"timestamp" => now, "id" => "stop-at-t"})
+    append(path, [tool])
+    name = start(path)
+    assert waiting(name) == %{"s1" => "working"}
+
+    append(path <> ".replacement", [tool, stop])
+    File.rename!(path <> ".replacement", path)
+    _ = all(name, path)
+    assert waiting(name) == %{"s1" => "waiting"}
+
+    # Only the already-read prefix remains; it cannot reopen the closed turn.
+    File.write!(path, tool <> "\n")
+    _ = all(name, path)
+    assert waiting(name) == %{"s1" => "waiting"}
+  end
+
+  @tag replay_finding_4: true
+  test "equal-time suffix preserves replayed child count and restates background work once", %{
+    path: path
+  } do
+    now = System.system_time(:millisecond)
+    context = %{"harness" => "codex", "timestamp" => now}
+
+    spawn =
+      ev(
+        "post_tool_use",
+        0,
+        Map.merge(context, %{"tool" => "collaborationspawn_agent", "id" => "spawn-at-t"})
+      )
+
+    stop = ev("stop", 0, Map.merge(context, %{"id" => "stop-at-t", "backgroundTasks" => 2}))
+    append(path, [spawn])
+    name = start(path)
+
+    append(path <> ".replacement", [spawn, stop])
+    File.rename!(path <> ".replacement", path)
+    _ = all(name, path)
+    assert %{turn: :closed, kids: 1, bg: 2} = :sys.get_state(name).waiting["s1"]
+
+    append(path <> ".replacement", [spawn, stop])
+    File.rename!(path <> ".replacement", path)
+    _ = all(name, path)
+    assert %{turn: :closed, kids: 1, bg: 2} = :sys.get_state(name).waiting["s1"]
+  end
+
+  test "a rebuild keeps a waiting session the new files no longer mention", %{path: path} do
+    now = System.system_time(:millisecond)
+    a = "session-a"
+    b = "session-b"
+
+    append(path, [
+      ev("notification", -3, %{
+        "timestamp" => now - 3 * @m,
+        "sessionId" => a,
+        "tmuxSession" => "a-pane-shuttle"
+      }),
+      ev("notification", -3, %{
+        "timestamp" => now - 3 * @m,
+        "sessionId" => a,
+        "tmuxSession" => "a-pane-shuttle"
+      })
     ])
 
     name = start(path)
     assert waiting(name) == %{a => "attention"}
 
     # Shrunk in place: the rebuild sees only b, and still remembers a.
-    File.write!(path, ev("stop", -1, %{"timestamp" => now - @m, "tmuxSession" => b}) <> "\n")
+    File.write!(
+      path,
+      ev("stop", -1, %{
+        "timestamp" => now - @m,
+        "sessionId" => b,
+        "tmuxSession" => "b-pane-shuttle"
+      }) <> "\n"
+    )
+
     assert Enum.map(recent(name, path, now), & &1.k) == ["agent", "reply"]
     assert waiting(name) == %{a => "attention", b => "waiting"}
   end

@@ -3,7 +3,8 @@ defmodule Shuttle.EventsParityTest do
   Cross-language guard on the event stream.
 
   `shuttle hook event` (Go) writes the stream; `Shuttle.EventStream` reads it and
-  `Shuttle.WaitingTracker` and `Shuttle.SentFiles` (Elixir) project it. Nothing in the type system connects the
+  `Shuttle.WaitingTracker`, `Shuttle.SessionBinding`, and `Shuttle.SentFiles`
+  (Elixir) project it. Nothing in the type system connects the
   two, so the contract is a checked-in fixture: `internal/shuttlecli/testdata/events_golden.jsonl`
   is produced byte-for-byte by `TestEventGoldenParity` in `internal/shuttlecli/hook_event_test.go`
   and parsed here.
@@ -23,9 +24,9 @@ defmodule Shuttle.EventsParityTest do
   # stopping with two detached shells still running and then being hit by the
   # harness's idle timer; and a subagent stopping outside any tmux session.
   @golden Path.expand("../../../internal/shuttlecli/testdata/events_golden.jsonl", __DIR__)
-  @worker_a "depersonalize-01KVC1N5XMAAMYXDAGR4V6QA9G-shuttle"
-  @worker_b "codex-01KVC1N5XMAAMYXDAGR4V6QAAA-shuttle"
-  @worker_c "background-01KVC1N5XMAAMYXDAGR4V6QABB-shuttle"
+  @worker_a "sess-a"
+  @worker_b "sess-b"
+  @worker_c "sess-d"
   @uid_a "01KVC1N5XMAAMYXDAGR4V6QA9G"
   # Just after the last event in the fixture, so nothing prunes as stale.
   @now 1_753_900_012_000
@@ -65,8 +66,8 @@ defmodule Shuttle.EventsParityTest do
       # anything. It reads as working, not as a raised hand.
       assert %{phase: "working", last_event_at: 1_753_900_010_000} = activity[@worker_c]
 
-      # The subagent line carries no tmux session, so it tracks nothing. Only
-      # `*-shuttle` sessions are worker sessions.
+      # The standalone subagent line has its own session id and no tracked
+      # Codex child state, so it does not create a waiting record.
       assert Map.keys(activity) |> Enum.sort() ==
                Enum.sort([@worker_a, @worker_b, @worker_c])
     end
@@ -116,6 +117,13 @@ defmodule Shuttle.EventsParityTest do
         assert is_binary(line["tmuxSession"])
         assert line["harness"] in ["claude-code", "codex"]
         assert is_binary(line["originName"])
+
+        assert line["receiverPid"] ==
+                 %{"sess-a" => 4242, "sess-b" => 4243, "sess-d" => 4244, "sess-c" => 4245}[
+                   line["sessionId"]
+                 ]
+
+        assert line["receiverBirth"] == "fixture-birth"
       end
 
       # The harness discriminator is the transcript path, and the fixture

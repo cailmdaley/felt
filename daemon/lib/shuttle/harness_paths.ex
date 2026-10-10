@@ -41,24 +41,35 @@ defmodule Shuttle.HarnessPaths do
   # local), and the capture burns its whole retry budget for nothing — the
   # worker runs, its session_uuid is lost, and it cannot be resumed.
   #
-  # One day is also not enough on its own: the dispatch and the transcript
-  # write can straddle local midnight in either direction. So search
-  # yesterday / today / tomorrow in local time and take the newest matching
-  # transcript across all three. That window also absorbs a stale zone read —
-  # the BEAM resolves the local zone through libc, which on some platforms
-  # holds the value captured when the OS process started, and no zone on earth
-  # is more than one civil day from another.
+  # Fresh capture searches yesterday / today / tomorrow in local time. For
+  # recovery, :since extends that window back to the dispatch's UTC date minus
+  # one day. Codex's local filing date can differ from UTC in either direction;
+  # the padding also covers the capture timestamp's five-second grace across
+  # midnight. Only this bounded date range is read, never the whole session tree.
   #
   # `SHUTTLE_CODEX_SESSIONS_DIR` overrides the ROOT (the `~/.codex/sessions`
   # equivalent); the YYYY/MM/DD fan-out applies to it too.
-  @doc "The three local-civil-day directories used while capturing a new rollout."
+  @doc "Codex date directories, newest first; :since extends recovery back to dispatch, and :today pins the local civil date."
   @spec codex_session_dirs(keyword()) :: [String.t()]
   def codex_session_dirs(opts \\ []) do
     root = codex_sessions_root(opts)
-    today = local_today()
+    today = Keyword.get_lazy(opts, :today, &local_today/0)
+    near_start = Date.add(today, -1)
 
-    Enum.map([1, 0, -1], fn offset ->
-      date = Date.add(today, offset)
+    first =
+      case Keyword.get(opts, :since) do
+        %DateTime{} = since ->
+          dispatch_start =
+            since |> DateTime.shift_zone!("Etc/UTC") |> DateTime.to_date() |> Date.add(-1)
+
+          if Date.before?(dispatch_start, near_start), do: dispatch_start, else: near_start
+
+        nil ->
+          near_start
+      end
+
+    Date.range(Date.add(today, 1), first, -1)
+    |> Enum.map(fn date ->
       Path.join([root, "#{date.year}", pad2(date.month), pad2(date.day)])
     end)
   end

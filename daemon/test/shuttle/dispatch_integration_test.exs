@@ -921,6 +921,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     shuttle:
       kind: oneshot
       agent: codex-sol
+      surface: cli
     ---
     A codex fiber whose session UUID should be captured from its own transcript.
     """)
@@ -935,11 +936,12 @@ defmodule Shuttle.DispatchIntegrationTest do
     # F2: dispatched_at is the dispatch-boundary ground truth and must exist
     # the moment the tmux session launches — codex/pi doesn't know its session
     # UUID yet at that instant, but the marker is stamped SYNCHRONOUSLY before
-    # `dispatch/1` returns regardless, carrying `--dispatched-at` with no
-    # `--session` (there is nothing to backfill into yet).
+    # `dispatch/1` returns, carrying `--dispatched-at` and an empty `--session`
+    # that clears predecessor identity until capture completes.
     assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
              cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
-               "--dispatched-at" in args and "--session" not in args
+               "--dispatched-at" in args and
+               Enum.member?(Enum.chunk_every(args, 2), ["--session", ""])
            end),
            "expected dispatched_at to be stamped synchronously before dispatch returned"
 
@@ -989,6 +991,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     shuttle:
       kind: oneshot
       agent: codex-sol
+      surface: cli
     ---
     A codex fiber whose transcript lands after local midnight.
     """)

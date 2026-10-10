@@ -873,6 +873,7 @@ func TestEventGoldenParity(t *testing.T) {
 	// is exactly the thing this change removed from the rest of the tree.
 	env.Set("SHUTTLE_HOST", "hub-a")
 
+	receivers := map[string]int{"sess-a": 4242, "sess-b": 4243, "sess-d": 4244, "sess-c": 4245}
 	var got bytes.Buffer
 	for _, ev := range goldenEvents(home) {
 		env.Set("SHUTTLE_TMUX_SESSION", ev.tmux)
@@ -882,6 +883,8 @@ func TestEventGoldenParity(t *testing.T) {
 		}
 		a := newApp(env)
 		a.eventNow, a.eventRand = now, rand
+		a.eventReceiverPID = func() int { return receivers[ev.payload["session_id"].(string)] }
+		a.eventProcessBirth = func(int) string { return "fixture-birth" }
 		line, ok := a.renderEventLine(bytes.NewReader(raw))
 		if !ok {
 			t.Fatalf("payload recorded nothing: %v", ev.payload)

@@ -174,12 +174,53 @@ defmodule Shuttle.Poller.Snapshot do
   Stamps a feed entry with its `:runtime` payload if the runtime index has a
   match under the fiber's uid/slug/id; otherwise returns the entry unchanged.
   """
-  def put_runtime(%{fiber: fiber} = entry, index) do
+  def put_runtime(
+        %{fiber: fiber} = entry,
+        index,
+        activity \\ %{},
+        binding \\ Shuttle.SessionBinding.new()
+      ) do
     fiber
     |> index_match(index)
     |> case do
-      nil -> entry
-      payload -> Map.put(entry, :runtime, put_session_link(payload, fiber))
+      nil ->
+        entry
+
+      payload ->
+        payload =
+          if payload.surface == "cli" do
+            uuid =
+              Shuttle.SessionBinding.current(
+                binding,
+                if(Map.get(payload, :identity_pending, false),
+                  do: nil,
+                  else:
+                    payload.session_uuid || get_in(fiber, ["shuttle", "runtime", "session_uuid"])
+                )
+              )
+
+            payload = Map.put(payload, :session_uuid, uuid)
+
+            cond do
+              Map.get(payload, :identity_pending, false) ->
+                Map.put(
+                  payload,
+                  :phase,
+                  if(payload[:identity_error], do: "identity_failed", else: "identity_pending")
+                )
+
+              Map.has_key?(activity, uuid) ->
+                %{last_event_at: at, phase: phase} = Map.fetch!(activity, uuid)
+                payload |> Map.put(:last_activity_at, at) |> Map.put(:phase, phase)
+
+              true ->
+                Map.delete(payload, :phase)
+            end
+          else
+            payload
+          end
+
+        Map.put(entry, :runtime, put_session_link(payload, fiber))
     end
   end
 
@@ -219,7 +260,12 @@ defmodule Shuttle.Poller.Snapshot do
   # on this host — the owner stamps its own rows). Omitted when the session was
   # never bridged, so a viewer renders a stamp rather than a link to nowhere.
   defp put_session_link(payload, fiber) do
-    case get_in(fiber, ["shuttle", "runtime", "session_uuid"]) do
+    uuid =
+      if payload.surface == "cli",
+        do: payload.session_uuid,
+        else: get_in(fiber, ["shuttle", "runtime", "session_uuid"])
+
+    case uuid do
       uuid when is_binary(uuid) and uuid != "" ->
         case Shuttle.SessionLink.cached_url(uuid) do
           url when is_binary(url) -> Map.put(payload, :session_link, url)
@@ -247,7 +293,7 @@ defmodule Shuttle.Poller.Snapshot do
     %{
       tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
       surface: if(app_id, do: "app", else: "cli"),
-      session_uuid: app_id,
+      session_uuid: app_id || Map.get(meta, :session_uuid),
       thread_id: app_id,
       desktop_link: Shuttle.SessionLink.desktop_url(app_id),
       transcript_session_uuid: app_id && Shuttle.AppWorkers.transcript_id(app_id),
@@ -257,12 +303,33 @@ defmodule Shuttle.Poller.Snapshot do
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }
+    |> put_identity(meta)
+  end
+
+  defp put_identity(payload, meta) do
+    pending =
+      payload.surface == "cli" and Map.has_key?(meta, :session_uuid) and meta.session_uuid == nil
+
+    payload = Map.put(payload, :identity_pending, pending)
+
+    cond do
+      pending and meta[:identity_error] ->
+        payload
+        |> Map.put(:identity_error, meta.identity_error)
+        |> Map.put(:phase, "identity_failed")
+
+      pending ->
+        Map.put(payload, :phase, "identity_pending")
+
+      true ->
+        payload
+    end
   end
 
   # The feed's `runtime` payload: the shared worker fields plus activity.
   #
   # `last_activity_at` + `phase` come from the activity tracker keyed by this
-  # worker's tmux session: the REAL timestamp of its most recent hook event and
+  # worker's harness UUID: the timestamp of its most recent hook event and
   # the event's phase category ("attention" / "waiting" / "working"). This is
   # what lets the in-flight column rank by idle duration; `meta.last_activity_at`
   # equals `started_at` (only the tmux liveness heartbeat ever bumps it), which
@@ -276,7 +343,7 @@ defmodule Shuttle.Poller.Snapshot do
 
     activity_key =
       case Shuttle.AppWorkers.id(meta.session) do
-        nil -> meta.session
+        nil -> Map.get(meta, :session_uuid)
         id -> Shuttle.AppWorkers.transcript_id(id)
       end
 

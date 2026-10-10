@@ -14,6 +14,7 @@
  * `?transcript=live` to watch a synthetic worker append records or
  * `?transcript=large` to exercise lazy reading of thousands of turns.
  * `?transcript=warm|cold|context` stages captured usage facts with a shifted timestamp.
+ * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
  *
  * The SETTINGS sheet is exercised the same way and is the one surface here
  * that is stateful: the stub keeps an in-memory copy of each host's operator
@@ -541,6 +542,20 @@ const MOCK_FEED = {
   generated_at: iso(0),
   fibers: [
     ...DRAFTS.map(fiber),
+    ...(search.get('identity') === 'all' ? ['identity_pending', 'identity_failed'].map((phase, i) => ({
+      ...fiber({
+        id: `fixtures/session-attribution/${phase}`, uid: `fixture-identity-${i}`,
+        name: phase === 'identity_pending' ? 'Pi worker identifying its session' : 'Codex worker with failed attribution',
+        status: 'active', shuttle: { ...shuttleBlock(), agent: i ? 'codex-sol' : 'pi-luna' },
+        outcome: 'Synthetic live worker; no operator content or actual execution.',
+      }),
+      origin: LOCAL_HOST,
+      runtime: {
+        state: 'running', surface: 'cli', session_uuid: null, identity_pending: true, phase,
+        identity_error: i ? 'Timed out waiting for session file; retrying acquisition.' : undefined,
+        tmux_session: `fixture-identity-${i}-shuttle`, started_at: now - 180_000, last_activity_at: now - 180_000,
+      },
+    })) : []),
     {
       ...APP_CONVERSATION,
       origin: 'ada-workstation',
