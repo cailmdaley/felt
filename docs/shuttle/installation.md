@@ -770,6 +770,22 @@ Each record names a CLI, a model, and its axis metadata (`effort_levels`,
 from the built-ins, working every field across several harnesses — edit that. A
 missing file is silent. A malformed file fails loudly and names the path.
 
+An optional `env` map sets worker process environment variables on the CLI/tmux surface, for both fresh launches and resumes.
+Keys must match `[A-Za-z_][A-Za-z0-9_]*`; values must be strings without NUL characters.
+Empty strings are allowed, and values are passed literally without shell expansion.
+For example, copy the complete `claude-opus` record, change its `id` to `claude-opus-5m`, and add:
+
+```json
+"env": { "CLAUDE_CODE_PROMPT_CACHE_TTL": "5m" }
+```
+
+Alias records inherit their base agent's environment and can override individual variables with their own `env` map.
+Resolved aliases retain their own id, so capture and resume reapply their environment and axis overlays.
+Interactive Chronicle resumes explicitly clear `headless` because a human is at the terminal.
+This alias overlay does not change the wholesale record replacement rule between registry layers.
+If a resume cannot resolve a registry record and falls back to a bare agent, that agent carries no `env` overrides.
+The Codex app surface connects to an existing App Server and does not set per-worker process environment variables.
+
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
 records over the built-ins by id, last one wins — wholesale, never field by
 field. `"restrict"` drops the built-in layer entirely, so the file becomes the

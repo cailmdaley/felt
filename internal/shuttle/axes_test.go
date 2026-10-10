@@ -111,8 +111,8 @@ func TestResolve_HeadlessAliasExpands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if base.ID != "claude-haiku" {
-		t.Fatalf("alias base = %q, want claude-haiku", base.ID)
+	if base.ID != "claude-haiku-headless" {
+		t.Fatalf("alias identity = %q, want claude-haiku-headless", base.ID)
 	}
 	if !eff.Headless {
 		t.Fatalf("expected headless:true from alias overlay, got %+v", eff)

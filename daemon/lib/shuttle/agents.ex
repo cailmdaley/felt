@@ -14,6 +14,8 @@ defmodule Shuttle.Agents do
   string-keyed JSON into the atom-keyed record the command builders consume.
   """
 
+  require Logger
+
   @type agent_record :: %{
           id: String.t(),
           cli: String.t() | nil,
@@ -21,6 +23,7 @@ defmodule Shuttle.Agents do
           provider: String.t() | nil,
           model: String.t() | nil,
           extra_flags: String.t() | nil,
+          env: %{String.t() => String.t()},
           requires_model: boolean(),
           effort: String.t() | nil,
           chrome: boolean(),
@@ -43,6 +46,7 @@ defmodule Shuttle.Agents do
       provider: resolved["provider"],
       model: resolved["model"],
       extra_flags: resolved["extra_flags"],
+      env: resolved["env"] || %{},
       requires_model: resolved["requires_model"] == true,
       effort: resolved["effort"],
       chrome: resolved["chrome"] == true,
@@ -121,16 +125,19 @@ defmodule Shuttle.Agents do
     # The wrapper is a shell function sourced via bash -l.
     # For claude: stdin via here-string; --session-id can be pre-specified.
     # For codex/pi: positional arg.
-    case agent.cli do
-      "claude" ->
-        session_flag =
-          if session_id, do: "--session-id #{shell_escape(session_id)} ", else: ""
+    command =
+      case agent.cli do
+        "claude" ->
+          session_flag =
+            if session_id, do: "--session-id #{shell_escape(session_id)} ", else: ""
 
-        "#{agent.wrapper} #{session_flag}#{flags} <<< #{shell_escape(prompt)}"
+          "#{agent.wrapper} #{session_flag}#{flags} <<< #{shell_escape(prompt)}"
 
-      _ ->
-        "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
-    end
+        _ ->
+          "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
+      end
+
+    with_env(command, agent)
   end
 
   @doc """
@@ -161,30 +168,57 @@ defmodule Shuttle.Agents do
 
     has_prompt = is_binary(prompt) and String.trim(prompt) != ""
 
-    case agent.cli do
-      "claude" ->
-        # Claude resumes from on-disk transcript. With a prompt, feed it
-        # via stdin (here-string) so it lands as the next user turn —
-        # mirrors fresh dispatch's `<<<` pattern.
-        base = "#{agent.wrapper} #{flags} --resume #{shell_escape(session_id)}"
-        if has_prompt, do: "#{base} <<< #{shell_escape(prompt)}", else: base
+    command =
+      case agent.cli do
+        "claude" ->
+          # Claude resumes from on-disk transcript. With a prompt, feed it
+          # via stdin (here-string) so it lands as the next user turn —
+          # mirrors fresh dispatch's `<<<` pattern.
+          base = "#{agent.wrapper} #{flags} --resume #{shell_escape(session_id)}"
+          if has_prompt, do: "#{base} <<< #{shell_escape(prompt)}", else: base
 
-      "codex" ->
-        # codex resume <uuid> [prompt] — resume subcommand, UUID positional,
-        # optional prompt as trailing positional.
-        base = "#{agent.wrapper} #{flags} resume #{shell_escape(session_id)}"
-        if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
+        "codex" ->
+          # codex resume <uuid> [prompt] — resume subcommand, UUID positional,
+          # optional prompt as trailing positional.
+          base = "#{agent.wrapper} #{flags} resume #{shell_escape(session_id)}"
+          if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
 
-      "pi" ->
-        # pi --session <path|partial-uuid> [messages...] — UUID prefix is
-        # enough; the optional message is the next user turn, same as fresh.
-        base = "#{agent.wrapper} #{flags} --session #{shell_escape(session_id)}"
-        if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
+        "pi" ->
+          # pi --session <path|partial-uuid> [messages...] — UUID prefix is
+          # enough; the optional message is the next user turn, same as fresh.
+          base = "#{agent.wrapper} #{flags} --session #{shell_escape(session_id)}"
+          if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
 
-      _ ->
-        # Unknown harness: fall back to fresh dispatch with a note.
-        "#{agent.wrapper} #{flags} #{shell_escape("Resume session #{session_id} if possible.")}"
-    end
+        _ ->
+          # Unknown harness: fall back to fresh dispatch with a note.
+          "#{agent.wrapper} #{flags} #{shell_escape("Resume session #{session_id} if possible.")}"
+      end
+
+    with_env(command, agent)
+  end
+
+  # Assignment prefixes work for both executables and login-shell functions.
+  # Values remain literal shell words, including quotes, newlines and expansions.
+  defp with_env(command, agent) do
+    assignments =
+      (agent[:env] || %{})
+      |> Enum.sort()
+      |> Enum.flat_map(fn
+        {key, value} when is_binary(key) and is_binary(value) ->
+          if Regex.match?(~r/\A[A-Za-z_][A-Za-z0-9_]*\z/, key) and
+               not String.contains?(value, <<0>>) do
+            ["#{key}=#{shell_escape(value)}"]
+          else
+            Logger.warning("Skipping invalid agent env entry for key #{inspect(key)}")
+            []
+          end
+
+        {key, _value} ->
+          Logger.warning("Skipping invalid agent env entry for key #{inspect(key)}")
+          []
+      end)
+
+    Enum.join(assignments ++ [command], " ")
   end
 
   # Renders the harness invocation flags, folding the resolved axes (effort,

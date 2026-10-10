@@ -1,6 +1,7 @@
 package shuttle
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -24,7 +25,7 @@ func TestNewResolvedAgent_MatchesResolveBlock(t *testing.T) {
 			t.Fatalf("Resolve(%s): %v", name, err)
 		}
 		viaVerb := reg.NewResolvedAgent(rec, axes)
-		if *viaVerb != *viaBlock.Agent {
+		if !reflect.DeepEqual(viaVerb, viaBlock.Agent) {
 			t.Fatalf("%s: verb path %+v != block path %+v", name, viaVerb, viaBlock.Agent)
 		}
 	}

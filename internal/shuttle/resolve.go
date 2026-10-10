@@ -7,18 +7,20 @@ import (
 )
 
 // ResolvedAgent is the daemon-facing resolution of a block's agent: the base
-// agent record (cli/wrapper/model/...) plus the effective axes (effort/chrome/
+// harness configuration (cli/wrapper/model/...) under the selected agent's id,
+// plus the effective axes (effort/chrome/
 // headless after alias overlay + block + defaults). Rendering these into CLI
 // flags stays the daemon's job — this is the resolved INPUT to that, so the
 // daemon needs neither the embedded registry nor the alias/axis logic.
 type ResolvedAgent struct {
-	ID            string `json:"id"`
-	CLI           string `json:"cli,omitempty"`
-	Wrapper       string `json:"wrapper,omitempty"`
-	Provider      string `json:"provider,omitempty"`
-	Model         string `json:"model,omitempty"`
-	ExtraFlags    string `json:"extra_flags,omitempty"`
-	RequiresModel bool   `json:"requires_model,omitempty"`
+	ID            string   `json:"id"`
+	CLI           string   `json:"cli,omitempty"`
+	Wrapper       string   `json:"wrapper,omitempty"`
+	Provider      string   `json:"provider,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	ExtraFlags    string   `json:"extra_flags,omitempty"`
+	Env           AgentEnv `json:"env,omitempty"`
+	RequiresModel bool     `json:"requires_model,omitempty"`
 	// Effective axes (post-resolution).
 	Effort   string `json:"effort,omitempty"`
 	Chrome   bool   `json:"chrome,omitempty"`
@@ -47,7 +49,7 @@ func (r *Resolved) IsEmpty() bool {
 	return r == nil || (r.Agent == nil && r.NextDue == nil && r.PrevDue == nil)
 }
 
-// NewResolvedAgent folds a base agent record and the effective axes into the
+// NewResolvedAgent folds a resolved harness record and the effective axes into the
 // daemon-facing ResolvedAgent. It is the single place this projection is made,
 // so `shuttle show -j`'s shuttle.resolved.agent (via ResolveBlock) and
 // `shuttle agents resolve` (ad-hoc, for the daemon's capture path) emit a
@@ -64,6 +66,7 @@ func (r *AgentRegistry) NewResolvedAgent(rec AgentRecord, axes Axes) *ResolvedAg
 		Provider:      rec.Provider,
 		Model:         resolveModelFamily(env, rec),
 		ExtraFlags:    rec.ExtraFlags,
+		Env:           rec.Env,
 		RequiresModel: rec.RequiresModel,
 		Effort:        axes.Effort,
 		Chrome:        axes.Chrome,

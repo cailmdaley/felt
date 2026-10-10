@@ -52,4 +52,12 @@ To talk to a worker later, the human resumes its card, which reopens the stored 
 
 ## Choosing the agent
 
+Registry records accept an optional `env` string-to-string map for CLI/tmux workers, including resumes: `"env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "5m"}`.
+Keys must match `[A-Za-z_][A-Za-z0-9_]*`, values must contain no NUL, and shell expansion is disabled for values.
+Registry layers replace records wholesale by id; aliases inherit base environment variables and override named variables with their own `env` map.
+Resolved aliases keep their own id so capture and resume reapply all overlays.
+A resume that falls back to a bare agent because no registry record resolves carries no `env` overrides.
+The Codex app surface uses an existing App Server and does not apply per-worker environment variables.
+See the [registry configuration reference](https://cailmdaley.github.io/felt/shuttle/installation/#configuring-agents).
+
 Use the agent the user or constitution names; otherwise pick from `shuttle agents`, the registry on this machine (built-ins plus `~/.config/shuttle/agents.json`, read separately on each host). Check the listing before assuming an agent exists, and remember there is no `human` agent — write a human gate instead. Change it with `shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]`. Claude agents run with `--permission-mode auto`. For headless (`claude -p`) runs, add an alias to the registry, such as `{"id": "claude-opus-headless", "alias_of": "claude-opus", "axes": {"headless": true}}`; no built-in agent is headless.
