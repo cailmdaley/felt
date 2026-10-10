@@ -73,6 +73,9 @@ const ANCHOR_MARGIN = 8
 /** How close to the anchor a reader must stay to keep following new messages. */
 const FOLLOW_SLACK = 24
 
+/** A warm cache dot drains on this cadence. */
+const CACHE_REPAINT_MS = 15_000
+
 /**
  * The window a session's context is read against. Claude transcripts record
  * none; Claude sessions run with a million-token window.
@@ -700,7 +703,8 @@ export class TranscriptBand {
   /**
    * The session's two usage facts, as words in the head line. Context is its
    * token count, tinted from verdigris toward red as it fills the window. The
-   * cache says warm or cold; it repaints when a warm entry expires.
+   * cache is a verdigris dot draining as the entry ages, an alarm-red ring once
+   * cold.
    */
   private paintFacts(): void {
     this.clearCacheTimer()
@@ -710,14 +714,16 @@ export class TranscriptBand {
     const warm = until !== undefined && until > now
     this.cacheFact.hidden = until === undefined
     this.cacheFact.dataset.cache = until === undefined ? '' : warm ? 'warm' : 'cold'
-    this.cacheFact.textContent = until === undefined ? '' : warm ? 'warm' : 'cold'
-    this.cacheFact.title = until === undefined ? ''
-      : `${warm ? `Cache warm until ${clock(until).text}` : `Cache cold since ${clock(until).text}`} (estimated from Claude cache usage)`
+    const cacheSaid = until === undefined ? '' : warm ? `Cache warm until ${clock(until).text}` : `Cache cold since ${clock(until).text}`
+    this.cacheFact.title = until === undefined ? '' : `${cacheSaid} (estimated from Claude cache usage)`
+    this.cacheFact.setAttribute('aria-label', cacheSaid)
+    const ttl = stats.cacheTtl ?? 300_000
+    this.cacheFact.style.setProperty('--ws-cache-left', warm ? String(Math.min(1, (until! - now) / ttl)) : '0')
     if (warm) {
       this.cacheTimer = window.setTimeout(() => {
         this.cacheTimer = null
         if (!this.disposed) this.paintFacts()
-      }, until! - now)
+      }, Math.min(until! - now, CACHE_REPAINT_MS))
     }
     const context = stats.context
     this.contextFact.hidden = context === undefined

@@ -31,6 +31,8 @@ export interface TranscriptStats {
   context?: number
   window?: number
   cacheUntil?: number
+  /** The lifetime of the cache entry that sets cacheUntil: an hour or five minutes. */
+  cacheTtl?: number
 }
 
 interface ToolReference {
@@ -50,7 +52,7 @@ export class TranscriptModel {
   private readonly tools = new Map<string, ToolReference>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
-  private facts: Pick<TranscriptStats, 'model' | 'context' | 'window' | 'cacheUntil'> = {}
+  private facts: Pick<TranscriptStats, 'model' | 'context' | 'window' | 'cacheUntil' | 'cacheTtl'> = {}
 
   private hourCacheUntil: number | undefined
   private shortCacheUntil: number | undefined
@@ -71,12 +73,13 @@ export class TranscriptModel {
           if (cache.hourWrite > 0 || hourRead) this.hourCacheUntil = entry.at + 3_600_000
           if (cache.write > cache.hourWrite || (cache.read > 0 && !hourRead)) this.shortCacheUntil = entry.at + 300_000
           this.facts.cacheUntil = Math.max(this.hourCacheUntil ?? 0, this.shortCacheUntil ?? 0)
+          this.facts.cacheTtl = this.facts.cacheUntil === this.hourCacheUntil ? 3_600_000 : 300_000
         }
         continue
       }
       if (entry.kind === 'event' && entry.contextReset) {
         this.facts.context = entry.context
-        this.facts.cacheUntil = undefined
+        this.facts.cacheUntil = this.facts.cacheTtl = undefined
         this.hourCacheUntil = this.shortCacheUntil = undefined
       }
       if (entry.kind === 'result') {
