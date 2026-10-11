@@ -87,13 +87,13 @@ defmodule ShuttleWeb.DeliverController do
     {status, Map.merge(body, %{delivered: launch_delivered(status, result), delivery: delivery})}
   end
 
+  defp reply({:error, status, error}, fiber_id),
+    do: {status, %{delivered: false, delivery: "message", fiber_id: fiber_id, error: error}}
+
   # A launch still queued in the Poller may yet deliver the text: unconfirmed,
   # not failed.
   defp launch_delivered(_status, {:error, :poller_busy}), do: nil
   defp launch_delivered(status, _result), do: status < 300
-
-  defp reply({:error, status, error}, fiber_id),
-    do: {status, %{delivered: false, delivery: "message", fiber_id: fiber_id, error: error}}
 
   # The receipt decides a message delivery's outcome, whichever daemon rendered
   # the owner's answer.
