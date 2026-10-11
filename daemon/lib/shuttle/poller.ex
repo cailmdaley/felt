@@ -470,10 +470,16 @@ defmodule Shuttle.Poller do
   def dispatch_fiber(fiber_id, opts \\ []),
     do: dispatch_fiber(Shuttle.Env.server(__MODULE__), fiber_id, opts)
 
+  # A call that outlives `dispatch_call_timeout_ms/0` answers
+  # `{:error, :poller_busy}` instead of exiting the caller. The request stays in
+  # the Poller's mailbox and may still launch, so the answer is "unconfirmed",
+  # never "refused".
   @spec dispatch_fiber(GenServer.server(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, atom()}
   def dispatch_fiber(server, fiber_id, opts) do
     GenServer.call(server, {:dispatch, fiber_id, opts}, dispatch_call_timeout_ms())
+  catch
+    :exit, {:timeout, _} -> {:error, :poller_busy}
   end
 
   @doc "The timeout of the Poller's worker-changing calls, in milliseconds."
@@ -564,18 +570,26 @@ defmodule Shuttle.Poller do
   inside the Poller, serialized with its state changes, then refresh the
   fiber's document-cache entry so the board reads the transition at once. A
   poll read in flight sees the old document or the new one, whose status and
-  `handed_off_at` land in one atomic write.
+  `handed_off_at` land in one atomic write. A call that outlives
+  `dispatch_call_timeout_ms/0` answers `{:error, :timeout, reason}`: the write
+  is still queued and may land.
   """
   @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t(), [
           String.t()
         ]) ::
-          Shuttle.Felt.result()
+          Shuttle.Felt.result() | {:error, :timeout, String.t()}
   def lifecycle_transition(server \\ Shuttle.Env.server(__MODULE__), verb, fiber_id, args \\ []) do
     GenServer.call(
       server,
       {:lifecycle_transition, verb, fiber_id, args},
       dispatch_call_timeout_ms()
     )
+  catch
+    :exit, {:timeout, _} ->
+      {:error, :timeout,
+       "this daemon's poller did not finish `#{verb}` on #{fiber_id} within " <>
+         "#{div(dispatch_call_timeout_ms(), 1000)}s; the write is still queued and may apply. " <>
+         "Check the fiber before retrying."}
   end
 
   @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()

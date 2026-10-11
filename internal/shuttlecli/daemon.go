@@ -147,14 +147,27 @@ func (t socketHostTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return t.next.RoundTrip(req)
 }
 
-// Timeouts for the daemon transport. Three, not one, because they bound
-// different things: a read may cross an SSH tunnel to another machine's daemon
-// (validate-identity fans out over every configured remote), a dispatch POST
-// waits on the daemon's own work, and the lifecycle POST bounds how long
-// `resume`/`accept` hang interactively (app.daemonLifecycleTimeout).
+// Timeouts for the daemon transport. A read may cross the tailnet to another
+// machine's daemon (validate-identity fans out over every configured remote).
+// A local lifecycle POST bounds how long `resume`/`accept` hang interactively
+// (app.daemonLifecycleTimeout) and falls back to a local write when the daemon
+// is down.
+//
+// Writes that run inside a Poller form a ladder in which every hop outlasts the
+// hop beneath it, so the innermost party with an answer gives it — "launched",
+// "refused", or "still queued" — instead of an outer client hanging up first
+// and reporting an action that "may have been applied":
+//
+//	owner Poller call      30 s  Shuttle.Poller @dispatch_call_timeout_ms
+//	daemon → owner forward 40 s  Shuttle.OriginRouter.default_forward_timeout_ms/0
+//	CLI → local daemon     35 s  daemonPostTimeout (this host owns the fiber)
+//	CLI → routed owner     45 s  daemonRoutedPostTimeout (another host owns it)
 const (
-	daemonReadTimeout = 15 * time.Second
-	daemonPostTimeout = 10 * time.Second
+	daemonReadTimeout       = 15 * time.Second
+	daemonOwnerCallBudget   = 30 * time.Second
+	daemonForwardBudget     = daemonOwnerCallBudget + 10*time.Second
+	daemonPostTimeout       = daemonOwnerCallBudget + 5*time.Second
+	daemonRoutedPostTimeout = daemonForwardBudget + 5*time.Second
 )
 
 // daemonStatusError is a non-2xx response — the daemon was reached but rejected

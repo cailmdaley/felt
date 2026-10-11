@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/spf13/cobra"
@@ -221,7 +222,7 @@ func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields 
 	if err != nil {
 		return "", err
 	}
-	response, err := a.postDaemon(endpoint, body, a.daemonLifecycleTimeout)
+	response, err := a.postRouted(owner, endpoint, body)
 	if err != nil {
 		return "", err
 	}
@@ -241,8 +242,23 @@ func (a *app) postOwnerDispatch(owner string, fiber *felt.Felt, fields map[strin
 	if err != nil {
 		return nil, err
 	}
-	return a.postDaemon(endpoint, body, daemonPostTimeout)
+	return a.postRouted(owner, endpoint, body)
 }
+
+// postRouted sends a write the local daemon forwards to owner. It waits out the
+// whole forwarding ladder (daemonRoutedPostTimeout), and says on stderr what it
+// is waiting for once the wait is long enough to look like a hang.
+func (a *app) postRouted(owner, endpoint string, body []byte) ([]byte, error) {
+	notice := time.AfterFunc(routedWaitNotice, func() {
+		fmt.Fprintf(a.env.Stderr, "waiting for %s's daemon (up to %s)…\n", owner, daemonRoutedPostTimeout)
+	})
+	defer notice.Stop()
+	return a.postDaemon(endpoint, body, daemonRoutedPostTimeout)
+}
+
+// routedWaitNotice is how long a routed write runs before the CLI says what it
+// is waiting for. Ordinary routed writes answer well within it.
+const routedWaitNotice = 3 * time.Second
 
 func (a *app) forwardLifecycleAction(cmd *cobra.Command, args []string, owner, action string, fiber *felt.Felt, fields map[string]any) (bool, error) {
 	if owner == "" {
