@@ -1,44 +1,55 @@
-/** The fiber page's Meeting menu picks under both engines' focus rules. Run
- * `npm run harness:board` then `node scripts/check-meeting-menu.mjs`.
- *
- * WebKit gives a clicked button no focus: pressing Room blurs the focused Call
- * to the body before Room's click lands. The open menu must remain available
- * until the choice reaches the daemon.
+/** Build with `npm run harness:board`, then run `node scripts/check-meeting-menu.mjs`.
+ * Checks recorder-addressed Join controls against the offline daemon on desktop and phone.
  */
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { chromium, webkit } from 'playwright-core'
+import { getBrowser } from '../e2e/browser.mjs'
 
-for (const engine of [webkit, chromium]) {
-  const browser = await engine.launch({ headless: true })
-  try {
-    const page = await browser.newPage({ viewport: { width: 1200, height: 900 }, reducedMotion: 'reduce' })
+const browser = await getBrowser({ executablePath: process.env.CHROME_PATH })
+try {
+  for (const mobile of [false, true]) {
+    const page = await browser.newPage({
+      viewport: mobile ? { width: 390, height: 844 } : { width: 1200, height: 900 },
+      isMobile: mobile, hasTouch: mobile, reducedMotion: 'reduce',
+    })
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
-    await page.goto(pathToFileURL(resolve('harness-board-dist/index.html')).href)
+    const url = pathToFileURL(resolve('harness-board-dist/index.html'))
+    url.search = '?recorder=recorder-host'
+    await page.goto(url.href)
     await page.getByText('Run the 2D B-mode null tests', { exact: true }).click()
     const controls = page.locator('.ws-selected .ws-dock')
     await controls.waitFor({ state: 'visible' })
-    await controls.locator('.kbn-detail-controls-toggle').click()
-    await page.evaluate(() => {
-      window.joins = []
-      const originalFetch = window.fetch
-      window.fetch = (input, init) => {
-        if (String(input).endsWith('/api/v1/meeting/join')) window.joins.push(JSON.parse(init.body))
-        return originalFetch(input, init)
-      }
-    })
-    const menu = controls.getByRole('menu', { name: 'Meeting kind', exact: true })
-    await controls.getByRole('button', { name: 'Meeting', exact: true }).click()
-    assert.ok(await menu.isVisible(), `${engine.name()}: Meeting opens its kinds`)
-    await controls.getByRole('menuitem', { name: 'Room', exact: true }).click({ timeout: 2000 })
-    await page.waitForTimeout(200)
-    const joins = await page.evaluate(() => window.joins)
-    assert.deepEqual(joins.map(j => j.meeting.mode), ['room'], `${engine.name()}: picking Room starts one room meeting`)
-    assert.deepEqual(errors, [], `${engine.name()}: no page errors`)
-    console.log(`${engine.name()}: Meeting → Room reaches /api/v1/meeting/join`)
-  } finally {
-    await browser.close()
+    const meeting = controls.locator('.kbn-ctl-meet')
+    await meeting.waitFor({ state: 'visible' })
+    await meeting.getByRole('switch').check()
+    assert.deepEqual(await meeting.getByRole('radio').allTextContents(), mobile ? ['Phone'] : ['Call', 'Room', 'Phone'])
+    assert.ok((await meeting.textContent()).includes('recorder-host'))
+    if (!mobile) {
+      await page.evaluate(() => {
+        window.joins = []
+        const original = window.fetch
+        window.fetch = (input, init) => {
+          if (String(input).endsWith('/api/v1/meeting/join')) window.joins.push(JSON.parse(init.body))
+          return original(input, init)
+        }
+      })
+      await meeting.getByRole('radio', { name: 'Room', exact: true }).click()
+      await meeting.getByRole('button', { name: 'Start meeting', exact: true }).click()
+      await page.waitForFunction(() => window.joins?.length === 1)
+      const [join] = await page.evaluate(() => window.joins)
+      assert.equal(join.meeting.mode, 'room')
+      assert.equal(join.recorder, 'recorder-host')
+      assert.ok(join.origin && join.origin !== join.recorder)
+    }
+    if (process.env.MEETING_SCREENSHOT_DIR) {
+      await page.screenshot({ path: `${process.env.MEETING_SCREENSHOT_DIR}/meeting-${mobile ? 'phone' : 'desktop'}.png` })
+    }
+    assert.deepEqual(errors, [])
+    console.log(`${mobile ? 'phone' : 'desktop'}: selected recorder visible; supported Join modes only`)
+    await page.close()
   }
+} finally {
+  await browser.close()
 }
