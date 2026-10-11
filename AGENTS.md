@@ -259,8 +259,8 @@ in `NOTICE` and `LICENSE-APACHE`.
 ## Merging
 
 Merge to `main` by default once tests pass; a finished PR does not wait for
-Cail. Hold only in rare cases: an open design question, a fleet-wide behavior
-change that needs his call, or a red or unrun suite.
+the maintainer. Hold only in rare cases: an open design question, a fleet-wide
+behavior change that needs the maintainer's call, or a red or unrun suite.
 
 Merging includes deploying (`bin/shuttle-deploy --hosts ...`, then
 `shuttle daemon release`) to the hosts the change affects: a UI-only change

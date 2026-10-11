@@ -68,7 +68,8 @@ const workspaceFixture = example === 'workspace' || example === 'music' ? worksp
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
-const meetingScenario = new URLSearchParams(window.location.search).get('meeting')
+const meetingScenario = search.get('meeting')
+const recorderHost = search.get('recorder') ?? 'local'
 const MOCK_TAIL = [
   '14:02:51 me  okay, I think everyone is here, let us start with the null tests',
   '14:03:12 S1  so the chi-squared for the B-modes came back at forty-one for thirty-six bins',
@@ -85,6 +86,9 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || 
   ? {
       state: 'live',
       title: 'Shear telecon',
+      recorder: recorderHost,
+      launch: 'harness-meeting',
+      phone: search.get('audio') === 'phone',
       mirror_host: 'project-host',
       fiber: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run') : null,
       scribe_session_uuid: meetingScenario === 'scribe' ? '6bc045dc-92e0-473a-bf9e-e1cc263223bc' : null,
@@ -1367,12 +1371,17 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     mockMeeting = mockMeeting.state === 'failed' ? null : { ...mockMeeting, state: 'stopping' }
     return json({ meeting: mockMeeting }, 202)
   }
-  if (url.endsWith('/api/v1/meeting')) return json({ available: true, modes: ['call', 'room', 'phone'], meeting: mockMeeting })
+  if (url.split('?')[0].endsWith('/api/v1/meeting')) return json({
+    available: true, modes: ['call', 'room', 'phone'], recorder: recorderHost, meeting: mockMeeting,
+  })
   if (url.endsWith('/api/v1/meeting/join') && init?.method === 'POST') {
     const request = body()
     if (mockMeeting && mockMeeting.state !== 'failed') return json({ error: 'a meeting is already active', meeting: mockMeeting }, 409)
     const fiber = String(request.fiber_id ?? '')
     mockMeeting = {
+      recorder: recorderHost,
+      launch: 'harness-join',
+      phone: (request.meeting as Record<string, unknown>)?.mode === 'phone',
       state: 'starting',
       title: String(request.note ?? '').split('\n')[0] || fiber.split('/').pop() || 'Meeting',
       started_at: null,

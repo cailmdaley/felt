@@ -92,12 +92,16 @@ export function relayUrl(
   shuttleBase: string,
   location: Pick<Location, 'protocol' | 'host'>,
   launch: string | null,
+  recorder?: string | null,
 ): string {
   const base = shuttleBase ? new URL(shuttleBase) : null
   const protocol = (base?.protocol ?? location.protocol) === 'https:' ? 'wss:' : 'ws:'
   const host = base?.host ?? location.host
   const prefix = base ? base.pathname.replace(/\/+$/, '') : ''
-  const query = launch ? `?launch=${encodeURIComponent(launch)}` : ''
+  const params = new URLSearchParams()
+  if (launch) params.set('launch', launch)
+  if (recorder) params.set('recorder', recorder)
+  const query = params.size ? `?${params.toString()}` : ''
   return `${protocol}//${host}${prefix}/api/v1/meeting/audio${query}`
 }
 

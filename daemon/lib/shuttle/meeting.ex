@@ -124,6 +124,7 @@ defmodule Shuttle.Meeting do
   def stop(opts \\ []) do
     with_meeting_lock(fn ->
       with {:ok, snapshot, context} <- inspect_current(opts),
+           :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
            {:ok, result} <- stop_current(snapshot, context, opts) do
         {:ok, result}
       end
@@ -290,6 +291,7 @@ defmodule Shuttle.Meeting do
     with {:ok, mode} <- validate_meeting(meeting),
          {:ok, note} <- validate_note(note),
          :ok <- validate_target(target),
+         :ok <- validate_origin(origin, opts),
          executable when is_binary(executable) <- find_hark(opts),
          :ok <- validate_supported_mode(mode, opts),
          {:ok, snapshot, context} <- inspect_current(opts),
@@ -587,6 +589,13 @@ defmodule Shuttle.Meeting do
       end
     end
   end
+
+  defp validate_stop_launch(_snapshot, nil), do: :ok
+
+  defp validate_stop_launch(%{meeting: %{launch: launch}}, launch)
+       when is_binary(launch) and launch != "", do: :ok
+
+  defp validate_stop_launch(%{meeting: row}, _launch), do: {:error, {:stale_launch, row}}
 
   defp stop_current(%{meeting: nil}, _context, _opts), do: {:error, :not_found}
 
@@ -891,8 +900,20 @@ defmodule Shuttle.Meeting do
 
   defp mirror_host(_), do: nil
 
+  defp validate_origin(origin, opts) do
+    case Shuttle.OriginRouter.route_host(origin, origin_router_opts(opts)) do
+      {:error, {:unknown_origin, name}} ->
+        {:error,
+         {:validation,
+          Shuttle.OriginRouter.unknown_origin_message(name, origin_router_opts(opts))}}
+
+      _known_owner ->
+        :ok
+    end
+  end
+
   defp mirror_destination(origin, opts) do
-    case Shuttle.OriginRouter.route(origin, origin_router_opts(opts)) do
+    case Shuttle.OriginRouter.route_host(origin, origin_router_opts(opts)) do
       :local ->
         {:ok, nil, nil}
 
@@ -901,6 +922,11 @@ defmodule Shuttle.Meeting do
           alias_name when is_binary(alias_name) and alias_name != "" -> {:ok, remote, alias_name}
           _ -> {:error, {:validation, "remote origin has no SSH alias for transcript mirroring"}}
         end
+
+      {:error, {:unknown_origin, name}} ->
+        {:error,
+         {:validation,
+          Shuttle.OriginRouter.unknown_origin_message(name, origin_router_opts(opts))}}
     end
   end
 

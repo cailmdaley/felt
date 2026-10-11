@@ -1,37 +1,32 @@
 defmodule ShuttleWeb.MeetingController do
   @moduledoc """
-  Starts, reports and stops this daemon's local hark meeting capture.
-
-  A recording always runs on the daemon receiving the request, on its
-  microphone. `POST /api/v1/capture` with `meeting` starts one for a new capture
-  agent; `POST /api/v1/meeting/join` starts one for an existing constitution and
-  delivers the meeting message to its worker through the owner-routed
-  `/deliver` path. Reports are host-addressed; stop runs on this daemon.
+  Starts, reports and stops a pinned recorder's hark meeting capture.
+  Phone capture prefers a reachable device-capable remote recorder; agent
+  delivery remains owner-routed independently of the recording host.
   """
 
   use Phoenix.Controller, formats: [:json]
 
-  import ShuttleWeb.RelayHelpers, only: [relay_bytes: 2]
-
-  alias Shuttle.{Meeting, OriginRouter}
+  alias Shuttle.{Meeting, MeetingRouter}
 
   def show(conn, params) do
-    case OriginRouter.route_host(Map.get(params, "origin")) do
-      :local ->
+    case MeetingRouter.select(params) do
+      {:ok, :local} ->
         show_local(conn)
 
-      {:remote, remote} ->
-        relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/meeting", params))
+      {:ok, {:remote, remote}} ->
+        {status, body} = MeetingRouter.forward_read(remote)
+        conn |> put_status(status) |> json(body)
 
-      {:error, {:unknown_origin, origin}} ->
-        conn |> put_status(400) |> json(%{error: OriginRouter.unknown_origin_message(origin)})
+      {:error, message} ->
+        conn |> put_status(400) |> json(%{error: message})
     end
   end
 
   defp show_local(conn) do
     case Meeting.show() do
       {:ok, snapshot} ->
-        json(conn, snapshot)
+        json(conn, MeetingRouter.stamp(snapshot))
 
       {:error, reason} ->
         conn |> put_status(503) |> json(%{error: error_message(reason)})
@@ -39,7 +34,7 @@ defmodule ShuttleWeb.MeetingController do
   end
 
   @doc """
-  Body `{fiber_id, origin?, meeting: {mode}, note?}`. Records locally, mirrors
+  Body `{fiber_id, origin?, recorder?, meeting: {mode}, note?}`. Selects a recorder, mirrors
   the transcript toward `origin`, and delivers the meeting message to the
   fiber's worker. The answer carries the delivery's status: 202 with
   `delivery.delivered: null` when the message was sent but its arrival is
@@ -47,6 +42,20 @@ defmodule ShuttleWeb.MeetingController do
   and the error beside the live row.
   """
   def join(conn, params) do
+    case MeetingRouter.select_start(params) do
+      {:ok, :local} ->
+        join_local(conn, params)
+
+      {:ok, {:remote, remote}} ->
+        {status, body} = MeetingRouter.forward_start(remote, "/api/v1/meeting/join", params)
+        conn |> put_status(status) |> json(body)
+
+      {:error, message} ->
+        conn |> put_status(400) |> json(%{error: message})
+    end
+  end
+
+  defp join_local(conn, params) do
     fiber_id = Map.get(params, "fiber_id")
     origin = Map.get(params, "origin")
 
@@ -60,7 +69,7 @@ defmodule ShuttleWeb.MeetingController do
         {status, delivery} =
           ShuttleWeb.DeliverController.route(fiber_id, prompt, origin, "shuttle meeting")
 
-        body = %{meeting: row, delivery: delivery}
+        body = MeetingRouter.stamp(%{meeting: row, delivery: delivery})
 
         body =
           if status < 300,
@@ -75,14 +84,41 @@ defmodule ShuttleWeb.MeetingController do
 
       {:error, reason} ->
         {status, body} = start_error(reason)
-        conn |> put_status(status) |> json(body)
+        conn |> put_status(status) |> json(MeetingRouter.stamp(body))
     end
   end
 
-  def stop(conn, _params) do
-    case Meeting.stop() do
+  def stop(conn, params) do
+    cond do
+      params["recorder"] not in [nil, ""] and params["launch"] in [nil, ""] ->
+        conn |> put_status(422) |> json(%{error: "launch is required for an addressed stop"})
+
+      true ->
+        case MeetingRouter.select(Map.delete(params, "prefer")) do
+          {:ok, :local} ->
+            stop_local(conn, params)
+
+          {:ok, {:remote, remote}} ->
+            {status, body} = MeetingRouter.forward_stop(remote, params)
+            conn |> put_status(status) |> json(body)
+
+          {:error, message} ->
+            conn |> put_status(400) |> json(%{error: message})
+        end
+    end
+  end
+
+  defp stop_local(conn, params) do
+    case Meeting.stop(launch: params["launch"]) do
       {:ok, snapshot} ->
-        conn |> put_status(202) |> json(%{meeting: snapshot.meeting})
+        conn |> put_status(202) |> json(MeetingRouter.stamp(%{meeting: snapshot.meeting}))
+
+      {:error, {:stale_launch, row}} ->
+        conn
+        |> put_status(409)
+        |> json(
+          MeetingRouter.stamp(%{error: "a different meeting is recording now", meeting: row})
+        )
 
       {:error, :not_found} ->
         conn |> put_status(404) |> json(%{error: "there is no meeting to stop"})

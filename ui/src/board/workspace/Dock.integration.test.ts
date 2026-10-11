@@ -96,7 +96,7 @@ describe('anchored pickers', () => {
     let recording: { title: string; state: 'live' } | null = null
     let canJoin = true
     const join = vi.fn(async () => ({ error: null, delivered: true }))
-    const control = { canJoin: () => canJoin, current: () => recording, join }
+    const control = { canJoin: () => canJoin, modes: () => ['call', 'room', 'phone'], current: () => recording, join }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const meetingBand = meetingDock.bandFor(task({ sessionUuid: 'session-1', status: 'active' }))
     document.body.append(meetingBand.el)
@@ -134,7 +134,7 @@ describe('anchored pickers', () => {
     let recording: Record<string, unknown> | null = { title: 'Standup', state: 'live', fiber: 'a/task', tail: [] }
     let requested = false
     const stop = vi.fn(() => { requested = true })
-    const control = { canJoin: () => false, current: () => recording, join: vi.fn(), stop, stopRequested: () => requested }
+    const control = { canJoin: () => false, modes: () => ['phone'], current: () => recording, join: vi.fn(), stop, stopRequested: () => requested }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const band = meetingDock.bandFor(task())
     document.body.append(band.el)
@@ -160,7 +160,7 @@ describe('anchored pickers', () => {
   })
 
   it('keeps the switch on when a meeting fails to start', async () => {
-    const control = { canJoin: () => true, current: () => null, join: vi.fn(async () => ({ error: 'hark unavailable', delivered: false })) }
+    const control = { canJoin: () => true, modes: () => ['call', 'room', 'phone'], current: () => null, join: vi.fn(async () => ({ error: 'hark unavailable', delivered: false })) }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const meetingBand = meetingDock.bandFor(task())
     document.body.append(meetingBand.el)

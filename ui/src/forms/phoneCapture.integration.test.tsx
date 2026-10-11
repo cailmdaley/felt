@@ -77,7 +77,7 @@ beforeEach(() => {
   result = vi.fn()
   fetcher = vi.fn(async (url: string) => {
     if (url.endsWith('/agents')) return { ok: true, json: async () => [] }
-    if (url.endsWith('/meeting')) return { ok: true, json: async () => ({ available: true, modes: ['call', 'room', 'phone'], meeting: null }) }
+    if (url.includes('/api/v1/meeting')) return { ok: true, json: async () => ({ available: true, modes: ['call', 'room', 'phone'], meeting: null }) }
     order.push('capture')
     return { ok: true, status: 200, json: async () => ({ spawned: true, meeting: recording }) }
   })
@@ -245,7 +245,7 @@ describe('phone Capture form wiring', () => {
     const opened = mic()
     vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
-    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 503, json: async () => url.endsWith('/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { error: 'not recording' } }))
+    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 503, json: async () => url.includes('/api/v1/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { error: 'not recording' } }))
     await mount()
     click('.form-submit')
     await tick()
@@ -260,7 +260,7 @@ describe('phone Capture form wiring', () => {
   it('keeps confirmed recording connected when the remote scribe fails without replacing successful project memory', async () => {
     const opened = mic()
     vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
-    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 500, json: async () => url.endsWith('/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { recording: true, error: 'scribe unavailable', meeting: recording } }))
+    fetcher.mockImplementation(async (url: string) => ({ ok: !url.endsWith('/capture'), status: 500, json: async () => url.includes('/api/v1/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { recording: true, error: 'scribe unavailable', meeting: recording } }))
     localStorage.setItem(MEETING_PROJECT_KEY, JSON.stringify(saved))
     await mount()
     const projectSelect = document.querySelectorAll<HTMLSelectElement>('.form-select')[1]
@@ -280,7 +280,7 @@ describe('phone Capture form wiring', () => {
   it('fails closed on a recording response without a launch and reports the continuing recording', async () => {
     const opened = mic()
     vi.spyOn(Mic, 'open').mockResolvedValue(opened as unknown as Mic)
-    fetcher.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith('/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { spawned: true, meeting: { ...recording, launch: null } } }))
+    fetcher.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.includes('/api/v1/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: null } : { spawned: true, meeting: { ...recording, launch: null } } }))
     await mount()
     click('.form-submit')
     await tick()

@@ -73,7 +73,7 @@ import type { QueueRewrite, QueueRowMovePlan } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
-import { joinDeliveryPhrase, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
+import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
 import { joinMeeting as requestMeetingJoin, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
 import {
@@ -277,7 +277,9 @@ export class KanbanModal {
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
   private lastFetchStartedAt: number | null = null
-  private meetingStatus: MeetingStatus = { available: false, meeting: null }
+  private meetingStatus: MeetingStatus = { available: false, modes: [], recorder: null, meeting: null }
+  private meetingRecorder: string | null = null
+  private meetingStartUncertain = false
   private meetingPollTimer: number | null = null
   private meetingClockTimer: number | null = null
   private meetingFetchPromise: Promise<void> | null = null
@@ -349,7 +351,9 @@ export class KanbanModal {
       this.openWorkerAfterGesture,
       {
         meeting: {
-          canJoin: () => meetingJoinable(this.meetingStatus),
+          canJoin: () => !this.meetingStartUncertain && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
+          modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
+          recorder: () => this.meetingStatus.recorder ?? null,
           join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
           current: () => this.meetingStatus.meeting,
           stop: (meeting) => this.stopCurrentMeeting(meeting),
@@ -395,7 +399,10 @@ export class KanbanModal {
   /** Capture's response supersedes reads that began before recording started. */
   meetingStarted(meeting: MeetingRecord | null): void {
     this.meetingReadEpoch += 1
-    if (meeting) this.meetingStatus = { available: true, meeting }
+    if (meeting) {
+      this.meetingRecorder = meeting.recorder ?? this.meetingStatus.recorder ?? null
+      this.meetingStatus = { ...this.meetingStatus, available: true, recorder: this.meetingRecorder, meeting }
+    }
     this.presentMeeting()
     this.surfaces.selectInFlight()
     void this.refreshMeeting()
@@ -421,6 +428,8 @@ export class KanbanModal {
     mode: MeetingMode,
     composeNote: () => Promise<string>,
   ): Promise<MeetingJoinResult> {
+    if (this.meetingStartUncertain) return { error: 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.', delivered: false }
+    const recorder = this.meetingStatus.recorder
     let opening: PhoneCaptureAttempt | undefined
     let generation: number | undefined
     if (mode === 'phone') {
@@ -446,10 +455,16 @@ export class KanbanModal {
     const outcome = await requestMeetingJoin(this.shuttleBase, {
       fiberId: card.id,
       origin: card.originId,
+      recorder,
       mode,
       note,
     })
     if (outcome.kind === 'error') {
+      if (outcome.uncertain) {
+        this.meetingStartUncertain = true
+        this.meetingRecorder = outcome.recorder ?? recorder ?? null
+        void this.refreshMeeting()
+      }
       opening?.cancel()
       this.showBanner(`Couldn't start the meeting: ${outcome.message}`, 'error')
       return { error: outcome.message, delivered: false }
@@ -467,10 +482,8 @@ export class KanbanModal {
         audioError = errText(error)
         this.showBanner(audioError, 'error')
       }
-      this.meetingStarted(outcome.meeting)
-    } else {
-      await this.refreshMeeting()
     }
+    this.meetingStarted(outcome.meeting)
     void this.fetchAndRender()
     return { error: audioError, delivered: outcome.kind !== 'recording' }
   }
@@ -479,7 +492,7 @@ export class KanbanModal {
     if (!this.meetingStopGuard.request(meeting)) return
     this.presentMeeting()
     try {
-      await requestMeetingStop(this.shuttleBase)
+      await requestMeetingStop(this.shuttleBase, fetch, meeting)
       if (meeting.phone) this.phoneAudio.cancel()
     } catch (error) {
       this.showBanner(`Couldn't stop the meeting: ${errText(error)}`, 'error')
@@ -2005,7 +2018,7 @@ export class KanbanModal {
     let succeeded = false
     const pending = (async () => {
       try {
-        const response = await fetch(`${this.shuttleBase}/api/v1/meeting`, { signal: controller.signal })
+        const response = await fetch(meetingStatusUrl(this.shuttleBase, this.meetingRecorder, isMobileViewport()), { signal: controller.signal })
         if (!response.ok || !this.container) return
         const status = parseMeetingStatus(await response.json())
         if (!status || epoch !== this.meetingReadEpoch) return
@@ -2013,6 +2026,8 @@ export class KanbanModal {
         this.meetingStopGuard.observe(status.meeting)
         const availabilityChanged = status.available !== this.meetingStatus.available
         this.meetingStatus = status
+        if (status.meeting) this.meetingRecorder = status.recorder ?? status.meeting.recorder ?? null
+        else if (!this.meetingStartUncertain) this.meetingRecorder = null
         this.phoneAudio.observe(status.meeting)
         this.syncMeetingClock()
         this.dock.syncMeeting()

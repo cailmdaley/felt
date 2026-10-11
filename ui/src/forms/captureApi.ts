@@ -17,6 +17,7 @@ export interface CaptureRequestInput {
   chrome?: boolean
   surface?: ExecutionSurface
   meetingMode?: MeetingMode | null
+  recorder?: string | null
 }
 
 export interface CaptureResponseData {
@@ -27,13 +28,15 @@ export interface CaptureResponseData {
   message?: string
   surface?: ExecutionSurface
   recording?: boolean
+  recording_unknown?: boolean
+  recorder?: string
   meeting?: unknown
 }
 
 export type CaptureOutcome =
   | { kind: 'spawned'; tmuxSession: string; surface?: ExecutionSurface }
   | { kind: 'meeting-recording'; host: string; error?: string }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; uncertain?: boolean }
 
 export function captureRequestBody(input: CaptureRequestInput): Record<string, unknown> {
   const prompt = input.prompt.trim()
@@ -45,7 +48,7 @@ export function captureRequestBody(input: CaptureRequestInput): Record<string, u
     ...(input.effort ? { effort: input.effort } : {}),
     ...(input.chrome ? { chrome: true } : {}),
     ...(input.meetingMode
-      ? { surface: 'cli', meeting: { mode: input.meetingMode } }
+      ? { surface: 'cli', meeting: { mode: input.meetingMode }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
       : input.surface
         ? { surface: input.surface }
         : {}),
@@ -57,6 +60,10 @@ export function captureOutcome(
   data: CaptureResponseData,
   options: { projectDir: string; meetingMode?: MeetingMode | null; host: string },
 ): CaptureOutcome {
+  if (data.recording_unknown === true) return {
+    kind: 'error', uncertain: true,
+    message: data.error || data.message || 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.',
+  }
   const spawned = response.ok && data.spawned === true
   const hasMeetingRow = !!data.meeting && typeof data.meeting === 'object' && !Array.isArray(data.meeting)
   const recording = data.recording === true || (response.ok && hasMeetingRow)
@@ -67,7 +74,7 @@ export function captureOutcome(
     return {
       kind: 'meeting-recording',
       host: options.host,
-      error: `Recording locally; the scribe didn't start: ${captureError(response.status, data, options.projectDir)}`,
+      error: `Recording; the scribe didn't start: ${captureError(response.status, data, options.projectDir)}`,
     }
   }
 

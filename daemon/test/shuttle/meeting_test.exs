@@ -33,6 +33,7 @@ defmodule Shuttle.Test.MeetingCaptureForwardClient do
     do: Agent.start_link(fn -> %{response: response, last: nil} end, name: __MODULE__)
 
   def last, do: Agent.get(__MODULE__, & &1.last)
+  def get(_url, _timeout), do: {:error, :unavailable}
 
   def post(url, body, _content_type, _timeout_ms) do
     Agent.update(__MODULE__, &Map.put(&1, :last, %{url: url, body: body}))
@@ -87,14 +88,25 @@ defmodule Shuttle.MeetingTest do
         |> Map.get(:resp_body)
         |> Jason.decode!()
 
-      assert body == %{"available" => true, "meeting" => nil, "modes" => modes}
+      assert body == %{
+               "available" => true,
+               "meeting" => nil,
+               "modes" => modes,
+               "recorder" => Shuttle.Poller.own_host_id()
+             }
     end
 
     for unavailable <- [false, path <> "-missing", path] do
       File.chmod!(path, 0o644)
       Env.put_app_env(:hark_path, unavailable)
       body = api_conn() |> get("/api/v1/meeting") |> Map.get(:resp_body) |> Jason.decode!()
-      assert body == %{"available" => false, "meeting" => nil, "modes" => []}
+
+      assert body == %{
+               "available" => false,
+               "meeting" => nil,
+               "modes" => [],
+               "recorder" => Shuttle.Poller.own_host_id()
+             }
     end
   end
 
@@ -139,12 +151,15 @@ defmodule Shuttle.MeetingTest do
 
     conn = get(api_conn(), "/api/v1/meeting?origin=audio-host&extra=kept")
     assert conn.status == 200
-    assert conn.resp_body == body
-    assert Plug.Conn.get_resp_header(conn, "content-type") == ["application/json"]
+
+    assert Jason.decode!(conn.resp_body) ==
+             Shuttle.MeetingRouter.stamp(Jason.decode!(body), "audio-host")
+
+    assert Plug.Conn.get_resp_header(conn, "content-type") == ["application/json; charset=utf-8"]
     url = Shuttle.Test.StubGetFileClient.last().url |> URI.parse()
     assert url.path == "/api/v1/meeting"
     assert url.host == "audio.example"
-    assert URI.decode_query(url.query) == %{"extra" => "kept"}
+    assert url.query == nil
     assert Shuttle.Test.MeetingRunner.calls() == []
   end
 
@@ -162,7 +177,7 @@ defmodule Shuttle.MeetingTest do
 
     conn = get(api_conn(), "/api/v1/meeting?origin=audio-host")
     assert conn.status == 502
-    assert Jason.decode!(conn.resp_body)["error"] =~ "forward to audio-host failed"
+    assert Jason.decode!(conn.resp_body)["error"] =~ "cannot inspect recorder"
     assert Shuttle.Test.MeetingRunner.calls() == []
   end
 
@@ -177,7 +192,12 @@ defmodule Shuttle.MeetingTest do
 
     conn = get(api_conn(), "/api/v1/meeting?origin=audio-host")
     assert conn.status == 503
-    assert conn.resp_body == body
+
+    assert Jason.decode!(conn.resp_body) == %{
+             "error" => "tmux unavailable on owner",
+             "recorder" => "audio-host"
+           }
+
     assert Shuttle.Test.MeetingRunner.calls() == []
   end
 
@@ -1073,6 +1093,69 @@ defmodule Shuttle.MeetingTest do
     assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
              cmd == "tmux" and match?(["new-session" | _], args)
            end) == 1
+  end
+
+  test "receiving recorder refuses a missing agent owner before any recording for capture and join",
+       %{hark_dir: hark_dir} do
+    for path <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+      conn =
+        post(
+          api_conn(),
+          path,
+          Jason.encode!(%{
+            recorder: Shuttle.Poller.own_host_id(),
+            recorder_forwarded: true,
+            origin: "absent-owner",
+            meeting: %{mode: "phone"},
+            prompt: "meeting",
+            note: "meeting",
+            fiber_id: "p/f",
+            project_dir: hark_dir
+          })
+        )
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["error"] =~ "unknown host \"absent-owner\""
+      assert Shuttle.Test.MeetingRunner.calls() == []
+      refute File.exists?(Path.join(hark_dir, "meetings"))
+    end
+
+    assert {:error, {:validation, message}} =
+             Meeting.meeting_paths("missing-owner", "absent-owner")
+
+    assert message =~ "unknown host"
+  end
+
+  test "addressed stale stop cannot signal or dismiss a newer launch", %{hark_dir: hark_dir} do
+    write_meeting(hark_dir, %{
+      "launch" => "new",
+      "pid" => 321,
+      "phase" => "live",
+      "transcript" => nil
+    })
+
+    set_current_meeting_handler("new", 321)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/meeting/stop",
+        Jason.encode!(%{recorder: Shuttle.Poller.own_host_id(), launch: "old"})
+      )
+
+    assert conn.status == 409
+    assert %{"meeting" => %{"launch" => "new"}, "recorder" => own} = Jason.decode!(conn.resp_body)
+    assert own == Shuttle.Poller.own_host_id()
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {command, args, _} ->
+             command == "kill" or (command == "tmux" and hd(args) == "kill-session")
+           end)
+
+    assert {:ok, _} = Meeting.stop(launch: "new")
+
+    assert Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {command, _, _} ->
+             command == "kill"
+           end)
   end
 
   test "concurrent and repeated stop requests signal a live pid only once", %{hark_dir: hark_dir} do

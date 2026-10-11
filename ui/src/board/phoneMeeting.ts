@@ -20,6 +20,7 @@ export class PhoneMeeting implements PhoneCaptureHooks {
   readonly lock: ScreenLock
   peak = 0
   private launch: string | null = null
+  private recorder: string | null = null
   private attempt = 0
   private checkTimer: number | null = null
   private mounted = false
@@ -46,7 +47,7 @@ export class PhoneMeeting implements PhoneCaptureHooks {
       },
       // The scribe's project origin does not own this meeting's audio.
       createRelay: (launch, events) => new RelayLink({
-        url: relayUrl(shuttleBase, window.location, launch), ...events,
+        url: relayUrl(shuttleBase, window.location, launch, this.recorder), ...events,
       }),
       lock: this.lock,
       onChange: changed,
@@ -80,6 +81,7 @@ export class PhoneMeeting implements PhoneCaptureHooks {
       throw new Error('Recording started, but the daemon did not return a phone meeting launch. The mic is off; reconnect when the meeting is available.')
     }
     this.launch = meeting.launch
+    this.recorder = meeting.recorder ?? null
     this.session.stream(generation, meeting.launch)
   }
 
@@ -101,12 +103,13 @@ export class PhoneMeeting implements PhoneCaptureHooks {
   cancel(): void {
     this.attempt += 1
     this.launch = null
+    this.recorder = null
     this.peak = 0
     this.session.stop()
   }
 
   observe(meeting: MeetingRecord | null): void {
-    if (this.launch && (!meeting || meeting.launch !== this.launch || meeting.state === 'failed' || meeting.state === 'stopping')) this.cancel()
+    if (this.launch && (!meeting || meeting.launch !== this.launch || (meeting.recorder ?? null) !== this.recorder || meeting.state === 'failed' || meeting.state === 'stopping')) this.cancel()
   }
 
   mount(): void {

@@ -48,7 +48,7 @@ describe('meeting capture response', () => {
     )).toEqual({
       kind: 'meeting-recording',
       host: 'project host',
-      error: 'Recording locally; the scribe didn\'t start: owner host is unreachable',
+      error: 'Recording; the scribe didn\'t start: owner host is unreachable',
     })
   })
 

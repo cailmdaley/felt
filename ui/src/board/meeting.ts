@@ -3,9 +3,14 @@ import type { KanbanCard } from './KanbanTypes.js'
 export const MEETING_POLL_IDLE_MS = 15_000
 export const MEETING_POLL_ACTIVE_MS = 2_000
 
+export type MeetingMode = 'call' | 'room' | 'phone'
+const MEETING_MODES = new Set<MeetingMode>(['call', 'room', 'phone'])
+
 export type MeetingState = 'starting' | 'loading' | 'live' | 'stopping' | 'failed'
 
 export interface MeetingRecord {
+  /** The daemon recording this meeting, independent of its scribe's owner. */
+  recorder?: string | null
   state: MeetingState
   title: string | null
   started_at: string | null
@@ -28,7 +33,20 @@ export interface MeetingRecord {
 
 export interface MeetingStatus {
   available: boolean
+  modes?: MeetingMode[]
+  recorder?: string | null
   meeting: MeetingRecord | null
+}
+
+/** Fail closed on unknown capabilities; mobile audio always comes from this tab. */
+export function supportedMeetingModes(status: MeetingStatus, mobile: boolean): MeetingMode[] {
+  return status.available ? (status.modes ?? []).filter(mode => !mobile || mode === 'phone') : []
+}
+
+/** Active recordings stay addressed even if capability probes would select another host. */
+export function meetingStatusUrl(base: string, recorder?: string | null, mobile = false): string {
+  const query = recorder ? `?recorder=${encodeURIComponent(recorder)}` : mobile ? '?prefer=phone' : ''
+  return `${base}/api/v1/meeting${query}`
 }
 
 const MEETING_STATES = new Set<MeetingState>(['starting', 'loading', 'live', 'stopping', 'failed'])
@@ -40,6 +58,7 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
   const nullableString = (key: string): string | null =>
     typeof raw[key] === 'string' ? raw[key] as string : null
   return {
+    recorder: nullableString('recorder'),
     state: raw.state as MeetingState,
     title: nullableString('title'),
     started_at: nullableString('started_at'),
@@ -59,9 +78,15 @@ export function parseMeetingStatus(value: unknown): MeetingStatus | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Record<string, unknown>
   if (typeof raw.available !== 'boolean') return null
-  if (raw.meeting === null || raw.meeting === undefined) return { available: raw.available, meeting: null }
+  const modes = Array.isArray(raw.modes)
+    ? [...new Set(raw.modes.filter((mode): mode is MeetingMode =>
+      typeof mode === 'string' && MEETING_MODES.has(mode as MeetingMode)))]
+    : []
+  const recorder = typeof raw.recorder === 'string' && raw.recorder.trim() ? raw.recorder : null
+  const status = { available: raw.available, modes, recorder }
+  if (raw.meeting === null || raw.meeting === undefined) return { ...status, meeting: null }
   const meeting = parseMeetingRecord(raw.meeting)
-  return meeting ? { available: raw.available, meeting } : null
+  return meeting ? { ...status, meeting: { ...meeting, recorder: meeting.recorder ?? recorder } } : null
 }
 
 export function meetingStateWord(state: MeetingState): string {
@@ -118,7 +143,7 @@ export function meetingPollDelay(
 }
 
 export class MeetingStopGuard {
-  private requested: { key: string; title: string | null; startedAt: string | null } | null = null
+  private requested: { key: string; title: string | null; startedAt: string | null; recorder: string | null; launch: string | null } | null = null
 
   request(meeting: MeetingRecord): boolean {
     if (meeting.state === 'stopping' || this.isRequested(meeting)) return false
@@ -126,6 +151,8 @@ export class MeetingStopGuard {
       key: this.key(meeting),
       title: meeting.title,
       startedAt: meeting.started_at,
+      recorder: meeting.recorder ?? null,
+      launch: meeting.launch,
     }
     return true
   }
@@ -133,6 +160,7 @@ export class MeetingStopGuard {
   isRequested(meeting: MeetingRecord): boolean {
     if (!this.requested) return false
     return this.requested.key === this.key(meeting) || (
+      !this.requested.launch && !meeting.launch && this.requested.recorder === (meeting.recorder ?? null) &&
       this.requested.startedAt === null && this.requested.title === meeting.title
     )
   }
@@ -152,12 +180,14 @@ export class MeetingStopGuard {
         key: this.key(meeting),
         title: meeting.title,
         startedAt: meeting.started_at,
+        recorder: meeting.recorder ?? null,
+        launch: meeting.launch,
       }
     }
   }
 
   private key(meeting: MeetingRecord): string {
-    return `${meeting.started_at ?? ''}\u0000${meeting.title ?? ''}`
+    return `${meeting.recorder ?? ''}\u0000${meeting.launch ?? ''}\u0000${meeting.started_at ?? ''}\u0000${meeting.title ?? ''}`
   }
 }
 

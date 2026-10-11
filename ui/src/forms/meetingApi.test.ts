@@ -8,12 +8,12 @@ describe('parseCaptureMeetingCapabilities', () => {
   it('keeps only known unique modes in daemon order', () => {
     expect(parseCaptureMeetingCapabilities({
       available: true, modes: ['phone', 'room', 'phone', 'unknown', 3, null, 'call'], meeting: null,
-    })).toEqual({ available: true, modes: ['phone', 'room', 'call'] })
+    })).toEqual({ available: true, modes: ['phone', 'room', 'call'], recorder: null })
   })
 
   it('does not infer modes from missing or malformed capabilities', () => {
     for (const modes of [undefined, null, 'phone', {}, []]) {
-      expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: null })).toEqual({ available: true, modes: [] })
+      expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: null })).toEqual({ available: true, modes: [], recorder: null })
     }
     for (const value of [undefined, null, [], 'phone', {}, { available: 'true', modes: ['phone'] }]) {
       expect(parseCaptureMeetingCapabilities(value).available).toBe(false)
@@ -26,11 +26,23 @@ describe('parseCaptureMeetingCapabilities', () => {
       expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: { state } }).available).toBe(false)
     }
     expect(parseCaptureMeetingCapabilities({ available: false, modes, meeting: null }).available).toBe(false)
-    expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: { state: 'failed' } })).toEqual({ available: true, modes })
+    expect(parseCaptureMeetingCapabilities({ available: true, modes, meeting: { state: 'failed' } })).toEqual({ available: true, modes, recorder: null })
   })
 })
 
 describe('stopMeeting', () => {
+  it('addresses Stop by recorder and launch, never by the constitution owner', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply({ meeting: null }, 202))
+    const meeting = { state: 'live', recorder: 'recorder-host', launch: 'launch-1' } as import('../board/meeting').MeetingRecord
+    await stopMeeting('https://hub', fetcher, meeting)
+    expect(fetcher).toHaveBeenCalledWith('https://hub/api/v1/meeting/stop', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recorder: 'recorder-host', launch: 'launch-1' }),
+    })
+    await expect(stopMeeting('https://hub', fetcher, { ...meeting, launch: null })).rejects.toThrow('no launch id')
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
   it('posts to the local meeting stop route and treats a missing meeting as already stopped', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 404 }))
     await expect(stopMeeting('http://daemon', fetcher)).resolves.toBeUndefined()
@@ -115,6 +127,6 @@ describe('joinMeeting', () => {
 
     const offline = vi.fn<typeof fetch>().mockRejectedValue(new Error('connection refused'))
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, offline))
-      .resolves.toEqual({ kind: 'error', message: "Couldn't reach Shuttle: connection refused" })
+      .resolves.toMatchObject({ kind: 'error', uncertain: true, message: expect.stringContaining('Inspect the recorder before starting another meeting') })
   })
 })
