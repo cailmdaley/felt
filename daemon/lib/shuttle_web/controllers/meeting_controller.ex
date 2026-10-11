@@ -34,7 +34,7 @@ defmodule ShuttleWeb.MeetingController do
   end
 
   @doc """
-  Body `{fiber_id, origin?, meeting: {mode}, note?}`. Records locally, mirrors
+  Body `{fiber_id, origin?, recorder?, meeting: {mode}, note?}`. Selects a recorder, mirrors
   the transcript toward `origin`, and delivers the meeting message to the
   fiber's worker. The answer carries the delivery's status: 202 with
   `delivery.delivered: null` when the message was sent but its arrival is

@@ -6,7 +6,7 @@ defmodule ShuttleWeb.CaptureController do
   prompt. The spawned session files a fiber, installs the shuttle block, claims
   itself via `/api/v1/claim`, and continues as the worker realizing it.
 
-  A meeting capture starts hark on the daemon receiving the request before the
+  A meeting capture starts hark on the selected recorder before the
   ordinary capture is routed to the project owner (`Shuttle.Meeting.start/5`
   with a capture target). The meeting instructions travel in the capture
   prompt, and the recording's launch id travels as `meeting_launch`: the owner
