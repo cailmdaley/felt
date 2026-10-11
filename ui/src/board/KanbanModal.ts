@@ -355,7 +355,7 @@ export class KanbanModal {
           stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
         },
         workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
-        onRest: (card, anchor) => this.openRestPopover(card, anchor),
+        onRest: card => this.openRestPopover(card),
       },
     )
     this.surfaces = new KanbanSurfaceRenderer({
@@ -370,7 +370,7 @@ export class KanbanModal {
       reorderQueue: (writes) => this.reorderQueue(writes),
       unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
       openDetail: (card) => this.openDocumentChannel(card),
-      onRest: (card, anchor) => this.openRestPopover(card, anchor),
+      onRest: card => this.openRestPopover(card),
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
@@ -527,7 +527,7 @@ export class KanbanModal {
       dock: this.dock,
       find: this.findEl ?? undefined,
       focusFind: () => this.focusFind(),
-      onRest: (card, anchor) => this.openRestPopover(card, anchor),
+      onRest: card => this.openRestPopover(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
     this.readerSlotEl?.append(this.workspace.reader.barIndex)
@@ -2619,9 +2619,9 @@ export class KanbanModal {
 
   private closeRestPopover?: () => void
 
-  private openRestPopover(card: KanbanCard, anchor: HTMLElement): void {
+  private openRestPopover(card: KanbanCard): void {
     this.closeRestPopover?.()
-    this.closeRestPopover = restPopover(card, anchor, async until => {
+    this.closeRestPopover = restPopover(card, async until => {
       try {
         await this.postJson('/api/v1/lifecycle', {
           action: 'rest', fiber: card.id, origin: card.originId, until,
@@ -2659,7 +2659,7 @@ export class KanbanModal {
         const address = this.deskKeyboard?.selection
         const card = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
         const anchor = this.deskEl?.querySelector<HTMLElement>('.kbn-key-selected')
-        if (card && anchor) this.openRestPopover(card, anchor)
+        if (card && anchor) this.openRestPopover(card)
         e.preventDefault(); e.stopPropagation()
         return
       }

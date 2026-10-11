@@ -253,7 +253,7 @@ interface KanbanSurfaceRendererOptions {
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
   /** Opens the Rest popover on the card's own Rest affordance. */
-  onRest?: (card: KanbanCard, anchor: HTMLElement) => void
+  onRest?: (card: KanbanCard) => void
   /** Resolve the owning host's registry default for agent labels. */
   getFleetDefaultAgent?: (origin: string) => string
   /** A card held still under the thumb — the touch reading of the drag. The
@@ -1924,10 +1924,9 @@ export class KanbanSurfaceRenderer {
       restBtn.textContent = 'rest'
       restBtn.title = 'Rest (s)'
       restBtn.setAttribute('aria-label', `Rest fiber: ${card.name} (s)`)
-      const button = restBtn
       restBtn.addEventListener('click', (e) => {
         e.stopPropagation()
-        this.o.onRest?.(card, button)
+        this.o.onRest?.(card)
       })
     }
     if (rightChip || restBtn) {

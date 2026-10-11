@@ -16,7 +16,7 @@ const open = (): { submit: ReturnType<typeof vi.fn>; anchor: HTMLElement } => {
   document.body.append(anchor)
   anchor.focus()
   const submit = vi.fn(async (_until: string) => {})
-  close = restPopover(card({ id: 'f' }), anchor, submit)
+  close = restPopover(card({ id: 'f' }), submit)
   return { submit, anchor }
 }
 const today = (): string => isoDayLocal(Date.now())

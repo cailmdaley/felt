@@ -839,7 +839,7 @@
 .kbn-rest-scrim {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 10600;
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--kbn-shade) 45%, transparent);

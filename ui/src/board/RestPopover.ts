@@ -17,7 +17,6 @@ import { civilWeekday, formatCivilDay, isoDayLocal, shiftCivilDay } from './civi
  */
 export function restPopover(
   card: KanbanCard,
-  anchor: HTMLElement,
   submit: (until: string) => Promise<void>,
 ): () => void {
   const previous = document.activeElement as HTMLElement | null
@@ -76,9 +75,9 @@ export function restPopover(
 
   panel.append(title, subject, headline, monthLabel, grid, presets, keys, rest)
   scrim.append(panel)
-  // Keep the board's palette without inheriting an inert Desk or reader body.
-  const root = anchor.closest('.kbn-modal') ?? document.body
-  root.append(scrim)
+  // The palette lives on :root, so the body is home: it stacks above the board's
+  // bar and does not inherit an inert Desk or reader.
+  document.body.append(scrim)
 
   function clamp(day: string): string {
     return day < earliest ? earliest : day
