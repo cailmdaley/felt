@@ -230,6 +230,27 @@ mirror of the Elixir resolver. `daemon/test/fixtures/tailnet_peers/` holds the
 shared cases. When Tailscale is absent, stopped, or failing, the daemon uses
 the file alone and records why, and `shuttle doctor` reports the reason.
 
+## Meeting recorder routing
+
+A meeting has two independent host addresses: the **recorder** runs hark, and the agent's **origin** owns the scribe or joined constitution.
+Capture and Join preserve that origin when forwarding to a recorder, so transcript mirrors and agent delivery point to the correct owner even when the owner is the requesting hub.
+
+A phone board asks its serving daemon for `GET /api/v1/meeting?prefer=phone`.
+The daemon probes the configured fleet with short bounded local-capability reads and prefers a reachable recorder advertising hark availability and macOS device modes.
+It falls back to local recording only before a start is attempted.
+Plain `GET /meeting` reports local capabilities and cannot trigger another selection round.
+An explicit recorder address terminates forwarding after one hop.
+
+The selected recorder is visible in the UI and travels with the returned meeting row.
+Active polling and Stop remain pinned to that recorder; Stop checks the launch identity under the meeting lock, so stale controls cannot stop another recording.
+After an ambiguous forwarded start, the daemon reports uncertainty and does not retry or select a fallback.
+The UI holds another start until the operator inspects the recorder.
+
+Phone audio stays phone audio even when a remote Mac records it.
+The phone connects only to the hub's `/meeting/audio` WebSocket, which relays to the selected recorder's `/meeting/audio` endpoint.
+The recorder validates the launch id and feeds its local hark socket.
+Relay connections have bounded connection and send deadlines, propagate status and closure, and never replay audio after a disconnect.
+
 ## Platform story
 
 **Linux and macOS are both supported for single-host use.** One host runs the

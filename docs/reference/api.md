@@ -37,9 +37,9 @@ is not enough.
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
-| `POST /capture` | owner-routed; meeting setup is local first | Launch a session from a free-text prompt; meeting mode starts local hark recording before routing the scribe capture |
-| `POST /meeting/join` | local recording; delivery owner-routed | Start local hark recording and join the meeting to an existing constitution's worker |
-| `POST /meeting/stop` | local | Stop the local hark capture or dismiss its failed tmux pane |
+| `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
+| `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
+| `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /attachments` | owner-routed | Store images pasted into the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
@@ -90,9 +90,9 @@ unknown action or a missing field is 400.
 
 `POST /capture` accepts `surface: "app"` for a Codex agent or `"cli"` for
 terminal execution. It also accepts an optional
-`meeting: {mode: "call" | "room" | "phone"}` object. Meeting mode starts hark on
-the daemon that receives the request before owner-routing the capture, so the
-recording starts immediately while the scribe runs beside the project. Meeting mode rejects `surface: "app"`,
+`meeting: {mode: "call" | "room" | "phone"}` object and an optional `recorder` host id.
+Meeting mode starts hark on the selected recorder before owner-routing the capture, so recording and the scribe can run on different hosts.
+Meeting mode rejects `surface: "app"`,
 allows `prompt` to be omitted, and replaces the prompt with the meeting's facts
 (mode and transcript path, plus a pointer to the shuttle skill's
 `references/meeting.md`) followed by the user's note.
@@ -198,15 +198,18 @@ harness processes sharing one transcript.
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
-| `GET /meeting/audio` | local | WebSocket: relay a phone's microphone into the live `phone` meeting's hark socket |
+| `GET /meeting/audio` | recorder-addressed | WebSocket: relay a phone's microphone through the serving hub to the selected recorder |
 
-`GET /meeting?origin=<host>` returns `{available, modes, meeting}` from the selected daemon.
-`modes` lists the recording inputs that host supports: `call` (local microphone and system audio), `room` (local microphone), or `phone` (streamed phone microphone).
+`GET /meeting?recorder=<host>` returns `{available, modes, recorder, meeting}` from the addressed daemon.
+`origin=<host>` also supports host-addressed reads.
+`modes` lists the recording inputs that host supports: `call` (its microphone and system audio), `room` (its microphone), or `phone` (streamed phone microphone).
 Without hark, the list is empty.
-Capture reads the serving daemon's modes, narrows them to `phone` on mobile, and hides the mode selector when only one mode remains.
-A live meeting on the serving daemon prevents starting another there.
-The board's host picker chooses the scribe host, not the recorder: open the desired recording host's board to record there.
-When the scribe runs elsewhere, Capture names both hosts beside the Meeting toggle.
+`GET /meeting?prefer=phone` asks the serving daemon to select a reachable remote recorder advertising `available: true` and both `room` and `call`; it uses the local recorder if no remote qualifies.
+Capability probes belong to the daemon and have short bounded deadlines; the browser never probes remote hosts.
+Capture and Join use the selected recorder's capabilities and narrow them to `phone` on mobile.
+A remote Mac still records in `phone` mode when the microphone is on the phone.
+The board's host picker chooses the scribe host, not the recorder, and the controls name the selected recorder.
+An active recording pins polling and Stop to that recorder instead of selecting again.
 
 Each origin in `GET /felt-stores` also reports `browser_capable`.
 It is true only for a macOS daemon whose user has an active GUI session.
@@ -269,12 +272,15 @@ may total at most 20 MiB. Successful receipts include
 copy. File-bearing envelopes are refused on `/messages`; this dedicated route
 prevents an older daemon from silently dropping fields it does not recognize.
 
-`GET /meeting` returns `{available, modes, meeting}` for the serving daemon, or the host named by `origin`.
+`GET /meeting` without a selector reports local capabilities and recording state, so daemon capability probes cannot recursively select another recorder.
+The answer includes `{available, modes, recorder, meeting}`.
+Use `recorder=<host>` for an explicit read, or `prefer=phone` for capability-based selection.
 Hark exposes no capability-reporting CLI protocol, and its help includes device flags even on Linux.
 The daemon therefore derives `modes` from hark availability and the OS: macOS offers call/room/phone; other hosts offer phone.
 The row is `null` when the addressed daemon has no meeting capture to report. Otherwise it carries
 `state`, `title`, `started_at`, `tail`, `transcript`, `mirror_host`,
-`fiber`, `joined`, `phone`, `launch`, `tmux_session`, and `error`. `phone` is
+`fiber`, `joined`, `phone`, `launch`, `recorder`, `tmux_session`, and `error`.
+`recorder` names the daemon that owns the recording, independently of the agent's owner. `phone` is
 true when the meeting takes its audio from a phone (`mode: "phone"`), so a page
 can offer to connect one; `launch` is the recording's launch id, which a phone's
 audio socket binds to. `tail` is the
@@ -294,8 +300,10 @@ records this machine's microphone and system audio, `room` its microphone
 alone, and `phone` a phone's microphone streamed in over `GET /meeting/audio`
 (hark `--phone`, an in-person meeting diarized like `room`). The daemon derives
 the meeting title and transcript name from the first line of `prompt`, or uses
-`Meeting` when no note is supplied. It starts hark in the local `hark-meeting`
-tmux session, then continues the normal local or forwarded capture flow.
+`Meeting` when no note is supplied.
+It starts hark in the selected recorder's `hark-meeting` tmux session, then continues the ordinary owner-routed capture flow.
+A `phone` start without an explicit `recorder` uses capability-based selection; other modes default to the receiving daemon.
+The `origin` remains the agent's owner when the request crosses to a recorder, including when the owner is the requesting hub.
 For a remote `origin`, hark writes locally and mirrors to
 `~/.hark/meetings/<name>.txt` through that remote's configured SSH alias.
 The capture agent receives the scribe message and the optional user note as its
@@ -305,9 +313,12 @@ An unavailable hark executable returns **503**. An existing meeting in
 `starting`, `loading`, `live`, or `stopping` returns **409** with its row.
 Meeting mode rejects `surface: "app"`, an invalid mode, or a mode unsupported by the recorder with **422**.
 If capture fails after hark starts, the capture's status and error body include
-the meeting row and `recording: true`; the local recording continues.
+the meeting row and `recording: true`; recording continues on its recorder.
+A transport failure after forwarding a start returns `recording_unknown: true` and the recorder address.
+The hub never retries or falls back to another recorder after attempting that write: the first recorder may already be recording.
+Capture and Join hold further starts after an ambiguous answer and instruct the operator to inspect the recorder before starting another meeting.
 
-`POST /meeting/join` accepts `{fiber_id, origin?, meeting: {mode}, note?}`. It
+`POST /meeting/join` accepts `{fiber_id, origin?, recorder?, meeting: {mode}, note?}`. It
 starts hark exactly as meeting capture does, mirrored toward `origin`, and names
 the recording after the note's first line or, with no note, the fiber's leaf.
 The meeting message (the same facts as a meeting capture's, plus a line saying
@@ -361,13 +372,18 @@ to that total, each socket read may take up to 120 s, and a forward allows
 empty, without following links. Re-sending an image refreshes its mtime. The board's composer uploads here
 before it sends a directive and appends one `[Image: <path>]` line per image.
 
-`POST /meeting/stop` returns HTTP 202 with `{meeting}` or 404 when no meeting
-exists. It sends at most one SIGINT to a live hark process, even while hark's
+`POST /meeting/stop` accepts `{recorder, launch}` and returns HTTP 202 with `{meeting}` or 404 when no meeting exists.
+The recorder checks the launch identity inside the same lock as Stop; a stale control cannot stop a replacement recording.
+An unknown recorder is refused rather than falling through to the hub's local meeting.
+It sends at most one SIGINT to a live hark process, even while hark's
 lifecycle file still reports `loading` or `live`. A `stopping` meeting is a
 no-op; a `starting` or `failed` meeting dismisses its tmux session.
 
-`GET /meeting/audio?launch=<id>` upgrades to a WebSocket that feeds the live
-`phone` meeting whose launch id is `id` (the row's `launch`). The page sends
+`GET /meeting/audio?recorder=<host>&launch=<id>` upgrades on the serving hub and feeds the addressed `phone` recording.
+For a remote recorder, the hub opens that daemon's `/meeting/audio` WebSocket and relays binary audio, status text and closure; the phone only connects to the hub.
+The recorder's socket validates `launch`, and an explicit one-hop route prevents recursive relay.
+A disconnected or slow relay closes rather than buffering or replaying microphone audio.
+The page sends
 binary frames of raw s16le 16 kHz mono PCM, which the daemon writes unchanged
 into hark's Unix socket, the path `meeting.json` names as `phone`. Nothing is
 buffered: hark places phone audio on its own wall clock and pads gaps with
@@ -389,9 +405,10 @@ Browsers open WebSockets cross-site without CORS, so the upgrade takes the same
 origin rule as a write: no `Origin`, an allowlisted dev origin, or the page's
 own; any other origin gets **403**. An idle socket closes after a minute.
 
-Meeting writes and audio control the serving daemon's recording and never owner-route it.
-`POST /capture` and `POST /meeting/join` start that recording before routing the agent's half to the project's or the fiber's owner.
-`GET /meeting?origin=<host>` can inspect another host's capabilities and recording without transferring recording ownership.
+Recorder routing and agent ownership are separate.
+`POST /capture` and `POST /meeting/join` select recording first, preserve the agent's `origin`, and route the scribe or delivery to that owner after hark starts.
+Show, Stop and audio carry the recorder address; changing the project host never moves a live recording.
+Recorder forwarding terminates after one hop, while ordinary agent forwarding strips `origin` at its owner.
 
 `/file` sits outside the JSON pipeline on purpose: it returns arbitrary content
 types, so a strict `Accept: application/pdf` would otherwise 406 before the
