@@ -17,6 +17,9 @@ func TestDaemonWriteTimeoutLadder(t *testing.T) {
 	if daemonRoutedPostTimeout <= daemonForwardBudget {
 		t.Fatalf("routed write timeout %v must outlast the daemon's forward %v", daemonRoutedPostTimeout, daemonForwardBudget)
 	}
+	if lifecycle := newApp(nil).daemonLifecycleTimeout; lifecycle <= daemonOwnerCallBudget {
+		t.Fatalf("local lifecycle timeout %v must outlast the owner's Poller call %v", lifecycle, daemonOwnerCallBudget)
+	}
 	if routedWaitNotice >= daemonRoutedPostTimeout {
 		t.Fatalf("the wait notice %v must come before the routed timeout %v", routedWaitNotice, daemonRoutedPostTimeout)
 	}

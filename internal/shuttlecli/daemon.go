@@ -149,9 +149,6 @@ func (t socketHostTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 // Timeouts for the daemon transport. A read may cross the tailnet to another
 // machine's daemon (validate-identity fans out over every configured remote).
-// A local lifecycle POST bounds how long `resume`/`accept` hang interactively
-// (app.daemonLifecycleTimeout) and falls back to a local write when the daemon
-// is down.
 //
 // Writes that run inside a Poller form a ladder in which every hop outlasts the
 // hop beneath it, so the innermost party with an answer gives it — "launched",
@@ -160,7 +157,8 @@ func (t socketHostTransport) RoundTrip(req *http.Request) (*http.Response, error
 //
 //	owner Poller call      30 s  Shuttle.Poller @dispatch_call_timeout_ms
 //	daemon → owner forward 40 s  Shuttle.OriginRouter.default_forward_timeout_ms/0
-//	CLI → local daemon     35 s  daemonPostTimeout (this host owns the fiber)
+//	CLI → local daemon     35 s  daemonPostTimeout (this host owns the fiber;
+//	                             also app.daemonLifecycleTimeout's default)
 //	CLI → routed owner     45 s  daemonRoutedPostTimeout (another host owns it)
 const (
 	daemonReadTimeout       = 15 * time.Second

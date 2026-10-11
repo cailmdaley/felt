@@ -130,7 +130,8 @@ type app struct {
 	daemonFindPIDs  func(pattern string) ([]int, error)
 	daemonSignalPID func(pid int, signal syscall.Signal) error
 	daemonPause     func(time.Duration)
-	// daemonLifecycleTimeout bounds the lifecycle POST resume and accept send.
+	// daemonLifecycleTimeout bounds the local lifecycle POST (resume, accept,
+	// rest); it outlasts the Poller call that serves it (daemonPostTimeout).
 	daemonLifecycleTimeout time.Duration
 	// eventNow and eventRand stamp and break ties between hook events.
 	eventNow          func() time.Time
@@ -154,7 +155,7 @@ func newApp(env *sysenv.Env) *app {
 		daemonSignalPID:           signalDaemonPID,
 		daemonPause:               time.Sleep,
 		messageResolveWait:        90 * time.Second,
-		daemonLifecycleTimeout:    5 * time.Second,
+		daemonLifecycleTimeout:    daemonPostTimeout,
 		eventNow:                  time.Now,
 		eventReceiverPID:          messaging.HookReceiverPID,
 		eventProcessBirth:         messaging.ProcessBirthToken,
