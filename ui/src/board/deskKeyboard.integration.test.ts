@@ -82,9 +82,9 @@ describe('Reader Rest lifecycle', () => {
     expect(target).not.toBeNull()
     target.focus()
     press('s', {}, target)
-    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover input')!
+    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover')!
     expect(input).not.toBeNull()
-    press('Enter', {}, input)
+    press('n', {}, input)
     await Promise.resolve(); await Promise.resolve()
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
     expect(calls).toHaveLength(1)
@@ -107,9 +107,9 @@ describe('Rest controls', () => {
     expect(rest.title).toContain('s')
     expect(document.querySelector<HTMLElement>('.ws-reader .kbn-ctl-temper')!.hidden).toBe(true)
     rest.click()
-    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover input')!
+    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover')!
     expect(input).not.toBeNull()
-    press('Enter', {}, input)
+    press('n', {}, input)
     await Promise.resolve(); await Promise.resolve()
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
     expect(calls).toHaveLength(1)
@@ -122,22 +122,24 @@ describe('Rest controls', () => {
     const button = document.querySelector<HTMLButtonElement>('[data-card-uid="review"] .kbn-card-rest')!
     expect(button).not.toBeNull()
     button.click()
-    expect(document.querySelector('.kbn-rest-popover input')).not.toBeNull()
+    expect(document.querySelector('.kbn-rest-popover')).not.toBeNull()
   })
 })
 
 describe('Desk keyboard selection', () => {
-  it.each(['', '2099-06-12'])('s on the focused constitution rests with date %j through lifecycle', async until => {
+  it.each([['n', ''], ['Enter', 'tomorrow']])('s on the focused constitution then %s rests through lifecycle', async (k, which) => {
     press('j')
     press('s')
-    const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover input')!
+    const input = document.querySelector<HTMLElement>('.kbn-rest-popover')!
     expect(input).not.toBeNull()
-    input.value = until
-    press('Enter', {}, input)
+    press(k, {}, input)
     await Promise.resolve(); await Promise.resolve()
     const calls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/api/v1/lifecycle'))
     expect(calls).toHaveLength(1)
-    expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'review', origin: 'local', until })
+    const body = JSON.parse(String(calls[0][1]?.body))
+    expect(body).toMatchObject({ action: 'rest', fiber: 'review', origin: 'local' })
+    if (which === '') expect(body.until).toBe('')
+    else expect(body.until).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(document.querySelector('.kbn-rest-popover')).toBeNull()
   })
 
