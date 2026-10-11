@@ -257,10 +257,11 @@ describe('Desk keyboard selection', () => {
     press('j'); press('Enter')
     expect(window.location.hash).toContain('child-uid')
   })
-  it('opens the reader on one grouped sidebar, and keeps the flight column for the cards that fly', () => {
+  it('opens the reader on one grouped sidebar of the Desk\'s columns, and keeps the flight column for the cards that fly', () => {
     press('j'); press('h'); press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review', 'Resting'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')].map(el => el.getAttribute('aria-label'))).toEqual(['Drafts, 2', 'In flight, 2', 'Awaiting review, 1', 'Resting, 1'])
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     expect(document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued-list')!.hidden).toBe(false)
@@ -271,7 +272,7 @@ describe('Desk keyboard selection', () => {
     press('j'); press('h')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')

@@ -138,6 +138,7 @@ export class Workspace {
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
       sidebarBand: card => this.sidebarGroup(card),
+      sidebarColumn: card => this.sidebarColumn(card),
       files: card => this.overview.fileNames(card),
       find: opts.find,
       onFind: () => opts.focusFind?.() ?? false,
@@ -240,28 +241,40 @@ export class Workspace {
   }
 
   /**
-   * The sidebar is one grouped list wherever the reader was opened from:
-   * Drafts, then In flight's Your turn and Working bands, then Awaiting review,
-   * each in the Desk's own order. Queued children are reached through their
-   * head's peek, not these groups or their J/K stops and index counts.
+   * The sidebar is one grouped list wherever the reader was opened from, in
+   * the Desk's reading order: Drafts, In flight's Your turn and Working bands,
+   * Awaiting review, Roles, then Resting, each in the Desk's own order. j/k
+   * walk it as one flow; J/K and the index strip step its columns. Queued
+   * children are reached through their head's peek, never as rows.
    */
   private sidebarCards(): KanbanCard[] {
     const all = this.opts.cards()
     const queues = sidebarQueue(all)
     const cards = all.filter(card => !queues.folded(card))
-    const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const inColumn = (column: string): KanbanCard[] => cards.filter(card => fiberPageColumn(card) === column)
+    const flight = inColumn('inFlight')
     return [
-      ...cards.filter(card => fiberPageColumn(card) === 'drafts'),
+      ...inColumn('drafts'),
       ...IN_FLIGHT_BANDS.flatMap(([band]) => flight.filter(card => inFlightBand(card) === band)),
-      ...cards.filter(card => fiberPageColumn(card) === 'awaitingReview'),
+      ...inColumn('awaitingReview'),
+      ...inColumn('roles'),
+      ...inColumn('resting'),
     ]
   }
-  /** A group's caption; the open constitution outside the four groups is captioned by its own column. */
+  /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {
     const column = fiberPageColumn(card)
     if (column === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(card))![1]
+    return this.sidebarColumn(card)
+  }
+  /** A card's Desk column: In flight holds both its bands' groups. */
+  private sidebarColumn(card: KanbanCard): string {
+    const column = fiberPageColumn(card)
+    if (column === 'inFlight') return 'In flight'
     if (column === 'drafts') return 'Drafts'
     if (column === 'awaitingReview') return 'Awaiting review'
+    if (column === 'roles') return 'Roles'
+    if (column === 'resting') return 'Resting'
     return fiberPageKicker(card) || 'Reading'
   }
   /** The constitutions opened in this session, most recent first, for the Board's Read lately shelf. */

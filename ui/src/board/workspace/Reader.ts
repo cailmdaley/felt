@@ -50,6 +50,8 @@ export interface ReaderOptions {
   switcherCards?(): KanbanCard[]
   pickerCards?(): KanbanCard[]
   sidebarBand?(card: KanbanCard): string | undefined
+  /** The column a sidebar card stands in, which may hold several bands; the J/K stops and index entries. Absent, each band is a stop. */
+  sidebarColumn?(card: KanbanCard): string | undefined
   files?(card: KanbanCard): string[]
   /** The board bar's Find field: on the desktop it filters the open sidebar. */
   find?: HTMLInputElement
@@ -66,7 +68,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   return el
 }
 /** The index strip abbreviates a caption too wide for its row; the caption keeps its full name. */
-const INDEX_LABELS: Record<string, string> = { 'Awaiting review': 'Review' }
+const INDEX_LABELS: Record<string, string> = { 'In flight': 'Flight', 'Awaiting review': 'Review' }
 
 function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
   const b = element('button', cls, text)
@@ -143,7 +145,7 @@ export class Reader {
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
   private currentCard: KanbanCard | null = null
-  /** The constitution last open in each sidebar group stop, for this session. */
+  /** The constitution last open in each sidebar column, for this session. */
   private readonly groupMemory = new Map<string, string>()
   private selected: DocKey | null = null
   private expanded = false
@@ -152,7 +154,7 @@ export class Reader {
   private menuRelease: Release | null = null
   private menuAnchor: HTMLElement | null = null
   private sidebar = element('aside', 'ws-sidebar')
-  /** One row naming each sidebar group with its count; its entries are the J/K stops. */
+  /** One row naming each sidebar column with its count; its entries are the J/K stops. */
   private readonly sidebarIndex = element('nav', 'ws-sidebar-index')
   private readonly indexEntries = new Map<string, HTMLButtonElement>()
   private readonly sidebarPicker: ConstitutionPicker
@@ -267,7 +269,7 @@ export class Reader {
     this.sidebarHandle.addEventListener('pointerdown', e => this.sidebarResizeStart(e))
     this.sidebarHandle.addEventListener('keydown', e => this.sidebarResizeKey(e))
     this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
-    this.sidebarIndex.setAttribute('aria-label', 'Constitution groups')
+    this.sidebarIndex.setAttribute('aria-label', 'Constitution columns')
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     column.append(this.stage)
@@ -1087,7 +1089,7 @@ export class Reader {
     return true
   }
 
-  private readonly stopOf = (card: KanbanCard): string => this.opts.sidebarBand?.(card) ?? ''
+  private readonly stopOf = (card: KanbanCard): string => (this.opts.sidebarColumn ?? this.opts.sidebarBand)?.(card) ?? ''
   private rememberStop(): void {
     if (this.currentCard) this.groupMemory.set(this.stopOf(this.currentCard), cardIdentity(this.currentCard))
   }
@@ -1107,9 +1109,9 @@ export class Reader {
     const queues = this.queues()
     return this.withCurrent(this.opts.switcherCards?.() ?? this.opts.cards()).filter(card => !queues.folded(card))
   }
-  /** The index strip names every group stop, unfiltered by Find, and marks the open constitution's. */
+  /** The index strip names every column, unfiltered by Find, and marks the open constitution's. */
   private renderIndex(): void {
-    const stops = this.opts.sidebarBand ? groupStops(this.sidebarCards(), this.stopOf).filter(stop => stop.key) : []
+    const stops = (this.opts.sidebarColumn ?? this.opts.sidebarBand) ? groupStops(this.sidebarCards(), this.stopOf).filter(stop => stop.key) : []
     const current = this.currentCard && cardIdentity(this.currentCard)
     const keys = new Set(stops.map(stop => stop.key))
     for (const [key, entry] of this.indexEntries) if (!keys.has(key)) { entry.remove(); this.indexEntries.delete(key) }

@@ -18,10 +18,6 @@ export interface KeyBinding {
 const VERDICT_UNDO = `${VERDICT_DELAY_MS / 1000} s`
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
-/** Desk regions follow reading order: the three Now columns left-to-right,
- * then Roles, then Resting. In flight's Your turn and Working bands form one
- * column. Roles and Resting each form one list in their drawn reading order.
- * Empty regions are skipped; movement stops at the ends, never wraps. */
 /** Acting on one constitution: the reader's open fiber, the Desk's selected
  * card. Both surfaces bind these same keys and run them through
  * `constitutionAction`, so what a key does to a constitution cannot drift
@@ -36,6 +32,10 @@ const constitutionBindings = (subject: string): KeyBinding[] => [
   bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
 ]
 
+/** Desk regions follow reading order: the three Now columns left-to-right,
+ * then Roles, then Resting. In flight's Your turn and Working bands form one
+ * column. Roles and Resting each form one list in their drawn reading order.
+ * Empty regions are skipped; movement stops at the ends, never wraps. */
 export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="inFlight"]', '[data-column="awaitingReview"]', '.kbn-section-roles', '.kbn-section-stash'] as const
 
 /** The binding table is also the help overlay's source; surfaces consume intents,
