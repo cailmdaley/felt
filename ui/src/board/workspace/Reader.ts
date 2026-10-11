@@ -3,7 +3,7 @@ import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { queuedControl } from '../QueuedControl.js'
 import { sidebarQueue } from './sidebarQueue.js'
-import { onDesk, restReachable, reviewReachable, verdictReachable } from './fiberPageState.js'
+import { constitutionAction, onDesk } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -1055,23 +1055,13 @@ export class Reader {
       return true
     }
     if (this.tabs.handleIntent(intent)) return true
-    if (intent === 'temper' || intent === 'discard') {
-      if (!this.currentCard || !verdictReachable(this.currentCard)) return false
-      this.opts.onVerdict?.(intent === 'temper' ? 'tempered' : 'composted')
-    }
-    else if (intent === 'toReview') {
-      if (!this.currentCard || !reviewReachable(this.currentCard)) return false
-      this.opts.onVerdict?.('awaitingReview')
-    }
-    else if (intent === 'compose') this.opts.onCompose?.()
-    else if (intent === 'conversation') {
-      if (this.currentCard) this.opts.onConversation?.(this.currentCard)
-    }
-    else if (intent === 'rest') {
-      if (!this.currentCard || !restReachable(this.currentCard)) return false
-      this.opts.onRest?.(this.currentCard, this.el)
-    }
-    else if (intent === 'sidebar') this.toggleSidebar()
+    if (constitutionAction(intent, this.currentCard, {
+      verdict: (_, verdict) => this.opts.onVerdict?.(verdict),
+      compose: () => this.opts.onCompose?.(),
+      conversation: card => this.opts.onConversation?.(card),
+      rest: card => this.opts.onRest?.(card, this.el),
+    })) return true
+    if (intent === 'sidebar') this.toggleSidebar()
     else if (intent === 'find') {
       if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
       else if (this.sidebarShown) this.sidebarPicker.focus()

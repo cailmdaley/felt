@@ -93,6 +93,8 @@ export class Workspace {
   private routeEpoch = 0
   private lastBoardRoute: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
+  /** A channel opened to write to: its composer takes focus once it is shown. */
+  private composing: string | null = null
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
@@ -214,6 +216,12 @@ export class Workspace {
     state.questionLanding = true
     state.selected = undefined
     this.open(card)
+  }
+
+  /** Open the constitution on its fiber page with the composer focused. */
+  compose(card: KanbanCard): void {
+    this.composing = cardIdentity(card)
+    this.open(card, this.opts.origin(), proseDocument(this.ensure(card).channel)?.key)
   }
 
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
@@ -354,12 +362,20 @@ export class Workspace {
     })
     return true
   }
-  private focusComposer(): void {
+  private focusComposer(): boolean {
     const state = this.current
-    if (!state) return
+    if (!state) return false
     const key = proseDocument(state.channel)?.key
     if (key) this.select(key)
-    this.controls(state)?.focusComposer()
+    return this.controls(state)?.focusComposer() ?? false
+  }
+  /** A channel opened to write to takes the composer's focus on its first
+   *  paint, and again once its body is read if the repaint dropped focus. */
+  private landComposer(state: ChannelState, last: boolean): void {
+    if (this.composing !== channelId(state.channel.uid, state.channel.owner)) { this.composing = null; return }
+    const lost = !document.activeElement || document.activeElement === document.body
+    if (!last || lost) this.focusComposer()
+    if (last) this.composing = null
   }
 
   /** Settings, history and the composer belong to fibers on the Desk's lifecycle; a note or role has none. */
@@ -473,6 +489,7 @@ export class Workspace {
     this.opts.onVisibility(true)
     this.depth.setActive(true)
     this.show(state)
+    this.landComposer(state, false)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
       this.startPrompt = null
@@ -488,6 +505,7 @@ export class Workspace {
       state.selected = report?.key ?? proseDocument(state.channel)?.key
     }
     this.show(state, loadedBefore)
+    this.landComposer(state, true)
     this.history.select(this.shown(state))
     this.startTimer()
   }

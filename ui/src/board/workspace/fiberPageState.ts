@@ -3,6 +3,8 @@ import { hasLiveWorker } from '../KanbanTypes.js'
 import { classifyFiber } from '../KanbanRules.js'
 import { COLUMN_TITLES } from '../KanbanSurfaces.js'
 import { isAgentCard } from '../KanbanModalShared.js'
+import type { KeyIntent } from '../keymap.js'
+import type { Verdict } from './Verdicts.js'
 
 /** The reader uses the same lifecycle classifier and labels as the Desk. */
 export function fiberPageColumn(card: KanbanCard) {
@@ -43,4 +45,32 @@ export function fiberPageKicker(card: KanbanCard): string {
   if (column === 'cycles') return 'Cycle'
   if (column === 'roles') return 'Roles'
   return COLUMN_TITLES[column]
+}
+
+/** What a surface does once a constitution key has reached a card. */
+export interface ConstitutionActions {
+  verdict(card: KanbanCard, verdict: Verdict): void
+  compose(card: KanbanCard): void
+  conversation(card: KanbanCard): void
+  rest(card: KanbanCard): void
+}
+/** A constitution key, gated by the same reachability on the reader and the
+ *  Desk. Answers whether the key reached the card. */
+export function constitutionAction(intent: KeyIntent, card: KanbanCard | null | undefined, actions: ConstitutionActions): boolean {
+  if (!card) return false
+  if (intent === 'temper' || intent === 'discard') {
+    if (!verdictReachable(card)) return false
+    actions.verdict(card, intent === 'temper' ? 'tempered' : 'composted')
+  } else if (intent === 'toReview') {
+    if (!reviewReachable(card)) return false
+    actions.verdict(card, 'awaitingReview')
+  } else if (intent === 'compose') {
+    if (!onDesk(card)) return false
+    actions.compose(card)
+  } else if (intent === 'conversation') actions.conversation(card)
+  else if (intent === 'rest') {
+    if (!restReachable(card)) return false
+    actions.rest(card)
+  } else return false
+  return true
 }
