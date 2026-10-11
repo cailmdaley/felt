@@ -836,21 +836,105 @@
    than another lane: no shadow, no lift. The head names what the bottom of the page
    means; the gloss is there so a card down here doesn't read as one that
    failed. Under the head, the column head's own hairline rule. */
-.kbn-rest-popover {
+.kbn-rest-scrim {
   position: fixed;
+  inset: 0;
   z-index: 1000;
-  width: 260px;
-  padding: 14px;
   display: grid;
-  gap: 10px;
+  place-items: center;
+  background: color-mix(in srgb, var(--kbn-shade) 45%, transparent);
+  backdrop-filter: blur(2px);
+}
+.kbn-rest-popover {
+  width: min(360px, calc(100vw - 32px));
+  padding: 22px 24px 18px;
+  display: grid;
+  gap: 12px;
   background: var(--kbn-parchment);
   color: var(--kbn-ink);
-  border: 1px solid currentColor;
-  border-radius: 8px;
-  box-shadow: 0 6px 24px color-mix(in srgb, var(--kbn-shade) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 18px 60px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
+  outline: none;
 }
-.kbn-rest-popover label { display: grid; gap: 8px; }
-.kbn-rest-popover small { opacity: .65; }
+.kbn-rest-title { margin: 0; font-size: 1.5rem; font-weight: 400; }
+.kbn-rest-subject {
+  margin: -8px 0 0;
+  font-size: .85rem;
+  color: var(--kbn-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kbn-rest-headline { margin: 4px 0 0; font-size: 1.15rem; }
+.kbn-rest-relative { font-size: .85rem; color: var(--kbn-ink-muted); }
+.kbn-rest-month {
+  font-variant: small-caps;
+  letter-spacing: .06em;
+  color: var(--kbn-ink-muted);
+}
+.kbn-rest-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  text-align: center;
+}
+.kbn-rest-dow { font-size: .7rem; color: var(--kbn-ink-muted); padding-bottom: 2px; }
+.kbn-rest-day {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.kbn-rest-day:hover:not(:disabled) { background: color-mix(in srgb, var(--kbn-ink) 10%, transparent); }
+.kbn-rest-day-outside { opacity: .4; }
+.kbn-rest-day-past { opacity: .2; cursor: default; }
+.kbn-rest-day-today { border-color: color-mix(in srgb, var(--kbn-ink) 35%, transparent); }
+.kbn-rest-day-cursor,
+.kbn-rest-day-cursor:hover:not(:disabled) {
+  background: var(--kbn-ink);
+  color: var(--kbn-parchment);
+  opacity: 1;
+}
+.kbn-rest-presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.kbn-rest-chip {
+  font: inherit;
+  font-size: .8rem;
+  color: inherit;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 22%, transparent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  cursor: pointer;
+}
+.kbn-rest-chip:hover { background: color-mix(in srgb, var(--kbn-ink) 10%, transparent); }
+.kbn-rest-chip kbd {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: .7rem;
+  color: var(--kbn-ink-muted);
+}
+.kbn-rest-count {
+  margin-left: auto;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  color: var(--kbn-ink-muted);
+}
+.kbn-rest-keys { margin: 0; font-size: .7rem; color: var(--kbn-ink-muted); line-height: 1.4; }
+.kbn-rest-confirm {
+  font: inherit;
+  color: var(--kbn-parchment);
+  background: var(--kbn-ink);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 0;
+  cursor: pointer;
+}
 
 .kbn-section-stash {
   /* Design size, like `.kbn-col`. */
