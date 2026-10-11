@@ -72,8 +72,10 @@ export interface MeetingJoinResult {
 
 /** The board's meeting control, lent to the dock. */
 export interface MeetingJoinControl {
-  /** hark is available on this machine and nothing is recording. */
+  /** The selected recorder is available and nothing is recording. */
   canJoin(): boolean
+  modes(): MeetingMode[]
+  recorder?(): string | null
   /** Record a meeting and join it to the card's constitution with the note
    *  `note` resolves to — it may upload images first, and rejects with their
    *  failure. Called inside the pick's gesture; Phone opens audio before
@@ -1246,9 +1248,17 @@ export class Dock {
     const word = document.createElement('span')
     word.textContent = 'Meeting'
     toggle.append(input, track, word)
-    const modes = segmented<MeetingMode>('Meeting kind', MEETING_MODES.map(({ value, label }) => [value, label] as const), lastMeetingMode)
-    modes.el.classList.add('kbn-ctl-meet-modes')
-    modes.onPick(mode => { lastMeetingMode = mode })
+    const modeChoices = (): typeof MEETING_MODES => MEETING_MODES.filter(({ value }) => this.meeting?.modes().includes(value))
+    const buildModes = (): Segmented<MeetingMode> => {
+      const choices = modeChoices()
+      const initial = choices.some(({ value }) => value === lastMeetingMode) ? lastMeetingMode : choices[0]?.value ?? 'phone'
+      const result = segmented<MeetingMode>('Meeting kind', choices.map(({ value, label }) => [value, label] as const), initial)
+      result.el.classList.add('kbn-ctl-meet-modes')
+      result.onPick(mode => { lastMeetingMode = mode })
+      return result
+    }
+    let modes = buildModes()
+    let modesSignature = modeChoices().map(({ value }) => value).join(':')
     const verb = ctlButton('', 'kbn-ctl-send kbn-ctl-meet-start')
     verb.setAttribute('aria-label', 'Start meeting')
     // The phone's narrow row drops the noun the switch beside it already says.
@@ -1276,6 +1286,16 @@ export class Dock {
     const paint = (): void => {
       const control = this.meeting
       if (!control) return
+      const signature = modeChoices().map(({ value }) => value).join(':')
+      if (signature !== modesSignature && !starting) {
+        const old = modes.el
+        modes = buildModes()
+        modesSignature = signature
+        old.replaceWith(modes.el)
+        modes.el.hidden = !input.checked
+      }
+      const recorder = control.recorder?.()
+      word.textContent = recorder ? `Meeting · ${recorder}` : 'Meeting'
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
       wrap.hidden = !control.canJoin() && !recording
@@ -1289,7 +1309,7 @@ export class Dock {
     this.meetingPaint = paint
 
     const start = (): void => {
-      if (!input.checked || starting || send.busy() || !this.meeting?.canJoin()) return
+      if (!input.checked || starting || send.busy() || !this.meeting?.canJoin() || !this.meeting.modes().includes(modes.value)) return
       starting = true
       send.setBusy(true)
       verbFace(true)

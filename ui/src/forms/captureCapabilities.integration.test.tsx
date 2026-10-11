@@ -73,14 +73,14 @@ beforeEach(() => {
   mobile = false
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: mobile && query === MOBILE_MEDIA })))
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: vi.fn() })
-  status = { available: true, modes, meeting: null }
+  status = { available: true, modes, recorder: 'local', meeting: null }
   bind = vi.fn()
   begin = vi.fn(() => ({ ready: Promise.resolve(7), bind, cancel: vi.fn() }))
   spawned = vi.fn()
   meetingResult = vi.fn()
   fetcher = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === `${base}/api/v1/agents`) return response(agents)
-    if (url === `${base}/api/v1/meeting`) return response(status)
+    if (url.startsWith(`${base}/api/v1/meeting`)) return response(status)
     if (url === `${base}/api/v1/capture` && init?.method === 'POST') {
       const body = JSON.parse(init.body as string)
       return response({ spawned: true, tmux_session: 'fake-scribe', ...(body.meeting ? {
@@ -93,12 +93,44 @@ beforeEach(() => {
 })
 afterEach(async () => {
   if (root) { await act(async () => root!.unmount()); root = null }
+  // Radix queues focus restoration on unmount; finish it inside this DOM realm.
+  await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 0)) })
   document.body.replaceChildren()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
 describe('rendered Capture capabilities', () => {
+  it('uses hub-selected remote recording on mobile, independently of the scribe owner', async () => {
+    mobile = true
+    status = { available: true, modes, recorder: 'remote', meeting: null }
+    await mount()
+    expect(meetingReads().map(([url]) => url)).toEqual([`${base}/api/v1/meeting?prefer=phone`])
+    expect(query('.capture-meeting-host-label').textContent).toBe('Records on Scribe · scribe on Recorder')
+    expect(document.querySelector('[role="radiogroup"]')).toBeNull()
+    click('.form-submit')
+    await tick()
+    expect(captureBody()).toMatchObject({ recorder: 'remote', origin: 'local', meeting: { mode: 'phone' } })
+    expect(begin).toHaveBeenCalledOnce()
+  })
+
+  it.each(['network', 'remote uncertainty'])('does not retry an ambiguous meeting start: %s', async (failure) => {
+    mobile = true
+    await mount()
+    fetcher.mockImplementation(async (url: string) => {
+      if (!url.endsWith('/capture')) return response(status)
+      if (failure === 'network') throw new Error('lost response')
+      return { ok: false, status: 502, json: async () => ({ recording_unknown: true, recorder: 'remote', error: 'Inspect the recorder before retrying.' }) }
+    })
+    click('.form-submit')
+    await tick()
+    expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
+    click('.form-submit')
+    await tick()
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/capture'))).toHaveLength(1)
+    expect(query('.form-error').textContent).toMatch(/Inspect the recorder/)
+  })
+
   it.each(modes)('desktop offers the recorder modes and submits %s', async (mode) => {
     await mount()
     expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('false')
@@ -150,10 +182,10 @@ describe('rendered Capture capabilities', () => {
   it.each([
     ['Mac', modes], ['phone-only', ['phone'] as MeetingMode[]],
   ])('remote scribe preserves %s recorder modes without origin routing or refetch', async (_name, offered) => {
-    status = { available: true, modes: offered, meeting: null }
+    status = { available: true, modes: offered, recorder: 'local', meeting: null }
     // Remote first guards against treating picker order as recorder identity.
     await mount({ hosts: [...hosts].reverse() })
-    expect(document.querySelector('.capture-meeting-host-label')).toBeNull()
+    expect(query('.capture-meeting-host-label').textContent).toBe('Records on Recorder · scribe on Recorder')
     click('.capture-meeting-toggle')
     if (offered.length > 1) click('[role="radio"]:nth-child(2)')
     select(0, 'remote')

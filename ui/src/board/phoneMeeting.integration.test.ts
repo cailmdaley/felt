@@ -49,7 +49,7 @@ const defer = <T,>() => {
 /** Turn the composer's Meeting switch on and choose `kind`. */
 const arm = (meeting: HTMLElement, kind: string): void => {
   meeting.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.click()
-  ;[...meeting.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.textContent === kind)!.click()
+  ;[...meeting.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((item) => item.textContent === kind)?.click()
 }
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 let board: KanbanModal
@@ -69,13 +69,13 @@ beforeEach(() => {
   opened = { close: vi.fn(), health: vi.fn(() => 'ok'), revive: vi.fn(async () => 'ok') }
   vi.spyOn(Mic, 'open').mockImplementation((_context, value) => { handlers = value; return Promise.resolve(opened as unknown as Mic) })
   current = row()
-  fetcher = vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith('/meeting') ? { available: true, meeting: current } : {} }))
+  fetcher = vi.fn(async (url: string) => ({ ok: true, status: 200, json: async () => url.includes('/api/v1/meeting') ? { available: true, modes: ['call', 'room', 'phone'], meeting: current } : {} }))
   vi.stubGlobal('fetch', fetcher)
   board = new KanbanModal({ shuttleBase: 'https://audio.example' })
   state = board as unknown as BoardState
   state.container = document.createElement('div')
   state.lastResponse = response()
-  state.meetingStatus = { available: true, meeting: current }
+  state.meetingStatus = { available: true, modes: ['call', 'room', 'phone'], meeting: current }
   document.body.append(state.container)
   state.container.append(state.surfaces.renderNowSection(state.lastResponse.now, {}))
 })
@@ -89,6 +89,63 @@ afterEach(() => {
 })
 
 describe('board phone meeting card wiring', () => {
+  it('pins Join, polling, audio and Stop to the recorder while preserving the agent owner', async () => {
+    current = row({ recorder: 'mac-recorder' })
+    state.meetingStatus = { available: true, modes: ['call', 'room', 'phone'], recorder: 'mac-recorder', meeting: null }
+    vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
+    vi.spyOn(state, 'showBanner').mockImplementation(() => {})
+    fetcher.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => url.endsWith('/join')
+      ? { meeting: current, delivery: { delivered: true, delivery: 'message' } }
+      : { available: true, modes: ['call', 'room', 'phone'], recorder: 'mac-recorder', meeting: current } }))
+    const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'agent-owner' }), document.createElement('div'), sendWith())
+    document.body.append(menu)
+    expect(menu.textContent).toContain('Meeting · mac-recorder')
+    expect([...menu.querySelectorAll('[role="radio"]')].map(item => item.textContent)).toEqual(['Phone'])
+    arm(menu, 'Phone')
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
+    await flush()
+    await vi.waitFor(() => expect(RelayLink).toHaveBeenCalled())
+    const join = fetcher.mock.calls.find(([url]) => url.endsWith('/join'))!
+    expect(JSON.parse(join[1].body)).toEqual({ fiber_id: 'science/task', origin: 'agent-owner', recorder: 'mac-recorder', meeting: { mode: 'phone' } })
+    expect(RelayLink).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'wss://audio.example/api/v1/meeting/audio?launch=L1&recorder=mac-recorder' }))
+    expect(fetcher.mock.calls.some(([url]) => url === 'https://audio.example/api/v1/meeting?recorder=mac-recorder')).toBe(true)
+    find<HTMLButtonElement>('.kbn-meeting-stop').click()
+    await flush()
+    expect(fetcher).toHaveBeenCalledWith('https://audio.example/api/v1/meeting/stop', expect.objectContaining({ body: JSON.stringify({ recorder: 'mac-recorder', launch: 'L1' }) }))
+    expect(fetcher.mock.calls.every(([url]) => url.startsWith('https://audio.example/'))).toBe(true)
+  })
+
+  it.each([
+    [false, ['phone'], ['Phone']],
+    [true, ['call', 'room', 'phone'], ['Phone']],
+    [false, ['call', 'room', 'phone'], ['Call', 'Room', 'Phone']],
+    [false, [], []],
+  ] as const)('filters Join capabilities on mobile=%s with %j', (mobile, modes, labels) => {
+    vi.stubGlobal('matchMedia', () => ({ matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    state.meetingStatus = { available: true, modes: [...modes], meeting: null }
+    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), sendWith())
+    expect([...menu.querySelectorAll('[role="radio"]')].map(item => item.textContent)).toEqual(labels)
+    expect(menu.hidden).toBe(labels.length === 0)
+  })
+
+  it('holds Join after an ambiguous start, even if a status read has no meeting yet', async () => {
+    state.meetingStatus.meeting = null
+    vi.spyOn(state, 'showBanner').mockImplementation(() => {})
+    fetcher.mockImplementation(async (url: string) => {
+      if (url.endsWith('/join')) throw new Error('lost response')
+      return { ok: true, status: 200, json: async () => ({ available: true, modes: ['phone'], meeting: null }) }
+    })
+    const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), sendWith())
+    arm(menu, 'Phone')
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
+    await flush()
+    await vi.waitFor(() => expect(opened.close).toHaveBeenCalledOnce())
+    menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
+    await flush()
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/join'))).toHaveLength(1)
+    expect(RelayLink).not.toHaveBeenCalled()
+  })
+
   it('sets no timer while idle and looks at a held mic once a second', async () => {
     const timeouts = vi.spyOn(window, 'setTimeout'), intervals = vi.spyOn(window, 'setInterval')
     board.phoneAudio.mount()
@@ -146,7 +203,7 @@ describe('board phone meeting card wiring', () => {
       fetcher.mockImplementation(async (url: string) => ({
         ok: url.endsWith('/join') ? reply.ok : true,
         status: reply.status,
-        json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: current },
+        json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, modes: ['call', 'room', 'phone'], meeting: current },
       }))
       const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), sendWith())
       document.body.append(menu)
@@ -193,7 +250,7 @@ describe('board phone meeting card wiring', () => {
       ok: true, status: 200,
       json: async () => url.endsWith('/join')
         ? { meeting: current, delivery: { delivery: 'message', delivered: true } }
-        : { available: true, meeting: current },
+        : { available: true, modes: ['call', 'room', 'phone'], meeting: current },
     }))
     const menu = state.dock.buildMeeting(card({ id: 'science/task', originId: 'scribe-host' }), document.createElement('div'), send)
     arm(menu, 'Phone')
@@ -226,6 +283,7 @@ describe('board phone meeting card wiring', () => {
   })
 
   it('keeps the note and images when the recording started but its worker did not receive it', async () => {
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     vi.spyOn(state, 'fetchAndRender').mockResolvedValue()
     vi.spyOn(state, 'showBanner').mockImplementation(() => {})
     for (const [reply, received] of [
@@ -236,7 +294,7 @@ describe('board phone meeting card wiring', () => {
       fetcher.mockImplementation(async (url: string) => ({
         ok: url.endsWith('/join') ? reply.ok : true,
         status: reply.status,
-        json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, meeting: null },
+        json: async () => url.endsWith('/join') ? { meeting: current, ...reply.payload } : { available: true, modes: ['call', 'room', 'phone'], meeting: null },
       }))
       const send = sendWith(async () => '[Image: /h/a.png]')
       const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), send)
@@ -327,7 +385,9 @@ describe('board phone meeting card wiring', () => {
     expect(find<HTMLButtonElement>('.kbn-meeting-stop').disabled).toBe(true)
     pendingStop.resolve({ ok: true, status: 200, json: async () => ({}) })
     await flush()
-    expect(fetcher).toHaveBeenCalledWith('https://audio.example/api/v1/meeting/stop', { method: 'POST' })
+    expect(fetcher).toHaveBeenCalledWith('https://audio.example/api/v1/meeting/stop', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ launch: 'L1' }),
+    })
     expect(opened.close).toHaveBeenCalledOnce()
     expect(relay().close).toHaveBeenCalledOnce()
   })

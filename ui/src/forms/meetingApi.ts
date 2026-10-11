@@ -1,37 +1,29 @@
-import { meetingJoinable, parseMeetingRecord, parseMeetingStatus, type MeetingRecord } from '../board/meeting'
+import { meetingJoinable, parseMeetingRecord, parseMeetingStatus, type MeetingRecord, type MeetingMode } from '../board/meeting'
+export type { MeetingMode } from '../board/meeting'
 
 /**
  * What hark records: `call` this machine's mic and system audio, `room` its mic
  * alone, `phone` a browser's mic streamed from the board.
  */
-export type MeetingMode = 'call' | 'room' | 'phone'
-
 export const MEETING_MODES: ReadonlyArray<{ value: MeetingMode; label: string }> = [
   { value: 'call', label: 'Call' },
   { value: 'room', label: 'Room' },
   { value: 'phone', label: 'Phone' },
 ]
 
-const KNOWN_MEETING_MODES = new Set<MeetingMode>(MEETING_MODES.map(({ value }) => value))
-
 export interface CaptureMeetingCapabilities {
   available: boolean
   modes: MeetingMode[]
+  recorder: string | null
 }
 
 /** Parse the serving daemon's meeting modes and fail closed while it records. */
 export function parseCaptureMeetingCapabilities(value: unknown): CaptureMeetingCapabilities {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { available: false, modes: [] }
-  const raw = value as Record<string, unknown>
-  const status = parseMeetingStatus(raw)
-  const modes = Array.isArray(raw.modes)
-    ? [...new Set(raw.modes.filter((mode): mode is MeetingMode =>
-        typeof mode === 'string' && KNOWN_MEETING_MODES.has(mode as MeetingMode),
-      ))]
-    : []
+  const status = parseMeetingStatus(value)
   return {
     available: status !== null && meetingJoinable(status),
-    modes,
+    modes: status?.modes ?? [],
+    recorder: status?.recorder ?? null,
   }
 }
 
@@ -48,8 +40,16 @@ function responseError(body: unknown, status: number): string {
 export async function stopMeeting(
   shuttleBase: string,
   fetcher: typeof fetch = fetch,
+  meeting?: MeetingRecord,
 ): Promise<void> {
-  const response = await fetcher(`${shuttleBase}/api/v1/meeting/stop`, { method: 'POST' })
+  if (meeting && !meeting.launch) throw new Error('The meeting has no launch id. Refresh before stopping it.')
+  const response = await fetcher(`${shuttleBase}/api/v1/meeting/stop`, {
+    method: 'POST',
+    ...(meeting ? {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...(meeting.recorder ? { recorder: meeting.recorder } : {}), launch: meeting.launch }),
+    } : {}),
+  })
   if (response.status === 404) return
   const payload: unknown = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(responseError(payload, response.status))
@@ -58,6 +58,7 @@ export async function stopMeeting(
 export interface JoinMeetingInput {
   fiberId: string
   origin?: string
+  recorder?: string | null
   mode: MeetingMode
   note?: string
 }
@@ -73,7 +74,7 @@ export type JoinMeetingOutcome =
   | { kind: 'joined'; delivery: string; meeting: MeetingRecord | null }
   | { kind: 'unconfirmed'; detail: string; meeting: MeetingRecord | null }
   | { kind: 'recording'; error: string; meeting: MeetingRecord | null }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; uncertain?: boolean; recorder?: string | null }
 
 /**
  * An unconfirmed delivery: `delivered: null`, or a message receipt of status
@@ -95,12 +96,13 @@ export function joinMeetingBody(input: JoinMeetingInput): Record<string, unknown
   return {
     fiber_id: input.fiberId,
     ...(input.origin ? { origin: input.origin } : {}),
+    ...(input.recorder ? { recorder: input.recorder } : {}),
     meeting: { mode: input.mode },
     ...(note ? { note } : {}),
   }
 }
 
-/** Record a meeting on this daemon and join it to an existing constitution. */
+/** Record on the selected recorder and deliver to the constitution's owner. */
 export async function joinMeeting(
   shuttleBase: string,
   input: JoinMeetingInput,
@@ -114,9 +116,15 @@ export async function joinMeeting(
       body: JSON.stringify(joinMeetingBody(input)),
     })
   } catch (error: unknown) {
-    return { kind: 'error', message: `Couldn't reach Shuttle: ${(error as Error)?.message ?? String(error)}` }
+    return { kind: 'error', uncertain: true, recorder: input.recorder,
+      message: `Recording start couldn't be confirmed: ${(error as Error)?.message ?? String(error)}. Inspect the recorder before starting another meeting.` }
   }
   const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>
+  if (payload.recording_unknown === true) return {
+    kind: 'error', uncertain: true,
+    recorder: typeof payload.recorder === 'string' ? payload.recorder : input.recorder,
+    message: responseError(payload, response.status),
+  }
   const delivery = payload.delivery && typeof payload.delivery === 'object'
     ? payload.delivery as Record<string, unknown>
     : null

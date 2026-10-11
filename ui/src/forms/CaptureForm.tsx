@@ -36,7 +36,7 @@ import {
 import { daemonErrorMessage } from '../board/daemonApi'
 import { isMobileViewport } from '../board/mobile'
 import type { PhoneCaptureAttempt, PhoneCaptureHooks } from '../board/phoneMeeting'
-import { parseMeetingRecord, type MeetingRecord } from '../board/meeting'
+import { meetingStatusUrl, parseMeetingRecord, type MeetingRecord } from '../board/meeting'
 import { rememberedMeetingProject, rememberMeetingProject } from './meetingProject'
 import { MEETING_MODES, parseCaptureMeetingCapabilities, type MeetingMode } from './meetingApi'
 import { agentGroups, resolveEffort, type AgentEntry } from './agents'
@@ -118,9 +118,11 @@ export function CaptureForm({
     loading: true,
     available: false,
     modes: [] as MeetingMode[],
+    recorder: null as string | null,
   })
   const [initialSelection] = useState(() => mobileMeeting ? rememberedMeetingProject(hosts, availableProjects) : undefined)
   const [submitting, setSubmitting] = useState(false)
+  const [startUncertain, setStartUncertain] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const mounted = useRef(true)
@@ -159,9 +161,10 @@ export function CaptureForm({
     ? meetingMode
     : meetingModes[0] ?? null
   const meetingEnabled = meetingIntent && selectedMeetingMode !== null
-  const recorderHost = hosts.find((host) => host.isLocal) ?? hosts[0]
-  const meetingHostLabel = recorderHost && recorderHost.id !== selectedHost.id
-    ? `Records on ${recorderHost.label} · scribe on ${selectedHost.label}`
+  const recorderHost = hosts.find(host => host.id === meetingCapabilities.recorder)
+  const recorderLabel = recorderHost?.label ?? meetingCapabilities.recorder
+  const meetingHostLabel = recorderLabel
+    ? `Records on ${recorderLabel} · scribe on ${selectedHost.label}`
     : undefined
 
   useEffect(() => {
@@ -170,8 +173,8 @@ export function CaptureForm({
 
   useEffect(() => {
     let cancelled = false
-    setMeetingCapabilities({ loading: true, available: false, modes: [] })
-    fetch(`${shuttleBase}/api/v1/meeting`)
+    setMeetingCapabilities({ loading: true, available: false, modes: [], recorder: null })
+    fetch(meetingStatusUrl(shuttleBase, null, mobileMeeting))
       .then((response) => response.ok ? response.json() as Promise<unknown> : null)
       .then((status) => {
         if (!cancelled) {
@@ -180,10 +183,10 @@ export function CaptureForm({
         }
       })
       .catch(() => {
-        if (!cancelled) setMeetingCapabilities({ loading: false, available: false, modes: [] })
+        if (!cancelled) setMeetingCapabilities({ loading: false, available: false, modes: [], recorder: null })
       })
     return () => { cancelled = true }
-  }, [shuttleBase])
+  }, [shuttleBase, mobileMeeting])
 
   const agentRec = agents.find((a) => a.id === agent)
   const effectiveEffort = resolveEffort(agentRec, effort)
@@ -217,7 +220,7 @@ export function CaptureForm({
   }
 
   const submit = async (): Promise<void> => {
-    if (submittingRef.current) return
+    if (submittingRef.current || startUncertain) return
     const trimmed = prompt.trim()
     if (meetingIntent && meetingCapabilities.loading) {
       setError('Meeting availability is still loading.')
@@ -237,6 +240,8 @@ export function CaptureForm({
     setError(null)
     const requestedMeetingMode = meetingEnabled ? selectedMeetingMode : null
     const phone = requestedMeetingMode === 'phone'
+    let startSent = false
+    let startAnswered = false
     try {
       // begin reaches AudioContext creation/resume and getUserMedia in this tap,
       // before the first await. The daemon is asked only after the mic succeeds.
@@ -245,6 +250,7 @@ export function CaptureForm({
       pendingAudio.current = opening ?? null
       const generation = opening ? await opening.ready : null
       if (!mounted.current) return
+      startSent = true
       const res = await fetch(`${shuttleBase}/api/v1/capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -257,15 +263,20 @@ export function CaptureForm({
           chrome: chrome && chromeCapable,
           ...(!meetingEnabled && isCodexAgent(agentRec) ? { surface } : {}),
           meetingMode: requestedMeetingMode,
+          recorder: meetingCapabilities.recorder,
         })),
       })
       const data = (await res.json().catch(() => ({}))) as CaptureResponseData
+      startAnswered = true
       const outcome = captureOutcome(res, data, {
         projectDir: selectedProject.path,
         meetingMode: requestedMeetingMode,
         host: selectedHost.label,
       })
-      if (outcome.kind === 'error') throw new Error(outcome.message)
+      if (outcome.kind === 'error') {
+        if (outcome.uncertain) setStartUncertain(true)
+        throw new Error(outcome.message)
+      }
       if (outcome.kind === 'meeting-recording') {
         let recordingError = outcome.error
         try {
@@ -289,7 +300,11 @@ export function CaptureForm({
       pendingAudio.current?.cancel()
       pendingAudio.current = null
       submittingRef.current = false
-      setError(daemonErrorMessage(err))
+      const uncertain = requestedMeetingMode !== null && startSent && !startAnswered
+      if (uncertain) setStartUncertain(true)
+      setError(uncertain
+        ? 'Recording start is unconfirmed. Inspect the recorder before starting another meeting; this form will not retry.'
+        : daemonErrorMessage(err))
       setSubmitting(false)
     }
   }
@@ -380,7 +395,7 @@ export function CaptureForm({
           verb={meetingEnabled ? 'start meeting' : 'spawn'}
           submitLabel={submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start meeting' : 'Spawn'}
           submitting={submitting}
-          disabled={submitting || (meetingIntent && meetingCapabilities.loading) || (!meetingEnabled && !prompt.trim())}
+          disabled={submitting || startUncertain || (meetingIntent && meetingCapabilities.loading) || (!meetingEnabled && !prompt.trim())}
           tone="cobalt"
           onCancel={onCancel}
           onSubmit={() => void submit()}

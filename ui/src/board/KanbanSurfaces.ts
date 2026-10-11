@@ -1654,7 +1654,8 @@ export class KanbanSurfaceRenderer {
     // Where the audio comes from (a phone meeting's), then where the
     // transcript is written.
     block.querySelector<HTMLElement>('.kbn-meeting-host')!.textContent =
-      (meeting.phone ? 'phone mic · ' : '') + (meeting.mirror_host ? `→ ${meeting.mirror_host}` : 'this Mac')
+      (meeting.phone ? 'phone mic · ' : '') + (meeting.recorder ? `records on ${meeting.recorder}` : 'recorder') +
+      (meeting.mirror_host ? ` → ${meeting.mirror_host}` : '')
     block.querySelector<HTMLElement>('.kbn-meeting-state')!.textContent = meetingStateWord(meeting.state)
     const duration = block.querySelector<HTMLTimeElement>('.kbn-meeting-duration')!
     const value = meetingDuration(meeting)
