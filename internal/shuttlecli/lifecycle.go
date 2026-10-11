@@ -381,6 +381,11 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
 			}
 			f.Status = felt.StatusActive
+			// Resting is a property of an open fiber; an armed one is always
+			// working or waiting, so arming drops the stash.
+			if err := f.SetExtraField("horizon", nil); err != nil {
+				return err
+			}
 			if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 				return err
 			}

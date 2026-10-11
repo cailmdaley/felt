@@ -547,7 +547,12 @@ function toCard(
   const lastActivityAt = entry.runtime?.lastActivityAt;
   const held = entry.held === true;
   const heldSince = entry.heldSince;
-  const horizon = effectiveHorizon(f, nowMs);
+  // Resting belongs to open fibers: an active or closed one is never stashed,
+  // whatever `horizon:` it still carries.
+  const horizon = effectiveHorizon(
+    { due: f.due, horizon: f.status === 'active' || f.status === 'closed' ? undefined : f.horizon },
+    nowMs,
+  );
   const isCycle = isCycleFiber(f);
 
   return {
