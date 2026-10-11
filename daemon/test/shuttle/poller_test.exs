@@ -6245,13 +6245,14 @@ defmodule Shuttle.PollerTest do
     assert Poller.snapshot(poller).eligible |> Enum.any?(&(&1.fiber_id == slow_id))
 
     # ...and the wait is that timeout, not GenServer's default: shrunk well
-    # below a spawn's duration, the caller gives up first, at the timeout its
-    # exit names.
+    # below a spawn's duration, the caller stops waiting first and is told the
+    # launch is still queued.
     Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 200)
     MockRunner.set_new_session_delay(2_000)
 
-    assert {:timeout, {GenServer, :call, [_server, _msg, 200]}} =
-             catch_exit(Poller.dispatch_fiber(poller, late_id, []))
+    started = System.monotonic_time(:millisecond)
+    assert Poller.dispatch_fiber(poller, late_id, []) == {:error, :poller_busy}
+    assert System.monotonic_time(:millisecond) - started < 2_000
   end
 
   test "every worker-changing call gives up at the configured dispatch timeout" do
@@ -6266,25 +6267,39 @@ defmodule Shuttle.PollerTest do
     settle_poller!(poller)
     Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 100)
 
-    # A suspended Poller never answers, so each call exits on its own timeout,
-    # and the exit names the timeout it waited: the shrunk 100 ms, not
-    # GenServer's 5 s default or the 30 s production value.
+    # A suspended Poller never answers, so each call gives up at the shrunk
+    # 100 ms, not GenServer's 5 s default or the 30 s production value. The
+    # calls that start or rearm work answer "still queued"; the others exit,
+    # naming the timeout they waited.
     :sys.suspend(poller)
 
-    calls = [
-      dispatch_fiber: fn -> Poller.dispatch_fiber(poller, "tests/t", []) end,
+    exits = [
       claim_session: fn -> Poller.claim_session(poller, "tests/t", "s", []) end,
       kill_session: fn -> Poller.kill_session(poller, "tests/t") end,
-      capture: fn -> Poller.capture(poller, "yap", []) end,
-      lifecycle_transition: fn -> Poller.lifecycle_transition(poller, :accept, "tests/t") end
+      capture: fn -> Poller.capture(poller, "yap", []) end
     ]
 
-    for {name, call} <- calls do
+    for {name, call} <- exits do
       task = Task.async(fn -> catch_exit(call.()) end)
 
       assert {:ok, {:timeout, {GenServer, :call, [_server, _msg, 100]}}} =
                Task.yield(task, 30_000),
              "#{name} did not give up at the configured timeout"
+    end
+
+    answers = [
+      dispatch_fiber:
+        {fn -> Poller.dispatch_fiber(poller, "tests/t", []) end,
+         &match?({:error, :poller_busy}, &1)},
+      lifecycle_transition:
+        {fn -> Poller.lifecycle_transition(poller, :accept, "tests/t") end,
+         &match?({:error, :timeout, _}, &1)}
+    ]
+
+    for {name, {call, expected?}} <- answers do
+      task = Task.async(call)
+      assert {:ok, result} = Task.yield(task, 30_000), "#{name} did not give up in time"
+      assert expected?.(result), "#{name} answered #{inspect(result)}"
     end
   end
 
