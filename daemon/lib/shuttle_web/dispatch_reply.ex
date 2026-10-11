@@ -107,6 +107,19 @@ defmodule ShuttleWeb.DispatchReply do
      }}
   end
 
+  def render(fiber_id, {:error, :poller_busy}) do
+    {504,
+     %{
+       dispatched: false,
+       reason: "poller_busy",
+       fiber_id: fiber_id,
+       message:
+         "The owning daemon's poller did not finish the launch within " <>
+           "#{div(Shuttle.Poller.dispatch_call_timeout_ms(), 1000)}s. The request is still " <>
+           "queued and may launch; check the fiber before retrying."
+     }}
+  end
+
   def render(fiber_id, {:error, reason}),
     do: {500, %{dispatched: false, reason: inspect(reason), fiber_id: fiber_id}}
 

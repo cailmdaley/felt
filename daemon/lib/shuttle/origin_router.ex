@@ -42,7 +42,11 @@ defmodule Shuttle.OriginRouter do
 
   require Logger
 
-  @default_forward_timeout_ms 30_000
+  # A forwarded write waits for the owner's longest Poller call plus transit, so
+  # the owner always answers (even "still busy") before this hop gives up.
+  @forward_transit_margin_ms 10_000
+  # A forwarded read serves the owner's files and feeds, not a Poller call.
+  @read_forward_timeout_ms 30_000
   @file_range_limit 4 * 1024 * 1024
   @file_error_limit 64 * 1024
 
@@ -155,6 +159,16 @@ defmodule Shuttle.OriginRouter do
   end
 
   @doc """
+  How long a forwarded write waits for the owner by default: the owner's longest Poller
+  call (`Shuttle.Poller.dispatch_call_timeout_ms/0`) plus a transit margin. The
+  owner therefore answers a slow launch itself, and a client waiting on this
+  daemon must wait longer than this.
+  """
+  @spec default_forward_timeout_ms() :: pos_integer()
+  def default_forward_timeout_ms,
+    do: Poller.dispatch_call_timeout_ms() + @forward_transit_margin_ms
+
+  @doc """
   Forward a write to the owning remote daemon's identical `path` (e.g.
   `"/api/v1/felt-edit"`). `payload` is the request body map; the `origin` key is
   stripped (string or atom) before sending, so the owner treats the fiber as
@@ -172,7 +186,7 @@ defmodule Shuttle.OriginRouter do
           {:forwarded, non_neg_integer(), String.t()} | {:error, term()}
   def forward(%Remote{} = remote, path, payload, opts \\ []) when is_map(payload) do
     client = forward_client()
-    timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
+    timeout = Keyword.get(opts, :forward_timeout_ms, default_forward_timeout_ms())
     url = Remote.url_for(remote, path)
     body = payload |> Map.delete("origin") |> Map.delete(:origin) |> Jason.encode!()
 
@@ -200,7 +214,7 @@ defmodule Shuttle.OriginRouter do
           {:forwarded, non_neg_integer(), String.t(), binary()} | {:error, term()}
   def forward_get(%Remote{} = remote, path, query, opts \\ []) when is_map(query) do
     client = forward_client()
-    timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
+    timeout = Keyword.get(opts, :forward_timeout_ms, @read_forward_timeout_ms)
     stripped = query |> Map.delete("origin") |> Map.delete(:origin)
     url = Remote.url_for(remote, path) <> "?" <> URI.encode_query(stripped)
 
@@ -232,7 +246,7 @@ defmodule Shuttle.OriginRouter do
   def forward_file_get(%Remote{} = remote, path, query, req_headers, opts \\ [])
       when is_map(query) and is_list(req_headers) do
     client = forward_client()
-    timeout = Keyword.get(opts, :forward_timeout_ms, @default_forward_timeout_ms)
+    timeout = Keyword.get(opts, :forward_timeout_ms, @read_forward_timeout_ms)
     stripped = query |> Map.delete("origin") |> Map.delete(:origin)
     url = Remote.url_for(remote, path) <> "?" <> URI.encode_query(stripped)
 

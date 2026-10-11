@@ -203,18 +203,19 @@ defmodule ShuttleWeb.APIControllerTest do
 
     # The request waits on the Poller's dispatch call timeout, which clears
     # GenServer's 5 s default (PollerTest pins that): shrunk below a spawn's
-    # duration, the request gives up first, so it holds no shorter wait of its
-    # own and no GenServer default in between.
+    # duration, the Poller call runs out first and the request answers 504
+    # poller_busy rather than dropping the connection.
     late_id = "tests/api-late-dispatch"
     MockRunner.set_fiber(late_id, make_fiber(late_id))
     MockRunner.set_shuttle(late_id, oneshot_shuttle())
     Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 200)
     MockRunner.set_new_session_delay(600)
 
-    assert {:timeout, {GenServer, :call, _}} =
-             catch_exit(
-               post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => late_id}))
-             )
+    conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => late_id}))
+    assert conn.status == 504
+    body = Jason.decode!(conn.resp_body)
+    assert body["reason"] == "poller_busy"
+    assert body["dispatched"] == false
   end
 
   test "dispatch returns 400 without fiber_id" do
