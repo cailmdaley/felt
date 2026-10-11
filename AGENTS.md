@@ -256,6 +256,12 @@ The repo is **MIT** (both Go CLIs + UI). The shuttle daemon (`daemon/lib/`) cont
 code derived from OpenAI's Symphony under the **Apache License 2.0**, preserved
 in `NOTICE` and `LICENSE-APACHE`.
 
+## Merging
+
+Merge to `main` by default once tests pass; a finished PR does not wait for
+Cail. Hold only in rare cases: an open design question, a fleet-wide behavior
+change that needs his call, or a red or unrun suite.
+
 ## Contributing
 
 See `CONTRIBUTING.md`.
