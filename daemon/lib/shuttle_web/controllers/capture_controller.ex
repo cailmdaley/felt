@@ -21,7 +21,7 @@ defmodule ShuttleWeb.CaptureController do
   import ShuttleWeb.RelayHelpers,
     only: [app_server_unavailable_message: 0, relay_json: 3, present?: 1]
 
-  alias Shuttle.{Meeting, OriginRouter}
+  alias Shuttle.{Meeting, MeetingRouter, OriginRouter}
   require Shuttle.Dispatcher
 
   def create(conn, params) do
@@ -29,26 +29,41 @@ defmodule ShuttleWeb.CaptureController do
       :error ->
         route_capture(conn, params, nil)
 
-      {:ok, meeting} ->
-        case Meeting.start(
-               meeting,
-               {:capture, Map.get(params, "surface")},
-               Map.get(params, "prompt"),
-               Map.get(params, "origin")
-             ) do
-          {:ok, %{meeting: row, prompt: prompt, launch: launch}} ->
-            params =
-              params
-              |> Map.delete("meeting")
-              |> Map.put("prompt", prompt)
-              |> Map.put("surface", "cli")
-              |> Map.put("meeting_launch", launch)
+      {:ok, _meeting} ->
+        case MeetingRouter.select_start(params) do
+          {:ok, :local} ->
+            create_meeting_local(conn, params)
 
-            route_capture(conn, params, row)
+          {:ok, {:remote, remote}} ->
+            {status, body} = MeetingRouter.forward_start(remote, "/api/v1/capture", params)
+            conn |> put_status(status) |> json(body)
 
-          {:error, reason} ->
-            meeting_error(conn, reason)
+          {:error, message} ->
+            conn |> put_status(400) |> json(%{error: message})
         end
+    end
+  end
+
+  defp create_meeting_local(conn, params) do
+    case Meeting.start(
+           params["meeting"],
+           {:capture, Map.get(params, "surface")},
+           Map.get(params, "prompt"),
+           Map.get(params, "origin")
+         ) do
+      {:ok, %{meeting: row, prompt: prompt, launch: launch}} ->
+        params =
+          params
+          |> Map.delete("meeting")
+          |> Map.put("prompt", prompt)
+          |> Map.put("surface", "cli")
+          |> Map.put("meeting_launch", launch)
+
+        row = Map.put(row, "recorder", MeetingRouter.own_host())
+        route_capture(conn, params, row)
+
+      {:error, reason} ->
+        meeting_error(conn, reason)
     end
   end
 
@@ -147,7 +162,7 @@ defmodule ShuttleWeb.CaptureController do
   defp relay_capture(conn, {:forwarded, status, body}, meeting_row) do
     payload = decode_capture_body(body) |> Map.put("meeting", meeting_row)
     payload = if status >= 400, do: Map.put(payload, "recording", true), else: payload
-    conn |> put_status(status) |> json(payload)
+    conn |> put_status(status) |> json(MeetingRouter.stamp(payload))
   end
 
   defp relay_capture(conn, {:error, {:forward_failed, name, reason}}, meeting_row) do
@@ -156,7 +171,7 @@ defmodule ShuttleWeb.CaptureController do
       |> Map.put("meeting", meeting_row)
       |> Map.put("recording", true)
 
-    conn |> put_status(502) |> json(payload)
+    conn |> put_status(502) |> json(MeetingRouter.stamp(payload))
   end
 
   defp decode_capture_body(body) do
@@ -169,7 +184,8 @@ defmodule ShuttleWeb.CaptureController do
 
   defp capture_json(conn, payload, nil), do: json(conn, payload)
 
-  defp capture_json(conn, payload, row), do: json(conn, Map.put(payload, "meeting", row))
+  defp capture_json(conn, payload, row),
+    do: json(conn, MeetingRouter.stamp(Map.put(payload, "meeting", row)))
 
   # A terminal capture's harness session, when the launch pre-assigned one.
   defp put_session_uuid(payload, uuid) when is_binary(uuid),
@@ -182,12 +198,12 @@ defmodule ShuttleWeb.CaptureController do
 
   defp capture_error(conn, status, payload, row) do
     payload = payload |> Map.put("meeting", row) |> Map.put("recording", true)
-    conn |> put_status(status) |> json(payload)
+    conn |> put_status(status) |> json(MeetingRouter.stamp(payload))
   end
 
   defp meeting_error(conn, reason) do
     {status, body} = ShuttleWeb.MeetingController.start_error(reason)
-    conn |> put_status(status) |> json(body)
+    conn |> put_status(status) |> json(MeetingRouter.stamp(body))
   end
 
   defp error_code(reason) when is_binary(reason), do: reason

@@ -124,6 +124,7 @@ defmodule Shuttle.Meeting do
   def stop(opts \\ []) do
     with_meeting_lock(fn ->
       with {:ok, snapshot, context} <- inspect_current(opts),
+           :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
            {:ok, result} <- stop_current(snapshot, context, opts) do
         {:ok, result}
       end
@@ -587,6 +588,13 @@ defmodule Shuttle.Meeting do
       end
     end
   end
+
+  defp validate_stop_launch(_snapshot, nil), do: :ok
+
+  defp validate_stop_launch(%{meeting: %{launch: launch}}, launch)
+       when is_binary(launch) and launch != "", do: :ok
+
+  defp validate_stop_launch(%{meeting: row}, _launch), do: {:error, {:stale_launch, row}}
 
   defp stop_current(%{meeting: nil}, _context, _opts), do: {:error, :not_found}
 

@@ -1286,6 +1286,14 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
+  @doc "A non-replayable POST: no redirects, Retry-After retries, or keepalive reuse."
+  def post_once(url, body, content_type, timeout_ms) do
+    case request(:post, url, [{"connection", "close"}], {content_type, body}, timeout_ms, true) do
+      {:ok, status, _headers, response} -> {:ok, status, response}
+      {:error, _reason} = error -> error
+    end
+  end
+
   # File fetch used by owner-routed byte reads. The header-aware form carries
   # validators across the tunnel and returns the owner's response headers for
   # the local daemon to relay; non-200 statuses (including 304) stay intact.
@@ -1322,7 +1330,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # it, httpc returns a charlist of *bytes*, and `List.to_string/1` then reads
   # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
   # every multibyte char (— × é …) and corrupting images and PDFs.
-  defp request(method, url, req_headers, payload, timeout_ms) do
+  defp request(method, url, req_headers, payload, timeout_ms, single_attempt? \\ false) do
     with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
       headers =
         Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
@@ -1337,6 +1345,11 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
         end
 
       http_opts = http_opts(request_url, timeout_ms, private_dial?)
+
+      http_opts =
+        if single_attempt?,
+          do: Keyword.merge(http_opts, autoredirect: false, autoretry: 0),
+          else: http_opts
 
       case :httpc.request(method, request, http_opts, [body_format: :binary], profile) do
         {:ok, {{_, status, _}, resp_headers, body}} ->
