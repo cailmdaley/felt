@@ -1095,6 +1095,37 @@ defmodule Shuttle.MeetingTest do
            end) == 1
   end
 
+  test "receiving recorder refuses a missing agent owner before any recording for capture and join",
+       %{hark_dir: hark_dir} do
+    for path <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+      conn =
+        post(
+          api_conn(),
+          path,
+          Jason.encode!(%{
+            recorder: Shuttle.Poller.own_host_id(),
+            recorder_forwarded: true,
+            origin: "absent-owner",
+            meeting: %{mode: "phone"},
+            prompt: "meeting",
+            note: "meeting",
+            fiber_id: "p/f",
+            project_dir: hark_dir
+          })
+        )
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["error"] =~ "unknown host \"absent-owner\""
+      assert Shuttle.Test.MeetingRunner.calls() == []
+      refute File.exists?(Path.join(hark_dir, "meetings"))
+    end
+
+    assert {:error, {:validation, message}} =
+             Meeting.meeting_paths("missing-owner", "absent-owner")
+
+    assert message =~ "unknown host"
+  end
+
   test "addressed stale stop cannot signal or dismiss a newer launch", %{hark_dir: hark_dir} do
     write_meeting(hark_dir, %{
       "launch" => "new",

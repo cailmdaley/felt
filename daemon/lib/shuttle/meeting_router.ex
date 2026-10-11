@@ -22,7 +22,7 @@ defmodule Shuttle.MeetingRouter do
       recorder not in [nil, ""] ->
         addressed(recorder, opts)
 
-      params["prefer"] == "phone" or get_in(params, ["meeting", "mode"]) == "phone" ->
+      params["prefer"] == "phone" or match?(%{"mode" => "phone"}, params["meeting"]) ->
         prefer_phone(opts)
 
       true ->
@@ -159,12 +159,16 @@ defmodule Shuttle.MeetingRouter do
   def forward_stop(remote, params) do
     payload = params |> Map.put("recorder", remote.name) |> Map.put("recorder_forwarded", true)
 
-    case OriginRouter.forward_client().post(
+    client = OriginRouter.forward_client()
+    Code.ensure_loaded?(client)
+    post = if function_exported?(client, :post_once, 4), do: :post_once, else: :post
+
+    case apply(client, post, [
            Remote.url_for(remote, "/api/v1/meeting/stop"),
            Jason.encode!(payload),
            "application/json",
            OriginRouter.default_forward_timeout_ms()
-         ) do
+         ]) do
       {:ok, status, body} ->
         {status, stamp(decode(body), remote.name)}
 

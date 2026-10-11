@@ -29,6 +29,14 @@ defmodule Shuttle.Test.RecorderClient do
   end
 end
 
+defmodule Shuttle.Test.RecorderOnceClient do
+  def post_once(url, body, type, timeout),
+    do: Shuttle.Test.RecorderClient.post(url, body, type, timeout)
+
+  def post(_url, _body, _type, _timeout),
+    do: raise("non-replayable recorder operation used ordinary POST")
+end
+
 defmodule Shuttle.MeetingRouterTest do
   use ExUnit.Case, async: true
   import Phoenix.ConnTest
@@ -60,6 +68,38 @@ defmodule Shuttle.MeetingRouterTest do
       {:get, "http://linux-recorder.example/api/v1/meeting"} => capability(~w(phone)),
       {:get, "http://mac-recorder.example/api/v1/meeting"} => capability(~w(call room phone))
     }
+  end
+
+  test "malformed meeting values reach validation without selector crashes" do
+    for path <- ["/api/v1/capture", "/api/v1/meeting/join"],
+        meeting <- ["phone", 42, ["phone"], nil] do
+      conn = post(api_conn(), path, Jason.encode!(%{meeting: meeting, fiber_id: "p/f"}))
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["error"] =~ "meeting.mode"
+    end
+
+    assert RecorderClient.calls() == []
+  end
+
+  test "addressed stop uses non-replayable transport when it is available" do
+    Env.put_app_env(:write_forward_client, Shuttle.Test.RecorderOnceClient)
+
+    RecorderClient.set(%{
+      {:post, "http://mac-recorder.example/api/v1/meeting/stop"} =>
+        {:ok, 202, "{\"meeting\":null}"}
+    })
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/meeting/stop",
+        Jason.encode!(%{recorder: "mac-recorder", launch: "L1"})
+      )
+
+    assert conn.status == 202
+
+    assert [{:post, _, %{"launch" => "L1", "recorder" => "mac-recorder"}, _}] =
+             RecorderClient.calls()
   end
 
   test "normal GET is local; preferred GET selects capable remote and stamps status and row" do

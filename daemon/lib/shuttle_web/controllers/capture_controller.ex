@@ -68,13 +68,21 @@ defmodule ShuttleWeb.CaptureController do
   end
 
   defp route_capture(conn, params, meeting_row) do
-    case OriginRouter.route(Map.get(params, "origin")) do
+    case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         result = OriginRouter.forward(remote, "/api/v1/capture", params)
         relay_capture(conn, result, meeting_row)
 
       :local ->
         create_local(conn, params, meeting_row)
+
+      {:error, {:unknown_origin, origin}} ->
+        capture_error(
+          conn,
+          400,
+          %{error: OriginRouter.unknown_origin_message(origin)},
+          meeting_row
+        )
     end
   end
 
