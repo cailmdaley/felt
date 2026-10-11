@@ -110,8 +110,24 @@ describe('rendered Capture capabilities', () => {
     expect(document.querySelector('[role="radiogroup"]')).toBeNull()
     click('.form-submit')
     await tick()
-    expect(captureBody()).toMatchObject({ recorder: 'remote', origin: 'local', meeting: { mode: 'phone' } })
+    expect(captureBody()).toMatchObject({ origin: 'local', meeting: { mode: 'phone' } })
+    // The preview is advisory: the hub checks reachability again before starting.
+    expect(captureBody()).not.toHaveProperty('recorder')
     expect(begin).toHaveBeenCalledOnce()
+  })
+
+  it('accepts a local recorder chosen at Start after a remote preview becomes unavailable', async () => {
+    mobile = true
+    status = { available: true, modes, recorder: 'remote', meeting: null }
+    await mount()
+    fetcher.mockImplementation(async (url: string) => url.endsWith('/capture')
+      ? response({ spawned: true, meeting: { state: 'loading', phone: true, launch: 'fallback-launch', recorder: 'local' } })
+      : response(status))
+    click('.form-submit')
+    await tick()
+    expect(captureBody()).not.toHaveProperty('recorder')
+    expect(bind).toHaveBeenCalledWith(7, expect.objectContaining({ recorder: 'local', launch: 'fallback-launch', phone: true }))
+    expect(meetingResult).toHaveBeenCalledWith(expect.objectContaining({ meeting: expect.objectContaining({ recorder: 'local' }) }))
   })
 
   it.each(['network', 'remote uncertainty'])('does not retry an ambiguous meeting start: %s', async (failure) => {

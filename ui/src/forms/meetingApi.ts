@@ -96,7 +96,7 @@ export function joinMeetingBody(input: JoinMeetingInput): Record<string, unknown
   return {
     fiber_id: input.fiberId,
     ...(input.origin ? { origin: input.origin } : {}),
-    ...(input.recorder ? { recorder: input.recorder } : {}),
+    ...(input.recorder && input.mode !== 'phone' ? { recorder: input.recorder } : {}),
     meeting: { mode: input.mode },
     ...(note ? { note } : {}),
   }

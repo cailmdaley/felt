@@ -209,6 +209,8 @@ Capability probes belong to the daemon and have short bounded deadlines; the bro
 Capture and Join use the selected recorder's capabilities and narrow them to `phone` on mobile.
 A remote Mac still records in `phone` mode when the microphone is on the phone.
 The board's host picker chooses the scribe host, not the recorder, and the controls name the selected recorder.
+The preview recorder is advisory for a new phone start: Capture and Join omit an explicit recorder so the daemon checks reachability again before recording.
+The returned meeting's recorder is authoritative.
 An active recording pins polling and Stop to that recorder instead of selecting again.
 
 Each origin in `GET /felt-stores` also reports `browser_capable`.

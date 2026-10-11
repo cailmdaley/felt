@@ -48,7 +48,7 @@ export function captureRequestBody(input: CaptureRequestInput): Record<string, u
     ...(input.effort ? { effort: input.effort } : {}),
     ...(input.chrome ? { chrome: true } : {}),
     ...(input.meetingMode
-      ? { surface: 'cli', meeting: { mode: input.meetingMode }, ...(input.recorder ? { recorder: input.recorder } : {}) }
+      ? { surface: 'cli', meeting: { mode: input.meetingMode }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
       : input.surface
         ? { surface: input.surface }
         : {}),

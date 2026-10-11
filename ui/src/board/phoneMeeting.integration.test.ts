@@ -106,7 +106,7 @@ describe('board phone meeting card wiring', () => {
     await flush()
     await vi.waitFor(() => expect(RelayLink).toHaveBeenCalled())
     const join = fetcher.mock.calls.find(([url]) => url.endsWith('/join'))!
-    expect(JSON.parse(join[1].body)).toEqual({ fiber_id: 'science/task', origin: 'agent-owner', recorder: 'mac-recorder', meeting: { mode: 'phone' } })
+    expect(JSON.parse(join[1].body)).toEqual({ fiber_id: 'science/task', origin: 'agent-owner', meeting: { mode: 'phone' } })
     expect(RelayLink).toHaveBeenLastCalledWith(expect.objectContaining({ url: 'wss://audio.example/api/v1/meeting/audio?launch=L1&recorder=mac-recorder' }))
     expect(fetcher.mock.calls.some(([url]) => url === 'https://audio.example/api/v1/meeting?recorder=mac-recorder')).toBe(true)
     find<HTMLButtonElement>('.kbn-meeting-stop').click()
