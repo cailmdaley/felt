@@ -93,6 +93,8 @@ export class Workspace {
   private routeEpoch = 0
   private lastBoardRoute: Extract<WorkspaceRoute, { kind: 'channel' }> | null = null
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
+  /** A channel opened to write to: its composer takes focus once it is shown. */
+  private composing: string | null = null
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
@@ -136,6 +138,7 @@ export class Workspace {
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
       sidebarBand: card => this.sidebarGroup(card),
+      sidebarColumn: card => this.sidebarColumn(card),
       files: card => this.overview.fileNames(card),
       find: opts.find,
       onFind: () => opts.focusFind?.() ?? false,
@@ -216,6 +219,12 @@ export class Workspace {
     this.open(card)
   }
 
+  /** Open the constitution on its fiber page with the composer focused. */
+  compose(card: KanbanCard): void {
+    this.composing = cardIdentity(card)
+    this.open(card, this.opts.origin(), proseDocument(this.ensure(card).channel)?.key)
+  }
+
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
     const outsideColumn = this.isActive && this.column && !this.column.some(entry => cardIdentity(entry.card) === cardIdentity(card))
     if (!this.isActive || origin !== this.origin || outsideColumn || !fromDeskColumn) {
@@ -232,28 +241,40 @@ export class Workspace {
   }
 
   /**
-   * The sidebar is one grouped list wherever the reader was opened from:
-   * Drafts, then In flight's Your turn and Working bands, then Awaiting review,
-   * each in the Desk's own order. Queued children are reached through their
-   * head's peek, not these groups or their J/K stops and index counts.
+   * The sidebar is one grouped list wherever the reader was opened from, in
+   * the Desk's reading order: Drafts, In flight's Your turn and Working bands,
+   * Awaiting review, Roles, then Resting, each in the Desk's own order. j/k
+   * walk it as one flow; J/K and the index strip step its columns. Queued
+   * children are reached through their head's peek, never as rows.
    */
   private sidebarCards(): KanbanCard[] {
     const all = this.opts.cards()
     const queues = sidebarQueue(all)
     const cards = all.filter(card => !queues.folded(card))
-    const flight = cards.filter(card => fiberPageColumn(card) === 'inFlight')
+    const inColumn = (column: string): KanbanCard[] => cards.filter(card => fiberPageColumn(card) === column)
+    const flight = inColumn('inFlight')
     return [
-      ...cards.filter(card => fiberPageColumn(card) === 'drafts'),
+      ...inColumn('drafts'),
       ...IN_FLIGHT_BANDS.flatMap(([band]) => flight.filter(card => inFlightBand(card) === band)),
-      ...cards.filter(card => fiberPageColumn(card) === 'awaitingReview'),
+      ...inColumn('awaitingReview'),
+      ...inColumn('roles'),
+      ...inColumn('resting'),
     ]
   }
-  /** A group's caption; the open constitution outside the four groups is captioned by its own column. */
+  /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {
     const column = fiberPageColumn(card)
     if (column === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(card))![1]
+    return this.sidebarColumn(card)
+  }
+  /** A card's Desk column: In flight holds both its bands' groups. */
+  private sidebarColumn(card: KanbanCard): string {
+    const column = fiberPageColumn(card)
+    if (column === 'inFlight') return 'In flight'
     if (column === 'drafts') return 'Drafts'
     if (column === 'awaitingReview') return 'Awaiting review'
+    if (column === 'roles') return 'Roles'
+    if (column === 'resting') return 'Resting'
     return fiberPageKicker(card) || 'Reading'
   }
   /** The constitutions opened in this session, most recent first, for the Board's Read lately shelf. */
@@ -354,12 +375,20 @@ export class Workspace {
     })
     return true
   }
-  private focusComposer(): void {
+  private focusComposer(): boolean {
     const state = this.current
-    if (!state) return
+    if (!state) return false
     const key = proseDocument(state.channel)?.key
     if (key) this.select(key)
-    this.controls(state)?.focusComposer()
+    return this.controls(state)?.focusComposer() ?? false
+  }
+  /** A channel opened to write to takes the composer's focus on its first
+   *  paint, and again once its body is read if the repaint dropped focus. */
+  private landComposer(state: ChannelState, last: boolean): void {
+    if (this.composing !== channelId(state.channel.uid, state.channel.owner)) { this.composing = null; return }
+    const lost = !document.activeElement || document.activeElement === document.body
+    if (!last || lost) this.focusComposer()
+    if (last) this.composing = null
   }
 
   /** Settings, history and the composer belong to fibers on the Desk's lifecycle; a note or role has none. */
@@ -473,6 +502,7 @@ export class Workspace {
     this.opts.onVisibility(true)
     this.depth.setActive(true)
     this.show(state)
+    this.landComposer(state, false)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
       this.startPrompt = null
@@ -488,6 +518,7 @@ export class Workspace {
       state.selected = report?.key ?? proseDocument(state.channel)?.key
     }
     this.show(state, loadedBefore)
+    this.landComposer(state, true)
     this.history.select(this.shown(state))
     this.startTimer()
   }

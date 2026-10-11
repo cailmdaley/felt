@@ -18,6 +18,20 @@ export interface KeyBinding {
 const VERDICT_UNDO = `${VERDICT_DELAY_MS / 1000} s`
 const bind = (keys: string[], intent: KeyIntent, label: string, alt = false): KeyBinding => ({ keys, intent, label, alt })
 
+/** Acting on one constitution: the reader's open fiber, the Desk's selected
+ * card. Both surfaces bind these same keys and run them through
+ * `constitutionAction`, so what a key does to a constitution cannot drift
+ * between them. */
+const constitutionBindings = (subject: string): KeyBinding[] => [
+  bind(['c', '.'], 'conversation', `Open ${subject}'s conversation`),
+  bind(['r'], 'compose', `Write to ${subject} from its fiber page`),
+  bind(['t'], 'temper', `Temper ${subject} (${VERDICT_UNDO} undo)`),
+  bind(['x'], 'discard', `Discard ${subject} (${VERDICT_UNDO} undo)`),
+  bind(['a'], 'toReview', `Move ${subject} to Awaiting review (${VERDICT_UNDO} undo)`),
+  bind(['s'], 'rest', `Rest ${subject}, with or without a date`),
+  bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
+]
+
 /** Desk regions follow reading order: the three Now columns left-to-right,
  * then Roles, then Resting. In flight's Your turn and Working bands form one
  * column. Roles and Resting each form one list in their drawn reading order.
@@ -32,9 +46,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['h', 'ArrowLeft'], 'left', 'Previous column / region'), bind(['l', 'ArrowRight'], 'right', 'Next column / region'),
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
-    bind(['c', '.'], 'conversation', 'Open selected conversation'),
-    bind(['s'], 'rest', 'Rest selected constitution, with or without a date'),
-    bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
+    ...constitutionBindings('the selected card'),
     bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
@@ -47,21 +59,15 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
-    bind(['c', '.'], 'conversation', 'Open conversation'),
-    bind(['r'], 'compose', 'Focus composer on the fiber page'),
-    bind(['t'], 'temper', `Temper the open fiber (${VERDICT_UNDO} undo)`),
-    bind(['x'], 'discard', `Discard the open fiber (${VERDICT_UNDO} undo)`),
-    bind(['a'], 'toReview', `Move the open fiber to Awaiting review (${VERDICT_UNDO} undo)`),
-    bind(['z'], 'undoVerdict', 'Undo latest pending verdict'),
-    bind(['s'], 'rest', 'Rest constitution, with or without a date'),
+    ...constitutionBindings('the open fiber'),
     bind(['/'], 'find', 'Find a constitution or file'),
     { ...bind(['\\'], 'sidebar', 'Toggle constitution sidebar'), command: true },
     bind(['h', 'ArrowLeft'], 'prev', 'Previous tab'), bind(['l', 'ArrowRight'], 'next', 'Next tab'),
     bind(['ArrowDown'], 'scrollDown', 'Scroll document down (3 lines)'), bind(['ArrowUp'], 'scrollUp', 'Scroll document up (3 lines)'),
     bind(['d'], 'halfDown', 'Scroll half a viewport down'), bind(['u'], 'halfUp', 'Scroll half a viewport up'),
     bind([' '], 'pageDown', 'Page document down'), bind(['Shift+ '], 'pageUp', 'Page document up'),
-    bind(['j'], 'nextChannel', 'Next constitution'), bind(['k'], 'prevChannel', 'Previous constitution'),
-    bind(['J'], 'nextGroup', 'Next sidebar group'), bind(['K'], 'prevGroup', 'Previous sidebar group'),
+    bind(['j'], 'nextChannel', 'Next constitution, across columns'), bind(['k'], 'prevChannel', 'Previous constitution, across columns'),
+    bind(['J'], 'nextGroup', 'Next sidebar column'), bind(['K'], 'prevGroup', 'Previous sidebar column'),
     bind(['ArrowLeft'], 'prev', 'Previous page', true), bind(['ArrowRight'], 'next', 'Next page', true),
     bind(['ArrowDown'], 'nextChannel', 'Next constitution', true), bind(['ArrowUp'], 'prevChannel', 'Previous constitution', true),
     bind(['Enter', 'o'], 'open', 'Toggle expand'), bind(['Escape'], 'back', 'Return to origin view'),

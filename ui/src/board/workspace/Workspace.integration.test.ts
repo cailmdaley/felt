@@ -382,7 +382,7 @@ describe('workspace reader integration', () => {
     await press('K'); expect(current()).toBe('alpha')
     expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
   })
-  it('captions In flight as its Question and Working bands even from an interleaved feed, and J/K stops at each', async () => {
+  it('captions In flight as its Your turn and Working bands even from an interleaved feed; j/k walk one flow and J/K stop at each column', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
@@ -394,13 +394,18 @@ describe('workspace reader integration', () => {
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
     const press = async (key: string): Promise<void> => { document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush() }
-    await press('K'); expect(current()).toBe('w1')
-    await press('j'); expect(current()).toBe('w2')
     await press('K'); expect(current()).toBe('n1')
-    await press('J'); expect(current()).toBe('w2')
+    await press('j'); expect(current()).toBe('n2')
+    // Off the end of one band, j goes on into the next, and on across columns.
+    await press('j'); expect(current()).toBe('w1')
+    await press('K'); expect(current()).toBe('draft')
+    await press('j'); expect(current()).toBe('n1')
+    await press('k'); expect(current()).toBe('draft')
+    await press('J'); expect(current()).toBe('n1')
     await press('J'); expect(current()).toBe('alpha')
+    await press('K'); expect(current()).toBe('n1')
   })
-  it('draws one index strip naming each J/K stop and its count, marks the open group, and lands a click as J/K would', async () => {
+  it('draws one index strip naming each Desk column and its count, marks the open one, and lands a click as J/K would', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
@@ -410,20 +415,22 @@ describe('workspace reader integration', () => {
     workspace.open(feed[3], 'Desk'); await flush()
     const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
-    // Empty groups draw no entry; the strip abbreviates Awaiting review, its caption does not.
-    expect(entries().map(entry => entry.textContent)).toEqual(['Your turn1', 'Working2', 'Review1'])
-    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['Your turn, 1', 'Working, 2', 'Awaiting review, 1'])
+    // Empty columns draw no entry; In flight is one entry over its two bands;
+    // the strip abbreviates In flight and Awaiting review, their names stay whole.
+    expect(entries().map(entry => entry.textContent)).toEqual(['Flight3', 'Review1'])
+    expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['In flight, 3', 'Awaiting review, 1'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Your turn', 'Working', 'Awaiting review'])
     expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title)).toEqual(['Awaiting review'])
-    entries()[1].click(); await flush()
-    expect(current()).toBe('w1')
-    expect(entries().find(entry => entry.getAttribute('aria-current') === 'location')?.title).toBe('Working')
+    entries()[0].click(); await flush()
+    expect(current()).toBe('n1')
+    expect(entries().find(entry => entry.getAttribute('aria-current') === 'location')?.title).toBe('In flight')
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
-    expect(current()).toBe('w2')
-    entries()[2].click(); await flush()
-    expect(current()).toBe('alpha')
-    // Back in Working, the click lands on the card last open there.
+    expect(current()).toBe('w1')
     entries()[1].click(); await flush()
-    expect(current()).toBe('w2')
+    expect(current()).toBe('alpha')
+    // Back in In flight, the click lands on the card last open there.
+    entries()[0].click(); await flush()
+    expect(current()).toBe('w1')
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()

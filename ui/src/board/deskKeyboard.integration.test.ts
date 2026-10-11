@@ -31,7 +31,7 @@ const data = () => response({
   now: {
     drafts: [card({ id: 'd1', uid: 'draft-uid' }), card({ id: 'd2' })],
     inFlight: [card({ id: 'working', status: 'active', runtimePhase: 'working' }), head],
-    awaitingReview: [card({ id: 'review', status: 'closed' })],
+    awaitingReview: [card({ id: 'review', status: 'closed', shuttleKind: 'oneshot' })],
   },
   folded: [child],
   stash: [card({ id: 'resting', effectiveHorizon: 'stashed' })],
@@ -126,6 +126,51 @@ describe('Rest controls', () => {
   })
 })
 
+describe('Desk constitution keys', () => {
+  const agentDesk = () => response({ now: {
+    drafts: [card({ id: 'plan', uid: 'plan', shuttleKind: 'oneshot' })],
+    inFlight: [],
+    awaitingReview: [card({ id: 'done', uid: 'done', status: 'closed', shuttleKind: 'oneshot' })],
+  } })
+  const undoLine = (uid: string): string | null | undefined =>
+    document.querySelector(`[data-card-uid="${uid}"] .ws-verdict-undo`)?.textContent
+  it.each([['t', 'Tempered'], ['x', 'Discarded']])('%s gives the selected card its verdict through the reader\'s undo window, and z takes it back', (key, word) => {
+    draw(agentDesk())
+    press('j'); expect(selected()).toBe('done')
+    expect(press(key).defaultPrevented).toBe(true)
+    expect(undoLine('done')).toBe(`${word}·undo z`)
+    expect(inside.workspace.isActive).toBe(false)
+    press('z')
+    expect(undoLine('done')).toBeUndefined()
+  })
+  it('a moves a selected draft to review and is refused where review is not reachable', () => {
+    draw(agentDesk())
+    press('j'); press('h'); expect(selected()).toBe('plan')
+    press('a')
+    expect(undoLine('plan')).toBe('To review·undo z')
+    press('z')
+    press('l'); expect(selected()).toBe('done')
+    expect(press('a').defaultPrevented).toBe(false)
+    expect(undoLine('done')).toBeUndefined()
+  })
+  it('keys do nothing without a selection, and the verdict keys skip a fiber off the lifecycle', () => {
+    expect(press('t').defaultPrevented).toBe(false)
+    press('j'); press('h'); press('h'); expect(selected()).toBe('draft-uid')
+    expect(press('t').defaultPrevented).toBe(false)
+    expect(undoLine('draft-uid')).toBeUndefined()
+  })
+  it('r opens the selected card on its fiber page, writing', async () => {
+    draw(agentDesk())
+    press('j')
+    press('r')
+    for (let i = 0; i < 50; i++) await Promise.resolve()
+    expect(inside.workspace.isActive).toBe(true)
+    expect(window.location.hash).toContain('done')
+    expect(document.activeElement?.closest('.ws-reader')).not.toBeNull()
+    expect(document.activeElement?.tagName).toBe('TEXTAREA')
+  })
+})
+
 describe('Desk keyboard selection', () => {
   it.each([['n', ''], ['Enter', 'tomorrow']])('s on the focused constitution then %s rests through lifecycle', async (k, which) => {
     press('j')
@@ -212,10 +257,11 @@ describe('Desk keyboard selection', () => {
     press('j'); press('Enter')
     expect(window.location.hash).toContain('child-uid')
   })
-  it('opens the reader on one grouped sidebar, and keeps the flight column for the cards that fly', () => {
+  it('opens the reader on one grouped sidebar of the Desk\'s columns, and keeps the flight column for the cards that fly', () => {
     press('j'); press('h'); press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review'])
-    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review', 'Resting'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')].map(el => el.getAttribute('aria-label'))).toEqual(['Drafts, 2', 'In flight, 2', 'Awaiting review, 1', 'Resting, 1'])
     document.querySelector<HTMLButtonElement>('.ws-return')!.click()
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     expect(document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued-list')!.hidden).toBe(false)
@@ -226,7 +272,7 @@ describe('Desk keyboard selection', () => {
     press('j'); press('h')
     document.querySelector<HTMLElement>('[data-fiber-id="head"] .kbn-card-queued')!.click()
     press('Enter')
-    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review'])
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
   })
   it('survives refresh reorder and a path rename by uid+origin, not list position', () => {
     press('j'); press('h'); press('h')

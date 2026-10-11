@@ -42,6 +42,7 @@ import './KanbanModal.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
+import { constitutionAction } from './workspace/fiberPageState.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
@@ -664,13 +665,14 @@ export class KanbanModal {
   }
 
   /** Desk and Chronicle cards enter the same owner-addressed document channel. */
-  private openDocumentChannel(card: KanbanCard): void {
+  private openDocumentChannel(card: KanbanCard, compose = false): void {
     if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
       : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
-    if (card.status === 'active' && isQuestion(card)) this.workspace?.openQuestion(card)
+    if (compose) this.workspace?.compose(card)
+    else if (card.status === 'active' && isQuestion(card)) this.workspace?.openQuestion(card)
     else this.workspace?.open(card)
   }
 
@@ -2655,18 +2657,14 @@ export class KanbanModal {
     }
     if (this.activeViewId === 'desk' && !keystrokeIsSpokenFor()) {
       const intent = keyIntent(e, 'desk')
-      if (intent === 'rest') {
-        const address = this.deskKeyboard?.selection
-        const card = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
-        const anchor = this.deskEl?.querySelector<HTMLElement>('.kbn-key-selected')
-        if (card && anchor) this.openRestPopover(card)
-        e.preventDefault(); e.stopPropagation()
-        return
-      }
-      if (intent === 'conversation') {
-        const address = this.deskKeyboard?.selection
-        const card = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
-        if (card) this.dock.openConversation(card)
+      const address = this.deskKeyboard?.selection
+      const selected = address && this.workspaceCards().find(card => (card.uid ?? card.id) === address.uid && card.originId === address.origin)
+      if (intent && constitutionAction(intent, selected, {
+        verdict: (card, verdict) => { this.workspace?.queueVerdict(card, verdict) },
+        compose: card => this.openDocumentChannel(card, true),
+        conversation: card => this.dock.openConversation(card),
+        rest: card => this.openRestPopover(card),
+      })) {
         e.preventDefault(); e.stopPropagation()
         return
       }

@@ -181,13 +181,13 @@ The fiber header shows status alone. Agent, effort, cadence, host and project di
 Document label bars show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
 The Constitutions sidebar starts closed and remembers an explicit choice.
-It groups the Desk's live work as Drafts, Your turn, Working and Awaiting review, in the Desk's order; each group's caption holds the top of the list while you scroll through it.
-An index strip at its top names each non-empty group with its count and marks the open constitution's; clicking an entry jumps there as J/K does.
+It lists the Desk's columns in the Desk's order: Drafts, In flight (as its Your turn and Working groups), Awaiting review, Roles and Resting; each group's caption holds the top of the list while you scroll through it.
+An index strip at its top names each non-empty column with its count and marks the open constitution's; clicking an entry jumps there as J/K does.
 On phones, previous/next controls sit in a thumb bar, and browser Back returns to the originating view.
 
-Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions in sidebar order and J/K jump between its groups, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
+Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions through the sidebar as one flow, across groups and columns, and J/K jump between its columns, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
-c (or .) opens the worker's conversation exactly as its pill does, on the Desk and in the reader; ⌘\\ toggles the Constitutions sidebar.
+The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does; t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back); r opens the fiber page with its composer focused. ⌘\\ toggles the Constitutions sidebar.
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
 Rest works in any state and stops a live worker through the owning daemon's lifecycle path.
 In flight shows **Your turn** then **Working**; a question card leads Your turn and opens its report when present, and harness attention reads **at a prompt**.
