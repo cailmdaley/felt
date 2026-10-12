@@ -144,11 +144,11 @@ describe('the composer takes pasted images', () => {
     expect(chips()).toHaveLength(0)
   })
 
-  it('refuses a non-image up front, on its own line', () => {
+  it('admits a non-image as a named chip', () => {
     paste(textarea(), [new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' })])
-    expect(chips()).toHaveLength(0)
-    expect(imageError().style.display).toBe('')
-    expect(imageError().textContent).toContain('notes.pdf is not a PNG, JPEG, GIF or WebP image')
+    expect(chips()).toHaveLength(1)
+    expect(chips()[0].textContent).toContain('notes.pdf')
+    expect(imageError().style.display).toBe('none')
     expect(error().style.display).toBe('none')
   })
 
@@ -195,13 +195,13 @@ describe('the composer takes pasted images', () => {
     expect(resume().disabled).toBe(false)
   })
 
-  it('keeps a waiting start prompt when an image is admitted or refused', () => {
+  it('keeps a waiting start prompt when a file is admitted or refused', () => {
     mount({ pendingStart: true })
     expect(error().querySelector('.kbn-start-prompt')).not.toBeNull()
     paste(textarea(), [png('one.png')])
-    paste(textarea(), [new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' })])
+    paste(textarea(), [new File([], 'empty.txt', { type: 'text/plain' })])
     expect(error().querySelector('.kbn-start-prompt')).not.toBeNull()
-    expect(imageError().textContent).toContain('notes.pdf')
+    expect(imageError().textContent).toContain('empty.txt is empty')
     expect(chips()).toHaveLength(1)
   })
 

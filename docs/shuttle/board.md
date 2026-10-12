@@ -109,11 +109,11 @@ The message box starts at one line and grows on focus or with a draft.
 Settings include the next launch's agent, effort, surface and kind, plus the card's due day and parent.
 The Desk also offers Stash and Capture dialogs and Attach.
 
-Images pasted or dropped into the message box wait there as thumbnails, each
-with a × to remove it: PNG, JPEG, GIF or WebP, at most 10 MB each, 8 per send
+Files pasted or dropped into the message box wait there, each with a × to
+remove it (images as thumbnails, other types as a name chip): any type, at most 10 MB each, 8 per send
 and 25 MB in total. New session, Resume and Meeting first store them on the
 host that owns the fiber (under its data directory's `attachments/`), then
-send the message followed by one `[Image: <path>]` line per image, so the
+send the message followed by one `[Image: <path>]` line per image (`[File: <path>]` for other types), so the
 worker opens each by path. If the upload fails nothing is sent and the box
 says why. While a send is in flight every verb waits and the thumbnails are
 frozen. A paste that carries text stays a text paste, even when the copying

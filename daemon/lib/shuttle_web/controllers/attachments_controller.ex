@@ -1,9 +1,9 @@
 defmodule ShuttleWeb.AttachmentsController do
   @moduledoc """
-  `POST /api/v1/attachments` — store the composer's pasted images on the host
+  `POST /api/v1/attachments` — store the composer's attached files on the host
   that owns the fiber, so the directive sent next can name their paths.
 
-  Body: `{"fiber", "origin"?, "attachments": [{"name", "mime", "data",
+  Body: `{"fiber", "origin"?, "attachments": [{"name", "mime"?, "data",
   "sha256"}]}` with `data` base64. Response: `{"files": [{"name", "path",
   "sha256", "size"}]}` in request order, `path` absolute on the owning host.
 

@@ -1,11 +1,12 @@
 /**
- * Images pasted or dropped into the fiber page's composer.
+ * Files pasted or dropped into the fiber page's composer: images and any
+ * other type.
  *
  * The composer holds them as chips until a send. Then {@link uploadPastedImages}
  * writes them to the daemon that owns the fiber (`POST /api/v1/attachments`,
  * owner-routed by `origin`), and {@link composeDirective} appends one
- * `[Image: <path>]` line per image to the typed text, so the worker on that
- * host opens each one by path.
+ * `[Image: <path>]` line per image (or `[File: <path>]` per other file) to the
+ * typed text, so the worker on that host opens each one by path.
  *
  * {@link buildImageStrip} draws the chips; everything else is plain state and
  * requests. The limits mirror `Shuttle.Attachments` on the daemon, which checks
@@ -15,8 +16,10 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import { errorMessageFromResponse } from './KanbanModalShared.js'
 
-/** The image types a composer accepts, and the daemon stores. */
+/** The image types the composer draws as thumbnails; the daemon checks their bytes. */
 export const PASTED_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+/** The extensions the daemon gives those types, which mark a stored path as an image. */
+const IMAGE_EXTENSIONS = /\.(png|jpg|gif|webp)$/
 /** The largest single image, in bytes. */
 export const MAX_PASTED_IMAGE_BYTES = 10 * 1024 * 1024
 /** The most images one send carries. */
@@ -25,7 +28,6 @@ export const MAX_PASTED_IMAGES = 8
 export const MAX_PASTED_TOTAL_BYTES = 25 * 1024 * 1024
 
 const MB = 1024 * 1024
-const TYPE_WORDS = 'PNG, JPEG, GIF or WebP'
 
 /** The parts of a `File` the composer reads; a plain `Blob` has no name. */
 export type ImageSource = Blob & { name?: string }
@@ -82,7 +84,7 @@ export class PastedImages {
   add(blobs: Iterable<ImageSource>): string | null {
     const refused: string[] = []
     for (const blob of blobs) {
-      const name = blob.name?.trim() || `image ${this.nextId}`
+      const name = blob.name?.trim() || `${blob.type.startsWith('image/') ? 'image' : 'file'} ${this.nextId}`
       const reason = this.refusal(blob)
       if (reason) {
         refused.push(`${name} ${reason}`)
@@ -102,11 +104,10 @@ export class PastedImages {
   }
 
   private refusal(blob: ImageSource): string | null {
-    if (!PASTED_IMAGE_TYPES.includes(blob.type)) return `is not a ${TYPE_WORDS} image`
     if (blob.size === 0) return 'is empty'
     if (blob.size > MAX_PASTED_IMAGE_BYTES)
-      return `is ${megabytes(blob.size)}; the limit is ${megabytes(MAX_PASTED_IMAGE_BYTES)} per image`
-    if (this.items.length >= MAX_PASTED_IMAGES) return `would exceed ${MAX_PASTED_IMAGES} images per send`
+      return `is ${megabytes(blob.size)}; the limit is ${megabytes(MAX_PASTED_IMAGE_BYTES)} per file`
+    if (this.items.length >= MAX_PASTED_IMAGES) return `would exceed ${MAX_PASTED_IMAGES} files per send`
     if (this.totalBytes + blob.size > MAX_PASTED_TOTAL_BYTES)
       return `would bring the send past ${megabytes(MAX_PASTED_TOTAL_BYTES)}`
     return null
@@ -204,9 +205,9 @@ export async function uploadPastedImages(
   return paths
 }
 
-/** The directive a worker receives: the typed text, then one line per image. */
+/** The directive a worker receives: the typed text, then one line per file. */
 export function composeDirective(text: string, paths: readonly string[]): string {
-  const lines = paths.map((path) => `[Image: ${path}]`)
+  const lines = paths.map((path) => `[${IMAGE_EXTENSIONS.test(path) ? 'Image' : 'File'}: ${path}]`)
   return [text.trim(), ...lines].filter(Boolean).join('\n')
 }
 
@@ -241,17 +242,26 @@ export function buildImageStrip(images: PastedImages): {
     }
     el.replaceChildren(
       ...images.list.map((image) => {
+        const isImage = PASTED_IMAGE_TYPES.includes(image.mime)
         let url = urls.get(image.id)
-        if (!url) {
+        if (isImage && !url) {
           url = URL.createObjectURL(image.blob)
           urls.set(image.id, url)
         }
         const chip = document.createElement('span')
         chip.className = 'kbn-ctl-image'
         chip.title = `${image.name} · ${megabytes(image.size)}`
-        const thumb = document.createElement('img')
-        thumb.src = url
-        thumb.alt = image.name
+        let thumb: HTMLElement
+        if (isImage) {
+          const img = document.createElement('img')
+          img.src = url!
+          img.alt = image.name
+          thumb = img
+        } else {
+          thumb = document.createElement('span')
+          thumb.className = 'kbn-ctl-image-file'
+          thumb.textContent = image.name
+        }
         const remove = document.createElement('button')
         remove.type = 'button'
         remove.className = 'kbn-ctl-image-remove'

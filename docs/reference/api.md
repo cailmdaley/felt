@@ -40,7 +40,7 @@ is not enough.
 | `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
 | `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
-| `POST /attachments` | owner-routed | Store images pasted into the board's composer on the fiber's host and return their paths |
+| `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User |
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
@@ -355,24 +355,24 @@ it with `text` as the From User: `delivery: "resume"` continues its previous
 conversation, `delivery: "dispatch"` starts one when it has none. These answer
 with `/dispatch`'s body and statuses plus `delivered` and `delivery`.
 
-`POST /attachments` accepts `{fiber, attachments: [{name, mime, data,
+`POST /attachments` accepts `{fiber, attachments: [{name, mime?, data,
 sha256}]}` (plus `origin` to forward), with `data` base64 and `sha256` the hex
 digest of the decoded bytes. The owning daemon resolves `fiber` in its own
 stores (**404** when it does not own it, **504** when felt timed out) and writes
-each image to `<data dir>/attachments/<fiber uid>/<first 16 hex of
-sha256>.<ext>` (0600, in a 0700 directory; the data dir is `$SHUTTLE_DATA_DIR`,
-default `~/.shuttle`). The name is content-addressed, so re-sending an image
+each file to `<data dir>/attachments/<fiber uid>/<first 16 hex of
+sha256>.<ext>` (`ext` from an image `mime`, else the name's own short alphanumeric extension, else `bin`; 0600, in a 0700 directory; the data dir is `$SHUTTLE_DATA_DIR`,
+default `~/.shuttle`). The name is content-addressed, so re-sending a file
 returns the same path. The answer is `{files: [{name, path, sha256, size}]}` in
 request order, `path` absolute on the owning host. The batch is all or nothing,
-and **400** `{error}` names the first broken rule: `mime` is one of
-`image/png`, `image/jpeg`, `image/gif`, `image/webp` and the bytes carry its
-signature; each image is at most 10 MB; at most 8 per request and 25 MB in
+and **400** `{error}` names the first broken rule: any file type is accepted, but a
+`mime` of `image/png`, `image/jpeg`, `image/gif` or `image/webp` must be backed by
+the bytes' signature; each file is at most 10 MB; at most 8 per request and 25 MB in
 total; `data` decodes; `sha256` matches. The route's JSON body ceiling is sized
 to that total, each socket read may take up to 120 s, and a forward allows
-120 s. Images are kept 30 days: every successful store removes files under
+120 s. Files are kept 30 days: every successful store removes files under
 `attachments/` whose mtime is older than that, and fiber directories left
-empty, without following links. Re-sending an image refreshes its mtime. The board's composer uploads here
-before it sends a directive and appends one `[Image: <path>]` line per image.
+empty, without following links. Re-sending a file refreshes its mtime. The board's composer uploads here
+before it sends a directive and appends one `[Image: <path>]` line per image and one `[File: <path>]` line per other file.
 
 `POST /meeting/stop` accepts `{recorder, launch}` and returns HTTP 202 with `{meeting}` or 404 when no meeting exists.
 The recorder checks the launch identity inside the same lock as Stop; a stale control cannot stop a replacement recording.

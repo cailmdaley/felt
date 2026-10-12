@@ -133,7 +133,7 @@ defmodule Shuttle.Meeting do
 
   @doc """
   Derive the meeting name and title from the first line of a note, skipping
-  `[Image: <path>]` lines.
+  `[Image: <path>]` / `[File: <path>]` lines.
   """
   @spec name_and_title(String.t() | nil, NaiveDateTime.t()) :: {String.t(), String.t()}
   def name_and_title(note, now \\ NaiveDateTime.local_now()) do
@@ -341,12 +341,12 @@ defmodule Shuttle.Meeting do
       else: {:error, {:validation, "meeting.mode '#{mode}' is not supported on this host"}}
   end
 
-  # The note's first line, past any `[Image: <path>]` lines the board's
+  # The note's first line, past any `[Image: <path>]` / `[File: <path>]` lines the board's
   # composer appends for pasted images: a path never names a meeting.
   defp first_line(note) do
     (note || "")
     |> String.split(["\r\n", "\n", "\r"])
-    |> Enum.reject(&Regex.match?(~r/\A\s*\[Image: [^\]]*\]\s*\z/u, &1))
+    |> Enum.reject(&Regex.match?(~r/\A\s*\[(?:Image|File): [^\]]*\]\s*\z/u, &1))
     |> List.first("")
     |> String.trim()
   end

@@ -1,9 +1,9 @@
 defmodule Shuttle.Attachments do
   @moduledoc """
-  Images the board's composer pastes into a directive, stored on the host
+  Files the board's composer attaches to a directive, stored on the host
   that owns the fiber so the worker it launches can open them by path.
 
-  `store/2` validates a batch, decodes it, and writes each image to
+  `store/2` validates a batch, decodes it, and writes each file to
 
       <data_dir>/attachments/<fiber dir>/<sha256 first 16 hex>.<ext>
 
@@ -11,11 +11,14 @@ defmodule Shuttle.Attachments do
   otherwise the first 16 hex of the sha256 of its address. Files are
   content-addressed, so sending the same image twice writes the same path.
 
-  Every limit is checked here, whatever the caller already checked: at most
-  `max_files/0` images, each at most `max_file_bytes/0` decoded bytes and all of
-  them together at most `max_total_bytes/0`; a mime among `mimes/0` whose magic
-  bytes the data actually carries; base64 that decodes; a sha256 equal to the
-  decoded bytes' digest. Nothing is written unless the whole batch passes.
+  Any file type is accepted. The extension comes from the declared image mime
+  when it is one of `mimes/0` (whose magic bytes the data must then carry), and
+  otherwise from the file name's own extension when that is a short alphanumeric
+  token, else `bin`. Every limit is checked here, whatever the caller already
+  checked: at most `max_files/0` files, each at most `max_file_bytes/0` decoded
+  bytes and all of them together at most `max_total_bytes/0`; base64 that
+  decodes; a sha256 equal to the decoded bytes' digest. Nothing is written
+  unless the whole batch passes.
 
   Writes are atomic and never follow a link: each directory under the data dir
   is created 0700 and refused if it is a symlink or not a directory, and each
@@ -23,12 +26,12 @@ defmodule Shuttle.Attachments do
   renamed over the destination (a rename replaces a link, it does not follow
   it).
 
-  **Retention.** Images are kept for `retention_days/0` (30) days. Every
+  **Retention.** Files are kept for `retention_days/0` (30) days. Every
   successful store prunes the attachments root (`prune/2`): regular files whose
   mtime is older than that, then fiber directories left empty. It reads two
   levels and never follows a link — a symlink anywhere under the root is left
-  alone, and so is whatever it points at. Re-sending an image rewrites its file,
-  so an image still in use keeps a fresh mtime.
+  alone, and so is whatever it points at. Re-sending a file rewrites it,
+  so a file still in use keeps a fresh mtime.
   """
 
   @max_files 8
@@ -50,19 +53,19 @@ defmodule Shuttle.Attachments do
           size: non_neg_integer()
         }
 
-  @doc "The most images one request may carry."
+  @doc "The most files one request may carry."
   def max_files, do: @max_files
 
-  @doc "The largest decoded image one request may carry, in bytes."
+  @doc "The largest decoded file one request may carry, in bytes."
   def max_file_bytes, do: @max_file_bytes
 
   @doc "The largest decoded total one request may carry, in bytes."
   def max_total_bytes, do: @max_total_bytes
 
-  @doc "How many days a stored image is kept before `prune/2` removes it."
+  @doc "How many days a stored file is kept before `prune/2` removes it."
   def retention_days, do: @retention_days
 
-  @doc "The accepted mime types."
+  @doc "The image mime types whose magic bytes are checked."
   def mimes, do: Map.keys(@extensions) |> Enum.sort()
 
   @doc """
@@ -122,7 +125,7 @@ defmodule Shuttle.Attachments do
   end
 
   @doc """
-  Remove images under `root` older than `retention_days/0` (by mtime, relative
+  Remove files under `root` older than `retention_days/0` (by mtime, relative
   to `now`, in POSIX seconds), then the fiber directories that leaves empty.
   Never follows a link; failures are ignored, since pruning is housekeeping.
   """
@@ -162,7 +165,7 @@ defmodule Shuttle.Attachments do
   defp check_count([]), do: {:error, :invalid, "attachments must not be empty"}
 
   defp check_count(list) when length(list) > @max_files,
-    do: {:error, :invalid, "at most #{@max_files} images per send (got #{length(list)})"}
+    do: {:error, :invalid, "at most #{@max_files} files per send (got #{length(list)})"}
 
   defp check_count(_), do: :ok
 
@@ -170,7 +173,7 @@ defmodule Shuttle.Attachments do
     total = decoded |> Enum.map(&byte_size(&1.bytes)) |> Enum.sum()
 
     if total > @max_total_bytes,
-      do: {:error, :invalid, "images total #{total} bytes; the limit is #{@max_total_bytes}"},
+      do: {:error, :invalid, "files total #{total} bytes; the limit is #{@max_total_bytes}"},
       else: :ok
   end
 
@@ -180,7 +183,7 @@ defmodule Shuttle.Attachments do
     |> Enum.reduce_while({:ok, []}, fn {item, index}, {:ok, acc} ->
       case decode_one(item) do
         {:ok, entry} -> {:cont, {:ok, [entry | acc]}}
-        {:error, message} -> {:halt, {:error, :invalid, "image #{index}: #{message}"}}
+        {:error, message} -> {:halt, {:error, :invalid, "file #{index}: #{message}"}}
       end
     end)
     |> case do
@@ -190,9 +193,9 @@ defmodule Shuttle.Attachments do
   end
 
   defp decode_one(%{} = item) do
-    with {:ok, mime} <- field(item, "mime"),
-         {:ok, ext} <- extension(mime),
-         {:ok, data} <- field(item, "data"),
+    mime = item |> Map.get("mime") |> mime_string()
+
+    with {:ok, data} <- field(item, "data"),
          :ok <- check_encoded_size(data),
          {:ok, bytes} <- decode_base64(data),
          :ok <- check_size(bytes),
@@ -202,7 +205,7 @@ defmodule Shuttle.Attachments do
       {:ok,
        %{
          name: display_name(Map.get(item, "name")),
-         ext: ext,
+         ext: extension(mime, Map.get(item, "name")),
          bytes: bytes,
          sha256: String.downcase(sha)
        }}
@@ -218,17 +221,26 @@ defmodule Shuttle.Attachments do
     end
   end
 
-  defp extension(mime) do
-    case Map.fetch(@extensions, String.downcase(mime)) do
-      {:ok, ext} ->
-        {:ok, ext}
+  defp mime_string(mime) when is_binary(mime), do: String.downcase(mime)
+  defp mime_string(_), do: ""
 
-      :error ->
-        {:error, "#{inspect(mime)} is not an accepted image type (#{Enum.join(mimes(), ", ")})"}
+  defp extension(mime, name) do
+    case Map.fetch(@extensions, mime) do
+      {:ok, ext} -> ext
+      :error -> name_extension(name)
     end
   end
 
-  # Refuse an oversized image before decoding it.
+  # The name's own extension when it is a short plain token; the name never
+  # reaches the filesystem otherwise.
+  defp name_extension(name) when is_binary(name) do
+    ext = name |> Path.extname() |> String.trim_leading(".") |> String.downcase()
+    if Regex.match?(~r/\A[a-z0-9]{1,10}\z/, ext), do: ext, else: "bin"
+  end
+
+  defp name_extension(_), do: "bin"
+
+  # Refuse an oversized file before decoding it.
   defp check_encoded_size(data) do
     if byte_size(data) > div(@max_file_bytes * 4, 3) + 4,
       do: {:error, "larger than #{@max_file_bytes} bytes"},
@@ -249,10 +261,12 @@ defmodule Shuttle.Attachments do
 
   defp check_size(_), do: :ok
 
+  # A declared image type must carry its own magic bytes; any other type is
+  # stored as sent.
   defp check_magic(mime, bytes) do
-    if magic?(String.downcase(mime), bytes),
-      do: :ok,
-      else: {:error, "data is not a #{mime} image"}
+    if Map.has_key?(@extensions, mime) and not magic?(mime, bytes),
+      do: {:error, "data is not a #{mime} image"},
+      else: :ok
   end
 
   defp magic?("image/png", <<0x89, "PNG", 0x0D, 0x0A, 0x1A, 0x0A, _::binary>>), do: true
@@ -279,10 +293,10 @@ defmodule Shuttle.Attachments do
       |> String.replace(~r/[[:cntrl:]]/u, "")
       |> String.slice(0, 200)
 
-    if cleaned == "", do: "image", else: cleaned
+    if cleaned == "", do: "file", else: cleaned
   end
 
-  defp display_name(_), do: "image"
+  defp display_name(_), do: "file"
 
   # `parent` is created if absent; `dir` is created 0700 if absent and refused
   # if it is a link or a non-directory.

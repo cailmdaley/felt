@@ -44,19 +44,24 @@ describe('PastedImages limits', () => {
     expect(images.list.map((i) => i.name)).toEqual(['a.png', 'b.jpg', 'c.gif', 'd.webp'])
   })
 
-  it('refuses other types, naming the file', () => {
+  it('admits files of any type', () => {
     const images = new PastedImages()
-    const refused = images.add([file('notes.pdf', 'application/pdf'), file('ok.png', 'image/png'), file('x.svg', 'image/svg+xml')])
-    expect(images.size).toBe(1)
-    expect(refused).toContain('notes.pdf is not a PNG, JPEG, GIF or WebP image')
-    expect(refused).toContain('x.svg')
+    const refused = images.add([file('notes.pdf', 'application/pdf'), file('chat.txt', 'text/plain'), file('blob', '')])
+    expect(refused).toBeNull()
+    expect(images.list.map((i) => i.name)).toEqual(['notes.pdf', 'chat.txt', 'blob'])
+  })
+
+  it('labels image paths Image and every other path File', () => {
+    expect(composeDirective('see', ['/h/a.png', '/h/b.txt', '/h/c.bin'])).toBe(
+      'see\n[Image: /h/a.png]\n[File: /h/b.txt]\n[File: /h/c.bin]',
+    )
   })
 
   it('refuses an image over the per-image limit', () => {
     const images = new PastedImages()
     const refused = images.add([sized('huge.png', 'image/png', MAX_PASTED_IMAGE_BYTES + 1)])
     expect(images.size).toBe(0)
-    expect(refused).toMatch(/huge\.png is 10\.1 MB; the limit is 10 MB per image/)
+    expect(refused).toMatch(/huge\.png is 10\.1 MB; the limit is 10 MB per file/)
   })
 
   it('admits an image exactly at the per-image limit', () => {
@@ -69,7 +74,7 @@ describe('PastedImages limits', () => {
     const many = Array.from({ length: MAX_PASTED_IMAGES + 2 }, (_, i) => file(`${i}.png`, 'image/png'))
     const refused = images.add(many)
     expect(images.size).toBe(MAX_PASTED_IMAGES)
-    expect(refused).toContain(`would exceed ${MAX_PASTED_IMAGES} images per send`)
+    expect(refused).toContain(`would exceed ${MAX_PASTED_IMAGES} files per send`)
   })
 
   it('stops at the per-send total', () => {

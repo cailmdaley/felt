@@ -207,6 +207,7 @@
 .ws-dock .kbn-ctl-images { display: flex; flex-wrap: wrap; gap: var(--ws-small-gap); padding: 6px 10px; }
 .ws-dock .kbn-ctl-image { position: relative; display: inline-flex; width: 64px; height: 64px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); overflow: hidden; }
 .ws-dock .kbn-ctl-image img { width: 100%; height: 100%; object-fit: cover; }
+.ws-dock .kbn-ctl-image-file { box-sizing: border-box; width: 100%; padding: 4px 26px 4px 6px; overflow: hidden; word-break: break-all; font: var(--ws-small-size)/1.2 var(--ws-serif); color: var(--ws-ink); }
 .ws-dock .kbn-ctl-image-remove { position: absolute; top: 2px; right: 2px; width: 24px; height: 24px; padding: 0; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: 50%; background: var(--ws-paper); color: var(--ws-ink); font: var(--ws-section-size)/1 var(--ws-serif); }
 .ws-dock .kbn-ctl-images-frozen img { opacity: .6; }
 .ws-dock .kbn-detail-error { color: var(--ws-red); font: var(--ws-label-size)/1.45 var(--ws-serif); overflow-wrap: anywhere; }

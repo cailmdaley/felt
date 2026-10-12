@@ -136,13 +136,12 @@ defmodule ShuttleWeb.AttachmentsControllerTest do
 
       rows = [
         {"a missing fiber", %{"attachments" => [image()]}, "fiber"},
-        {"a non-image mime", [image("hi", "text/plain")], "not an accepted image type"},
         {"bytes that are not the declared type", [image("not a png")], "not a image/png image"},
         {"an oversized image", [image(big)], "larger than"},
-        {"more than the per-send limit", many, "at most 8 images"},
+        {"more than the per-send limit", many, "at most 8 files"},
         {"a total over the batch limit", over_total, "the limit is"},
         # The batch is all-or-nothing: the valid first image is not written.
-        {"a sha256 that does not match", [image(), wrong_sha], "image 2: sha256 does not match"},
+        {"a sha256 that does not match", [image(), wrong_sha], "file 2: sha256 does not match"},
         {"bad base64", [bad_base64], "not valid base64"},
         {"an empty attachment list", [], "must not be empty"},
         {"a missing attachment list", %{"fiber" => "tests/paste"}, "must be a list"}
