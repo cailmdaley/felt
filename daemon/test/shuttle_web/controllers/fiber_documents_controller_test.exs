@@ -1605,11 +1605,13 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     end
   end
 
-  # Start (or reuse) the singleton Poller, force a real poll against this test's
-  # configured stores, and block until its document cache is warm. The owner
-  # feed (`?shuttle=true`) and the composite board are now served ALWAYS from
-  # this cache — there is no live `felt ls` fallback — so a test that expects
-  # on-disk shuttle fibers to appear must warm the cache first. Returns the pid.
+  # Start (or reuse) this test's Poller, force a real poll against its configured
+  # stores, and wait for that cycle to finish. A warm cache alone can belong to
+  # the boot cycle while another poll is still reconciling running workers;
+  # callers must be able to inject runtime state after this helper returns.
+  # The owner feed (`?shuttle=true`) and the composite board always use this
+  # cache, so tests expecting on-disk shuttle fibers must warm it first.
+  # Returns the pid.
   defp warm_poller!(store) do
     stores =
       case Shuttle.Env.get("SHUTTLE_STORES") do
@@ -1619,26 +1621,30 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       end
 
     {poller, original_state} = start_or_reuse_poller(store)
+    Shuttle.Test.PollerHelpers.await_boot_cycle!(poller)
 
-    :sys.replace_state(poller, fn state ->
-      %{
-        state
-        | felt_stores: stores,
-          own_host_id: "test-host",
-          full_scan_budget_ms: max(state.full_scan_budget_ms, 60_000),
-          last_known_listings: %{},
-          last_full_listings: %{},
-          discovery: %{},
-          document_cache_ready: false,
-          document_cache: %{}
-      }
-    end)
+    reset_state =
+      :sys.replace_state(poller, fn state ->
+        %{
+          state
+          | felt_stores: stores,
+            own_host_id: "test-host",
+            full_scan_budget_ms: max(state.full_scan_budget_ms, 60_000),
+            last_known_listings: %{},
+            last_full_listings: %{},
+            discovery: %{},
+            document_cache_ready: false,
+            document_cache: %{}
+        }
+      end)
 
     send(poller, :run_poll_cycle)
 
     wait_until(fn ->
       state = :sys.get_state(poller)
-      state.document_cache_ready and map_size(state.document_cache) > 0
+
+      state.poll_cycles > reset_state.poll_cycles and not state.poll_check_in_progress and
+        state.document_cache_ready and map_size(state.document_cache) > 0
     end)
 
     restore_poller_on_exit(poller, original_state)
