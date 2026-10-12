@@ -388,7 +388,7 @@ defmodule Shuttle.Meeting do
   defp dismiss_failed(_context, _opts), do: :ok
 
   defp hark_argv(executable, paths, title, mode, launch_id) do
-    [executable, "-o", paths.local_transcript, "--launch", launch_id, "--title", title] ++
+    [executable, "-o", paths.local_transcript, "--launch=" <> launch_id, "--title=" <> title] ++
       mode_flag(mode) ++
       if(paths.mirror, do: ["--mirror", paths.mirror], else: [])
   end

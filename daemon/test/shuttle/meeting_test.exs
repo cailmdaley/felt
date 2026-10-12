@@ -408,7 +408,7 @@ defmodule Shuttle.MeetingTest do
     assert fiber_from_tmux_args(args) == "cosmo/shear-bmodes"
     command = List.last(Enum.take_while(args, &(&1 != ";")))
     assert command =~ "--mirror"
-    assert command =~ "'--title' 'shear-bmodes'"
+    assert command =~ "'--title=shear-bmodes'"
 
     assert %{"meeting" => %{"fiber" => "cosmo/shear-bmodes", "joined" => true}} =
              api_conn() |> get("/api/v1/meeting") |> Map.get(:resp_body) |> Jason.decode!()
@@ -452,7 +452,7 @@ defmodule Shuttle.MeetingTest do
         cmd == "tmux" and match?(["new-session" | _], args)
       end)
 
-    assert List.last(Enum.take_while(args, &(&1 != ";"))) =~ "'--title' 'shear-bmodes'"
+    assert List.last(Enum.take_while(args, &(&1 != ";"))) =~ "'--title=shear-bmodes'"
   end
 
   test "a delivery failure after hark starts keeps the recording row", %{hark_dir: hark_dir} do
@@ -943,7 +943,7 @@ defmodule Shuttle.MeetingTest do
     command = List.last(Enum.take_while(args, &(&1 != ";")))
     assert command =~ "--mirror"
     assert command =~ "remote-alias:~/.hark/meetings/2026-09-25_1403_shear-review.txt"
-    assert command =~ "--launch"
+    assert command =~ ~r/'--launch=[A-Za-z0-9_-]+'/
 
     # The owner hands the launch to its scribe's claim; the recording's daemon
     # learns nothing more from the capture response.
