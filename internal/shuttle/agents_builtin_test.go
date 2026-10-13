@@ -17,7 +17,8 @@ func TestBuiltinRegistry_IsComplete(t *testing.T) {
 	want := []string{
 		"claude-sonnet", "claude-opus", "claude-haiku", "claude-fable",
 		"codex-astra", "codex-sol", "codex-luna",
-		"pi-luna", "pi-openai-luna", "pi-grok", "pi-gemini-flash",
+		"pi-luna", "pi-openai-luna", "pi-haiku", "pi-sonnet", "pi-opus", "pi-fable",
+		"pi-grok", "pi-gemini-flash",
 		"pi-kimi", "pi-deepseek-flash", "pi-glm-flash", "pi-union-alpha",
 	}
 	if got := reg.IDs(); !slices.Equal(got, want) {
@@ -69,6 +70,10 @@ func TestBuiltinRegistry_PiRefreshRoles(t *testing.T) {
 		"pi-luna":        {provider: "github-copilot", model: "gpt-luna"},
 		"pi-openai-luna": {provider: "openai-codex", model: "gpt-luna"},
 		"pi-union-alpha": {provider: "openrouter", model: "stealth/union-alpha"},
+		"pi-haiku":       {provider: "anthropic", model: "claude-haiku-5-5"},
+		"pi-sonnet":      {provider: "anthropic", model: "claude-sonnet-5-5"},
+		"pi-opus":        {provider: "anthropic", model: "claude-opus-5-5"},
+		"pi-fable":       {provider: "anthropic", model: "claude-fable-5-1"},
 	}
 	for id, expected := range want {
 		got, ok := reg.Find(id)
