@@ -1015,7 +1015,7 @@ export class Dock {
     message.className = 'kbn-detail-directive'
     message.rows = 1
     message.placeholder = ''
-    message.setAttribute('aria-label', 'Message for the next worker')
+    message.setAttribute('aria-label', 'Message to the agent')
     // The field is one line, focused or not; only text that wraps grows it.
     // The text always has the field's whole width: while it fits beside the
     // verbs they ride its line, and once it would reach them (or holds a line
@@ -1073,16 +1073,25 @@ export class Dock {
     // so what is sent is what was shown.
     let busy = false
     const fresh = ctlButton('Start ↵', 'kbn-ctl-send')
-    const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
+    const resume = ctlButton('Continue ↵', 'kbn-ctl-send kbn-ctl-resume')
+    const sends = document.createElement('span')
+    sends.className = 'kbn-ctl-sends'
     this.composerPaint = () => {
       const draft = fiberPageColumn(card) === 'drafts'
-      const resumable = !draft && Boolean(card.sessionUuid)
-      // A fresh session is always the default verb (↵); a resumable session
-      // adds Resume beside it as the secondary verb (⌥↵).
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : resumable ? 'New session ↵' : 'Start ↵'
-      resume.classList.toggle('kbn-ctl-secondary', resumable)
-      resume.title = resumable ? 'Resume the previous session (⌥↵)' : ''
+      const resumable = Boolean(card.sessionUuid)
+      // A reply belongs to the recorded conversation. Starting over remains
+      // explicit, including the existing confirmation before cutting a worker.
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = resumable ? 'New session' : draft ? 'Launch ↵' : 'Start ↵'
+      if (!this.blockedDispatches.has(resume)) resume.textContent = hasLiveWorker(card) ? 'Send ↵' : 'Continue ↵'
+      fresh.classList.toggle('kbn-ctl-secondary', resumable)
+      fresh.title = resumable ? 'Start a new conversation (⌥↵)' : ''
+      resume.title = resumable ? 'Continue the recorded conversation (↵)' : ''
       resume.hidden = !resumable
+      // DOM order and keyboard tab order agree with the primary action.
+      if (sends.firstElementChild !== (resumable ? resume : fresh)) {
+        if (resumable) sends.replaceChildren(resume, fresh)
+        else sends.replaceChildren(fresh, resume)
+      }
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
       const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
@@ -1161,15 +1170,12 @@ export class Dock {
     // meeting (its note), a fresh worker, or the same worker resumed.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    const sends = document.createElement('span')
-    sends.className = 'kbn-ctl-sends'
     // With Meeting on, its own verb stands in for New session and Resume.
     const meeting = this.meeting ? this.buildMeeting(card, err, send, armed => {
       sends.hidden = armed
       this.composerPaint?.()
       fit()
     }) : null
-    sends.append(fresh, resume)
     foot.append(...(meeting ? [meeting] : []), sends)
 
     this.composerSend = send
@@ -1202,8 +1208,10 @@ export class Dock {
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
       if (this.meetingArmed()) { this.meetingStart?.(); return }
-      const resumeSession = event.altKey && Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
-      void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
+      const resumeSession = !event.altKey && Boolean(card.sessionUuid)
+      const verb = resumeSession ? resume : fresh
+      if (verb.disabled) return
+      void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', verb, err).then(ok => ok && send.sent())
     })
     box.append(message, strip.el, foot)
     wrap.append(box, imageErr, err)
@@ -1943,7 +1951,7 @@ export class Dock {
       const ok = window.confirm(
         `A worker is still running for “${card.name}”${working}.\n\n` +
           `Start a new session? This cuts the open session and discards its ` +
-          `in-flight context. Use Resume instead to continue that worker.`,
+          `in-flight context. Send a message instead to continue that worker.`,
       )
       if (!ok) return false
     }
@@ -2006,7 +2014,7 @@ export class Dock {
       // A message the worker did not take stays in the composer.
       if (body.tmux_session && text.trim() === '') {
         btn.textContent = original
-        this.finishRequeue(card, body.tmux_session)
+        this.finishRequeue(card, mode === 'previous' ? undefined : body.tmux_session)
         return true
       }
 
@@ -2032,10 +2040,9 @@ export class Dock {
 
     btn.disabled = false
     btn.textContent = original
-    // A message resumed into a live terminal worker was typed into its
-    // conversation; the human stays here rather than being sent to the tab.
-    const typedIntoLive = mode === 'previous' && text.trim() !== '' && hasLiveWorker(card)
-    this.finishRequeue(card, typedIntoLive ? undefined : body.tmux_session)
+    // Continuing a conversation keeps the board as the conversation client,
+    // even when its backend needs to restart a dormant terminal worker.
+    this.finishRequeue(card, mode === 'previous' ? undefined : body.tmux_session)
     return true
   }
 

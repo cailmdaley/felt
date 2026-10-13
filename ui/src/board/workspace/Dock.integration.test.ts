@@ -216,7 +216,6 @@ describe('Dock dispatch recovery', () => {
     vi.mocked(fetch).mockResolvedValue(response({}, 409))
     band.el.querySelector<HTMLTextAreaElement>('textarea')!.value = 'a message'
     const verb = button(name)
-    const label = verb.textContent
     verb.click()
     await flush()
     expect(verb.textContent).toBe('Already running')
@@ -225,8 +224,8 @@ describe('Dock dispatch recovery', () => {
     expect(verb.disabled).toBe(true)
     dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
     expect(verb.disabled).toBe(false)
-    // The verb names the state it now stands in: a live session makes a fresh start "New session ↵".
-    expect(verb.textContent).toBe(name === 'Resume' ? label : 'New session ↵')
+    // The verb names the state it now stands in: a live conversation is sent a reply.
+    expect(verb.textContent).toBe(name === 'Resume' ? 'Send ↵' : 'New session')
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
   })
 
@@ -293,14 +292,15 @@ describe('state-shaped act zone', () => {
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
     expect(band.el.querySelector('.kbn-ctl-verdict-menu')).toBeNull()
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
+    expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toBe('Continue ↵New session')
   })
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
-    ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
-    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session ↵', 'Resume']],
+    ['draft with a recorded session', { status: 'open', sessionUuid: 's' }, ['Continue ↵', 'New session']],
+    ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['Continue ↵', 'New session']],
+    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['Send ↵', 'New session']],
     ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
-    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
+    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['Continue ↵', 'New session']],
     ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
   ] as const)('offers a sensible verb set: %s', (_name, patch, verbs) => {
     band = dock.bandFor(task(patch as Partial<KanbanCard>))
@@ -342,17 +342,79 @@ describe('state-shaped act zone', () => {
     expect(outer).not.toHaveBeenCalled()
     band.el.remove()
   })
-  it('Enter starts a new session and Alt-Enter resumes the named one', async () => {
+  it('Enter continues the named conversation and Alt-Enter explicitly starts over', async () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
-    message.value = 'Restart'
+    message.value = 'Continue'
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Restart' })
-    message.value = 'Continue'
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue', origin: 'owner' })
+    message.value = 'Restart'
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
     await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Restart' })
+  })
+})
+
+describe('conversation-first sending', () => {
+  it.each([
+    { status: 'closed', sessionUuid: 'recorded' },
+    { status: 'open', sessionUuid: 'recorded' },
+    { status: 'active', sessionUuid: 'recorded', workerState: 'running', tmuxSession: 'worker' },
+  ] satisfies Partial<KanbanCard>[])('keeps the board open when continuing %j', async patch => {
+    const open = vi.fn()
+    const controls = new Dock('', saved, undefined, open)
+    const view = controls.bandFor(task(patch))
+    document.body.append(view.el)
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }))
+    const message = view.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'A follow-up'; message.dispatchEvent(new Event('input'))
+    view.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!.click()
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'A follow-up' })
+    expect(open).not.toHaveBeenCalled()
+    expect(message.value).toBe('')
+    controls.reset()
+  })
+
+  it('keeps an empty previous-session conflict on the board', async () => {
+    const open = vi.fn()
+    const controls = new Dock('', saved, undefined, open)
+    const view = controls.bandFor(task({ status: 'closed', sessionUuid: 'recorded' }))
+    document.body.append(view.el)
+    vi.mocked(fetch).mockResolvedValue(response({ tmux_session: 'worker' }, 409))
+    const message = view.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = ''; message.dispatchEvent(new Event('input'))
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: '' })
+    expect(open).not.toHaveBeenCalled()
+    controls.reset()
+  })
+
+  it('does not submit an empty Enter to a live conversation', async () => {
+    dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = ''; message.dispatchEvent(new Event('input'))
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes()).toEqual([])
+  })
+
+  it('confirms an explicit new session before cutting a live conversation', async () => {
+    dock.syncRuntime(task({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'Start over'; message.dispatchEvent(new Event('input'))
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
+    await flush()
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(writes()).toEqual([])
+    expect(message.value).toBe('Start over')
+    confirm.mockReturnValue(true)
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Start over' })
   })
 })
 
