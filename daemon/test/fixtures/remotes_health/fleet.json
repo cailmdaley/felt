@@ -1,0 +1,36 @@
+{
+  "remotes": [
+    {
+      "name": "hub-a",
+      "url": "http://localhost:4001",
+      "port": 4001,
+      "source": "configured",
+      "tunnel": {"manager": "launchd"},
+      "health": {
+        "polled": true,
+        "stale": false,
+        "last_error": null,
+        "last_polled_at": "2026-01-02T00:00:00Z",
+        "recovery": {"state": "healthy", "attempt": 0, "last_error": null}
+      },
+      "build": {
+        "git_short_sha": "abc1234",
+        "booted_at": "2026-01-01T00:00:00Z"
+      }
+    },
+    {
+      "name": "hub-b",
+      "url": "https://hub-b.example.ts.net",
+      "source": "discovered",
+      "tunnel": {"manager": "none"},
+      "health": {
+        "polled": false,
+        "stale": true,
+        "last_error": null,
+        "last_polled_at": null,
+        "recovery": null
+      },
+      "build": null
+    }
+  ]
+}

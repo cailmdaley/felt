@@ -2,12 +2,14 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,6 +246,72 @@ func TestRemotesList_ReportsDaemonReachAndPreservesObservations(t *testing.T) {
 	}
 	if !strings.Contains(streams.Stdout.String(), "hub-healthy") || strings.Contains(streams.Stdout.String(), "abc123") {
 		t.Fatal("no-reach must preserve peers but omit observations")
+	}
+}
+
+func TestRemotesList_SharedReachFixtureAndNoReachReader(t *testing.T) {
+	t.Parallel()
+	content, err := os.ReadFile("../../daemon/test/fixtures/remotes_health/fleet.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Remotes []remoteListingRow `json:"remotes"`
+	}
+	if err := json.Unmarshal(content, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	env := testEnv(t)
+	writeRemotesIn(t, env, `{"remotes":[{"name":"hub-a","port":4001}]}`)
+	var fleetReads atomic.Int32
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/version": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"discovery":{"state":"ok","via":"localapi","peers":[{"name":"hub-b","url":"https://hub-b.example.ts.net"}]}}`))
+		},
+		"/api/v1/fleet": func(w http.ResponseWriter, _ *http.Request) {
+			fleetReads.Add(1)
+			_, _ = w.Write(content)
+		},
+	})
+	a := newApp(env)
+	a.json = true
+	for _, noReach := range []bool{false, true} {
+		streams := sysenvtest.Capture(env)
+		cmd := a.remotesListCmd()
+		if err := cmd.Flags().Set("no-reach", fmt.Sprint(noReach)); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		var listing struct {
+			Remotes []remoteListingRow `json:"remotes"`
+		}
+		if err := json.Unmarshal([]byte(streams.Stdout.String()), &listing); err != nil {
+			t.Fatal(err)
+		}
+		if len(listing.Remotes) != len(fixture.Remotes) {
+			t.Fatalf("rows = %+v", listing.Remotes)
+		}
+		for i, expected := range fixture.Remotes {
+			actual := listing.Remotes[i]
+			if actual.Name != expected.Name || actual.Source != expected.Source {
+				t.Fatalf("resolved row = %+v", actual)
+			}
+			for key, pair := range map[string][2]json.RawMessage{"health": {actual.Health, expected.Health}, "build": {actual.Build, expected.Build}} {
+				var got, want any
+				_ = json.Unmarshal(pair[0], &got)
+				if !noReach {
+					_ = json.Unmarshal(pair[1], &want)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("noReach=%v %s = %s, want %v", noReach, key, pair[0], want)
+				}
+			}
+		}
+		if fleetReads.Load() != 1 {
+			t.Fatalf("--no-reach recursively fetched fleet: %d requests", fleetReads.Load())
+		}
 	}
 }
 
