@@ -97,6 +97,10 @@ Verify reach in both directions when workers need to talk back; one configured r
 A userspace Tailscale host uses the private LocalAPI dialing path; do not introduce an unauthenticated outbound proxy on a shared machine.
 See [setup.md](setup.md) and the public [remote setup guide](https://cailmdaley.github.io/felt/shuttle/remotes/) for the supported recipes.
 
+**Judge reach through the daemon, never with a shell probe.** On a userspace-Tailscale host, `curl`, `ssh` and `/dev/tcp` from a worker's shell do not route into the tailnet at all, while the daemon dials through the LocalAPI socket; `tailscale ping` answers either way. So a failed probe says nothing about the remote. Ask the local daemon: `curl -s http://127.0.0.1:4000/api/v1/fleet` lists each remote with `health.polled`, `health.stale`, `health.last_error` and its `build`, and `GET /api/v1/peers` lists live sessions on every host. A remote the daemon polls healthy is reachable for every Shuttle verb (`reopen`, `message`, origin-routed reads), whatever the shell says. A worker reaches a remote machine's shell only through those verbs: message a session there, or start one with `reopen`.
+
+**A remote dispatch needs the owner's store to hold the fiber.** Fibers travel by Git; the daemon does not pull. After `shuttle install --host <remote>` and `felt sync --push`, the remote's store still lacks the fiber until something there syncs, and `shuttle reopen` fails with `shuttle show … exited 1`. Ask a live session on that host (`shuttle message <address> "run felt -C <store> sync"`) or the human to sync, then reopen again.
+
 From a hub, `shuttle reopen <fiber> --message "<directive>"` starts a worker on the fiber's own host, with the directive as its From User; the other lifecycle verbs reach remote fibers the same way.
 
 Cards from a remote host reach the hub's board over this transport, not through git.
