@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/spf13/cobra"
@@ -832,10 +833,10 @@ Examples:
 // remotes extended with the discovered peers and each row's source, plus the
 // local daemon's discovery report or why it could not be read.
 type remotesListing struct {
-	Version            int             `json:"version"`
-	LaunchdLabelPrefix string          `json:"launchd_label_prefix,omitempty"`
-	Defaults           *remoteDefaults `json:"defaults,omitempty"`
-	Remotes            []remoteSpec    `json:"remotes"`
+	Version            int                `json:"version"`
+	LaunchdLabelPrefix string             `json:"launchd_label_prefix,omitempty"`
+	Defaults           *remoteDefaults    `json:"defaults,omitempty"`
+	Remotes            []remoteListingRow `json:"remotes"`
 	// TailscaleSocket is the effective LocalAPI socket (see
 	// effectiveTailscaleSocket) and TailscaleSocketSource where it came from.
 	TailscaleSocket       string `json:"tailscale_socket,omitempty"`
@@ -847,14 +848,16 @@ type remotesListing struct {
 }
 
 func (a *app) remotesListCmd() *cobra.Command {
-	var remotesListConfigured bool
+	var remotesListConfigured, remotesListNoReach bool
 	remotesListCmd := &cobra.Command{
 		Use:   "list",
 		Short: "List the fleet: configured remotes and discovered tailnet peers",
 		Long: `Lists every remote this host's daemon uses: the fleet file's entries
 (disabled ones included) and the tailnet peers the local daemon discovered,
-with a SOURCE column saying which. Discovered peers come from the running
-daemon; when it cannot be reached the list is the file alone, and says so.
+with a SOURCE column saying which and REACH from the daemon's cached fleet
+health: healthy with build and uptime, stale with the last error, unpolled,
+or ? when unknown. Discovered peers come from the running daemon; when it
+cannot be reached the list is the file alone, and says so.
 
 --configured lists and validates the file alone, without asking the daemon.`,
 		Args: cobra.NoArgs,
@@ -873,13 +876,23 @@ daemon; when it cannot be reached the list is the file alone, and says so.
 				}
 			}
 			doc := fleet.Doc
-			rows := make([]remoteSpec, 0, len(doc.Remotes))
+			rows := make([]remoteListingRow, 0, len(doc.Remotes))
 			for _, r := range doc.Remotes {
 				r.Source = sourceConfigured
-				rows = append(rows, r)
+				rows = append(rows, remoteListingRow{remoteSpec: r})
 			}
 			if fleet.Discovery != nil {
-				rows = append(rows, a.admitDiscovered(doc, fleet.Discovery.Peers)...)
+				for _, r := range a.admitDiscovered(doc, fleet.Discovery.Peers) {
+					rows = append(rows, remoteListingRow{remoteSpec: r})
+				}
+			}
+			if !remotesListConfigured && !remotesListNoReach {
+				// A failed reach read leaves observations null, never stale.
+				reach, _ := a.fetchRemoteReach()
+				for i := range rows {
+					observed := reach[rows[i].Name]
+					rows[i].Health, rows[i].Build = observed.Health, observed.Build
+				}
 			}
 
 			if a.json {
@@ -917,7 +930,8 @@ daemon; when it cannot be reached the list is the file alone, and says so.
 				fmt.Fprintf(a.env.Stdout, "warning: default tailscale LocalAPI socket refused (%s)\n", refused)
 			}
 			fmt.Fprintln(a.env.Stdout)
-			fmt.Fprintf(a.env.Stdout, "%-16s %-6s %-18s %-12s %-11s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "SOURCE", "URL")
+			fmt.Fprintf(a.env.Stdout, "%-16s %-6s %-18s %-12s %-11s %-42s %s\n", "NAME", "PORT", "SSH", "TUNNEL", "SOURCE", "URL", "REACH")
+			now := time.Now()
 			for _, r := range rows {
 				opts := r.tunnelOpts()
 				tunnel := opts.Manager
@@ -936,7 +950,7 @@ daemon; when it cannot be reached the list is the file alone, and says so.
 				if r.SSH != "" {
 					ssh = r.SSH
 				}
-				fmt.Fprintf(a.env.Stdout, "%-16s %-6s %-18s %-12s %-11s %s\n", r.Name, port, ssh, tunnel, r.Source, r.URL)
+				fmt.Fprintf(a.env.Stdout, "%-16s %-6s %-18s %-12s %-11s %-42s %s\n", r.Name, port, ssh, tunnel, r.Source, r.URL, r.reach(now))
 				if r.Port == defaultRemoteDaemonPort {
 					fmt.Fprintf(a.env.Stderr,
 						"warning: remote %q uses port %d, which the local daemon binds\n",
@@ -946,6 +960,9 @@ daemon; when it cannot be reached the list is the file alone, and says so.
 			return nil
 		},
 	}
+	// The daemon's fleet endpoint uses this to avoid calling itself recursively.
+	remotesListCmd.Flags().BoolVar(&remotesListNoReach, "no-reach", false, "Skip the fleet health lookup (daemon fleet reader)")
+	_ = remotesListCmd.Flags().MarkHidden("no-reach")
 	remotesListCmd.Flags().BoolVar(&remotesListConfigured, "configured", false, "List and validate the fleet file alone, without asking the daemon for discovered peers")
 	return remotesListCmd
 }
