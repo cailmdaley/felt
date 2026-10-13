@@ -330,10 +330,9 @@ defmodule Shuttle.WaitingTrackerTest do
     assert phase(sessions, "p") == "waiting"
   end
 
-  test "background and child suppression expire after an hour, but permission remains attention" do
+  test "background work and children keep a session working however long they run, and permission remains attention" do
     bg = fold([event("stop", "bg", %{"backgroundTasks" => 1})])
-    assert phase(bg, "bg", @now + @hour - 1) == "working"
-    assert phase(bg, "bg", @now + @hour) == "waiting"
+    assert phase(bg, "bg", @now + 6 * @hour) == "working"
 
     codex =
       fold([
@@ -345,7 +344,7 @@ defmodule Shuttle.WaitingTrackerTest do
         event("stop", "kid", %{"harness" => "codex"})
       ])
 
-    assert phase(codex, "kid", @now + @hour) == "waiting"
+    assert phase(codex, "kid", @now + 6 * @hour) == "working"
 
     codex =
       Tracker.apply_event(

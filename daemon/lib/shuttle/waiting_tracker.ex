@@ -5,8 +5,9 @@ defmodule Shuttle.WaitingTracker do
   Sessions are keyed by nonempty `sessionId`, independently of tmux naming.
   Each record tracks turn state, outstanding Claude background work, Codex
   children, a pending human request, its last activity time, and its harness.
-  `phases/2` derives attention, working, or waiting; background work only
-  suppresses waiting for one hour after the session's last event.
+  `phases/2` derives attention, working, or waiting; outstanding background
+  work or children keep a session working for as long as the tracker holds it,
+  since each harness reports their completion with a new event.
 
   Event timestamps are activity timestamps, not an ordering authority. Events
   fold in stream order, while `at` never moves backward when timestamps arrive
@@ -14,7 +15,6 @@ defmodule Shuttle.WaitingTracker do
   retained prefix from unread suffixes during replay, within a 48-hour window.
   """
 
-  @bg_suppress_ms 60 * 60 * 1_000
   @max_age_ms 48 * 60 * 60 * 1_000
   @unknown_session "unknown"
 
@@ -36,15 +36,13 @@ defmodule Shuttle.WaitingTracker do
   @doc "Derives each session's timestamp and phase at `now`."
   @spec phases(sessions(), integer()) ::
           %{optional(String.t()) => %{last_event_at: integer(), phase: String.t()}}
-  def phases(sessions, now) do
+  def phases(sessions, _now) do
     Map.new(sessions, fn {id, session} ->
-      live = now - session.at < @bg_suppress_ms and session.turn != :ended
-
       phase =
         cond do
           session.pending -> "attention"
           session.turn == :open -> "working"
-          live and session.bg + session.kids > 0 -> "working"
+          session.turn != :ended and session.bg + session.kids > 0 -> "working"
           true -> "waiting"
         end
 

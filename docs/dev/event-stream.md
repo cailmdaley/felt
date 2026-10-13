@@ -141,18 +141,20 @@ The count is scoped to the parent's `sessionId` and starts only through the pare
 A child's events under a different session id never alter the parent merely because they share a pane.
 Identified child-count events are deduplicated within the 48-hour replay window.
 A duplicate spawn event is inert for both the child count and the foreground turn.
-The hook stream supplies no individual child identity or live registry; an incomplete stream can therefore leave a stale count until the bound expires.
+The hook stream supplies no individual child identity or live registry; an incomplete stream can therefore leave a stale count until the session is pruned.
 Pi exposes turn activity through the shared event stream but no child registry here; idle Pi workers fall back to Your turn.
 Child activity does not clear a pending human request on a closed parent turn.
 A child completion changes the outstanding count, not whether someone has answered the parent's permission prompt.
 
-**The suppression expires after an hour, and that bound is the whole safety
-story.** Claude's carried background count is restated by the follow-up turn's stop rather than decremented on a child stop.
-Codex's child count is decremented by `SubagentStop`. A
-task that never returns has no such path, and left unbounded it would silence
-its worker forever: a false "needs you" is noise a
-person dismisses, a false "nothing to see" is a worker nobody looks at again.
-Past the bound the session categorizes as if both counts were zero.
+**Outstanding work holds Working for as long as it is outstanding.** Each
+harness reports a child's end with an event: Claude delivers a finished
+background task to the model, whose follow-up turn's stop restates the count,
+and Codex decrements its child count on `SubagentStop`. A session with work
+still running is still working, however long the job takes. A task that hangs
+holds its card in Working, where the human sees it as running work rather than
+a question. A worker whose process dies is the dispatcher's to observe through
+its pane, not the event stream's, and a stale count from a lost event lasts at
+most until the 48-hour prune drops the session.
 
 ### Boot and incomplete histories
 
