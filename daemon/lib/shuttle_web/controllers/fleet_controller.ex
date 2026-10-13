@@ -120,7 +120,8 @@ defmodule ShuttleWeb.FleetController do
   # so a non-zero exit here IS the diagnostic — relayed verbatim rather than
   # summarized, exactly as a refused config write is.
   defp normalized_fleet do
-    case CLI.run(["remotes", "list", "--json"], timeout_ms: 15_000) do
+    # Keep discovery, but do not ask this endpoint for its own health.
+    case CLI.run(["remotes", "list", "--json", "--no-reach"], timeout_ms: 15_000) do
       {:ok, ""} -> {:ok, %{"remotes" => []}}
       {:ok, output} -> decode_fleet(output)
       {:command_error, _status, output} -> {:error, String.trim(output)}

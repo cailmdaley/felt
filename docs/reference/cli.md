@@ -363,9 +363,16 @@ the existing owner-served file surface.
 
 ### Fleet / operator plumbing
 
+Judge reach through the daemon, never with a shell probe.
+On a userspace-Tailscale host, `curl`, `ssh` and `/dev/tcp` from a worker's shell do not route into the tailnet at all and can time out, while the daemon dials through the LocalAPI socket.
+Use `shuttle remotes list` or the local daemon's `/api/v1/fleet` to check reach.
+A remote dispatch also needs the owner's store to hold the fiber: fibers travel by Git, and the daemon does not pull.
+After publishing with `felt sync --push`, ask a session on the owner host or the human to sync that store before reopening; otherwise `shuttle reopen` fails with `shuttle show … exited 1`.
+See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connection) for the sync command and shared-host API access.
+
 | Command | Purpose |
 |---|---|
-| `shuttle remotes list` | List the fleet: the file's entries (disabled ones included) and the local daemon's discovered tailnet peers, with a SOURCE column (`configured` or `discovered`) and a line on discovery's state; an unreachable daemon lists the file alone and says so. Validates paths, proxy/dial exclusivity, duplicate names, and port collisions. `--configured` lists and validates the file alone; `--json` adds `discovery` (or `discovery_error`) to the normalized document |
+| `shuttle remotes list` | List the fleet: the file's entries (disabled ones included) and the local daemon's discovered tailnet peers, with a SOURCE column (`configured` or `discovered`), a REACH column (`healthy <sha> up <uptime>`, `stale <last_error…>`, `unpolled`, or `?` when unknown), and a line on discovery's state; an unreachable daemon lists the file alone and says so. Validates paths, proxy/dial exclusivity, duplicate names, and port collisions. `--configured` lists and validates the file alone without asking the daemon (reach unknown); `--json` adds `discovery` (or `discovery_error`) to the normalized document and each remote's verbatim `health` and `build` objects from `/api/v1/fleet` (`null` when unknown) |
 | `shuttle remotes add <name>` | Add or replace a remote in the file (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`, `--tunnel-manager`) |
 | `shuttle remotes rm <name>` | Remove a remote from the file; a discovered peer is suppressed with an `"enabled": false` entry instead |
 | `shuttle remotes path` | Print the fleet file path (`~/.config/shuttle/remotes.json`) |

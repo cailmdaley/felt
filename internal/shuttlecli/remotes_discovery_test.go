@@ -2,13 +2,16 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
@@ -93,9 +96,17 @@ func TestAdmitDiscovered_TakesDocumentDefaults(t *testing.T) {
 
 // serveDiscovery stands env's local daemon up, its /api/v1/version reporting
 // the given discovery block.
-func serveDiscovery(t *testing.T, env *sysenv.Env, discovery string) {
+func serveDiscovery(t *testing.T, env *sysenv.Env, discovery string, fleet ...string) {
 	t.Helper()
 	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/fleet": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if len(fleet) == 0 {
+				_, _ = w.Write([]byte(`{"remotes":[]}`))
+				return
+			}
+			_, _ = w.Write([]byte(fleet[0]))
+		},
 		"/api/v1/version": func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ready":true,"host":"hub-self","discovery":` + discovery + `}`))
@@ -164,8 +175,162 @@ func TestRemotesList_DaemonUnreachableListsConfiguredOnly(t *testing.T) {
 	if !strings.Contains(out, "no discovered peers from the daemon") || !strings.Contains(out, "showing configured remotes only") {
 		t.Fatalf("missing unreachable note:\n%s", out)
 	}
-	if !strings.Contains(out, "hub-n") {
-		t.Fatalf("configured entry missing:\n%s", out)
+	if !strings.Contains(out, "hub-n") || !strings.Contains(out, "REACH") || !strings.HasSuffix(strings.TrimSpace(out), "?") {
+		t.Fatalf("configured entry or unknown reach missing:\n%s", out)
+	}
+	a := newApp(env)
+	a.json = true
+	var listing struct {
+		Remotes []map[string]any `json:"remotes"`
+	}
+	if err := json.Unmarshal([]byte(remotesList(t, a)), &listing); err != nil {
+		t.Fatal(err)
+	}
+	row := listing.Remotes[0]
+	for _, key := range []string{"health", "build"} {
+		if value, ok := row[key]; !ok || value != nil {
+			t.Fatalf("unknown %s = %v (present %v)", key, value, ok)
+		}
+	}
+}
+
+func TestRemotesList_ReportsDaemonReachAndPreservesObservations(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	writeRemotesIn(t, env, `{"remotes":[{"name":"hub-stale","port":4005},{"name":"hub-unpolled","port":4006},{"name":"hub-unknown","port":4007}]}`)
+	const healthy = `{"polled":true,"stale":false,"last_error":null,"last_polled_at":"2026-01-02T00:00:00Z","recovery":{"state":"healthy","attempt":0},"future_field":42}`
+	const build = `{"git_short_sha":"abc123","booted_at":"2026-01-01T00:00:00Z","future_field":"kept"}`
+	serveDiscovery(t, env, `{"state":"ok","via":"localapi","peers":[{"name":"hub-healthy","url":"https://hub-healthy.example.ts.net"}]}`, `{"remotes":[
+  {"name":"hub-healthy","health":`+healthy+`,"build":`+build+`},
+  {"name":"hub-stale","health":{"polled":true,"stale":true,"last_error":"dial timeout"},"build":null},
+  {"name":"hub-unpolled","health":{"polled":false,"stale":true},"build":null}
+ ]}`)
+	a := newApp(env)
+	out := remotesList(t, a)
+	for name, want := range map[string]string{"hub-healthy": "healthy abc123 up ", "hub-stale": "stale dial timeout", "hub-unpolled": "unpolled", "hub-unknown": "?"} {
+		found := false
+		for _, line := range strings.Split(out, "\n") {
+			if strings.HasPrefix(line, name+" ") {
+				found = strings.Contains(line, want)
+			}
+		}
+		if !found {
+			t.Fatalf("%s missing reach %q:\n%s", name, want, out)
+		}
+	}
+	a.json = true
+	var listing struct {
+		Remotes []remoteListingRow `json:"remotes"`
+	}
+	if err := json.Unmarshal([]byte(remotesList(t, a)), &listing); err != nil {
+		t.Fatal(err)
+	}
+	row := listing.Remotes[len(listing.Remotes)-1]
+	for key, pair := range map[string][2]json.RawMessage{"health": {row.Health, json.RawMessage(healthy)}, "build": {row.Build, json.RawMessage(build)}} {
+		var got, want any
+		_ = json.Unmarshal(pair[0], &got)
+		_ = json.Unmarshal(pair[1], &want)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s was not preserved: %s", key, pair[0])
+		}
+	}
+	// The daemon's internal fleet reader must retain discovery without asking
+	// the fleet endpoint to shell this same command again.
+	streams := sysenvtest.Capture(env)
+	cmd := a.remotesListCmd()
+	if err := cmd.Flags().Set("no-reach", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(streams.Stdout.String(), "hub-healthy") || strings.Contains(streams.Stdout.String(), "abc123") {
+		t.Fatal("no-reach must preserve peers but omit observations")
+	}
+}
+
+func TestRemotesList_SharedReachFixtureAndNoReachReader(t *testing.T) {
+	t.Parallel()
+	content, err := os.ReadFile("../../daemon/test/fixtures/remotes_health/fleet.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Remotes []remoteListingRow `json:"remotes"`
+	}
+	if err := json.Unmarshal(content, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	env := testEnv(t)
+	writeRemotesIn(t, env, `{"remotes":[{"name":"hub-a","port":4001}]}`)
+	var fleetReads atomic.Int32
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/version": func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"discovery":{"state":"ok","via":"localapi","peers":[{"name":"hub-b","url":"https://hub-b.example.ts.net"}]}}`))
+		},
+		"/api/v1/fleet": func(w http.ResponseWriter, _ *http.Request) {
+			fleetReads.Add(1)
+			_, _ = w.Write(content)
+		},
+	})
+	a := newApp(env)
+	a.json = true
+	for _, noReach := range []bool{false, true} {
+		streams := sysenvtest.Capture(env)
+		cmd := a.remotesListCmd()
+		if err := cmd.Flags().Set("no-reach", fmt.Sprint(noReach)); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatal(err)
+		}
+		var listing struct {
+			Remotes []remoteListingRow `json:"remotes"`
+		}
+		if err := json.Unmarshal([]byte(streams.Stdout.String()), &listing); err != nil {
+			t.Fatal(err)
+		}
+		if len(listing.Remotes) != len(fixture.Remotes) {
+			t.Fatalf("rows = %+v", listing.Remotes)
+		}
+		for i, expected := range fixture.Remotes {
+			actual := listing.Remotes[i]
+			if actual.Name != expected.Name || actual.Source != expected.Source {
+				t.Fatalf("resolved row = %+v", actual)
+			}
+			for key, pair := range map[string][2]json.RawMessage{"health": {actual.Health, expected.Health}, "build": {actual.Build, expected.Build}} {
+				var got, want any
+				_ = json.Unmarshal(pair[0], &got)
+				if !noReach {
+					_ = json.Unmarshal(pair[1], &want)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("noReach=%v %s = %s, want %v", noReach, key, pair[0], want)
+				}
+			}
+		}
+		if fleetReads.Load() != 1 {
+			t.Fatalf("--no-reach recursively fetched fleet: %d requests", fleetReads.Load())
+		}
+	}
+}
+
+func TestRemoteReachFormatting(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct{ health, build, want string }{
+		{`{"polled":true,"stale":false}`, `{"git_short_sha":"abc123","booted_at":"2026-01-01T00:00:00Z"}`, "healthy abc123 up 24h0m0s"},
+		{`{"polled":true,"stale":false}`, `null`, "healthy ? up ?"},
+		{`{"polled":false,"stale":true}`, `null`, "unpolled"},
+		{`{"polled":true,"stale":true,"last_error":"dial\n timeout"}`, `null`, "stale dial timeout"},
+		{`{"polled":true,"stale":true}`, `null`, "stale"},
+		{`null`, `null`, "?"},
+		{`{"polled":true,"stale":true,"last_error":"` + strings.Repeat("界", 90) + `"}`, `null`, "stale " + strings.Repeat("界", 79) + "…"},
+	} {
+		row := remoteListingRow{Health: json.RawMessage(tc.health), Build: json.RawMessage(tc.build)}
+		if got := row.reach(now); got != tc.want {
+			t.Errorf("reach = %q, want %q", got, tc.want)
+		}
 	}
 }
 

@@ -80,6 +80,24 @@ defmodule ShuttleWeb.FleetControllerTest do
     def get(_url, _timeout), do: {:error, :econnrefused}
   end
 
+  defmodule ReachFixtureClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+    @fixture Path.expand("../../fixtures/remotes_health/fleet.json", __DIR__)
+    @external_resource @fixture
+    @build @fixture
+           |> File.read!()
+           |> Jason.decode!()
+           |> Map.fetch!("remotes")
+           |> hd()
+           |> Map.fetch!("build")
+
+    @impl true
+    def get("http://localhost:4001/api/v1/state", _timeout),
+      do:
+        {:ok,
+         Jason.encode!(%{"host" => "hub-a", "eligible" => [], "blocked" => [], "build" => @build})}
+  end
+
   setup do
     path =
       Path.join(
@@ -122,7 +140,52 @@ defmodule ShuttleWeb.FleetControllerTest do
     :ok = RemoteRegistry.poll_now()
   end
 
+  # Shared with Go's remotes listing tests: the endpoint owns observations,
+  # while its CLI reader owns the resolved configuration, including discovery.
+  @reach_fixture Path.expand("../../fixtures/remotes_health/fleet.json", __DIR__)
+  @external_resource @reach_fixture
+  @reach_rows @reach_fixture |> File.read!() |> Jason.decode!() |> Map.fetch!("remotes")
+
   describe "GET /api/v1/fleet" do
+    test "shared reach fixture preserves discovered rows without recursive health reads" do
+      # A registry polls hub-a; hub-b is a discovered peer not yet polled.
+      [healthy, unpolled] = @reach_rows
+
+      MockFelt.reply_with(fn
+        ["remotes", "list", "--json", "--no-reach"] ->
+          doc = %{"remotes" => Enum.map(@reach_rows, &Map.drop(&1, ["health", "build"]))}
+          {Jason.encode!(doc), 0}
+
+        _ ->
+          {"fleet reader must skip reach lookup", 1}
+      end)
+
+      Shuttle.Test.Env.start_scoped!(
+        {RemoteRegistry,
+         name: nil,
+         remotes: [%Remote{name: "hub-a", url: healthy["url"], poll_interval_ms: 60_000}],
+         client: ReachFixtureClient,
+         auto_poll: false,
+         tick_interval_ms: 60_000},
+        RemoteRegistry
+      )
+
+      :ok = RemoteRegistry.poll_now()
+
+      assert %{"error" => nil, "remotes" => [actual_healthy, actual_unpolled]} =
+               api_conn() |> get("/api/v1/fleet") |> json_response(200)
+
+      assert actual_healthy["source"] == healthy["source"]
+      assert actual_healthy["build"] == healthy["build"]
+
+      assert Map.delete(actual_healthy["health"], "last_polled_at") ==
+               Map.delete(healthy["health"], "last_polled_at")
+
+      assert actual_unpolled["source"] == unpolled["source"]
+      assert actual_unpolled["health"] == unpolled["health"]
+      assert actual_unpolled["build"] == unpolled["build"]
+    end
+
     test "joins the normalized file to live health and each remote's build", %{path: path} do
       File.write!(path, "{}")
       MockFelt.reply_with(fn _args -> {Jason.encode!(@fleet_doc), 0} end)
@@ -133,7 +196,7 @@ defmodule ShuttleWeb.FleetControllerTest do
       assert conn.status == 200
       body = Jason.decode!(conn.resp_body)
 
-      assert MockFelt.last_call() == {"shuttle", ["remotes", "list", "--json"]}
+      assert MockFelt.last_call() == {"shuttle", ["remotes", "list", "--json", "--no-reach"]}
       assert body["host"] == Shuttle.Poller.own_host_id()
       assert body["error"] == nil
       assert body["launchd_label_prefix"] == "io.shuttle"
