@@ -1267,6 +1267,8 @@ defmodule Shuttle.PollerTest do
     assert [^root] = successor_writes
     [{_, adopted}] = Map.to_list(:sys.get_state(poller).running)
     assert adopted.felt_store == root
+    # Re-adoption keeps the worker's durable dispatch time, not the boot time.
+    assert DateTime.to_iso8601(adopted.started_at) == boundary
 
     assert Enum.any?(
              Shuttle.SessionLedger.read_since(0),

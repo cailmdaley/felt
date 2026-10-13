@@ -134,11 +134,20 @@ defmodule Shuttle.Poller.SessionReconciliation do
           end
       end
 
+    # A re-adopted worker keeps the start it already had: the app record's,
+    # else the fiber's durable dispatch stamp; `now` only when neither exists.
     started_at =
-      case DateTime.from_iso8601(app_record["started_at"] || "") do
-        {:ok, timestamp, _} -> timestamp
-        _ -> now
-      end
+      [app_record["started_at"], get_in(fiber, ["shuttle", "runtime", "dispatched_at"])]
+      |> Enum.find_value(now, fn
+        stamp when is_binary(stamp) ->
+          case DateTime.from_iso8601(stamp) do
+            {:ok, timestamp, _} -> timestamp
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end)
 
     running_meta = %{
       state: Map.get(app_record, "launch_state", "running"),
