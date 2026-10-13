@@ -64,6 +64,9 @@ shuttle doctor
 ```
 
 The remote should appear with source `discovered`, under its Shuttle host ID.
+The **REACH** column shows the local daemon's cached poll result: `healthy <sha> up <uptime>`, `stale <last_error…>`, `unpolled`, or `?` when the daemon's observation is unknown.
+`shuttle remotes list --json` includes each remote's `health` and `build` objects from `/api/v1/fleet` unchanged, or `null` when unknown.
+`--configured` skips the daemon entirely, so reach is unknown.
 Discovery looks for online nodes owned by the same Tailscale user, at their default HTTPS address, that answer as Shuttle daemons.
 Don't assume a tagged device or a device shared by another user will be discovered.
 
@@ -168,6 +171,17 @@ Userspace Tailscale is an advanced alternative only where policy permits it.
 Read the [host boundaries](installation.md#host-classes-and-trust-boundaries) and [userspace recipe](installation.md#the-unprivileged-recipe) first: serving a shared host is not the same as forwarding a personal machine's port 4000.
 
 ## Verify work across the connection
+
+**Judge reach through the daemon, never with a shell probe.**
+On a userspace-Tailscale host, `curl`, `ssh` and `/dev/tcp` from a worker's shell do not route into the tailnet at all and can time out, while the daemon dials through the LocalAPI socket.
+A failed probe says nothing about the remote.
+Use `shuttle remotes list` or the local daemon's `/api/v1/fleet` to check reach; on a shared host, use its private Unix socket for API requests.
+Do not introduce an unauthenticated outbound proxy on a shared machine.
+
+**A remote dispatch needs the owner's store to hold the fiber.**
+Fibers travel by Git; the daemon does not pull.
+After `shuttle install --host <remote>` and `felt sync --push`, the remote's store still lacks the fiber until something there syncs, and `shuttle reopen` fails with `shuttle show … exited 1`.
+Ask a live session on that host (`shuttle message <address> "run felt -C <store> sync"`) or the human to sync, then reopen again.
 
 Open the hub's **Settings → Connected hosts** and check that the remote answers.
 Choose the remote host in Settings to inspect its registered stores and projects.
