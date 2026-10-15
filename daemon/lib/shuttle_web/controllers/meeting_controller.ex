@@ -69,6 +69,7 @@ defmodule ShuttleWeb.MeetingController do
         {status, delivery} =
           ShuttleWeb.DeliverController.route(fiber_id, prompt, origin, "shuttle meeting")
 
+        Meeting.log_delivery(row, status, delivery)
         body = MeetingRouter.stamp(%{meeting: row, delivery: delivery})
 
         body =

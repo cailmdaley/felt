@@ -49,6 +49,7 @@ defmodule Shuttle.Meeting do
   """
 
   alias Shuttle.{HostCapabilities, Remote, Remotes, Runner, Tmux}
+  require Logger
 
   @session "hark-meeting"
   @modes ~w(call room phone)
@@ -311,6 +312,10 @@ defmodule Shuttle.Meeting do
          fiber <- target_fiber(target),
          argv <- hark_argv(executable, paths, title, mode, launch_id),
          :ok <- create_session(argv, launch_id, fiber, opts),
+         :ok <-
+           Logger.info(
+             "meeting start launch=#{launch_id} mode=#{mode} fiber=#{inspect(fiber)} transcript=#{inspect(paths.transcript)}"
+           ),
          {:ok, row} <- await_launch(launch_id, paths, title, fiber, mode, opts) do
       message = meeting_message(mode, paths.transcript, target)
       {:ok, %{meeting: row, prompt: message <> "\n\n" <> note, launch: launch_id}}
@@ -318,6 +323,15 @@ defmodule Shuttle.Meeting do
       nil -> {:error, :unavailable}
       {:error, _reason} = error -> error
     end
+  end
+
+  @doc "Log the agent delivery outcome for a recording on this host."
+  def log_delivery(row, status, outcome) do
+    launch = row[:launch] || row["launch"]
+
+    Logger.info(
+      "meeting delivery launch=#{launch} status=#{status} outcome=#{Jason.encode!(outcome)}"
+    )
   end
 
   # A joined meeting with no note is named after the constitution it joins.

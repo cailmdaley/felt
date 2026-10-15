@@ -368,17 +368,27 @@ defmodule Shuttle.MeetingTest do
     Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_joined_meeting_handler(hark_dir)
 
-    conn =
-      api_conn()
-      |> post(
-        "/api/v1/meeting/join",
-        Jason.encode!(%{
-          "fiber_id" => "cosmo/shear-bmodes",
-          "origin" => "project-host",
-          "meeting" => %{"mode" => "call"},
-          "note" => ""
-        })
-      )
+    {conn, log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        api_conn()
+        |> post(
+          "/api/v1/meeting/join",
+          Jason.encode!(%{
+            "fiber_id" => "cosmo/shear-bmodes",
+            "origin" => "project-host",
+            "meeting" => %{"mode" => "call"},
+            "note" => ""
+          })
+        )
+      end)
+
+    launch = Jason.decode!(conn.resp_body)["meeting"]["launch"]
+    assert log =~ "[info] meeting start launch=#{launch} mode=call fiber=\"cosmo/shear-bmodes\""
+    assert log =~ "transcript=\"~/.hark/meetings/2026-09-25_1403_shear-bmodes.txt\""
+    assert log =~ "[info] meeting delivery launch=#{launch} status=200"
+    assert log =~ ~s("delivered":true)
+    assert length(Regex.scan(~r/meeting start /, log)) == 1
+    assert length(Regex.scan(~r/meeting delivery /, log)) == 1
 
     assert conn.status == 200
 
@@ -462,34 +472,41 @@ defmodule Shuttle.MeetingTest do
 
     start_supervised!(
       {Shuttle.Test.MeetingCaptureForwardClient,
-       {:ok, 422,
+       {:ok, 409,
         Jason.encode!(%{
-          "dispatched" => false,
-          "reason" => "not_eligible",
-          "message" => "Fiber is closed — reopen it before dispatching."
+          "delivered" => false,
+          "error" =>
+            "the live worker has no addressable conversation yet; try again once it has started"
         })}}
     )
 
     Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
     set_joined_meeting_handler(hark_dir)
 
-    conn =
-      api_conn()
-      |> post(
-        "/api/v1/meeting/join",
-        Jason.encode!(%{
-          "fiber_id" => "cosmo/shear-bmodes",
-          "origin" => "project-host",
-          "meeting" => %{"mode" => "room"},
-          "note" => "B-mode telecon"
-        })
-      )
+    {conn, log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        api_conn()
+        |> post(
+          "/api/v1/meeting/join",
+          Jason.encode!(%{
+            "fiber_id" => "cosmo/shear-bmodes",
+            "origin" => "project-host",
+            "meeting" => %{"mode" => "room"},
+            "note" => "B-mode telecon"
+          })
+        )
+      end)
 
-    assert conn.status == 422
+    assert conn.status == 409
+    launch = Jason.decode!(conn.resp_body)["meeting"]["launch"]
+    assert log =~ "[info] meeting delivery launch=#{launch} status=409"
+    assert log =~ ~s("delivered":false)
+    assert log =~ "the live worker has no addressable conversation yet"
+    assert length(Regex.scan(~r/meeting delivery /, log)) == 1
 
     assert %{
              "recording" => true,
-             "error" => "Fiber is closed — reopen it before dispatching.",
+             "error" => "the live worker has no addressable conversation yet" <> _,
              "meeting" => %{"state" => "live", "fiber" => "cosmo/shear-bmodes"}
            } = Jason.decode!(conn.resp_body)
   end

@@ -168,14 +168,19 @@ defmodule ShuttleWeb.CaptureController do
     do: relay_json(conn, result, &capture_failed/2)
 
   defp relay_capture(conn, {:forwarded, status, body}, meeting_row) do
-    payload = decode_capture_body(body) |> Map.put("meeting", meeting_row)
+    outcome = decode_capture_body(body)
+    Meeting.log_delivery(meeting_row, status, outcome)
+    payload = Map.put(outcome, "meeting", meeting_row)
     payload = if status >= 400, do: Map.put(payload, "recording", true), else: payload
     conn |> put_status(status) |> json(MeetingRouter.stamp(payload))
   end
 
   defp relay_capture(conn, {:error, {:forward_failed, name, reason}}, meeting_row) do
+    outcome = capture_failed(name, reason)
+    Meeting.log_delivery(meeting_row, 502, outcome)
+
     payload =
-      capture_failed(name, reason)
+      outcome
       |> Map.put("meeting", meeting_row)
       |> Map.put("recording", true)
 
@@ -192,8 +197,10 @@ defmodule ShuttleWeb.CaptureController do
 
   defp capture_json(conn, payload, nil), do: json(conn, payload)
 
-  defp capture_json(conn, payload, row),
-    do: json(conn, MeetingRouter.stamp(Map.put(payload, "meeting", row)))
+  defp capture_json(conn, payload, row) do
+    Meeting.log_delivery(row, 200, payload)
+    json(conn, MeetingRouter.stamp(Map.put(payload, "meeting", row)))
+  end
 
   # A terminal capture's harness session, when the launch pre-assigned one.
   defp put_session_uuid(payload, uuid) when is_binary(uuid),
@@ -205,6 +212,7 @@ defmodule ShuttleWeb.CaptureController do
     do: conn |> put_status(status) |> json(payload)
 
   defp capture_error(conn, status, payload, row) do
+    Meeting.log_delivery(row, status, payload)
     payload = payload |> Map.put("meeting", row) |> Map.put("recording", true)
     conn |> put_status(status) |> json(MeetingRouter.stamp(payload))
   end
