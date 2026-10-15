@@ -24,6 +24,39 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
     end
   end
 
+  describe "office projection" do
+    test "reads the office and boolean seat only from shuttle fields" do
+      fiber = %{
+        "id" => "tests/office",
+        "role" => "ignored",
+        "seat" => true,
+        "collaboration" => %{"ignored" => []},
+        "shuttle" => %{"role" => "gardener", "seat" => true}
+      }
+
+      assert [%{fiber: projected}] = FiberDocuments.entries_for_fiber("/tmp/store", fiber)
+      assert projected["role"] == "gardener"
+      assert projected["seat"] === true
+      refute Map.has_key?(projected, "collaboration")
+      refute "collaboration" in FiberDocuments.kanban_fields()
+    end
+
+    test "does not infer an office from a string seat or top-level metadata" do
+      for shuttle <- [%{}, %{"seat" => "gardener"}, %{"seat" => "true"}] do
+        fiber = %{
+          "id" => "tests/office",
+          "role" => "ignored",
+          "seat" => true,
+          "shuttle" => shuttle
+        }
+
+        assert [%{fiber: projected}] = FiberDocuments.entries_for_fiber("/tmp/store", fiber)
+        assert projected["role"] == nil
+        assert projected["seat"] === false
+      end
+    end
+  end
+
   describe "kanban_aux_admissible?/1" do
     test "claims a fiber carrying a due date" do
       assert FiberDocuments.kanban_aux_admissible?(%{"due" => "2026-11-30T00:00:00Z"})

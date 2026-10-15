@@ -27,15 +27,7 @@ defmodule Shuttle.SessionLedgerTest do
   defp decoded(path), do: Enum.map(lines(path), &Jason.decode!/1)
 
   describe "record/1" do
-    test "snapshots collaboration and resolved execution recipe on the new row", %{path: path} do
-      collaboration = %{
-        "collaborator" => %{
-          "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
-          "origin" => "host-a"
-        },
-        "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
-      }
-
+    test "snapshots the office and resolved execution recipe on the new row", %{path: path} do
       SessionLedger.record(
         path: path,
         fiber: "work/paper/edits",
@@ -43,28 +35,31 @@ defmodule Shuttle.SessionLedgerTest do
         kind: :dispatch,
         agent: "codex-luna",
         model: "gpt-6-luna",
-        collaboration: collaboration
+        role: "vizier"
       )
 
       assert [record] = decoded(path)
       assert record["agent"] == "codex-luna"
       assert record["model"] == "gpt-6-luna"
-      assert record["collaboration"] == collaboration
+      assert record["role"] == "vizier"
+      refute Map.has_key?(record, "collaboration")
+      refute Map.has_key?(record, "collaborator")
     end
 
-    test "snapshots readable collaboration as participation without rewriting it", %{path: path} do
-      collaboration = %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}
-
+    test "omits absent office metadata and never writes collaboration", %{path: path} do
       SessionLedger.record(
         path: path,
         fiber: "work/paper/edits",
         session: "0883ade1-08e0-4457-94c6-7ac12137eb0f",
         kind: :dispatch,
-        collaboration: collaboration
+        collaboration: %{"vizier" => ["fable"]},
+        collaborator: "fable"
       )
 
-      assert [%{"collaboration" => ^collaboration}] = decoded(path)
-      assert [%{"collaboration" => ^collaboration}] = SessionLedger.read_since(0, path: path)
+      assert [record] = decoded(path)
+      refute Map.has_key?(record, "role")
+      refute Map.has_key?(record, "collaboration")
+      refute Map.has_key?(record, "collaborator")
     end
 
     test "reads historical UID collaboration snapshots unchanged", %{path: path} do

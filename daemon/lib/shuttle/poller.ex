@@ -31,7 +31,6 @@ defmodule Shuttle.Poller do
   require Shuttle.Dispatcher
 
   alias Shuttle.{
-    Collaboration,
     DaemonHeartbeat,
     Dispatcher,
     LifecycleService,
@@ -566,7 +565,7 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  Run Shuttle's `accept` / `resume` / `rest` / `seat` writer (`Shuttle.LifecycleService.write/3`)
+  Run Shuttle's `accept` / `resume` / `rest` / `role` / `seat` writer (`Shuttle.LifecycleService.write/3`)
   inside the Poller, serialized with its state changes, then refresh the
   fiber's document-cache entry so the board reads the transition at once. A
   poll read in flight sees the old document or the new one, whose status and
@@ -1569,7 +1568,8 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp cached_fiber(%State{} = state, fiber_id) do
+  @doc false
+  def cached_fiber(%State{} = state, fiber_id) do
     Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
       fiber = Map.get(entry, :fiber, %{})
 
@@ -2991,13 +2991,6 @@ defmodule Shuttle.Poller do
       get_in(fiber, ["shuttle", "agent"]) || "unknown"
   end
 
-  defp collaboration_snapshot(fiber) do
-    case Collaboration.snapshot(fiber) do
-      {:ok, snapshot} -> snapshot
-      {:error, _} -> nil
-    end
-  end
-
   # A fiber's configured agent is an execution recipe. It makes a useful
   # running-card label, but it cannot prove what an external claimant was
   # actually running. Ledger provenance therefore carries only an explicit
@@ -3436,7 +3429,7 @@ defmodule Shuttle.Poller do
               harness: "codex",
               kind: :claim,
               agent: app_claim_agent(id, opts),
-              collaboration: collaboration_snapshot(fiber)
+              role: get_in(fiber, ["shuttle", "role"])
             )
 
             {refresh_document_entry(state, fiber_id),
@@ -3645,7 +3638,7 @@ defmodule Shuttle.Poller do
             ),
           kind: :claim,
           agent: explicit_claim_agent(opts),
-          collaboration: collaboration_snapshot(fiber)
+          role: get_in(fiber, ["shuttle", "role"])
         )
 
         state = refresh_document_entry(state, fiber_id)

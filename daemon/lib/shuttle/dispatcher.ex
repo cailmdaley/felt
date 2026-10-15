@@ -11,7 +11,7 @@ defmodule Shuttle.Dispatcher do
 
   require Logger
 
-  alias Shuttle.{Agents, Collaboration}
+  alias Shuttle.Agents
 
   # Codex and pi mint their own session UUIDs after the process starts. A cold
   # harness can spend tens of seconds loading before it writes the transcript
@@ -146,7 +146,7 @@ defmodule Shuttle.Dispatcher do
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
             previous_session: previous_session,
-            collaboration: Collaboration.snapshot(fiber),
+            role: get_in(fiber, ["shuttle", "role"]),
             agent: agent.id,
             model: agent.model
           )
@@ -399,7 +399,7 @@ defmodule Shuttle.Dispatcher do
   # cannot: the fiber's store-relative id with the store it resolves in, the
   # conversation surface and headless mode when they differ from a terminal
   # session, and the previous session. Everything else (the exit contract,
-  # standing runs' handoff, the roster) lives in the fiber or the shuttle skill.
+  # standing runs' handoff) lives in the fiber or the shuttle skill.
   defp compose_prompt(header, opts) do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
@@ -1811,7 +1811,7 @@ defmodule Shuttle.Dispatcher do
       kind: Keyword.get(opts, :ledger_kind, :dispatch),
       agent: Keyword.get(opts, :agent),
       model: Keyword.get(opts, :model),
-      collaboration: Keyword.get(opts, :collaboration)
+      role: Keyword.get(opts, :role)
     )
   end
 

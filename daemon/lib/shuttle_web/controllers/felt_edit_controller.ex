@@ -40,9 +40,31 @@ defmodule ShuttleWeb.FeltEditController do
   use Phoenix.Controller, formats: [:json]
   import ShuttleWeb.RelayHelpers, only: [relay_text: 2, send_cli_result: 3, store_for_fiber: 1]
 
-  alias Shuttle.{CLI, Collaboration, Felt, OriginRouter, Poller, RemoteFiberRegistry}
+  alias Shuttle.{Felt, OriginRouter, Poller, RemoteFiberRegistry}
+
+  @edit_fields ~w(fiber_id origin add remove set unset due name body)
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
+    case Map.keys(params) -- @edit_fields do
+      [] ->
+        route_edit(conn, fiber_id, params)
+
+      unknown ->
+        send_cli_result(
+          conn,
+          "felt",
+          {:error, "unsupported edit fields: #{Enum.join(unknown, ", ")}"}
+        )
+    end
+  end
+
+  def create(conn, _params) do
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(400, "fiber_id is required")
+  end
+
+  defp route_edit(conn, fiber_id, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
       {:remote, remote} ->
         result = OriginRouter.forward(remote, "/api/v1/felt-edit", conn.body_params)
@@ -57,12 +79,6 @@ defmodule ShuttleWeb.FeltEditController do
     end
   end
 
-  def create(conn, _params) do
-    conn
-    |> put_resp_content_type("text/plain")
-    |> send_resp(400, "fiber_id is required")
-  end
-
   defp create_local(conn, fiber_id, params) do
     add = string_list(params["add"])
     remove = string_list(params["remove"])
@@ -71,7 +87,6 @@ defmodule ShuttleWeb.FeltEditController do
     with {:ok, set_pairs} <- set_pairs(params["set"]),
          {:ok, due_args} <- due_args(params),
          {:ok, native_args} <- native_args(params),
-         {:ok, collaboration} <- collaboration(params),
          {:ok, store, address} <- store_for_fiber(fiber_id),
          {:ok, output} <-
            run(
@@ -81,8 +96,7 @@ defmodule ShuttleWeb.FeltEditController do
              remove,
              unset,
              set_pairs,
-             due_args ++ native_args,
-             collaboration
+             due_args ++ native_args
            ) do
       # The edit mutated the felt doc (tags / horizon / due); re-read it into the
       # document cache NOW so the kanban's post-edit refetch reflects the change
@@ -94,26 +108,14 @@ defmodule ShuttleWeb.FeltEditController do
       |> send_resp(200, output)
     else
       other ->
-        tool = if Map.has_key?(params, "collaboration"), do: "shuttle", else: "felt"
-        send_cli_result(conn, tool, other)
+        send_cli_result(conn, "felt", other)
     end
   end
 
   # An empty diff is a no-op.
-  defp run(_store, _fiber_id, [], [], [], [], [], nil), do: {:ok, ""}
+  defp run(_store, _fiber_id, [], [], [], [], []), do: {:ok, ""}
 
-  defp run(store, fiber_id, [], [], [], [], [], collaboration) when is_map(collaboration) do
-    CLI.run([
-      "-C",
-      store,
-      "assign",
-      fiber_id,
-      "--json-assignment",
-      Jason.encode!(collaboration)
-    ])
-  end
-
-  defp run(store, fiber_id, add, remove, unset, set_pairs, due_args, nil) do
+  defp run(store, fiber_id, add, remove, unset, set_pairs, due_args) do
     args = ["-C", store, "edit", fiber_id]
     args = Enum.reduce(remove, args, fn tag, acc -> acc ++ ["--untag", tag] end)
     args = Enum.reduce(add, args, fn tag, acc -> acc ++ ["--tag", tag] end)
@@ -123,12 +125,6 @@ defmodule ShuttleWeb.FeltEditController do
 
     Felt.run(args)
   end
-
-  # Both commands are individual locked read-modify-write operations. Refusing
-  # a mixed request keeps a collaboration replacement atomic with respect to
-  # ordinary frontmatter/body edits instead of guessing an ordering.
-  defp run(_store, _fiber_id, _add, _remove, _unset, _set_pairs, _due_args, _collaboration),
-    do: {:error, "collaboration must be the only document mutation in a request"}
 
   # `set` is a map of opaque scalar frontmatter. Render each entry as the
   # `key=value` argument `felt edit --set` expects; felt re-parses the value as
@@ -187,14 +183,6 @@ defmodule ShuttleWeb.FeltEditController do
       {:ok, nil} -> {:ok, ["--due", ""]}
       {:ok, value} when is_binary(value) -> {:ok, ["--due", value]}
       {:ok, _} -> {:error, "due must be a string or null"}
-    end
-  end
-
-  defp collaboration(params) do
-    case Map.fetch(params, "collaboration") do
-      :error -> {:ok, nil}
-      {:ok, nil} -> {:error, "collaboration must be an object"}
-      {:ok, value} -> Collaboration.parse(value)
     end
   end
 

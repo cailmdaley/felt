@@ -379,7 +379,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{store}\nset-agent\ntests/project-dir\n--project-dir\n/tmp/project\n--local\n"
   end
 
-  test "seat forwards the role, or --clear, to shuttle" do
+  test "seat forwards its boolean toggle, or --clear, to shuttle" do
     store = fixture_store!("shuttle-lifecycle-seat", "tests/hub", "Hub")
     args_file = install_fake_cli!()
 
@@ -390,13 +390,12 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         Jason.encode!(%{
           "action" => "seat",
           "fiber" => "tests/hub",
-          "role" => "cmbx-chair",
           "clear" => false
         })
       )
 
     assert conn.status == 200
-    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\ncmbx-chair\n--local\n"
+    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\n--local\n"
 
     conn =
       post(
@@ -412,7 +411,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   defmodule SeatRunner do
     @behaviour Shuttle.Runner
 
-    def cmd("shuttle", ["-C", _store, "seat" | _] = args, opts) do
+    def cmd("shuttle", ["-C", _store, verb | _] = args, opts) when verb in ["role", "seat"] do
       send(Shuttle.Env.app(:seat_writer_observer), {:seat_writer, self(), args})
       Shuttle.Runner.Default.cmd("shuttle", args, opts)
     end
@@ -423,7 +422,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     def cmd(_command, _args, _opts), do: {"", 1}
   end
 
-  test "seat set and clear execute in the Poller, serialized with lifecycle writes" do
+  test "role and seat edits execute in the Poller, serialized with lifecycle writes" do
     store = fixture_store!("shuttle-seat-serialized", "tests/hub", "Hub")
     install_fake_cli!()
     Shuttle.Test.Env.put_app_env(:seat_writer_observer, self())
@@ -436,25 +435,27 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         poll_interval_ms: 60_000
       )
 
-    for {params, seat_args} <- [
-          {%{"role" => "cmbx-chair"}, ["cmbx-chair"]},
-          {%{"clear" => true}, ["--clear"]}
+    for {action, params, office_args} <- [
+          {"role", %{"role" => "cmbx-chair"}, ["cmbx-chair"]},
+          {"role", %{"clear" => true}, ["--clear"]},
+          {"seat", %{}, []},
+          {"seat", %{"clear" => true}, ["--clear"]}
         ] do
       conn =
         post(
           api_conn(),
           "/api/v1/lifecycle",
-          Jason.encode!(Map.merge(params, %{"action" => "seat", "fiber" => "tests/hub"}))
+          Jason.encode!(Map.merge(params, %{"action" => action, "fiber" => "tests/hub"}))
         )
 
       assert conn.status == 200
       assert_receive {:seat_writer, writer, args}
       assert writer == poller
-      assert args == ["-C", store, "seat", "tests/hub"] ++ seat_args ++ ["--local"]
+      assert args == ["-C", store, action, "tests/hub"] ++ office_args ++ ["--local"]
     end
   end
 
-  test "seat without a role or --clear is refused before shelling" do
+  test "role without a slug or --clear is refused before shelling" do
     fixture_store!("shuttle-lifecycle-seat-bare", "tests/bare", "Bare")
     args_file = install_fake_cli!()
 
@@ -462,7 +463,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       post(
         api_conn(),
         "/api/v1/lifecycle",
-        Jason.encode!(%{"action" => "seat", "fiber" => "tests/bare", "clear" => false})
+        Jason.encode!(%{"action" => "role", "fiber" => "tests/bare", "clear" => false})
       )
 
     assert conn.status in 400..499

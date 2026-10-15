@@ -147,23 +147,14 @@ defmodule Shuttle.DispatcherTest do
         tags: ["constitution", "pi"],
         shuttle: %{"agent" => "pi-deepseek-flash", "resolved" => %{"agent" => @pi_resolved}}
       },
-      "tests/collaborative" => %{
+      "tests/office" => %{
         status: "active",
         tags: ["constitution"],
-        collaboration: %{
-          "collaborator" => %{
-            "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
-            "origin" => "host-a"
-          },
-          "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
-        },
-        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
-      },
-      "tests/readable-collaborative" => %{
-        status: "active",
-        tags: ["constitution"],
-        collaboration: %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]},
-        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+        shuttle: %{
+          "role" => "vizier",
+          "seat" => true,
+          "resolved" => %{"agent" => @claude_sonnet_resolved}
+        }
       },
       "tests/shuttle-agent-block" => %{
         status: "active",
@@ -359,7 +350,6 @@ defmodule Shuttle.DispatcherTest do
               "modified_at" => "2026-04-28T00:00:00Z"
             }
             |> maybe_put("shuttle", fiber.shuttle)
-            |> maybe_put("collaboration", Map.get(fiber, :collaboration))
             |> maybe_put("uid", Map.get(fiber, :uid, Shuttle.Test.FiberUid.for(fiber_id)))
 
           {Jason.encode!(payload), 0}
@@ -466,16 +456,18 @@ defmodule Shuttle.DispatcherTest do
                "Fiber: tests/haiku\nFelt store: /tmp/store"
   end
 
-  test "fresh, resumed and standing prompts leave the exit contract and roster to the skill" do
+  test "fresh, resumed and standing prompts omit office metadata and exit instructions" do
     for prompt <- [
-          Dispatcher.render_prompt("tests/a", collaboration: {:ok, %{"vizier" => ["fable"]}}),
+          Dispatcher.render_prompt("tests/a", role: "vizier", seat: true),
           Dispatcher.render_resume_prompt("tests/a"),
           Dispatcher.render_standing_run_prompt("tests/a", "run-1")
         ] do
       refute prompt =~ "Close with an outcome"
       refute prompt =~ "Kind:"
       refute prompt =~ "Collaboration"
-      refute prompt =~ "role store"
+      refute prompt =~ "role"
+      refute prompt =~ "vizier"
+      refute prompt =~ "seat"
       refute prompt =~ "standing run, finish with handoff"
     end
   end
@@ -599,27 +591,15 @@ defmodule Shuttle.DispatcherTest do
            ) =~ "Previous session"
   end
 
-  test "dispatch snapshots collaboration and selected execution recipe into its ledger row" do
-    assert {:ok, _} = Dispatcher.dispatch("tests/collaborative", runner: MockRunner)
+  test "dispatch snapshots the office and selected execution recipe into its ledger row" do
+    assert {:ok, _} = Dispatcher.dispatch("tests/office", runner: MockRunner)
 
     assert [record] = Shuttle.SessionLedger.read_since(0)
     assert record["agent"] == "claude-sonnet"
     assert record["model"] == "sonnet"
-
-    assert record["collaboration"] == %{
-             "collaborator" => %{
-               "uid" => "01KTS261GJMMRDRHS2QDMEFV3K",
-               "origin" => "host-a"
-             },
-             "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "host-b"}
-           }
-  end
-
-  test "dispatch snapshots the readable collaboration participation map unchanged" do
-    assert {:ok, _} = Dispatcher.dispatch("tests/readable-collaborative", runner: MockRunner)
-
-    assert [record] = Shuttle.SessionLedger.read_since(0)
-    assert record["collaboration"] == %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}
+    assert record["role"] == "vizier"
+    refute Map.has_key?(record, "collaboration")
+    refute Map.has_key?(record, "collaborator")
   end
 
   test "render_prompt omits the From User block when no user_message is carried" do

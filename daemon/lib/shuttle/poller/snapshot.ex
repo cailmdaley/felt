@@ -109,16 +109,19 @@ defmodule Shuttle.Poller.Snapshot do
       # ends on — without a `/version` round trip per host.
       build: Shuttle.BuildStamp.stamp(),
       felt_stores: state.felt_stores,
-      eligible: eligible,
-      blocked: blocked,
+      eligible: with_office(eligible, state),
+      blocked: with_office(blocked, state),
       boot_quarantine: state.boot_quarantine,
       # The boot-time `shuttle contract` handshake result — always
       # present (not just on skew) so /api/v1/state and /api/v1/version can
       # both show "what we expect" and "what we saw" even when they match.
       contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason]),
-      pending_launch: pending_launch,
-      orphans: state.orphans,
-      standing_roles: StandingRoles.standing_role_snapshots(state.standing_roles, now, state),
+      pending_launch: with_office(pending_launch, state),
+      orphans: with_office(state.orphans, state),
+      standing_roles:
+        state.standing_roles
+        |> StandingRoles.standing_role_snapshots(now, state)
+        |> with_office(state),
       claimed_count: map_size(state.running),
       max_concurrent: state.max_concurrent_workers,
       # The refresh's hit/miss/eviction/entry counts plus the feed envelope's
@@ -131,6 +134,18 @@ defmodule Shuttle.Poller.Snapshot do
         |> Map.merge(state.document_cache_stats)
         |> stringify_keys()
     }
+  end
+
+  defp with_office(rows, state) do
+    Enum.map(rows, fn row ->
+      fiber = Poller.cached_fiber(state, row.fiber_id) || %{}
+      role = get_in(fiber, ["shuttle", "role"])
+
+      Map.merge(row, %{
+        role: if(is_binary(role), do: role, else: nil),
+        seat: get_in(fiber, ["shuttle", "seat"]) === true
+      })
+    end)
   end
 
   @spec build_full_state(State.t()) :: map()

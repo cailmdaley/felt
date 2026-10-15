@@ -81,7 +81,7 @@ defmodule Shuttle.SessionLedger do
   App Server address id; `:session` may name a different transcript id), `:tmux`,
   `:harness`, `:uid` (derived from the tmux name when omitted), `:host` (this daemon's
   own_host_id when omitted), `:at` (now when omitted), `:agent`, `:model`,
-  and `:collaboration` (the exact launch-time participation snapshot). `:model`
+  and `:role` (the launch-time office slug). `:model`
   records the configured model passed to a launch command, not a claim about a
   provider's concrete backend checkpoint; callers omit it when no model was
   selected for that session.
@@ -129,7 +129,7 @@ defmodule Shuttle.SessionLedger do
         |> maybe_put("thread_id", presence(Keyword.get(fields, :thread_id)))
         |> maybe_put("agent", presence(Keyword.get(fields, :agent)))
         |> maybe_put("model", presence(Keyword.get(fields, :model)))
-        |> maybe_put("collaboration", collaboration(Keyword.get(fields, :collaboration)))
+        |> maybe_put("role", presence(Keyword.get(fields, :role)))
 
       {:ok, Jason.encode!(line) <> "\n"}
     else
@@ -295,19 +295,6 @@ defmodule Shuttle.SessionLedger do
 
   defp presence(value) when is_binary(value) and value != "", do: value
   defp presence(_), do: nil
-
-  # Dispatcher carries parse results through its prompt options so malformed
-  # stored metadata can be rendered visibly. Accept that validated result here
-  # too; the snapshot is still the value read at launch, never a later re-read.
-  defp collaboration({:ok, snapshot}), do: snapshot
-  defp collaboration({:error, _}), do: nil
-
-  defp collaboration(value) do
-    case Shuttle.Collaboration.parse(value) do
-      {:ok, snapshot} -> snapshot
-      {:error, _} -> nil
-    end
-  end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

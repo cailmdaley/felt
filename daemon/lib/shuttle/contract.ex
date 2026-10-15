@@ -19,17 +19,11 @@ defmodule Shuttle.Contract do
 
   require Logger
 
-  # Bumped in lockstep with internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Level 4: the daemon shells `shuttle accept|resume <fiber> --local`.
-  # Level 6: the daemon shells `shuttle resolve-dir <path>` and
-  # `shuttle reopen <fiber> --project-dir <dir> --conclude-run --local`.
-  # Level 7: the daemon shells `shuttle rest <fiber>`; `shuttle pin` is gone.
-  # Level 8: the daemon shells `shuttle seat <fiber> <role>|--clear`.
-  # Level 9: discovery uses `shuttle ls --ids-from` for hot-set reads.
-  # Level 10: the daemon clears worker questions with `shuttle ask <fiber> --clear`.
-  # Level 11: discovery uses `shuttle ls --any` for the kanban union.
-  # Level 12: resolved agent JSON carries worker environment overrides under `env`.
-  @expected_level 12
+  # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
+  # Office writes use `shuttle role <fiber> <slug>|--clear` and
+  # `shuttle seat <fiber> [--clear]`; resolved Shuttle JSON carries a role
+  # string and a boolean seat.
+  @expected_level 13
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()

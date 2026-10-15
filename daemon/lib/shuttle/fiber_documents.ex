@@ -27,7 +27,7 @@ defmodule Shuttle.FiberDocuments do
   # `kanban_fields/0`) so cache entries build directly from candidate rows.
   @kanban_fields ~w(id uid name status tags created_at closed_at modified_at
                     outcome due horizon cold kind priority depends_on tempered
-                    shuttle collaboration start theme path report_path)
+                    shuttle start theme path report_path)
 
   @doc "The kanban metadata field names the owner feed projects from felt JSON."
   @spec kanban_fields() :: [String.t()]
@@ -446,6 +446,9 @@ defmodule Shuttle.FiberDocuments do
 
     fiber =
       fiber
+      |> Map.delete("collaboration")
+      |> Map.put("role", office_role(fiber))
+      |> Map.put("seat", get_in(fiber, ["shuttle", "seat"]) === true)
       |> Map.put("id", logical_id)
       |> put_slug(canonical_id)
 
@@ -474,6 +477,13 @@ defmodule Shuttle.FiberDocuments do
   end
 
   defp entry_for(_store, _fiber, _report_mode), do: []
+
+  defp office_role(fiber) do
+    case get_in(fiber, ["shuttle", "role"]) do
+      role when is_binary(role) -> role
+      _ -> nil
+    end
+  end
 
   # Whether the fiber has a sibling report.html. Two sources:
   #
