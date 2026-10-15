@@ -155,6 +155,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
       fiber_id: fiber_id,
       session: session,
       agent_id: app_record["agent_id"] || agent_id,
+      role: get_in(fiber, ["shuttle", "role"]),
       uid: uid,
       felt_store:
         if(Shuttle.AppWorkers.app?(session),

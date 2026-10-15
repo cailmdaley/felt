@@ -2267,6 +2267,7 @@ defmodule Shuttle.Poller do
         tmux: worker.session,
         uid: metadata_uid(worker),
         harness: Shuttle.SessionLedger.harness_for_cli(cli),
+        role: Map.get(worker, :role),
         fallback_signal: signal
       ]
 
@@ -2344,7 +2345,8 @@ defmodule Shuttle.Poller do
                   fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
                 ),
               kind: :resume,
-              agent: Map.get(meta, :agent_id)
+              agent: Map.get(meta, :agent_id),
+              role: Map.get(meta, :role)
             )
 
             state = %{
@@ -3556,7 +3558,8 @@ defmodule Shuttle.Poller do
             session: uuid,
             tmux: worker.session,
             kind: :claim,
-            agent: explicit_claim_agent(opts)
+            agent: explicit_claim_agent(opts),
+            role: Map.get(worker, :role)
           )
 
           state = %{state | running: Map.put(state.running, key, worker)}
@@ -4355,6 +4358,9 @@ defmodule Shuttle.Poller do
       fiber_id: fiber_id,
       session: session,
       agent_id: agent_id,
+      # Keep the office snapshot with the worker across identity retries and
+      # session succession; document edits do not change this run's provenance.
+      role: get_in(fiber, ["shuttle", "role"]),
       uid: Map.get(fiber, "uid"),
       felt_store: felt_store,
       started_at: now,

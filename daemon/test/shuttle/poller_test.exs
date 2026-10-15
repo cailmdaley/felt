@@ -1028,7 +1028,7 @@ defmodule Shuttle.PollerTest do
 
       MockRunner.set_shuttle(
         id,
-        "kind: oneshot\nagent: #{unquote(agent)}\nproject_dir: #{project_dir}\nruntime:\n  dispatched_at: #{boundary}\n"
+        "kind: oneshot\nagent: #{unquote(agent)}\nrole: gardener\nproject_dir: #{project_dir}\nruntime:\n  dispatched_at: #{boundary}\n"
       )
 
       MockRunner.add_tmux_session(FiberUid.session(id))
@@ -1072,6 +1072,15 @@ defmodule Shuttle.PollerTest do
       end)
 
       [{_, worker}] = Map.to_list(:sys.get_state(poller).running)
+      assert worker.role == "gardener"
+
+      # Identity retries must retain the office observed at adoption, even if
+      # the constitution is reassigned before its transcript becomes visible.
+      MockRunner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: #{unquote(agent)}\nrole: reviewer\nproject_dir: #{project_dir}\nruntime:\n  dispatched_at: #{boundary}\n"
+      )
+
       uuid = "recovered-#{cli}"
       header = %{"id" => uuid, "cwd" => root, "timestamp" => boundary}
 
@@ -1120,6 +1129,11 @@ defmodule Shuttle.PollerTest do
       assert_eventually(fn -> assert Poller.session_uuid(poller, id) == uuid end)
       assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == uuid
       assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == boundary
+      assert get_in(MockRunner.fiber(id), ["shuttle", "role"]) == "reviewer"
+
+      assert [%{"role" => "gardener"}] =
+               Enum.filter(Shuttle.SessionLedger.read_since(0), &(&1["session"] == uuid))
+
       assert {:ok, %{fibers: [%{runtime: recovered}]}} = Poller.cached_fiber_documents(poller)
       refute recovered.identity_pending
       refute Map.has_key?(recovered, :identity_error)
@@ -1140,7 +1154,7 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_shuttle(
       id,
-      "kind: oneshot\nagent: pi-luna\nproject_dir: #{root}\nruntime:\n  dispatched_at: #{boundary}\n"
+      "kind: oneshot\nagent: pi-luna\nrole: gardener\nproject_dir: #{root}\nruntime:\n  dispatched_at: #{boundary}\n"
     )
 
     MockRunner.add_tmux_session(FiberUid.session(id))
@@ -1156,6 +1170,14 @@ defmodule Shuttle.PollerTest do
     settle_poller!(poller)
 
     [{_, pending_worker}] = Map.to_list(:sys.get_state(poller).running)
+    assert pending_worker.role == "gardener"
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: pi-luna\nrole: reviewer\nproject_dir: #{root}\nruntime:\n  dispatched_at: #{boundary}\n"
+    )
+
+    Poller.refresh_document(poller, id)
 
     assert {:ok, _} =
              Poller.claim_session(poller, id, FiberUid.session(id), session_uuid: "claimed-uuid")
@@ -1169,6 +1191,9 @@ defmodule Shuttle.PollerTest do
 
     send(poller, {:fallback_started, id, pending_worker.identity_token, [felt_store: root]})
     assert Poller.session_uuid(poller, id) == "claimed-uuid"
+
+    assert [%{"role" => "gardener", "kind" => "claim"}] =
+             Enum.filter(Shuttle.SessionLedger.read_since(0), &(&1["session"] == "claimed-uuid"))
   end
 
   @tag :pr53_successor
@@ -1284,7 +1309,7 @@ defmodule Shuttle.PollerTest do
   test "poll tick persists successor without changing dispatch boundary" do
     id = "tests/persist-binding"
     MockRunner.set_fiber(id, make_fiber(id))
-    MockRunner.set_shuttle(id, oneshot_shuttle())
+    MockRunner.set_shuttle(id, oneshot_shuttle() <> "role: gardener\n")
 
     {:ok, poller} =
       start_poller!(
@@ -1325,6 +1350,14 @@ defmodule Shuttle.PollerTest do
       )
 
     Env.put_app_env(:session_bindings_source, fn -> binding end)
+
+    MockRunner.set_shuttle(
+      id,
+      oneshot_shuttle() <>
+        "role: reviewer\nruntime:\n  dispatched_at: #{original["dispatched_at"]}\n  session_uuid: #{original["session_uuid"]}\n"
+    )
+
+    Poller.refresh_document(poller, id)
     sync_poll_cycle!(poller)
     assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "successor"
 
@@ -1334,7 +1367,8 @@ defmodule Shuttle.PollerTest do
     assert {:ok, %{fibers: [%{runtime: %{session_uuid: "successor"}}]}} =
              Poller.cached_fiber_documents(poller)
 
-    assert Enum.any?(Shuttle.SessionLedger.read_since(0), &(&1["session"] == "successor"))
+    assert [%{"role" => "gardener", "kind" => "resume"}] =
+             Enum.filter(Shuttle.SessionLedger.read_since(0), &(&1["session"] == "successor"))
   end
 
   test "fallback becomes identity-pending, capture initializes once, and stale capture cannot overwrite" do
