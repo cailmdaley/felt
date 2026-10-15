@@ -110,14 +110,14 @@ If nothing remains to do until the answer arrives, end your turn; don't close un
 5. **Otherwise, just end your turn.** The board infers Your turn when no live background work remains; it stays Working while your children run.
 No ask or exit verb is needed for an ordinary conversational pause.
 
-If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation, include the store selector on the exit verb: `shuttle -C <store> close <id>`, `shuttle -C <store> rest <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
+If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation (`Surface: app` in the launch prompt), include the store selector on the exit verb: `shuttle -C <store> close <id>`, `shuttle -C <store> rest <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
 
 **When the human names the exit, take it literally: it means the command.** "Hand off" means sweep, commit, sync, then run `shuttle handoff <id>`. "Close out", "wrap it up" or "I'm done for now" means the same sequence ending in `shuttle close <id>`, even when you can see more to do — unfinished is often exactly why they want it back on their desk. "Put it to rest" or "rest it" means the sequence ending in `shuttle rest <id>`. None of them is a request for a summary in chat.
 
 **Close completed work, not every turn.** Close carries an outcome for review; ask carries a report for a decision.
 A conversational turn ending is neither signal.
 The transcript stays readable from the board after closing, and talking again resumes the session.
-In a **headless** run (`headless: true` in the launch metadata) nobody can attach, but a question can still be raised with a report and answered through a message.
+In a **headless** run (`Headless: true` in the launch prompt) nobody can attach, but a question can still be raised with a report and answered through a message.
 
 A **standing** constitution always hands off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
 

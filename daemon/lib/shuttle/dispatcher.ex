@@ -310,7 +310,7 @@ defmodule Shuttle.Dispatcher do
   @spec render_prompt(String.t(), keyword()) :: String.t()
   def render_prompt(fiber_id, opts \\ []) do
     compose_prompt(
-      "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
+      "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{fiber_id}",
       opts
     )
   end
@@ -350,7 +350,7 @@ defmodule Shuttle.Dispatcher do
   @spec render_resume_prompt(String.t(), keyword()) :: String.t()
   def render_resume_prompt(fiber_id, opts \\ []) do
     compose_prompt(
-      "You are a Shuttle worker. Activate the felt and shuttle skills.\nMode: resume\nSync and re-read the fiber before continuing.\nFiber: #{Keyword.get(opts, :prompt_fiber_id, fiber_id)}",
+      "You are a Shuttle worker. Activate the felt and shuttle skills.\nMode: resume\nFiber: #{fiber_id}",
       Keyword.delete(opts, :previous_session)
     )
   end
@@ -386,70 +386,29 @@ defmodule Shuttle.Dispatcher do
   @spec render_standing_run_prompt(String.t(), String.t(), keyword()) :: String.t()
   def render_standing_run_prompt(fiber_id, run_id, opts \\ []) do
     ad_hoc? = Keyword.get(opts, :ad_hoc, false)
-    prompt_fiber_id = Keyword.get(opts, :prompt_fiber_id, fiber_id)
 
     mode = if ad_hoc?, do: "ad-hoc", else: "scheduled"
 
     header =
-      "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{prompt_fiber_id}\nRun: #{run_id}\nRun mode: #{mode}"
+      "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{fiber_id}\nRun: #{run_id}\nRun mode: #{mode}"
 
-    compose_prompt(header, Keyword.put(opts, :kind, "standing"))
+    compose_prompt(header, opts)
   end
 
-  @doc false
-  @spec prompt_fiber_id(String.t(), String.t(), module()) :: String.t()
-  # The worker runs `felt show <id>` from inside `work_dir`, whose `.felt`
-  # symlinks into a sub-store view of the loom — so the id it sees is
-  # project-local (e.g. global `ai-futures/shuttle/X` → local `constitution/X`).
-  # felt already computes that local address: `felt -C work_dir show <id> -j`
-  # resolves the fiber against the worker's felt view and carries its
-  # view-relative `id`. Read it directly rather than reconstructing it from a
-  # globbed path. On any felt miss/error fall back to the global `fiber_id`.
-  # The worker's view is `work_dir`, not the configured store root, so no
-  # felt_store is needed here.
-  # Runs through the injected, bounded `runner`: this sits on the Poller's
-  # dispatch path (via `create_tmux_session/7`), where a wedged felt would
-  # otherwise block the Poller GenServer. A timeout degrades to the global-id
-  # fallback.
-  def prompt_fiber_id(fiber_id, work_dir, runner \\ Shuttle.Runner.Default) do
-    case felt_show_id(work_dir, fiber_id, runner) do
-      {:ok, local_id} -> local_id
-      :error -> fiber_id
-    end
-  end
-
-  defp felt_show_id(work_dir, fiber_id, runner) do
-    case runner.cmd("felt", ["-C", work_dir, "show", fiber_id, "-j"], stderr_to_stdout: false) do
-      {output, 0} ->
-        case Jason.decode(output) do
-          {:ok, %{"id" => id}} when is_binary(id) and id != "" -> {:ok, id}
-          _ -> :error
-        end
-
-      _ ->
-        :error
-    end
-  rescue
-    _ -> :error
-  end
-
-  # Prompts carry dispatch facts and the attention contract; the shuttle
-  # skill owns the detailed worker workflow.
+  # A launch message carries only what this dispatch knows and the skill
+  # cannot: the fiber's store-relative id with the store it resolves in, the
+  # conversation surface and headless mode when they differ from a terminal
+  # session, and the previous session. Everything else (the exit contract,
+  # standing runs' handoff, the roster) lives in the fiber or the shuttle skill.
   defp compose_prompt(header, opts) do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
     [
       header,
-      "Close with an outcome when done; ask with a report when a human decision unlocks work; otherwise just end your turn. Never raise a flag on every turn.",
-      if(Keyword.get(opts, :kind) == "standing",
-        do:
-          "For a standing run, finish with handoff instead of close; the daemon marks the run for review.",
-        else: ""
-      ),
       if(felt_store, do: "Felt store: #{felt_store}", else: ""),
-      "Kind: #{Keyword.get(opts, :kind, "oneshot")}; surface: #{Keyword.get(opts, :surface, "cli")}; headless: #{Keyword.get(opts, :headless, false)}",
-      render_previous_session_line(opts),
-      Collaboration.prompt_section(Keyword.get(opts, :collaboration), felt_store)
+      if(Keyword.get(opts, :surface) == "app", do: "Surface: app", else: ""),
+      if(Keyword.get(opts, :headless) == true, do: "Headless: true", else: ""),
+      render_previous_session_line(opts)
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
@@ -1325,12 +1284,10 @@ defmodule Shuttle.Dispatcher do
     resume_intent = effective_resume_intent(resume_intent, agent, opts)
     session = session_name(fiber_id, Keyword.get(opts, :uid))
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
-    worker_fiber_id = prompt_fiber_id(fiber_id, work_dir, runner)
 
     prompt_opts =
       opts
       |> Keyword.put(:work_dir, work_dir)
-      |> Keyword.put(:prompt_fiber_id, worker_fiber_id)
       |> Keyword.put(:headless, agent[:headless] == true)
 
     case resume_intent do
@@ -1397,7 +1354,6 @@ defmodule Shuttle.Dispatcher do
                 dismiss_resume_warning: agent.cli == "claude" and not headless,
                 session: session,
                 headless: headless,
-                display_fiber_id: worker_fiber_id,
                 fiber_path: Keyword.get(opts, :fiber_path)
               )
 
@@ -1461,7 +1417,6 @@ defmodule Shuttle.Dispatcher do
 
         run_script =
           build_run_script(fiber_id, command, agent.id,
-            display_fiber_id: worker_fiber_id,
             fiber_path: Keyword.get(opts, :fiber_path)
           )
 
@@ -1516,7 +1471,6 @@ defmodule Shuttle.Dispatcher do
   # dispatch normally and capture the UUID asynchronously after spawn.
   defp build_fresh_command(agent, fiber_id, prompt_context, opts) do
     prompt = render_context_prompt(fiber_id, prompt_context, opts)
-    prompt_fiber_id = Keyword.get(opts, :prompt_fiber_id, fiber_id)
 
     case agent.cli do
       "claude" ->
@@ -1527,7 +1481,7 @@ defmodule Shuttle.Dispatcher do
       cli when cli in ["codex", "pi"] ->
         command = Agents.build_command(agent, prompt)
         work_dir = Keyword.get(opts, :work_dir, File.cwd!())
-        {command, {:capture, cli, work_dir, prompt_fiber_id, DateTime.utc_now()}}
+        {command, {:capture, cli, work_dir, DateTime.utc_now()}}
 
       _ ->
         command = Agents.build_command(agent, prompt)
@@ -1613,7 +1567,7 @@ defmodule Shuttle.Dispatcher do
 
   defp store_session_id(
          fiber_id,
-         {:capture, cli, work_dir, capture_fiber_id, dispatched_after},
+         {:capture, cli, work_dir, dispatched_after},
          runner,
          opts
        ) do
@@ -1633,7 +1587,6 @@ defmodule Shuttle.Dispatcher do
         fiber_id,
         cli,
         work_dir,
-        capture_fiber_id,
         dispatched_after,
         runner,
         opts,
@@ -1706,13 +1659,11 @@ defmodule Shuttle.Dispatcher do
         end
 
         deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
-        capture_fiber_id = prompt_fiber_id(fiber_id, work_dir, runner)
 
         capture_and_backfill(
           fiber_id,
           cli,
           work_dir,
-          capture_fiber_id,
           dispatched_at,
           runner,
           opts,
@@ -1749,13 +1700,12 @@ defmodule Shuttle.Dispatcher do
          fiber_id,
          cli,
          work_dir,
-         capture_fiber_id,
          dispatched_after,
          runner,
          opts,
          deadline
        ) do
-    case capture_session_uuid(cli, work_dir, capture_fiber_id, dispatched_after, deadline) do
+    case capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
       {:ok, uuid} ->
         case Keyword.get(opts, :poller) do
           nil ->
@@ -1898,13 +1848,10 @@ defmodule Shuttle.Dispatcher do
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
       deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
 
-      capture_fiber_id = prompt_fiber_id(fiber_id, work_dir, runner)
-
       capture_and_backfill(
         fiber_id,
         cli,
         work_dir,
-        capture_fiber_id,
         dispatched_after,
         runner,
         opts,

@@ -17,19 +17,6 @@ defmodule Shuttle.PollerTest do
   alias Shuttle.Test.Env
 
   defmodule IdentityRunner do
-    def cmd("felt", ["-C", _dir, "show", _id, "-j"] = args, opts) do
-      case MockRunner.cmd("felt", args, opts) do
-        {json, 0} ->
-          fiber = Jason.decode!(json)
-
-          {Jason.encode!(Map.put(fiber, "id", Shuttle.Env.app(:identity_prompt_id, fiber["id"]))),
-           0}
-
-        other ->
-          other
-      end
-    end
-
     def cmd(command, args, opts) do
       if command == "shuttle" and "mark-runtime" in args and
            Enum.chunk_every(args, 2, 1, :discard) |> Enum.member?(["--session", ""]) and
@@ -1013,8 +1000,6 @@ defmodule Shuttle.PollerTest do
     test "restart retries #{cli} identity capture with #{project} project path after a visible timeout" do
       cli = unquote(cli)
       id = "tests/recover-#{cli}"
-      local_id = "constitution/recover-#{cli}"
-      Env.put_app_env(:identity_prompt_id, local_id)
       root = MockRunner.felt_root()
       Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(root, "pi-sessions"))
       Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", Path.join(root, "codex-sessions"))
@@ -1107,13 +1092,13 @@ defmodule Shuttle.PollerTest do
 
       if unquote(project) == :old do
         for {label, candidate, prompt} <- [
-              {"wrong-cwd", Map.put(header, "cwd", Path.join(root, "other")), local_id},
+              {"wrong-cwd", Map.put(header, "cwd", Path.join(root, "other")), id},
               {"too-early",
                Map.put(
                  header,
                  "timestamp",
                  DateTime.to_iso8601(DateTime.add(dispatched_at, -60, :second))
-               ), local_id},
+               ), id},
               {"wrong-fiber", header, "another-fiber"}
             ] do
           candidate = Map.put(candidate, "id", label)
@@ -1128,7 +1113,7 @@ defmodule Shuttle.PollerTest do
 
       File.write!(
         path,
-        Jason.encode!(event) <> "\n" <> Jason.encode!(%{"text" => "Fiber: #{local_id}"}) <> "\n"
+        Jason.encode!(event) <> "\n" <> Jason.encode!(%{"text" => "Fiber: #{id}"}) <> "\n"
       )
 
       # The timeout's scheduled retry must find the late transcript without a manual retry.

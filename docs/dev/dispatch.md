@@ -205,25 +205,26 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 Prompt rendering lives in `Shuttle.Dispatcher`.
 
 Launch messages open with `You are a Shuttle worker. Activate the felt and
-shuttle skills.` and the attention contract: close with an outcome when done, ask with a report when a human decision unlocks work, otherwise just end the turn.
-Workers never raise a flag on every turn.
-Standing prompts name their completion exception: hand off instead of closing, so the daemon marks the run for review.
-The rest carries this dispatch's facts:
+shuttle skills.` and carry only what this dispatch knows and the skill cannot:
 
-- `Fiber:` and `Felt store:`; kind, surface, and headless mode.
-- `Mode: resume` and `Sync and re-read the fiber before continuing.` on a
-  resumed session, which may have slept for any length of time.
+- `Fiber:` — the fiber's id relative to the store root — and `Felt store:`,
+  so `felt -C <store> show <id>` resolves it whatever the worker's project
+  view is.
+- `Surface: app` and `Headless: true`, only when the conversation is not an
+  attachable terminal session.
+- `Mode: resume` on a resumed session, which may have slept for any length of
+  time.
 - Standing run ID and scheduled/ad-hoc mode when applicable.
 - On fresh launches, `Previous session: <uuid> (<harness>)` when there was
   one. When the previous session ended without a handoff and is not resumed,
   the line says so and gives its transcript path.
-- `Collaboration:` — the assigned role and collaborator (named when the
-  roster has exactly one of each) and the shared role store. A fiber with no
-  roster gets `Collaboration: no roster` instead, with the same role store;
-  what to do about it is the shuttle skill's.
 - `From User:` followed by the exact user message, when nonblank.
 
-Syncing the store, reading the fiber and its `## Status`, what to do with a
+Facts the fiber already holds — its kind, its collaboration roster — stay in
+the fiber. Roles live in the same store the prompt names.
+
+Syncing the store, reading the fiber and its `## Status`, the exit contract
+(close, ask, or just end the turn; standing runs hand off), what to do with a
 predecessor's transcript, and reading role and collaborator fibers are static
 instructions, so they live in the shuttle skill (its Survey step and
 `references/collaboration.md`) rather than in every prompt.

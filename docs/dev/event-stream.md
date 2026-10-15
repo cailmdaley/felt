@@ -63,7 +63,7 @@ A pane name remains transport context for terminals, sent files, and activity; s
 The worker's `shuttle.runtime.session_uuid` is the binding anchor.
 Claude launches with a daemon-generated UUID supplied through `--session-id`, and resume and claim paths supply their known session id.
 Fresh Codex and Pi launches use the dispatcher's transcript capture to learn their UUID; until capture succeeds, the worker has no hook-derived phase.
-Re-adoption restarts capture from the durable dispatch boundary and owning project directory, resolving the same project-local fiber address used in the launch prompt.
+Re-adoption restarts capture from the durable dispatch boundary and owning project directory, matching the store-relative fiber id the launch prompt names.
 Resume-to-fresh fallback signals live under the host data directory, keyed by the worker handle and dispatch boundary.
 Re-adoption restores their monitor or observes an already-started fallback; an observed fallback invalidates the in-memory predecessor even when clearing the durable UUID fails.
 Successful capture records explicit fallback completion only after the acquired UUID is persisted.

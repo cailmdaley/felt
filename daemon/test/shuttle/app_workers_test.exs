@@ -172,7 +172,7 @@ defmodule Shuttle.AppWorkersTest do
     assert record["launch_state"] == "running"
     assert record["turn_id"] == "turn-1"
     assert [{:start, _}, {:turn, "app-session-1", prompt, _}] = App.calls()
-    assert prompt =~ "surface: app"
+    assert prompt =~ "Surface: app"
     assert prompt =~ "Activate the felt and shuttle skills"
     refute prompt =~ "env -u TMUX"
 

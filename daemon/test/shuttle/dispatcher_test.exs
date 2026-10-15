@@ -458,33 +458,26 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Tests ──
 
-  test "worker entrypoint carries invocation data without duplicated workflow" do
+  test "worker entrypoint carries only dispatch facts the skill cannot know" do
     prompt = Dispatcher.render_prompt("tests/haiku", felt_store: "/tmp/store")
-    assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
-    assert prompt =~ "Fiber: tests/haiku"
-    assert prompt =~ "Felt store: /tmp/store"
-    assert prompt =~ "Kind: oneshot; surface: cli; headless: false"
-    refute prompt =~ "Exit Contract"
-    refute prompt =~ "shuttle handoff"
-    refute prompt =~ "──"
+
+    assert prompt ==
+             "You are a Shuttle worker. Activate the felt and shuttle skills.\n" <>
+               "Fiber: tests/haiku\nFelt store: /tmp/store"
   end
 
-  test "fresh, resumed and standing prompts carry the same attention contract" do
+  test "fresh, resumed and standing prompts leave the exit contract and roster to the skill" do
     for prompt <- [
-          Dispatcher.render_prompt("tests/a"),
+          Dispatcher.render_prompt("tests/a", collaboration: {:ok, %{"vizier" => ["fable"]}}),
           Dispatcher.render_resume_prompt("tests/a"),
           Dispatcher.render_standing_run_prompt("tests/a", "run-1")
         ] do
-      assert prompt =~ "Close with an outcome when done"
-      assert prompt =~ "ask with a report when a human decision unlocks work"
-      assert prompt =~ "otherwise just end your turn"
-      assert prompt =~ "Never raise a flag on every turn"
+      refute prompt =~ "Close with an outcome"
+      refute prompt =~ "Kind:"
+      refute prompt =~ "Collaboration"
+      refute prompt =~ "role store"
+      refute prompt =~ "standing run, finish with handoff"
     end
-
-    assert Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~
-             "For a standing run, finish with handoff instead of close"
-
-    refute Dispatcher.render_prompt("tests/a") =~ "For a standing run"
   end
 
   test "render_prompt carries the previous-session lineage line only when one exists" do
@@ -524,103 +517,25 @@ defmodule Shuttle.DispatcherTest do
     assert standing =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (claude-code)"
   end
 
-  test "role and surface metadata select the skill's exit semantics" do
-    assert Dispatcher.render_prompt("tests/a", kind: "standing") =~ "Kind: standing"
-    assert Dispatcher.render_prompt("tests/a", surface: "app") =~ "surface: app"
-    assert Dispatcher.render_prompt("tests/a") =~ "Kind: oneshot"
+  test "surface and headless appear only when they differ from a terminal session" do
+    assert Dispatcher.render_prompt("tests/a", surface: "app") =~ "\nSurface: app"
+    assert Dispatcher.render_prompt("tests/a", headless: true) =~ "\nHeadless: true"
+
+    plain = Dispatcher.render_prompt("tests/a", surface: "cli", headless: false)
+    refute plain =~ "Surface"
+    refute plain =~ "Headless"
   end
 
-  test "headless is explicit invocation data" do
-    assert Dispatcher.render_prompt("tests/a", headless: true) =~ "headless: true"
-    assert Dispatcher.render_prompt("tests/a") =~ "headless: false"
-  end
+  test "the fiber line is the store-relative id, resolvable against the felt store" do
+    prompt =
+      Dispatcher.render_prompt("science/cmbx", felt_store: "/tmp/some-loom")
 
-  test "render_prompt names the felt store so the safe-fail global id stays resolvable" do
-    # When prompt_fiber_id's local translation misses, the worker holds a
-    # global id that doesn't resolve from cwd. The store line makes the
-    # fallback mechanical: `felt -C <felt-store> show <id>`.
-    prompt = Dispatcher.render_prompt("tests/haiku", felt_store: "/tmp/some-loom")
-    assert prompt =~ "Felt store: /tmp/some-loom"
+    assert prompt =~ "Fiber: science/cmbx\nFelt store: /tmp/some-loom"
+    assert Dispatcher.render_resume_prompt("science/cmbx") =~ "Fiber: science/cmbx"
+    assert Dispatcher.render_standing_run_prompt("science/cmbx", "r") =~ "Fiber: science/cmbx"
 
     # Default store renders too — the line is unconditional.
-    default_prompt = Dispatcher.render_prompt("tests/haiku")
-    assert default_prompt =~ "Felt store: "
-  end
-
-  test "fresh, resumed, and standing prompts point at assigned collaboration without snapshotting it" do
-    collaboration =
-      {:ok,
-       %{
-         "collaborator" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3K"},
-         "role" => %{"uid" => "01KTS261GJMMRDRHS2QDMEFV3M", "origin" => "old-host"}
-       }}
-
-    for prompt <- [
-          Dispatcher.render_prompt("tests/a",
-            collaboration: collaboration,
-            felt_store: "/tmp/loom"
-          ),
-          Dispatcher.render_resume_prompt("tests/a",
-            collaboration: collaboration,
-            felt_store: "/tmp/loom"
-          ),
-          Dispatcher.render_standing_run_prompt("tests/a", "run-1",
-            collaboration: collaboration,
-            felt_store: "/tmp/loom"
-          )
-        ] do
-      assert prompt =~
-               "Collaboration: collaborator 01KTS261GJMMRDRHS2QDMEFV3K, " <>
-                 "role 01KTS261GJMMRDRHS2QDMEFV3M; role store: /tmp/loom"
-
-      refute prompt =~ "felt -C"
-      refute prompt =~ "old-host"
-      refute prompt =~ "response.host"
-    end
-
-    refute Dispatcher.render_prompt("tests/a") =~ "Collaboration:"
-    refute Dispatcher.render_resume_prompt("tests/a") =~ "Collaboration:"
-    refute Dispatcher.render_standing_run_prompt("tests/a", "run-1") =~ "Collaboration:"
-
-    for prompt <- [
-          Dispatcher.render_prompt("tests/a", collaboration: {:ok, nil}, felt_store: "/tmp/loom"),
-          Dispatcher.render_resume_prompt("tests/a",
-            collaboration: {:ok, nil},
-            felt_store: "/tmp/loom"
-          ),
-          Dispatcher.render_standing_run_prompt("tests/a", "run-1",
-            collaboration: {:ok, nil},
-            felt_store: "/tmp/loom"
-          )
-        ] do
-      assert prompt =~
-               ~r"Collaboration: no roster; role store: (/private)?/tmp/loom"
-    end
-  end
-
-  test "readable collaboration prompts name a singleton actor and hide multi-role rosters" do
-    singleton = {:ok, %{"vizier" => ["fable"]}}
-    multi = {:ok, %{"vizier" => ["fable", "astra"], "organizer" => ["opus"]}}
-
-    singleton_prompt =
-      Dispatcher.render_prompt("tests/a", collaboration: singleton, felt_store: "/tmp/loom")
-
-    # Role fibers resolve through the store's realpath; on macOS /tmp is /private/tmp.
-    assert singleton_prompt =~
-             ~r"Collaboration: fable in role vizier; role store: (/private)?/tmp/loom\z"
-
-    for prompt <- [
-          Dispatcher.render_prompt("tests/a", collaboration: multi),
-          Dispatcher.render_resume_prompt("tests/a", collaboration: multi),
-          Dispatcher.render_standing_run_prompt("tests/a", "run-1", collaboration: multi)
-        ] do
-      assert prompt =~ "Collaboration: several assignments on the roster"
-      refute prompt =~ "vizier"
-      refute prompt =~ "fable"
-      refute prompt =~ "astra"
-      refute prompt =~ "organizer"
-      refute prompt =~ "opus"
-    end
+    assert Dispatcher.render_prompt("tests/haiku") =~ "Felt store: "
   end
 
   test "worker prompt entrypoints leave detailed workflow to the skill" do
@@ -642,7 +557,7 @@ defmodule Shuttle.DispatcherTest do
     end)
   end
 
-  test "the fresh prompt carries dispatch facts and the attention contract" do
+  test "the fresh prompt carries dispatch facts" do
     assert Dispatcher.render_prompt("tests/a",
              felt_store: "/tmp/store",
              previous_session: %{uuid: "0883ade1-08e0-4457-94c6-7ac12137eb0f", harness: "pi"}
@@ -650,9 +565,7 @@ defmodule Shuttle.DispatcherTest do
              String.trim_trailing("""
              You are a Shuttle worker. Activate the felt and shuttle skills.
              Fiber: tests/a
-             Close with an outcome when done; ask with a report when a human decision unlocks work; otherwise just end your turn. Never raise a flag on every turn.
              Felt store: /tmp/store
-             Kind: oneshot; surface: cli; headless: false
              Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (pi)
              """)
   end
@@ -737,83 +650,6 @@ defmodule Shuttle.DispatcherTest do
     prompt = Dispatcher.render_prompt("tests/haiku")
     refute prompt =~ "Outcome"
     refute prompt =~ "Last session"
-  end
-
-  test "prompt_fiber_id uses the worker cwd's project-local felt view" do
-    loom =
-      Path.join(System.tmp_dir!(), "shuttle-prompt-loom-#{System.unique_integer([:positive])}")
-
-    work_dir =
-      Path.join(System.tmp_dir!(), "shuttle-prompt-work-#{System.unique_integer([:positive])}")
-
-    canonical_path =
-      Path.join([
-        loom,
-        ".felt",
-        "ai-futures",
-        "shuttle",
-        "constitution-shuttle-ctl-ux-fixes",
-        "constitution-shuttle-ctl-ux-fixes.md"
-      ])
-
-    File.mkdir_p!(Path.dirname(canonical_path))
-    File.write!(canonical_path, "---\nname: test\n---\n")
-    File.mkdir_p!(work_dir)
-    File.ln_s!(Path.join([loom, ".felt", "ai-futures", "shuttle"]), Path.join(work_dir, ".felt"))
-
-    on_exit(fn ->
-      File.rm_rf!(loom)
-      File.rm_rf!(work_dir)
-    end)
-
-    assert Dispatcher.prompt_fiber_id(
-             "ai-futures/shuttle/constitution-shuttle-ctl-ux-fixes",
-             work_dir
-           ) == "constitution-shuttle-ctl-ux-fixes"
-  end
-
-  test "prompt_fiber_id preserves nested IDs under the project felt root" do
-    loom =
-      Path.join(System.tmp_dir!(), "shuttle-prompt-loom-#{System.unique_integer([:positive])}")
-
-    work_dir =
-      Path.join(System.tmp_dir!(), "shuttle-prompt-work-#{System.unique_integer([:positive])}")
-
-    canonical_path =
-      Path.join([
-        loom,
-        ".felt",
-        "ai-futures",
-        "portolan",
-        "portolan",
-        "constitution-shuttle-portolan-version-sync",
-        "constitution-shuttle-portolan-version-sync.md"
-      ])
-
-    File.mkdir_p!(Path.dirname(canonical_path))
-    File.write!(canonical_path, "---\nname: test\n---\n")
-    File.mkdir_p!(work_dir)
-    File.ln_s!(Path.join([loom, ".felt", "ai-futures", "portolan"]), Path.join(work_dir, ".felt"))
-
-    on_exit(fn ->
-      File.rm_rf!(loom)
-      File.rm_rf!(work_dir)
-    end)
-
-    assert Dispatcher.prompt_fiber_id(
-             "ai-futures/portolan/portolan/constitution-shuttle-portolan-version-sync",
-             work_dir
-           ) == "portolan/constitution-shuttle-portolan-version-sync"
-  end
-
-  test "render_prompt can display a project-local fiber while querying canonical history" do
-    prompt =
-      Dispatcher.render_prompt("ai-futures/shuttle/constitution-shuttle-ctl-ux-fixes",
-        prompt_fiber_id: "constitution-shuttle-ctl-ux-fixes"
-      )
-
-    assert prompt =~ "Fiber: constitution-shuttle-ctl-ux-fixes"
-    refute prompt =~ "Fiber: ai-futures/shuttle/constitution-shuttle-ctl-ux-fixes"
   end
 
   # Crockford base32, the alphabet a felt ULID is written in (no I, L, O, U).
@@ -1482,7 +1318,6 @@ defmodule Shuttle.DispatcherTest do
     assert prompt =~ "Fiber: tests/haiku"
     assert prompt =~ "Run: run-2026-05-06"
     assert prompt =~ "Run mode: scheduled"
-    assert prompt =~ "Kind: standing"
     refute prompt =~ "shuttle handoff"
   end
 
@@ -1673,7 +1508,7 @@ defmodule Shuttle.DispatcherTest do
   test "resume reloads current constitution and skills" do
     prompt = Dispatcher.render_resume_prompt("tests/haiku")
     assert prompt =~ "You are a Shuttle worker. Activate the felt and shuttle skills"
-    assert prompt =~ "Mode: resume\nSync and re-read the fiber before continuing.\n"
+    assert prompt =~ "Mode: resume\nFiber: tests/haiku"
     assert prompt =~ "Mode: resume"
     assert prompt =~ "Fiber: tests/haiku"
     refute prompt =~ "Exit Contract"
