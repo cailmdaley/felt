@@ -45,6 +45,37 @@ func TestRoleAndSeatResolution(t *testing.T) {
 	}
 }
 
+// A synchronized card can still carry a string seat. Its read projection must
+// remain addressable even though lifecycle writes require boolean seats.
+func TestResolve_StringSeatKeepsWorkerAddressable(t *testing.T) {
+	t.Parallel()
+	f := shuttleFiber(t, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "seat": "chief-of-staff",
+		"runtime": map[string]any{"session_uuid": "live-conversation"},
+	})
+	facet := marshalShuttle(t, f)[FacetKey].(map[string]any)
+	resolved, ok := facet["resolved"].(map[string]any)
+	if !ok {
+		t.Fatalf("worker harness missing from read projection: %#v", facet)
+	}
+	agent, ok := resolved["agent"].(map[string]any)
+	if !ok || agent["cli"] != "claude" {
+		t.Fatalf("worker harness = %#v, want claude", resolved["agent"])
+	}
+	if facet["seat"] != false || facet["role"] != "" {
+		t.Fatalf("unexpected office projection: %#v", facet)
+	}
+	if got := facet["runtime"].(map[string]any)["session_uuid"]; got != "live-conversation" {
+		t.Fatalf("conversation = %v", got)
+	}
+	if got := felt.MappingValueNode(f.ExtraFields[FacetKey], "seat").Value; got != "chief-of-staff" {
+		t.Fatalf("read changed stored seat: %q", got)
+	}
+	if _, _, err := BlockOf(f); err == nil {
+		t.Fatal("lifecycle validation accepted a string seat")
+	}
+}
+
 func TestBlockOf_OfficeFieldTypes(t *testing.T) {
 	t.Parallel()
 	for _, fields := range []map[string]any{

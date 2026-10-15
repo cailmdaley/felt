@@ -195,8 +195,14 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 	if kind, ok := flat["kind"].(string); ok {
 		flat["kind"] = NormalizeKind(kind)
 	}
+	// Resolve the same normalized office fields the read projection exposes.
+	// Decode a copy so reads never rewrite the synchronized document.
+	var projected yaml.Node
+	if err := projected.Encode(flat); err != nil {
+		return err
+	}
 	var block Block
-	if err := node.Decode(&block); err == nil {
+	if err := projected.Decode(&block); err == nil {
 		if resolved, err := ResolveBlock(&block, reg, now); err == nil && !resolved.IsEmpty() {
 			if _, exists := flat["resolved"]; !exists {
 				flat["resolved"] = resolved
