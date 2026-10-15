@@ -47,7 +47,7 @@ defmodule Shuttle.HostCapabilitiesTest do
       assert HostCapabilities.meeting_modes(false, os_type: os) == []
     end
 
-    assert HostCapabilities.meeting_modes(true, os_type: {:unix, :darwin}) == ~w(call room phone)
+    assert HostCapabilities.meeting_modes(true, os_type: {:unix, :darwin}) == ~w(room call phone)
     assert HostCapabilities.meeting_modes(true, os_type: {:unix, :linux}) == ~w(phone)
     assert HostCapabilities.meeting_modes(true, os_type: {:unix, :freebsd}) == ~w(phone)
   end

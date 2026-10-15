@@ -1,0 +1,568 @@
+
+[1m▸ push (target 61aa94e)[0m
+Everything up-to-date
+  [32m✓[0m pushed
+
+[1m▸ local (61aa94e)[0m
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+loaded io.shuttle.daemon → daemon will keep-alive + start at login
+board → http://127.0.0.1:4000/
+logs → /Users/cd280747/Library/Logs/shuttle.log   (launchctl list | grep shuttle to inspect)
+  [32m✓[0m harness plugins: codex claude set up, pi set up
+  waiting for daemon on local to answer /api/v1/version (0s elapsed)
+  [32m✓[0m live on 61aa94e, quarantine released
+
+[1m▸ candide (candide:/home/cdaley/dev/felt)[0m
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+  [32m✓[0m harness plugins: codex claude set up, pi set up
+  waiting for daemon on candide to answer /api/v1/version (0s elapsed)
+  [32m✓[0m live on 61aa94e, quarantine released
+
+[1m▸ cineca (cineca:/leonardo/home/userexternal/cdaley00/dev/felt)[0m
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+  [31m✗[0m config migration or supervisor refresh failed on cineca
+
+[1m▸ amundsen (amundsen:/home/cailmdaley/code/felt)[0m
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+     warning: the following clause is redundant:
+
+         _ ->
+
+     previous clauses have already matched on the following types:
+
+         false
+         ({:error, :native_thread_unverified} and not {:ok, map()}) or
+           ({:error, :not_found} and not {:ok, term()}) or {:error, term()}
+
+     type warning found at:
+     │
+ 142 │         _ -> {:error, :session_owner_mismatch}
+     │           ~
+     │
+     └─ lib/shuttle/app_workers.ex:142:11: Shuttle.AppWorkers.recover/4
+
+     warning: type record/0 is overriding a built-in type
+     │
+ 166 │   @type record :: %{String.t() => term()}
+     │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/shuttle/daemon_heartbeat.ex:166: (file)
+
+     warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+         scoped ->
+
+     it attempts to match on the result of:
+
+         Shuttle.Env.child_env()
+
+     which has the already matched type:
+
+         empty_list()
+
+     where "scoped" was given the type:
+
+         # type: empty_list()
+         # from: lib/shuttle/runner.ex:157:9
+         scoped
+
+     type warning found at:
+     │
+ 157 │         scoped ->
+     │                ~
+     │
+     └─ lib/shuttle/runner.ex:157:16: Shuttle.Runner.Default.with_scoped_env/1
+
+     warning: this clause of defp valid_authority_host?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 228 │   defp valid_authority_host?(_), do: false
+     │        ~
+     │
+     └─ lib/shuttle_web/cors_plug.ex:228:8: ShuttleWeb.CORSPlug.valid_authority_host?/1
+
+     warning: the variable "header_size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 205 │           <<headers::binary-size(header_size), rest::binary>> = acc
+     │                                  ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:205:34: Shuttle.CodexApp.Transport.recv_headers/3
+
+     warning: the variable "length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 330 │         <<payload::binary-size(length), tail::binary>> = payload_rest
+     │                                ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:330:32: Shuttle.CodexApp.Transport.decode_payload/4
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 64 │   @type record :: %{String.t() => String.t() | integer() | map() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/session_ledger.ex:64: (file)
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 53 │   @type record :: %{String.t() => String.t() | integer() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/commit_ledger.ex:53: (file)
+
+     warning: the following clause is redundant:
+
+         _ ->
+
+     previous clauses have already matched on the following types:
+
+         false
+         ({:error, :native_thread_unverified} and not {:ok, map()}) or
+           ({:error, :not_found} and not {:ok, term()}) or {:error, term()}
+
+     type warning found at:
+     │
+ 142 │         _ -> {:error, :session_owner_mismatch}
+     │           ~
+     │
+     └─ lib/shuttle/app_workers.ex:142:11: Shuttle.AppWorkers.recover/4
+
+     warning: type record/0 is overriding a built-in type
+     │
+ 166 │   @type record :: %{String.t() => term()}
+     │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/shuttle/daemon_heartbeat.ex:166: (file)
+
+     warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+         scoped ->
+
+     it attempts to match on the result of:
+
+         Shuttle.Env.child_env()
+
+     which has the already matched type:
+
+         empty_list()
+
+     where "scoped" was given the type:
+
+         # type: empty_list()
+         # from: lib/shuttle/runner.ex:157:9
+         scoped
+
+     type warning found at:
+     │
+ 157 │         scoped ->
+     │                ~
+     │
+     └─ lib/shuttle/runner.ex:157:16: Shuttle.Runner.Default.with_scoped_env/1
+
+     warning: this clause of defp valid_authority_host?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 228 │   defp valid_authority_host?(_), do: false
+     │        ~
+     │
+     └─ lib/shuttle_web/cors_plug.ex:228:8: ShuttleWeb.CORSPlug.valid_authority_host?/1
+
+     warning: the variable "header_size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 205 │           <<headers::binary-size(header_size), rest::binary>> = acc
+     │                                  ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:205:34: Shuttle.CodexApp.Transport.recv_headers/3
+
+     warning: the variable "length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 330 │         <<payload::binary-size(length), tail::binary>> = payload_rest
+     │                                ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:330:32: Shuttle.CodexApp.Transport.decode_payload/4
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 64 │   @type record :: %{String.t() => String.t() | integer() | map() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/session_ledger.ex:64: (file)
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 53 │   @type record :: %{String.t() => String.t() | integer() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/commit_ledger.ex:53: (file)
+
+     warning: type record/0 is overriding a built-in type
+     │
+ 166 │   @type record :: %{String.t() => term()}
+     │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/shuttle/daemon_heartbeat.ex:166: (file)
+
+     warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+         scoped ->
+
+     it attempts to match on the result of:
+
+         Shuttle.Env.child_env()
+
+     which has the already matched type:
+
+         empty_list()
+
+     where "scoped" was given the type:
+
+         # type: empty_list()
+         # from: lib/shuttle/runner.ex:157:9
+         scoped
+
+     type warning found at:
+     │
+ 157 │         scoped ->
+     │                ~
+     │
+     └─ lib/shuttle/runner.ex:157:16: Shuttle.Runner.Default.with_scoped_env/1
+
+     warning: this clause of defp valid_authority_host?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 228 │   defp valid_authority_host?(_), do: false
+     │        ~
+     │
+     └─ lib/shuttle_web/cors_plug.ex:228:8: ShuttleWeb.CORSPlug.valid_authority_host?/1
+
+     warning: the variable "header_size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 205 │           <<headers::binary-size(header_size), rest::binary>> = acc
+     │                                  ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:205:34: Shuttle.CodexApp.Transport.recv_headers/3
+
+     warning: the variable "length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 330 │         <<payload::binary-size(length), tail::binary>> = payload_rest
+     │                                ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:330:32: Shuttle.CodexApp.Transport.decode_payload/4
+
+     warning: the following clause is redundant:
+
+         _ ->
+
+     previous clauses have already matched on the following types:
+
+         false
+         ({:error, :native_thread_unverified} and not {:ok, map()}) or
+           ({:error, :not_found} and not {:ok, term()}) or {:error, term()}
+
+     type warning found at:
+     │
+ 142 │         _ -> {:error, :session_owner_mismatch}
+     │           ~
+     │
+     └─ lib/shuttle/app_workers.ex:142:11: Shuttle.AppWorkers.recover/4
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 64 │   @type record :: %{String.t() => String.t() | integer() | map() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/session_ledger.ex:64: (file)
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 53 │   @type record :: %{String.t() => String.t() | integer() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/commit_ledger.ex:53: (file)
+
+enabled shuttle-daemon.service → daemon restarts on crash + starts at login
+board → http://127.0.0.1:4000/
+logs → /home/cailmdaley/.shuttle/shuttle.log   (systemctl --user status shuttle-daemon.service to inspect)
+run 'loginctl enable-linger cailmdaley' so it survives logout and starts at boot
+  [32m✓[0m harness plugins: codex claude set up, pi set up
+  waiting for daemon on amundsen to answer /api/v1/version (2s elapsed)
+  [32m✓[0m live on 61aa94e, quarantine released
+
+[1m▸ nibi (nibi:/home/cdaley/code/felt)[0m
+  [32m✓[0m shipped ui/dist (this host does not build it)
+Updating files:  92% (50/54)Updating files:  94% (51/54)Updating files:  96% (52/54)Updating files:  98% (53/54)Updating files: 100% (54/54)Updating files: 100% (54/54), done.
+     warning: type record/0 is overriding a built-in type
+     │
+ 166 │   @type record :: %{String.t() => term()}
+     │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/shuttle/daemon_heartbeat.ex:166: (file)
+
+     warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+         scoped ->
+
+     it attempts to match on the result of:
+
+         Shuttle.Env.child_env()
+
+     which has the already matched type:
+
+         empty_list()
+
+     where "scoped" was given the type:
+
+         # type: empty_list()
+         # from: lib/shuttle/runner.ex:157:9
+         scoped
+
+     type warning found at:
+     │
+ 157 │         scoped ->
+     │                ~
+     │
+     └─ lib/shuttle/runner.ex:157:16: Shuttle.Runner.Default.with_scoped_env/1
+
+     warning: this clause of defp valid_authority_host?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 228 │   defp valid_authority_host?(_), do: false
+     │        ~
+     │
+     └─ lib/shuttle_web/cors_plug.ex:228:8: ShuttleWeb.CORSPlug.valid_authority_host?/1
+
+     warning: the variable "header_size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 205 │           <<headers::binary-size(header_size), rest::binary>> = acc
+     │                                  ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:205:34: Shuttle.CodexApp.Transport.recv_headers/3
+
+     warning: the variable "length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 330 │         <<payload::binary-size(length), tail::binary>> = payload_rest
+     │                                ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:330:32: Shuttle.CodexApp.Transport.decode_payload/4
+
+     warning: the following clause is redundant:
+
+         _ ->
+
+     previous clauses have already matched on the following types:
+
+         false
+         ({:error, :native_thread_unverified} and not {:ok, map()}) or
+           ({:error, :not_found} and not {:ok, term()}) or {:error, term()}
+
+     type warning found at:
+     │
+ 142 │         _ -> {:error, :session_owner_mismatch}
+     │           ~
+     │
+     └─ lib/shuttle/app_workers.ex:142:11: Shuttle.AppWorkers.recover/4
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 64 │   @type record :: %{String.t() => String.t() | integer() | map() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/session_ledger.ex:64: (file)
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 53 │   @type record :: %{String.t() => String.t() | integer() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/commit_ledger.ex:53: (file)
+
+     warning: type record/0 is overriding a built-in type
+     │
+ 166 │   @type record :: %{String.t() => term()}
+     │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/shuttle/daemon_heartbeat.ex:166: (file)
+
+     warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+         scoped ->
+
+     it attempts to match on the result of:
+
+         Shuttle.Env.child_env()
+
+     which has the already matched type:
+
+         empty_list()
+
+     where "scoped" was given the type:
+
+         # type: empty_list()
+         # from: lib/shuttle/runner.ex:157:9
+         scoped
+
+     type warning found at:
+     │
+ 157 │         scoped ->
+     │                ~
+     │
+     └─ lib/shuttle/runner.ex:157:16: Shuttle.Runner.Default.with_scoped_env/1
+
+     warning: this clause of defp valid_authority_host?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 228 │   defp valid_authority_host?(_), do: false
+     │        ~
+     │
+     └─ lib/shuttle_web/cors_plug.ex:228:8: ShuttleWeb.CORSPlug.valid_authority_host?/1
+
+     warning: the variable "header_size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 205 │           <<headers::binary-size(header_size), rest::binary>> = acc
+     │                                  ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:205:34: Shuttle.CodexApp.Transport.recv_headers/3
+
+     warning: the variable "length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 330 │         <<payload::binary-size(length), tail::binary>> = payload_rest
+     │                                ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:330:32: Shuttle.CodexApp.Transport.decode_payload/4
+
+     warning: the following clause is redundant:
+
+         _ ->
+
+     previous clauses have already matched on the following types:
+
+         false
+         ({:error, :native_thread_unverified} and not {:ok, map()}) or
+           ({:error, :not_found} and not {:ok, term()}) or {:error, term()}
+
+     type warning found at:
+     │
+ 142 │         _ -> {:error, :session_owner_mismatch}
+     │           ~
+     │
+     └─ lib/shuttle/app_workers.ex:142:11: Shuttle.AppWorkers.recover/4
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 64 │   @type record :: %{String.t() => String.t() | integer() | map() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/session_ledger.ex:64: (file)
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 53 │   @type record :: %{String.t() => String.t() | integer() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/commit_ledger.ex:53: (file)
+
+     warning: type record/0 is overriding a built-in type
+     │
+ 166 │   @type record :: %{String.t() => term()}
+     │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/shuttle/daemon_heartbeat.ex:166: (file)
+
+     warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+         scoped ->
+
+     it attempts to match on the result of:
+
+         Shuttle.Env.child_env()
+
+     which has the already matched type:
+
+         empty_list()
+
+     where "scoped" was given the type:
+
+         # type: empty_list()
+         # from: lib/shuttle/runner.ex:157:9
+         scoped
+
+     type warning found at:
+     │
+ 157 │         scoped ->
+     │                ~
+     │
+     └─ lib/shuttle/runner.ex:157:16: Shuttle.Runner.Default.with_scoped_env/1
+
+     warning: this clause of defp valid_authority_host?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 228 │   defp valid_authority_host?(_), do: false
+     │        ~
+     │
+     └─ lib/shuttle_web/cors_plug.ex:228:8: ShuttleWeb.CORSPlug.valid_authority_host?/1
+
+     warning: the variable "header_size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 205 │           <<headers::binary-size(header_size), rest::binary>> = acc
+     │                                  ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:205:34: Shuttle.CodexApp.Transport.recv_headers/3
+
+     warning: the variable "length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 330 │         <<payload::binary-size(length), tail::binary>> = payload_rest
+     │                                ~
+     │
+     └─ lib/shuttle/codex_app/transport.ex:330:32: Shuttle.CodexApp.Transport.decode_payload/4
+
+     warning: the following clause is redundant:
+
+         _ ->
+
+     previous clauses have already matched on the following types:
+
+         false
+         ({:error, :native_thread_unverified} and not {:ok, map()}) or
+           ({:error, :not_found} and not {:ok, term()}) or {:error, term()}
+
+     type warning found at:
+     │
+ 142 │         _ -> {:error, :session_owner_mismatch}
+     │           ~
+     │
+     └─ lib/shuttle/app_workers.ex:142:11: Shuttle.AppWorkers.recover/4
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 64 │   @type record :: %{String.t() => String.t() | integer() | map() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/session_ledger.ex:64: (file)
+
+    warning: type record/0 is overriding a built-in type
+    │
+ 53 │   @type record :: %{String.t() => String.t() | integer() | nil}
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/shuttle/commit_ledger.ex:53: (file)
+
+  [32m✓[0m harness plugins: codex claude set up, pi set up
+shuttle-launch: respawn loop running in tmux session 'shuttle-daemon' (repo: /home/cdaley/code/felt)
+  daemon on nibi is still booting; waiting for ready:true (4s elapsed)
+  daemon on nibi is still booting; waiting for ready:true (38s elapsed)
+  daemon on nibi is still booting; waiting for ready:true (74s elapsed)
+  [32m✓[0m live on 61aa94e, quarantine released
+
+[1m▸ nersc (perlmutter:/global/homes/c/cdaley/code/felt)[0m
+  [31m✗[0m ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)
+
+[31m[1m✗ failed: cineca nersc[0m

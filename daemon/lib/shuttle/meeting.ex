@@ -395,7 +395,7 @@ defmodule Shuttle.Meeting do
 
   defp mode_flag("room"), do: ["--room"]
   defp mode_flag("phone"), do: ["--phone"]
-  defp mode_flag("call"), do: []
+  defp mode_flag("call"), do: ["--call"]
 
   defp create_session(argv, launch_id, fiber, opts) do
     command = "exec " <> Enum.map_join(argv, " ", &shell_quote/1)
