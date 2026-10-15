@@ -57,27 +57,16 @@ is not enough.
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
-`POST /felt-edit` also accepts a `collaboration` object to replace a fiber's
-optional role roster. It is an exact replacement map from role slugs to arrays
-of collaborator slugs, for example
-`{"vizier":["fable","astra"],"organizer":[]}`. An empty collaborator
-array keeps a role-only entry. Send this separately from body, status, or
-other document edits: the owner runs one locked
-`shuttle assign --json-assignment` write. This changes the roster without
-launching a worker or changing the execution agent. The roster stores readable
-names, not copied profile bodies; workers synchronize their store and read
-relevant role and collaborator content locally. The request's top-level
-`origin` still routes the task edit. See
-[Collaborators](../concepts/collaborators.md).
-
 ### Lifecycle actions
 
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
 fields, and runs the matching `shuttle <action>` on the owning host:
 `install`, `repeat`, `reshape`, `pause`, `rest`, `resume`, `accept`, `close`, `reopen`,
-`set-model`, `set-agent`, `seat` (`role`, or `clear: true`), `set-outcome` or
-`uninstall`. `accept`, `resume` and
-`rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
+`set-model`, `set-agent`, `role`, `seat`, `set-outcome` or
+`uninstall`.
+The `role` action takes `role: <role-slug>`, or `clear: true` to remove both role and seat.
+The `seat` action sets `shuttle.seat: true` and requires an assigned role; `clear: true` removes the seat field.
+`accept`, `resume`, `role`, `seat` and `rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
 owning daemon's Poller, serialized with its state changes — a rest then stops
 any live worker through its backend — which then refreshes
 that fiber's document cache; a poll read in flight sees the old document or

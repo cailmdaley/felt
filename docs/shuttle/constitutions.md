@@ -160,19 +160,20 @@ is still read, as `oneshot`; `shuttle check` warns about it, and
 
 ### Seats
 
-A constitution can be a **seat** of a role: `shuttle.seat: <role>` names a
-charter under `roles/`, and a worker there sits in that office — the cmbx
-chair, the vizier, a chief of staff on one of two machines. A seat is a oneshot
-or a standing constitution like any other; the field changes where the board
-draws it at rest (the Roles band rather than Drafts or Resting) and what it
-means, never its lifecycle. A role may have any number of seats, and the
-charter itself stays host-free and is never dispatched.
+A constitution can name an office with `shuttle.role: <role-slug>`. Setting
+`shuttle.seat: true` marks it as a seat of that role; a true seat requires a
+role. A role may have any number of seats, and the charter itself stays
+host-free and is never dispatched. Seat changes only where the board draws it
+at rest (the Roles band rather than Drafts or Resting) and what it means, never
+its lifecycle.
 
 ```bash
-shuttle seat <fiber> cmbx-chair     # or --clear
+shuttle role <fiber> cmbx-chair
+shuttle seat <fiber>
+shuttle seat <fiber> --clear
 ```
 
-`shuttle check` warns when a seat names a role with no charter.
+`shuttle role <fiber> --clear` clears the role and seat.
 
 ### Changing kind
 

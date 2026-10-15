@@ -38,9 +38,9 @@ frontmatter field. The editorial chain lives in the constitution body's
 Fiber documents synchronize through ordinary Git. Workers use `felt sync`
 before substantive work, edit locally, and publish committed changes with
 `felt sync --push`. A worker resolves relevant conflicts with the work's
-context. Roles and collaborators under `roles/<role>/<collaborator>/` have
-intrinsic IDs and no host owner. A task's optional `collaboration` map records
-readable collaborator slugs by role; it does not select an execution model.
+context. Role charters under `roles/<role>/` have intrinsic IDs and no host
+owner. A task's optional `shuttle.role` names one role charter; `shuttle.seat`
+marks whether the constitution is a seat of that office.
 Synchronizing a constitution does not change its `shuttle.host` dispatch gate.
 Host-addressed board requests still use the daemon's routing for that host's
 current content, artifacts, and execution controls.

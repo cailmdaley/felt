@@ -23,7 +23,7 @@ orchestration; the daemon is the production dispatcher.
 **Fibers are ordinary Git-synchronized documents; execution is host-owned.**
 Run `felt sync` before substantive work, read and edit the local store, then
 commit intentional changes and publish with `felt sync --push`. Resolve Git
-conflicts with the work's context. Roles and collaborators live under `roles/`
+conflicts with the work's context. Role charters live under `roles/`
 and have no host owner. A constitution's `shuttle.host` selects the daemon
 allowed to execute it; synchronizing its file does not transfer execution.
 The live board still uses owner-routed APIs for host-local content and control.
@@ -77,7 +77,7 @@ lives in the docs site (`docs/`, published to
   requests such as `/api/v1/fibers/:id?body=true` and `/file`, so it can display
   that host's current content and artifacts without waiting for Git sync.
   Route requests for host-local assets and execution through the selected
-  daemon. Ordinary synchronized notes, including roles and collaborators,
+  daemon. Ordinary synchronized notes, including role charters,
   are read and edited locally; they do not need an origin registry.
 - **The Shuttle CLI owns the agent registry.** It layers the embedded
   `internal/shuttle/agents.builtin.json` with
@@ -135,7 +135,7 @@ lives in the docs site (`docs/`, published to
   constitution at rest is `status: open` + `horizon: stashed`, drawn in
   Resting; `shuttle rest` puts it there without review. "Role" names only an
   identity under `roles/`, never a kind of constitution. A constitution with
-  `shuttle.seat: <role>` is a seat of that office (`shuttle seat`); at rest
+  `shuttle.role: <role-slug>` and `shuttle.seat: true` is a seat of that office (`shuttle seat`); at rest
   the board draws it in the Roles band, and its lifecycle is unchanged.
 - **`shuttle.project_dir` is required for armed installs.** `shuttle install`
   and `shuttle repeat` require `--project-dir`; workers start there instead of

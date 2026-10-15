@@ -220,14 +220,12 @@ shuttle skills.` and carry only what this dispatch knows and the skill cannot:
   the line says so and gives its transcript path.
 - `From User:` followed by the exact user message, when nonblank.
 
-Facts the fiber already holds — its kind, its collaboration roster — stay in
-the fiber. Roles live in the same store the prompt names.
+Facts the fiber already holds — its kind, role, and seat — stay in the fiber. Roles live in the same store the prompt names.
 
 Syncing the store, reading the fiber and its `## Status`, the exit contract
 (close, ask, or just end the turn; standing runs hand off), what to do with a
-predecessor's transcript, and reading role and collaborator fibers are static
-instructions, so they live in the shuttle skill (its Survey step and
-`references/collaboration.md`) rather than in every prompt.
+predecessor's transcript, and reading role charters are static instructions,
+so they live in the shuttle skill's Survey step rather than in every prompt.
 
 Capture launches point to the shuttle skill's `references/capture.md` and carry
 JSON install metadata and the exact claim endpoint/body. That reference owns the

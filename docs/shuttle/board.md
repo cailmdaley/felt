@@ -18,8 +18,8 @@ A constitution uses `#/board/<uid>@<owner>/<document>`; browser Back returns to 
 ## Desk — the kanban
 
 Three surfaces: the **Now** board of cards that need something; **Roles**, a
-band of launcher chips for every seat at rest (a constitution carrying
-`shuttle.seat`), in name order and never paged; and **Resting**, where
+band of launcher chips for every seat at rest (a constitution with
+`shuttle.seat: true` and a role), in name order and never paged; and **Resting**, where
 everything else put down waits — paused and snoozed work, the hubs you start by
 hand, and standing constitutions between runs.
 
@@ -44,7 +44,7 @@ evaluates in this order:
 | Discarded | `closed` + `tempered: false` |
 | Awaiting review | `closed`, `tempered` absent |
 | In flight | live tmux worker with a shuttle block — liveness wins over everything below |
-| Roles | `shuttle.seat` set and at rest: not `active`, or `active` + `kind: standing` between runs |
+| Roles | `shuttle.seat: true` with a role, and at rest: not `active`, or `active` + `kind: standing` between runs |
 | Scheduled | `active` + `kind: standing` — drawn in Resting, wearing its next launch |
 | In flight | `active` oneshot |
 | Drafts | anything left, including `open` |

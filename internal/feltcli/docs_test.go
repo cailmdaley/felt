@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
+	"gopkg.in/yaml.v3"
 )
 
 var retiredCommandPhrases = []string{
@@ -217,6 +218,39 @@ func TestReadmeListsPluginSkills(t *testing.T) {
 	if strings.Contains(text, "extracted from title") {
 		t.Fatal("README still documents legacy tag extraction on the name/title argument")
 	}
+}
+
+func TestDocsNavigationTargetsExist(t *testing.T) {
+	t.Parallel()
+	docsDir := filepath.Join(repoRoot(t), "docs")
+	data, err := os.ReadFile(filepath.Join(docsDir, "mkdocs.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Nav yaml.Node `yaml:"nav"`
+	}
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	var walk func(*yaml.Node)
+	walk = func(node *yaml.Node) {
+		if node.Kind == yaml.ScalarNode && strings.HasSuffix(node.Value, ".md") && !strings.Contains(node.Value, "://") {
+			if _, err := os.Stat(filepath.Join(docsDir, node.Value)); err != nil {
+				t.Errorf("navigation target %q: %v", node.Value, err)
+			}
+		}
+		if node.Kind == yaml.MappingNode {
+			for i := 1; i < len(node.Content); i += 2 {
+				walk(node.Content[i])
+			}
+			return
+		}
+		for _, child := range node.Content {
+			walk(child)
+		}
+	}
+	walk(&config.Nav)
 }
 
 func TestDocsAvoidLegacyTagExtractionExample(t *testing.T) {

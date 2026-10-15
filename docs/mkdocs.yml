@@ -68,7 +68,7 @@ nav:
       - Fibers: concepts/fibers.md
       - Organizing: concepts/organizing.md
       - Frontmatter: concepts/frontmatter.md
-      - Collaborators and roles: concepts/collaborators.md
+      - Roles: concepts/roles.md
       - Companions: concepts/companions.md
       - Constitution themes: concepts/themes.md
       - Cross-Project: concepts/cross-project.md
