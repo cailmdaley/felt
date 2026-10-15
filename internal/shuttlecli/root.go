@@ -201,7 +201,7 @@ func (a *app) rootCmd() *cobra.Command {
 	}
 	root.AddGroup(
 		&cobra.Group{ID: groupOperations, Title: "Dispatch and sessions:"},
-		&cobra.Group{ID: groupAgents, Title: "Agents and collaboration:"},
+		&cobra.Group{ID: groupAgents, Title: "Agents:"},
 		&cobra.Group{ID: groupHosts, Title: "Hosts and connectivity:"},
 	)
 	root.SetHelpCommandGroupID(groupOperations)
@@ -209,7 +209,7 @@ func (a *app) rootCmd() *cobra.Command {
 	root.PersistentFlags().StringVarP(&a.dir, "store", "C", "", "Felt store root (directory containing .felt/)")
 	for _, command := range []*cobra.Command{
 		a.shuttleAgentsCmd(),
-		a.assignCmd(),
+		a.roleCmd(),
 		a.askCmd(),
 		a.shuttleCheckCmd(),
 		a.claimCmd(),

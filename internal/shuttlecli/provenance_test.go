@@ -46,7 +46,7 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"records":[
           {"fiber":"old/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"dispatch","agent":"codex-luna","model":"gpt-6","collaboration":{"collaborator":{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","origin":"candide"}},"at":1,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
-          {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","agent":"codex-sol","model":"gpt-6.1","collaboration":{"role":{"uid":"01BX5ZZKBKACTAV9WEVGEMMVRZ","origin":"cineca"}},"at":2,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
+          {"fiber":"new/name","uid":"01UID","session":"` + provenanceSession + `","host":"candide","harness":"codex","kind":"resume","agent":"codex-sol","model":"gpt-6.1","role":"vizier","at":2,"transcript":{"availability":"available_remote","host":"candide","source_path":"/remote/codex.jsonl","byte_count":3,"sha256":"abc"}},
           {"fiber":"new/name","uid":"01UID","session":"other","host":"cineca","harness":"claude-code","kind":"dispatch","at":3,"transcript":{"availability":"transcript_missing"}},
           {"fiber":"other","uid":"02UID","session":"ignored","host":"candide","harness":"codex","kind":"dispatch","at":4}
         ]}`))
@@ -69,7 +69,7 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 	if len(rows[0].Events) != 2 || rows[0].Events[0].Kind != "dispatch" || rows[0].Events[1].Kind != "resume" {
 		t.Fatalf("duplicate ledger rows did not preserve ordered lifecycle events: %#v", rows[0].Events)
 	}
-	if rows[0].Agent != "codex-luna" || rows[0].Model != "gpt-6" || rows[0].Collaboration == nil || rows[0].Collaboration.Collaborator == nil {
+	if rows[0].Agent != "codex-luna" || rows[0].Model != "gpt-6" || !strings.Contains(string(rows[0].Collaboration), `"collaborator"`) {
 		t.Fatalf("dispatch attribution missing from row: %#v", rows[0])
 	}
 	if rows[0].Address != "shuttle://candide/codex/"+provenanceSession {
@@ -78,7 +78,7 @@ func TestShuttleSessions_FollowsUIDAndDedupesHistory(t *testing.T) {
 	if rows[1].Harness != "claude-code" || rows[1].Address != "shuttle://cineca/claude/other" {
 		t.Fatalf("ledger harness spelling did not produce a canonical address: %#v", rows[1])
 	}
-	if rows[0].Events[1].Agent != "codex-sol" || rows[0].Events[1].Model != "gpt-6.1" || rows[0].Events[1].Collaboration == nil || rows[0].Events[1].Collaboration.Role == nil {
+	if rows[0].Events[1].Agent != "codex-sol" || rows[0].Events[1].Model != "gpt-6.1" || rows[0].Events[1].Role != "vizier" || len(rows[0].Events[1].Collaboration) != 0 {
 		t.Fatalf("resume attribution missing from event: %#v", rows[0].Events[1])
 	}
 }

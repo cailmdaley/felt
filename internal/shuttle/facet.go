@@ -37,6 +37,14 @@ func BlockOf(f *felt.Felt) (*Block, bool, error) {
 	if !ok {
 		return nil, false, nil
 	}
+	for _, field := range []struct{ key, tag, kind string }{
+		{"role", "!!str", "string"},
+		{"seat", "!!bool", "boolean"},
+	} {
+		if value := felt.MappingValueNode(node, field.key); value != nil && (value.Kind != yaml.ScalarNode || value.Tag != field.tag) {
+			return nil, true, fmt.Errorf("shuttle.%s must be a %s", field.key, field.kind)
+		}
+	}
 	var block Block
 	if err := node.Decode(&block); err != nil {
 		return nil, true, fmt.Errorf("shuttle: block is malformed: %w", err)
@@ -120,6 +128,7 @@ func SetRuntimeField(f *felt.Felt, key, value string) error {
 var configKeys = map[string]bool{
 	"kind": true, "host": true, "project_dir": true, "agent": true,
 	"effort": true, "chrome": true, "surface": true, "schedule": true,
+	"role": true, "seat": true,
 }
 
 // SetConfig replaces the typed configuration while preserving runtime and
@@ -177,6 +186,11 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 	if err := node.Decode(&flat); err != nil || flat == nil {
 		return nil
 	}
+	// Office fields have a stable type in the daemon-facing projection.
+	role, _ := flat["role"].(string)
+	seat, _ := flat["seat"].(bool)
+	flat["role"] = role
+	flat["seat"] = seat
 	// Readers of the resolved view see the kind a legacy value is read as.
 	if kind, ok := flat["kind"].(string); ok {
 		flat["kind"] = NormalizeKind(kind)

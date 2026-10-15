@@ -7,6 +7,7 @@ import (
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func (a *app) shuttleCheckCmd() *cobra.Command {
@@ -27,8 +28,20 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 			issues := make([]felt.CheckIssue, 0)
 			var roles map[string]bool
 			for _, fiber := range fibers {
+				if _, exists := fiber.ExtraFields["collaboration"]; exists {
+					issues = append(issues, felt.CheckIssue{
+						Level: felt.CheckLevelError, FiberID: fiber.ID, Path: "collaboration",
+						Message: "migrate this store: replace collaboration with one shuttle.role slug and remove collaboration",
+					})
+				}
 				if !shuttle.HasFacet(fiber) {
 					continue
+				}
+				if seat := felt.MappingValueNode(fiber.ExtraFields[shuttle.FacetKey], "seat"); seat != nil && seat.Kind == yaml.ScalarNode && seat.Tag == "!!str" {
+					issues = append(issues, felt.CheckIssue{
+						Level: felt.CheckLevelError, FiberID: fiber.ID, Path: "shuttle.seat",
+						Message: "migrate this store: set shuttle.role to the office slug and shuttle.seat: true",
+					})
 				}
 				if err := shuttle.ValidateFacet(fiber); err != nil {
 					issues = append(issues, felt.CheckIssue{
@@ -46,16 +59,16 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 						Message: fmt.Sprintf("kind %q is retired and read as %q; scripts/migrate-pinned.py rewrites it", stored, shuttle.LegacyKinds[stored]),
 					})
 				}
-				if block, ok, err := shuttle.BlockOf(fiber); err == nil && ok && block.Seat != "" && shuttle.ValidSeat(block.Seat) {
+				if block, ok, err := shuttle.BlockOf(fiber); err == nil && ok && block.Role != "" && shuttle.ValidRole(block.Role) {
 					if roles == nil {
 						roles = roleRoots(storage)
 					}
-					if !roles[block.Seat] {
+					if !roles[block.Role] {
 						issues = append(issues, felt.CheckIssue{
 							Level:   felt.CheckLevelWarning,
 							FiberID: fiber.ID,
-							Path:    shuttle.FacetKey + ".seat",
-							Message: fmt.Sprintf("seat %q names no role: there is no roles/%s fiber", block.Seat, block.Seat),
+							Path:    shuttle.FacetKey + ".role",
+							Message: fmt.Sprintf("role %q has no charter: there is no roles/%s fiber", block.Role, block.Role),
 						})
 					}
 				}
@@ -89,7 +102,7 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 
 // roleRoots is the set of role slugs with a charter at roles/<slug> in the
 // store that owns the roles. An unreadable store yields an empty set, so every
-// seat is reported rather than none.
+// role is reported rather than none.
 func roleRoots(st *felt.Storage) map[string]bool {
 	out := map[string]bool{}
 	profiles, err := listRoleProfiles(st)
@@ -97,7 +110,7 @@ func roleRoots(st *felt.Storage) map[string]bool {
 		return out
 	}
 	for _, f := range profiles {
-		if isRoleRoot(f.ID) {
+		if strings.HasPrefix(f.ID, "roles/") && strings.Count(f.ID, "/") == 1 {
 			out[strings.TrimPrefix(f.ID, "roles/")] = true
 		}
 	}

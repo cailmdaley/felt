@@ -2069,8 +2069,7 @@ func ParentPath(id string) string {
 	return parent
 }
 
-// RolesNamespace is the top-level directory that holds role profiles
-// (roles/<role>) and their collaborators (roles/<role>/<collaborator>).
+// RolesNamespace names a reserved top-level namespace for fiber paths.
 const RolesNamespace = "roles"
 
 // NamespaceExists reports whether dir names an existing fiber or a directory

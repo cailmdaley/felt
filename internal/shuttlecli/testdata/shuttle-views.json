@@ -17,9 +17,11 @@
           "effort": "high"
         }
       },
+      "role": "vizier",
       "runtime": {
         "session_id": "session-123"
-      }
+      },
+      "seat": true
     }
   }
 ]

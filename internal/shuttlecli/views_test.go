@@ -26,6 +26,8 @@ func TestShuttleViewsKeepResolvedFacetJSON(t *testing.T) {
 		"host":        "test-host",
 		"kind":        "oneshot",
 		"project_dir": "/work/project",
+		"role":        "vizier",
+		"seat":        true,
 		"runtime":     map[string]any{"session_id": "session-123"},
 	}); err != nil {
 		t.Fatalf("SetExtraField: %v", err)

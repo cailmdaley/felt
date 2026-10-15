@@ -266,7 +266,6 @@ func (h *harness) seedTemplate() error {
 		{"felt", "add", "epsilon", "Epsilon standing"},
 		{"felt", "add", "zeta", "Zeta pinned"},
 		{"felt", "add", "roles/reviewer", "Reviewer role"},
-		{"felt", "add", "roles/reviewer/ada", "Ada collaborator"},
 		{"shuttle", "remotes", "add", remoteHost, "--url", "http://127.0.0.1:" + seedPort},
 		{"shuttle", "install", "beta", "--project-dir", project},
 		{"shuttle", "install", "delta", "--project-dir", project, "--host", remoteHost},

@@ -317,8 +317,18 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				t.Fatalf("reshape payload = %#v", body)
 			}
 		}},
-		{"seat", felt.StatusOpen, remoteShuttleBlock(project), []string{"seat", "seat", "cmbx-chair"}, "seat", func(t *testing.T, body map[string]any) {
-			if body["role"] != "cmbx-chair" || body["clear"] != false {
+		{"role", felt.StatusOpen, remoteShuttleBlock(project), []string{"role", "role", "cmbx-chair"}, "role", func(t *testing.T, body map[string]any) {
+			if body["role"] != "cmbx-chair" || body["clear"] != nil {
+				t.Fatalf("role payload = %#v", body)
+			}
+		}},
+		{"unrole", felt.StatusOpen, remoteShuttleBlock(project), []string{"role", "unrole", "--clear"}, "role", func(t *testing.T, body map[string]any) {
+			if body["clear"] != true || body["role"] != nil {
+				t.Fatalf("role --clear payload = %#v", body)
+			}
+		}},
+		{"seat", felt.StatusOpen, remoteShuttleBlock(project), []string{"seat", "seat"}, "seat", func(t *testing.T, body map[string]any) {
+			if body["role"] != nil || body["clear"] != nil {
 				t.Fatalf("seat payload = %#v", body)
 			}
 		}},
@@ -489,7 +499,7 @@ func TestShuttleRemoteLifecycleLocalRefusesWithoutRouting(t *testing.T) {
 
 	for _, verb := range [][]string{
 		{"pause"}, {"rest"}, {"resume"}, {"close"}, {"reopen"}, {"accept"}, {"set-outcome", "--outcome", "x"},
-		{"set-model", "claude-opus"}, {"set-agent", "claude-opus"}, {"seat", "--clear"}, {"reshape", "oneshot"}, {"uninstall"},
+		{"set-model", "claude-opus"}, {"set-agent", "claude-opus"}, {"role", "--clear"}, {"seat", "--clear"}, {"reshape", "oneshot"}, {"uninstall"},
 	} {
 		argv := append([]string{verb[0], "work/task"}, verb[1:]...)
 		argv = append(argv, "--local")

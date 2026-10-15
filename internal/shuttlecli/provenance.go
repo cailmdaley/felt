@@ -24,7 +24,6 @@ import (
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/messaging"
-	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
 
@@ -62,28 +61,30 @@ type SessionProvenance struct {
 	Harness  string `json:"harness,omitempty"`
 	Host     string `json:"host,omitempty"`
 	Tmux     string `json:"tmux,omitempty"`
-	// Collaboration snapshots the configured participants, not session authorship.
-	// Agent and Model record execution settings. These launch-time values are not
-	// reconstructed from the fiber's current assignment.
-	Collaboration *shuttle.Collaboration `json:"collaboration,omitempty"`
-	Agent         string                 `json:"agent,omitempty"`
-	Model         string                 `json:"model,omitempty"`
-	At            int64                  `json:"at,omitempty"`
-	Kind          string                 `json:"kind,omitempty"`
-	Origin        string                 `json:"origin,omitempty"`
-	Stale         bool                   `json:"stale,omitempty"`
-	Events        []SessionEvent         `json:"events,omitempty"`
-	Transcript    TranscriptReceipt      `json:"transcript,omitempty"`
+	// Role, Agent and Model record launch-time settings, not session authorship.
+	// They are not reconstructed from the fiber's current configuration.
+	Role string `json:"role,omitempty"`
+	// Collaboration retains opaque historical ledger provenance.
+	Collaboration json.RawMessage   `json:"collaboration,omitempty"`
+	Agent         string            `json:"agent,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	At            int64             `json:"at,omitempty"`
+	Kind          string            `json:"kind,omitempty"`
+	Origin        string            `json:"origin,omitempty"`
+	Stale         bool              `json:"stale,omitempty"`
+	Events        []SessionEvent    `json:"events,omitempty"`
+	Transcript    TranscriptReceipt `json:"transcript,omitempty"`
 }
 
 type SessionEvent struct {
-	At            int64                  `json:"at,omitempty"`
-	Kind          string                 `json:"kind,omitempty"`
-	Fiber         string                 `json:"fiber,omitempty"`
-	Tmux          string                 `json:"tmux,omitempty"`
-	Collaboration *shuttle.Collaboration `json:"collaboration,omitempty"`
-	Agent         string                 `json:"agent,omitempty"`
-	Model         string                 `json:"model,omitempty"`
+	At            int64           `json:"at,omitempty"`
+	Kind          string          `json:"kind,omitempty"`
+	Fiber         string          `json:"fiber,omitempty"`
+	Tmux          string          `json:"tmux,omitempty"`
+	Role          string          `json:"role,omitempty"`
+	Collaboration json.RawMessage `json:"collaboration,omitempty"`
+	Agent         string          `json:"agent,omitempty"`
+	Model         string          `json:"model,omitempty"`
 }
 
 func (s SessionProvenance) fiber() string {
@@ -254,6 +255,7 @@ func sessionEvent(row SessionProvenance) SessionEvent {
 		Kind:          row.Kind,
 		Fiber:         row.fiber(),
 		Tmux:          row.Tmux,
+		Role:          row.Role,
 		Collaboration: row.Collaboration,
 		Agent:         row.Agent,
 		Model:         row.Model,

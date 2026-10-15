@@ -40,11 +40,11 @@ type Block struct {
 	Chrome   bool      `json:"chrome,omitempty" yaml:"chrome,omitempty"`
 	Schedule *Schedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
 	Ask      *Ask      `json:"ask,omitempty" yaml:"ask,omitempty"`
-	// Seat names the role this constitution is a seat of: the slug of a charter
-	// under roles/. A worker here sits in that office, and the board draws the
-	// constitution at rest among the Roles rather than in Resting. It changes
-	// nothing about the lifecycle.
-	Seat string `json:"seat,omitempty" yaml:"seat,omitempty"`
+	// Role names this constitution's office by its charter slug under roles/.
+	Role string `json:"role,omitempty" yaml:"role,omitempty"`
+	// Seat places a resting constitution in the board's Roles band.
+	// A seat requires a role and does not change the lifecycle.
+	Seat bool `json:"seat,omitempty" yaml:"seat,omitempty"`
 }
 
 // Ask is a worker's outstanding question to the human.
@@ -104,11 +104,10 @@ func NormalizeKind(kind string) string {
 	return kind
 }
 
-// seatPattern is the shape of a role slug: the leaf of roles/<slug>.
-var seatPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var rolePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-// ValidSeat reports whether seat has the shape of a role slug.
-func ValidSeat(seat string) bool { return seatPattern.MatchString(seat) }
+// ValidRole reports whether role has the shape of a charter slug under roles/.
+func ValidRole(role string) bool { return rolePattern.MatchString(role) }
 
 // ---- Validation ------------------------------------------------------------
 
@@ -176,8 +175,11 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		}
 	}
 
-	if b.Seat != "" && !ValidSeat(b.Seat) {
-		add("seat", fmt.Sprintf("must be a role slug (the leaf of roles/<slug>), got %q", b.Seat))
+	if b.Role != "" && !ValidRole(b.Role) {
+		add("role", fmt.Sprintf("must be a role slug (the leaf of roles/<slug>), got %q", b.Role))
+	}
+	if b.Seat && b.Role == "" {
+		add("seat", "requires shuttle.role")
 	}
 
 	if b.Kind == "standing" {
