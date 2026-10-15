@@ -11,7 +11,7 @@ Write one when the desired state is clear, or can be made clear, but the path is
 3. **Write the spec** (below). The `ideating` skill carries the thinking: name what done *is* before designing how to get there, fence what stays untouched, and test whether the framing is right at all.
 4. **Refine it with the user.** Show the draft, revise it, and check it once more for goal, constraints and success criteria before launch. A live uncertainty can sit in an "Open questions" section until it's resolved; then fold the answer in and delete the section.
 5. **Install the block.** `shuttle install <fiber-id> --model <agent> --project-dir "$PWD"` writes and validates the `shuttle:` block and arms the fiber, an existing open draft included; add `--disabled` to leave it in Drafts. A hand-written block works too but skips validation, and without `status: active` it won't dispatch.
-6. **Give it a role.** `shuttle assign <fiber-id> --role <role> [--collaborator <model>]`, choosing or creating the charter that fits ([collaboration.md](collaboration.md)). Without one, each worker has to rediscover the playbooks and the human gates.
+6. **Give it a role.** `shuttle role <fiber-id> <role>`, choosing or creating the charter that fits ([roles.md](roles.md)). Without one, each worker has to rediscover the playbooks and the human gates.
 
 Workers re-read the constitution at every dispatch, so keep refining it between sessions.
 
