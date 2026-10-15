@@ -64,28 +64,26 @@ export function installBodyFileLinks(
 }
 
 /**
- * The roster's roles for the status line, left of the worker pill: each role
+ * The office for the status line, left of the worker pill: the role
  * is a wikilink to its fiber `roles/<slug>`, live when the index names that
  * exact id and plain text otherwise.
  */
-function rosterRoles(roles: string[], opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement | null {
-  if (roles.length === 0) return null
+function roleChip(slug: string | undefined, opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement | null {
+  if (!slug) return null
   const el = document.createElement('span')
   el.className = 'ws-fiber-roles'
   el.dataset.part = 'roles'
   el.setAttribute('role', 'group')
-  el.setAttribute('aria-label', roles.length === 1 ? 'Role' : 'Roles')
-  for (const slug of roles) {
-    const role = document.createElement('span')
-    role.className = 'ws-fiber-role'
-    const link = document.createElement('a')
-    link.className = 'kbn-wikilink'
-    link.dataset.fiber = `roles/${slug}`
-    link.dataset.wikilinkRaw = slug
-    link.textContent = slug
-    role.append(link)
-    el.append(role)
-  }
+  el.setAttribute('aria-label', 'Role')
+  const role = document.createElement('span')
+  role.className = 'ws-fiber-role'
+  const link = document.createElement('a')
+  link.className = 'kbn-wikilink'
+  link.dataset.fiber = `roles/${slug}`
+  link.dataset.wikilinkRaw = slug
+  link.textContent = slug
+  role.append(link)
+  el.append(role)
   void installWikilinks(el, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, exact: true })
   return el
 }
@@ -101,7 +99,7 @@ export function buildFiberProse(
     onContinueReading?: (text: string) => void
     onFiber: (id: string) => void
     onFile: (path: string, title?: string) => void
-    /** On a role page, the constitutions whose roster names the role, in Desk order. */
+    /** On a role charter, the constitutions assigned to the office in Desk order. */
     holds?: KanbanCard[]
     onCard?: (card: KanbanCard) => void
   },
@@ -121,7 +119,7 @@ export function buildFiberProse(
     status.textContent = kicker
     header.append(status)
   }
-  const roles = rosterRoles(card.roles ?? [], opts)
+  const roles = roleChip(card.shuttleRole, opts)
   if (roles) header.append(roles)
   if (opts.acts) header.append(opts.acts)
   const title = document.createElement('h1')
@@ -159,7 +157,7 @@ export function buildFiberProse(
   installBodyFileLinks(body, opts.onFile)
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
   const slug = roleSlug(card)
-  const ledger = slug ? buildRoleLedger(slug, opts.holds ?? [], { shuttleBase: opts.shuttleBase, onFiber: opts.onFiber, onCard: opts.onCard ?? (() => {}) }) : null
+  const ledger = slug ? buildRoleLedger(opts.holds ?? [], { onCard: opts.onCard ?? (() => {}) }) : null
   article.append(header, title, outcome, ...(ledger ? [ledger] : []), ...(opts.controls ? [opts.controls] : []), body)
   scroller.append(article)
   return scroller

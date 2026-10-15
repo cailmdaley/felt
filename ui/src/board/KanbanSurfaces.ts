@@ -855,7 +855,7 @@ export class KanbanSurfaceRenderer {
     hint.hidden = hint.textContent === ''
 
     el.append(dot, name, hint)
-    const seat = card.shuttleSeat ? `seat of roles/${card.shuttleSeat}` : ''
+    const seat = card.shuttleSeat === true && card.shuttleRole ? `seat of roles/${card.shuttleRole}` : ''
     el.title = [card.name, seat, detail, card.outcome].filter(Boolean).join(' — ')
     el.setAttribute('aria-label', `${card.name}${seat ? `, ${seat}` : ''}${isStale ? ' — waiting on origin, drag disabled' : ''}`)
 

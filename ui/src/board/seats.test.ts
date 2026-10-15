@@ -24,7 +24,8 @@ const fiber = (over: Partial<Fiber>): Fiber => ({
   createdAt: at0,
   hasShuttleBlock: true,
   shuttleKind: 'oneshot',
-  shuttleSeat: 'cmbx-chair',
+  shuttleRole: 'cmbx-chair',
+  shuttleSeat: true,
   ...over,
 })
 
@@ -45,18 +46,22 @@ describe('classifyFiber — a seat at rest is among the Roles', () => {
     expect(classifyFiber(fiber({ status: 'closed', tempered: true }))).toBe('tempered')
   })
 
-  it('does not treat a roster as a seat', () => {
-    expect(classifyFiber(fiber({ shuttleSeat: undefined, roles: ['cmbx-chair'] }))).toBe('drafts')
+  it('requires both an office and a boolean seat', () => {
+    expect(classifyFiber(fiber({ shuttleSeat: false }))).toBe('drafts')
+    expect(classifyFiber(fiber({ shuttleSeat: undefined }))).toBe('drafts')
+    expect(classifyFiber(fiber({ shuttleRole: undefined }))).toBe('drafts')
+    expect(classifyFiber(fiber({ shuttleSeat: 'cmbx-chair' as unknown as boolean }))).toBe('drafts')
   })
 })
 
 describe('mapFeltJsonToFiber reads shuttle.seat', () => {
-  it('carries the role slug', () => {
+  it('carries the role slug and boolean seat', () => {
     const f = mapFeltJsonToFiber({
       id: 'science/cmbx', name: 'cmbx chair', status: 'open', created_at: at0,
-      shuttle: { kind: 'oneshot', seat: 'cmbx-chair' },
+      shuttle: { kind: 'oneshot', role: 'cmbx-chair', seat: true },
     })
-    expect(f?.shuttleSeat).toBe('cmbx-chair')
+    expect(f?.shuttleRole).toBe('cmbx-chair')
+    expect(f?.shuttleSeat).toBe(true)
   })
 })
 
@@ -71,7 +76,20 @@ function board(fibers: Record<string, unknown>[]): KanbanResponse {
 describe('the read model files seats on the roles surface', () => {
   const seat = (id: string, name: string, over: Record<string, unknown> = {}) => ({
     id, uid: `uid-${id}`, name, status: 'open', created_at: at0,
-    shuttle: { kind: 'oneshot', host: 'desk', seat: 'vizier' }, ...over,
+    shuttle: { kind: 'oneshot', host: 'desk', role: 'vizier', seat: true }, ...over,
+  })
+
+  it('ignores collaboration and string seats, and requires an office for boolean seats', () => {
+    const resp = board([
+      seat('work/string-seat', 'String seat', { shuttle: { kind: 'oneshot', role: 'vizier', seat: 'vizier' } }),
+      seat('work/roster', 'Roster', { collaboration: { vizier: ['sol'] }, shuttle: { kind: 'oneshot' } }),
+      seat('work/no-office', 'No office', { shuttle: { kind: 'oneshot', seat: true } }),
+      seat('work/not-seat', 'Not seat', { shuttle: { kind: 'oneshot', role: 'vizier', seat: false } }),
+    ])
+    expect(resp.roles).toEqual([])
+    expect(resp.now.drafts).toHaveLength(4)
+    expect(resp.now.drafts.find(c => c.id === 'work/roster')?.shuttleRole).toBeUndefined()
+    expect(resp.now.drafts.find(c => c.id === 'work/string-seat')?.shuttleSeat).toBeUndefined()
   })
 
   it('takes seats off the desk and out of Resting, in name order', () => {
@@ -79,7 +97,7 @@ describe('the read model files seats on the roles surface', () => {
       seat('life/vizier', 'Vizier', { horizon: 'stashed' }),
       seat('loom/post', 'Morning post', {
         status: 'active',
-        shuttle: { kind: 'standing', host: 'desk', seat: 'vizier', schedule: { expr: '0 7 * * *', tz: 'UTC' } },
+        shuttle: { kind: 'standing', host: 'desk', role: 'vizier', seat: true, schedule: { expr: '0 7 * * *', tz: 'UTC' } },
       }),
       { id: 'work/draft', uid: 'uid-d', name: 'Draft', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk' } },
     ])
@@ -93,7 +111,7 @@ describe('the read model files seats on the roles surface', () => {
 
 describe('moveDestinations for a seat', () => {
   const seatCard = (over: Partial<KanbanCard> = {}): KanbanCard =>
-    baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleSeat: 'cmbx-chair', createdAt: at0, ...over })
+    baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleRole: 'cmbx-chair', shuttleSeat: true, createdAt: at0, ...over })
 
   it('offers a seat at rest only what changes it: start it, or review it', () => {
     const c = seatCard()
@@ -111,7 +129,7 @@ describe('moveDestinations for a seat', () => {
 
 describe('the Dock names a seat\'s role', () => {
   it('says "seat of <role>" on a seat and nothing on other work', () => {
-    const seat = baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleSeat: 'cmbx-chair', createdAt: at0 })
+    const seat = baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleRole: 'cmbx-chair', shuttleSeat: true, createdAt: at0 })
     expect(stripFacts(seat).seat?.text).toBe('seat of cmbx-chair')
     expect(stripFacts({ ...seat, shuttleSeat: undefined }).seat).toBeUndefined()
   })
@@ -139,8 +157,8 @@ describe('the Roles band', () => {
 
   it('draws every seat as a chip that opens its fiber, a standing one wearing its next firing', () => {
     const resp = board([
-      { id: 'life/vizier', uid: 'u1', name: 'Vizier', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk', seat: 'vizier', agent: 'claude-opus' } },
-      { id: 'loom/post', uid: 'u2', name: 'Morning post', status: 'active', created_at: at0, shuttle: { kind: 'standing', host: 'desk', seat: 'vizier', schedule: { expr: '0 7 * * *', tz: 'UTC' } } },
+      { id: 'life/vizier', uid: 'u1', name: 'Vizier', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk', role: 'vizier', seat: true, agent: 'claude-opus' } },
+      { id: 'loom/post', uid: 'u2', name: 'Morning post', status: 'active', created_at: at0, shuttle: { kind: 'standing', host: 'desk', role: 'vizier', seat: true, schedule: { expr: '0 7 * * *', tz: 'UTC' } } },
     ])
     const openDetail = vi.fn()
     const band = renderer(resp, openDetail).renderRolesSection(resp.roles, resp.staleness)!

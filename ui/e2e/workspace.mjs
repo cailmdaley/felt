@@ -29,6 +29,23 @@ async function open(p, expected = 'calibration-report') {
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(expected))
 }
 
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+  test(`Role charter holds assigned constitutions without model holders (${device})`, async p => {
+    await open(p); await choose(p, 'Constitution')
+    const office = selected(p).locator('.ws-fiber-role a.kbn-wikilink-live')
+    assert.equal((await office.innerText()).trim().toLowerCase(), 'surveyor')
+    await office.click()
+    const ledger = selected(p).locator('[data-part="role-ledger"]')
+    await ledger.waitFor()
+    assert.deepEqual(await ledger.locator('.ws-role-caption').allTextContents(), ['Holds'])
+    assert.deepEqual(await ledger.locator('.ws-role-hold-name').allTextContents(), ['Calibrate the shear response', 'Weekly shear summary'])
+    assert.equal(await ledger.locator('[data-part="role-holders"]').count(), 0)
+    await ledger.locator('.ws-role-hold').first().click()
+    await selected(p).locator('.ws-fiber-role').waitFor()
+    assert.match(await selected(p).locator('[data-part="fiber-title"]').innerText(), /Calibrate the shear response/)
+  }, viewport)
+}
+
 test('The Dock follows a live transcript by byte offset', async p => {
   await p.goto(`${url}&transcript=live`)
   await p.locator('.kbn-card').filter({ hasText: name }).click()
@@ -2384,7 +2401,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await open(p); await choose(p, 'Constitution')
     const header = selected(p).locator('.ws-prose-header')
     assert.equal((await header.locator('.ws-prose-status').innerText()).trim().toLowerCase(), 'awaiting your review', 'fiber kicker uses the Desk state')
-    // The status line reads the kicker, the roster's roles, then the act zone: the worker pill (none here) and the verdicts.
+    // The status line reads the kicker, the office, then the act zone: the worker pill (none here) and the verdicts.
     assert.deepEqual(await header.locator(':scope > *').evaluateAll(es => es.map(e => e.className)), ['ws-prose-status', 'ws-fiber-roles', 'ws-fiber-acts'])
     assert.deepEqual(await header.locator('.ws-fiber-acts button:visible').allTextContents(), ['Temper', 'Discard'])
     const settings = selected(p).locator('.kbn-detail-controls-toggle')

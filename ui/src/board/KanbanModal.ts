@@ -3138,7 +3138,7 @@ function applyOptimisticTransition(
       nowMs,
     )
     // A standing seat re-armed between runs rests among the Roles.
-    if (moved.shuttleSeat) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
+    if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
     timeline.futureDated = [...timeline.futureDated, moved]
     return withSurfaces(resp, { now, timeline, stash, roles, folded })
   }
@@ -3178,7 +3178,7 @@ function applyOptimisticTransition(
       moved.closedAt = undefined
     }
     // A seat parked as a draft is a seat at rest: it goes back to its role.
-    if (target === 'drafts' && moved.shuttleSeat) {
+    if (target === 'drafts' && moved.shuttleSeat === true && moved.shuttleRole) {
       return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
     }
     now[target] = [...now[target], moved]
@@ -3247,6 +3247,6 @@ function placeOptimistically(
   if (!card) return null
   const moved: KanbanCard = { ...card, foldedUnder: undefined, ...patch(card) }
   // Resting a seat keeps it a seat: it comes to rest among the Roles.
-  if (moved.shuttleSeat) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
+  if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
   return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles, folded })
 }

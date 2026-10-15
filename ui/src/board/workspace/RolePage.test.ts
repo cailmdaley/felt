@@ -9,7 +9,7 @@ import { roleHolds, roleSlug } from './RolePage.js'
 const role = card({ id: 'roles/surveyor', uid: 'surveyor', name: 'Surveyor', outcome: 'Maps a project.' })
 const channel: Channel = { uid: 'surveyor', owner: 'local', name: 'Surveyor', body: 'Reads first.', labels: ['Note'], documents: [] }
 const work = (id: string, over: Partial<KanbanCard>): KanbanCard =>
-  card({ id, uid: id, name: id, shuttleKind: 'oneshot', roles: ['surveyor'], ...over })
+  card({ id, uid: id, name: id, shuttleKind: 'oneshot', shuttleRole: 'surveyor', ...over })
 const draft = work('draft', { status: 'open', outcome: 'A *draft* to write.' })
 const flying = work('flying', { status: 'active', workerState: 'running', tmuxSession: 'flying-shuttle' })
 const review = work('review', { status: 'closed' })
@@ -34,12 +34,13 @@ describe('role page', () => {
     expect(roleSlug(card({ id: 'roles' }))).toBeNull()
   })
 
-  it('holds the constitutions whose roster names the role, in the Desk order', () => {
-    const other = work('other', { roles: ['scribe'] })
-    expect(roleHolds([tempered, draft, other, flying, review], 'surveyor').map(c => c.id)).toEqual(['review', 'flying', 'draft', 'tempered'])
+  it('holds constitutions assigned to the office, independently of seat, in Desk order', () => {
+    const other = work('other', { shuttleRole: 'scribe', shuttleSeat: true })
+    const seat = work('seat', { shuttleSeat: true, status: 'open' })
+    expect(roleHolds([tempered, draft, other, flying, seat, review], 'surveyor').map(c => c.id)).toEqual(['review', 'flying', 'seat', 'draft', 'tempered'])
   })
 
-  it('lists holds and holders under the lede, before the body, and opens each', async () => {
+  it('lists assigned constitutions under the lede without model child pages, and opens each', async () => {
     const shuttleBase = daemon(['roles/surveyor', 'roles/surveyor/opus', 'roles/surveyor/fable', 'roles/surveyor/opus/notes', 'roles/scribe/opus'])
     const onCard = vi.fn(), onFiber = vi.fn()
     const pane = buildFiberProse(role, channel, { shuttleBase, onFiber, onFile: vi.fn(), holds: [review, flying, draft], onCard })
@@ -47,11 +48,10 @@ describe('role page', () => {
     const ledger = pane.querySelector<HTMLElement>('[data-part="role-ledger"]')!
     expect(ledger.previousElementSibling?.querySelector('.kbn-detail-lede')).not.toBeNull()
     expect(ledger.nextElementSibling?.classList.contains('ws-prose-body')).toBe(true)
-    expect(names(ledger, '.ws-role-caption')).toEqual(['Held by', 'Holds'])
-    // Only the direct children are holders.
-    expect(names(ledger, '.ws-role-holder')).toEqual(['fable', 'opus'])
-    ledger.querySelector<HTMLAnchorElement>('.ws-role-holder a.kbn-wikilink-live')!.click()
-    expect(onFiber).toHaveBeenCalledWith('roles/surveyor/fable')
+    expect(names(ledger, '.ws-role-caption')).toEqual(['Holds'])
+    expect(ledger.querySelector('[data-part="role-holders"]')).toBeNull()
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+    expect(onFiber).not.toHaveBeenCalled()
     const rows = [...ledger.querySelectorAll<HTMLButtonElement>('.ws-role-hold')]
     expect(rows.map(row => row.dataset.column)).toEqual(['awaitingReview', 'inFlight', 'drafts'])
     expect(names(ledger, '.ws-role-hold-column')).toEqual(['Review', 'In flight', 'Draft'])
@@ -72,14 +72,15 @@ describe('role page', () => {
     expect(pane.querySelector('.ws-role-more')).toBeNull()
   })
 
-  it('draws no heading for a role that holds nothing and no one holds', async () => {
+  it('draws no heading for a role with no assigned constitutions', async () => {
     const pane = buildFiberProse(role, channel, { shuttleBase: daemon(['roles/surveyor']), onFiber: vi.fn(), onFile: vi.fn(), holds: [] })
     await settle(); await settle()
     expect(pane.querySelector('.ws-role-caption')).toBeNull()
-    expect(pane.querySelector<HTMLElement>('[data-part="role-holders"]')?.hidden).toBe(true)
+    expect(pane.querySelector('[data-part="role-holders"]')).toBeNull()
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled()
   })
 
-  it('gives a holder page and any other fiber no ledger', () => {
+  it('gives child notes and any other fiber no ledger', () => {
     for (const id of ['roles/surveyor/opus', 'notes/task']) {
       const pane = buildFiberProse(card({ id }), channel, { shuttleBase: daemon([]), onFiber: vi.fn(), onFile: vi.fn(), holds: [draft] })
       expect(pane.querySelector('[data-part="role-ledger"]')).toBeNull()

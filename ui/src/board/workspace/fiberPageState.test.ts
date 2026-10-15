@@ -10,7 +10,7 @@ describe('Rest eligibility', () => {
           for (const effectiveHorizon of ['now', 'stashed'] as const)
             expect(restReachable(card({ id: 'work', shuttleKind, status, tempered, effectiveHorizon }))).toBe(true)
     expect(restReachable(card({ id: 'agent', shuttleKind: undefined, shuttleAgent: 'claude-opus' }))).toBe(true)
-    expect(restReachable(card({ id: 'seat', shuttleKind: 'standing', shuttleSeat: 'warden' }))).toBe(true)
+    expect(restReachable(card({ id: 'seat', shuttleKind: 'standing', shuttleSeat: true, shuttleRole: 'warden' }))).toBe(true)
   })
 
   it('does not offer Shuttle rest for ordinary notes or non-Shuttle cycles', () => {

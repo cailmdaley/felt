@@ -8,7 +8,7 @@ import type { Verdict } from './Verdicts.js'
 
 /** The reader uses the same lifecycle classifier and labels as the Desk. */
 export function fiberPageColumn(card: KanbanCard) {
-  const column = classifyFiber({ id: card.id, name: card.name, status: card.status, createdAt: card.createdAt, tags: card.tags, tempered: card.tempered, shuttleKind: card.shuttleKind, shuttleSeat: card.shuttleSeat, hasShuttleBlock: isAgentCard(card) }, { liveWorker: hasLiveWorker(card) })
+  const column = classifyFiber({ id: card.id, name: card.name, status: card.status, createdAt: card.createdAt, tags: card.tags, tempered: card.tempered, shuttleKind: card.shuttleKind, shuttleSeat: card.shuttleSeat, shuttleRole: card.shuttleRole, hasShuttleBlock: isAgentCard(card) }, { liveWorker: hasLiveWorker(card) })
   // A seat at rest is among the Roles whatever its horizon.
   if (column !== 'roles' && card.effectiveHorizon === 'stashed') return 'resting' as const
   return column

@@ -572,7 +572,7 @@ function toCard(
     theme: f.theme,
     due: f.due,
     tags: f.tags,
-    roles: f.roles,
+    shuttleRole: f.shuttleRole,
     createdAt: f.createdAt,
     closedAt: f.closedAt,
     modifiedAt: f.modifiedAt,

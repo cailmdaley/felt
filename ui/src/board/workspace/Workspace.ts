@@ -400,7 +400,7 @@ export class Workspace {
     return slug ? roleHolds(this.opts.cards(), slug) : []
   }
   private proseRevision(state: ChannelState): string {
-    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.roles, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
+    return JSON.stringify([state.channel.body, state.channel.outcome, state.channel.labels, state.channel.documents.map(d => d.key), state.card.status, state.card.tempered, state.card.workerState, state.card.effectiveHorizon, state.card.shuttleAgent, state.card.shuttleRole, state.card.shuttleSeat, holdsRevision(this.holds(state)), state.error, state.loaded, state.metadataKnown])
   }
   private prose(key: DocKey): HTMLElement {
     const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === key)
@@ -656,9 +656,11 @@ export class Workspace {
           for (const key of ['workerState', 'workerSurface', 'workerAgent', 'tmuxSession', 'runtimePhase', 'lastActivityAt', 'workerStartedAt', 'sessionLink', 'desktopLink', 'launchError'] as const) {
             metadata[key] = live[key] as never
           }
-          // Every feed poll replaces the card, so a fiber the feed lists takes its
-          // roster from the feed too, and the roles never flicker between reads.
-          if (feed) metadata.roles = feed.roles
+          // The feed owns office metadata between body reads.
+          if (feed) {
+            metadata.shuttleRole = feed.shuttleRole
+            metadata.shuttleSeat = feed.shuttleSeat
+          }
           if (live.workerState) metadata.sessionUuid = live.sessionUuid
           state.card = metadata
           state.metadataKnown = true

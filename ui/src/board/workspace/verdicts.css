@@ -53,7 +53,7 @@
    their middles meet. */
 .ws-fiber-prose .ws-prose-header { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
 .ws-fiber-prose .ws-prose-status { flex: none; text-box: trim-both ex alphabetic; }
-/* The roster's roles, left of the pill and in its register: mono capitals,
+/* The constitution's office, left of the pill and in its register: mono capitals,
    muted, a middot between two, cut with an ellipsis when the line runs out:
    they give way, so a worker arriving never pushes the verdicts off the line.
    Each opens its role's page; the link firms under the pointer the way the

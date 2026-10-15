@@ -47,8 +47,6 @@ export interface KanbanCard {
   theme?: string
   due?: string
   tags?: string[]
-  /** The `collaboration:` roster's role slugs; each names the fiber `roles/<slug>`. */
-  roles?: string[]
   createdAt: string
   closedAt?: string
   /** File mtime the owning daemon reports (`modified_at`). Tracks last activity
@@ -188,12 +186,14 @@ export interface KanbanCard {
    */
   shuttleKind?: ShuttleKind
   /**
-   * `shuttle.seat` — the slug of the role (`roles/<slug>`) this constitution is
-   * a seat of. A seat at rest (not running, not closed) is drawn in the Roles
+   * `shuttle.seat` — whether this constitution is an office seat.
+   * A seat at rest (not running, not closed) is drawn in the Roles
    * band rather than Drafts or Resting; its lifecycle is a oneshot's or a
    * standing constitution's like any other.
    */
-  shuttleSeat?: string
+  shuttleSeat?: boolean
+  /** `shuttle.role` — the single office's slug (`roles/<slug>`). */
+  shuttleRole?: string
   /**
    * `shuttle.schedule.expr` — 5-field cron expression for standing constitutions.
    * Absent on one-shot fibers and on fibers without a shuttle block.

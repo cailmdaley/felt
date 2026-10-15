@@ -47,12 +47,12 @@ function rows(cards: KanbanCard[], response: KanbanResponse): ChronicleRow[] {
 }
 
 describe('resting seats on the Chronicle', () => {
-  const dueSeat = card({ id: 'seats/due', shuttleSeat: 'vizier', due: dayAt(3) })
+  const dueSeat = card({ id: 'seats/due', shuttleSeat: true, shuttleRole: 'vizier', due: dayAt(3) })
   const standingSeat = card({
-    id: 'seats/standing', shuttleSeat: 'vizier', shuttleKind: 'standing',
+    id: 'seats/standing', shuttleSeat: true, shuttleRole: 'vizier', shuttleKind: 'standing',
     status: 'active', nextLaunchAt: noonOf(dayAt(4)),
   })
-  const workedSeat = card({ id: 'seats/worked', shuttleSeat: 'vizier' })
+  const workedSeat = card({ id: 'seats/worked', shuttleSeat: true, shuttleRole: 'vizier' })
   const seats = [dueSeat, standingSeat, workedSeat]
 
   it('collects Roles cards once, including cards projected onto another surface', () => {

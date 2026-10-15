@@ -277,7 +277,7 @@ export function classifyFiber(
   // is about to start it.
   if (
     f.hasShuttleBlock === true &&
-    f.shuttleSeat &&
+    f.shuttleSeat === true && !!f.shuttleRole &&
     (f.status !== 'active' || f.shuttleKind === 'standing')
   ) {
     return 'roles';

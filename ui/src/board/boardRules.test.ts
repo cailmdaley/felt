@@ -1204,11 +1204,11 @@ describe('the cycle lens — membership is derived, never assigned', () => {
 
     it('claims due-dated resting seats as ghosts, not seats with only a cadence', () => {
       const due = card({
-        id: 'seats/due', shuttleSeat: 'vizier', status: 'open',
+        id: 'seats/due', shuttleSeat: true, shuttleRole: 'vizier', status: 'open',
         effectiveHorizon: 'stashed', due: asFeltWrites(dayFromNow(5)),
       })
       const standing = card({
-        id: 'seats/standing', shuttleSeat: 'vizier', shuttleKind: 'standing',
+        id: 'seats/standing', shuttleSeat: true, shuttleRole: 'vizier', shuttleKind: 'standing',
         status: 'active', nextLaunchAt: dayFromNow(2),
       })
       const far = card({ ...due, id: 'seats/far', due: asFeltWrites(dayFromNow(90)) })

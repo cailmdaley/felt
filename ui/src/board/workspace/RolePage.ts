@@ -1,11 +1,10 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { renderMarkdown } from '../utils.js'
-import { fiberIndex, installWikilinks } from '../wikilinks.js'
 import { fiberPageColumn } from './fiberPageState.js'
 
 const ROLE_ID = /^roles\/([a-z0-9]+(?:-[a-z0-9]+)*)$/
 
-/** The slug of a role page: a fiber at exactly `roles/<slug>`, never a holder beneath it. */
+/** The slug of a role charter at exactly `roles/<slug>`. */
 export function roleSlug(card: KanbanCard): string | null {
   return ROLE_ID.exec(card.id)?.[1] ?? null
 }
@@ -21,12 +20,11 @@ const HOLD_LABELS: Record<HoldColumn, string> = {
 /** Rows shown before the rest fold behind "more"; live work is always shown whole. */
 const HOLDS_SHOWN = 5
 
-/** The feed's constitutions that are this role's seats or whose roster names
- *  it, in Desk order. */
+/** The feed's constitutions assigned to this office, in Desk order. */
 export function roleHolds(cards: KanbanCard[], slug: string): KanbanCard[] {
   const rank = (card: KanbanCard) => HOLD_ORDER.indexOf(fiberPageColumn(card))
   return cards
-    .filter(card => card.shuttleSeat === slug || card.roles?.includes(slug))
+    .filter(card => card.shuttleRole === slug)
     .sort((a, b) => rank(a) - rank(b))
 }
 
@@ -106,50 +104,14 @@ function holdsSection(holds: KanbanCard[], onCard: (card: KanbanCard) => void): 
   return section
 }
 
-/**
- * The holder pages `roles/<slug>/<holder>` the fiber index names, as quiet
- * links. The line stays hidden until the index lands, and for good when it
- * names none.
- */
-function holdersLine(slug: string, opts: { shuttleBase: string; onFiber: (id: string) => void }): HTMLElement {
-  const line = document.createElement('section')
-  line.className = 'ws-role-holders'
-  line.dataset.part = 'role-holders'
-  line.hidden = true
-  const prefix = `roles/${slug}/`
-  void fiberIndex(opts.shuttleBase).then(async index => {
-    const ids = index.map(row => row.id).filter(id => id.startsWith(prefix) && !id.slice(prefix.length).includes('/')).sort()
-    if (ids.length === 0) return
-    const names = document.createElement('span')
-    names.className = 'ws-role-holder-names'
-    for (const id of ids) {
-      const holder = document.createElement('span')
-      holder.className = 'ws-role-holder'
-      const link = document.createElement('a')
-      link.className = 'kbn-wikilink'
-      link.dataset.fiber = id
-      link.dataset.wikilinkRaw = id.slice(prefix.length)
-      link.textContent = id.slice(prefix.length)
-      holder.append(link)
-      names.append(holder)
-    }
-    line.append(caption('Held by'), names)
-    await installWikilinks(names, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber, exact: true })
-    line.hidden = false
-  }).catch(() => { /* No index, no holders: the page reads without them. */ })
-  return line
-}
-
-/** A role page's ledger under its lede: who holds the role, and the constitutions it holds. */
+/** A role charter's assigned constitutions under its lede. */
 export function buildRoleLedger(
-  slug: string,
   holds: KanbanCard[],
-  opts: { shuttleBase: string; onFiber: (id: string) => void; onCard: (card: KanbanCard) => void },
+  opts: { onCard: (card: KanbanCard) => void },
 ): HTMLElement {
   const ledger = document.createElement('div')
   ledger.className = 'ws-role-ledger'
   ledger.dataset.part = 'role-ledger'
-  ledger.append(holdersLine(slug, opts))
   if (holds.length) ledger.append(holdsSection(holds, opts.onCard))
   return ledger
 }

@@ -138,17 +138,17 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-b:beta')
   })
 
-  it('names the roster the feed carries and repaints the page when it changes', async () => {
+  it('names the office the feed carries and repaints the page when it changes', async () => {
     const original = cards[0]
     const roles = (): string[] => [...document.querySelectorAll('.ws-fiber-role')].map(role => role.textContent ?? '')
     try {
-      // The body read carries no roster; the feed's card does, and it holds across the read.
-      cards[0] = { ...original, roles: ['surveyor'] }
+      // The body read carries no office; the feed's card does.
+      cards[0] = { ...original, shuttleRole: 'surveyor' }
       workspace.open(cards[0]); await flush(); await flush()
       expect(roles()).toEqual(['surveyor'])
-      cards[0] = { ...original, roles: ['surveyor', 'scribe'] }
+      cards[0] = { ...original, shuttleRole: 'scribe' }
       workspace.update(); await flush()
-      expect(roles()).toEqual(['surveyor', 'scribe'])
+      expect(roles()).toEqual(['scribe'])
       cards[0] = original
       workspace.update(); await flush()
       expect(roles()).toEqual([])
@@ -158,22 +158,23 @@ describe('workspace reader integration', () => {
   it('gives a role page its holds from the feed and none of a constitution\'s controls', async () => {
     const original = cards[0]
     const role = card({ id: 'roles/surveyor', uid: 'surveyor-uid', name: 'Surveyor', originId: 'host-a', fiberDir: '/roles/surveyor', path: 'roles/surveyor/surveyor.md' })
-    cards[0] = { ...original, shuttleKind: 'oneshot', roles: ['surveyor'] }
+    cards[0] = { ...original, shuttleKind: 'oneshot', shuttleRole: 'surveyor' }
     bodyCards = [...cards, role]
     onTestFinished(() => { cards[0] = original })
     const holds = (): string[] => [...document.querySelectorAll('.ws-role-hold-name')].map(name => name.textContent ?? '')
     workspace.open(role); await flush(); await flush()
     expect(holds()).toEqual(['Alpha'])
+    expect(document.querySelector('[data-part="role-holders"]')).toBeNull()
     const page = document.querySelector<HTMLElement>('.ws-fiber-prose')!
     for (const chrome of ['.ws-dock', '.kbn-detail-controls', '.kbn-ctl-history-toggle', '.kbn-detail-directive', '.kbn-ctl-verdict']) {
       expect(page.querySelector(chrome), chrome).toBeNull()
     }
-    // A role is outside the feed; its holds still follow the feed's rosters.
+    // A role is outside the feed; its holds still follow office assignments.
     cards[0] = { ...original, shuttleKind: 'oneshot' }
     workspace.update(); await flush()
     expect(holds()).toEqual([])
     expect(document.querySelector('[data-part="role-holds"]')).toBeNull()
-    cards[0] = { ...original, shuttleKind: 'oneshot', roles: ['surveyor'] }
+    cards[0] = { ...original, shuttleKind: 'oneshot', shuttleRole: 'surveyor' }
     workspace.update(); await flush()
     document.querySelector<HTMLButtonElement>('.ws-role-hold')!.click()
     await flush(); await flush()

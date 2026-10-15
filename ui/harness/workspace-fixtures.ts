@@ -105,9 +105,8 @@ export function installWorkspaceNativeURLs(example: WorkspaceExample): Workspace
 }
 
 /**
- * Plain notes the fixture links to, none Shuttle-managed: two roles from the
- * role store (one held by two holders and named by three rosters, one held
- * by no one and named by none), the holder pages, and a note outside it.
+ * Plain notes the fixture links to, none Shuttle-managed: two role charters
+ * and a glossary outside the role store.
  */
 export const NOTE_FIBERS = [
   {
@@ -118,25 +117,11 @@ export const NOTE_FIBERS = [
     body: 'The surveyor reads before it writes: the code, the data products and the open questions, in that order.\n\nIts working terms are in [[research/workspace/glossary]]; a role with no work yet is [[roles/scribe]].',
   },
   {
-    id: 'roles/surveyor/opus',
-    uid: '01KVBR9Q4KN3CVQ5CC89V356V6',
-    name: 'Surveyor: opus',
-    outcome: 'Opus holds the surveyor role across the workspace projects.',
-    body: 'Notes this holder keeps between surveys.',
-  },
-  {
-    id: 'roles/surveyor/sonnet',
-    uid: '01KVBRAR5MP4DWR6DD90W467W7',
-    name: 'Surveyor: sonnet',
-    outcome: 'Sonnet holds the surveyor role for quick passes.',
-    body: 'Notes this holder keeps between passes.',
-  },
-  {
     id: 'roles/scribe',
     uid: '01KVBRBS6NQ5EXS7EE01X578X8',
     name: 'Scribe',
     outcome: 'Keeps the record of what was decided and why.',
-    body: 'No roster names the scribe yet, and no one holds it.',
+    body: 'Record decisions together with their reasoning and the evidence that supports them.',
   },
   {
     id: 'research/workspace/glossary',
@@ -171,7 +156,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       age: 0.1,
       outcome: transcriptScenario === 'long-outcome' ? LONG_OUTCOME : 'The response passes the null test at every scale; the report and source products are ready for review.',
       host: WORKSPACE_HOST,
-      collaboration: { surveyor: ['opus'] },
+      role: 'surveyor',
     },
     {
       id: 'research/workspace/weekly-summary',
@@ -181,7 +166,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       age: 1,
       outcome: 'Collect the latest validation results and note what remains uncertain.',
       host: WORKSPACE_HOST,
-      collaboration: { surveyor: ['sonnet'] },
+      role: 'surveyor',
     },
     {
       id: 'pipeline/spin/remote-review',
@@ -191,9 +176,8 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       age: 2,
       outcome: 'Check the covariance products on the remote host before the next run.',
       host: WORKSPACE_REMOTE,
-      // Two roles; the second names no role fiber, so it reads as plain text,
-      // and is long enough to need cutting at a phone's width.
-      collaboration: { surveyor: [], 'covariance-archivist-and-steward': [] },
+      // This office has no charter in the index, so it reads as plain text.
+      role: 'covariance-archivist-and-steward',
     },
     {
       id: 'research/workspace/mask-validation',
@@ -266,8 +250,8 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
         ...(fiber.id === 'research/workspace/weekly-summary' ? { depends_on: WORKSPACE_UID } : {}),
         ...(fiber.id === 'research/workspace/validation-follow-up' ? { depends_on: '01KVBR2G7CXDWMG85592QW78M9' } : {}),
-        ...(fiber.collaboration ? { collaboration: fiber.collaboration } : {}),
         shuttle: {
+          role: fiber.role,
           kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
           schedule: fiber.id === 'pipeline/spin/remote-review' ? { expr: '0 9 * * *', tz: 'UTC' } : undefined,
           host: fiber.host,

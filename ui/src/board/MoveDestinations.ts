@@ -123,7 +123,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
 
   // ── Surfaces ───────────────────────────────────────────────────────────
   // Onto the desk.
-  if (!planningIgnored(card) && !card.shuttleSeat) {
+  if (!planningIgnored(card) && !(card.shuttleSeat === true && card.shuttleRole)) {
     const alreadyOnDesk = card.status !== 'closed' && card.effectiveHorizon === 'now'
     if (!alreadyOnDesk) {
       out.push({
@@ -139,7 +139,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
     if (card.status === 'closed' || !restingNow(card)) {
       out.push({
         id: 'stashed',
-        label: card.shuttleSeat ? 'Roles' : SURFACE_TITLE.stashed,
+        label: card.shuttleSeat === true && card.shuttleRole ? 'Roles' : SURFACE_TITLE.stashed,
         group: 'other',
         action: { kind: 'surface', horizon: 'stashed' },
       })
@@ -178,7 +178,7 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
  *  branch, read off the card. */
 export function seatAtRest(card: KanbanCard): boolean {
   return (
-    !!card.shuttleSeat &&
+    card.shuttleSeat === true && !!card.shuttleRole &&
     card.status !== 'closed' &&
     !hasLiveWorker(card) &&
     (card.status !== 'active' || card.shuttleKind === 'standing')

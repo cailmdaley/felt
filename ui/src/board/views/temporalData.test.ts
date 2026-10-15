@@ -129,6 +129,18 @@ describe('parseSessions', () => {
     expect(out.records.map((r) => r.session)).toEqual(['s1'])
   })
 
+  it('reads optional role provenance without a collaborator', () => {
+    const records = parseSessions({ records: [
+      { at: 1, fiber: 'work/a', session: 's1', kind: 'dispatch', role: 'surveyor', collaborator: 'sol' },
+      { at: 2, fiber: 'work/a', session: 's2', kind: 'claim', role: '' },
+      { at: 3, fiber: 'work/b', session: 's3', kind: 'resume' },
+    ] }, empty).records
+    expect(records[0].role).toBe('surveyor')
+    expect(records[0]).not.toHaveProperty('collaborator')
+    expect(records[1]).not.toHaveProperty('role')
+    expect(records[2]).not.toHaveProperty('role')
+  })
+
   it('treats blank optional fields as absent rather than empty strings', () => {
     const out = parseSessions(
       { host: 'ada', records: [{ at: 1, fiber: 'work/a', session: 's1', kind: 'claim', tmux: '   ', uid: '', harness: null }] },

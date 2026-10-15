@@ -9,23 +9,14 @@
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-fiber-prose > h1 { display: none; }
 }
-/* A role page's ledger, between the lede and the body: who holds the role,
-   then the constitutions whose roster names it. Captions and holders share
-   the status line's register (mono capitals, muted); each hold is a compact
+/* A role charter's assigned constitutions, between the lede and the body.
+   Captions share the status line's register (mono capitals, muted); each hold is a compact
    row in the Desk's order, its dot in its column's pigment, the outcome a
    single muted line beneath the name. */
 .ws-role-ledger { margin: 0 0 20px; }
 .ws-role-caption {
   margin: 0; color: var(--ws-ink-muted);
   font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase;
-}
-.ws-role-holders { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--ws-small-gap) var(--ws-inset); margin: 0 0 var(--ws-gap); }
-.ws-role-holders[hidden] { display: none; }
-.ws-role-holder-names { color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
-.ws-role-holder + .ws-role-holder::before { content: '·'; margin-inline: var(--ws-small-gap); }
-.ws-role-holders a.kbn-wikilink-live { color: inherit; text-decoration: none; }
-.ws-role-holders a.kbn-wikilink-live:is(:hover, :focus-visible) {
-  color: var(--ws-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
 }
 .ws-role-holds .ws-role-caption { margin-bottom: var(--ws-small-gap); }
 .ws-role-hold-list { list-style: none; margin: 0; padding: 0; }

@@ -222,8 +222,8 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
     actor: { text: agent ? (card.shuttleAgent ?? 'agent') : 'me', agent },
     effort: agent ? card.shuttleEffort : undefined,
     chrome: agent && card.shuttleChrome === true,
-    seat: card.shuttleSeat
-      ? { text: `seat of ${card.shuttleSeat}`, title: `A seat of roles/${card.shuttleSeat}: a worker here sits in that office.` }
+    seat: card.shuttleSeat === true && card.shuttleRole
+      ? { text: `seat of ${card.shuttleRole}`, title: `A seat of roles/${card.shuttleRole}: a worker here sits in that office.` }
       : undefined,
     cadence,
     place,

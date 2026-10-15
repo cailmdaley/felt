@@ -38,9 +38,6 @@ export interface Fiber {
   cold?: boolean;     // project-owned frontmatter `cold:` — when true, stash
                       // cluster renders dimmer and below warm clusters.
   tags?: string[];
-  /** The role slugs of the `collaboration:` roster, in frontmatter order. Each
-   * names the role fiber `roles/<slug>`; the holders are not carried. */
-  roles?: string[];
   dependsOn?: string[]; // fiber IDs this depends on
   /**
    * How `depends_on:` was WRITTEN, not what it means — `scalar` for the bare
@@ -60,9 +57,10 @@ export interface Fiber {
   hasShuttleBlock?: boolean;
   /** `shuttle.kind` — `oneshot` (default) or `standing`. */
   shuttleKind?: 'oneshot' | 'standing';
-  /** `shuttle.seat` — the slug of the role (`roles/<slug>`) this constitution
-   * is a seat of. At rest, a seat is drawn among the Roles, not in Resting. */
-  shuttleSeat?: string;
+  /** `shuttle.role` — the single office's slug (`roles/<slug>`). */
+  shuttleRole?: string;
+  /** `shuttle.seat` — an office seat, drawn among the Roles when at rest. */
+  shuttleSeat?: boolean;
   /** `shuttle.runtime.session_uuid` — the harness session UUID of the worker the
    * daemon most recently launched for this fiber. Machine-managed, and the ONLY
    * value on the row that changes when a fresh dispatch replaces one session with
@@ -150,7 +148,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   const modifiedAt = pickIsoString(f, 'modified_at');
 
   const tags = stringList(f.tags);
-  const roles = rosterRoles(f.collaboration);
   // depends_on ships as `[{id: "..."}]` (common), bare-string arrays (legacy),
   // or a BARE STRING — the one-dep form `felt edit --set depends_on=<id>`
   // writes, which is what the board's drag-to-stack gesture produces. Accept
@@ -170,7 +167,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     !!shuttleRaw && typeof shuttleRaw === 'object' && !Array.isArray(shuttleRaw);
 
   let shuttleKind: 'oneshot' | 'standing' | undefined;
-  let shuttleSeat: string | undefined;
+  let shuttleRole: string | undefined;
+  let shuttleSeat: boolean | undefined;
   let shuttleSessionUuid: string | undefined;
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
@@ -195,7 +193,8 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     // the CLI's `shuttle.NormalizeKind` and the daemon's `Poller.block_kind`.
     shuttleKind = s.kind === 'standing' ? 'standing' : 'oneshot';
     if (typeof s.host === 'string' && s.host.trim()) shuttleHost = s.host.trim();
-    if (typeof s.seat === 'string' && s.seat.trim()) shuttleSeat = s.seat.trim();
+    if (typeof s.role === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.role)) shuttleRole = s.role;
+    if (typeof s.seat === 'boolean') shuttleSeat = s.seat;
 
 
     // shuttle.runtime — the machine-managed nested block (session_uuid,
@@ -263,12 +262,12 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     horizon,
     cold,
     tags,
-    roles,
     dependsOn,
     dependsOnShape,
     tempered,
     hasShuttleBlock: hasShuttleBlock || undefined,
     shuttleKind,
+    shuttleRole,
     shuttleSeat,
     shuttleSessionUuid,
     shuttleDispatchedAt,
@@ -284,19 +283,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     parentId,
     isRoot,
   };
-}
-
-/**
- * The roles a `collaboration:` roster assigns: each key whose value is a list
- * of holders (an empty list assigns the role alone). The older pointer shape
- * (`{role: {...}, collaborator: {...}}`) carries no lists and yields nothing.
- */
-function rosterRoles(v: unknown): string[] | undefined {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
-  const roles = Object.entries(v as Record<string, unknown>)
-    .filter(([slug, holders]) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && Array.isArray(holders))
-    .map(([slug]) => slug);
-  return roles.length > 0 ? roles : undefined;
 }
 
 function pickIsoString(obj: Record<string, unknown>, key: string): string | undefined {

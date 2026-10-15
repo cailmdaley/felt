@@ -219,7 +219,8 @@ interface MockFiber {
   start?: string
   shuttle?: ReturnType<typeof shuttleBlock> & {
     surface?: string
-    seat?: string
+    role?: string
+    seat?: boolean
     schedule?: { expr: string; tz: string }
   }
 }
@@ -412,24 +413,24 @@ const STANDING: MockFiber[] = [
  * one is a standing seat asleep on its cron, so the band shows both hints.
  */
 const ROLE_SEATS: MockFiber[] = [
-  { id: 'science/cmbx', name: 'cmbx chair', seat: 'cmbx-chair' },
-  { id: 'science/survey/north', name: 'Survey chair · north', seat: 'chief-of-staff' },
-  { id: 'science/survey/south', name: 'Survey chair · south', seat: 'chief-of-staff' },
-  { id: 'life/vizier', name: 'Vizier', seat: 'vizier' },
-  { id: 'life/music', name: 'Music — the composer\'s desk', seat: 'composer' },
-].map(({ id, name, seat }): MockFiber => ({
+  { id: 'science/cmbx', name: 'cmbx chair', role: 'cmbx-chair' },
+  { id: 'science/survey/north', name: 'Survey chair · north', role: 'chief-of-staff' },
+  { id: 'science/survey/south', name: 'Survey chair · south', role: 'chief-of-staff' },
+  { id: 'life/vizier', name: 'Vizier', role: 'vizier' },
+  { id: 'life/music', name: 'Music — the composer\'s desk', role: 'composer' },
+].map(({ id, name, role }): MockFiber => ({
   id,
   name,
   status: 'open',
   outcome: `${name}: at rest.`,
-  shuttle: { ...shuttleBlock('oneshot'), seat },
+  shuttle: { ...shuttleBlock('oneshot'), role, seat: true },
 }))
 ROLE_SEATS.push({
   id: 'loom/morning-post',
   name: 'Morning post',
   status: 'active',
   outcome: 'Morning post: sleeping until tomorrow.',
-  shuttle: { ...shuttleBlock('standing'), seat: 'vizier', schedule: { expr: '0 7 * * *', tz: 'Europe/Paris' } },
+  shuttle: { ...shuttleBlock('standing'), role: 'vizier', seat: true, schedule: { expr: '0 7 * * *', tz: 'Europe/Paris' } },
 })
 
 /**
@@ -1259,7 +1260,7 @@ const mockHostState = (host: string) => ({
   pending_launch: host === LOCAL_HOST ? [] : [{ fiber_id: 'a/b' }],
   max_concurrent: 10,
   claimed_count: host === LOCAL_HOST ? 2 : 0,
-  contract: { ok: true, expected: 2, observed: 2, reason: null },
+  contract: { ok: true, expected: 13, observed: 13, reason: null },
   poll_health: { state: 'idle', stalls: 0, stall_timeout_ms: 300_000, last_stalled_at: null },
   document_cache: { state: 'fresh', entries: 412 },
   standing_roles: [{}, {}, {}],

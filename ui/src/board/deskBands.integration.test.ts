@@ -63,7 +63,7 @@ afterEach(() => {
 describe('cycle members at rest', () => {
   it('renders a due-dated seat like a resting member without moving it out of Roles', () => {
     const now = Date.parse('2026-10-05T12:00:00Z')
-    const seat = card({ id: 'seats/vizier', shuttleSeat: 'vizier', due: '2026-10-07', effectiveHorizon: 'stashed' })
+    const seat = card({ id: 'seats/vizier', shuttleSeat: true, shuttleRole: 'vizier', due: '2026-10-07', effectiveHorizon: 'stashed' })
     const resting = card({ id: 'work/resting', due: seat.due, effectiveHorizon: 'stashed' })
     const data = response({
       roles: [seat], stash: [resting],
