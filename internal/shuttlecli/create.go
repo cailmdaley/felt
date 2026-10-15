@@ -61,8 +61,8 @@ func (a *app) installCmd() *cobra.Command {
 	var installSurface string
 	installCmd := &cobra.Command{
 		Use:   "install <fiber>",
-		Short: "Install a fiber as a one-shot dispatch role",
-		Long: `Install the fiber as a oneshot role: a one-time dispatch that the daemon
+		Short: "Install a fiber as a one-shot constitution",
+		Long: `Install the fiber as a oneshot constitution: a one-time dispatch that the daemon
 picks up on its next poll (after a daemon restart, once the boot quarantine is
 released).
 
@@ -169,7 +169,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 			if installDisabled {
 				state = "draft, status: open"
 			}
-			fmt.Fprintf(a.env.Stdout, "installed %s as oneshot role (%s)\n", args[0], state)
+			fmt.Fprintf(a.env.Stdout, "installed %s as oneshot constitution (%s)\n", args[0], state)
 			fmt.Fprintf(a.env.Stdout, "  host: %s\n", block.Host)
 			if block.Agent != "" {
 				fmt.Fprintf(a.env.Stdout, "  agent: %s\n", block.Agent)
@@ -210,7 +210,7 @@ func (a *app) repeatCmd() *cobra.Command {
 	var repeatSurface string
 	repeatCmd := &cobra.Command{
 		Use:   "repeat <fiber>",
-		Short: "Install a fiber as a standing (recurring) role",
+		Short: "Install a fiber as a standing (recurring) constitution",
 		Long: `Install the fiber as a standing constitution on a recurring cron schedule.
 
 The cron expression uses standard 5-field syntax: minute hour dom month dow.
@@ -330,7 +330,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 }
 
 // newBlockSurface applies the creation-only transport default. Absence remains
-// CLI on a stored block for compatibility, but a newly created Codex role
+// CLI on a stored block for compatibility, but a newly created Codex constitution
 // starts in the app unless the caller explicitly asks for CLI.
 func newBlockSurface(block *shuttle.Block, requested string, reg *shuttle.AgentRegistry) (string, error) {
 	if requested != "" {
