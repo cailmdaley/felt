@@ -65,7 +65,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/commit.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/commit.sh\"",
+            "async": true
           }
         ]
       },
@@ -93,7 +94,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"",
+            "async": true
           }
         ]
       }
@@ -113,7 +115,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\""
+            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/event.sh\"",
+            "async": true
           }
         ]
       }
