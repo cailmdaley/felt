@@ -7,8 +7,43 @@ const PLACEHOLDER = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg
 // Attribute quotes must stay encoded in both HTML attributes and CSS url().
 const mediaPlaceholder = PLACEHOLDER.replaceAll('"', '%22')
 
+const STYLE_LIMIT = PREVIEW_LIMIT - 32
+
+function attribute(tag: string, name: string): string | undefined {
+  const match = new RegExp(`\\s${name}\\s*=\\s*("[^"]*"|'[^']*'|[^\\s>]+)`, 'i').exec(tag)
+  return match?.[1].replace(/^["']|["']$/g, '')
+}
+
+/** The stylesheet a `data:text/css` URI carries, or null when it cannot be read. */
+function dataStylesheet(uri: string): string | null {
+  const comma = uri.indexOf(',')
+  if (comma < 0) return null
+  const payload = uri.slice(comma + 1)
+  try {
+    if (!/;base64$/i.test(uri.slice(0, comma))) return decodeURIComponent(payload)
+    return new TextDecoder().decode(Uint8Array.from(atob(payload), char => char.charCodeAt(0)))
+  } catch { return null }
+}
+
+/**
+ * A large embedded stylesheet link becomes the style block it carries, so the
+ * miniature keeps its styling without a link the placeholder would break; one
+ * too large for the head's budget is dropped.
+ */
+function inlineDataStylesheets(html: string): string {
+  return html.replace(/<link\b[^>]*>/gi, link => {
+    const href = attribute(link, 'href')
+    if (!href || !/^data:text\/css[;,]/i.test(href) || href.length <= MEDIA_LIMIT) return link
+    if (href.length > STYLE_LIMIT * 3) return ''
+    const css = dataStylesheet(href)
+    if (css === null || css.length > STYLE_LIMIT || /<\/style/i.test(css)) return ''
+    const media = attribute(link, 'media')
+    return `<style${media ? ` media="${media.replaceAll('"', '&quot;')}"` : ''}>${css}</style>`
+  })
+}
+
 export function buildThumbnailPreview(source: string): string {
-  let html = source.replace(/<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)/gi, '')
+  let html = inlineDataStylesheets(source.replace(/<script\b[^>]*>[\s\S]*?(?:<\/script\s*>|$)/gi, ''))
   html = html.replace(/\b(src|href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, (attribute, name: string, value: string) => {
     const unquoted = value.replace(/^["']|["']$/g, '')
     return /^data:/i.test(unquoted) && unquoted.length > MEDIA_LIMIT ? `${name}="${mediaPlaceholder}"` : attribute
@@ -28,7 +63,7 @@ export function buildThumbnailPreview(source: string): string {
     // Keep complete style blocks that fit; cutting inside a style hides the body.
     let styles = ''
     for (const match of head.matchAll(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi)) {
-      if (styles.length + match[0].length <= PREVIEW_LIMIT - 32) styles += match[0]
+      if (styles.length + match[0].length <= STYLE_LIMIT) styles += match[0]
     }
     head = `<head>${styles}</head>`
   }
