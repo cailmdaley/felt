@@ -155,6 +155,16 @@ describe('Reader channel sidebar', () => {
     expect(onChannel).toHaveBeenCalledExactlyOnceWith(latest)
   })
 
+  it('releases the refresh snapshot when a row face throws', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    let broken = false
+    const reader = makeReader(alpha, undefined, () => { if (broken) throw new Error('pill failed'); return null })
+    broken = true
+    listedCards = listedCards.map(card => ({ ...card, outcome: 'Revised' }))
+    expect(() => reader.refreshChannels()).toThrow('pill failed')
+    expect((reader as unknown as { sidebarSnapshot: unknown }).sidebarSnapshot).toBeNull()
+  })
+
   it('repaints a retained worker pill when its card folds out of flight', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'blocked', runtimePhase: 'attention', lastActivityAt: Date.now() }

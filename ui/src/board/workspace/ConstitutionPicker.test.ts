@@ -52,6 +52,20 @@ it('cancels a deferred reveal when selection returns to the already-revealed row
   expect(scroll).not.toHaveBeenCalled()
 })
 
+it('closes every refresh it opens, including one whose row pass throws', () => {
+  const onBeforeRefresh = vi.fn(), onRefresh = vi.fn()
+  let broken = true
+  const subject = picker = new ConstitutionPicker({ cards: () => [card({ id: 'a', uid: 'a', name: 'Alpha' })], onOpen: vi.fn(), onBeforeRefresh, onRefresh,
+    renderCard: () => { if (broken) throw new Error('face failed'); return document.createElement('div') },
+  })
+  expect(() => subject.refresh(false)).toThrow('face failed')
+  expect(onBeforeRefresh).toHaveBeenCalledOnce()
+  expect(onRefresh).toHaveBeenCalledOnce()
+  broken = false
+  subject.refresh(false)
+  expect(onRefresh).toHaveBeenCalledTimes(2)
+})
+
 it('reports only retained, placed rows after every refresh and revision patch, then removes them once', () => {
   let cards = [card({ id: 'a', uid: 'a', name: 'Alpha' }), card({ id: 'b', uid: 'b', name: 'Beta' })]
   const faces: HTMLElement[] = []
