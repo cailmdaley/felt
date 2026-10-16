@@ -131,14 +131,14 @@ export function meetingActions(meeting: MeetingRecord, stopRequested = false): M
   }
 }
 
-/** A failed or absent read backs off to the board's regular polling cadence. */
+/** Failed meetings and failed or absent reads use the board's idle cadence. */
 export function meetingPollDelay(
   visible: boolean,
   succeeded: boolean,
   meeting: MeetingRecord | null,
 ): number | null {
   if (!visible) return null
-  if (!succeeded || !meeting) return MEETING_POLL_IDLE_MS
+  if (!succeeded || !meeting || meeting.state === 'failed') return MEETING_POLL_IDLE_MS
   return MEETING_POLL_ACTIVE_MS
 }
 
