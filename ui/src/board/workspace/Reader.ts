@@ -359,9 +359,9 @@ export class Reader {
     this.tabs.setVisible(true)
     this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
     if (!switching) this.tabs.arrive(arrivals)
+    this.renderSidebar()
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
-    this.renderSidebar()
     if (arriving) this.setSidebarVisible(this.sidebarShown)
     // A keyboard switch gives focus a home on the new channel: its selected tile
     // on the desktop, the top bar's back control on the phone.
@@ -622,6 +622,9 @@ export class Reader {
     const W = this.stage.clientWidth, H = this.stage.clientHeight
     if (!W || !H) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
     const inset = this.measure('stage-inset', 28), top = this.measure('stage-top', 10), gap = this.measure('gap', 24)
+    const tile = this.tabs.selectedWidth / 2 + this.measure('index-fade', 40)
+    const column = this.stage.parentElement?.getBoundingClientRect().left ?? 0
+    const stripLeft = this.tabs.el.getBoundingClientRect().left, stripWidth = this.tabs.el.clientWidth
     // Beside the sidebar the page keeps one page gap from the column and shrinks
     // before that gutter grows; the right neighbour has the room left over.
     // Without the sidebar the page is centred in the stage.
@@ -649,11 +652,9 @@ export class Reader {
     })
     const target = Math.round(docked ? gap - (centre - selectedWidth / 2) : W / 2 - centre)
     // The index holds the selected tile over the page's centre, or as near it as its slot allows.
-    const tile = this.tabs.selectedWidth / 2 + this.measure('index-fade', 40)
     // The map rides the board bar, outside the reader, so the page's centre is measured on screen.
-    const column = this.stage.parentElement?.getBoundingClientRect().left ?? 0
-    const focus = column + target + centre - this.tabs.el.getBoundingClientRect().left
-    this.tabs.setFocus(Math.max(Math.min(tile, this.tabs.el.clientWidth / 2), Math.min(Math.max(this.tabs.el.clientWidth / 2, this.tabs.el.clientWidth - tile), focus)))
+    const focus = column + target + centre - stripLeft
+    this.tabs.setFocus(Math.max(Math.min(tile, stripWidth / 2), Math.min(Math.max(stripWidth / 2, stripWidth - tile), focus)))
     if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
@@ -1023,13 +1024,12 @@ export class Reader {
   private setSidebarVisible(visible: boolean, animate = true): void {
     this.sidebarFlight.setVisible(visible, animate)
     if (!this.opts.themes) return
-    for (const ghost of this.el.querySelectorAll<HTMLElement>('.ws-sidebar-flight .ws-channel-row')) {
+    for (const [ghost, finished] of this.sidebarFlight.flights) {
       if (this.flightRoots.has(ghost)) continue
       const card = [...this.sidebarRows.values()].find(card => (card.uid ?? card.id) === ghost.dataset.channelUid && card.originId === ghost.dataset.channelOwner)
       if (!card) continue
       this.flightRoots.add(ghost); this.opts.themes.bind(ghost, card)
-      const flights = ghost.getAnimations().filter(animation => !('animationName' in animation) && !('transitionProperty' in animation))
-      void Promise.allSettled(flights.map(animation => animation.finished)).then(() => {
+      void Promise.allSettled([finished]).then(() => {
         if (this.flightRoots.delete(ghost)) this.opts.themes?.unbind(ghost)
       })
     }

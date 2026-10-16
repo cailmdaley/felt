@@ -38,6 +38,24 @@ it('uses real Desk and sidebar rects, animating only transform and opacity on th
   flight.setVisible(false); finish(); await Promise.resolve()
   expect(source.classList.contains('ws-sidebar-source')).toBe(false)
 })
+it('reads all flight destinations before appending or animating any copy', () => {
+  const second = row.cloneNode(true) as HTMLElement
+  second.dataset.channelUid = 'b'; sidebar.append(second)
+  const secondSource = source.cloneNode() as HTMLElement
+  secondSource.getBoundingClientRect = () => rect(800, 100, 360, 180)
+  root.append(secondSource)
+  flight.capture([
+    { card: card({ id: 'a', uid: 'a', originId: 'host' }), source },
+    { card: card({ id: 'b', uid: 'b', originId: 'host' }), source: secondSource },
+  ])
+  second.getBoundingClientRect = () => {
+    expect(animate).not.toHaveBeenCalled()
+    expect(root.querySelector('.ws-sidebar-flight')).toBeNull()
+    return rect(12, 300, 256, 112)
+  }
+  flight.setVisible(true)
+  expect(animate).toHaveBeenCalledTimes(2)
+})
 it('transfers instantly under reduced motion and restores sources on disposal', () => {
   reduced = true
   flight.setVisible(true)

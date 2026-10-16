@@ -200,14 +200,15 @@ describe('Reader channel sidebar', () => {
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 60000 }
     listedCards = [working]
     const open = vi.fn()
-    let target = document.createElement('button')
-    // Each call builds a fresh pill, as the dock does; the sidebar's is the last one built.
+    const targets: HTMLButtonElement[] = []
     const reader = makeReader(working, undefined, () => {
-      target = document.createElement('button')
+      const target = document.createElement('button')
+      targets.push(target)
       target.addEventListener('click', open)
       return target
     })
-    expect(reader.el.querySelector('.ws-sidebar .ws-worker-control')).toBe(target)
+    const target = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar .ws-worker-control')!
+    expect(targets).toContain(target)
     expect(target.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
     expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m')
     expect(target.dataset.part).toBe('act')
@@ -299,6 +300,7 @@ describe('Reader channel sidebar', () => {
     Object.defineProperty(HTMLElement.prototype, 'getAnimations', { configurable: true, value: function (this: HTMLElement) {
       return animations.has(this) ? [animations.get(this)!.animation] : []
     } })
+    const animationQueries = vi.spyOn(HTMLElement.prototype, 'getAnimations')
     const themes = new ChannelThemes('')
     try {
       const reader = makeReader(alpha, themes)
@@ -313,6 +315,7 @@ describe('Reader channel sidebar', () => {
       flight.setSidebarVisible(true)
       const ghost = reader.el.querySelector<HTMLElement>('.ws-sidebar-flight [data-channel-uid="beta"]')!
       const scope = ghost.dataset.wsTheme
+      expect(animationQueries).not.toHaveBeenCalled()
       expect(scope).toBeTruthy()
       const row = reader.el.querySelector<HTMLElement>('.ws-sidebar:not(.ws-sidebar-flight) [data-channel-uid="beta"]')!
       expect(row.dataset.wsTheme).toBeUndefined()
@@ -585,6 +588,20 @@ describe('Reader channel sidebar', () => {
     expect(onChannel).not.toHaveBeenCalled()
   })
 
+  it('reads index geometry before writing page widths during layout', () => {
+    const reader = makeReader()
+    Object.defineProperty(reader.stage, 'clientWidth', { configurable: true, value: 1200 })
+    Object.defineProperty(reader.stage, 'clientHeight', { configurable: true, value: 800 })
+    const page = reader.track.querySelector<HTMLElement>('.ws-page')!
+    const writes = vi.spyOn(page.style, 'width', 'set')
+    vi.spyOn(reader.stage.parentElement!, 'getBoundingClientRect').mockImplementation(() => {
+      expect(writes).not.toHaveBeenCalled()
+      return new DOMRect(0, 0, 1200, 800)
+    })
+    ;(reader as unknown as { layout(animate: boolean): void }).layout(false)
+    expect(writes).toHaveBeenCalledOnce()
+  })
+
   it('keeps the selected tab visible when opening the sidebar changes layout', () => {
     const reader = makeReader()
     const base = channel(alpha)
@@ -602,8 +619,10 @@ describe('Reader channel sidebar', () => {
     Object.defineProperty(selected, 'offsetLeft', { configurable: true, value: 310 })
     Object.defineProperty(selected, 'offsetWidth', { configurable: true, value: 80 })
     window.dispatchEvent(new Event('resize'))
+    paintFrame()
     expect(strip.scrollLeft).toBe(290)
     reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+    paintFrame()
     expect(strip.scrollLeft).toBe(300)
     expect(strip.scrollLeft).toBeLessThanOrEqual(310)
     expect(strip.scrollLeft + strip.clientWidth).toBeGreaterThanOrEqual(390)
