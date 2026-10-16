@@ -42,14 +42,16 @@ defmodule ShuttleWeb.FiberDocumentsController do
 
     # The polled owner feed (`?shuttle=true` without bodies) is the hot path
     # remote viewers hit every 5s: serve it from the poller's in-memory cache
-    # with a conditional-fetch etag. The body/content and non-shuttle variants
-    # keep their direct `FiberDocuments.list/1` behavior.
+    # with a conditional-fetch etag. The index has its own all-fiber cache;
+    # full metadata and body/content requests read directly through felt.
     cond do
       shuttle_only? and not with_body? ->
         serve_owner_feed(conn)
 
       Map.get(params, "fields") == "index" ->
-        serve_direct(conn, false, shuttle_only?, &index_rows/1)
+        if shuttle_only?,
+          do: serve_direct(conn, false, true, &index_rows/1),
+          else: serve_index(conn)
 
       true ->
         serve_direct(conn, with_body?, shuttle_only?, & &1)
@@ -60,6 +62,22 @@ defmodule ShuttleWeb.FiberDocumentsController do
     case Shuttle.FiberDocuments.list(with_body: with_body?, shuttle_only: shuttle_only?) do
       {:ok, body} ->
         json(conn, shape.(body))
+
+      {:error, errors} ->
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{error: "felt_list_failed", stores: errors})
+    end
+  end
+
+  defp serve_index(conn) do
+    case Shuttle.FiberIndex.fetch() do
+      {:ok, %{body: body, etag: etag}} ->
+        conn = put_resp_header(conn, "etag", etag)
+
+        if if_none_match?(conn, etag),
+          do: send_resp(conn, 304, ""),
+          else: conn |> put_resp_content_type("application/json") |> send_resp(200, body)
 
       {:error, errors} ->
         conn
