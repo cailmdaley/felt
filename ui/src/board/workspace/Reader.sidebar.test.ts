@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
+import { claudeOpening, saveClaudeOpening } from '../conversationOpening.js'
 import { Reader, SIDEBAR_MEDIA, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import type { Channel, DocKey } from './documents.js'
@@ -95,6 +96,17 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
+  it('reads the full queue graph once per refresh, and retains faces when only document metadata changes', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const queueCards = vi.fn(() => listedCards)
+    const reader = makeReader(alpha, undefined, undefined, { queueCards })
+    const face = reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"] .kbn-card-header')
+    queueCards.mockClear()
+    listedCards = listedCards.map(card => ({ ...card, modifiedAt: '2026-10-17', fiberDir: '/changed' }))
+    reader.refreshChannels()
+    expect(queueCards).toHaveBeenCalledOnce()
+    expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"] .kbn-card-header')).toBe(face)
+  })
   it('shares Desk’s queue chip and peek, resolves UID edges, and refreshes a retained head when its children change', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const queued = { ...beta, dependsOn: [alpha.uid!.toUpperCase()], foldedUnder: alpha.id }
@@ -124,6 +136,34 @@ describe('Reader channel sidebar', () => {
     expect(head.querySelector('.kbn-card-queued')).toBeNull()
     expect(rowNames(reader)).toEqual(['Alpha', 'Beta'])
   })
+  it('opens current queued-member data while retaining an unchanged queue face', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const queued = { ...beta, dependsOn: [alpha.id], fiberDir: '/old' }
+    listedCards = [alpha, queued]
+    const reader = makeReader()
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar .kbn-card-queued-row')!
+    const latest = { ...queued, fiberDir: '/new', outcome: 'Updated result' }
+    listedCards = [alpha, latest]
+    reader.refreshChannels()
+    expect(reader.el.querySelector('.ws-sidebar .kbn-card-queued-row')).toBe(row)
+    row.click()
+    expect(onChannel).toHaveBeenCalledExactlyOnceWith(latest)
+  })
+
+  it('refreshes retained worker targets when the browser opening preference changes', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const reader = makeReader(alpha, undefined, () => {
+      const target = document.createElement(claudeOpening() === 'terminal' ? 'button' : 'a')
+      return target
+    })
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
+    expect(row.querySelector('button.ws-worker-control')).not.toBeNull()
+    saveClaudeOpening('browser')
+    reader.refreshChannels()
+    expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
+    expect(row.querySelector('a.ws-worker-control')).not.toBeNull()
+  })
+
   it('keeps unresolved edges visible but excludes active and live dependency children, including the current child', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     listedCards = [alpha, { ...beta, dependsOn: ['missing'] }, { ...gamma, dependsOn: [alpha.id], status: 'active', workerState: 'running', runtimePhase: 'working', tmuxSession: 'gamma-worker' }]
