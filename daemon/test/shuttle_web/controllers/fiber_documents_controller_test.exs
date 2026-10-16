@@ -127,7 +127,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert warm.status == 200
     assert warm.resp_body == conn.resp_body
     [etag] = get_resp_header(warm, "etag")
-    assert etag == ~s("#{Base.encode16(:crypto.hash(:sha256, warm.resp_body), case: :lower)}")
+    assert etag =~ ~r/^"[0-9a-f]{64}"$/
 
     unchanged =
       api_conn() |> put_req_header("if-none-match", etag) |> get("/api/v1/fibers?fields=index")

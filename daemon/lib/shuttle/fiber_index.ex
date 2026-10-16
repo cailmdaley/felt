@@ -76,13 +76,19 @@ defmodule Shuttle.FiberIndex do
         Shuttle.Env.adopt_callers(callers)
 
         with {:ok, body} <- loader.() do
-          encoded = Jason.encode!(body)
-          etag = ~s("#{Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)}")
-          {:ok, %{body: encoded, etag: etag}}
+          {:ok, %{body: Jason.encode!(body), etag: etag(body)}}
         end
       end)
 
     %{state | task: task}
+  end
+
+  # A strong validator over what the index says: its stores and fibers, not
+  # `generated_at`, which every refresh restamps. An unchanged store keeps its
+  # etag across refreshes, so a revalidating client gets a 304.
+  defp etag(body) do
+    content = :erlang.term_to_binary({body.felt_stores, body.fibers}, [:deterministic])
+    ~s("#{Base.encode16(:crypto.hash(:sha256, content), case: :lower)}")
   end
 
   defp complete(state, result) do
