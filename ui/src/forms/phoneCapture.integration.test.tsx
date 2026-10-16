@@ -183,7 +183,7 @@ describe('phone Capture form wiring', () => {
     expect(choices().slice(0, 2)).toEqual(['local', 'local:/desk'])
     expect(document.activeElement?.tagName).toBe('TEXTAREA')
     click('.capture-meeting-toggle')
-    expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Call')
+    expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Live')
     click('[role="radio"]:last-child')
     expect(document.querySelector('[role="radio"][aria-checked="true"]')?.textContent).toBe('Phone')
   })

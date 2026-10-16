@@ -19,7 +19,7 @@ describe('capture meeting control', () => {
     expect(off).toMatch(/<div class="capture-meeting-modes"[^>]* hidden=""/)
     expect(on).not.toMatch(/capture-meeting-modes"[^>]* hidden/)
     expect(off.match(/role="radio"/g)).toHaveLength(3)
-    expect(on).toMatch(/aria-checked="true"[^>]*>Room</)
+    expect(on).toMatch(/aria-checked="true"[^>]*>Mic only</)
     expect(render('phone')).toMatch(/aria-checked="true"[^>]*>Phone</)
   })
 })

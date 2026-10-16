@@ -33,7 +33,7 @@ describe('rendered MeetingControl capabilities', () => {
   it('renders only offered segments, preserves the default, and disables every interaction', () => {
     const change = vi.fn()
     act(() => root.render(<MeetingControl enabled={false} mode={null} modes={['room', 'phone']} defaultMode="phone" disabled={false} onChange={change} />))
-    expect([...container.querySelectorAll('[role="radio"]')].map((node) => node.textContent)).toEqual(['Room', 'Phone'])
+    expect([...container.querySelectorAll('[role="radio"]')].map((node) => node.textContent)).toEqual(['Mic only', 'Phone'])
     expect(container.querySelector('[role="radiogroup"]')?.hasAttribute('hidden')).toBe(true)
     act(() => container.querySelector<HTMLButtonElement>('.capture-meeting-toggle')!.click())
     expect(change).toHaveBeenLastCalledWith('phone')

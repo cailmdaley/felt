@@ -6,8 +6,8 @@ export type { MeetingMode } from '../board/meeting'
  * alone, `phone` a browser's mic streamed from the board.
  */
 export const MEETING_MODES: ReadonlyArray<{ value: MeetingMode; label: string }> = [
-  { value: 'room', label: 'Room' },
-  { value: 'call', label: 'Call' },
+  { value: 'call', label: 'Live' },
+  { value: 'room', label: 'Mic only' },
   { value: 'phone', label: 'Phone' },
 ]
 

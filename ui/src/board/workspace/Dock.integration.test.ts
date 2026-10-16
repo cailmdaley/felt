@@ -108,9 +108,9 @@ describe('anchored pickers', () => {
 
     toggle.click()
     expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-modes').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([true, false, false])
-    expect([...meetingBand.el.querySelectorAll('.kbn-ctl-meet-modes [role="radio"]')].map(r => r.textContent)).toEqual(['Room', 'Call', 'Phone'])
+    expect([...meetingBand.el.querySelectorAll('.kbn-ctl-meet-modes [role="radio"]')].map(r => r.textContent)).toEqual(['Live', 'Mic only', 'Phone'])
     expect(field.placeholder).toBe('A note for the meeting (optional)')
-    ;[...meetingBand.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-meet-modes [role="radio"]')].find(r => r.textContent === 'Room')!.click()
+    ;[...meetingBand.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-meet-modes [role="radio"]')].find(r => r.textContent === 'Mic only')!.click()
     vi.mocked(fetch).mockClear()
     field.value = 'agenda'
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))

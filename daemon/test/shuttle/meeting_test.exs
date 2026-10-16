@@ -79,7 +79,7 @@ defmodule Shuttle.MeetingTest do
 
   # Mutation control: omit modes from inspect_current/1 or ignore executable permission.
   test "GET reports platform-supported modes only when hark is executable", %{hark_path: path} do
-    for {os, modes} <- [{:darwin, ~w(room call phone)}, {:linux, ~w(phone)}] do
+    for {os, modes} <- [{:darwin, ~w(call room phone)}, {:linux, ~w(phone)}] do
       Env.put_app_env(:host_capabilities_os_type, {:unix, os})
 
       body =

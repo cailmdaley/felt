@@ -118,7 +118,7 @@ describe('board phone meeting card wiring', () => {
   it.each([
     [false, ['phone'], ['Phone']],
     [true, ['call', 'room', 'phone'], ['Phone']],
-    [false, ['call', 'room', 'phone'], ['Room', 'Call', 'Phone']],
+    [false, ['call', 'room', 'phone'], ['Live', 'Mic only', 'Phone']],
     [false, [], []],
   ] as const)('filters Join capabilities on mobile=%s with %j', (mobile, modes, labels) => {
     vi.stubGlobal('matchMedia', () => ({ matches: mobile, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
