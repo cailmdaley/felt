@@ -182,10 +182,14 @@ interface ChangeRow {
   summary: HTMLElement
   outcome: HTMLElement
   documents: HTMLElement
-  more: HTMLElement
+  more: HTMLButtonElement
+  /** True once the user has revealed the receipts past the cap. */
+  expanded: boolean
   thumbs: Map<DocKey, { el: HTMLButtonElement; thumb: Thumbnail }>
   change: Change
 }
+/** Sent attachments a change row draws before folding the rest behind its +N button. */
+export const CHANGE_ATTACHMENT_CAP = 3
 const needsYou = (card: KanbanCard): number => fiberPageColumn(card) === 'awaitingReview' ? 0
   : fiberPageColumn(card) === 'inFlight' && inFlightBand(card) !== 'working' ? 1 : 2
 function changeSummary(change: Change): string {
@@ -844,10 +848,11 @@ export class Overview {
         const summary = node('span', 'ws-overview-change-summary ws-overview-meta')
         const outcome = node('span', 'ws-overview-change-outcome')
         const documents = node('div', 'ws-overview-change-documents')
-        const more = node('span', 'ws-overview-change-more ws-overview-meta')
+        const more = button('ws-overview-change-more ws-overview-meta')
         open.append(name, summary, outcome); el.append(open, documents)
-        row = { el, open, name, summary, outcome, documents, more, thumbs: new Map(), change }
+        row = { el, open, name, summary, outcome, documents, more, expanded: false, thumbs: new Map(), change }
         const record = row
+        more.addEventListener('click', () => { record.expanded = true; this.render() })
         open.addEventListener('click', () => { void this.open(record.change.card, record.change.receipts[0]?.key) })
         this.changeRows.set(change.uid, row)
       }
@@ -856,7 +861,7 @@ export class Overview {
       row.open.title = change.card.path
       row.el.dataset.needsYou = String(change.priority < 2)
       row.el.hidden = !visibleUids.has(change.uid); row.el.inert = row.el.hidden
-      const documents = change.receipts.slice(0, 4)
+      const documents = row.expanded ? change.receipts : change.receipts.slice(0, CHANGE_ATTACHMENT_CAP)
       const keys = new Set(documents.map(r => r.key))
       for (const [key, item] of row.thumbs) if (!keys.has(key)) {
         this.removeThumbnail(item.thumb); item.el.remove(); row.thumbs.delete(key)
@@ -875,8 +880,10 @@ export class Overview {
         item.el.title = `${declaredTitle(receipt.key)?.title ?? receipt.basename} — ${receipt.owner}:${receipt.fullPath}`
         item.el.setAttribute('aria-label', `Open ${declaredTitle(receipt.key)?.title ?? receipt.basename}`)
       }
-      text(row.more, `+${change.receipts.length - documents.length}`)
-      place(row.documents, [...documents.map(r => row!.thumbs.get(r.key)!.el), ...(change.receipts.length > 4 ? [row.more] : [])])
+      const hidden = change.receipts.length - documents.length
+      text(row.more, `+${hidden}`)
+      row.more.setAttribute('aria-label', `Show ${hidden} more ${hidden === 1 ? 'document' : 'documents'}`)
+      place(row.documents, [...documents.map(r => row!.thumbs.get(r.key)!.el), ...(hidden > 0 ? [row.more] : [])])
     }
     place(this.changesEl, [...visible.map(c => this.changeRows.get(c.uid)!.el), ...(overflow ? [this.changesMore] : [])])
     for (const row of this.changeRows.values()) {

@@ -64,7 +64,12 @@
 .ws-overview-change-documents { display: flex; gap: 8px; align-items: center; }
 .ws-overview-change-doc { width: 76px; height: 56px; flex: none; }
 .ws-overview-change-doc .ws-overview-thumb { width: 100%; height: 100%; }
-.ws-overview-change-more { min-width: 28px; font: var(--ws-label-size)/1.3 var(--ws-serif); letter-spacing: 0; color: var(--ws-ink-muted); }
+.ws-overview-change-more {
+  flex: none; min-width: 44px; height: 56px; padding: 0 8px; border-radius: var(--ws-tile-radius); background: transparent;
+  border: var(--ws-line-width) dashed var(--ws-hairline) !important; cursor: pointer;
+  font: var(--ws-label-size)/1.3 var(--ws-serif); letter-spacing: 0; color: var(--ws-ink-muted);
+}
+.ws-overview-change-more:hover, .ws-overview-change-more:focus-visible { color: var(--ws-ink); border-color: var(--ws-ink-faint) !important; }
 .ws-overview-change-open:hover .ws-overview-change-name { text-decoration: underline; text-decoration-color: var(--ws-hairline); text-underline-offset: .15em; }
 .ws-overview-changes-empty { margin: 8px 0 16px; font-style: italic; color: var(--ws-ink-muted); }
 .ws-overview-latest { margin: 12px 0 0; }
@@ -169,6 +174,7 @@
   .ws-overview-change-summary { font-size: var(--ws-small-size); }
   .ws-overview-change-outcome { font-size: var(--ws-prose-size); }
   .ws-overview-change-doc { width: 64px; height: 48px; }
+  .ws-overview-change-more { height: 48px; }
   .ws-overview-controls { gap: 16px; margin-top: 12px; flex-wrap: nowrap; }
   .ws-overview-lens { flex: none; gap: 16px; }
   .ws-overview-lens button { font-size: var(--ws-label-size); }

@@ -587,8 +587,15 @@ describe('Overview news, visits and graduated density', () => {
     await refresh()
     const rows = [...overview.el.querySelectorAll<HTMLElement>('.ws-overview-change')]
     expect(rows.map(r => r.dataset.uid)).toEqual(['alpha', 'beta', 'gamma'])
-    expect(rows[0].querySelectorAll('.ws-overview-change-doc')).toHaveLength(4)
-    expect(rows[0].querySelector('.ws-overview-change-more')?.textContent).toBe('+2')
+    expect(rows[0].querySelectorAll('.ws-overview-change-doc')).toHaveLength(3)
+    const more = rows[0].querySelector<HTMLButtonElement>('.ws-overview-change-more')!
+    expect(more.textContent).toBe('+3')
+    expect(more.getAttribute('aria-label')).toBe('Show 3 more documents')
+    expect(rows[1].querySelector('.ws-overview-change-more')).toBeNull()
+    more.click()
+    expect(rows[0].querySelectorAll('.ws-overview-change-doc')).toHaveLength(6)
+    expect(rows[0].querySelector('.ws-overview-change-more')).toBeNull()
+    expect(rows[1].querySelectorAll('.ws-overview-change-doc')).toHaveLength(1)
     rows[0].querySelector<HTMLButtonElement>('.ws-overview-change-open')!.click(); await settle()
     expect(onOpen).toHaveBeenLastCalledWith(cards[0], 'host-a:/report-0.html')
     expect(overview.el.querySelector('.ws-overview-change[data-uid="alpha"]')).toBeNull()
