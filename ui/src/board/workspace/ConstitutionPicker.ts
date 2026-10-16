@@ -35,6 +35,7 @@ export class ConstitutionPicker {
   private release: Release | null = null
   private selected: string | null = null
   private revealed: string | null = null
+  private revealFrame = 0
   private readonly rows = new Map<string, { el: HTMLElement; name: HTMLElement; owner: HTMLElement; card: KanbanCard; revision: string }>()
   /** Each group's box: its caption, then its rows, so a sticky caption leaves with its group. */
   private readonly groups = new Map<string, HTMLElement>()
@@ -91,6 +92,7 @@ export class ConstitutionPicker {
     if (selected !== this.selected && current && this.opts.revealCurrent && !matches(current)) {
       this.find.value = ''; query = ''
     }
+    if (selected !== this.selected) { cancelAnimationFrame(this.revealFrame); this.revealFrame = 0 }
     this.selected = selected
     const visible = cards.filter(matches)
     const keys = new Set(visible.map(identity))
@@ -168,10 +170,20 @@ export class ConstitutionPicker {
   }
   /** Scroll the current row into view; its scroll margin keeps its group's caption in sight above it. */
   reveal(): void {
-    const row = this.selected ? this.rows.get(this.selected) : undefined
+    const selected = this.selected
+    const row = selected ? this.rows.get(selected) : undefined
     if (!row) return
-    row.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
-    this.revealed = this.selected
+    cancelAnimationFrame(this.revealFrame)
+    this.revealFrame = requestAnimationFrame(() => {
+      this.revealFrame = 0
+      if (this.selected !== selected || !row.el.isConnected || this.opts.active?.() === false) return
+      const bounds = this.list.getBoundingClientRect(), rect = row.el.getBoundingClientRect()
+      const margin = Number.parseFloat(getComputedStyle(row.el).scrollMarginTop) || 0
+      if (!rect.height || !bounds.height || rect.top - margin < bounds.top || rect.bottom > bounds.bottom || rect.left < bounds.left || rect.right > bounds.right) {
+        row.el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
+      }
+      this.revealed = selected
+    })
   }
   private readonly keydown = (event: KeyboardEvent): void => {
     const mine = this.el.contains(event.target as Node) || (event.target === this.find && this.listening)
@@ -192,6 +204,7 @@ export class ConstitutionPicker {
     if (this.isOpen && !this.el.contains(event.target as Node) && event.target !== this.find) this.close()
   }
   dispose(): void {
+    cancelAnimationFrame(this.revealFrame)
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
     this.el.remove()

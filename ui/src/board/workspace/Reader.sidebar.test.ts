@@ -26,6 +26,8 @@ let storage: Map<string, string>
 let reduced: boolean
 const scrollCurrent = vi.fn()
 let readers: Reader[]
+let frames: FrameRequestCallback[]
+const paintFrame = (): void => { const pending = frames; frames = []; pending.forEach(frame => frame(performance.now())) }
 let listedCards: KanbanCard[]
 const onChannel = vi.fn<(card: KanbanCard) => void>()
 const channels = [alpha, beta, gamma]
@@ -81,7 +83,8 @@ beforeEach(() => {
     removeEventListener: vi.fn(),
   }))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
-  vi.stubGlobal('requestAnimationFrame', () => 1)
+  frames = []
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback))
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   document.body.replaceChildren()
   sessionStorage.clear()
@@ -508,6 +511,7 @@ describe('Reader channel sidebar', () => {
     reduced = reduce
     storage.set('shuttle:workspace:sidebar', 'true')
     const reader = makeReader(alpha)
+    paintFrame()
     onChannel.mockImplementation(next => reader.show(channel(next), fiberKey(next), 'Board', next))
     const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar input')!
     find.value = 'Alpha'; find.dispatchEvent(new Event('input'))
@@ -520,6 +524,7 @@ describe('Reader channel sidebar', () => {
       expect(rows[0].dataset.channelUid).toBe(expected.uid)
       expect(rows[0].dataset.channelOwner).toBe(expected.originId)
       expect(reader.el.querySelector('.ws-channel-title')?.textContent).toBe(expected.name)
+      paintFrame()
       expect(scrollCurrent).toHaveBeenLastCalledWith({ block: 'nearest', inline: 'nearest', behavior: reduce ? 'instant' : 'smooth' })
     }
     expect(find.value).toBe('')
