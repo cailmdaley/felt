@@ -347,7 +347,7 @@ export class Overview {
       }, { root: this.el, rootMargin: LOAD_POLICY.ring })
     }
     if (typeof ResizeObserver !== 'undefined') {
-      this.resizeObserver = new ResizeObserver(() => { this.scaleThumbnails(); this.schedule() })
+      this.resizeObserver = new ResizeObserver(this.schedule)
       this.resizeObserver.observe(this.el)
     }
     window.addEventListener('resize', this.schedule)
@@ -1061,8 +1061,5 @@ export class Overview {
   private pump(): void {
     if (this.disposed || !this.visible) return
     pumpThumbnails()
-  }
-  private scaleThumbnails(): void {
-    for (const thumb of this.thumbnails.values()) thumb.scale()
   }
 }

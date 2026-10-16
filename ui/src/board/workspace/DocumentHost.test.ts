@@ -52,7 +52,7 @@ const ready = async (call = render.calls.at(-1)!) => {
 describe('say it once label bars', () => {
   it.each([false, true])('updates last-changed and owner-aware arrivals without rerendering or reloading (phone=%s)', phone => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query === '(max-width: 600px)', addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
     vi.stubGlobal('requestAnimationFrame', () => 1)
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const prose = vi.fn(() => document.createElement('div'))
@@ -498,7 +498,7 @@ describe('refresh and failure states', () => {
 describe('report scrolling', () => {
   it('sends HTML scrolling commands without reading the report DOM', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
     vi.stubGlobal('requestAnimationFrame', () => 1)
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const report: WorkspaceDocument = { ...docs[0], kind: 'html' }
