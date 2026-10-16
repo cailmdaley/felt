@@ -13,9 +13,9 @@ export interface ConstitutionPickerOptions {
   /** The retained root, after placement and revision patching, on every refresh. */
   onRow?(el: HTMLElement, card: KanbanCard): void
   onRemove?(el: HTMLElement): void
-  /** Capture shared inputs once for the whole row pass. */
+  /** Capture shared inputs once for the whole row pass; `onRefresh` follows it whether or not the pass completes. */
   onBeforeRefresh?(): void
-  /** After every refresh, once rows and captions are placed. */
+  /** After every refresh, once rows and captions are placed, or once a row pass has thrown. */
   onRefresh?(): void
   onOpen(card: KanbanCard): void
   /** A field the picker reads instead of its own (the board bar's Find), heard only while `active`. */
@@ -81,6 +81,9 @@ export class ConstitutionPicker {
   }
   refresh(reveal = true): void {
     this.opts.onBeforeRefresh?.()
+    try { this.placeRows(reveal) } finally { this.opts.onRefresh?.() }
+  }
+  private placeRows(reveal: boolean): void {
     const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
     const cards = [...new Map(this.opts.cards().map(card => [identity(card), card])).values()]
     const current = cards.find(card => this.opts.current?.(card))
@@ -166,7 +169,6 @@ export class ConstitutionPicker {
     }
     for (const [group, box] of this.groups) if (!groups.has(group)) { box.remove(); this.groups.delete(group) }
     if (reveal && selected && selected !== this.revealed) this.reveal()
-    this.opts.onRefresh?.()
   }
   /** Scroll the current row into view; its scroll margin keeps its group's caption in sight above it. */
   reveal(): void {

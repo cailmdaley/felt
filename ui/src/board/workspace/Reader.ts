@@ -264,7 +264,7 @@ export class Reader {
         else this.opts.themes?.unbind(el)
       },
       onRemove: el => { this.sidebarRows.delete(el); this.opts.themes?.unbind(el) },
-      onRefresh: () => { this.renderIndex(); this.sidebarSnapshot = null },
+      onRefresh: () => { try { this.renderIndex() } finally { this.sidebarSnapshot = null } },
     })
     this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
