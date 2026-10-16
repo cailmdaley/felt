@@ -191,7 +191,8 @@ views as **join rung 0** — the structural pairing that replaces an inference.
   with the session that made it: one line per commit carrying `sha`, `subject`,
   `repo`, the `--shortstat` counts, and `session` / `tmux` / `cwd`. It replaces
   parsing a fiber name out of a commit subject.
-  `shuttle hook commit` remains available for explicit integrations, but the plugin no longer registers a commit recorder.
+  The Claude/Codex plugin no longer registers a commit recorder.
+  `shuttle hook commit` remains available and is still called by the Pi extension.
   The daemon is a reader only, and an absent or stale ledger is valid.
   Coverage is therefore partial:
   commits made outside an agent session, or before the plugin was installed,

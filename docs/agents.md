@@ -113,7 +113,7 @@ plugin.
 
 The logic lives in the owning binary, not the script. `remind.sh` and
 `touch.sh` call `felt hook pretool` and `felt hook posttool`; `event.sh` calls `shuttle hook event`.
-The plugin no longer records commits automatically; `shuttle hook commit` remains available for explicit integrations.
+The Claude/Codex plugin no longer records commits automatically; `shuttle hook commit` remains available and is still used by the Pi extension.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
 `handoff.sh` calls `shuttle hook handoff` without starting Node.
