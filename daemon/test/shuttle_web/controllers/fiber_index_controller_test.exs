@@ -81,6 +81,21 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     refute get_resp_header(updated, "etag") == [etag]
   end
 
+  test "a refresh over unchanged stores keeps the etag", %{clock: clock} do
+    first = warm()
+    [etag] = get_resp_header(first, "etag")
+    Agent.update(clock, fn _ -> 30_000 end)
+    assert request().status == 200
+    assert_receive {:refresh, worker}
+    finish(worker, {:ok, %{body("First") | generated_at: "later stamp"}})
+
+    refreshed = request()
+    assert Jason.decode!(refreshed.resp_body)["generated_at"] == "later stamp"
+    assert get_resp_header(refreshed, "etag") == [etag]
+    conditional = api_conn() |> put_req_header("if-none-match", etag) |> get(@url)
+    assert conditional.status == 304
+  end
+
   test "cold concurrent callers share a listing" do
     tasks = for _ <- 1..8, do: Task.async(fn -> request() end)
     assert_receive {:refresh, worker}
