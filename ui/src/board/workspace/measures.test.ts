@@ -16,7 +16,7 @@ it('reads minified second durations and milliseconds on the same clock', () => {
   el.remove()
 })
 
-it('reads style once across transitions and invalidates on appearance and channel theme changes', () => {
+it('reads style once across transitions and invalidates on appearance changes and on request', () => {
   const el = document.createElement('div'); document.body.append(el)
   el.style.setProperty('--ws-crossing', '.28s')
   el.style.setProperty('--ws-ease', 'ease')
@@ -27,7 +27,7 @@ it('reads style once across transitions and invalidates on appearance and channe
     workspaceMeasure(el, 'crossing', 0)
     expect(read).toHaveBeenCalledOnce()
     el.style.setProperty('--ws-crossing', '100ms')
-    el.dispatchEvent(new Event('workspace-theme-change', { bubbles: true }))
+    invalidateWorkspaceMeasures(el)
     expect(workspaceMeasure(el, 'crossing', 0)).toBe(100)
     window.dispatchEvent(new Event(APPEARANCE_CHANGED))
     expect(workspaceMeasure(el, 'crossing', 0)).toBe(100)
