@@ -201,7 +201,7 @@ export class ChannelThemes {
     } catch (error) {
       console.warn('Shuttle theme: CSS could not be parsed; using the bundled base', error)
       entry.custom = ''
-      entry.compiled = scopeTheme(base, selector, entry.scope, this.defaults, assetBase)
+      this.compile(entry)
     }
   }
   /** Custom CSS is scoped to its channel; a bundled base is scoped to the base, shared by its channels. */
