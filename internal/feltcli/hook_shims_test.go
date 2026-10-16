@@ -43,7 +43,7 @@ func TestReminderShellGate(t *testing.T) {
 }
 
 func TestHookShimsOneInvocationAndOldBinary(t *testing.T) {
-	for _, hook := range []string{"event.sh", "commit.sh", "remind.sh", "touch.sh"} {
+	for _, hook := range []string{"event.sh", "remind.sh", "touch.sh", "handoff.sh"} {
 		for _, status := range []string{"0", "1", "127"} {
 			t.Run(hook+status, func(t *testing.T) {
 				dir := t.TempDir()

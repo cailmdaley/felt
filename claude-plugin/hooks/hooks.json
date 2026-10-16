@@ -61,16 +61,6 @@
         ]
       },
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/hooks/commit.sh\"",
-            "async": true
-          }
-        ]
-      },
-      {
         "hooks": [
           {
             "type": "command",

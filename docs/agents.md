@@ -110,11 +110,10 @@ plugin.
 | `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
 | `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Calls `shuttle hook event` to append one JSON line to `~/.shuttle/events.jsonl` and handle Shuttle mailbox registration/delivery; writes nothing unless `~/.shuttle` exists |
-| `commit.sh` | `PostToolUse` (`Bash`) | Calls `shuttle hook commit` to record commits in `~/.shuttle/commits.jsonl` |
 
 The logic lives in the owning binary, not the script. `remind.sh` and
-`touch.sh` call `felt hook pretool` and `felt hook posttool`; `event.sh` and
-`commit.sh` call `shuttle hook event` and `shuttle hook commit`.
+`touch.sh` call `felt hook pretool` and `felt hook posttool`; `event.sh` calls `shuttle hook event`.
+The plugin no longer records commits automatically; `shuttle hook commit` remains available for explicit integrations.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
 
