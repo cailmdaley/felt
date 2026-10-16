@@ -9,7 +9,8 @@ import { ChannelThemes } from './ChannelThemes.js'
 import type { Channel, DocKey } from './documents.js'
 
 const alpha = card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a' })
-const beta = card({ id: 'work/beta', uid: 'beta', name: 'Beta', originId: 'host-b' })
+// Beta draws a base of its own, so the sheet it holds is released with its last binding.
+const beta = card({ id: 'work/beta', uid: 'beta', name: 'Beta', originId: 'host-b', theme: 'blueprint' })
 const gamma = card({ id: 'work/gamma', uid: 'gamma', name: 'Gamma', originId: 'host-c' })
 const fiberKey = (card: KanbanCard): DocKey => `fiber:${card.originId}:${card.uid ?? card.id}`
 const channel = (card: KanbanCard): Channel => ({

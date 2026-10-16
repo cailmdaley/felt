@@ -19,14 +19,19 @@ interface ThemeEntry {
   etag?: string
   readAt: number
   pending?: Promise<void>
-  style?: HTMLStyleElement
+  /** The scope of the sheet this entry holds while it has painted roots. */
+  sheet?: string
 }
+interface ThemeSheet { style: HTMLStyleElement; users: Set<ThemeEntry> }
 
-/** One owner-routed, ETag-revalidated theme per channel; styles exist only for bound surfaces. */
+/** One owner-routed, ETag-revalidated theme per channel; styles exist only for bound surfaces.
+ *  Channels without custom CSS share one sheet per bundled base, so the document carries a
+ *  handful of theme sheets however many channels are drawn. */
 export class ChannelThemes {
   private readonly entries = new Map<string, ThemeEntry>()
-  /** Bundled CSS has no fiber-relative assets; only its generated scope varies by channel. */
+  /** Bundled CSS has no fiber-relative assets, so each base compiles once into its shared scope. */
   private readonly bundledCompiled = new Map<string, string>()
+  private readonly sheets = new Map<string, ThemeSheet>()
   private readonly roots = new Map<HTMLElement, ThemeEntry>()
   private readonly readers = new Set<HTMLElement>()
   private readonly plain = new Set<string>()
@@ -176,13 +181,13 @@ export class ChannelThemes {
     if (typeof CSSStyleSheet.prototype.replaceSync !== 'function') { entry.compiled = ''; return }
     const base = bundled[`./themes/${entry.base}.css`] ?? ''
     if (!entry.custom) {
-      const namespace = 'shuttle-bundled-scope-placeholder'
-      let template = this.bundledCompiled.get(entry.base)
-      if (template === undefined) {
-        template = scopeTheme(base, `[data-ws-theme="${namespace}"]`, namespace, this.defaults)
-        this.bundledCompiled.set(entry.base, template)
+      let compiled = this.bundledCompiled.get(entry.base)
+      if (compiled === undefined) {
+        const scope = bundledScope(entry.base)
+        compiled = scopeTheme(base, `[data-ws-theme="${scope}"]`, scope, this.defaults)
+        this.bundledCompiled.set(entry.base, compiled)
       }
-      entry.compiled = template.replaceAll(namespace, entry.scope)
+      entry.compiled = compiled
       return
     }
     const asset = new URL(fileBytesUrl(this.base, '', entry.card.originId), document.baseURI)
@@ -199,30 +204,49 @@ export class ChannelThemes {
       entry.compiled = scopeTheme(base, selector, entry.scope, this.defaults, assetBase)
     }
   }
+  /** Custom CSS is scoped to its channel; a bundled base is scoped to the base, shared by its channels. */
+  private sheetScope(entry: ThemeEntry): string { return entry.custom ? entry.scope : bundledScope(entry.base) }
   private paint(entry: ThemeEntry): void {
     const roots = [...this.roots].filter(([, theme]) => theme === entry).map(([root]) => root)
     const plain = this.plain.has(entry.key)
+    const scope = plain ? undefined : this.sheetScope(entry)
     for (const root of roots) {
-      const scope = plain ? undefined : entry.scope, name = plain ? 'plain' : entry.base
+      const name = plain ? 'plain' : entry.base
       if (root.dataset.wsTheme !== scope || root.dataset.wsThemeName !== name) this.changed(root)
-      if (plain) delete root.dataset.wsTheme
-      else root.dataset.wsTheme = entry.scope
+      if (scope === undefined) delete root.dataset.wsTheme
+      else root.dataset.wsTheme = scope
       root.dataset.wsThemeName = name
     }
-    if (!roots.length || plain) {
-      if (entry.style) for (const root of roots) this.changed(root)
-      entry.style?.remove(); entry.style = undefined
+    const held = entry.sheet
+    if (!roots.length || scope === undefined) {
+      if (held !== undefined) { this.release(entry); for (const root of roots) this.changed(root) }
       return
     }
-    let installed = false
-    if (!entry.style) {
-      entry.style = document.createElement('style')
-      entry.style.dataset.wsThemeSheet = entry.scope
-      document.head.append(entry.style)
-      installed = true
+    if (held !== scope) this.release(entry)
+    let sheet = this.sheets.get(scope)
+    let installed = held !== scope
+    if (!sheet) {
+      const style = document.createElement('style')
+      style.dataset.wsThemeSheet = scope
+      document.head.append(style)
+      sheet = { style, users: new Set() }
+      this.sheets.set(scope, sheet)
     }
-    if (entry.style.textContent !== entry.compiled) { entry.style.textContent = entry.compiled; installed = true }
+    sheet.users.add(entry); entry.sheet = scope
+    if (sheet.style.textContent !== entry.compiled) {
+      sheet.style.textContent = entry.compiled; installed = true
+      for (const user of sheet.users) if (user !== entry) for (const [root, bound] of this.roots) if (bound === user) this.changed(root)
+    }
     if (installed) for (const root of roots) this.changed(root)
+  }
+  private release(entry: ThemeEntry): void {
+    const scope = entry.sheet
+    entry.sheet = undefined
+    if (scope === undefined) return
+    const sheet = this.sheets.get(scope)
+    if (!sheet) return
+    sheet.users.delete(entry)
+    if (!sheet.users.size) { sheet.style.remove(); this.sheets.delete(scope) }
   }
   private refresh(entry: ThemeEntry): Promise<void> {
     if (entry.pending) return entry.pending
@@ -266,10 +290,15 @@ export class ChannelThemes {
     this.disposed = true
     window.removeEventListener(APPEARANCE_CHANGED, this.reappear)
     for (const root of [...this.roots.keys()]) this.unbind(root)
+    for (const sheet of this.sheets.values()) sheet.style.remove()
+    this.sheets.clear()
     this.entries.clear()
     this.actDefaults.remove()
   }
 }
+
+/** The shared scope of a bundled base; channel scopes are hashes, so the prefix cannot collide. */
+function bundledScope(base: string): string { return `ws-base-${base}` }
 
 /** Stable, selector-safe identity; two 32-bit hashes keep hosts with mirrored ids distinct. */
 export function themeScopeId(key: string): string {
