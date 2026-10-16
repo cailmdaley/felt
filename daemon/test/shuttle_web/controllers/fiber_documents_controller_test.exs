@@ -36,6 +36,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
     Shuttle.Test.Env.put_env("SHUTTLE_HOST", "test-host")
+    Shuttle.Test.Env.start_scoped!({Shuttle.FiberIndex, name: nil})
 
     on_exit(fn -> File.rm_rf(root) end)
 
@@ -118,6 +119,69 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert fiber["name"] == "Indexed fiber"
     assert fiber["id"] == "tests/indexed"
     assert Map.keys(fiber) -- ["id", "slug", "name"] == []
+
+    # Neither felt nor a store remains readable: a warm hit is memory-only.
+    File.rm_rf!(Path.join(store, ".felt"))
+    Shuttle.Test.Env.put_env("PATH", "")
+    warm = get(api_conn(), "/api/v1/fibers?fields=index")
+    assert warm.status == 200
+    assert warm.resp_body == conn.resp_body
+    [etag] = get_resp_header(warm, "etag")
+    assert etag == ~s("#{Base.encode16(:crypto.hash(:sha256, warm.resp_body), case: :lower)}")
+
+    unchanged =
+      api_conn() |> put_req_header("if-none-match", etag) |> get("/api/v1/fibers?fields=index")
+
+    assert unchanged.status == 304
+    assert unchanged.resp_body == ""
+    assert get_resp_header(unchanged, "etag") == [etag]
+
+    changed =
+      api_conn()
+      |> put_req_header("if-none-match", ~s("other"))
+      |> get("/api/v1/fibers?fields=index")
+
+    assert changed.status == 200
+    assert changed.resp_body == warm.resp_body
+  end
+
+  test "warming the index does not cache full metadata or body listings", %{store: store} do
+    write_fiber!(store, "tests/live-list", "---\nname: First\n---\n\nFirst body.\n")
+    first = get(api_conn(), "/api/v1/fibers?fields=index&body=true")
+    assert [%{"fiber" => %{"name" => "First"} = fiber}] = Jason.decode!(first.resp_body)["fibers"]
+    refute Map.has_key?(fiber, "body")
+
+    write_fiber!(store, "tests/live-list", "---\nname: Second\n---\n\nSecond body.\n")
+    assert get(api_conn(), "/api/v1/fibers?fields=index").resp_body == first.resp_body
+    metadata = get(api_conn(), "/api/v1/fibers")
+    assert [%{"fiber" => %{"name" => "Second"}}] = Jason.decode!(metadata.resp_body)["fibers"]
+    content = get(api_conn(), "/api/v1/fibers?body=true")
+
+    assert [%{"fiber" => %{"name" => "Second", "body" => "Second body."}}] =
+             Jason.decode!(content.resp_body)["fibers"]
+  end
+
+  test "index projection preserves UID identity and deduplication through symlinked stores", %{
+    store: store
+  } do
+    project = Path.join(Path.dirname(store), "project")
+    uid = "01JZ0000000000000000000007"
+    write_fiber!(project, "nested/item", "---\nid: #{uid}\nname: Linked\n---\n\nBody.\n")
+    File.mkdir_p!(Path.join(store, ".felt"))
+    File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "linked"]))
+
+    full = get(api_conn(), "/api/v1/fibers") |> Map.fetch!(:resp_body) |> Jason.decode!()
+
+    index =
+      get(api_conn(), "/api/v1/fibers?fields=index") |> Map.fetch!(:resp_body) |> Jason.decode!()
+
+    assert [%{"fiber" => %{"id" => ^uid, "slug" => "nested/item", "name" => "Linked"}}] =
+             index["fibers"]
+
+    assert index["fibers"] ==
+             Enum.map(full["fibers"], fn row ->
+               %{"fiber" => Map.take(row["fiber"], ["id", "slug", "name"])}
+             end)
   end
 
   test "GET /api/v1/fibers?body=true still finds each fiber's report", %{store: store} do
@@ -260,6 +324,22 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       |> Enum.sort()
 
     assert owner_names == ["Closed pinned", "Managed", "Plain todo"]
+
+    # The owner feed takes precedence over fields=index without body=true.
+    owner_index = get(api_conn(), "/api/v1/fibers?shuttle=true&fields=index")
+
+    assert Jason.decode!(owner_index.resp_body)["fibers"] ==
+             Jason.decode!(only.resp_body)["fibers"]
+
+    # With both flags, the direct owned projection is selected, not the
+    # all-fiber cache or a body listing.
+    projected = get(api_conn(), "/api/v1/fibers?shuttle=true&body=true&fields=index")
+    rows = Jason.decode!(projected.resp_body)["fibers"]
+    assert Enum.sort(Enum.map(rows, & &1["fiber"]["name"])) == owner_names
+
+    assert Enum.all?(rows, fn row ->
+             Map.keys(row) == ["fiber"] and Map.keys(row["fiber"]) -- ["id", "slug", "name"] == []
+           end)
   end
 
   test "GET /api/v1/fibers?shuttle=true stamps live runtime from the poller",

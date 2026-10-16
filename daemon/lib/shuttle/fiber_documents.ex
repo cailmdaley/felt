@@ -85,6 +85,14 @@ defmodule Shuttle.FiberDocuments do
     collect(opts, Keyword.get(opts, :with_body, false), mode)
   end
 
+  @doc "The all-fiber index, preserving logical ids, canonical slugs and store deduplication."
+  def index do
+    with {:ok, %{fibers: entries} = body} <- collect([], false, :index) do
+      {:ok,
+       %{body | fibers: Enum.map(entries, &%{fiber: Map.take(&1.fiber, ["id", "slug", "name"])})}}
+    end
+  end
+
   defp collect(opts, with_body?, mode) do
     stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
 
@@ -301,7 +309,11 @@ defmodule Shuttle.FiberDocuments do
   end
 
   defp list_store(store, with_body?, mode, cli \\ "felt") do
-    with {:ok, rows} <- ls_rows(store, cli, with_body?) do
+    # Identity and path are needed before projection: they preserve UID-based
+    # deduplication and canonical slugs across symlinked substores.
+    fields = if mode == :index, do: "id,uid,name,path"
+
+    with {:ok, rows} <- ls_rows(store, cli, with_body?, fields) do
       # A metadata listing carries felt's native `report_path`, so its rows are
       # never stat'ed; `ls --body` omits that field, so a body listing stats.
       report_mode = if with_body?, do: :stat, else: :field
@@ -309,8 +321,9 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  defp ls_rows(store, cli, with_body? \\ false) do
+  defp ls_rows(store, cli, with_body? \\ false, fields \\ nil) do
     args = if cli == "shuttle", do: ["ls", "-s", "all", "-j"], else: list_args(with_body?)
+    args = if fields, do: args ++ ["--json-field", fields], else: args
 
     # Do NOT fold stderr into stdout: the CLIs can report warnings for stray
     # non-fiber `.md` files while still emitting valid JSON on stdout. Capturing

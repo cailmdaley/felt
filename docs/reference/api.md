@@ -189,6 +189,14 @@ harness processes sharing one transcript.
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
 | `GET /meeting/audio` | recorder-addressed | WebSocket: relay a phone's microphone through the serving hub to the selected recorder |
 
+`GET /fibers?fields=index` returns the local wikilink and parent-picker index: only `id`, optional `slug`, and `name` inside each `fiber` row.
+The first request shares one live listing with concurrent callers.
+Warm requests return a pre-encoded in-memory response; after 30 seconds, the next request starts one background refresh and returns the cached response immediately.
+Store-registry changes become visible through that refresh, and a failed refresh retains the last successful response with a 30-second retry interval.
+A strong `ETag` hashes the response bytes; matching `If-None-Match` returns 304 with an empty body.
+Full metadata and `body=true` listings without `fields=index` stay live.
+`shuttle=true` without bodies takes precedence and serves the poller's owner feed, independently of the all-fiber index cache.
+
 `GET /meeting?recorder=<host>` returns `{available, modes, recorder, meeting}` from the addressed daemon.
 `origin=<host>` also supports host-addressed reads.
 `modes` lists the recording inputs that host supports: `call` (its microphone and system audio), `room` (its microphone), or `phone` (streamed phone microphone).
