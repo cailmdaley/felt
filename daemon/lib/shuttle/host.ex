@@ -119,6 +119,31 @@ defmodule Shuttle.Host do
     end
   end
 
+  @doc """
+  The most workers this daemon runs at once, from host.json
+  `"max_concurrent_workers"` (a positive integer), falling back to `default`.
+  Daemon-only (the Go reader ignores the key).
+  """
+  @spec max_concurrent_workers(pos_integer()) :: pos_integer()
+  def max_concurrent_workers(default) when is_integer(default) and default > 0 do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, %{"max_concurrent_workers" => n}} when is_integer(n) and n > 0 ->
+        n
+
+      {:ok, %{"max_concurrent_workers" => value}} ->
+        Logger.warning(
+          ~s(#{path}: "max_concurrent_workers" must be a positive integer, got #{inspect(value)}; using #{default})
+        )
+
+        default
+
+      _ ->
+        default
+    end
+  end
+
   @doc "Full-scan budget from host.json, falling back to the configured default."
   @spec full_scan_budget_ms(non_neg_integer()) :: non_neg_integer()
   def full_scan_budget_ms(default) when is_integer(default) and default >= 0 do

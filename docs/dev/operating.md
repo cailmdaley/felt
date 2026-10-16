@@ -65,9 +65,14 @@ Dispatch sanity ladder:
    daemon killed hard and back within seconds, workers intact, releases itself;
    the boot log line `boot quarantine auto-released (…)` or `boot quarantine
    held (…)` says which happened and why.)
-4. `shuttle` sees it but daemon doesn't → daemon binary is stale.
+4. Fiber is `active` and armed, but in neither `eligible[]` nor
+   `pending_launch`, and the snapshot's `claimed_count` equals
+   `max_concurrent`? → the host is at its worker cap and the fiber launches
+   when a slot frees. The cap defaults to 10; raise it per host with host.json
+   `"max_concurrent_workers": <n>` and a restart.
+5. `shuttle` sees it but daemon doesn't → daemon binary is stale.
    `make restart` (then `shuttle daemon release`).
-5. Daemon sees it but agent never appears → check the resolved agent's `cli`
+6. Daemon sees it but agent never appears → check the resolved agent's `cli`
    (`shuttle agents`) and that the wrapper is on `PATH`.
 
 **"The terminal opens and closes instantly", or the card never moves and no

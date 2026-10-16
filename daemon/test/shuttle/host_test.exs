@@ -132,6 +132,42 @@ defmodule Shuttle.HostTest do
     end
   end
 
+  describe "max_concurrent_workers/1" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "shuttle-host-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      %{host_file: Path.join(dir, "host.json")}
+    end
+
+    test "uses the host override, falling back to the default when absent", %{host_file: file} do
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+
+      for {body, want} <- [
+            {~s({"max_concurrent_workers":32}), 32},
+            {~s({"class":"shared-multi-user"}), 10}
+          ] do
+        File.write!(file, body)
+        assert Host.max_concurrent_workers(10) == want, body
+      end
+    end
+
+    test "rejects a zero, negative or non-integer override", %{host_file: file} do
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+
+      for body <- [
+            ~s({"max_concurrent_workers":0}),
+            ~s({"max_concurrent_workers":-3}),
+            ~s({"max_concurrent_workers":"many"})
+          ] do
+        File.write!(file, body)
+
+        assert capture_log(fn -> assert Host.max_concurrent_workers(10) == 10 end) =~
+                 "must be a positive integer"
+      end
+    end
+  end
+
   describe "resolve!/1" do
     test "raises with the file's path on a malformed host.json" do
       path = Path.join(@fixture_dir, "malformed.json")

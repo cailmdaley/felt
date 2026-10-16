@@ -656,7 +656,9 @@ defmodule Shuttle.Poller do
       self_ref: self_ref,
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, @default_poll_interval_ms),
       max_concurrent_workers:
-        Keyword.get(opts, :max_concurrent_workers, @default_max_concurrent_workers),
+        Keyword.get_lazy(opts, :max_concurrent_workers, fn ->
+          Shuttle.Host.max_concurrent_workers(@default_max_concurrent_workers)
+        end),
       heartbeat_interval_ms:
         Keyword.get(opts, :heartbeat_interval_ms, @default_heartbeat_interval_ms),
       tick_timer_ref: nil,
