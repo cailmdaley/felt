@@ -1852,7 +1852,7 @@ for (const format of ['mp4', 'webm']) test(`Video ${format} plays and seeks nati
   assert.ok(await video.evaluate(v => v === window.__video && Math.abs(v.currentTime - 0.5) < 0.1 && getComputedStyle(v.closest('.ws-content')).opacity === '1'))
 })
 
-test('Native PDF renderer loads fixture; owner route and first-page preview', async p => {
+test('Native PDF renderer loads fixture; owner route; Overview draws PDFs as faces', async p => {
   await open(p); await choose(p, 'response.pdf')
   const pdf = selected(p).locator('iframe')
   await pdf.waitFor()
@@ -1878,7 +1878,8 @@ test('Native PDF renderer loads fixture; owner route and first-page preview', as
   await leave(p)
   await p.locator('[data-view="shelf"]').click()
   await revealLatestFiles(p)
-  await poll(p, () => [...document.querySelectorAll('.ws-overview iframe')].some(f => f.src.includes('#page=1')))
+  await poll(p, () => document.querySelectorAll('.ws-overview .kbn-thumbnail-pdf').length > 0)
+  assert.equal(await p.locator('.ws-overview .kbn-thumbnail-pdf iframe').count(), 0, 'PDF thumbnails draw a face, not the native viewer')
 })
 
 test('Remote worker conversation records attach handler without launching a terminal', async p => {
