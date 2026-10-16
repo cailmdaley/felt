@@ -27,25 +27,27 @@ shared plugin for both.
 
 ## Context handoff nudges
 
-The first nudge fires at `min(window × 75%, 500000)` context tokens; the firmer nudge fires at `min(window × 88%, 750000)`.
+The Claude Code hook's first nudge fires at `min(window × 75%, 250000)` context tokens; the firmer nudge fires at `min(window × 88%, 350000)`.
+Pi and Codex retain `min(window × 75%, 500000)` and `min(window × 88%, 750000)`.
 Each level fires once per session, even after resuming or compacting.
 If a turn crosses both thresholds, Pi sends the first nudge and escalates on the next turn if work continues.
 The integration advises a durable handoff; it neither terminates the session nor changes interactive Pi's compaction settings.
 Confer can still veto automatic compaction for its workers, but felt owns their nudges.
 
-| Environment variable | Default |
-|---|---:|
-| `SHUTTLE_HANDOFF_PCT` | 75 |
-| `SHUTTLE_HANDOFF_TOKENS` | 500000 |
-| `SHUTTLE_HANDOFF_HARD_PCT` | 88 |
-| `SHUTTLE_HANDOFF_HARD_TOKENS` | 750000 |
+| Environment variable | Claude Code default | Pi / Codex default |
+|---|---:|---:|
+| `SHUTTLE_HANDOFF_PCT` | 75 | 75 |
+| `SHUTTLE_HANDOFF_TOKENS` | 250000 | 500000 |
+| `SHUTTLE_HANDOFF_HARD_PCT` | 88 | 88 |
+| `SHUTTLE_HANDOFF_HARD_TOKENS` | 350000 | 750000 |
 
 Percentages must be positive and at most 100; token limits must be positive.
 Hard settings must be at least their corresponding first-nudge settings.
 Invalid configuration disables nudges without failing tools.
 Pi uses `getContextUsage()` and records `shuttle-handoff` entries in the session; it also honors existing `confer-handoff` entries.
 
-The Claude/Codex shim needs Node on the hook's PATH (or a standard Homebrew/system install); a missing runtime fails open.
+The Claude/Codex shim calls `shuttle hook handoff`; a missing or old binary fails open.
+It does not start Node.
 It reads at most the last 256 KiB of the transcript and skips malformed, partial, or oversized records.
 If that suffix contains no usage record, it emits nothing and tries again at the next hook.
 Claude context is the latest assistant's input, cache-read, cache-creation, and output tokens combined.

@@ -50,6 +50,9 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 		return err
 	}
 	values := []float64{75, 500000, 88, 750000}
+	if usage.Harness == "claude" {
+		values[1], values[3] = 250000, 350000
+	}
 	for i, key := range []string{"SHUTTLE_HANDOFF_PCT", "SHUTTLE_HANDOFF_TOKENS", "SHUTTLE_HANDOFF_HARD_PCT", "SHUTTLE_HANDOFF_HARD_TOKENS"} {
 		if raw, ok := a.env.LookupEnv(key); ok {
 			v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
@@ -95,7 +98,12 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 		if closeErr != nil {
 			return closeErr
 		}
-		return json.NewEncoder(out).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.Event, AdditionalContext: handoffNotice(*usage, level)}})
+		line, err := encodeJSONLine(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.Event, AdditionalContext: handoffNotice(*usage, level)}})
+		if err != nil {
+			return err
+		}
+		_, err = io.WriteString(out, line)
+		return err
 	}
 	return nil
 }
