@@ -31,7 +31,7 @@ func TestRecorderHookSchedule(t *testing.T) {
 				if strings.Contains(hook.Command, "commit.sh") {
 					t.Fatal("commit hook must not be registered")
 				}
-				wantAsync := strings.Contains(hook.Command, "event.sh") && (event == "SubagentStop" || event == "SessionEnd")
+				wantAsync := strings.Contains(hook.Command, "event.sh") && event == "SubagentStop"
 				if hook.Async != wantAsync {
 					t.Fatalf("%s %s: async=%v", event, hook.Command, hook.Async)
 				}

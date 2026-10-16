@@ -119,7 +119,8 @@ The Claude/Codex plugin no longer records commits automatically; `shuttle hook c
 `handoff.sh` calls `shuttle hook handoff` without starting Node.
 Once the felt skill has activated, `remind.sh` checks the existing session flag with shell builtins and skips the binary entirely for Claude's canonical payload.
 
-`event.sh` runs asynchronously on `SubagentStop` and `SessionEnd`.
+`event.sh` runs asynchronously only on `SubagentStop`, which never touches mailbox or native receiver registrations.
+`SessionEnd` stays synchronous so its receiver withdrawal finishes before a resumed `SessionStart` registers a new receiver.
 `SessionStart`, `PreToolUse`, `PostToolUse`, and `UserPromptSubmit` stay synchronous for queued peer-message delivery.
 `Stop` never drains the mailbox.
 `Stop` and `Notification` also stay synchronous: the daemon folds state transitions in file order, so a late stop or notification can close a newer working turn.
