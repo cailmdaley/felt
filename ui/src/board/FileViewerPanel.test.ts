@@ -20,6 +20,13 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('releases a thumbnail image source when its body is unmounted', () => {
+    const viewer = buildFileViewer('', '/plot.svg', 'host-a', undefined, undefined, { thumbnail: true })
+    const image = viewer.querySelector('img')!
+    expect(image.hasAttribute('src')).toBe(true)
+    disposeFileViewer(viewer)
+    expect(image.hasAttribute('src')).toBe(false)
+  })
   it('draws a PDF thumbnail as a glyph without creating a native viewer, while reading its title', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('%PDF-1.4 /Title (A paper)', { headers: { ETag: 'pdf-preview' } })))
     const onThumbnailSource = vi.fn(), onState = vi.fn()

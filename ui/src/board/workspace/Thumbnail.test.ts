@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
+import thumbnailCss from './thumbnail.css?raw'
 const renderer = vi.hoisted(() => ({ finishes: [] as Array<() => void>, fails: [] as Array<() => void> }))
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -17,6 +18,10 @@ import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
 import { RESOURCE_FRESH_MS } from '../documentResources.js'
 let thumbs: Thumbnail[] = []
 afterEach(() => { for (const thumb of thumbs) thumb.dispose(); thumbs = []; renderer.finishes = []; renderer.fails = []; vi.unstubAllGlobals(); vi.useRealTimers() })
+it('keeps the ready PDF glyph visible', () => {
+  const hidden = thumbnailCss.split('}').filter(rule => /display:\s*none/.test(rule)).join('}')
+  expect(hidden).not.toContain('.kbn-thumbnail-pdf')
+})
 it.each(['report.html', 'index.html'])('omits the generic %s fallback title from its face', basename => {
   const path = `/reports/${basename}`
   const thumb = new Thumbnail({ key: path, shuttleBase: '', file: { fullPath: path, owner: 'host', basename }, fallback: '', priority: () => 0, distance: () => 0 })
@@ -62,7 +67,23 @@ it('shares four loading and sixteen live slots across overview and tab previews,
   thumbs.push(tab); document.body.append(tab.el)
   pumpThumbnails()
   expect(tab.state).toBe('loading')
-  expect(thumbs.filter(t => t.body)).toHaveLength(16)
+  expect(thumbs.filter(t => t.body)).toHaveLength(1)
+})
+
+it('unmounts live and loading thumbnails outside the loading ring, including hidden surfaces', () => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  let priority = 2
+  for (let i = 0; i < 2; i++) {
+    const thumb = new Thumbnail({ key: `offscreen-${i}`, shuttleBase: '', file: { fullPath: `/${i}.html`, owner: 'host', basename: `${i}.html` }, fallback: '', priority: () => priority, distance: () => 0 })
+    thumbs.push(thumb)
+  }
+  pumpThumbnails(); renderer.finishes[0]()
+  expect(thumbs.map(t => t.state)).toEqual(['live', 'loading'])
+  priority = 0; pumpThumbnails()
+  expect(thumbs.map(t => t.state)).toEqual(['idle', 'idle'])
+  expect(thumbs.every(t => !t.body)).toBe(true)
+  renderer.finishes[1]()
+  expect(thumbs[1].state).toBe('idle')
 })
 
 it('scales from observed sizes without layout reads or unchanged style writes', () => {

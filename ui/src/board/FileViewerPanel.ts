@@ -374,6 +374,8 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
   viewerDisposers.set(wrap, () => {
     disposed = true
     controller.abort()
+    for (const image of wrap.querySelectorAll('img')) image.removeAttribute('src')
+    for (const frame of wrap.querySelectorAll('iframe')) { frame.removeAttribute('srcdoc'); frame.removeAttribute('src'); frame.remove() }
     if (native) { native.pause(); native.removeAttribute('src'); native.load() }
   })
   return wrap
