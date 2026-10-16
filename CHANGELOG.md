@@ -33,7 +33,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Every felt-enabled Pi, Claude Code, and supported Codex session receives a durable handoff nudge at the smaller of 75% context or 500,000 tokens, then a firmer nudge at the smaller of 88% or 750,000 tokens.
+- Every felt-enabled Pi, Claude Code, and supported Codex session receives a durable handoff nudge.
+  Claude Code nudges at the smaller of 75% context or 250,000 tokens, then at the smaller of 88% or 350,000 tokens.
+  Pi and Codex retain the 500,000-token and 750,000-token defaults with the same percentages.
   Each level fires once per session, including resumes; `SHUTTLE_HANDOFF_*` environment variables configure the thresholds.
   Claude Code and Codex require Node on the hook's PATH; unknown Claude windows use the absolute limits.
 
