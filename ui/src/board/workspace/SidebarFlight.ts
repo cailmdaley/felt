@@ -17,6 +17,9 @@ export class SidebarFlight {
   private readonly hidden = new Set<HTMLElement>()
   private readonly animations = new Set<Animation>()
   private readonly ghosts = new Set<HTMLElement>()
+  private readonly completions = new Map<HTMLElement, Promise<Animation>>()
+  /** Travelling roots and their owned animation lifetimes, without a browser animation query. */
+  get flights(): ReadonlyMap<HTMLElement, Promise<Animation>> { return this.completions }
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly overlay = document.createElement('div')
   private visible = false
@@ -50,7 +53,7 @@ export class SidebarFlight {
     const revision = this.revision
     const duration = workspaceMeasure(this.root, 'crossing', 280)
     const easing = workspaceToken(this.root, 'ease') || 'ease'
-    this.root.append(this.overlay)
+    const placements: { row: HTMLElement; start: DOMRect; end: DOMRect }[] = []
     for (const row of this.sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')) {
       const key = JSON.stringify([row.dataset.channelOwner, row.dataset.channelUid])
       const source = this.sources.get(key)
@@ -59,6 +62,10 @@ export class SidebarFlight {
       if (!slot.width || !slot.height) continue
       const desk = visible ? source.rect : this.returnRect(source)
       const start = interrupted.get(key) ?? (visible ? desk : slot), end = visible ? slot : desk
+      placements.push({ row, start, end })
+    }
+    this.root.append(this.overlay)
+    for (const { row, start, end } of placements) {
       const ghost = row.cloneNode(true) as HTMLElement
       ghost.classList.toggle('ws-flight-current', row.getAttribute('aria-current') === 'true')
       ghost.removeAttribute('aria-current'); ghost.removeAttribute('tabindex')
@@ -71,9 +78,10 @@ export class SidebarFlight {
         { transform: 'none', opacity: 1 },
       ], { duration, easing, fill: 'both' })
       this.animations.add(animation)
+      this.completions.set(ghost, animation.finished)
       void animation.finished.then(() => {
         if (revision !== this.revision) return
-        ghost.remove(); this.ghosts.delete(ghost); this.animations.delete(animation)
+        ghost.remove(); this.ghosts.delete(ghost); this.completions.delete(ghost); this.animations.delete(animation)
         row.classList.remove('ws-card-travelling')
         if (!this.animations.size) { this.overlay.remove(); if (!this.visible) this.restoreSources() }
       }).catch(() => { /* Interrupted flights continue from their current screen rects. */ })
@@ -108,7 +116,7 @@ export class SidebarFlight {
     for (const animation of this.animations) animation.cancel()
     this.animations.clear()
     for (const ghost of this.ghosts) ghost.remove()
-    this.ghosts.clear(); this.overlay.remove()
+    this.ghosts.clear(); this.completions.clear(); this.overlay.remove()
     for (const row of this.sidebar.querySelectorAll('.ws-card-travelling')) row.classList.remove('ws-card-travelling')
   }
   private readonly preference = (): void => {
