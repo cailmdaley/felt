@@ -47,15 +47,30 @@ func TestReminderShellGate(t *testing.T) {
 	if err := os.WriteFile(binary, []byte("#!/bin/bash\nprintf x >> \"$CALLS\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "felt-reminded-activated"), nil, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "felt-reminded-activated"), preToolActivationMarker("/transcript/current.jsonl"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "felt-reminded-legacy"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		payload string
 		skipped bool
 	}{
-		{`{"session_id":"activated","tool_name":"Read"}`, true},
-		{`{ "session_id" : "activated", "tool_name":"Read" }`, true},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","tool_name":"Read"}`, true},
+		{`{ "session_id" : "activated", "transcript_path" : "/transcript/current.jsonl", "tool_name":"Read" }`, true},
+		{`{"SESSION_ID":"activated","TRANSCRIPT_PATH":"/transcript/current.jsonl"}`, true},
+		{`{"session_id":"activated","transcript_path":"/transcript/fresh.jsonl"}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/CURRENT.jsonl"}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","session_id":"not-activated"}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","SESSION_ID":"not-activated"}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","\\u0073ession_id":"not-activated"}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","transcript_path":"/transcript/fresh.jsonl"}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","TRANSCRIPT_PATH":"/transcript/fresh.jsonl"}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","tool_input":{"session_id":"not-activated"}}`, false},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","tool_input":{"transcript_path":"/transcript/fresh.jsonl"}}`, false},
+		{`{"session_id":"activated","tool_name":"Read"}`, false},
+		{`{"session_id":"legacy","transcript_path":"/transcript/current.jsonl"}`, false},
 		{`{"session_id":"not-activated","tool_name":"Read"}`, false},
 		{`{"tool_input":{"session_id":"activated"},"session_id":"not-activated"}`, false},
 		{`{"session_id":"../activated"}`, false},

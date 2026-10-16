@@ -117,7 +117,8 @@ The Claude/Codex plugin no longer records commits automatically; `shuttle hook c
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
 `handoff.sh` calls `shuttle hook handoff` without starting Node.
-Once the felt skill has activated, `remind.sh` checks the existing session flag with shell builtins and skips the binary entirely for Claude's canonical payload.
+Once the felt skill has activated, `remind.sh` compares a versioned transcript-bound activation marker with shell builtins and skips the binary entirely for Claude's canonical payload.
+A reused session id with a different transcript, an empty legacy flag, or duplicate/escaped identity keys falls through to the Go gate; stale markers do not grant activation.
 
 `event.sh` runs asynchronously only on `SubagentStop`, which never touches mailbox or native receiver registrations.
 `SessionEnd` stays synchronous so its receiver withdrawal finishes before a resumed `SessionStart` registers a new receiver.
