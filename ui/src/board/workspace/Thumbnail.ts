@@ -63,6 +63,9 @@ class ThumbnailBudget {
     const ranks = new Map(all.map(t => [t, { priority: t.priority(), distance: t.distance() }]))
     const priority = (t: Thumbnail): number => ranks.get(t)!.priority
     const distance = (t: Thumbnail): number => ranks.get(t)!.distance
+    for (const thumb of all) {
+      if (priority(thumb) === 0 && (thumb.state === 'live' || thumb.state === 'loading')) thumb.unmount()
+    }
     const candidates = all.filter(t => t.state === 'idle' && t.file && priority(t) > 0)
       .sort((a, b) => priority(b) - priority(a) || distance(a) - distance(b) || a.key.localeCompare(b.key))
     for (const candidate of candidates) {

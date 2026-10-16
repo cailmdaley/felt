@@ -305,7 +305,7 @@ export class TabStrip {
       fallback: '', className: `ws-tab-thumb ws-tab-kind-${doc.kind}`, captioned: true,
       title: () => doc.kind === 'fiber' ? '' : record.caption,
       priority: () => live && this.visible && !this.disposed && this.el.isConnected && this.el.clientWidth > 0
-        ? (this.onScreen(record.button) ? 2 : 1) : 0,
+        ? (this.onScreen(record.button) ? 2 : 0) : 0,
       distance: () => Math.abs(this.records.indexOf(record) - this.selectedIndex),
     })
     record.button.append(thumb.el)
