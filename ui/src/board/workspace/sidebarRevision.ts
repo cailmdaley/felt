@@ -6,15 +6,15 @@ import { workerPlateFacts } from './workerPlate.js'
 import { claudeOpening } from '../conversationOpening.js'
 import { coarsePointer } from '../mobile.js'
 
-/** Only the paper, queue peek, worker target and host mark contribute to a row's face. */
-export function sidebarRevision(card: KanbanCard, members: readonly KanbanCard[], hostMark?: string): string {
+/** Only the paper, queue peek, worker target and phase, and host mark contribute to a row's face. */
+export function sidebarRevision(card: KanbanCard, members: readonly KanbanCard[], phase: boolean, hostMark?: string): string {
   return JSON.stringify([
     card.id, card.uid, card.originId, card.name, card.outcome, isAgentCard(card), onDesk(card),
     card.status === 'active' && card.runtimePhase !== 'attention' ? card.ask?.text : undefined,
     hostMark, fiberPageColumn(card), card.workerState, card.runtimePhase, card.launchError,
     card.tmuxSession, card.sessionLink, card.sessionUuid, card.desktopLink, card.shuttleHost,
     card.shuttleProjectDir, card.workerSurface, card.shuttleSurface, card.workerAgent, card.shuttleAgent,
-    card.lastActivityAt, workerPlateFacts(card), claudeOpening(), coarsePointer(),
+    card.lastActivityAt, phase, workerPlateFacts(card, Date.now(), phase), claudeOpening(), coarsePointer(),
     members.map(member => [member.id, member.uid, member.originId, member.name, queueMemberNote(member)]),
   ])
 }

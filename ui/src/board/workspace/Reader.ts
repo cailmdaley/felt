@@ -38,6 +38,8 @@ export interface ReaderOptions {
   onCrossing?(travel: number): void
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
+  /** Whether the card's worker pill draws its phase (the Desk draws it in flight); absent, it does. */
+  workerPhase?(card: KanbanCard): boolean
   onVerdict?(verdict: Verdict): void
   onCompose?(): void
   onConversation?(card: KanbanCard): void
@@ -255,7 +257,7 @@ export class Reader {
         const cards = this.opts.cards()
         this.sidebarSnapshot = { queues: sidebarQueue(this.opts.queueCards?.() ?? cards), marks: overviewHostMarks(cards.map(card => card.originId)) }
       },
-      revision: card => sidebarRevision(card, this.queues().members(card), this.sidebarHostMark(card)),
+      revision: card => sidebarRevision(card, this.queues().members(card), this.workerPhase(card), this.sidebarHostMark(card)),
       onRow: (el, card) => {
         this.sidebarRows.set(el, card)
         if (this.active && this.sidebarShown) this.opts.themes?.bind(el, card)
@@ -508,7 +510,7 @@ export class Reader {
     const card = this.currentCard
     const pill = card ? this.opts.workerPill?.(card) ?? null : null
     const focused = this.headWorker.contains(document.activeElement)
-    this.headWorker.replaceChildren(...(card && pill ? [workerPlate(card, pill)] : []))
+    this.headWorker.replaceChildren(...(card && pill ? [workerPlate(card, pill, this.workerPhase(card))] : []))
     this.headWorker.hidden = !pill
     if (focused) this.headWorker.querySelector<HTMLElement>('.kbn-card-worker')?.focus({ preventScroll: true })
   }
@@ -864,7 +866,7 @@ export class Reader {
     const pill = this.opts.workerPill?.(card)
     if (pill) {
       pill.dataset.part = 'act'; pill.dataset.act = 'worker'
-      meta.append(workerPlate(card, pill))
+      meta.append(workerPlate(card, pill, this.workerPhase(card)))
     }
     face.append(meta)
     if (queue) face.append(queue.list)
@@ -1114,6 +1116,7 @@ export class Reader {
     const marks = this.sidebarSnapshot?.marks ?? overviewHostMarks(this.opts.cards().map(row => row.originId))
     return marks.get(card.originId) ?? overviewHostMarks([...marks.keys(), card.originId]).get(card.originId) ?? '○'
   }
+  private workerPhase(card: KanbanCard): boolean { return this.opts.workerPhase?.(card) ?? true }
   private queues() { return this.sidebarSnapshot?.queues ?? sidebarQueue(this.opts.queueCards?.() ?? this.opts.cards()) }
   /** A peek-opened child steps from its visible head without becoming a row. */
   private sidebarPosition(cards: KanbanCard[]): number {
