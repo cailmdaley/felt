@@ -45,7 +45,7 @@ beforeEach(() => {
     clear: () => localStorageData.clear(),
   })
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', () => 1)
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({}))))

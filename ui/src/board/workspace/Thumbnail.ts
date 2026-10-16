@@ -26,6 +26,19 @@ export interface ThumbnailOptions {
 class ThumbnailBudget {
   readonly thumbnails = new Set<Thumbnail>()
   private raf?: number
+  private readonly byElement = new Map<Element, Thumbnail>()
+  private observer?: ResizeObserver
+  add(thumb: Thumbnail): void {
+    this.thumbnails.add(thumb)
+    this.byElement.set(thumb.el, thumb)
+    if (!this.observer && typeof ResizeObserver !== 'undefined') {
+      this.observer = new ResizeObserver(entries => {
+        for (const entry of entries) this.byElement.get(entry.target)?.resize(entry.contentRect.width, entry.contentRect.height)
+        this.schedule()
+      })
+    }
+    this.observer?.observe(thumb.el)
+  }
   schedule(): void {
     if (this.raf !== undefined) return
     this.raf = requestAnimationFrame(() => { this.raf = undefined; this.pump() })
@@ -37,6 +50,8 @@ class ThumbnailBudget {
   }
   remove(thumb: Thumbnail): void {
     this.thumbnails.delete(thumb)
+    this.observer?.unobserve(thumb.el)
+    this.byElement.delete(thumb.el)
     if (!this.thumbnails.size) {
       if (this.raf !== undefined) cancelAnimationFrame(this.raf)
       this.raf = undefined
@@ -44,20 +59,24 @@ class ThumbnailBudget {
   }
   private pump(): void {
     const all = [...this.thumbnails]
-    for (const thumb of all) thumb.scale()
-    const candidates = all.filter(t => t.state === 'idle' && t.file && t.priority() > 0)
-      .sort((a, b) => b.priority() - a.priority() || a.distance() - b.distance() || a.key.localeCompare(b.key))
+    // Collect geometry-dependent ranks before mounting or scaling writes any styles.
+    const ranks = new Map(all.map(t => [t, { priority: t.priority(), distance: t.distance() }]))
+    const priority = (t: Thumbnail): number => ranks.get(t)!.priority
+    const distance = (t: Thumbnail): number => ranks.get(t)!.distance
+    const candidates = all.filter(t => t.state === 'idle' && t.file && priority(t) > 0)
+      .sort((a, b) => priority(b) - priority(a) || distance(a) - distance(b) || a.key.localeCompare(b.key))
     for (const candidate of candidates) {
       const population = all.filter(t => t.state === 'live' || t.state === 'loading')
       if (population.filter(t => t.state === 'loading').length >= LOAD_POLICY.maxConcurrent) break
       if (population.length >= LOAD_POLICY.maxLive) {
-        const victim = population.filter(t => t.state === 'live' && t.priority() < candidate.priority())
-          .sort((a, b) => a.priority() - b.priority() || a.lastVisible - b.lastVisible || b.distance() - a.distance())[0]
+        const victim = population.filter(t => t.state === 'live' && priority(t) < priority(candidate))
+          .sort((a, b) => priority(a) - priority(b) || a.lastVisible - b.lastVisible || distance(b) - distance(a))[0]
         if (!victim) break
         victim.unmount()
       }
       candidate.mount()
     }
+    for (const thumb of all) thumb.scale()
   }
 }
 const budget = new ThumbnailBudget()
@@ -81,6 +100,9 @@ export class Thumbnail {
   private timer?: ReturnType<typeof setTimeout>
   private retryTimer?: ReturnType<typeof setTimeout>
   private generation = 0
+  private boxWidth = 176
+  private boxHeight = 116
+  private scaled?: { content: HTMLElement; width: number; height: number }
   private readonly opts: ThumbnailOptions
   private readonly face: HTMLElement
   private readonly title: HTMLElement
@@ -104,7 +126,7 @@ export class Thumbnail {
     this.el.append(this.face)
     this.paintFace()
     this.stopTitles = watchDocumentTitles(key => { if (key === this.documentKey) this.paintFace() })
-    budget.thumbnails.add(this)
+    budget.add(this)
   }
   private get documentKey(): string | undefined { return this.file ? docKey(this.file.owner, this.file.fullPath, this.file.owner) : undefined }
   setProse(prose: string, title: string): void {
@@ -137,14 +159,20 @@ export class Thumbnail {
     this.body?.remove(); this.body = undefined; this.state = 'idle'
     this.el.classList.remove('ws-thumbnail-ready')
   }
+  resize(width: number, height: number): void {
+    this.boxWidth = width || 176
+    this.boxHeight = height || 116
+  }
   scale(): void {
     if (!this.body) return
     const content = this.body.querySelector<HTMLElement>('iframe,pre')
     if (!content) return
-    const width = this.body.classList.contains('kbn-thumbnail-pdf') ? 900 : content.tagName === 'IFRAME' ? 1040 : 760
-    const scale = (this.el.clientWidth || 176) / width
+    if (this.scaled?.content === content && this.scaled.width === this.boxWidth && this.scaled.height === this.boxHeight) return
+    this.scaled = { content, width: this.boxWidth, height: this.boxHeight }
+    const width = content.tagName === 'IFRAME' ? 1040 : 760
+    const scale = this.boxWidth / width
     content.style.width = `${width}px`; content.style.transform = `scale(${scale})`
-    if (content.tagName === 'IFRAME') content.style.height = `${Math.ceil((this.el.clientHeight || 116) / scale)}px`
+    if (content.tagName === 'IFRAME') content.style.height = `${Math.ceil(this.boxHeight / scale)}px`
   }
   mount(): void {
     const file = this.file
@@ -162,7 +190,7 @@ export class Thumbnail {
         clearTimeout(this.retryTimer)
         this.retryTimer = setTimeout(() => { if (this.state === 'failed') { this.state = 'idle'; budget.schedule() } }, RESOURCE_FRESH_MS)
       }
-      this.scale(); budget.schedule()
+      budget.schedule()
     }
     this.timer = setTimeout(() => finish(false), LOAD_POLICY.softTimeoutRemoteMs)
     const kind = documentKind(file.fullPath)
@@ -180,6 +208,6 @@ export class Thumbnail {
     img?.addEventListener('load', () => {
       if (img.naturalWidth && img.naturalHeight) this.opts.onAspect?.(img.naturalWidth / img.naturalHeight)
     }, { once: true })
-    this.scale()
+    budget.schedule()
   }
 }

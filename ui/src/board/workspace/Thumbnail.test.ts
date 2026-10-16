@@ -65,6 +65,24 @@ it('shares four loading and sixteen live slots across overview and tab previews,
   expect(thumbs.filter(t => t.body)).toHaveLength(16)
 })
 
+it('scales from observed sizes without layout reads or unchanged style writes', () => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  const thumb = new Thumbnail({ key: 'scale', shuttleBase: '', file: { fullPath: '/scale.html', owner: 'host', basename: 'scale.html' }, fallback: '', priority: () => 2, distance: () => 0 })
+  thumbs.push(thumb)
+  const width = vi.spyOn(thumb.el, 'clientWidth', 'get'), height = vi.spyOn(thumb.el, 'clientHeight', 'get')
+  pumpThumbnails()
+  const frame = thumb.body!.querySelector('iframe')!
+  expect(frame.style.width).toBe('1040px')
+  const writes = vi.spyOn(frame.style, 'transform', 'set')
+  pumpThumbnails(); pumpThumbnails()
+  expect(writes).not.toHaveBeenCalled()
+  thumb.resize(104, 52); pumpThumbnails()
+  expect(frame.style.transform).toBe('scale(0.1)')
+  expect(frame.style.height).toBe('520px')
+  expect(writes).toHaveBeenCalledOnce()
+  expect(width).not.toHaveBeenCalled(); expect(height).not.toHaveBeenCalled()
+})
+
 it('tries a failed thumbnail again once the miss it saw has expired, so a report written later appears', () => {
   vi.useFakeTimers()
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1)); vi.stubGlobal('cancelAnimationFrame', vi.fn())
