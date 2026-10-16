@@ -288,4 +288,85 @@ describe('TabStrip', () => {
     strip.dispose()
     expect(el.children).toHaveLength(0)
   })
+
+  describe('sent-attachment cap', () => {
+    const many = (extra: Partial<Parameters<typeof buildChannel>[0]> = {}) => buildChannel({
+      uid: 'cap', owner: 'cap-host', name: 'Cap', path: '/fiber.md', fiberDir: '/', body: '',
+      sent: Array.from({ length: 7 }, (_, i) => ({ path: `/sent-${i}.html`, time: 1000 + i })), ...extra,
+    })
+    const make = (channel: ReturnType<typeof buildChannel>, onSelect = vi.fn()) => {
+      const strip = new TabStrip(onSelect, vi.fn(), { shuttleBase: '' })
+      strips.push(strip); document.body.append(strip.el)
+      strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+      return strip
+    }
+    const names = (strip: TabStrip) => strip.buttons.map(b => b.dataset.tabKey!.split('/').at(-1))
+    const more = (strip: TabStrip) => strip.el.querySelector<HTMLButtonElement>('.ws-tab-more')
+
+    it('mounts the page and the three newest sent files, folding the rest behind +N', () => {
+      const channel = many()
+      const strip = make(channel)
+      expect(names(strip)).toEqual(['fiber:cap-host:cap', 'sent-6.html', 'sent-5.html', 'sent-4.html'])
+      expect(strip.el.querySelectorAll('.ws-tab-thumb')).toHaveLength(4)
+      expect(more(strip)?.textContent).toBe('+4')
+      expect(more(strip)?.getAttribute('aria-label')).toBe('Show 4 more documents')
+      expect(strip.el.lastElementChild).toBe(more(strip))
+    })
+
+    it('never folds embedded or linked documents, however many', () => {
+      const channel = many({ embeds: Array.from({ length: 5 }, (_, i) => ({ path: `/embed-${i}.html` })), links: [{ path: '/linked.html' }] })
+      const strip = make(channel)
+      expect(strip.buttons).toHaveLength(channel.documents.length - 4)
+      expect(names(strip)).toEqual(expect.arrayContaining(['embed-0.html', 'embed-4.html', 'linked.html', 'fiber:cap-host:cap']))
+      expect(more(strip)?.textContent).toBe('+4')
+    })
+
+    it('shows no tile when the sent files fit the cap', () => {
+      const strip = make(many({ sent: [{ path: '/a.html', time: 1 }, { path: '/b.html', time: 2 }, { path: '/c.html', time: 3 }] }))
+      expect(more(strip)).toBeNull()
+      expect(strip.buttons).toHaveLength(4)
+    })
+
+    it('reveals every document, mounting their tiles, when +N is activated', () => {
+      const channel = many()
+      const strip = make(channel)
+      more(strip)!.click()
+      expect(strip.buttons).toHaveLength(channel.documents.length)
+      expect(strip.el.querySelectorAll('.ws-tab-thumb')).toHaveLength(channel.documents.length)
+      expect(more(strip)).toBeNull()
+      strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+      expect(strip.buttons).toHaveLength(channel.documents.length)
+    })
+
+    it('reveals a hidden document when it is marked, and by keyboard stepping past the cap', () => {
+      const channel = many()
+      const onSelect = vi.fn()
+      const strip = make(channel, onSelect)
+      const last = channel.documents.length - 1
+      const lastKey = channel.documents[last].key
+      strip.mark(last, false)
+      expect(strip.buttons.at(-1)?.dataset.tabKey).toBe(lastKey)
+      expect(strip.buttons.at(-1)?.getAttribute('aria-selected')).toBe('true')
+      expect(more(strip)).toBeNull()
+
+      const other = make(many())
+      const edge = other.buttons.at(-1)!
+      edge.focus()
+      expect(other.handleIntent('next')).toBe(true)
+      expect(other.buttons).toHaveLength(channel.documents.length)
+      expect(document.activeElement).toBe(other.buttons[other.buttons.indexOf(edge) + 1])
+    })
+
+    it('keeps a selected hidden document visible across a re-render, and re-caps on another channel', () => {
+      const channel = many()
+      const strip = make(channel)
+      strip.mark(channel.documents.length - 1, false)
+      strip.render(channel.labels, channel.documents.map(d => d.key), channel)
+      expect(strip.buttons).toHaveLength(channel.documents.length)
+      const next = many({ uid: 'cap-2' })
+      strip.render(next.labels, next.documents.map(d => d.key), next)
+      expect(strip.buttons).toHaveLength(4)
+      expect(more(strip)?.textContent).toBe('+4')
+    })
+  })
 })

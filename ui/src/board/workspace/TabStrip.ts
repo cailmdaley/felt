@@ -1,6 +1,6 @@
 import type { KeyIntent } from '../keymap.js'
 import { extractEmbeds } from '../attachments.js'
-import type { Channel, DocKey, WorkspaceDocument } from './documents.js'
+import { isDeclared, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { probeDocumentTitles } from './titleProbe.js'
 import { declaredTitle } from './DocumentTitles.js'
 import { Thumbnail } from './Thumbnail.js'
@@ -13,6 +13,13 @@ export const TAB_CROSSING_MS = 280
 export const TIP_DELAY_MS = 360
 /** Bars in an audio tile's sketch of its recording. */
 const SKETCH_BARS = 18
+/** Sent attachments (documents the body neither embeds nor links) a channel's strip shows before folding the rest behind a +N tile. */
+export const SENT_TILE_CAP = 3
+
+/** A sent attachment: sent to the channel and not declared in its body. */
+export function isSentAttachment(doc: WorkspaceDocument): boolean {
+  return doc.kind !== 'fiber' && !isDeclared(doc) && doc.provenance.some(p => p.kind === 'sent')
+}
 
 /**
  * Clamp the scroll offset that puts a tab's centre at `focus` inside a
@@ -48,7 +55,7 @@ function easeCrossing(progress: number): number {
  * that is a file's name drops its extension (the kind mark names the kind)
  * unless that would make two captions alike.
  */
-export function indexCaptions(labels: string[], channel?: Channel): string[] {
+export function indexCaptions(labels: string[], channel?: Pick<Channel, 'documents'>): string[] {
   const captions = labels.map((label, index) => {
     const doc = channel?.documents[index]
     if (doc?.kind === 'fiber') return '§'
@@ -60,7 +67,7 @@ export function indexCaptions(labels: string[], channel?: Channel): string[] {
   return captions.map((caption, index) => caption !== '§' && (counts.get(caption) ?? 0) > 1 ? labels[index] : caption)
 }
 
-type TabRecord = { key: string; label: string; button: HTMLButtonElement; thumb?: Thumbnail; caption: string; doc?: WorkspaceDocument }
+type TabRecord = { key: string; label: string; docIndex: number; button: HTMLButtonElement; thumb?: Thumbnail; caption: string; doc?: WorkspaceDocument }
 interface StripOptions { shuttleBase: string }
 
 /**
@@ -90,6 +97,12 @@ export class TabStrip {
   private tipFor: HTMLButtonElement | null = null
   private tipWarmUntil = 0
   private channel: Channel | null = null
+  /** The last full run handed to `render`, including documents folded behind the +N tile. */
+  private input: { labels: string[]; keys?: string[]; channel?: Channel } | null = null
+  private channelId: string | null = null
+  private expanded = false
+  private selectedKey: string | null = null
+  private expandTile: HTMLButtonElement | null = null
   private focus: number | null = null
   private readonly shuttleBase: string | null
   private readonly stopSketches: () => void
@@ -156,17 +169,32 @@ export class TabStrip {
     for (const record of this.records) record.thumb?.schedule()
   }
 
-  render(labels: string[], keys?: string[], channel?: Channel): void {
+  /**
+   * Draw the run. Given a channel, a channel's sent attachments beyond the
+   * newest `SENT_TILE_CAP` stay unmounted behind a +N tile until revealed; the
+   * selected document is never one of them.
+   */
+  render(allLabels: string[], allKeys?: string[], channel?: Channel): void {
     if (this.disposed) return
+    this.input = { labels: allLabels, keys: allKeys, channel }
+    const channelId = channel ? `${channel.owner}\u0000${channel.uid}` : null
+    if (channelId !== this.channelId) { this.channelId = channelId; this.expanded = false; this.selectedKey = null }
     if (channel) this.channel = channel
     if (channel && this.shuttleBase !== null) probeDocumentTitles(this.shuttleBase, channel.documents)
-    const captions = indexCaptions(labels, channel)
+    const shown = this.shownIndices(allLabels, allKeys, channel)
+    const labels = shown.map(i => allLabels[i])
+    const keys = allKeys && shown.map(i => allKeys[i])
+    const docs = channel && shown.map(i => channel.documents[i])
+    const hiddenCount = allLabels.length - shown.length
+    const captions = indexCaptions(labels, docs && { documents: docs })
     if (labels.length === this.records.length && labels.every((label, index) => label === this.records[index].label && (!keys || keys[index] === this.records[index].key))) {
       this.records.forEach((record, index) => {
         record.caption = captions[index]
-        record.doc = channel?.documents[index] ?? record.doc
+        record.docIndex = shown[index]
+        record.doc = docs?.[index] ?? record.doc
         this.paint(record)
       })
+      this.syncExpandTile(hiddenCount)
       return
     }
 
@@ -188,11 +216,12 @@ export class TabStrip {
       seen.set(label, occurrence + 1)
       const key = keys?.[index] ?? `${label}\u0000${occurrence}`
       const reused = available.get(keys ? key : label)?.shift()
-      const record: TabRecord = reused ?? { key, label, button: this.createButton(key), caption: captions[index] }
+      const record: TabRecord = reused ?? { key, label, docIndex: shown[index], button: this.createButton(key), caption: captions[index] }
       record.key = key
       record.label = label
+      record.docIndex = shown[index]
       record.caption = captions[index]
-      record.doc = channel?.documents[index]
+      record.doc = docs?.[index]
       record.button.dataset.tabKey = key
       record.button.setAttribute('aria-label', label)
       this.paint(record)
@@ -211,9 +240,10 @@ export class TabStrip {
       if (at !== button) this.el.insertBefore(button, at ?? null)
     }
     for (const child of [...this.el.children]) {
-      if (child instanceof HTMLButtonElement && !retained.has(child)) child.remove()
+      if (child instanceof HTMLButtonElement && child !== this.expandTile && !retained.has(child)) child.remove()
     }
     this.records = next
+    this.syncExpandTile(hiddenCount)
     if (this.tipFor && !retained.has(this.tipFor)) this.hideTip()
     this.updateSelection()
     this.scheduleLayout()
@@ -221,9 +251,61 @@ export class TabStrip {
     if (active && focusTarget) focusTarget.focus({ preventScroll: true })
   }
 
-  mark(index: number, animate: boolean): void {
-    if (this.disposed || index < 0 || index >= this.records.length) return
+  /**
+   * Indices of the documents to draw. Without a channel, or once expanded, all
+   * of them; otherwise every document but the sent attachments past the cap. A
+   * selected document that the cap would fold expands the run instead.
+   */
+  private shownIndices(labels: string[], keys: string[] | undefined, channel: Channel | undefined): number[] {
+    const all = labels.map((_, i) => i)
+    if (!channel || this.expanded) return all
+    let sent = 0
+    const hidden = new Set<number>()
+    channel.documents.forEach((doc, i) => { if (isSentAttachment(doc) && ++sent > SENT_TILE_CAP) hidden.add(i) })
+    if (!hidden.size) return all
+    const selected = this.selectedKey === null || !keys ? -1 : keys.indexOf(this.selectedKey)
+    if (selected >= 0 && hidden.has(selected)) { this.expanded = true; return all }
+    return all.filter(i => !hidden.has(i))
+  }
+
+  /** The strip's last tile: `+N`, revealing the documents the cap folded away. */
+  private syncExpandTile(hidden: number): void {
+    if (hidden <= 0) { this.expandTile?.remove(); this.expandTile = null; return }
+    if (!this.expandTile) {
+      const tile = document.createElement('button')
+      tile.type = 'button'
+      tile.className = 'ws-tab-more'
+      tile.dataset.part = 'tab-more'
+      tile.addEventListener('click', () => this.expand())
+      this.expandTile = tile
+    }
+    const tile = this.expandTile
+    tile.textContent = `+${hidden}`
+    tile.setAttribute('aria-label', `Show ${hidden} more ${hidden === 1 ? 'document' : 'documents'}`)
+    if (tile.parentElement !== this.el || tile !== this.el.lastElementChild) this.el.append(tile)
+  }
+
+  /** Mount every document of the channel being read; the strip stays expanded until another channel opens. */
+  private expand(): void {
+    const first = this.records.length ? this.records[this.records.length - 1].docIndex + 1 : 0
+    this.expanded = true
+    if (this.input) this.render(this.input.labels, this.input.keys, this.input.channel)
+    this.records.find(record => record.docIndex === first)?.button.focus({ preventScroll: true })
+  }
+
+  /** Select the document at `docIndex` of the run last rendered, revealing it if the cap folded it away. */
+  mark(docIndex: number, animate: boolean): void {
+    if (this.disposed || docIndex < 0) return
+    let index = this.records.findIndex(record => record.docIndex === docIndex)
+    if (index < 0 && this.input && docIndex < this.input.labels.length) {
+      this.selectedKey = this.input.keys?.[docIndex] ?? null
+      this.expanded = true
+      this.render(this.input.labels, this.input.keys, this.input.channel)
+      index = this.records.findIndex(record => record.docIndex === docIndex)
+    }
+    if (index < 0) return
     this.selectedIndex = index
+    this.selectedKey = this.records[index].key
     this.updateSelection()
     this.cancelAnimation()
     this.pendingMark = { animate, start: performance.now() }
@@ -387,7 +469,7 @@ export class TabStrip {
     button.dataset.tabKey = key
     button.addEventListener('click', () => {
       const index = this.records.findIndex((record) => record.button === button)
-      if (index >= 0) { this.mark(index, true); this.onSelect(index) }
+      if (index >= 0) { const doc = this.records[index].docIndex; this.mark(doc, true); this.onSelect(doc) }
     })
     button.addEventListener('dblclick', () => {
       const index = this.records.findIndex((record) => record.button === button)
@@ -411,7 +493,7 @@ export class TabStrip {
 
   /** An edge fades only where a tile runs past it, not over the strip's centring margin. */
   private updateFades(): void {
-    const first = this.records[0]?.button, last = this.records[this.records.length - 1]?.button
+    const first = this.records[0]?.button, last = this.expandTile ?? this.records[this.records.length - 1]?.button
     const left = this.el.scrollLeft, right = left + this.el.clientWidth
     const fadeLeft = !!first && first.offsetLeft < left - 2
     const fadeRight = !!last && last.offsetLeft + last.offsetWidth > right + 2
@@ -476,7 +558,7 @@ export class TabStrip {
     this.tip.hidden = true
   }
   private readonly onScroll = (): void => { this.scheduleLayout(); for (const record of this.records) record.thumb?.schedule() }
-  private readonly onResize = (): void => { this.mark(this.selectedIndex, false) }
+  private readonly onResize = (): void => { this.mark(this.records[this.selectedIndex]?.docIndex ?? -1, false) }
   private readonly onMotionChange = (): void => {
     if (!this.motion?.matches || this.animationFrame === null) return
     this.cancelAnimation()
@@ -487,12 +569,13 @@ export class TabStrip {
   handleIntent(intent: KeyIntent): boolean {
     const current = this.records.findIndex(({ button }) => button === document.activeElement)
     if (current < 0) return false
-    const next = intent === 'next' ? Math.min(this.records.length - 1, current + 1)
-      : intent === 'prev' ? Math.max(0, current - 1)
-      : intent === 'first' ? 0 : intent === 'last' ? this.records.length - 1 : null
+    const doc = this.records[current].docIndex, total = this.input?.labels.length ?? this.records.length
+    const next = intent === 'next' ? Math.min(total - 1, doc + 1)
+      : intent === 'prev' ? Math.max(0, doc - 1)
+      : intent === 'first' ? 0 : intent === 'last' ? total - 1 : null
     if (next === null) return false
-    if (next !== current) { this.mark(next, true); this.onSelect(next) }
-    this.records[next]?.button.focus({ preventScroll: true })
+    if (next !== doc) { this.mark(next, true); this.onSelect(next) }
+    this.records.find(record => record.docIndex === next)?.button.focus({ preventScroll: true })
     return true
   }
 }

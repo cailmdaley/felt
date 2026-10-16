@@ -7,7 +7,7 @@ import { claudeOpening, saveClaudeOpening } from '../conversationOpening.js'
 import { terminalWorkerPill } from '../appConversation.js'
 import { Reader, SIDEBAR_MEDIA, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
-import type { Channel, DocKey } from './documents.js'
+import { buildChannel, type Channel, type DocKey } from './documents.js'
 
 const alpha = card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a' })
 // Beta draws a base of its own, so the sheet it holds is released with its last binding.
@@ -729,5 +729,22 @@ describe('Reader channel sidebar', () => {
     expect(left.defaultPrevented).toBe(true)
     expect(tabs[0].getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement).toBe(tabs[0])
+  })
+
+  it('caps a channel\'s sent attachments in the strip but shows the document the reader lands on', () => {
+    const big = buildChannel({
+      uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '',
+      sent: Array.from({ length: 6 }, (_, i) => ({ path: `/sent-${i}.html`, time: 100 + i })),
+    })
+    const reader = makeReader(alpha)
+    const tiles = (): string[] => [...reader.el.querySelectorAll<HTMLElement>('.ws-tab')].map(tab => tab.dataset.tabKey!)
+    reader.show(big, big.documents[0].key, 'Board', alpha)
+    expect(tiles()).toEqual(big.documents.slice(0, 4).map(d => d.key))
+    expect(reader.el.querySelector('.ws-tab-more')?.textContent).toBe('+3')
+    const hidden = big.documents.at(-1)!
+    reader.show(big, hidden.key, 'Board', alpha)
+    expect(tiles()).toEqual(big.documents.map(d => d.key))
+    expect(reader.el.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey).toBe(hidden.key)
+    expect(reader.el.querySelector('.ws-tab-more')).toBeNull()
   })
 })

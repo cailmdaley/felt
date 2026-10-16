@@ -79,6 +79,17 @@
 .ws-tab .ws-tab-thumb .kbn-thumbnail-image img { object-fit: cover; }
 .ws-tab .ws-tab-thumb :is(.kbn-thumbnail-glyph, .kbn-thumbnail-name) { display: none; }
 
+/* The +N tile closes the run when the cap has folded sent documents away: a tile-sized
+   outline in the serif, with no page behind it, so it reads as a place to open, not a page. */
+.ws-tab-more {
+  position: relative; flex: none; width: var(--ws-tile-width); height: var(--ws-tile-height); padding: 0;
+  border-radius: var(--ws-tile-radius); background: transparent; color: var(--ws-ink-muted);
+  border: var(--ws-line-width) dashed var(--ws-hairline) !important; cursor: pointer;
+  font: 500 var(--ws-tile-title-size)/1 var(--ws-serif); font-variant-numeric: tabular-nums;
+  transition: color var(--ws-crossing) var(--ws-ease), border-color var(--ws-crossing) var(--ws-ease);
+}
+.ws-tab-more:hover, .ws-tab-more:focus-visible { color: var(--ws-ink); border-color: var(--ws-ink-muted) !important; }
+
 /* The gold fresh mark sits at the tile's shoulder. */
 .ws-tab-fresh::after {
   content: ''; position: absolute; top: -3px; right: -3px; z-index: 1; width: 6px; height: 6px; border-radius: 50%;
@@ -112,4 +123,4 @@
 .ws-run-pending { visibility: hidden; opacity: 0; }
 .ws-run-landing { animation: ws-run-land var(--ws-crossing) var(--ws-ease); }
 @keyframes ws-run-land { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab .ws-tab-thumb { transition: none; } .ws-run-landing { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab-more, .ws-tab .ws-tab-thumb { transition: none; } .ws-run-landing { animation: none; } }
