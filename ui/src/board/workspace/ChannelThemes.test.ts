@@ -22,6 +22,26 @@ afterEach(() => { themes?.dispose(); document.body.replaceChildren(); document.d
 const root = (): HTMLElement => { const el = document.createElement('div'); document.body.append(el); return el }
 
 describe('channel theme lifetime and owner reads', () => {
+  it('compiles a bundled base once across channels and leaves unchanged bindings untouched', () => {
+    vi.mocked(scopeTheme).mockClear()
+    const a = root(), b = root()
+    themes.bind(a, card)
+    themes.bind(b, { ...card, uid: 'second-channel' })
+    expect(scopeTheme).toHaveBeenCalledOnce()
+    expect(a.dataset.wsTheme).not.toBe(b.dataset.wsTheme)
+    const sheets = [...document.querySelectorAll('style[data-ws-theme-sheet]')]
+    expect(sheets[0].textContent).toContain(a.dataset.wsTheme)
+    expect(sheets[1].textContent).toContain(b.dataset.wsTheme)
+    const mutations = vi.fn()
+    const observer = new MutationObserver(mutations)
+    observer.observe(a, { attributes: true })
+    themes.bind(a, { ...card })
+    expect(observer.takeRecords()).toHaveLength(0)
+    expect(scopeTheme).toHaveBeenCalledOnce()
+    themes.bind(a, { ...card, theme: 'blueprint' })
+    expect(scopeTheme).toHaveBeenCalledTimes(2)
+    observer.disconnect()
+  })
   it('paints bundled folios without IO and reuses reader-loaded custom CSS without revalidation', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(':scope { --cached-theme: 1 }', { headers: { ETag: 'cached' } }))
     vi.stubGlobal('fetch', fetcher)

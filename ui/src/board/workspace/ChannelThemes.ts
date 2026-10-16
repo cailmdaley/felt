@@ -25,6 +25,8 @@ interface ThemeEntry {
 /** One owner-routed, ETag-revalidated theme per channel; styles exist only for bound surfaces. */
 export class ChannelThemes {
   private readonly entries = new Map<string, ThemeEntry>()
+  /** Bundled CSS has no fiber-relative assets; only its generated scope varies by channel. */
+  private readonly bundledCompiled = new Map<string, string>()
   private readonly roots = new Map<HTMLElement, ThemeEntry>()
   private readonly readers = new Set<HTMLElement>()
   private readonly plain = new Set<string>()
@@ -38,6 +40,7 @@ export class ChannelThemes {
   /** The board's palette re-inks with the scheme, so the snapshot and every compiled theme follow it. */
   private readonly reappear = (): void => {
     this.writeDefaults()
+    this.bundledCompiled.clear()
     for (const entry of this.entries.values()) {
       entry.base = this.baseName(entry.card)
       this.compile(entry); this.paint(entry)
@@ -108,10 +111,10 @@ export class ChannelThemes {
   /** Only a reader requests custom CSS. Context surfaces consume the session cache. */
   bind(root: HTMLElement, card: KanbanCard, mode: 'reader' | 'cached' = 'cached'): void {
     if (this.disposed) return
-    root.dataset.wsThemeBoundary = ''
+    if (!root.hasAttribute('data-ws-theme-boundary')) root.dataset.wsThemeBoundary = ''
     const key = this.key(card)
     const old = this.roots.get(root)
-    if (old?.key !== key) this.unbind(root)
+    if (old && old.key !== key) this.unbind(root)
     let entry = this.entries.get(key)
     if (!entry) {
       entry = { key, scope: themeScopeId(key), card, base: '', custom: '', customAvailable: false, compiled: '', readAt: -Infinity }
@@ -123,7 +126,8 @@ export class ChannelThemes {
     const oldDir = entry.card.fiberDir
     entry.card = card
     const base = this.baseName(card)
-    if (entry.base !== base || oldDir !== card.fiberDir) {
+    const changed = entry.base !== base || oldDir !== card.fiberDir
+    if (changed) {
       entry.base = base
       if (oldDir !== card.fiberDir) {
         const hadCustom = entry.customAvailable
@@ -132,7 +136,7 @@ export class ChannelThemes {
       }
       this.compile(entry)
     }
-    this.paint(entry)
+    if (changed || old !== entry) this.paint(entry)
     if (mode === 'reader') void this.refresh(entry)
   }
   unbind(root: HTMLElement): void {
@@ -171,6 +175,16 @@ export class ChannelThemes {
     const selector = `[data-ws-theme="${entry.scope}"]`
     if (typeof CSSStyleSheet.prototype.replaceSync !== 'function') { entry.compiled = ''; return }
     const base = bundled[`./themes/${entry.base}.css`] ?? ''
+    if (!entry.custom) {
+      const namespace = 'shuttle-bundled-scope-placeholder'
+      let template = this.bundledCompiled.get(entry.base)
+      if (template === undefined) {
+        template = scopeTheme(base, `[data-ws-theme="${namespace}"]`, namespace, this.defaults)
+        this.bundledCompiled.set(entry.base, template)
+      }
+      entry.compiled = template.replaceAll(namespace, entry.scope)
+      return
+    }
     const asset = new URL(fileBytesUrl(this.base, '', entry.card.originId), document.baseURI)
     asset.pathname = asset.pathname.replace(/\/file$/, `/file-assets/${encodeURIComponent(entry.card.originId)}`)
       + `${entry.card.fiberDir ?? ''}/theme.css`.split('/').map(encodeURIComponent).join('/')
