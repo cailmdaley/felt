@@ -5,6 +5,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { parseCompositeFeed } from '../KanbanComposite.js'
 import { cardFromCompositeEntry } from '../KanbanReadModel.js'
 import { scopeTheme } from './themeScope.js'
+import { workspaceToken } from './measures.js'
 
 vi.mock('./themeScope.js', () => ({ scopeTheme: vi.fn((css: string, scope: string) => {
   if (css === 'broken') throw new Error('Invalid CSS')
@@ -41,6 +42,15 @@ describe('channel theme lifetime and owner reads', () => {
     themes.bind(a, { ...card, theme: 'blueprint' })
     expect(scopeTheme).toHaveBeenCalledTimes(2)
     observer.disconnect()
+  })
+  it('lets a layout in the same task read the new channel’s tokens', () => {
+    const reader = root()
+    themes.bind(reader, card, 'cached')
+    reader.style.setProperty('--ws-stage-gap', '10px')
+    expect(workspaceToken(reader, 'stage-gap')).toBe('10px')
+    reader.style.setProperty('--ws-stage-gap', '24px')
+    themes.bind(reader, { ...card, uid: 'next-channel', theme: 'blueprint' }, 'cached')
+    expect(workspaceToken(reader, 'stage-gap')).toBe('24px')
   })
   it('keeps one sheet for many channels on a base and drops it with the last binding', () => {
     const roots = Array.from({ length: 40 }, (_, i) => { const el = root(); themes.bind(el, { ...card, uid: `channel-${i}` }); return el })

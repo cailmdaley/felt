@@ -43,6 +43,7 @@ import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { constitutionAction } from './workspace/fiberPageState.js'
+import { invalidateWorkspaceMeasures } from './workspace/measures.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
@@ -705,7 +706,11 @@ export class KanbanModal {
     this.container.style.setProperty('--kbn-bar-bottom', `${Math.max(0, Math.round(bar.bottom - this.container.getBoundingClientRect().top))}px`)
     // How far the map's tiles reach below the bar: the pages start clear of them.
     const map = this.readerSlotEl?.getBoundingClientRect()
-    this.container.style.setProperty('--kbn-bar-overhang', `${map?.height ? Math.max(0, Math.ceil(map.bottom - bar.bottom)) : 0}px`)
+    const overhang = `${map?.height ? Math.max(0, Math.ceil(map.bottom - bar.bottom)) : 0}px`
+    if (this.container.style.getPropertyValue('--kbn-bar-overhang') === overhang) return
+    this.container.style.setProperty('--kbn-bar-overhang', overhang)
+    // The reader's stage top derives from the overhang.
+    invalidateWorkspaceMeasures()
   }
 
   /** While the reader is open its origin's tab closes it, and says so. */

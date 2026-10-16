@@ -2,17 +2,17 @@ import { APPEARANCE_CHANGED } from '../appearance.js'
 
 let snapshots = new WeakMap<HTMLElement, Map<string, string>>()
 
-/** Appearance and channel styles invalidate the stylesheet-token snapshot. */
+/**
+ * Forget an element's stylesheet-token snapshot, or every snapshot. Whoever
+ * changes a token's inputs calls it as it writes them: the appearance, a
+ * channel theme (`ChannelThemes`), the board's bar geometry (`KanbanModal`)
+ * and the reader's own layout modes.
+ */
 export function invalidateWorkspaceMeasures(element?: HTMLElement): void {
   if (element) snapshots.delete(element)
   else snapshots = new WeakMap()
 }
-if (typeof window !== 'undefined') {
-  window.addEventListener(APPEARANCE_CHANGED, () => invalidateWorkspaceMeasures())
-  document.addEventListener('workspace-theme-change', event => {
-    if (event.target instanceof HTMLElement) invalidateWorkspaceMeasures(event.target)
-  }, true)
-}
+if (typeof window !== 'undefined') window.addEventListener(APPEARANCE_CHANGED, () => invalidateWorkspaceMeasures())
 
 /** Read the workspace's stylesheet constants together, before interaction writes dirty its style. */
 export function workspaceToken(element: HTMLElement, name: string): string {

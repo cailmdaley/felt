@@ -2,6 +2,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { fileBytesUrl } from '../utils.js'
 import { fetchDocument, RESOURCE_PRIORITY } from '../documentResources.js'
 import { scopeTheme } from './themeScope.js'
+import { invalidateWorkspaceMeasures } from './measures.js'
 import { APPEARANCE_CHANGED, appearance, appearanceTheme, currentScheme, watchAppearance } from '../appearance.js'
 import './themes/surface.css'
 
@@ -154,7 +155,9 @@ export class ChannelThemes {
     if (old) this.paint(old)
     if (changed) this.changed(root)
   }
+  /** A root's tokens are stale at once, so a layout in the same task reads the new theme; listeners hear of it after the task. */
   private changed(root: HTMLElement): void {
+    invalidateWorkspaceMeasures(root)
     this.changes.add(root)
     if (this.changeQueued) return
     this.changeQueued = true
