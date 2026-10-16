@@ -10,12 +10,12 @@
 
 set -e
 
-source "$(dirname "$0")/shuttle-bin.sh"
+source "${0%/*}/shuttle-bin.sh"
 
 # Hooks must not make every agent event fail when the optional CLI is absent
 # or predates the `hook` subcommand.
 if shuttle_hook_available; then
-  exec "$SHUTTLE_BIN" hook event
+  "$SHUTTLE_BIN" hook event 2>/dev/null || true
 fi
 
 exit 0

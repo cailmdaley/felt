@@ -110,13 +110,24 @@ plugin.
 | `remind.sh` | `PreToolUse` | Gates the first non-skill tool call in a felt-enabled project until the felt skill has activated this session; a pass-through everywhere else |
 | `touch.sh` | `PostToolUse` (Edit/Write/MultiEdit) | Stamps a fiber's `updated-at` when the agent edits its markdown file directly, so hand-edits count toward recency the same as `felt edit` does |
 | `event.sh` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `Notification`, `SessionEnd` | Calls `shuttle hook event` to append one JSON line to `~/.shuttle/events.jsonl` and handle Shuttle mailbox registration/delivery; writes nothing unless `~/.shuttle` exists |
-| `commit.sh` | `PostToolUse` (`Bash`) | Calls `shuttle hook commit` to record commits in `~/.shuttle/commits.jsonl` |
 
 The logic lives in the owning binary, not the script. `remind.sh` and
-`touch.sh` call `felt hook pretool` and `felt hook posttool`; `event.sh` and
-`commit.sh` call `shuttle hook event` and `shuttle hook commit`.
+`touch.sh` call `felt hook pretool` and `felt hook posttool`; `event.sh` calls `shuttle hook event`.
+The Claude/Codex plugin no longer records commits automatically; `shuttle hook commit` remains available and is still used by the Pi extension.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
+`handoff.sh` calls `shuttle hook handoff` without starting Node.
+Once the felt skill has activated, `remind.sh` compares a versioned transcript-bound activation marker with shell builtins and skips the binary entirely for Claude's canonical payload.
+A reused session id with a different transcript, an empty legacy flag, or duplicate/escaped identity keys falls through to the Go gate; stale markers do not grant activation.
+
+`event.sh` runs asynchronously only on `SubagentStop`, which never touches mailbox or native receiver registrations.
+`SessionEnd` stays synchronous so its receiver withdrawal finishes before a resumed `SessionStart` registers a new receiver.
+`SessionStart`, `PreToolUse`, `PostToolUse`, and `UserPromptSubmit` stay synchronous for queued peer-message delivery.
+`Stop` never drains the mailbox.
+`Stop` and `Notification` also stay synchronous: the daemon folds state transitions in file order, so a late stop or notification can close a newer working turn.
+A late post can likewise reopen a stopped turn.
+Making those recorders asynchronous requires an ordering-aware daemon change, not just a hook flag.
+`touch.sh` stays synchronous because its frontmatter write must finish before the agent's next edit.
 
 ### Extension events (pi)
 

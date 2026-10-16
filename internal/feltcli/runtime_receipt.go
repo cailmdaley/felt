@@ -509,7 +509,7 @@ func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 
 func hookFilesCompatible(pluginRoot string) bool {
 	hooks := filepath.Join(pluginRoot, "hooks")
-	for _, name := range []string{"hooks.json", "session.sh", "remind.sh", "touch.sh", "event.sh", "commit.sh", "felt-bin.sh", "shuttle-bin.sh"} {
+	for _, name := range []string{"hooks.json", "session.sh", "remind.sh", "touch.sh", "event.sh", "felt-bin.sh", "shuttle-bin.sh"} {
 		path := filepath.Join(hooks, name)
 		if _, err := os.Stat(path); err != nil {
 			return false
@@ -533,7 +533,6 @@ func hookFilesCompatible(pluginRoot string) bool {
 		hookCommandPresent(session, "session.sh") &&
 		hookCommandPresent(pretool, "remind.sh") &&
 		hookCommandPresent(posttool, "touch.sh") &&
-		hookCommandPresent(posttool, "commit.sh") &&
 		hookValueContains(hookDoc, "event.sh")
 }
 

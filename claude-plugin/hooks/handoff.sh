@@ -1,12 +1,10 @@
 #!/bin/bash
-# Optional Node adapter; a missing runtime or broken transcript never blocks tools.
-node_bin="$(command -v node 2>/dev/null)"
-if [ -z "$node_bin" ]; then
-  for candidate in /opt/homebrew/bin/node /usr/local/bin/node; do
-    if [ -x "$candidate" ]; then node_bin="$candidate"; break; fi
-  done
-fi
-if [ -n "$node_bin" ]; then
-  "$node_bin" "$(dirname "$0")/handoff.mjs" 2>/dev/null || true
+# Optional Go adapter; an absent/old binary or broken transcript never blocks.
+source "${0%/*}/shuttle-bin.sh"
+if shuttle_hook_available; then
+  # Older Cobra command trees can print help and exit 0 for an unknown child.
+  # Only a hook envelope belongs on stdout; never inject that help into Claude.
+  output="$("$SHUTTLE_BIN" hook handoff 2>/dev/null)" || output=
+  if [[ $output == \{* ]]; then printf '%s\n' "$output"; fi
 fi
 exit 0

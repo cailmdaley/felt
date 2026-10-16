@@ -8,10 +8,14 @@ import { fileURLToPath } from "node:url";
 import { transcriptUsage, TAIL_BYTES } from "../claude-plugin/hooks/handoff.mjs";
 
 const hook = fileURLToPath(new URL("../claude-plugin/hooks/handoff.sh", import.meta.url));
+const buildRoot = fs.mkdtempSync(path.join(os.tmpdir(), "felt-handoff-binary-"));
+const shuttle = path.join(buildRoot, "shuttle");
+execFileSync("go", ["build", "-o", shuttle, "./cmd/shuttle"], { cwd: fileURLToPath(new URL("..", import.meta.url)) });
+process.on("exit", () => fs.rmSync(buildRoot, { recursive: true, force: true }));
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "felt-handoff-hook-"));
   const transcript = path.join(root, "session.jsonl");
-  const env = { PATH: process.env.PATH, HOME: root, SHUTTLE_HANDOFF_STATE_DIR: path.join(root, "state") };
+  const env = { PATH: process.env.PATH, HOME: root, SHUTTLE_BIN: shuttle, SHUTTLE_HANDOFF_STATE_DIR: path.join(root, "state") };
   const input = { hook_event_name: "PostToolUse", session_id: "session/../../test", transcript_path: transcript };
   const write = (tokens, extra = {}) => fs.writeFileSync(transcript, JSON.stringify({ type: "assistant", message: { role: "assistant", model: "unknown", usage: { input_tokens: tokens - 30, cache_read_input_tokens: 10, cache_creation_input_tokens: 10, output_tokens: 10 }, ...extra } }) + "\n");
   const run = (payload = input, overrides = {}) => execFileSync(hook, { input: JSON.stringify(payload), env: { ...env, ...overrides }, encoding: "utf8", timeout: 5000 });
@@ -21,14 +25,14 @@ function fixture() {
 test("Claude pipe: below, once soft, resumed once hard, new session", () => {
   const f = fixture();
   try {
-    f.write(499_999); assert.equal(f.run(), "");
-    f.write(500_000);
+    f.write(249_999); assert.equal(f.run(), "");
+    f.write(250_000);
     const soft = JSON.parse(f.run()).hookSpecificOutput;
     assert.equal(soft.hookEventName, "PostToolUse");
-    assert.match(soft.additionalContext, /500,000 tokens \(window unknown\)/);
+    assert.match(soft.additionalContext, /250,000 tokens \(window unknown\)/);
     assert.equal(f.run(), "");
     assert.equal(f.run({ ...f.input, hook_event_name: "UserPromptSubmit" }), "");
-    f.write(750_000);
+    f.write(350_000);
     assert.match(JSON.parse(f.run()).hookSpecificOutput.additionalContext, /^HARD CONTEXT LIMIT:/);
     assert.equal(f.run(), "");
     assert.ok(JSON.parse(f.run({ ...f.input, session_id: "fresh" })).hookSpecificOutput.additionalContext);
@@ -72,7 +76,7 @@ test("Codex uses last request usage/window, never cumulative or cached twice", (
 test("concurrent Claude hooks claim each level only once", async () => {
   const f = fixture();
   try {
-    f.write(500_000);
+    f.write(250_000);
     const outputs = await Promise.all(Array.from({ length: 6 }, () => new Promise((resolve, reject) => {
       const child = spawn(hook, { env: f.env }); let output = "";
       child.stdout.on("data", (data) => output += data);
@@ -92,6 +96,6 @@ test("bad input, missing runtime/file, invalid env, unwritable state fail open",
     assert.equal(f.run(f.input, { SHUTTLE_HANDOFF_PCT: "bad" }), "");
     assert.equal(f.run(f.input, { SHUTTLE_HANDOFF_STATE_DIR: f.transcript }), "");
     assert.equal(execFileSync(hook, { input: "not json", env: f.env, encoding: "utf8" }), "");
-    assert.equal(f.run(f.input, { PATH: "/nonexistent" }), "");
+    assert.equal(f.run(f.input, { SHUTTLE_BIN: "/nonexistent", PATH: "/nonexistent" }), "");
   } finally { f.cleanup(); }
 });

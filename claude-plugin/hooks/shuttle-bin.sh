@@ -24,5 +24,6 @@ else
 fi
 
 shuttle_hook_available() {
-  [ -n "$SHUTTLE_BIN" ] && "$SHUTTLE_BIN" hook --help >/dev/null 2>&1
+  # No capability subprocess on the hot path. Callers tolerate old binaries.
+  [ -n "$SHUTTLE_BIN" ] && [ -x "$SHUTTLE_BIN" ]
 }

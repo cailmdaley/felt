@@ -26,6 +26,12 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if json.Unmarshal(b, &input) != nil || input.SessionID == "" {
 		return nil
 	}
+	// SubagentStop is an async recorder, not a parent receiver lifecycle
+	// event. A delayed child completion must not overwrite or resurrect the
+	// parent's mailbox/native registration after a resume or SessionEnd.
+	if input.HookEventName == "SubagentStop" {
+		return nil
+	}
 	harness := a.messageHookHarness(input)
 	if harness == "" {
 		return nil

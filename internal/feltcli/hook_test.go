@@ -656,6 +656,46 @@ func TestHookPreToolFlagPersists(t *testing.T) {
 	}
 }
 
+func TestHookPreToolMarkerRequiresTranscriptGeneration(t *testing.T) {
+	t.Parallel()
+	feltDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(feltDir, ".felt"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	env, _ := testEnv(t)
+	tmp := t.TempDir()
+	env.Set("TMPDIR", tmp)
+	a := testApp(t, env)
+	input := preToolInput{SessionID: "reused", ToolName: "Skill", CWD: feltDir, TranscriptPath: filepath.Join(homeOf(t, env), ".claude", "projects", "x", "old.jsonl")}
+	input.ToolInput.Skill = "felt"
+	if out := runPreToolWithInput(t, a, input); out != "" {
+		t.Fatal(out)
+	}
+	input.ToolName = "Read"
+	if out := runPreToolWithInput(t, a, input); out != "" {
+		t.Fatalf("same generation denied: %s", out)
+	}
+	input.TranscriptPath = filepath.Join(homeOf(t, env), ".claude", "projects", "x", "fresh.jsonl")
+	if out := runPreToolWithInput(t, a, input); !strings.Contains(out, `"permissionDecision": "deny"`) {
+		t.Fatalf("stale generation bypassed gate: %s", out)
+	}
+	// Legacy zero-byte flags must not bypass either decoder.
+	if err := os.WriteFile(filepath.Join(tmp, "felt-reminded-reused"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out := runPreToolWithInput(t, a, input); !strings.Contains(out, `"permissionDecision": "deny"`) {
+		t.Fatalf("legacy marker bypassed gate: %s", out)
+	}
+	input.ToolName = "Skill"
+	if out := runPreToolWithInput(t, a, input); out != "" {
+		t.Fatal(out)
+	}
+	input.ToolName = "Read"
+	if out := runPreToolWithInput(t, a, input); out != "" {
+		t.Fatalf("reactivated generation denied: %s", out)
+	}
+}
+
 // --- helpers ---
 
 // sessionContextFor runs `felt session` and returns the plain context text.

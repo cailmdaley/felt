@@ -190,11 +190,11 @@ views as **join rung 0** — the structural pairing that replaces an inference.
 - `~/.shuttle/commits.jsonl` (`daemon/lib/shuttle/commit_ledger.ex`) pairs a commit
   with the session that made it: one line per commit carrying `sha`, `subject`,
   `repo`, the `--shortstat` counts, and `session` / `tmux` / `cwd`. It replaces
-  parsing a fiber name out of a commit subject. **The hook writes it** —
-  `shuttle hook commit`, which the plugin runs on `PostToolUse` for a Bash call
-  (`claude-plugin/hooks/commit.sh`), appending a line when the call ran a `git
-  commit` — because the pairing is only knowable inside the session's own
-  process tree. The daemon is a reader only. Coverage is therefore partial:
+  parsing a fiber name out of a commit subject.
+  The Claude/Codex plugin no longer registers a commit recorder.
+  `shuttle hook commit` remains available and is still called by the Pi extension.
+  The daemon is a reader only, and an absent or stale ledger is valid.
+  Coverage is therefore partial:
   commits made outside an agent session, or before the plugin was installed,
   are absent — and there is **no fallback**. Only recorded, joined commits are
   ever drawn, so a day with no ledger has no prose rather than a guessed one.

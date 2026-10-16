@@ -11,18 +11,20 @@
 set -e
 set -o pipefail
 
-source "$(dirname "$0")/felt-bin.sh"
+source "${0%/*}/felt-bin.sh"
 
 if [ -n "$FELT_BIN" ] && command -v jq >/dev/null 2>&1; then
-  "$FELT_BIN" session | jq -Rs '{
-    hookSpecificOutput: {
-      hookEventName: "SessionStart",
-      additionalContext: .
-    }
-  }'
-  exit 0
+  if context="$("$FELT_BIN" session 2>/dev/null)"; then
+    printf '%s\n' "$context" | jq -Rs '{
+      hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: .
+      }
+    }' || true
+    exit 0
+  fi
 elif felt_hook_available; then
-  exec "$FELT_BIN" hook session
+  if "$FELT_BIN" hook session 2>/dev/null; then exit 0; fi
 fi
 
 # Keep SessionStart non-blocking when felt is absent or too old. Reached only

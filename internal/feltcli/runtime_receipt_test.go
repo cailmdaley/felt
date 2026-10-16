@@ -224,7 +224,7 @@ func TestHookFilesCompatibleRequiresBothRuntimeBoundaries(t *testing.T) {
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"session.sh", "remind.sh", "touch.sh", "event.sh", "commit.sh", "felt-bin.sh", "shuttle-bin.sh"} {
+	for _, name := range []string{"session.sh", "remind.sh", "touch.sh", "event.sh", "felt-bin.sh", "shuttle-bin.sh"} {
 		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -250,8 +250,8 @@ func TestHookFilesCompatibleRequiresBothRuntimeBoundaries(t *testing.T) {
 	if err := os.WriteFile(manifestPath, []byte(withoutCommit), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if hookFilesCompatible(root) {
-		t.Fatal("PostToolUse manifest without the commit hook was reported compatible")
+	if !hookFilesCompatible(root) {
+		t.Fatal("PostToolUse manifest without the retired commit hook was rejected")
 	}
 }
 

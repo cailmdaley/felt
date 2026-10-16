@@ -1,6 +1,7 @@
 package feltcli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -476,7 +477,7 @@ type preToolInput struct {
 //   - Skill tool activating felt: mark flag, pass.
 //   - Skill tool activating something else: pass (don't mark).
 //   - Codex (transcript_path not under ~/.claude/projects/, or empty): mark, pass.
-//   - flag already set: pass.
+//   - flag matches this transcript generation: pass.
 //   - otherwise: emit deny envelope.
 func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 	var input preToolInput
@@ -493,6 +494,7 @@ func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 	}
 
 	flagPath := filepath.Join(a.tempDir(), "felt-reminded-"+input.SessionID)
+	marker := preToolActivationMarker(input.TranscriptPath)
 
 	// Skill tool: open the gate only on felt activation specifically. Without
 	// this asymmetry an agent could bypass felt by activating a sibling skill
@@ -500,7 +502,7 @@ func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 	if input.ToolName == "Skill" {
 		s := input.ToolInput.Skill
 		if s == "felt" || s == "felt:felt" || strings.HasPrefix(s, "felt@") {
-			_ = os.WriteFile(flagPath, nil, 0644)
+			_ = os.WriteFile(flagPath, marker, 0600)
 		}
 		return nil
 	}
@@ -508,11 +510,11 @@ func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 	// Non-Claude sessions have no Skill tool to activate, and the deny would
 	// deadlock the loop.
 	if !a.isClaudeTranscriptPath(input.TranscriptPath) {
-		_ = os.WriteFile(flagPath, nil, 0644)
+		_ = os.WriteFile(flagPath, marker, 0600)
 		return nil
 	}
 
-	if _, err := os.Stat(flagPath); err == nil {
+	if recorded, err := os.ReadFile(flagPath); err == nil && bytes.Equal(recorded, marker) {
 		return nil
 	}
 
@@ -530,6 +532,14 @@ func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 		PermissionDecisionReason: preToolDenyReason,
 	}}
 	return encodeHookJSON(stdout, envelope)
+}
+
+// preToolActivationMarker binds activation to a transcript generation, not
+// only a reusable session id. The versioned JSON string is also read by
+// remind.sh using shell builtins. Empty legacy markers never match.
+func preToolActivationMarker(transcriptPath string) []byte {
+	encoded, _ := json.Marshal(transcriptPath)
+	return []byte("v1:" + string(encoded) + "\n")
 }
 
 // tempDir is os.TempDir read through the invocation's environment.

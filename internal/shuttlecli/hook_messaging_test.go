@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -50,6 +51,62 @@ func TestEventHookOffersClaudeMailboxWithoutStopWake(t *testing.T) {
 	hook("SessionEnd")
 	if messaging.MailboxAvailable(env, "claude", "s", "host") {
 		t.Fatal("mailbox still available")
+	}
+}
+
+func TestSubagentStopNeverTouchesReceiverRegistrations(t *testing.T) {
+	for _, harness := range []string{"claude", "codex", "pi"} {
+		t.Run(harness, func(t *testing.T) {
+			env := messageHookEnv(t, "host")
+			events := filepath.Join(t.TempDir(), "events.jsonl")
+			env.Set("SHUTTLE_EVENTS", "")
+			env.Set("SHUTTLE_EVENTS_FILE", events)
+			hook := func(name, cwd string) {
+				t.Helper()
+				payload, _ := json.Marshal(eventHookInput{HookEventName: name, Harness: harness, SessionID: "resumed", CWD: cwd})
+				var out bytes.Buffer
+				if err := newApp(env).runEventAndMessageHook(bytes.NewReader(payload), &out); err != nil || out.Len() != 0 {
+					t.Fatalf("%s: %s %v", name, out.String(), err)
+				}
+			}
+			// A child event cannot create a receiver before the parent registers.
+			hook("SubagentStop", "/old")
+			if messaging.MailboxAvailable(env, harness, "resumed", "host") {
+				t.Fatal("child created receiver")
+			}
+			hook("SessionStart", "/new-generation")
+			var receiver string
+			err := filepath.WalkDir(env.Getenv("SHUTTLE_DATA_DIR"), func(path string, entry os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if entry.Name() == "receiver.json" {
+					receiver = path
+				}
+				return nil
+			})
+			if err != nil || receiver == "" {
+				t.Fatalf("receiver: %q %v", receiver, err)
+			}
+			before, err := os.ReadFile(receiver)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hook("SubagentStop", "/old-generation")
+			after, err := os.ReadFile(receiver)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("child overwrote resumed receiver: %s %v", after, err)
+			}
+			hook("SessionEnd", "/new-generation")
+			hook("SubagentStop", "/old-generation")
+			if messaging.MailboxAvailable(env, harness, "resumed", "host") {
+				t.Fatal("child resurrected ended receiver")
+			}
+			data, err := os.ReadFile(events)
+			if err != nil || bytes.Count(data, []byte(`"type":"subagent_stop"`)) != 3 {
+				t.Fatalf("child events lost: %s %v", data, err)
+			}
+		})
 	}
 }
 
