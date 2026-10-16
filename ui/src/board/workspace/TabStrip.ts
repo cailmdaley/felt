@@ -82,6 +82,8 @@ export class TabStrip {
   private selectedIndex = -1
   private animationFrame: number | null = null
   private animationTarget = 0
+  private layoutFrame: number | null = null
+  private pendingMark: { animate: boolean; start: number } | null = null
   private disposed = false
   private visible = true
   private tipTimer: ReturnType<typeof setTimeout> | null = null
@@ -141,6 +143,7 @@ export class TabStrip {
 
   /** Where, inside the strip, the selected tile's centre belongs; null centres it. */
   setFocus(x: number | null): void {
+    if (this.focus === x) return
     this.focus = x
     // The strip's ends are padded to the focus, so the first and last tiles can reach it too.
     if (x === null) { this.el.style.removeProperty('--ws-strip-start'); this.el.style.removeProperty('--ws-strip-end') }
@@ -213,7 +216,7 @@ export class TabStrip {
     this.records = next
     if (this.tipFor && !retained.has(this.tipFor)) this.hideTip()
     this.updateSelection()
-    this.updateFades()
+    this.scheduleLayout()
     for (const record of this.records) record.thumb?.schedule()
     if (active && focusTarget) focusTarget.focus({ preventScroll: true })
   }
@@ -222,7 +225,27 @@ export class TabStrip {
     if (this.disposed || index < 0 || index >= this.records.length) return
     this.selectedIndex = index
     this.updateSelection()
-    const selected = this.records[index].button
+    this.cancelAnimation()
+    this.pendingMark = { animate, start: performance.now() }
+    this.scheduleLayout()
+  }
+
+  /** Coalesce marks from Reader paint and layout; geometry is read once before scroll/fade writes. */
+  private scheduleLayout(): void {
+    if (this.layoutFrame !== null) return
+    this.layoutFrame = this.requestFrame(() => {
+      this.layoutFrame = null
+      if (this.disposed) return
+      const pending = this.pendingMark
+      this.pendingMark = null
+      if (pending) this.place(pending.animate, pending.start)
+      else this.updateFades()
+    })
+  }
+
+  private place(animate: boolean, start: number): void {
+    const selected = this.records[this.selectedIndex]?.button
+    if (!selected) return
     const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth, this.focus ?? this.el.clientWidth / 2)
     this.animationTarget = target
     this.cancelAnimation()
@@ -237,7 +260,6 @@ export class TabStrip {
       this.updateFades()
       return
     }
-    const start = performance.now()
     const step = (now: number): void => {
       if (this.disposed) return
       const progress = Math.min(1, Math.max(0, (now - start) / TAB_CROSSING_MS))
@@ -246,12 +268,15 @@ export class TabStrip {
       if (progress < 1) this.animationFrame = this.requestFrame(step)
       else this.animationFrame = null
     }
-    this.animationFrame = this.requestFrame(step)
+    step(performance.now())
   }
 
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    if (this.layoutFrame !== null) this.cancelFrame(this.layoutFrame)
+    this.layoutFrame = null
+    this.pendingMark = null
     this.cancelAnimation()
     this.hideTip()
     this.receiptMotion.dispose()
@@ -376,8 +401,10 @@ export class TabStrip {
   private updateFades(): void {
     const first = this.records[0]?.button, last = this.records[this.records.length - 1]?.button
     const left = this.el.scrollLeft, right = left + this.el.clientWidth
-    this.el.classList.toggle('ws-fade-l', !!first && first.offsetLeft < left - 2)
-    this.el.classList.toggle('ws-fade-r', !!last && last.offsetLeft + last.offsetWidth > right + 2)
+    const fadeLeft = !!first && first.offsetLeft < left - 2
+    const fadeRight = !!last && last.offsetLeft + last.offsetWidth > right + 2
+    this.el.classList.toggle('ws-fade-l', fadeLeft)
+    this.el.classList.toggle('ws-fade-r', fadeRight)
   }
 
   private requestFrame(callback: FrameRequestCallback): number {
@@ -436,8 +463,8 @@ export class TabStrip {
     this.tipFor = null
     this.tip.hidden = true
   }
-  private readonly onScroll = (): void => { this.updateFades(); for (const record of this.records) record.thumb?.schedule() }
-  private readonly onResize = (): void => { this.mark(this.selectedIndex, false); this.updateFades() }
+  private readonly onScroll = (): void => { this.scheduleLayout(); for (const record of this.records) record.thumb?.schedule() }
+  private readonly onResize = (): void => { this.mark(this.selectedIndex, false) }
   private readonly onMotionChange = (): void => {
     if (!this.motion?.matches || this.animationFrame === null) return
     this.cancelAnimation()

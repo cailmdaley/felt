@@ -26,6 +26,23 @@ function dimensions(el: HTMLElement, values: Record<string, number>): void {
 }
 
 describe('TabStrip', () => {
+  it('coalesces repeated marks without reading layout on the interaction stack', () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const strip = create()
+    const reads = vi.fn(() => 100)
+    Object.defineProperty(strip.el, 'clientWidth', { configurable: true, get: reads })
+    strip.render(['One', 'Two'])
+    strip.mark(0, false)
+    strip.setFocus(30)
+    strip.mark(1, false)
+    expect(reads).not.toHaveBeenCalled()
+    expect(strip.buttons[1].getAttribute('aria-selected')).toBe('true')
+    expect(frames).toHaveLength(1)
+    frames.shift()!(0)
+    expect(reads).toHaveBeenCalled()
+  })
   it('exports clamped centring math and uses the design crossing duration', () => {
     expect(centeredScrollLeft(0, 90, 100, 500)).toBe(0)
     expect(centeredScrollLeft(200, 90, 100, 500)).toBe(195)
@@ -104,7 +121,10 @@ describe('TabStrip', () => {
     expect(strip.buttons.map((button) => button.tabIndex)).toEqual([-1, 0, -1])
   })
 
-  it('centres the selected tab and settles immediately when reduced motion is preferred', () => {
+  it('centres the selected tab without animating when reduced motion is preferred', () => {
+    let frame!: FrameRequestCallback
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frame = callback; return 1 })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const media = {
       matches: true,
       media: '(prefers-reduced-motion: reduce)',
@@ -122,6 +142,7 @@ describe('TabStrip', () => {
     dimensions(strip.buttons[1], { offsetLeft: 200, offsetWidth: 90 })
     dimensions(strip.buttons[2], { offsetLeft: 300, offsetWidth: 90 })
     strip.mark(1, true)
+    frame(0)
     expect(strip.el.scrollLeft).toBe(195)
     // Edges fade only where a tile runs past them.
     expect(strip.el.classList.contains('ws-fade-l')).toBe(true)
