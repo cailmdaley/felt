@@ -15,6 +15,21 @@ it('keeps page structure and small media but drops scripts and large embedded me
   expect(result).not.toContain('b'.repeat(100))
   expect(result.length).toBeLessThan(2000)
 })
+it('keeps a large embedded stylesheet as the style it carries, and drops one past the head budget', () => {
+  const css = `h1{color:rebeccapurple}${'.x{margin:0}'.repeat(2000)}`
+  const encoded = (text: string): string => btoa(Array.from(new TextEncoder().encode(text), byte => String.fromCharCode(byte)).join(''))
+  const base64 = buildThumbnailPreview(`<head><link rel="stylesheet" media="screen" href="data:text/css;base64,${encoded(css)}"></head><body><h1>Report</h1>`)
+  expect(base64).toContain(`<style media="screen">${css}</style>`)
+  expect(base64).not.toContain('<link')
+  expect(base64).not.toContain('data:image/svg+xml')
+  const escaped = buildThumbnailPreview(`<head><link rel=stylesheet href='data:text/css,${encodeURIComponent(css)}'></head><body>`)
+  expect(escaped).toContain(`<style>${css}</style>`)
+  const huge = buildThumbnailPreview(`<head><link rel="stylesheet" href="data:text/css;base64,${encoded('p{}'.repeat(PREVIEW_LIMIT))}"><style>h1{color:red}</style></head><body><h1>Report</h1>`)
+  expect(huge).not.toContain('<link')
+  expect(huge).toContain('<style>h1{color:red}</style>')
+  const small = '<link rel="stylesheet" href="data:text/css,h1%7Bcolor:red%7D">'
+  expect(buildThumbnailPreview(small)).toBe(small)
+})
 it('caps the body while keeping the head and bounded output for fragments', () => {
   const head = '<head><style>h1{color:red}</style></head><body>'
   expect(buildThumbnailPreview(head + 'x'.repeat(PREVIEW_LIMIT * 4))).toHaveLength(head.length + PREVIEW_LIMIT)
