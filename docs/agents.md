@@ -116,6 +116,16 @@ The logic lives in the owning binary, not the script. `remind.sh` and
 The plugin no longer records commits automatically; `shuttle hook commit` remains available for explicit integrations.
 `session.sh` wraps `felt session` with a `jq -Rs` pipeline, and falls back to
 `felt hook session` when `jq` is absent.
+`handoff.sh` calls `shuttle hook handoff` without starting Node.
+Once the felt skill has activated, `remind.sh` checks the existing session flag with shell builtins and skips the binary entirely for Claude's canonical payload.
+
+`event.sh` runs asynchronously on `SubagentStop` and `SessionEnd`.
+`SessionStart`, `PreToolUse`, `PostToolUse`, and `UserPromptSubmit` stay synchronous for queued peer-message delivery.
+`Stop` never drains the mailbox.
+`Stop` and `Notification` also stay synchronous: the daemon folds state transitions in file order, so a late stop or notification can close a newer working turn.
+A late post can likewise reopen a stopped turn.
+Making those recorders asynchronous requires an ordering-aware daemon change, not just a hook flag.
+`touch.sh` stays synchronous because its frontmatter write must finish before the agent's next edit.
 
 ### Extension events (pi)
 

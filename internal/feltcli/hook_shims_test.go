@@ -1,12 +1,44 @@
 package feltcli
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestRecorderHookSchedule(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "claude-plugin", "hooks", "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+				Async   bool   `json:"async"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	for event, groups := range config.Hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				if strings.Contains(hook.Command, "commit.sh") {
+					t.Fatal("commit hook must not be registered")
+				}
+				wantAsync := strings.Contains(hook.Command, "event.sh") && (event == "SubagentStop" || event == "SessionEnd")
+				if hook.Async != wantAsync {
+					t.Fatalf("%s %s: async=%v", event, hook.Command, hook.Async)
+				}
+			}
+		}
+	}
+}
 
 func TestReminderShellGate(t *testing.T) {
 	dir := t.TempDir()
