@@ -105,7 +105,12 @@ async function choose(p, label) {
     if (await p.evaluate(() => navigator.maxTouchPoints > 0)) await row.tap()
     else await row.click()
     await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
-  } else await tab(p, label).or(p.getByRole('tab', { name: label, exact: true })).click()
+  } else {
+    const target = tab(p, label).or(p.getByRole('tab', { name: label, exact: true }))
+    // The strip folds older sent files behind its +N tile; a page chosen by name may be one.
+    if (!(await target.count())) await p.locator('.ws-tab-more').click()
+    await target.click()
+  }
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 15000, polling: 40 }) }
@@ -1981,7 +1986,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     const sheet = p.getByRole('dialog', { name: 'Pages in this constitution' })
     await sheet.waitFor()
     assert.equal(p.url(), url, 'sheet is a same-address history layer')
-    assert.equal(await sheet.locator('.ws-page-sheet-row').count(), await tab(p, 'Constitution').evaluate(t => t.parentElement.children.length))
+    assert.equal(await sheet.locator('.ws-page-sheet-row').count(), await tab(p, 'Constitution').evaluate(t => [...t.parentElement.children].reduce((n, c) => n + (c.matches('.ws-tab-more') ? Number(c.textContent.slice(1)) : 1), 0)))
     assert.equal(await sheet.locator('[aria-current="page"] .ws-page-sheet-title').innerText(), 'Calibration report')
     assert.match(await sheet.locator('[aria-current="page"] .ws-page-sheet-summary').innerText(), /sent 1m ago · 3 receipts/)
     for (let i = 0; i < 22; i++) {
