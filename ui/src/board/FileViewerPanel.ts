@@ -14,6 +14,7 @@
 
 import './FileViewerPanel.css'
 import './prose.css'
+import { thumbnailPreviews } from './workspace/thumbnailPreview.js'
 import { watchLiveFile, type LiveFileSubscription } from './LiveFileRefresh.js'
 import type { ReferenceTarget } from './workspace/ChannelReferences.js'
 import { fileKind } from './attachments.js'
@@ -326,7 +327,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
         options.onThumbnailSource?.(body.text, body.etag)
         // An empty frame has already loaded about:blank; only the page's own load counts.
         frame.addEventListener('load', () => finish(true), { once: true })
-        frame.srcdoc = htmlWithBase(body.text, src)
+        frame.srcdoc = htmlWithBase(thumbnailPreviews.get(src, body.text, body.etag), src)
       })
     } else {
       // Native PDF viewers need their plugin; the host makes the whole slot inert.
