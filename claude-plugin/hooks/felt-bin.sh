@@ -25,5 +25,6 @@ else
 fi
 
 felt_hook_available() {
-  [ -n "$FELT_BIN" ] && "$FELT_BIN" hook --help >/dev/null 2>&1
+  # No capability subprocess on the hot path. Callers tolerate old binaries.
+  [ -n "$FELT_BIN" ] && [ -x "$FELT_BIN" ]
 }

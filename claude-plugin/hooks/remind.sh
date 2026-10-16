@@ -11,12 +11,12 @@
 
 set -e
 
-source "$(dirname "$0")/felt-bin.sh"
+source "${0%/*}/felt-bin.sh"
 
 # A missing or old felt binary should lose the reminder gate, not block every
 # tool call in the session.
 if felt_hook_available; then
-  exec "$FELT_BIN" hook pretool
+  "$FELT_BIN" hook pretool 2>/dev/null || true
 fi
 
 exit 0

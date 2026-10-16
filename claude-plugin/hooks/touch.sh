@@ -13,10 +13,10 @@
 
 set -e
 
-source "$(dirname "$0")/felt-bin.sh"
+source "${0%/*}/felt-bin.sh"
 
 if felt_hook_available; then
-  exec "$FELT_BIN" hook posttool
+  "$FELT_BIN" hook posttool 2>/dev/null || true
 fi
 
 exit 0

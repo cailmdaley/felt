@@ -22,7 +22,7 @@ if [ -n "$FELT_BIN" ] && command -v jq >/dev/null 2>&1; then
   }'
   exit 0
 elif felt_hook_available; then
-  exec "$FELT_BIN" hook session
+  if "$FELT_BIN" hook session 2>/dev/null; then exit 0; fi
 fi
 
 # Keep SessionStart non-blocking when felt is absent or too old. Reached only

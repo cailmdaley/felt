@@ -10,12 +10,12 @@
 
 set -e
 
-source "$(dirname "$0")/shuttle-bin.sh"
+source "${0%/*}/shuttle-bin.sh"
 
 # A missing or old shuttle binary should lose the ledger entry, not fail the
 # Bash call that just committed.
 if shuttle_hook_available; then
-  exec "$SHUTTLE_BIN" hook commit
+  "$SHUTTLE_BIN" hook commit 2>/dev/null || true
 fi
 
 exit 0
