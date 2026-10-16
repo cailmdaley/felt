@@ -296,8 +296,8 @@ export class TabStrip {
 
   private thumbnail(record: TabRecord, doc: WorkspaceDocument): Thumbnail {
     const key: DocKey = doc.key
-    // Only reports, pictures and PDFs load live: at tile size their first view tells them apart; text, media
-    // and files not drawn here read better as their titled face.
+    // Reports and pictures load miniature pages; PDFs load only their title metadata.
+    // Text, media and files not drawn here read better as their titled face.
     const live = doc.kind === 'html' || doc.kind === 'image' || doc.kind === 'pdf'
     const thumb = new Thumbnail({
       key: `tile:${key}`, shuttleBase: this.shuttleBase!,

@@ -159,7 +159,7 @@ describe('native media documents', () => {
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/file-info?'), expect.anything())
   })
 
-  it('times an audio thumbnail from its peek, with a video first frame and native PDF page-one thumbnails', async () => {
+  it('times an audio thumbnail from its peek, with a video first frame and a glyph-only PDF thumbnail', async () => {
     // A WAV head: 1000 bytes a second over a 61 000-byte data chunk.
     const wav = new Uint8Array(44)
     const data = new DataView(wav.buffer)
@@ -174,8 +174,9 @@ describe('native media documents', () => {
     expect(onState).toHaveBeenCalledWith({ status: 'ready' })
     const video = viewer('/film.webm', { thumbnail: true }).querySelector('video')!
     expect(video.muted).toBe(true); expect(video.controls).toBe(false)
-    const pdf = viewer('/paper.pdf', { thumbnail: true }).querySelector('iframe')!
-    expect(pdf.src).toContain('#page=1&view=FitH&toolbar=0')
+    const pdf = viewer('/paper.pdf', { thumbnail: true })
+    expect(pdf.querySelector('iframe')).toBeNull()
+    expect(pdf.querySelector('.kbn-thumbnail-kind')?.textContent).toBe('▧')
     expect(pdf.inert).toBe(true)
     const html = viewer('/report.html', { thumbnail: true }).querySelector('iframe')!
     expect(html.getAttribute('sandbox')).toBe('')
