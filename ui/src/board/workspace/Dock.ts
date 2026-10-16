@@ -461,7 +461,8 @@ export class Dock {
   private queueVerdict?: (card: KanbanCard, target: Verdict) => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
-  private readonly workerPhase: (card: KanbanCard) => boolean
+  /** Whether the Desk draws this card's worker phase; every surface drawing its pill asks the same. */
+  readonly workerPhase: (card: KanbanCard) => boolean
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 
   constructor(

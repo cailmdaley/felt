@@ -4,6 +4,7 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { claudeOpening, saveClaudeOpening } from '../conversationOpening.js'
+import { terminalWorkerPill } from '../appConversation.js'
 import { Reader, SIDEBAR_MEDIA, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import type { Channel, DocKey } from './documents.js'
@@ -152,6 +153,22 @@ describe('Reader channel sidebar', () => {
     expect(reader.el.querySelector('.ws-sidebar .kbn-card-queued-row')).toBe(row)
     row.click()
     expect(onChannel).toHaveBeenCalledExactlyOnceWith(latest)
+  })
+
+  it('repaints a retained worker pill when its card folds out of flight', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'blocked', runtimePhase: 'attention', lastActivityAt: Date.now() }
+    listedCards = [asking, beta]
+    let inFlight = true
+    const reader = makeReader(asking, undefined, card => terminalWorkerPill(card, { phase: inFlight }), { workerPhase: () => inFlight })
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
+    expect(row.querySelector('.kbn-card-worker-attention')).not.toBeNull()
+    inFlight = false
+    reader.refreshChannels()
+    expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
+    expect(row.querySelector('.kbn-card-worker-attention')).toBeNull()
+    expect(row.querySelector('.kbn-card-worker-aloft')).not.toBeNull()
+    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.workerState).toBe('aloft')
   })
 
   it('refreshes retained worker targets when the browser opening preference changes', () => {
