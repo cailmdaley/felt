@@ -21,7 +21,7 @@ import { buildCardPaper } from '../KanbanSurfaces.js'
 import { overviewHostMarks } from './Overview.js'
 import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { groupJump, groupStops, stopLanding } from './groupJump.js'
-import { workspaceMeasure } from './measures.js'
+import { invalidateWorkspaceMeasures, workspaceMeasure, workspaceToken } from './measures.js'
 import { workerPlate } from './workerPlate.js'
 import { markVerdictHost, type Verdict } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
@@ -675,6 +675,7 @@ export class Reader {
     }
   }
   private readonly relayout = (): void => {
+    invalidateWorkspaceMeasures(this.el)
     if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.applySidebarWidth()
     this.renderSidebar()
@@ -691,6 +692,7 @@ export class Reader {
   private setExpanded(expanded: boolean): void {
     this.expanded = expanded
     this.el.classList.toggle('ws-expand-mode', expanded)
+    invalidateWorkspaceMeasures(this.el)
     this.opts.onExpand?.(expanded)
     this.renderSidebar()
   }
@@ -902,7 +904,7 @@ export class Reader {
     const after = this.stagePlaces()
     const options: KeyframeAnimationOptions = {
       duration: this.measure('sidebar-time', 220),
-      easing: getComputedStyle(this.el).getPropertyValue('--ws-sidebar-ease').trim() || 'ease',
+      easing: workspaceToken(this.el, 'sidebar-ease') || 'ease',
     }
     const animations: Animation[] = []
     const glide = (el: Element | null, from: number): void => {

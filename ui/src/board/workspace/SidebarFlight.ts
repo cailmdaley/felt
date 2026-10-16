@@ -1,5 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
-import { workspaceMeasure } from './measures.js'
+import { workspaceMeasure, workspaceToken } from './measures.js'
 
 export interface SidebarEntry {
   card: KanbanCard
@@ -49,7 +49,7 @@ export class SidebarFlight {
     }
     const revision = this.revision
     const duration = workspaceMeasure(this.root, 'crossing', 280)
-    const easing = getComputedStyle(this.root).getPropertyValue('--ws-ease').trim() || 'ease'
+    const easing = workspaceToken(this.root, 'ease') || 'ease'
     this.root.append(this.overlay)
     for (const row of this.sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')) {
       const key = JSON.stringify([row.dataset.channelOwner, row.dataset.channelUid])
