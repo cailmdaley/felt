@@ -202,11 +202,18 @@ describe('channel theme lifetime and owner reads', () => {
   it('keeps the bundled base after parse or transport failure', async () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('broken')))
+    const other = root()
+    themes.bind(other, { ...card, uid: 'other-channel' })
+    const shared = document.querySelector('style[data-ws-theme-sheet]')?.textContent
     const el = root()
     themes.bind(el, card, 'reader')
     await vi.waitFor(() => expect(warnings).toHaveBeenCalledWith(expect.stringContaining('could not be parsed'), expect.any(Error)))
     expect(el.dataset.wsThemeName).toBe('portolan')
-    expect(document.querySelector('style[data-ws-theme-sheet]')?.textContent).not.toContain('broken')
+    expect(el.dataset.wsTheme).toBe(other.dataset.wsTheme)
+    const sheets = [...document.querySelectorAll('style[data-ws-theme-sheet]')]
+    expect(sheets).toHaveLength(1)
+    expect(sheets[0].textContent).toBe(shared)
+    expect(sheets[0].textContent).not.toContain('broken')
   })
   it('falls back for unknown declarations, with one warning per name', () => {
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
