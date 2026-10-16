@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   formatMeetingDuration,
   joinDeliveryPhrase,
@@ -91,15 +91,36 @@ describe('meeting state words and actions', () => {
 })
 
 describe('meeting poll cadence', () => {
-  it('uses two seconds for a visible meeting and the board cadence for idle or failed reads', () => {
-    expect(meetingPollDelay(true, true, meeting())).toBe(2_000)
+  it.each(['starting', 'loading', 'live', 'stopping'] as const)('polls %s meetings every two seconds', (state) => {
+    expect(meetingPollDelay(true, true, meeting({ state }))).toBe(2_000)
+  })
+
+  it('uses the idle cadence for terminal meetings, absence, and failed reads', () => {
+    expect(meetingPollDelay(true, true, meeting({ state: 'failed' }))).toBe(15_000)
     expect(meetingPollDelay(true, true, null)).toBe(15_000)
     expect(meetingPollDelay(true, false, meeting())).toBe(15_000)
   })
 
+  it('polls a failed meeting four times per minute', () => {
+    vi.useFakeTimers()
+    try {
+      let polls = 0
+      const poll = () => {
+        polls++
+        schedule()
+      }
+      const schedule = () => setTimeout(poll, meetingPollDelay(true, true, meeting({ state: 'failed' }))!)
+      schedule()
+      vi.advanceTimersByTime(60_000)
+      expect(polls).toBe(4)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('pauses while hidden and resumes with the current cadence when visible', () => {
     expect(meetingPollDelay(false, true, meeting())).toBeNull()
-    expect(meetingPollDelay(true, true, meeting({ state: 'failed' }))).toBe(2_000)
+    expect(meetingPollDelay(true, true, meeting({ state: 'failed' }))).toBe(15_000)
   })
 })
 
