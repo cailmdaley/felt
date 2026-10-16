@@ -20,6 +20,17 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('draws a PDF thumbnail as a glyph without creating a native viewer, while reading its title', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('%PDF-1.4 /Title (A paper)', { headers: { ETag: 'pdf-preview' } })))
+    const onThumbnailSource = vi.fn(), onState = vi.fn()
+    const viewer = buildFileViewer('', '/paper.pdf', 'host-a', undefined, undefined, { thumbnail: true, onThumbnailSource, onState })
+    expect(viewer.querySelector('iframe')).toBeNull()
+    expect(viewer.querySelector('.kbn-thumbnail-kind')?.textContent).toBe('▧')
+    expect(viewer.querySelector('.kbn-thumbnail-name')?.textContent).toBe('paper.pdf')
+    await vi.waitFor(() => expect(onThumbnailSource).toHaveBeenCalled())
+    expect(onState).toHaveBeenCalledWith({ status: 'ready' })
+    disposeFileViewer(viewer)
+  })
   it('sends full thumbnail source to title metadata but only lightweight markup to the frame', async () => {
     const source = `<title>Full report</title><body><img src="data:image/png;base64,${'a'.repeat(100000)}"><script>run()</script><h1>Report</h1>${'body '.repeat(20000)}`
     vi.stubGlobal('fetch', vi.fn(async () => new Response(source, { headers: { ETag: 'preview-test' } })))

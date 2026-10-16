@@ -310,33 +310,28 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
     image.addEventListener('error', () => finish(false), { once: true })
     image.src = src
     wrap.append(image)
-  } else if (kind === 'html' || kind === 'pdf') {
+  } else if (kind === 'pdf') {
+    // A PDF's title and glyph need no browser plugin or document navigation.
+    if (options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
+    queueMicrotask(() => finish(true))
+  } else if (kind === 'html') {
     const frame = document.createElement('iframe')
     frame.title = basename(path)
     frame.inert = true
     frame.tabIndex = -1
     frame.setAttribute('scrolling', 'no')
     frame.addEventListener('error', () => finish(false), { once: true })
-    if (kind === 'html') {
-      // The page's own text, from the cache the reader shares, drawn without scripts.
-      frame.setAttribute('sandbox', '')
-      frame.allow = "autoplay 'none'"
-      void documentText(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(body => {
-        if (disposed) return
-        if (!body) { finish(false); return }
-        options.onThumbnailSource?.(body.text, body.etag)
-        // An empty frame has already loaded about:blank; only the page's own load counts.
-        frame.addEventListener('load', () => finish(true), { once: true })
-        frame.srcdoc = htmlWithBase(thumbnailPreviews.get(src, body.text, body.etag), src)
-      })
-    } else {
-      // Native PDF viewers need their plugin; the host makes the whole slot inert.
-      frame.addEventListener('load', () => {
-        void head(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(info => finish(!!info?.exists))
-      }, { once: true })
-      frame.src = `${src}#page=1&view=FitH&toolbar=0`
-      if (options.onThumbnailSource) void readThumbnailMetadata(src, controller.signal, options.onThumbnailSource)
-    }
+    // The page's own text, from the cache the reader shares, drawn without scripts.
+    frame.setAttribute('sandbox', '')
+    frame.allow = "autoplay 'none'"
+    void documentText(src, RESOURCE_PRIORITY.thumbnail, { signal: controller.signal }).then(body => {
+      if (disposed) return
+      if (!body) { finish(false); return }
+      options.onThumbnailSource?.(body.text, body.etag)
+      // An empty frame has already loaded about:blank; only the page's own load counts.
+      frame.addEventListener('load', () => finish(true), { once: true })
+      frame.srcdoc = htmlWithBase(thumbnailPreviews.get(src, body.text, body.etag), src)
+    })
     wrap.append(frame)
   } else if (kind === 'audio') {
     // A recording is its face: the title and the duration its peek declares, with no media element.
