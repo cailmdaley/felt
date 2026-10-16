@@ -20,6 +20,18 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('sends full thumbnail source to title metadata but only lightweight markup to the frame', async () => {
+    const source = `<title>Full report</title><body><img src="data:image/png;base64,${'a'.repeat(100000)}"><script>run()</script><h1>Report</h1>${'body '.repeat(20000)}`
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(source, { headers: { ETag: 'preview-test' } })))
+    const onThumbnailSource = vi.fn()
+    const viewer = buildFileViewer('', '/preview.html', 'host-a', undefined, undefined, { thumbnail: true, onThumbnailSource })
+    await vi.waitFor(() => expect(onThumbnailSource).toHaveBeenCalledWith(source, 'preview-test'))
+    const frame = viewer.querySelector('iframe')!
+    expect(frame.srcdoc.length).toBeLessThan(50000)
+    expect(frame.srcdoc).not.toContain('run()')
+    expect(frame.srcdoc).not.toContain('a'.repeat(1000))
+    disposeFileViewer(viewer)
+  })
   it.each([
     '<!doctype html><html><head><style>img { max-width: 42%; }</style></head><body><img width="3000" height="600"></body></html>',
     '<html><body><svg width="3000"></svg></body></html>',
