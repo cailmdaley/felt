@@ -10,6 +10,7 @@ const behavior = (): ScrollBehavior => window.matchMedia?.('(prefers-reduced-mot
 /** Selection belongs to card identity, not a DOM node or a feed position. */
 export class DeskKeyboard {
   private selected: DeskAddress | null = null
+  private revealFrame = 0
   private root: HTMLElement
   private open: (address: DeskAddress) => void
   constructor(root: HTMLElement, open: (address: DeskAddress) => void) {
@@ -17,7 +18,7 @@ export class DeskKeyboard {
     this.open = open
     root.addEventListener('click', this.onClick, true)
   }
-  dispose(): void { this.root.removeEventListener('click', this.onClick, true) }
+  dispose(): void { cancelAnimationFrame(this.revealFrame); this.root.removeEventListener('click', this.onClick, true) }
   get selection(): DeskAddress | null { return this.selected }
 
   /** The reader's column is exactly the Desk's navigable order, including expanded queues. */
@@ -101,6 +102,19 @@ export class DeskKeyboard {
   }
 
   private reveal(el: HTMLElement): void {
+    cancelAnimationFrame(this.revealFrame)
+    this.revealFrame = 0
+    if (isMobileViewport()) { this.revealPlaced(el); return }
+    const address = identity(el)
+    this.revealFrame = requestAnimationFrame(() => {
+      this.revealFrame = 0
+      if (this.selected?.uid !== address.uid || this.selected.origin !== address.origin) return
+      const current = this.node()
+      if (current) this.revealPlaced(current)
+    })
+  }
+
+  private revealPlaced(el: HTMLElement): void {
     const motion = behavior()
     if (isMobileViewport()) {
       const band = el.closest<HTMLElement>('.kbn-band-folded')
@@ -111,7 +125,22 @@ export class DeskKeyboard {
         const index = [...board.children].indexOf(column)
         board.scrollTo?.({ left: folioScrollTarget(index, board.clientWidth, 3), behavior: motion })
       }
+      el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: motion })
+      return
     }
-    el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: motion })
+    const rect = el.getBoundingClientRect()
+    let visible = rect.height > 0 && rect.width > 0 && rect.top >= 0 && rect.left >= 0 && rect.bottom <= window.innerHeight && rect.right <= window.innerWidth
+    for (let parent = el.parentElement; visible && parent; parent = parent.parentElement) {
+      const clipsY = parent.scrollHeight > parent.clientHeight && /auto|scroll|hidden/.test(getComputedStyle(parent).overflowY)
+      const clipsX = parent.scrollWidth > parent.clientWidth && /auto|scroll|hidden/.test(getComputedStyle(parent).overflowX)
+      if (!clipsY && !clipsX) continue
+      const bounds = parent.getBoundingClientRect()
+      const scaleY = parent.offsetHeight ? bounds.height / parent.offsetHeight : 1
+      const scaleX = parent.offsetWidth ? bounds.width / parent.offsetWidth : 1
+      const top = bounds.top + parent.clientTop * scaleY, left = bounds.left + parent.clientLeft * scaleX
+      visible = (!clipsY || rect.top >= top && rect.bottom <= top + parent.clientHeight * scaleY)
+        && (!clipsX || rect.left >= left && rect.right <= left + parent.clientWidth * scaleX)
+    }
+    if (!visible) el.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: motion })
   }
 }
