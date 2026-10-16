@@ -200,8 +200,14 @@ func readHandoffUsage(file string, window any, override string) (*handoffUsage, 
 			w = override
 		}
 		size := handoffNumber(w)
-		if size <= 0 && strings.Contains(strings.ToLower(row.Message.Model), "[1m]") {
-			size = 1000000
+		// Match Number.isFinite(window) && window > 0 in the Node adapter.
+		// ParseFloat accepts NaN/Infinity and returns infinity on overflow; none
+		// can enter claim JSON or percentage calculations. Preserve [1m] fallback.
+		if math.IsNaN(size) || math.IsInf(size, 0) || size <= 0 {
+			size = 0
+			if strings.Contains(strings.ToLower(row.Message.Model), "[1m]") {
+				size = 1000000
+			}
 		}
 		return &handoffUsage{total, size, "claude"}, nil
 	}

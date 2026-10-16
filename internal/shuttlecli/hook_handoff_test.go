@@ -25,39 +25,65 @@ func TestHandoffHookMatchesNode(t *testing.T) {
 	if err != nil {
 		t.Skip("node unavailable")
 	}
-	for _, row := range []string{
+	rows := []string{
 		`{"type":"assistant","message":{"role":"assistant","model":"opus[1m]","usage":{"input_tokens":780000,"cache_read_input_tokens":10000,"output_tokens":1000}}}`,
 		`{"type":"assistant","message":{"role":"assistant","usage":{"input_tokens":510000}}}`,
 		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":190000},"model_context_window":200000}}}`,
 		`{"type":"assistant","message":{"role":"assistant","usage":{"input_tokens":-1}}}`,
-	} {
-		t.Run(row, func(t *testing.T) {
-			env, _ := envWithHome(t)
-			clearHandoffEnv(env)
-			env.Set("SHUTTLE_HANDOFF_STATE_DIR", filepath.Join(t.TempDir(), "go"))
-			tr := filepath.Join(t.TempDir(), "transcript.jsonl")
-			if err := os.WriteFile(tr, []byte(row+"\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			input, _ := json.Marshal(map[string]any{"session_id": "test", "transcript_path": tr, "hook_event_name": "PostToolUse"})
-			nodeDir := filepath.Join(t.TempDir(), "node")
-			for i := 0; i < 3; i++ {
-				var got bytes.Buffer
-				if err := newApp(env).runHandoffHook(bytes.NewReader(input), &got); err != nil {
+	}
+	for _, override := range []string{"", "Infinity", "NaN", "1e10000", "-Infinity", "0", "-1"} {
+		for _, row := range rows {
+			t.Run(override+"/"+row, func(t *testing.T) {
+				env, _ := envWithHome(t)
+				clearHandoffEnv(env)
+				if override != "" {
+					env.Set("SHUTTLE_HANDOFF_CONTEXT_WINDOW", override)
+				}
+				goDir := filepath.Join(t.TempDir(), "go")
+				env.Set("SHUTTLE_HANDOFF_STATE_DIR", goDir)
+				tr := filepath.Join(t.TempDir(), "transcript.jsonl")
+				if err := os.WriteFile(tr, []byte(row+"\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
-				cmd := exec.Command(node, filepath.Join("..", "..", "claude-plugin", "hooks", "handoff.mjs"))
-				cmd.Env = append(env.Environ(), "SHUTTLE_HANDOFF_STATE_DIR="+nodeDir)
-				cmd.Stdin = bytes.NewReader(input)
-				want, err := cmd.Output()
+				input, _ := json.Marshal(map[string]any{"session_id": "test", "transcript_path": tr, "hook_event_name": "PostToolUse"})
+				nodeDir := filepath.Join(t.TempDir(), "node")
+				for i := 0; i < 3; i++ {
+					var got bytes.Buffer
+					if err := newApp(env).runHandoffHook(bytes.NewReader(input), &got); err != nil {
+						t.Fatal(err)
+					}
+					cmd := exec.Command(node, filepath.Join("..", "..", "claude-plugin", "hooks", "handoff.mjs"))
+					cmd.Env = append(env.Environ(), "SHUTTLE_HANDOFF_STATE_DIR="+nodeDir)
+					cmd.Stdin = bytes.NewReader(input)
+					want, err := cmd.Output()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if strings.TrimSpace(got.String()) != strings.TrimSpace(string(want)) {
+						t.Fatalf("go %s\nnode %s", got.String(), want)
+					}
+				}
+				// A bad window must not leave a poisoned/empty exclusive claim that
+				// silently prevents the reminder from ever being emitted on a retry.
+				claims, err := filepath.Glob(filepath.Join(goDir, "*", "*"))
 				if err != nil {
 					t.Fatal(err)
 				}
-				if strings.TrimSpace(got.String()) != strings.TrimSpace(string(want)) {
-					t.Fatalf("go %s\nnode %s", got.String(), want)
+				for _, claim := range claims {
+					data, err := os.ReadFile(claim)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var usage handoffUsage
+					if err := json.Unmarshal(data, &usage); err != nil {
+						t.Fatalf("invalid claim %s: %v", data, err)
+					}
+					if override != "" && usage.ContextWindow != 0 && usage.ContextWindow != 1000000 && usage.Harness == "claude" {
+						t.Fatalf("invalid override not normalized: %+v", usage)
+					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
