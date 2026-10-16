@@ -43,6 +43,25 @@ describe('TabStrip', () => {
     frames.shift()!(0)
     expect(reads).toHaveBeenCalled()
   })
+  it('lands a pending placement at once when flushed, and only once', () => {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length })
+    const cancel = vi.fn()
+    vi.stubGlobal('cancelAnimationFrame', cancel)
+    const strip = create()
+    strip.render(['One', 'Two'])
+    frames.length = 0
+    dimensions(strip.el, { clientWidth: 100, scrollWidth: 500 })
+    dimensions(strip.buttons[1], { offsetLeft: 200, offsetWidth: 90 })
+    strip.mark(1, false)
+    expect(strip.el.scrollLeft).toBe(0)
+    strip.flushLayout()
+    expect(strip.el.scrollLeft).toBe(195)
+    expect(cancel).toHaveBeenCalledWith(1)
+    strip.el.scrollLeft = 7
+    strip.flushLayout()
+    expect(strip.el.scrollLeft).toBe(7)
+  })
   it('exports clamped centring math and uses the design crossing duration', () => {
     expect(centeredScrollLeft(0, 90, 100, 500)).toBe(0)
     expect(centeredScrollLeft(200, 90, 100, 500)).toBe(195)

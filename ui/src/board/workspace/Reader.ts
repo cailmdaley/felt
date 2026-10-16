@@ -902,6 +902,8 @@ export class Reader {
     return { page, tabs: this.tabs.buttons.map(tab => tab.getBoundingClientRect().left), sidebar: this.sidebar.offsetWidth }
   }
   private slideSidebar(shown: boolean, before: { page: number; tabs: number[]; sidebar: number }): void {
+    // The tiles glide from where they were to where the strip's scroll puts them.
+    this.tabs.flushLayout()
     const after = this.stagePlaces()
     const options: KeyframeAnimationOptions = {
       duration: this.measure('sidebar-time', 220),

@@ -629,6 +629,41 @@ describe('Reader channel sidebar', () => {
     expect(strip.scrollLeft + strip.clientWidth).toBeGreaterThanOrEqual(390)
   })
 
+  it('glides the tiles from the scroll they had to the scroll the opened sidebar gives them', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate')
+    const glides = new Map<Element, Keyframe[]>()
+    Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: function (this: HTMLElement, keyframes: Keyframe[]) {
+      glides.set(this, keyframes)
+      return { finished: new Promise(() => {}), cancel() {} } as unknown as Animation
+    } })
+    try {
+      const reader = makeReader()
+      const base = channel(alpha)
+      const documents = Array.from({ length: 4 }, (_, index) => ({
+        ...base.documents[0], key: `fiber:host-a:alpha-${index}`, name: `Page ${index + 1}`,
+      }))
+      reader.show({ ...base, documents, labels: documents.map(doc => doc.name) }, documents[3].key, 'Desk', alpha)
+      const strip = reader.el.querySelector<HTMLElement>('.ws-tabs')!
+      const selected = reader.el.querySelector<HTMLButtonElement>('.ws-tab[aria-selected="true"]')!
+      Object.defineProperty(strip, 'clientWidth', {
+        configurable: true, get: () => reader.el.classList.contains('ws-with-sidebar') ? 100 : 120,
+      })
+      Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 500 })
+      Object.defineProperty(selected, 'offsetLeft', { configurable: true, value: 310 })
+      Object.defineProperty(selected, 'offsetWidth', { configurable: true, value: 80 })
+      selected.getBoundingClientRect = () => new DOMRect(310 - strip.scrollLeft, 0, 80, 40)
+      window.dispatchEvent(new Event('resize'))
+      paintFrame()
+      expect(strip.scrollLeft).toBe(290)
+      reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+      expect(strip.scrollLeft).toBe(300)
+      expect(glides.get(selected)).toEqual([{ translate: '10px 0' }, { translate: '0 0' }])
+    } finally {
+      if (descriptor) Object.defineProperty(HTMLElement.prototype, 'animate', descriptor)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'animate')
+    }
+  })
+
   it('leaves activation keys to focused controls while keeping native Reader modality', () => {
     const reader = makeReader()
     const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
