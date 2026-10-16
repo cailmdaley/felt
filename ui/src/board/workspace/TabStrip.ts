@@ -233,14 +233,26 @@ export class TabStrip {
   /** Coalesce marks from Reader paint and layout; geometry is read once before scroll/fade writes. */
   private scheduleLayout(): void {
     if (this.layoutFrame !== null) return
-    this.layoutFrame = this.requestFrame(() => {
-      this.layoutFrame = null
-      if (this.disposed) return
-      const pending = this.pendingMark
-      this.pendingMark = null
-      if (pending) this.place(pending.animate, pending.start)
-      else this.updateFades()
-    })
+    this.layoutFrame = this.requestFrame(() => this.runLayout())
+  }
+
+  /**
+   * Land a pending placement now, for a caller about to measure the tiles
+   * where they end up (a FLIP glide); otherwise placement waits for the frame.
+   */
+  flushLayout(): void {
+    if (this.layoutFrame === null) return
+    this.cancelFrame(this.layoutFrame)
+    this.runLayout()
+  }
+
+  private runLayout(): void {
+    this.layoutFrame = null
+    if (this.disposed) return
+    const pending = this.pendingMark
+    this.pendingMark = null
+    if (pending) this.place(pending.animate, pending.start)
+    else this.updateFades()
   }
 
   private place(animate: boolean, start: number): void {
