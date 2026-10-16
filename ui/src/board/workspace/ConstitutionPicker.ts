@@ -13,6 +13,8 @@ export interface ConstitutionPickerOptions {
   /** The retained root, after placement and revision patching, on every refresh. */
   onRow?(el: HTMLElement, card: KanbanCard): void
   onRemove?(el: HTMLElement): void
+  /** Capture shared inputs once for the whole row pass. */
+  onBeforeRefresh?(): void
   /** After every refresh, once rows and captions are placed. */
   onRefresh?(): void
   onOpen(card: KanbanCard): void
@@ -77,6 +79,7 @@ export class ConstitutionPicker {
     this.previous = null
   }
   refresh(reveal = true): void {
+    this.opts.onBeforeRefresh?.()
     const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
     const cards = [...new Map(this.opts.cards().map(card => [identity(card), card])).values()]
     const current = cards.find(card => this.opts.current?.(card))
