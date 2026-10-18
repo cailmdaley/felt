@@ -2,7 +2,7 @@
 
 A worker keeps running where Shuttle launched it.
 Opening its conversation gives you another view of that work; it doesn't move the process to your laptop, browser, or phone.
-The **Aloft**, **Your turn**, and **At a prompt** controls on a card all open that worker.
+A live worker's pill names its turn (**working**, **idle**, **question**, **at a prompt**, **blocked**) and opens that worker.
 
 ## Supported routes
 
@@ -22,7 +22,7 @@ Changing an opening preference doesn't change a task's execution surface.
 Settings opens to **Conversations**, with **Open conversations in** at the top.
 Choose the default for Claude sessions: **Terminal**, **Claude browser**, or **Claude app**.
 The choice saves immediately.
-Right-click **Aloft** to use another available route for that conversation without changing the default.
+Right-click the worker pill to use another available route for that conversation without changing the default.
 This is a preference for the browser you're using, separate from the host configuration selected in Settings.
 Claude browser/app routes require a recorded Remote Control link for that session.
 The preference doesn't enable Remote Control by itself.

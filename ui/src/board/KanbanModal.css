@@ -1394,7 +1394,7 @@
    against a hairline. The edge is painted inside the card's own 1 px border,
    so a card crossing into the band changes colour, never size. A background
    layer leaves the card's shadows to whichever surface draws it. */
-.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card[data-turn="question"] {
+.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card:is([data-turn="blocked"], [data-turn="prompt"], [data-turn="question"]) {
   border-left-color: var(--kbn-owed);
   background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
 }
@@ -1980,8 +1980,8 @@
 }
 /* THE WORKER PILL — one treatment wherever a worker is drawn: the Desk card,
    the reader's sidebar card and the reader's head. A dot carries the state's
-   pigment (cobalt aloft, gold waiting, cinnabar attention or blocked); the
-   state word and its compact age ("11m", "3h", "2d") are mono capitals,
+   turn's pigment (cobalt working, gold idle, cinnabar blocked, prompt or
+   question, muted when the turn is unknown); the turn word and its compact age ("11m", "3h", "2d") are mono capitals,
    set tight, with no plate. Only the pointer or the keyboard draws a plate.
    Each word's box is trimmed to its capitals (cap height to baseline), so
    centring the words centres the capitals in the plate, and the pill's
@@ -2026,9 +2026,9 @@
   background: var(--worker-dot);
   box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--worker-dot) 18%, transparent);
 }
-.kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--kbn-owed-bright); }
-.kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--kbn-you); }
-.kbn-card-worker[data-worker-state='no worker'] .ws-worker-dot { --worker-dot: var(--kbn-ink-muted); }
+.kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--kbn-owed-bright); }
+.kbn-card-worker:is([data-turn='blocked'], [data-turn='prompt'], [data-turn='question']) .ws-worker-dot { --worker-dot: var(--kbn-you); }
+.kbn-card-worker:is([data-turn='none'], [data-turn='unknown']) .ws-worker-dot { --worker-dot: var(--kbn-ink-muted); }
 .kbn-card-worker .ws-worker-state { font: var(--worker-word); }
 .kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { text-box: trim-both cap alphabetic; }
 .kbn-card-worker .ws-worker-elapsed { font: var(--worker-time); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
@@ -2058,12 +2058,12 @@
 }
 /* Boot-quarantine hold: the daemon is WITHHOLDING this fresh launch after a
    restart (parked in pending_launch, awaiting release). Cool, inert slate —
-   deliberately unlike the teal "aloft" pill (running) and the warm gold/amber
+   deliberately unlike the teal working pill and the warm gold/amber
    phase chips (dispatch lifecycle). A dashed border reads as a held boundary,
    not a solid live state; no pulse — it's parked, not churning.
 
    The badge IS the release control: it's a <button> whose default face shows
-   `⏹︎ held`; on hover/focus it swaps to `▶ release` in the teal "aloft" colour
+   `⏹︎ held`; on hover/focus it swaps to `▶ release` in the teal working colour
    (matching the running-worker pill — release means "let it fly") so the
    click's meaning is unmistakable. Global-per-host release — one click frees
    every held launch on the owning daemon (see the title). */

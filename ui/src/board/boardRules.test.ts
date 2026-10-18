@@ -46,7 +46,6 @@ import {
   clusterStashCards,
   findCardById,
   formatLaunchDay,
-  phasePillLabel,
   sortDatedByReturn,
   splitStashByReturn,
   boardDependents,
@@ -177,24 +176,6 @@ describe('humanizeIdleAge', () => {
     expect(humanizeIdleAge(-5_000)).toBe('0m')
     expect(humanizeIdleAge(undefined)).toBe('0m')
     expect(humanizeIdleAge(Number.NaN)).toBe('0m')
-  })
-})
-
-describe('phasePillLabel', () => {
-  it('always clocks a waiting worker', () => {
-    expect(phasePillLabel('waiting', NOW - 12 * 60_000, NOW)).toBe('⏸ your turn · 12m')
-    expect(phasePillLabel('waiting', NOW - 3 * 3_600_000, NOW)).toBe('⏸ your turn · 3h')
-    expect(phasePillLabel('waiting', NOW - 2 * DAY, NOW)).toBe('⏸ your turn · 2d')
-  })
-
-  it('clocks attention only once it has gone an hour unanswered', () => {
-    expect(phasePillLabel('attention', NOW - 4 * 60_000, NOW)).toBe('☞︎ at a prompt')
-    expect(phasePillLabel('attention', NOW - 90 * 60_000, NOW)).toBe('☞︎ at a prompt · 1h')
-  })
-
-  it('falls back to the bare label with no activity stamp', () => {
-    expect(phasePillLabel('waiting', undefined, NOW)).toBe('⏸ your turn')
-    expect(phasePillLabel('dispatched', NOW - DAY, NOW)).toBe('▸ dispatched')
   })
 })
 

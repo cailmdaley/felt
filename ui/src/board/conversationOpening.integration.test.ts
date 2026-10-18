@@ -6,7 +6,7 @@ import { sessionTargets } from './sessionHistory'
 import { card } from './testFixtures'
 
 const bridge = 'https://claude.ai/code/session_test'
-const worker = card({ id: 'test', tmuxSession: 'test-shuttle', workerAgent: 'claude-opus', sessionLink: bridge })
+const worker = card({ id: 'test', status: 'active', workerState: 'running', runtimePhase: 'working', tmuxSession: 'test-shuttle', workerAgent: 'claude-opus', sessionLink: bridge })
 const record = { session: 'test-session', host: 'host' }
 const link = { session: record.session, harness: 'claude-code', availability: 'available_local', url: bridge }
 
@@ -31,7 +31,7 @@ describe('conversation opening', () => {
 
   it.each([
     ['browser', bridge], ['app', 'claude://claude.ai/code/session_test'],
-  ] as const)('makes Aloft and History open the same %s destination', (choice, href) => {
+  ] as const)('makes the worker pill and History open the same %s destination', (choice, href) => {
     expect(saveClaudeOpening(choice)).toBe(true)
     const attach = vi.fn()
     const pill = terminalWorkerPill(worker, { openWorker: attach }) as HTMLAnchorElement
@@ -46,7 +46,7 @@ describe('conversation opening', () => {
     saveClaudeOpening('browser')
     const attach = vi.fn()
     const pill = terminalWorkerPill({ ...worker, sessionLink: undefined }, { openWorker: attach })
-    expect(pill.textContent).toBe('Aloft · terminal')
+    expect(pill.textContent).toBe('working · terminal')
     expect(pill.title).toContain('No Claude Remote Control link')
     pill.click()
     expect(attach).toHaveBeenCalledOnce()
@@ -64,7 +64,7 @@ describe('conversation opening', () => {
     const history = sessionTargets(record, { ...link, url }, { desktop: true })
     expect(history.primary).toMatchObject({ kind: 'web', href: url })
     if (choice === 'app') {
-      expect(pill.textContent).toBe('Aloft · browser')
+      expect(pill.textContent).toBe('working · browser')
       expect(pill.title).toContain('no supported Claude desktop app route')
       expect(history.guidance).toContain('no supported Claude desktop app route')
       expect(history.guidance).not.toContain('No Claude Remote Control link')
@@ -85,7 +85,7 @@ describe('conversation opening', () => {
   it('leaves Codex CLI terminals and Codex app links alone', () => {
     saveClaudeOpening('app')
     const cli = terminalWorkerPill({ ...worker, workerAgent: 'codex-sol', sessionLink: undefined }, { openWorker: vi.fn() })
-    expect(cli.textContent).toBe('Aloft')
+    expect(cli.textContent).toBe('working')
     expect(cli.tagName).toBe('BUTTON')
     const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     expect(appWorkerLink(card({ id: 'codex', desktopLink: route })).href).toBe(route)

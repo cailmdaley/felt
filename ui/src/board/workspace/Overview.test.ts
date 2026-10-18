@@ -581,7 +581,7 @@ describe('Overview news, visits and graduated density', () => {
     reset(now() - 3600000)
     cards.push(card({ id: 'gamma', uid: 'gamma', originId: 'host-a', status: 'active', shuttleKind: 'oneshot' }))
     cards[0] = { ...cards[0], status: 'closed' }
-    cards[1] = { ...cards[1], status: 'active', shuttleKind: 'oneshot', runtimePhase: 'waiting' }
+    cards[1] = { ...cards[1], status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'waiting' }
     feed.files = [receipt('gamma', '/working.html', now()), receipt('beta', '/needs.html', now() - 1000),
       ...Array.from({ length: 6 }, (_, i) => receipt('alpha', `/report-${i}.html`, now() - 2000 - i, 'host-a', { sessionId: 'one-batch' }))]
     await refresh()

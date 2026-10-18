@@ -2334,8 +2334,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     const elsewhere = device === 'phone' ? '.ws-selected .ws-fiber-acts .kbn-card-worker' : '.ws-navbar .ws-head-worker .kbn-card-worker'
     assert.equal(await p.locator(elsewhere).isVisible(), false, 'one worker control on screen')
     const head = p.locator(where)
-    await poll(p, where => document.querySelector(where)?.dataset.workerState === 'aloft', where)
-    await poll(p, where => document.querySelector(where)?.textContent.includes('12m'), where)
+    await poll(p, where => document.querySelector(where)?.dataset.turn === 'working', where)
+    await poll(p, where => document.querySelector(where)?.textContent.includes('working'), where)
     const dot = head.locator('.ws-worker-dot')
     assert.ok(await dot.isVisible(), 'the worker dot shows')
     assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none', 'reduced motion suppresses breathing')
@@ -2349,10 +2349,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       assert.ok(headBox.width >= 44 && headBox.height >= 44, `the phone dot is a full target: ${JSON.stringify(headBox)}`)
       assert.ok(headBox.x + headBox.width >= viewport.width - 16, 'the phone dot sits at the right end of the top bar')
     } else {
-      // Dot, state word, compact age.
-      assert.equal(await head.textContent(), 'aloft12m')
-      assert.equal(await head.locator('.ws-worker-state').textContent(), 'aloft')
-      assert.equal(await head.locator('.ws-worker-elapsed').textContent(), '12m')
+      // Dot and turn word; a busy worker carries no age until it goes quiet.
+      assert.equal(await head.textContent(), 'working')
+      assert.equal(await head.locator('.ws-worker-state').textContent(), 'working')
+      assert.equal(await head.locator('.ws-worker-elapsed').textContent(), '')
       const line = await selected(p).evaluate(page => {
         const rect = sel => page.querySelector(sel).getBoundingClientRect()
         const status = rect('.ws-prose-status'), worker = rect('.ws-fiber-acts .ws-worker-control'), temper = rect('.ws-fiber-acts .kbn-ctl-temper')
@@ -2360,14 +2360,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       })
       assert.deepEqual(line, { order: true, row: true }, 'the pill rides the status line between the kicker and the verdicts')
     }
-    await shot('aloft')
+    await shot('working')
     await p.evaluate(async () => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
       row.runtime.phase = 'waiting'
       row.runtime.last_activity_at = Date.now() - 120000
       await window.__harness.modal.fetchAndRender()
     })
-    await poll(p, where => document.querySelector(where)?.dataset.workerState === 'waiting', where)
+    await poll(p, where => document.querySelector(where)?.dataset.turn === 'idle', where)
     assert.equal(await p.locator(`${where}.ws-turn-active`).count(), 0, 'a waiting worker does not breathe')
     assert.notEqual(await dot.evaluate(el => getComputedStyle(el).backgroundColor), headDot, 'a waiting worker turns the dot gold')
     if (device !== 'phone') assert.equal(await head.locator('.ws-worker-elapsed').textContent(), '2m', 'a waiting worker counts from its last activity')

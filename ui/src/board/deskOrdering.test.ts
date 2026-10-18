@@ -139,10 +139,10 @@ describe('Desk comparators', () => {
 
   it('ranks questions first in Your turn, then keeps creation order regardless of activity age', () => {
     const workers = [
-      card({ id: 'waiting-new', runtimePhase: 'waiting', createdAt: NEW, lastActivityAt: NOW }),
-      card({ id: 'attention-old', runtimePhase: 'attention', createdAt: OLD, lastActivityAt: 1 }),
-      card({ id: 'asked-old', runtimePhase: 'working', ask: { text: 'Which?', at: OLD }, createdAt: OLD, uid: 'z', lastActivityAt: 1 }),
-      card({ id: 'working-new', runtimePhase: 'working', createdAt: NEW, lastActivityAt: 1 }),
+      card({ id: 'waiting-new', status: 'active', workerState: 'running', runtimePhase: 'waiting', createdAt: NEW, lastActivityAt: NOW }),
+      card({ id: 'attention-old', status: 'active', workerState: 'running', runtimePhase: 'attention', createdAt: OLD, lastActivityAt: 1 }),
+      card({ id: 'asked-old', status: 'active', workerState: 'running', runtimePhase: 'working', ask: { text: 'Which?', at: OLD }, createdAt: OLD, uid: 'z', lastActivityAt: 1 }),
+      card({ id: 'working-new', status: 'active', workerState: 'running', runtimePhase: 'working', createdAt: NEW, lastActivityAt: 1 }),
       card({ id: 'unobserved-old', createdAt: OLD, status: 'active' }),
     ]
     const expected = ['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old']

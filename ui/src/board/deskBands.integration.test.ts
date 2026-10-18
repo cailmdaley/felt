@@ -88,13 +88,13 @@ describe('cycle members at rest', () => {
 
 describe('In flight bands', () => {
   it.each([
-    ['identity_pending', 'Identifying session'],
-    ['identity_failed', 'Session attribution failed'],
-  ])('renders %s visibly rather than as Working', (phase, label) => {
+    ['identity_pending', 'working', 'Working', 'identifying'],
+    ['identity_failed', 'yourTurn', 'Your turn', 'unattributed'],
+  ])('names %s on the pill: a pending identity is the worker\'s move, a failed one needs repair', (phase, band, caption, label) => {
     const data = workerFeed([phase])
     const root = renderer(data).renderNowSection(data.now, {})
     expect(flightOrder(root)).toEqual([
-      { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['worker-0'] },
+      { band, caption, label: caption, ids: ['worker-0'] },
     ])
     expect(root.querySelector('.ws-worker-state')?.textContent).toBe(label)
   })
@@ -124,7 +124,7 @@ describe('In flight bands', () => {
     expect(root.querySelector('.kbn-card-question')?.textContent).toBe(question.ask!.text)
     expect(root.querySelector<HTMLElement>('[data-fiber-id="question"]')?.dataset.turn).toBe('question')
     expect(root.querySelector<HTMLElement>('[data-fiber-id="worker-0"]')?.dataset.turn).toBe('idle')
-    expect(root.querySelector<HTMLElement>('[data-fiber-id="worker-1"]')?.dataset.turn).toBeUndefined()
+    expect(root.querySelector<HTMLElement>('[data-fiber-id="worker-1"]')?.dataset.turn).toBe('working')
     question.runtimePhase = 'attention'
     expect(flightOrder(renderer(data).renderNowSection(data.now, {}))).toEqual(flightOrder(root))
     question.ask = undefined

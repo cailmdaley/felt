@@ -56,15 +56,16 @@ interface CompositeRuntime {
   surface?: 'cli' | 'app';
   agent?: string;
   sessionUuid?: string;
-  /** Owner-served activity category — one of `"attention"` (raised its hand —
-   * "at a prompt"), `"waiting"` (paused at a stop — "waiting for you"
-   * once idle ≥60s), `"working"` (mid-tool — busy, in the Working band, no
-   * chip). Absent until the worker's first hook event (or, for an app worker,
-   * while its launch is not running). */
+  /** Owner-served activity category: `"attention"` (stopped on a harness
+   * prompt), `"waiting"` (turn ended, nothing running under it) or
+   * `"working"` (mid-turn, or idle over work it started), plus the identity
+   * phases. The board reads it through `turnOf`. Absent until the worker's
+   * first hook event (or, for an app worker, while its launch is not
+   * running). */
   phase?: string;
   /** Real ms timestamp of this live session's most-recent hook event of ANY
-   * type. Present only for a tracked running worker; drives activity-age labels
-   * and the 60s waiting-chip gate, never card ordering. */
+   * type. Present only for a tracked running worker; drives the turn's age on
+   * the worker pill, never card ordering. */
   lastActivityAt?: number;
   /** Owner-observed launch instant of the current worker, epoch milliseconds. */
   startedAt?: number;

@@ -5,22 +5,27 @@ import { workerPlate, workerPlateFacts } from './workerPlate.js'
 
 const now = Date.parse('2026-10-04T14:00:00Z')
 describe('owner-observed worker plate', () => {
-  it('uses live launch time, not stale dispatch metadata', () => {
-    const task = card({ id: 'task', workerState: 'running', runtimePhase: 'working', workerStartedAt: now - 12 * 60000, dispatchedAt: '2025-01-01T00:00:00Z' })
-    expect(workerPlateFacts(task, now)).toEqual({ state: 'aloft', elapsed: '12m', working: true })
+  it('ages a working worker only once it has gone quiet', () => {
+    const busy = card({ id: 'task', workerState: 'running', runtimePhase: 'working', lastActivityAt: now - 30_000, workerStartedAt: now - 12 * 60000 })
+    expect(workerPlateFacts(busy, now)).toEqual({ turn: 'working', word: 'working', elapsed: undefined, busy: true })
+    const quiet = card({ id: 'task', workerState: 'running', runtimePhase: 'working', lastActivityAt: now - 18 * 3_600_000 })
+    expect(workerPlateFacts(quiet, now).elapsed).toBe('18h')
   })
-  it('shows no invented age without a valid launch time', () => {
-    expect(workerPlateFacts(card({ id: 'task', workerState: 'running' }), now)).toEqual({ state: 'aloft', working: false })
+  it('ages a worker with no signal from its live launch, never stale dispatch metadata', () => {
+    const task = card({ id: 'task', workerState: 'running', workerStartedAt: now - 12 * 60000, dispatchedAt: '2025-01-01T00:00:00Z' })
+    expect(workerPlateFacts(task, now)).toEqual({ turn: 'unknown', word: 'no signal', elapsed: '12m', busy: false })
     expect(workerPlateFacts(card({ id: 'task', workerState: 'running', dispatchedAt: 'invalid' }), now).elapsed).toBeUndefined()
   })
-  it('does not breathe for waiting, unknown, attention, or blocked workers', () => {
+  it('breathes for a busy worker whatever the turn, and never otherwise', () => {
     for (const runtimePhase of [undefined, 'waiting', 'attention', 'blocked']) {
-      expect(workerPlateFacts(card({ id: 'task', workerState: 'running', runtimePhase }), now).working).toBe(false)
+      expect(workerPlateFacts(card({ id: 'task', workerState: 'running', runtimePhase }), now).busy).toBe(false)
     }
-    expect(workerPlateFacts(card({ id: 'task', workerState: 'blocked', runtimePhase: 'working' }), now).working).toBe(false)
+    expect(workerPlateFacts(card({ id: 'task', workerState: 'blocked', runtimePhase: 'working' }), now).busy).toBe(false)
+    const asking = card({ id: 'task', status: 'active', workerState: 'running', runtimePhase: 'working', ask: { text: 'OK?', at: new Date(now - 60_000).toISOString() } })
+    expect(workerPlateFacts(asking, now)).toEqual({ turn: 'question', word: 'question', elapsed: '1m', busy: true })
   })
   it('ignores a durable old session on a workerless fiber', () => {
-    expect(workerPlateFacts(card({ id: 'task', dispatchedAt: '2025-01-01T00:00:00Z', sessionUuid: 'old-session' }), now)).toEqual({ state: 'no worker', working: false })
+    expect(workerPlateFacts(card({ id: 'task', dispatchedAt: '2025-01-01T00:00:00Z', sessionUuid: 'old-session' }), now)).toEqual({ turn: 'none', word: 'no worker', elapsed: undefined, busy: false })
   })
   it('keeps the conversation target and its click handler', () => {
     const target = document.createElement('button')

@@ -84,14 +84,14 @@ export interface KanbanCard {
    */
   tmuxSession?: string
   /**
-   * What the live worker is doing, for the chips and the In-flight sort:
-   * `working` (busy, or idle over work it started — the Working band, no
-   * chip), `waiting` (its turn ended with nothing running under it — "your
-   * turn" once idle ≥60s), `attention` (raised a harness attention signal — "at
-   * a prompt"), or `blocked` (the worker is `workerState: 'blocked'` with
-   * `launchError`). These phases and an outstanding `ask` put the worker in
-   * Your turn above Working, questions first. Absent when there
-   * is no worker, or before a live worker's first activity event.
+   * The daemon's report of the live worker: `working` (busy, or idle over
+   * work it started), `waiting` (its turn ended with nothing running under
+   * it), `attention` (stopped on a harness prompt), `blocked` (the worker is
+   * `workerState: 'blocked'` with `launchError`), or `identity_pending` /
+   * `identity_failed`. Read it through `turnOf` (turn.ts), which joins it
+   * with `ask` and `launchError` into the one turn every surface draws.
+   * Absent when there is no worker, or before a live worker's first
+   * activity event.
    */
   runtimePhase?: string
   /** Non-blocking request for the human's view; the worker keeps working. */
@@ -101,8 +101,7 @@ export interface KanbanCard {
   /**
    * Real ms timestamp of the live worker's most-recent hook event (any type).
    * Present only for a live worker (paired with `workerState`);
-   * drives the activity-age label and the 60s waiting-chip gate, never card
-   * ordering. Absent for worker-less cards.
+   * drives the turn's age on the worker pill, never card ordering. Absent for worker-less cards.
    */
   lastActivityAt?: number
   /** Owner-observed launch instant of the current worker, epoch milliseconds. */

@@ -1,8 +1,8 @@
-import { appWorkerLink, terminalWorkerPill, workerVariant } from './appConversation.js'
+import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
 import { queuedControl } from './QueuedControl.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
-import { humanizeIdleAge, renderMarkdown } from './utils.js'
+import { renderMarkdown } from './utils.js'
 import {
   ascByKey,
   civilWeekday,
@@ -24,6 +24,8 @@ import type {
   KanbanOriginStaleness,
   KanbanResponse,
 } from './KanbanTypes.js'
+import { hasLiveWorker } from './KanbanTypes.js'
+import { turnOf } from './turn.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import {
   buildDependents,
@@ -51,7 +53,7 @@ import type {
   StackVerdict,
   ZoneRect,
 } from './KanbanRules.js'
-import { byCreatedAtDesc, deriveCycleLens, IN_FLIGHT_BANDS, inFlightBand, isQuestion, isSleepingOnSchedule } from './KanbanReadModel.js'
+import { byCreatedAtDesc, deriveCycleLens, IN_FLIGHT_BANDS, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
 import type { PhoneMeeting } from './phoneMeeting'
 import { paintPhoneLevel, paintPhoneMeetingControls } from './phoneMeetingControls'
@@ -119,65 +121,21 @@ const DRAG_HORIZON_DAYS = 21
 const QUEUE_ROW_MIME = 'application/x-queue-row'
 
 /**
- * Daemon runtime phases that earn a chip on an In-flight card.
- *
- * Two live-worker flavors, both of which *take over* the worker pill — the chip
- * becomes the clickable worker button itself, so the human-attention state IS
- * the call-to-action rather than a flag beside it. `attention` (raised its hand
- * via Notification) takes over from the first event — the red manicule chip.
- * `waiting` (the worker ended its turn with nothing running under it — your
- * turn) takes over once idle ≥60s — the amber chip (the daemon stamps `waiting` the instant a stop fires, so the
- * takeover is gated downstream in `renderCard`; under 60s the pill stays the
- * plain "Aloft"). The third live category, `working` (busy mid-tool), has NO entry here — its
- * absence IS the "no chip" behavior. The rest fire *without* a live worker to
- * show: `running` is the rare unmatched case (daemon says running but no session
- * resolved); `retrying`/`due`/`dispatched` are genuinely worker-less. Either way
- * the chip lets the card explain itself instead of reading as an anomaly. Phases
- * that drive their own column (`scheduled`, `awaiting`, `accepted`, `dormant`)
- * are omitted — the column already says it.
+ * Daemon runtime phases that earn a badge on an In-flight card with no live
+ * worker to draw. A live worker's turn is never a badge: its pill names the
+ * turn (`turnOf`). These fire *without* one: `running` is the rare unmatched
+ * case (the daemon says running but no session resolved);
+ * `retrying`/`due`/`dispatched`/`starting` are genuinely worker-less. Either
+ * way the badge lets the card explain itself instead of reading as an anomaly.
+ * Phases that drive their own column (`scheduled`, `awaiting`, `accepted`,
+ * `dormant`) are omitted — the column already says it.
  */
 const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
-  // The manicule (U+261E) followed by the U+FE0E text variation selector forces
-  // a serif text glyph, not a color emoji — paired with `font-variant-emoji:
-  // text` and the EB Garamond stack in CSS.
-  attention: { label: '☞︎ at a prompt', title: 'The harness reports that the worker needs human input. Open it to respond.' },
-  waiting: { label: '⏸ your turn', title: 'The worker ended its turn with nothing running under it — open it to respond.' },
   retrying: { label: '⟳ retrying', title: 'Dispatch failed — daemon is retrying with backoff. No live worker right now.' },
   due: { label: '◴ due', title: 'Scheduled tick elapsed — awaiting dispatch.' },
   dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
   starting: { label: '▸ starting', title: 'The app conversation is starting.' },
   running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
-  blocked: { label: 'blocked', title: 'The app conversation could not start its turn. Open the card for the recorded error.' },
-  identity_pending: { label: 'Identifying session', title: 'The worker is live; Shuttle is acquiring its session UUID before attributing turn state.' },
-  identity_failed: { label: 'Session attribution failed', title: 'The worker is live but its turn state is unknown. Shuttle retries identity acquisition; an explicit session claim can repair it.' },
-}
-
-/** Below this, an attention chip carries no clock: a worker that just raised
- *  its hand is simply "now", and a number there would be noise. */
-const ATTENTION_AGE_FLOOR_MS = 60 * 60_000
-
-/**
- * The phase pill's text, with the wait made visible. A `waiting` worker always
- * says how long it has been waiting — that age IS the reason to look at it,
- * and it was the one thing the pill never told you. `attention` earns a clock
- * only once it has gone an hour unanswered; fresh attention needs no number.
- *
- * Computed at render, not on a timer: the board's 15s poll re-renders, so the
- * figure refreshes without a single interval running behind the page.
- */
-export function phasePillLabel(
-  phase: string,
-  lastActivityAt: number | undefined,
-  nowMs: number = Date.now(),
-): string {
-  const base = RUNTIME_PHASE_BADGES[phase]?.label ?? phase
-  if (lastActivityAt === undefined) return base
-  const age = nowMs - lastActivityAt
-  if (phase === 'waiting') return `${base} · ${humanizeIdleAge(age)}`
-  if (phase === 'attention' && age >= ATTENTION_AGE_FLOOR_MS) {
-    return `${base} · ${humanizeIdleAge(age)}`
-  }
-  return base
 }
 
 /** Skim-able title for surface affordance announcements. The stored horizon is
@@ -1413,8 +1371,8 @@ export class KanbanSurfaceRenderer {
           // looking, not a filter that takes the board away from you.
           dim: !hostsMeeting && lens !== null && !lens.memberIds.has(card.id),
         })
-        // Your turn holds questions and idle turns; a question is drawn heavier.
-        if (kind === 'inFlight' && inFlightBand(card) === 'yourTurn') el.dataset.turn = isQuestion(card) ? 'question' : 'idle'
+        // Every in-flight card carries its turn; Your turn draws a question heavier than an idle turn.
+        if (kind === 'inFlight') el.dataset.turn = turnOf(card).turn
         if (hostsMeeting) this.hostMeeting(el, meeting)
         parent.append(el)
       }
@@ -1810,51 +1768,37 @@ export class KanbanSurfaceRenderer {
       )
     }
 
-    // A phase badge and a live-worker pill exclude each other. The worker-less
-    // phases (retrying/due/dispatched/running) only show as a standalone span
-    // chip when there is no pill to convey liveness. The two human-attention
-    // phases on a *live* worker instead *take over* the pill — the chip becomes
-    // the clickable worker button itself, so the call-to-action IS the worker:
-    //   • `attention` (raised its hand via Notification) — the red manicule
-    //     chip. No idle gate — attention is urgent from the first event.
-    //   • `waiting` (stopped at a prompt) — the amber chip. Gated to idle ≥60s:
-    //     the daemon stamps `waiting` the instant a worker stops, so without
-    //     this gate every momentary pause would flip the pill. Under 60s it
-    //     stays the plain "Aloft" pill (the sort still floats it up).
-    // A `working` worker has no badge entry, so it never takes over.
-    // An app worker has no terminal to take over: it takes the `!tmuxSession`
-    // branch below and becomes the link into the Codex app.
-    const showPhase =
-      kind === 'inFlight' &&
-      ((card.runtimePhase && RUNTIME_PHASE_BADGES[card.runtimePhase]) || ((card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid)) &&
-      !card.tmuxSession
+    // A live worker's pill names its turn (`turnOf`): the same word, pigment
+    // and age on every column, the reader and the dock, and the pill is the
+    // action that opens the conversation. A terminal worker's pill is a
+    // button into its tmux session; an app worker's links into the Codex app.
+    // The worker-less dispatch phases (retrying/due/dispatched/starting/
+    // running) show as a badge only when there is no worker to draw.
     // The RIGHT region: at most one of phase badge / held pill / worker pill
     // is ever live at once (they're mutually exclusive states), collected
     // here rather than appended immediately so the spacer logic at the
     // bottom can place it — same reasoning as `reviewMetaActions` above.
     let rightChip: HTMLElement | undefined
-    if (showPhase) {
-      const phaseName = card.runtimePhase ?? 'working'
-      const title = RUNTIME_PHASE_BADGES[phaseName]?.title ?? 'The app conversation is working.'
+    if (kind === 'inFlight' && !card.tmuxSession) {
       const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid
+      const badge = card.runtimePhase ? RUNTIME_PHASE_BADGES[card.runtimePhase] : undefined
       if (app) {
-        const variant = workerVariant(card)
-        const classes = card.launchError || phaseName === 'blocked'
-          ? 'kbn-card-phase-blocked'
-          : `kbn-card-worker-${variant}`
-        rightChip = workerPlate(card, appWorkerLink(card, classes))
-        rightChip.title = `${phasePillLabel(phaseName, card.lastActivityAt)} — ${rightChip.title}`
-      } else {
+        rightChip = workerPlate(card, appWorkerLink(card))
+      } else if (badge) {
         const phase = document.createElement('span')
-        phase.className = `kbn-card-phase kbn-card-phase-${phaseName}`
-        phase.textContent = phasePillLabel(phaseName, card.lastActivityAt)
-        phase.title = card.launchError ? `${title}\n\n${card.launchError}` : title
+        phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
+        phase.textContent = badge.label
+        phase.title = card.launchError ? `${badge.title}\n\n${card.launchError}` : badge.title
         rightChip = phase
+      } else if (hasLiveWorker(card)) {
+        // A live worker with no conversation handle here still states its turn.
+        rightChip = workerPlate(card, null)
+        rightChip.title = turnTitle(card)
       }
     }
     // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
     // withholding after a restart. Reads as "held, awaiting release" — distinct
-    // from the "Aloft" running pill and from an idle-active card (mutually
+    // from a live worker's pill and from an idle-active card (mutually
     // exclusive with `tmuxSession`: held means parked, not running). The badge
     // IS the release control: hover flips `⏹︎ held` → `▶ release`, click POSTs
     // the release to the card's OWNING host. Release is global per daemon (one
@@ -1893,7 +1837,7 @@ export class KanbanSurfaceRenderer {
       rightChip = heldEl
     }
     if (card.tmuxSession) {
-      rightChip = workerPlate(card, terminalWorkerPill(card, { phase: kind === 'inFlight', openWorker: this.o.openWorker }), kind === 'inFlight')
+      rightChip = workerPlate(card, terminalWorkerPill(card, { openWorker: this.o.openWorker }))
     }
 
     // Place the CENTER (Temper/Compost) and RIGHT (phase/held/worker) regions

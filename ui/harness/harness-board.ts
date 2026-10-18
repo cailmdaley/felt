@@ -542,6 +542,18 @@ const APP_CONVERSATION = fiber({
  *  project_dir (see the `/api/v1/dispatch` stub). */
 const BARE_FOLLOW_UP = 'work/spt3g_papers/bmodes-2d/run/new-mask'
 
+/** One live worker per turn state: slug, name, runtime overrides, outstanding ask. */
+const TURN_FIXTURES: ReadonlyArray<readonly [string, string, Record<string, unknown>, string?]> = [
+  ['asked-while-working', 'Asked a question, still working', { phase: 'working', last_activity_at: now - 30_000 }, 'OK to adopt the SPICE estimator as default?'],
+  ['asked-then-idle', 'Asked a question, then went idle', { phase: 'waiting', last_activity_at: now - 40 * 60_000 }, 'Two OKs: install the rebuilt maps; clear scratch?'],
+  ['at-a-prompt', 'Stopped at a permission prompt', { phase: 'attention', last_activity_at: now - 5 * 60_000 }],
+  ['idle', 'Ended its turn', { phase: 'waiting', last_activity_at: now - 90 * 60_000 }],
+  ['working', 'Working right now', { phase: 'working', last_activity_at: now - 4_000 }],
+  ['silent-working', 'Working, no sign of life for 18h', { phase: 'working', last_activity_at: now - 18 * 3_600_000 }],
+  ['no-signal', 'Live, no hook event yet', { last_activity_at: now - 20 * 3_600_000 }],
+  ['blocked', 'Turn could not start', { state: 'blocked', launch_error: 'codex app-server refused the turn: thread not loaded', last_activity_at: now - 12 * 60_000 }],
+]
+
 const MOCK_FEED = {
   host: 'local',
   generated_at: iso(0),
@@ -560,6 +572,18 @@ const MOCK_FEED = {
         identity_error: i ? 'Timed out waiting for session file; retrying acquisition.' : undefined,
         tmux_session: `fixture-identity-${i}-shuttle`, started_at: now - 180_000, last_activity_at: now - 180_000,
       },
+    })) : []),
+    // `?turns=all` stages one live worker per turn state, so the In flight
+    // bands and every worker pill can be checked against each other at once.
+    ...(search.get('turns') === 'all' ? TURN_FIXTURES.map(([slug, name, runtime, ask], i) => ({
+      ...fiber({
+        id: `fixtures/turns/${slug}`, uid: `fixture-turn-${i}`, name, status: 'active',
+        created_at: iso(-(i + 1) * 3_600_000),
+        shuttle: { ...shuttleBlock(), ...(ask ? { ask: { text: ask, at: iso(-2 * 3_600_000) } } : {}) },
+        outcome: 'Synthetic live worker; no operator content or actual execution.',
+      }),
+      origin: LOCAL_HOST,
+      runtime: { state: 'running', surface: 'cli', tmux_session: `fixture-turn-${i}-shuttle`, started_at: now - 20 * 3_600_000, ...runtime },
     })) : []),
     {
       ...APP_CONVERSATION,

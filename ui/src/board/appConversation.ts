@@ -4,6 +4,7 @@ import { humanizeIdleAge } from './utils.js'
 import { claudeAppRoute, claudeWebLink } from './sessionHistory.js'
 import { effectiveClaudeOpening, REMOTE_CONTROL_REQUIRED, CLAUDE_APP_ROUTE_UNAVAILABLE } from './conversationOpening.js'
 import type { KanbanCard } from './KanbanTypes.js'
+import { turnOf } from './turn.js'
 
 const DESKTOP_THREAD_LINK = /^codex:\/\/threads\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -44,31 +45,23 @@ export function appConversationTarget(
   }
 }
 
-export function workerStatusLabel(phase?: string, launchError?: string): string {
-  if (phase === 'identity_pending') return 'Identifying session'
-  if (phase === 'identity_failed') return 'Session attribution failed'
-  if (launchError || phase === 'blocked') return 'Blocked'
-  if (phase === 'attention') return 'At a prompt'
-  if (phase === 'waiting') return 'Your turn'
-  return 'Aloft'
+/** The pill's hover title: the turn in full, and how long it has held. */
+export function turnTitle(card: TurnInput, nowMs = Date.now()): string {
+  const { detail, since } = turnOf(card, nowMs)
+  return since !== undefined && Number.isFinite(since) ? `${detail} (${humanizeIdleAge(nowMs - since)})` : detail
 }
 
-/** The worker's pill follows the daemon's phase, as the board's turn bands do. */
-export function workerVariant(card: Pick<KanbanCard, 'runtimePhase' | 'launchError'>): 'aloft' | 'waiting' | 'attention' {
-  if (card.launchError || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked' || card.runtimePhase === 'identity_pending' || card.runtimePhase === 'identity_failed') return 'attention'
-  if (card.runtimePhase === 'waiting') return 'waiting'
-  return 'aloft'
-}
+type TurnInput = Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt'>
 
-export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement {
+/** An app worker's pill: the turn's word, linking into the conversation backend. */
+export function appWorkerLink(card: KanbanCard): HTMLAnchorElement {
   const coarse = coarsePointer()
   const target = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarse), navigator.userAgent, coarse)
-  const variant = workerVariant(card)
   const link = document.createElement('a')
-  link.className = `kbn-card-worker ${classes}`.trim()
-  link.textContent = workerStatusLabel(variant === 'aloft' ? undefined : card.runtimePhase, card.launchError)
+  link.className = 'kbn-card-worker'
+  link.textContent = turnOf(card).word
   link.href = target.href
-  link.title = `${card.runtimePhase ?? 'Aloft'} — ${target.title}`
+  link.title = `${turnTitle(card)} — ${target.title}`
   link.setAttribute('aria-label', target.ariaLabel)
   link.addEventListener('click', event => event.stopPropagation())
   return link
@@ -77,41 +70,25 @@ export function appWorkerLink(card: KanbanCard, classes = ''): HTMLAnchorElement
 /**
  * A terminal worker's pill, shared by the Desk and the reader.
  *
- * Desktop Claude opening follows this browser's preference: Kitty, the
- * Remote Control web link, or the installed Claude app's session route.
- * An unavailable Remote Control link is an explicitly labelled terminal
- * fallback. Other CLI harnesses open in Kitty. Phones use a recorded Claude
- * HTTPS link or a mark of the worker's state. The touch stylesheet keys on the
- * element, not on a class: a `.kbn-card-worker` that is not a link takes no
- * taps. On the Desk card it keeps its compact card sizing.
- *
- * `phase` lets the waiting and attention states take the pill over (label,
- * colour, title); a card outside In flight passes false and stays "Aloft".
+ * Its word is the card's turn (`turnOf`) on every surface; the pill itself is
+ * the action that opens the conversation. Desktop Claude opening follows this
+ * browser's preference: Kitty, the Remote Control web link, or the installed
+ * Claude app's session route. An unavailable Remote Control link is an
+ * explicitly labelled terminal fallback. Other CLI harnesses open in Kitty.
+ * Phones use a recorded Claude HTTPS link or a mark of the worker's state.
+ * The touch stylesheet keys on the element, not on a class: a
+ * `.kbn-card-worker` that is not a link takes no taps.
  */
 export function terminalWorkerPill(
-  card: Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'runtimePhase' | 'lastActivityAt' | 'launchError' | 'shuttleHost' | 'workerAgent' | 'shuttleAgent'>,
+  card: TurnInput & Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'shuttleHost' | 'workerAgent' | 'shuttleAgent'>,
   options: {
-    classes?: string
-    phase?: boolean
     openWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   } = {},
 ): HTMLElement {
   const tmuxName = card.tmuxSession ?? ''
-  const variant = options.phase === false ? 'aloft' : workerVariant(card)
-  const takesOver = variant !== 'aloft' && !!card.runtimePhase
-  const classes = `kbn-card-worker kbn-card-worker-${variant} ${options.classes ?? ''}`.trim()
-  const label = workerStatusLabel(takesOver ? card.runtimePhase : undefined)
-  const idleMs = card.lastActivityAt !== undefined ? Date.now() - card.lastActivityAt : Infinity
-  const age = Number.isFinite(idleMs) ? ` ${humanizeIdleAge(idleMs)} ago` : ''
-  const state = card.runtimePhase === 'identity_pending'
-    ? 'Worker is live; acquiring session identity. Turn state is unknown.'
-    : card.runtimePhase === 'identity_failed'
-      ? 'Worker is live; session attribution failed. Retrying acquisition; an explicit session claim can repair it.'
-    : !takesOver
-    ? 'Worker aloft'
-    : card.runtimePhase === 'attention'
-      ? `Worker raised its hand${age}`
-      : `Worker paused on input${age}`
+  const classes = 'kbn-card-worker'
+  const label = turnOf(card).word
+  const state = turnTitle(card)
 
   const coarse = coarsePointer()
   const web = claudeWebLink(card.sessionLink)
@@ -148,10 +125,7 @@ export function terminalWorkerPill(
   btn.className = classes
   const fallback = claude && choice !== 'terminal' && !web
   btn.textContent = fallback ? `${label} · terminal` : label
-  const aria = !takesOver
-    ? 'Open worker terminal'
-    : card.runtimePhase === 'attention' ? 'Worker at a prompt — open terminal' : 'Worker waiting for you — open terminal'
-  btn.setAttribute('aria-label', `${aria}: ${tmuxName}`)
+  btn.setAttribute('aria-label', `Worker ${label} — open terminal: ${tmuxName}`)
   btn.title = `${fallback ? `${REMOTE_CONTROL_REQUIRED}\n` : ''}${state} — click to open ${tmuxName} in Kitty`
   btn.addEventListener('click', (e) => {
     e.stopPropagation()

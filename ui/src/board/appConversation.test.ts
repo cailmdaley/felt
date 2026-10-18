@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { workerStatusLabel, workerVariant, appConversationTarget, canOpenDesktopApp, validDesktopThreadLink } from './appConversation.js'
-import { inFlightBand } from './KanbanReadModel.js'
+import { turnTitle, appConversationTarget, canOpenDesktopApp, validDesktopThreadLink } from './appConversation.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
 const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
@@ -52,28 +51,12 @@ describe('app conversation opening', () => {
   })
 })
 
-describe('shared worker activity labels', () => {
-  it.each([
-    [undefined, 'Aloft'], ['working', 'Aloft'], ['waiting', 'Your turn'],
-    ['attention', 'At a prompt'], ['blocked', 'Blocked'],
-  ])('shows %s in the worker marker', (phase, label) => {
-    expect(workerStatusLabel(phase)).toBe(label)
-  })
-  it('keeps a launch failure ahead of cached native activity', () => {
-    expect(workerStatusLabel('waiting', 'failed')).toBe('Blocked')
-  })
-})
-
-
-describe('shared worker appearance', () => {
-  it('follows the phase the turn bands read', () => {
-    const card = { runtimePhase: 'waiting', lastActivityAt: 1000 } as KanbanCard
-    expect(workerVariant(card)).toBe('waiting')
-    expect(inFlightBand(card)).toBe('yourTurn')
-    expect(workerVariant({ runtimePhase: 'attention' })).toBe('attention')
-    expect(workerVariant({ runtimePhase: 'blocked' })).toBe('attention')
-    expect(workerVariant({ runtimePhase: 'working', launchError: 'failed' })).toBe('attention')
-    expect(workerVariant({ runtimePhase: 'working' })).toBe('aloft')
+describe('shared worker title', () => {
+  it('states the turn in full with its age', () => {
+    const now = Date.parse('2026-10-18T12:00:00Z')
+    const idle = { status: 'active', workerState: 'running', runtimePhase: 'waiting', lastActivityAt: now - 3 * 3_600_000 } as KanbanCard
+    expect(turnTitle(idle, now)).toBe('The worker ended its turn with nothing running under it. (3h)')
+    expect(turnTitle({ ...idle, launchError: 'refused' }, now)).toBe('refused (3h)')
   })
   it('still opens ChatGPT when no desktop conversation route is available', () => {
     expect(appConversationTarget({}, true)).toMatchObject({ href: 'https://chatgpt.com/open-app', conversationSpecific: false })

@@ -1,7 +1,7 @@
 /**
  * The card drawer's History: a folded line (`HISTORY 38 ▾`) that unfolds to
  * every harness session the fleet's ledgers paired with this fiber, newest
- * first. Claude opening follows the same browser preference as Aloft. A
+ * first. Claude opening follows the same browser preference as the worker pill. A
  * terminal action attaches to the live worker or resumes a past session on
  * its owning host (`POST /api/v1/attach`). Bridged Claude sessions can open
  * in the browser or installed desktop app; phones use the HTTPS link.
@@ -117,7 +117,7 @@ export interface TargetContext {
  * What a row does — the one place the choice is made.
  *
  *   · Terminal opening at a desktop attaches the live worker's row to its tmux, exactly as
- *     Aloft does, and any other row resumes that session in a terminal on the
+ *     the worker pill does, and any other row resumes that session in a terminal on the
  *     host that ran it. Not offered: a live worker with no tmux (a Codex app
  *     conversation, which a terminal must not take from its app), and a session
  *     whose host found no transcript.
@@ -371,7 +371,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     }
     for (const extra of targets.extras) li.append(targetEl(extra, 'kbn-ctl-session-alt'))
     if (targets.guidance) put('kbn-ctl-session-opening-note', targets.guidance)
-    // The whole row is its primary action, as the Aloft pill is.
+    // The whole row is its primary action, as the worker pill is.
     if (targets.primary.kind === 'terminal') {
       li.classList.add('kbn-ctl-session-opens')
       li.title = targets.primary.title

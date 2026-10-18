@@ -19,7 +19,7 @@ export function ConversationsSection(): JSX.Element {
     <>
       <header className="set-pane-heading">
         <h2>Open conversations in</h2>
-        <p>Choose what happens when you click Aloft or open a conversation in History.</p>
+        <p>Choose what happens when you click a worker pill or open a conversation in History.</p>
       </header>
       <fieldset className="set-opening-options">
         <legend className="set-section-label">Default for Claude sessions</legend>
@@ -41,10 +41,10 @@ export function ConversationsSection(): JSX.Element {
         {choice === 'terminal'
           ? 'Kitty opens on the machine serving this board. Remote workers need an SSH route.'
           : choice === 'browser'
-            ? 'Requires Remote Control in the Claude session. If no link is available, Aloft is labelled terminal and opens Kitty.'
-            : 'Requires the Claude desktop app and Remote Control in the session. If an app link is unavailable, Aloft is labelled browser or terminal and opens there.'}
+            ? 'Requires Remote Control in the Claude session. If no link is available, the worker pill is labelled terminal and opens Kitty.'
+            : 'Requires the Claude desktop app and Remote Control in the session. If an app link is unavailable, the worker pill is labelled browser or terminal and opens there.'}
       </p>
-      <div className="set-opening-tip"><strong>Choose once, or choose each time.</strong> Right-click Aloft to open a session another way when alternatives are available.</div>
+      <div className="set-opening-tip"><strong>Choose once, or choose each time.</strong> Right-click a worker pill to open a session another way when alternatives are available.</div>
       <p className="set-row-note">Saved in this browser across your fleet. Workers keep running on their assigned hosts.</p>
       <p className="set-row-note">Other terminal workers open in Kitty; Codex app conversations open in ChatGPT. Phones use Claude web links.</p>
       <details className="set-opening-details">
