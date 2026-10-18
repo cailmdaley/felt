@@ -113,8 +113,10 @@ func TestProcessParentMatchesGetppid(t *testing.T) {
 }
 
 // TestHookReceiverPIDSkipsShells runs this test binary as a stand-in harness
-// that launches a hook through a shell which cannot exec it away; the hook
-// must name the harness, not the shell.
+// that launches a hook through shells which cannot exec it away: `sh -c`, and
+// `sh -c` running a shebang script the way the plugin runs `hooks/event.sh`.
+// Linux names a script's process after the script (`event.sh`), not its
+// interpreter. The hook must name the harness, not either shell.
 func TestHookReceiverPIDSkipsShells(t *testing.T) {
 	t.Parallel()
 	switch os.Getenv("SHUTTLE_TEST_HOOK_ROLE") {
@@ -122,18 +124,28 @@ func TestHookReceiverPIDSkipsShells(t *testing.T) {
 		os.Stdout.WriteString(strconv.Itoa(HookReceiverPID()) + " " + strconv.Itoa(os.Getppid()) + "\n")
 		return
 	case "harness":
-		cmd := exec.Command("/bin/sh", "-c", `"$0" -test.run='^TestHookReceiverPIDSkipsShells$'; status=$?; exit $status`, os.Args[0])
-		cmd.Env = append(os.Environ(), "SHUTTLE_TEST_HOOK_ROLE=hook")
-		out, err := cmd.Output()
-		if err != nil {
+		script := filepath.Join(t.TempDir(), "event.sh")
+		body := "#!/bin/sh\n\"$SHUTTLE_TEST_HOOK_BIN\" -test.run='^TestHookReceiverPIDSkipsShells$'; status=$?; exit $status\n"
+		if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		fields := strings.Fields(strings.SplitN(string(out), "\n", 2)[0])
-		if len(fields) != 2 || fields[1] == strconv.Itoa(os.Getpid()) {
-			t.Fatalf("hook output %q: the shell did not stand between harness %d and hook", out, os.Getpid())
-		}
-		if fields[0] != strconv.Itoa(os.Getpid()) {
-			t.Fatalf("hook named %s; harness is %d", fields[0], os.Getpid())
+		for name, command := range map[string]string{
+			"sh -c":          `"$SHUTTLE_TEST_HOOK_BIN" -test.run='^TestHookReceiverPIDSkipsShells$'; status=$?; exit $status`,
+			"shebang script": `"$0"; status=$?; exit $status`,
+		} {
+			cmd := exec.Command("/bin/sh", "-c", command, script)
+			cmd.Env = append(os.Environ(), "SHUTTLE_TEST_HOOK_ROLE=hook", "SHUTTLE_TEST_HOOK_BIN="+os.Args[0])
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			fields := strings.Fields(strings.SplitN(string(out), "\n", 2)[0])
+			if len(fields) != 2 || fields[1] == strconv.Itoa(os.Getpid()) {
+				t.Fatalf("%s: hook output %q: no shell stood between harness %d and hook", name, out, os.Getpid())
+			}
+			if fields[0] != strconv.Itoa(os.Getpid()) {
+				t.Fatalf("%s: hook named %s; harness is %d", name, fields[0], os.Getpid())
+			}
 		}
 		return
 	}

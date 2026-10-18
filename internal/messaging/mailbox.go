@@ -45,7 +45,7 @@ func (r mailboxRegistration) live() bool {
 // hook command. They exit with the hook, so they never identify the receiver.
 var hookShells = map[string]bool{
 	"sh": true, "bash": true, "dash": true, "zsh": true, "ksh": true, "mksh": true,
-	"fish": true, "csh": true, "tcsh": true, "env": true,
+	"fish": true, "csh": true, "tcsh": true, "env": true, "busybox": true,
 }
 
 // HookReceiverPID names the harness process running the calling hook: the
