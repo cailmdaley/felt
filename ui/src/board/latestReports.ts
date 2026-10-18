@@ -8,11 +8,13 @@
  */
 
 import { normalizeShelfFiles, shelfKind, type ShelfFile } from './views/shelfData.js'
-import { docKey, parseDocKey } from './workspace/documents.js'
+import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
 /** A sent file resolved to the host that holds its bytes. */
 export interface LatestReport {
+  /** The document's key in the reader, where it is marked seen. */
+  key: DocKey
   fullPath: string
   basename: string
   timestamp: number
@@ -56,9 +58,10 @@ export class LatestReports {
   get(card: KanbanCard): LatestReport | undefined {
     const file = (card.uid ? this.byFiber.get(card.uid) : undefined) ?? this.byFiber.get(card.id)
     if (!file) return undefined
-    const parsed = parseDocKey(docKey(file.host ?? '', file.fullPath, card.originId, card.fiberDir))
+    const key = docKey(file.host ?? '', file.fullPath, card.originId, card.fiberDir)
+    const parsed = parseDocKey(key)
     if (!parsed) return undefined
-    return { fullPath: parsed.path, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner }
+    return { key, fullPath: parsed.path, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner }
   }
 
   /** Read the fleet feed unless a read is in flight or happened within the throttle. */

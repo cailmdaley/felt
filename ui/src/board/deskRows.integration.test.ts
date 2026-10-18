@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import type { LatestReport } from './latestReports.js'
 import { card, response } from './testFixtures.js'
+import { DocumentSeen } from './workspace/DocumentSeen.js'
+import type { Channel } from './workspace/documents.js'
 
 function renderer(data: KanbanResponse, reports: Record<string, LatestReport> = {}): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
@@ -24,9 +26,13 @@ function renderer(data: KanbanResponse, reports: Record<string, LatestReport> = 
   })
 }
 
-const REPORT: LatestReport = { fullPath: '/work/run/report.html', basename: 'report.html', timestamp: Date.now() - 3 * 3_600_000, owner: 'local' }
+const REPORT: LatestReport = { key: 'local:/work/run/report.html', fullPath: '/work/run/report.html', basename: 'report.html', timestamp: Date.now() - 3 * 3_600_000, owner: 'local' }
 
-afterEach(() => { document.body.replaceChildren() })
+const storage = new Map<string, string>()
+beforeEach(() => {
+  vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v) } })
+})
+afterEach(() => { document.body.replaceChildren(); storage.clear(); vi.unstubAllGlobals() })
 
 describe('a Desk row is a line, not a card', () => {
   const review = card({
@@ -50,6 +56,21 @@ describe('a Desk row is a line, not a card', () => {
     expect(mark.dataset.kind).toBe('html')
     expect(mark.title).toMatch(/^report\.html — sent 3h ago$/)
     expect(root.querySelector('[data-fiber-id="draft"] .kbn-card-report')).toBeNull()
+  })
+
+  it('dots a report sent since the reader last showed it, until the reader shows it', () => {
+    const mark = (): HTMLElement => renderer(data, { 'work/run': REPORT }).renderNowSection(data.now, data.staleness)
+      .querySelector<HTMLElement>('[data-fiber-id="work/run"] .kbn-card-report')!
+    // The first look sets the baseline: a report sent before it is not news.
+    expect(mark().dataset.unseen).toBeUndefined()
+    localStorage.setItem('shuttle.workspace.document-seen-baseline', String(REPORT.timestamp - 60_000))
+    expect(mark().dataset.unseen).toBe('')
+    expect(mark().getAttribute('aria-label')).toBe('New report: report.html')
+    expect(mark().title).toMatch(/^report\.html — new, sent 3h ago$/)
+    // The reader showing the report, in any session, clears the dot.
+    const channel = { owner: 'local', uid: 'work/run', documents: [{ key: REPORT.key, provenance: [{ kind: 'sent', time: REPORT.timestamp }] }] } as unknown as Channel
+    new DocumentSeen().observe(channel, REPORT.key)
+    expect(mark().dataset.unseen).toBeUndefined()
   })
 
   it('keeps the verdicts and Rest at the row\'s right end, where an undo window lands', () => {

@@ -2,6 +2,7 @@ import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.
 import { workerPlate } from './workspace/workerPlate.js'
 import { Thumbnail } from './workspace/Thumbnail.js'
 import { documentKind } from './workspace/documents.js'
+import { unseenSince } from './workspace/DocumentSeen.js'
 import type { LatestReport } from './latestReports.js'
 import { queuedControl } from './QueuedControl.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
@@ -113,15 +114,20 @@ const REPORT_GLYPH: Record<ReturnType<typeof documentKind>, string> = {
 /**
  * A row's mark for its newest report: a small leaf with the document's kind on
  * it, in the thumbnail's own glyph vocabulary. The report itself is the
- * preview's — a live thumbnail at a row's height would be a smudge.
+ * preview's — a live thumbnail at a row's height would be a smudge. A report
+ * sent since the reader last showed it carries a gold dot on the leaf's corner
+ * (`data-unseen`), cleared by opening it.
  */
 function reportMark(report: LatestReport): HTMLElement {
   const mark = document.createElement('span')
   mark.className = 'kbn-card-report'
   mark.dataset.kind = documentKind(report.fullPath)
   mark.textContent = REPORT_GLYPH[documentKind(report.fullPath)]
-  mark.title = `${report.basename} — sent ${humanizeIdleAge(Date.now() - report.timestamp)} ago`
-  mark.setAttribute('aria-label', `Latest report: ${report.basename}`)
+  const unseen = unseenSince(report.key, report.timestamp)
+  if (unseen) mark.dataset.unseen = ''
+  const age = `sent ${humanizeIdleAge(Date.now() - report.timestamp)} ago`
+  mark.title = `${report.basename} — ${unseen ? `new, ${age}` : age}`
+  mark.setAttribute('aria-label', `${unseen ? 'New report' : 'Latest report'}: ${report.basename}`)
   return mark
 }
 

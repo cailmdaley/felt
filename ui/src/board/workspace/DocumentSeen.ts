@@ -2,6 +2,7 @@ import { documentActivity, type Channel, type DocKey } from './documents.js'
 
 const PREFIX = 'shuttle.workspace.document-seen:'
 const VISIT = 'shuttle.workspace.channel-seen:'
+const BASELINE = 'shuttle.workspace.document-seen-baseline'
 function read(key: string): number | undefined {
   try {
     const value = localStorage.getItem(key)
@@ -36,4 +37,19 @@ export class DocumentSeen {
     }
     return fresh
   }
+}
+
+/**
+ * True when `key` changed at `activity` after the reader last showed it, read
+ * from what `DocumentSeen` stored in any session. A document the reader never
+ * showed counts from the first time this browser asked, so the marks start
+ * quiet instead of lighting every report sent before them.
+ */
+export function unseenSince(key: DocKey, activity: number): boolean {
+  let baseline = read(BASELINE)
+  if (baseline === undefined) {
+    baseline = Date.now()
+    write(BASELINE, baseline)
+  }
+  return activity > (read(PREFIX + key) ?? baseline)
 }

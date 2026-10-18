@@ -31,7 +31,7 @@ describe('LatestReports', () => {
     ]))
     const reports = new LatestReports('http://daemon', () => {})
     await reports.refresh(1_000_000)
-    expect(reports.get(card({ id: 'work/x', uid: 'ULID-1', originId: 'laptop' }))).toEqual({ fullPath: '/r/report.html', basename: 'report.html', timestamp: 10, owner: 'laptop' })
+    expect(reports.get(card({ id: 'work/x', uid: 'ULID-1', originId: 'laptop' }))).toEqual({ key: 'laptop:/r/report.html', fullPath: '/r/report.html', basename: 'report.html', timestamp: 10, owner: 'laptop' })
     expect(reports.get(card({ id: 'work/by-id', originId: 'laptop' }))?.owner).toBe('cluster')
     expect(reports.get(card({ id: 'none' }))).toBeUndefined()
   })
