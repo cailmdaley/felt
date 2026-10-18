@@ -180,7 +180,7 @@ moves; `npm run build` runs every time.
 
 Editing `daemon/lib/*.ex` needs `make restart` (a restart without `make daemon` is a
 no-op — the release runs compiled BEAMs). Editing either Go CLI needs `make cli`.
-Editing `ui/` needs `cd ui && npm test`, then `make restart` from the root.
+Editing `ui/` needs `cd ui && npm test` and `go test ./internal/feltcli -run Hygiene` (the hygiene scan covers `ui/`, harness fixtures included), then `make restart` from the root.
 Changing anything the board draws also wants a look at it: `cd ui && npm run
 harness:board` builds a self-contained bundle with a mocked daemon that opens
 over `file://`, which is the only way to see the board where `:4000` is
