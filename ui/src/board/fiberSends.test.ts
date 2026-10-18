@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FiberSends, SEND_REFRESH_MS, newestReport, sendsByFiber } from './fiberSends.js'
+import { FiberSends, SEND_REFRESH_MS, newestReport, sendsByFiber, withEmbeds, type FiberSend } from './fiberSends.js'
 import type { ShelfFile } from './views/shelfData.js'
 import { card } from './testFixtures.js'
 
@@ -79,5 +79,18 @@ describe('FiberSends', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down') }))
     await reports.refresh(SEND_REFRESH_MS)
     expect(reports.latest(card({ id: 'A' }))?.fullPath).toBe('/r/report.html')
+  })
+})
+
+describe('withEmbeds', () => {
+  const doc = (path: string, timestamp: number, embedded?: boolean): FiberSend =>
+    ({ key: `h:${path}`, fullPath: path, basename: path.split('/').pop()!, timestamp, owner: 'h', ...(embedded ? { embedded } : {}) })
+
+  it('leads with the body\'s embeds in their order, then the rest sent, one item per document', () => {
+    const sends = [doc('/f/plot.png', 30), doc('/f/report.html', 20), doc('/f/notes.pdf', 10)]
+    const embeds = [doc('/f/summary.html', 0, true), doc('/f/report.html', 0, true)]
+    expect(withEmbeds(sends, embeds).map(s => [s.basename, s.timestamp, !!s.embedded])).toEqual([
+      ['summary.html', 0, true], ['report.html', 20, true], ['plot.png', 30, false], ['notes.pdf', 10, false],
+    ])
   })
 })

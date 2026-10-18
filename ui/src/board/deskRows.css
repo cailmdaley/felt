@@ -328,8 +328,8 @@
   text-align: center;
 }
 
-/* ── The constitution, read below the card when the fiber has sent nothing:
-   the reader's prose at the column's measure. */
+/* ── The constitution, read below the gallery: the reader's prose at the
+   column's measure. */
 .kbn-preview-body { display: flex; flex-direction: column; min-width: 0; }
 .kbn-preview-body .kbn-preview-prose { padding: 14px 18px 22px; }
 .kbn-preview-body-note {
@@ -339,29 +339,6 @@
   font-size: 12.5px;
   color: var(--kbn-ink-muted);
 }
-.kbn-preview-embeds {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 12px 18px 0;
-}
-.kbn-preview-embed {
-  appearance: none;
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  margin: 0;
-  padding: 3px 8px;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 18%, transparent);
-  border-radius: 2px;
-  background: var(--kbn-paper-bright);
-  color: var(--kbn-ink-soft, var(--kbn-ink));
-  font-family: var(--font-serif, 'EB Garamond', serif);
-  font-size: 13px;
-  cursor: pointer;
-}
-.kbn-preview-embed:hover { border-color: color-mix(in srgb, var(--kbn-ink) 40%, transparent); color: var(--kbn-ink); }
-.kbn-preview-embed:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 2px; }
 
 /* ── Verdicts in the preview's head: always shown, it is a place to act. */
 .kbn-preview-card .kbn-card-header { align-items: center; }

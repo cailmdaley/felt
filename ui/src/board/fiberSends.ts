@@ -20,6 +20,23 @@ export interface FiberSend {
   timestamp: number
   /** The daemon holding the bytes, as `/api/v1/file` wants it. */
   owner: string
+  /** Named by the fiber's body (`:::{embed}`); `timestamp` is 0 unless it was also sent. */
+  embedded?: boolean
+}
+
+/**
+ * The gallery's files: what the body embeds first, in the body's order — the
+ * author's own deliverables — then everything else sent, newest first. An
+ * embedded file that was also sent is one item, carrying its send's time.
+ */
+export function withEmbeds(sends: readonly FiberSend[], embeds: readonly FiberSend[]): FiberSend[] {
+  const sent = new Map(sends.map(send => [send.key, send]))
+  const lead = embeds.map(embed => {
+    const match = sent.get(embed.key)
+    return match ? { ...match, embedded: true } : embed
+  })
+  const led = new Set(lead.map(send => send.key))
+  return [...lead, ...sends.filter(send => !led.has(send.key))]
 }
 
 /** How far back a sent file still counts. */

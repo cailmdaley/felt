@@ -2,7 +2,7 @@ import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.
 import { workerPlate } from './workspace/workerPlate.js'
 import { documentKind, type DocKey } from './workspace/documents.js'
 import { unseenSince } from './workspace/DocumentSeen.js'
-import type { FiberSend } from './fiberSends.js'
+import { withEmbeds, type FiberSend } from './fiberSends.js'
 import { buildSendGallery } from './previewGallery.js'
 import { buildPreviewConstitution } from './previewConstitution.js'
 import type { PreviewContent } from './CardPreview.js'
@@ -1956,8 +1956,9 @@ export class KanbanSurfaceRenderer {
    * preview's content. Built on demand, for one row at a time: the paper face
    * (title, path, question, outcome), the facts the row leaves out (the
    * machine it lives on, agent, due, its turn, where else the fiber lives),
-   * any warning, then the gallery of sent files. The sheet scrolls as one;
-   * `dispose` releases the gallery's thumbnails.
+   * any warning, then the gallery of what it embeds and sent, then the
+   * constitution's body. The sheet scrolls as one; `dispose` releases the
+   * gallery's thumbnails.
    */
   buildCardPreview(row: HTMLElement): PreviewContent | null {
     const card = this.previewCard(row)
@@ -1970,22 +1971,32 @@ export class KanbanSurfaceRenderer {
     const sends = this.o.getSentFiles?.(card) ?? []
     const signature = sendsSignature(sends)
     const shuttleBase = this.o.shuttleBase ?? ''
-    // What the fiber sent, or — when it has sent nothing — the constitution itself.
-    const below = buildSendGallery(sends, {
-      shuttleBase,
-      open: (send) => this.o.openCardDocument?.(card, send.key),
-    }) ?? buildPreviewConstitution(card, {
+    const galleryOptions = { shuttleBase, open: (send: FiberSend) => this.o.openCardDocument?.(card, send.key) }
+    // The gallery: what the fiber sent now, joined by what its body embeds
+    // once the body is read. Then the constitution itself, always.
+    let gallery = buildSendGallery(sends, galleryOptions)
+    if (gallery) sheet.append(gallery.el)
+    const constitution = buildPreviewConstitution(card, {
       shuttleBase,
       openDocument: (doc) => this.o.openCardDocument?.(card, doc),
       openFiber: (id) => {
         const target = boardCards(this.o.getLastResponse()).find((c) => c.id === id)
         if (target) this.o.openDetail(target)
       },
+      onEmbeds: (embeds) => {
+        const files = withEmbeds(sends, embeds)
+        if (sendsSignature(files) === signature) return
+        const next = buildSendGallery(files, galleryOptions)!
+        if (gallery) gallery.el.replaceWith(next.el)
+        else constitution.el.before(next.el)
+        gallery?.dispose()
+        gallery = next
+      },
     })
-    sheet.append(below.el)
+    sheet.append(constitution.el)
     return {
       el: sheet,
-      dispose: () => below.dispose(),
+      dispose: () => { gallery?.dispose(); constitution.dispose() },
       // A Desk redraw repaints the card face in place; the gallery, and the
       // thumbnails it has loaded, stand unless what the fiber sent changed.
       refresh: (next) => {

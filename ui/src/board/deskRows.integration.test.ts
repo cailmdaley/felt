@@ -143,23 +143,28 @@ describe('the preview is the full card and what it sent, built for one row', () 
     expect(preview.el.querySelector('.kbn-preview-gallery')).toBeNull()
   })
 
-  it('reads the constitution in place of a gallery when the fiber sent nothing, once per card', async () => {
+  it('reads the constitution below the gallery, and makes what it embeds the cover', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ fibers: [{ origin: 'hub', path: 'work/run', felt_store: '/s', fiber: { id: 'work/run', name: 'Null tests', body: ':::{embed} report.html\n:title: The report\n:::\n\n## Desired State\n\nThe **null** passes.\n' } }] })))
     vi.stubGlobal('fetch', fetcher)
     const opened = vi.fn()
-    const surfaces = renderer(data, {}, {}, opened)
-    const first = open(surfaces)
+    const withDir = response({ now: { drafts: [], inFlight: [], awaitingReview: [{ ...review, fiberDir: '/store/.felt/work/run' }] } })
+    const surfaces = renderer(withDir, {}, { 'work/run': [send('b-mode.png', 2)] }, opened)
+    const root = surfaces.renderNowSection(withDir.now, withDir.staleness)
+    const first = surfaces.buildCardPreview(root.querySelector<HTMLElement>('[data-card-uid="ULID-RUN"]')!)!
     const body = first.el.querySelector<HTMLElement>('.kbn-preview-body')!
     expect(body.textContent).toBe('Reading the constitution…')
     await vi.waitFor(() => expect(body.querySelector('.kbn-detail-prose h2')?.textContent).toBe('Desired State'))
     expect(body.querySelector('.kbn-detail-prose strong')?.textContent).toBe('null')
     expect(String((fetcher.mock.calls[0] as unknown[])[0])).toMatch(/\/api\/v1\/fibers\/work\/run\?body=true&origin=hub/)
-    // The embed is a link into the reader, not a frame.
-    const embed = body.querySelector<HTMLElement>('.kbn-preview-embed')!
-    expect(embed.textContent).toContain('The report')
-    embed.click()
-    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/run' }), expect.stringMatching(/report\.html$/))
-    open(surfaces)
+    // The embed leads the gallery as its cover, beside what was sent; the body follows.
+    const items = [...first.el.querySelectorAll<HTMLElement>('.kbn-preview-gallery .kbn-preview-send')]
+    expect(items.map(i => [i.querySelector('.kbn-preview-send-name')?.textContent, i.dataset.slot])).toEqual([['report.html', 'cover'], ['b-mode.png', 'plate']])
+    expect(items[0].querySelector('.kbn-preview-send-age')?.textContent).toBe('in the body')
+    expect(first.el.querySelector('.kbn-preview-gallery')!.nextElementSibling).toBe(body)
+    items[0].click()
+    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/run' }), 'hub:/store/.felt/work/run/report.html')
+    // Read once per card.
+    surfaces.buildCardPreview(root.querySelector<HTMLElement>('[data-card-uid="ULID-RUN"]')!)
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 

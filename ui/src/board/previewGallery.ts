@@ -1,8 +1,9 @@
 /**
- * The preview's gallery: what a fiber sent, newest first, laid out by what can
- * be seen of it.
+ * The preview's gallery: what a fiber embeds in its body and what it sent
+ * (`withEmbeds` orders them), laid out by what can be seen of it.
  *
- * The newest file is the cover and every image is a plate, each the panel's
+ * The first file — what the body embeds, else the newest sent — is the cover,
+ * and every image is a plate, each the panel's
  * full width at its own aspect — a plot is read at size or not at all. Pages,
  * PDFs and text sit two to a row as tiles; what a thumbnail cannot draw (an
  * archive, a recording) is a line. Every item opens its document in the reader.
@@ -49,7 +50,7 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
   const now = o.now ?? Date.now()
   const el = document.createElement('section')
   el.className = 'kbn-preview-gallery'
-  el.setAttribute('aria-label', `Sent files (${sends.length})`)
+  el.setAttribute('aria-label', `Files (${sends.length})`)
 
   const thumbs: Thumbnail[] = []
   let settled = false
@@ -69,9 +70,11 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
     item.className = 'kbn-preview-send'
     item.dataset.slot = slot
     item.dataset.kind = documentKind(send.fullPath)
-    const age = `${humanizeIdleAge(now - send.timestamp)} ago`
-    item.title = `Open ${send.basename} — sent ${age}`
-    if (unseenSince(send.key, send.timestamp)) item.dataset.unseen = ''
+    const sent = send.timestamp > 0
+    const age = sent ? `${humanizeIdleAge(now - send.timestamp)} ago` : 'in the body'
+    item.title = sent ? `Open ${send.basename} — sent ${age}` : `Open ${send.basename} — embedded in the constitution`
+    if (send.embedded) item.dataset.embedded = ''
+    if (sent && unseenSince(send.key, send.timestamp)) item.dataset.unseen = ''
     item.addEventListener('click', (e) => {
       e.stopPropagation()
       o.open(send)

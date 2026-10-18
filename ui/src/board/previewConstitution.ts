@@ -1,8 +1,8 @@
 /**
- * The preview's reading when a fiber has sent nothing: the constitution
- * itself — its body (Desired State, Status, …) rendered as the reader renders
- * it, below the card. Its embeds stand as a short list of links into the
- * reader rather than live frames; the gallery is where sent things are seen.
+ * The constitution in the preview: its body (Desired State, Status, …)
+ * rendered as the reader renders it, below the gallery. The files it embeds
+ * (`:::{embed}`) are handed to the gallery, where they stand beside what the
+ * fiber sent, rather than drawn here.
  *
  * The body is read from the owning daemon only when a preview opens, once per
  * card within a minute, so running the pointer down a column of drafts does
@@ -13,7 +13,8 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { readFiber } from './workspace/fiberSource.js'
 import { renderFiberMarkdown, installBodyFileLinks } from './workspace/FiberProse.js'
 import { installWikilinks } from './wikilinks.js'
-import { docKey, documentKind, type DocKey } from './workspace/documents.js'
+import { docKey, parseDocKey, type DocKey } from './workspace/documents.js'
+import type { FiberSend } from './fiberSends.js'
 import { basename } from './utils.js'
 import './prose.css'
 
@@ -41,16 +42,26 @@ export function cardBody(card: KanbanCard, read: BodyReader, now = Date.now()): 
 /** Forget every cached body (tests). */
 export function clearCardBodies(): void { cache.clear() }
 
-const GLYPH: Record<ReturnType<typeof documentKind>, string> = {
-  fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□',
-}
-
 export interface ConstitutionOptions {
   shuttleBase: string
   openDocument: (key: DocKey) => void
   openFiber: (id: string) => void
+  /** The files the body embeds, as the reader resolves them, once it is read. */
+  onEmbeds?: (embeds: FiberSend[]) => void
   /** Reads the card's body; the owner-routed fiber read by default. */
   read?: BodyReader
+}
+
+/** A body's embeds as documents of the card's own host, resolved against its folder. */
+export function embedSends(card: KanbanCard, paths: readonly string[]): FiberSend[] {
+  const out: FiberSend[] = []
+  for (const path of paths) {
+    const key = docKey(card.originId, path, card.originId, card.fiberDir)
+    const parsed = parseDocKey(key)
+    if (!parsed || out.some(send => send.key === key)) continue
+    out.push({ key, fullPath: parsed.path, basename: basename(parsed.path), timestamp: 0, owner: parsed.owner, embedded: true })
+  }
+  return out
 }
 
 export function buildPreviewConstitution(card: KanbanCard, o: ConstitutionOptions): { el: HTMLElement; dispose: () => void } {
@@ -91,29 +102,8 @@ export function buildPreviewConstitution(card: KanbanCard, o: ConstitutionOption
     installBodyFileLinks(prose, open)
     void installWikilinks(prose, { shuttleBase: o.shuttleBase, onOpen: o.openFiber })
 
-    const parts: HTMLElement[] = []
-    if (attachments.length) {
-      const embeds = document.createElement('div')
-      embeds.className = 'kbn-preview-embeds'
-      for (const attachment of attachments) {
-        const link = document.createElement('button')
-        link.type = 'button'
-        link.className = 'kbn-preview-embed'
-        const glyph = document.createElement('span')
-        glyph.className = 'kbn-preview-send-glyph'
-        glyph.setAttribute('aria-hidden', 'true')
-        glyph.textContent = GLYPH[documentKind(attachment.path)]
-        const name = document.createElement('span')
-        name.textContent = attachment.title ?? basename(attachment.path)
-        link.append(glyph, name)
-        link.title = `Open ${basename(attachment.path)} in the reader`
-        link.addEventListener('click', (e) => { e.stopPropagation(); open(attachment.path) })
-        embeds.append(link)
-      }
-      parts.push(embeds)
-    }
-    parts.push(prose)
-    el.replaceChildren(...parts)
+    el.replaceChildren(prose)
+    if (attachments.length) o.onEmbeds?.(embedSends(card, attachments.map(a => a.path)))
   }
 
   return { el, dispose: () => { live = false } }
