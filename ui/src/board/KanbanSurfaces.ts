@@ -1,8 +1,11 @@
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
+import { Thumbnail } from './workspace/Thumbnail.js'
+import { documentKind } from './workspace/documents.js'
+import type { LatestReport } from './latestReports.js'
 import { queuedControl } from './QueuedControl.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
-import { renderMarkdown } from './utils.js'
+import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
   civilWeekday,
@@ -101,6 +104,25 @@ export function buildCardPaper(card: KanbanCard): HTMLElement {
     el.append(outcome)
   }
   return el
+}
+
+const REPORT_GLYPH: Record<ReturnType<typeof documentKind>, string> = {
+  fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□',
+}
+
+/**
+ * A row's mark for its newest report: a small leaf with the document's kind on
+ * it, in the thumbnail's own glyph vocabulary. The report itself is the
+ * preview's — a live thumbnail at a row's height would be a smudge.
+ */
+function reportMark(report: LatestReport): HTMLElement {
+  const mark = document.createElement('span')
+  mark.className = 'kbn-card-report'
+  mark.dataset.kind = documentKind(report.fullPath)
+  mark.textContent = REPORT_GLYPH[documentKind(report.fullPath)]
+  mark.title = `${report.basename} — sent ${humanizeIdleAge(Date.now() - report.timestamp)} ago`
+  mark.setAttribute('aria-label', `Latest report: ${report.basename}`)
+  return mark
 }
 
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
@@ -210,6 +232,10 @@ interface KanbanSurfaceRendererOptions {
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
+  /** The newest report a card sent — the row's mark and the preview's thumbnail. */
+  getLatestReport?: (card: KanbanCard) => LatestReport | undefined
+  /** Daemon base URL, for the preview's report thumbnail. */
+  shuttleBase?: string
   /** Opens the Rest popover on the card's own Rest affordance. */
   onRest?: (card: KanbanCard) => void
   /** Resolve the owning host's registry default for agent labels. */
@@ -1201,7 +1227,6 @@ export class KanbanSurfaceRenderer {
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
-    el.title = card.name
     el.setAttribute('role', 'listitem')
     el.setAttribute('aria-label', `${card.name}${agentName ? ` — ${agentName}` : ''}`)
 
@@ -1662,9 +1687,18 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * Render one grid card. Clicking it opens the document workspace reader;
-   * the worker pill opens its conversation, and fiber controls live inline on
-   * the fiber page.
+   * Render one Desk row — a line in a thread list, not a slip of paper.
+   *
+   * At a glance a row carries only what decides where to look next: whose
+   * hand it is in (the glyph), the title, the queue behind it, a mark for its
+   * newest report, and the turn chip. Everything read rather than glanced —
+   * outcome, question, path, agent, due, warnings and the report itself — is
+   * the preview's (`buildCardPreview`), built when the row is hovered or
+   * selected and never before. The verdicts and Rest surface over the row's
+   * right end under the pointer or the keyboard selection.
+   *
+   * Clicking the row opens the document workspace reader; the turn chip opens
+   * its conversation.
    */
   private renderCard(
     card: KanbanCard,
@@ -1675,7 +1709,7 @@ export class KanbanSurfaceRenderer {
     const isStale = originStaleness?.status === 'stale'
     const agentName = this.agentName(card)
 
-    const el = buildCardPaper(card)
+    const el = document.createElement('div')
     el.className = `kbn-card kbn-card-${kind}${isStale ? ' kbn-card--stale' : ''}`
     if (lensState.dim) el.classList.add('kbn-card--lens-off')
     if (lensState.ghost) el.classList.add('kbn-card--lens-ghost')
@@ -1692,12 +1726,6 @@ export class KanbanSurfaceRenderer {
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
-    // A fiber in a git-synced store is served by every daemon holding it. The
-    // board shows one card (see `dedupeMirroredRows`); say on hover where else
-    // it lives, so "one card" doesn't read as "the other host lost it".
-    if (card.mirroredOrigins?.length) {
-      el.title = `${card.name}\nAlso on ${card.mirroredOrigins.join(', ')} — shown from ${card.originId}`
-    }
 
     if (!isStale) this.installDraggable(el, card, true)
     // THE TOUCH READING OF THE DRAG. A card held still under the thumb offers
@@ -1713,42 +1741,34 @@ export class KanbanSurfaceRenderer {
     // held title, leaving a refused drag's tooltip stuck on the card.
     this.installStackTarget(el, card)
 
+    const glyph = document.createElement('span')
+    glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
+    glyph.textContent = isAgentCard(card) ? '◐' : '✓'
+    glyph.setAttribute('aria-hidden', 'true')
+    const name = document.createElement('span')
+    name.className = 'kbn-card-name'
+    name.textContent = card.name
+    el.append(glyph, name)
+
+    // The row's right end. A verdict given from the Desk waits out its undo
+    // window here, over whatever the end was showing.
     const meta = document.createElement('div')
     meta.className = 'kbn-card-meta'
-    // A verdict given from the Desk waits out its undo window on this foot.
     markVerdictHost(meta, card)
 
-    const actor = document.createElement('span')
-    actor.className = `kbn-card-actor ${isAgentCard(card) ? 'kbn-card-actor-agent' : 'kbn-card-actor-human'}`
-    actor.textContent = isAgentCard(card) ? (agentName ?? '') : 'me'
-    actor.hidden = isAgentCard(card) && agentName === null
-    meta.append(actor)
-
-    if (card.due) {
-      const due = document.createElement('span')
-      due.className = 'kbn-card-due'
-      due.textContent = formatDue(card.due)
-      // The due date is what drifted the card, so the due chip carries that
-      // story on hover rather than a chip of its own.
-      due.title = card.drifted
-        ? `${card.due} — promoted from ${card.storedHorizon ?? 'unset'} by due date`
-        : card.due
-      meta.append(due)
-    }
-
-    // "+N queued" — this card heads a sequence. It sits here with the other
-    // facts about the card (actor, due), left of the right-aligned actions.
+    // "+N queued" — this card heads a sequence. Its peek list hangs under the
+    // row, on a line of its own, where the keyboard can walk it.
     this.renderQueuedChip(card, meta)
+    const queuedList = meta.querySelector<HTMLElement>(':scope > .kbn-card-queued-list')
 
-    // Built here (it reads `kind`/`card` in scope with everything above), but
-    // NOT appended directly — it's a CENTER-region chip, placed by the
-    // spacer logic below rather than by its own DOM position. The phase
-    // badge / held pill / worker pill are the RIGHT region, built further
-    // down and collected into `rightChip` for the same reason.
-    let reviewMetaActions: HTMLDivElement | undefined
-    // Work awaiting review or in flight can be cleared from its card.
+    // Temper / Discard (awaiting review and in flight) and Rest (every
+    // Shuttle-managed card) lie over the title's end, shown under the pointer,
+    // on focus and on the key-selected row — the thread-list idiom of actions
+    // standing in where the row's own words run out.
+    const hoverActions = document.createElement('div')
+    hoverActions.className = 'kbn-card-hover-actions'
     if ((kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
-      reviewMetaActions = document.createElement('div')
+      const reviewMetaActions = document.createElement('div')
       reviewMetaActions.className = 'kbn-card-review-meta-actions'
       const verdictBtn = (label: string, modifier: string, target: ColumnKind): HTMLButtonElement => {
         const btn = document.createElement('button')
@@ -1766,18 +1786,62 @@ export class KanbanSurfaceRenderer {
         verdictBtn('Temper', 'tempered', 'tempered'),
         verdictBtn('Discard', 'discard', 'composted'),
       )
+      hoverActions.append(reviewMetaActions)
+    }
+    if (this.o.onRest && isAgentCard(card) && !isStale) {
+      const restBtn = document.createElement('button')
+      restBtn.type = 'button'
+      restBtn.className = 'kbn-card-rest'
+      restBtn.textContent = 'rest'
+      restBtn.title = 'Rest (s)'
+      restBtn.setAttribute('aria-label', `Rest fiber: ${card.name} (s)`)
+      restBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        this.o.onRest?.(card)
+      })
+      hoverActions.append(restBtn)
+    }
+    if (hoverActions.childElementCount) meta.append(hoverActions)
+
+    // A card whose host has gone quiet says so in one glyph; the preview and
+    // the aria label carry the sentence.
+    if (isStale) {
+      const stale = document.createElement('span')
+      stale.className = 'kbn-card-stale-mark'
+      stale.textContent = '⌛'
+      stale.title = `Waiting on ${originStaleness.hostname ?? card.originId}`
+      meta.append(stale)
     }
 
+    const report = this.o.getLatestReport?.(card)
+    if (report) meta.append(reportMark(report))
+
+    const turnChip = this.renderTurnChip(card, kind)
+    if (turnChip) meta.append(turnChip)
+
+    el.append(meta)
+    if (queuedList) el.append(queuedList)
+
+    el.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a, button, textarea')) return
+      this.o.openDetail(card)
+    })
+
+    return el
+  }
+
+  /**
+   * The turn chip at a row's right end: at most one of phase badge, held
+   * pill or worker pill, since they are mutually exclusive states. Undefined
+   * when the card has none of them.
+   */
+  private renderTurnChip(card: KanbanCard, kind: NowColumnKind): HTMLElement | undefined {
     // A live worker's pill names its turn (`turnOf`): the same word, pigment
     // and age on every column, the reader and the dock, and the pill is the
     // action that opens the conversation. A terminal worker's pill is a
     // button into its tmux session; an app worker's links into the Codex app.
     // The worker-less dispatch phases (retrying/due/dispatched/starting/
     // running) show as a badge only when there is no worker to draw.
-    // The RIGHT region: at most one of phase badge / held pill / worker pill
-    // is ever live at once (they're mutually exclusive states), collected
-    // here rather than appended immediately so the spacer logic at the
-    // bottom can place it — same reasoning as `reviewMetaActions` above.
     let rightChip: HTMLElement | undefined
     if (kind === 'inFlight' && !card.tmuxSession) {
       const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid
@@ -1839,51 +1903,70 @@ export class KanbanSurfaceRenderer {
     if (card.tmuxSession) {
       rightChip = workerPlate(card, terminalWorkerPill(card, { openWorker: this.o.openWorker }))
     }
+    return rightChip
+  }
 
-    // Place the CENTER (Temper/Compost) and RIGHT (phase/held/worker) regions
-    // with flex spacers rather than per-chip `margin-left: auto` — auto
-    // margins on two different chips fight over the same free space and
-    // (worse) stop meaning what their name says the moment a third thing
-    // is added to the row. A spacer BEFORE center and AFTER center divides
-    // whatever room the left-flowing chips (actor/due/queued) left behind
-    // into two equal halves, so center actually sits in the middle of that
-    // room rather than flush against whichever side claims it first; the
-    // right chip then lands flush against the row's own right edge, same as
-    // it always has.
-    // In flight the pair follows the left chips instead of centring, so a
-    // worker pill that changes width never moves it under the pointer.
-    if (reviewMetaActions) {
-      const before = document.createElement('div')
-      before.className = 'kbn-card-meta-spacer'
-      const after = document.createElement('div')
-      after.className = 'kbn-card-meta-spacer'
-      meta.append(...(kind === 'inFlight' ? [] : [before]), reviewMetaActions, after)
+  /**
+   * The full card behind a Desk row or Resting line — what the hover preview
+   * shows. Built on demand, for one row at a time: the paper face (title,
+   * path, question, outcome), the facts the row leaves out (agent, due, where
+   * else the fiber lives), any warning, and a live thumbnail of the newest
+   * report. `dispose` releases the thumbnail.
+   */
+  buildCardPreview(row: HTMLElement): { el: HTMLElement; dispose: () => void } | null {
+    const uid = row.dataset.cardUid
+    const origin = row.dataset.cardOrigin
+    const resp = this.o.getLastResponse()
+    const card = boardCards(resp).find((c) => (c.uid ?? c.id) === uid && c.originId === origin)
+    if (!card) return null
+
+    const el = buildCardPaper(card)
+    // Not a `.kbn-card`: the preview is a reading of a card, and nothing that
+    // finds, drags or counts Desk cards may find it.
+    el.className = 'kbn-preview-card'
+    const column = row.closest<HTMLElement>('[data-column]')?.dataset.column
+    if (column) el.dataset.column = column
+    const turn = row.dataset.turn
+    if (turn) el.dataset.turn = turn
+
+    const facts = document.createElement('div')
+    facts.className = 'kbn-card-meta kbn-preview-facts'
+    if (isAgentCard(card)) {
+      const actor = document.createElement('span')
+      actor.className = 'kbn-card-actor kbn-card-actor-agent'
+      actor.textContent = card.shuttleAgent ?? this.o.getFleetDefaultAgent?.(card.originId) ?? FALLBACK_DEFAULT_AGENT
+      facts.append(actor)
+    } else {
+      const actor = document.createElement('span')
+      actor.className = 'kbn-card-actor kbn-card-actor-human'
+      actor.textContent = 'me'
+      facts.append(actor)
     }
-    // Rest reaches every Shuttle-managed card (restReachable); a hover or
-    // focus affordance at the foot, left to the reader's button on touch.
-    let restBtn: HTMLButtonElement | undefined
-    if (this.o.onRest && isAgentCard(card) && !isStale) {
-      restBtn = document.createElement('button')
-      restBtn.type = 'button'
-      restBtn.className = 'kbn-card-rest'
-      restBtn.textContent = 'rest'
-      restBtn.title = 'Rest (s)'
-      restBtn.setAttribute('aria-label', `Rest fiber: ${card.name} (s)`)
-      restBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.o.onRest?.(card)
-      })
+    if (card.due) {
+      const due = document.createElement('span')
+      due.className = 'kbn-card-due'
+      due.textContent = formatDue(card.due)
+      // The due date is what drifted the card, so the due chip carries that story.
+      if (card.drifted) due.textContent += ` · promoted from ${card.storedHorizon ?? 'unset'}`
+      facts.append(due)
     }
-    if (rightChip || restBtn) {
-      if (!reviewMetaActions) {
-        const spacer = document.createElement('div')
-        spacer.className = 'kbn-card-meta-spacer'
-        meta.append(spacer)
-      }
-      if (restBtn) meta.append(restBtn)
-      if (rightChip) meta.append(rightChip)
+    const host = card.shuttleHost && card.shuttleHost !== card.originId ? card.shuttleHost : null
+    if (host) {
+      const where = document.createElement('span')
+      where.className = 'kbn-preview-host'
+      where.textContent = `runs on ${host}`
+      facts.append(where)
     }
-    el.append(meta)
+    // A fiber in a git-synced store is served by every daemon holding it. The
+    // board shows one card (see `dedupeMirroredRows`); say where else it
+    // lives, so "one card" doesn't read as "the other host lost it".
+    if (card.mirroredOrigins?.length) {
+      const mirrored = document.createElement('span')
+      mirrored.className = 'kbn-preview-host'
+      mirrored.textContent = `also on ${card.mirroredOrigins.join(', ')}`
+      facts.append(mirrored)
+    }
+    el.append(facts)
 
     // A dep id that resolves to nothing. It holds nothing back, so the only way
     // it can be seen is to say so on the card — otherwise a typo reads as a
@@ -1891,31 +1974,45 @@ export class KanbanSurfaceRenderer {
     if (card.dependsOnUnresolved?.length) {
       const warn = document.createElement('div')
       warn.className = 'kbn-card-depwarn'
-      warn.textContent = `unresolved dep: ${card.dependsOnUnresolved.join(', ')}`
-      warn.title =
-        'This id matches no fiber the board can see, so this card is not folded under anything. ' +
-        'Fix the reference or remove it — `felt check` names it too.'
+      warn.textContent = `unresolved dep: ${card.dependsOnUnresolved.join(', ')} — fix the reference or remove it`
       el.append(warn)
     }
-
-    if (isStale) {
-      const hostname = originStaleness.hostname ?? card.originId
+    const staleness = resp?.staleness[card.originId]
+    if (staleness?.status === 'stale') {
       const waiting = document.createElement('div')
       waiting.className = 'kbn-card-waiting'
-      waiting.setAttribute('role', 'status')
-      waiting.title = originStaleness.staleSince
-        ? `Disconnected since ${originStaleness.staleSince}`
-        : 'Origin agent disconnected'
-      waiting.textContent = `⌛ waiting on ${hostname}`
+      waiting.textContent = `⌛ waiting on ${staleness.hostname ?? card.originId}${staleness.staleSince ? `, disconnected since ${staleness.staleSince}` : ''}`
       el.append(waiting)
     }
 
-    el.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).closest('a, button, textarea')) return
-      this.o.openDetail(card)
-    })
-
-    return el
+    let thumb: Thumbnail | undefined
+    const report = this.o.getLatestReport?.(card)
+    if (report) {
+      const figure = document.createElement('figure')
+      figure.className = 'kbn-preview-report'
+      const live: Thumbnail = new Thumbnail({
+        key: `desk-preview:${report.owner}:${report.fullPath}`,
+        file: { fullPath: report.fullPath, owner: report.owner, basename: report.basename },
+        fallback: report.basename,
+        shuttleBase: this.o.shuttleBase ?? '',
+        className: 'kbn-preview-thumb',
+        captioned: true,
+        priority: () => (live.el.isConnected ? 3 : 0),
+        distance: () => 0,
+      })
+      thumb = live
+      const caption = document.createElement('figcaption')
+      const file = document.createElement('span')
+      file.className = 'kbn-preview-report-name'
+      file.textContent = report.basename
+      const when = document.createElement('span')
+      when.className = 'kbn-preview-report-age'
+      when.textContent = `${humanizeIdleAge(Date.now() - report.timestamp)} ago`
+      caption.append(file, when)
+      figure.append(live.el, caption)
+      el.prepend(figure)
+    }
+    return { el, dispose: () => thumb?.dispose() }
   }
 
   /**

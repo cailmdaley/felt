@@ -20,6 +20,8 @@ export class DeskKeyboard {
   }
   dispose(): void { cancelAnimationFrame(this.revealFrame); this.root.removeEventListener('click', this.onClick, true) }
   get selection(): DeskAddress | null { return this.selected }
+  /** The row drawn for the selection, when one is on the Desk. */
+  get selectedRow(): HTMLElement | null { return this.node() ?? null }
 
   /** The reader's column is exactly the Desk's navigable order, including expanded queues. */
   columnFor(address: DeskAddress): HTMLElement[] {
