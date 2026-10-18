@@ -379,7 +379,7 @@ export class KanbanModal {
     this.surfaces = new KanbanSurfaceRenderer({
       getLatestReport: card => this.fiberSends?.latest(card),
       getSentFiles: card => this.fiberSends?.all(card) ?? [],
-      openSentFile: (card, send) => this.openDocumentChannel(card, false, send.key),
+      openCardDocument: (card, doc) => this.openDocumentChannel(card, false, doc),
       shuttleBase: this.shuttleBase,
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },

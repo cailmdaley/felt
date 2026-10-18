@@ -1,9 +1,10 @@
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
-import { documentKind } from './workspace/documents.js'
+import { documentKind, type DocKey } from './workspace/documents.js'
 import { unseenSince } from './workspace/DocumentSeen.js'
 import type { FiberSend } from './fiberSends.js'
 import { buildSendGallery } from './previewGallery.js'
+import { buildPreviewConstitution } from './previewConstitution.js'
 import type { PreviewContent } from './CardPreview.js'
 import { queuedControl } from './QueuedControl.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
@@ -263,8 +264,8 @@ interface KanbanSurfaceRendererOptions {
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
   /** Everything a card sent, newest first — the preview's gallery. */
   getSentFiles?: (card: KanbanCard) => FiberSend[]
-  /** Open one sent file in the reader, in its fiber's channel. */
-  openSentFile?: (card: KanbanCard, send: FiberSend) => void
+  /** Open one of a card's documents (a sent file, a file its body names) in the reader, in its channel. */
+  openCardDocument?: (card: KanbanCard, doc: DocKey) => void
   /** Daemon base URL, for the preview's thumbnails. */
   shuttleBase?: string
   /** Opens the Rest popover on the card's own Rest affordance. */
@@ -1968,14 +1969,23 @@ export class KanbanSurfaceRenderer {
 
     const sends = this.o.getSentFiles?.(card) ?? []
     const signature = sendsSignature(sends)
-    const gallery = buildSendGallery(sends, {
-      shuttleBase: this.o.shuttleBase ?? '',
-      open: (send) => this.o.openSentFile?.(card, send),
+    const shuttleBase = this.o.shuttleBase ?? ''
+    // What the fiber sent, or — when it has sent nothing — the constitution itself.
+    const below = buildSendGallery(sends, {
+      shuttleBase,
+      open: (send) => this.o.openCardDocument?.(card, send.key),
+    }) ?? buildPreviewConstitution(card, {
+      shuttleBase,
+      openDocument: (doc) => this.o.openCardDocument?.(card, doc),
+      openFiber: (id) => {
+        const target = boardCards(this.o.getLastResponse()).find((c) => c.id === id)
+        if (target) this.o.openDetail(target)
+      },
     })
-    if (gallery) sheet.append(gallery.el)
+    sheet.append(below.el)
     return {
       el: sheet,
-      dispose: () => gallery?.dispose(),
+      dispose: () => below.dispose(),
       // A Desk redraw repaints the card face in place; the gallery, and the
       // thumbnails it has loaded, stand unless what the fiber sent changed.
       refresh: (next) => {

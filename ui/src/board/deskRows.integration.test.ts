@@ -5,22 +5,23 @@ import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import type { FiberSend } from './fiberSends.js'
 import { card, response } from './testFixtures.js'
 import { DocumentSeen } from './workspace/DocumentSeen.js'
+import { clearCardBodies } from './previewConstitution.js'
 import type { Channel } from './workspace/documents.js'
 
 function renderer(
   data: KanbanResponse,
   reports: Record<string, FiberSend> = {},
   sent: Record<string, FiberSend[]> = {},
-  openSentFile?: (card: KanbanCard, send: FiberSend) => void,
+  openCardDocument?: (card: KanbanCard, doc: string) => void,
 ): KanbanSurfaceRenderer {
-  return new KanbanSurfaceRenderer(rendererOptions(data, reports, sent, openSentFile))
+  return new KanbanSurfaceRenderer(rendererOptions(data, reports, sent, openCardDocument))
 }
 
 function rendererOptions(
   data: KanbanResponse,
   reports: Record<string, FiberSend> = {},
   sent: Record<string, FiberSend[]> = {},
-  openSentFile?: (card: KanbanCard, send: FiberSend) => void,
+  openCardDocument?: (card: KanbanCard, doc: string) => void,
 ): ConstructorParameters<typeof KanbanSurfaceRenderer>[0] {
   return {
     getDragSourceId: () => null,
@@ -37,7 +38,7 @@ function rendererOptions(
     onRefresh: () => {},
     getLatestReport: (c: KanbanCard) => reports[c.id],
     getSentFiles: (c: KanbanCard) => sent[c.id] ?? [],
-    openSentFile,
+    openCardDocument,
     shuttleBase: 'http://daemon',
   }
 }
@@ -47,6 +48,9 @@ const REPORT: FiberSend = { key: 'local:/work/run/report.html', fullPath: '/work
 const storage = new Map<string, string>()
 beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v) } })
+  // A preview of a fiber that sent nothing reads its body; no daemon answers here.
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('no daemon') }))
+  clearCardBodies()
 })
 afterEach(() => { document.body.replaceChildren(); storage.clear(); vi.unstubAllGlobals() })
 
@@ -139,6 +143,26 @@ describe('the preview is the full card and what it sent, built for one row', () 
     expect(preview.el.querySelector('.kbn-preview-gallery')).toBeNull()
   })
 
+  it('reads the constitution in place of a gallery when the fiber sent nothing, once per card', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ fibers: [{ origin: 'hub', path: 'work/run', felt_store: '/s', fiber: { id: 'work/run', name: 'Null tests', body: ':::{embed} report.html\n:title: The report\n:::\n\n## Desired State\n\nThe **null** passes.\n' } }] })))
+    vi.stubGlobal('fetch', fetcher)
+    const opened = vi.fn()
+    const surfaces = renderer(data, {}, {}, opened)
+    const first = open(surfaces)
+    const body = first.el.querySelector<HTMLElement>('.kbn-preview-body')!
+    expect(body.textContent).toBe('Reading the constitution…')
+    await vi.waitFor(() => expect(body.querySelector('.kbn-detail-prose h2')?.textContent).toBe('Desired State'))
+    expect(body.querySelector('.kbn-detail-prose strong')?.textContent).toBe('null')
+    expect(String((fetcher.mock.calls[0] as unknown[])[0])).toMatch(/\/api\/v1\/fibers\/work\/run\?body=true&origin=hub/)
+    // The embed is a link into the reader, not a frame.
+    const embed = body.querySelector<HTMLElement>('.kbn-preview-embed')!
+    expect(embed.textContent).toContain('The report')
+    embed.click()
+    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/run' }), expect.stringMatching(/report\.html$/))
+    open(surfaces)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
   it('names the host that serves a card nothing runs', () => {
     const human = card({ id: 'note', uid: 'ULID-NOTE', originId: 'hub', shuttleKind: undefined })
     const only = response({ now: { drafts: [human], inFlight: [], awaitingReview: [] } })
@@ -164,7 +188,7 @@ describe('the preview is the full card and what it sent, built for one row', () 
     const opened = vi.fn()
     const preview = open(renderer(data, {}, { 'work/run': SENT }, opened))
     preview.el.querySelectorAll<HTMLElement>('.kbn-preview-send')[1].click()
-    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/run' }), SENT[1])
+    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/run' }), SENT[1].key)
   })
 
   it('repaints the card in place on a redraw and keeps the gallery, unless what it sent changed', () => {
