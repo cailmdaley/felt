@@ -5,6 +5,7 @@ package messaging
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -38,8 +39,11 @@ func processStartToken(pid int) string {
 	return start
 }
 
-// processParent reads the parent pid (field 4) and command name (field 2) of
-// pid from /proc/<pid>/stat.
+// processParent reads the parent pid (field 4) of pid from /proc/<pid>/stat
+// and names the program it runs: the basename of /proc/<pid>/exe, falling back
+// to the command name (field 2) when the link cannot be read. The command name
+// alone misnames a shell running a script: Linux sets it to the script's
+// basename (`event.sh`), while exe names the interpreter.
 func processParent(pid int) (int, string, bool) {
 	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
 	if err != nil {
@@ -58,6 +62,9 @@ func processParent(pid int) (int, string, bool) {
 	ppid, err := strconv.Atoi(fields[1])
 	if err != nil {
 		return 0, "", false
+	}
+	if exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe"); err == nil {
+		return ppid, filepath.Base(strings.TrimSuffix(exe, " (deleted)")), true
 	}
 	return ppid, s[openParen+1 : closeParen], true
 }
