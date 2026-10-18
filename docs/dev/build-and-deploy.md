@@ -28,6 +28,12 @@ make install      # full from-source bootstrap (scripts/bootstrap.sh)
 make install-agent / uninstall-agent   # durable keep-alive: launchd (macOS) / systemd user unit (Linux)
 ```
 
+`make ui` and `make daemon` take the checkout's build lock (`scripts/build-lock.sh`,
+a `bin/.build.lock` directory holding the builder's pid), so two builds started in
+one checkout at once — two agents deploying together — run one after the other
+instead of overwriting each other's `ui/dist` and `bin/rel.next`. A lock whose
+holder has exited is broken automatically.
+
 Source builds require Go, Elixir/OTP, Node 22+, and npm on every build host.
 `make build` compiles both Go CLIs, the UI, and daemon release; `make daemon` builds only the daemon release.
 The fleet helper builds in each host's login shell, where its toolchain is configured.

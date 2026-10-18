@@ -82,7 +82,7 @@ MIX := env -u ROOTDIR -u BINDIR -u PROGNAME -u EMU PATH='$(MIX_PATH)' mix
 AGENT_STORES ?=
 AGENT_PATH ?=
 
-.PHONY: build cli cli-install ui daemon test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test \
+.PHONY: build cli cli-install ui ui-unlocked daemon daemon-unlocked test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test \
         all start stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
@@ -144,7 +144,10 @@ $(UI_DEPS_STAMP): ui/package-lock.json
 	@mkdir -p $(dir $@)
 	@touch $@
 
-ui: $(UI_DEPS_STAMP)
+ui:
+	@sh scripts/build-lock.sh $(MAKE) ui-unlocked
+
+ui-unlocked: $(UI_DEPS_STAMP)
 	cd ui && npm run build
 
 cli-install:
@@ -156,6 +159,9 @@ cli-install:
 # required rather than building only part of the daemon's interface.
 # With Go available the build installs both before compiling the release.
 daemon:
+	@sh scripts/build-lock.sh $(MAKE) daemon-unlocked
+
+daemon-unlocked:
 ifeq ($(SKIP_CLI),1)
 	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH (SKIP_CLI=1)."; exit 1; }
 	@command -v shuttle >/dev/null 2>&1 || { echo "shuttle not found on PATH (SKIP_CLI=1)."; exit 1; }

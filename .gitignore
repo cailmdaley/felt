@@ -41,6 +41,7 @@ shuttle-*.tar
 /bin/rel.next/
 /bin/rel.prev/
 /bin/rel.retained-*/
+/bin/.build.lock/
 /daemon/priv/ui/
 /daemon/lib/shuttle/build_info.ex
 
