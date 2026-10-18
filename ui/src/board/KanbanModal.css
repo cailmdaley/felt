@@ -1128,9 +1128,7 @@
 
 .kbn-col {
   /* Desk cards/chrome render at design size — the 1.18 scale is for the
-     temporal views and document workspace reader, not the Desk lanes.
-     KanbanModal's expandOutcomesToFillSpace reads this off each card's
-     computed style rather than the root, so it follows this override. */
+     temporal views and document workspace reader, not the Desk lanes. */
   --kbn-type-scale: 1;
   display: flex;
   flex-direction: column;
@@ -1699,10 +1697,7 @@
   color: var(--kbn-ink-soft);
   /* Truncate at N lines with an ellipsis. Aligns the cutoff to a line
      boundary (no half-cropped letters) and signals truncation explicitly.
-     N defaults to 4 but JS expands it post-render when a column has
-     spare vertical space — see `expandOutcomesToFillSpace` for the
-     calculation. CSS variable + var() cascades cleanly through the
-     -webkit-line-clamp property in modern browsers. */
+     A surface sets `--card-line-clamp` to give its card more lines. */
   display: -webkit-box;
   -webkit-line-clamp: var(--card-line-clamp, 4);
   -webkit-box-orient: vertical;
@@ -2562,13 +2557,10 @@
     text-align: left;
     margin-top: -2px;
   }
-  /* Beats `expandOutcomesToFillSpace`, which writes `--card-line-clamp`
-     inline on the column after measuring a layout this query has already
-     replaced. One line is the whole intent here. */
   .kbn-card-outcome {
     font-size: 12px;
     line-height: 1.55;
-    -webkit-line-clamp: 1 !important;
+    -webkit-line-clamp: 1;
   }
   /* The row clips sideways only, so a verdict's touch target can reach past its plate vertically. */
   .kbn-card-meta {

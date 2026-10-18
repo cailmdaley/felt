@@ -542,11 +542,68 @@ const APP_CONVERSATION = fiber({
  *  project_dir (see the `/api/v1/dispatch` stub). */
 const BARE_FOLLOW_UP = 'work/spt3g_papers/bmodes-2d/run/new-mask'
 
+/**
+ * `?desk=dense`: a Desk at the density a working week reaches — about forty
+ * cards across the three columns, live workers and idle turns among them, and
+ * reports on many — for judging how many lines a column shows and how the
+ * preview behaves among them.
+ */
+const DENSE_NAMES = {
+  drafts: [
+    'Rerun the shear calibration with the new PSF model', 'Abstract for the cosmic-shear session', 'Clean up the photo-z bin edges in the config',
+    'Draft the referee response for the kSZ paper', 'Port the covariance notebook to the pipeline', 'Survey the mask-apodization options',
+    'Write the data-release note for the catalog', 'Scope the cross-correlation with DESI LRGs', 'Collect the telecon slides into one deck',
+    'Benchmark NaMaster against the pseudo-Cℓ code', 'Plan the summer-student project', 'Check the blinding scheme against the new splits',
+  ],
+  inFlight: [
+    'Reprocess the B-mode maps with the updated beam', 'Fit the intrinsic-alignment amplitude per tomographic bin', 'Assemble the systematics null-test suite',
+    'Draft the methods section for the 2D power paper', 'Build the mock catalogs for the covariance', 'Profile the pipeline memory on the compute nodes',
+    'Compare shear estimators on the image simulations', 'Validate the redshift distributions against spec-z', 'Regenerate the plots at print size',
+    'Sweep the smoothing scale for the peak counts', 'Chase the PTE outlier in the north patch', 'Summarize the collaboration review comments',
+  ],
+  awaitingReview: [
+    'Weekly arXiv surface', 'Defect and blend handling A/B', 'Prospective jobs running list', 'Telecon notes for the shear group',
+    'Null tests on the reprocessed maps', 'Covariance convergence check', 'Bibliography sweep for the paper', 'Calibration bias summary',
+    'Mask-split comparison', 'Photo-z outlier audit', 'Beam window function update', 'Pipeline timing report',
+  ],
+} as const
+const DENSE_OUTCOME = 'Ran the comparison on the full footprint; the two choices agree within the statistical error everywhere except the lowest bin, where the difference is 0.6σ. Recommendation and figures are in report.html; three questions for Cail at the end.'
+const denseRows = search.get('desk') === 'dense'
+  ? (Object.entries(DENSE_NAMES) as Array<[keyof typeof DENSE_NAMES, readonly string[]]>).flatMap(([column, names]) => names.map((name, i) => {
+    const id = `dense/${column}/${i}`
+    const row = fiber({
+      id, uid: `dense-${column}-${i}`, name,
+      status: column === 'drafts' ? 'open' : column === 'inFlight' ? 'active' : 'closed',
+      outcome: DENSE_OUTCOME,
+      closed_at: column === 'awaitingReview' ? iso(-(i + 1) * 3_600_000) : undefined,
+      due: i % 5 === 2 ? iso(2 * 86_400_000).slice(0, 10) : undefined,
+      shuttle: { ...shuttleBlock(), agent: i % 4 === 1 ? 'codex-sol' : 'claude-opus' },
+    })
+    if (column !== 'inFlight') return row
+    return {
+      ...row,
+      origin: LOCAL_HOST,
+      runtime: {
+        state: 'running',
+        tmux_session: sessionFor(id, `dense-${i}`),
+        phase: i % 3 === 0 ? 'waiting' : 'working',
+        last_activity_at: now - (i % 3 === 0 ? (i + 1) * 3_600_000 : 20_000),
+      },
+    }
+  }))
+  : []
+const DENSE_SENT_FILES = denseRows.filter((_, i) => i % 2 === 0).map((row, i) => ({
+  fullPath: `/work/dense/${row.fiber.id.split('/').slice(1).join('-')}/${['report.html', 'figure.png', 'notes.pdf'][i % 3]}`,
+  uid: row.fiber.uid ?? row.fiber.id,
+  at: -(i + 1) * 47 * 60_000,
+}))
+
 const MOCK_FEED = {
   host: 'local',
   generated_at: iso(0),
   fibers: [
     ...DRAFTS.map(fiber),
+    ...denseRows,
     ...(search.get('identity') === 'all' ? ['identity_pending', 'identity_failed'].map((phase, i) => ({
       ...fiber({
         id: `fixtures/session-attribution/${phase}`, uid: `fixture-identity-${i}`,
@@ -1107,13 +1164,14 @@ const MOCK_ORIGINS: TemporalOrigins = {
  * receipt from a stale remote. Their bodies do not load over `file://`, so the
  * overview shows thumbnails.
  */
-const MOCK_SENT_FILES = [
+const MOCK_SENT_FILES = ([
   { fullPath: '/work/shear/results/b-mode-null.png', uid: 'work/euclid/photoz-systematics/reread', at: -40 * 60_000 },
   { fullPath: '/work/shear/report/null-tests.html', uid: 'work/euclid/photoz-systematics/reread', at: -3 * 3_600_000 },
   { fullPath: '/work/kanban/board-chrome.pdf', uid: 'ai-futures/portolan/standalone-kanban/board-chrome-redesign', at: -5 * 3_600_000 },
   { fullPath: '/work/arxiv/digest.md', uid: 'work/arxiv/daily-digest', at: -9 * 3_600_000 },
   { fullPath: '/work/cycles/chains.tar.gz', uid: 'work/cycles/shear-paper-sprint', at: -26 * 3_600_000, host: FOREIGN_HOST },
-].map(({ fullPath, uid, at, host }) => ({
+  ...DENSE_SENT_FILES,
+] as Array<{ fullPath: string; uid: string; at: number; host?: string }>).map(({ fullPath, uid, at, host }) => ({
   fullPath,
   basename: fullPath.split('/').pop() ?? fullPath,
   timestamp: now + at,

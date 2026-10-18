@@ -65,8 +65,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** A Desk row names a non-default agent in its label; the default goes unsaid. */
+function rowAgent(root: ParentNode, id: string): string | null {
+  const label = root.querySelector<HTMLElement>(`[data-fiber-id="${id}"]`)?.getAttribute('aria-label') ?? ''
+  const parts = label.split(' — ')
+  return parts.length > 2 ? parts[1] : null
+}
+
 describe('agent names follow each owning fleet default', () => {
-  it('hides the registry default and omitted agent on cards, pins and resting chips', () => {
+  it('hides the registry default and omitted agent on Desk rows and resting chips', () => {
     const renderer = surfaces((origin) => fleetDefaults[origin] ?? FALLBACK_DEFAULT_AGENT)
     const now = renderer.renderNowSection({
       drafts: [
@@ -77,9 +84,9 @@ describe('agent names follow each owning fleet default', () => {
       inFlight: [],
       awaitingReview: [],
     }, {})
-    expect(now.querySelector<HTMLElement>('[data-fiber-id="default"] .kbn-card-actor')?.hidden).toBe(true)
-    expect(now.querySelector<HTMLElement>('[data-fiber-id="custom"] .kbn-card-actor')?.textContent).toBe('claude-opus')
-    expect(now.querySelector<HTMLElement>('[data-fiber-id="implicit"] .kbn-card-actor')?.hidden).toBe(true)
+    expect(rowAgent(now, 'default')).toBeNull()
+    expect(rowAgent(now, 'custom')).toBe('claude-opus')
+    expect(rowAgent(now, 'implicit')).toBeNull()
 
     const resting = renderer.renderStashSection([
       card({ id: 'rest-default', originId: 'alpha', effectiveHorizon: 'stashed', shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }),
@@ -98,8 +105,8 @@ describe('agent names follow each owning fleet default', () => {
       inFlight: [],
       awaitingReview: [],
     }, {})
-    expect(root.querySelector<HTMLElement>('[data-fiber-id="fallback-default"] .kbn-card-actor')?.hidden).toBe(true)
-    expect(root.querySelector<HTMLElement>('[data-fiber-id="fallback-custom"] .kbn-card-actor')?.textContent).toBe('claude-fable')
+    expect(rowAgent(root, 'fallback-default')).toBeNull()
+    expect(rowAgent(root, 'fallback-custom')).toBe('claude-fable')
   })
 
   it('loads the owner-routed registry default once for each card origin', async () => {
@@ -123,11 +130,11 @@ describe('agent names follow each owning fleet default', () => {
     } }))
 
     await vi.waitFor(() => {
-      expect(document.querySelector<HTMLElement>('[data-fiber-id="alpha-card"] .kbn-card-actor')?.hidden).toBe(true)
-      expect(document.querySelector<HTMLElement>('[data-fiber-id="beta-card"] .kbn-card-actor')?.textContent).toBe('claude-fable')
+      expect(rowAgent(document.body, 'alpha-card')).toBeNull()
+      expect(rowAgent(document.body, 'beta-card')).toBe('claude-fable')
     })
     const urls = fetcher.mock.calls.map(([input]) => new URL(String(input), window.location.href))
-    expect(urls.map((url) => url.pathname + url.search).sort()).toEqual([
+    expect(urls.filter((url) => url.pathname === '/api/v1/agents').map((url) => url.pathname + url.search).sort()).toEqual([
       '/api/v1/agents?origin=alpha',
       '/api/v1/agents?origin=beta',
     ])

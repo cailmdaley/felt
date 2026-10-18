@@ -138,6 +138,11 @@ async function chooseDeskColumn(p, index) {
   if (!await segment.isVisible()) return
   await segment.click()
   await poll(p, index => document.querySelector(`.kbn-folio-seg[data-folio="${index}"]`)?.getAttribute('aria-selected') === 'true', index)
+  // The strip marks the leaf before the pager's scroll lands on it; wait for the leaf itself.
+  await poll(p, index => {
+    const leaf = document.querySelectorAll('.kbn-now-board > .kbn-col')[index]?.getBoundingClientRect()
+    return !!leaf && leaf.left >= 0 && leaf.right <= innerWidth
+  }, index)
 }
 async function revealLatestFiles(p) {
   const latest = p.locator('.ws-overview-latest')
@@ -253,52 +258,52 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.equal(await p.locator('.kbn-keymap-overlay').count(), 0)
 }, viewport)
 
-test('Awaiting-review actions reveal without shifting and remain thumb-sized on touch', async p => {
+test("Awaiting-review actions reveal at the row's end without shifting; the rest of the row opens the card", async p => {
   const drafts = p.locator('[data-column="drafts"]')
   const flight = p.locator('[data-column="inFlight"]')
   const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
   const actions = review.locator('.kbn-card-review-meta-actions')
+  const group = review.locator('.kbn-card-hover-actions')
   assert.equal(await drafts.locator('.kbn-card-review-meta-actions').count(), 0)
-  // Work in flight reveals the same pair on hover, so a card can be cleared from the Desk.
-  const flightActions = flight.locator('.kbn-card-review-meta-actions').first()
-  assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '0')
-  await flight.locator('.kbn-card').first().hover()
-  await waitOpacity(p, flightActions, '1')
-  assert.equal(await flightActions.evaluate(el => getComputedStyle(el).opacity), '1')
-  assert.deepEqual(await flightActions.locator('button').allTextContents(), ['Temper', 'Discard'])
+  // Work in flight reveals the same pair at its row's end, so a card can be cleared from the Desk.
+  const flightGroup = flight.locator('.kbn-card-hover-actions').first()
+  assert.equal(await flightGroup.evaluate(el => getComputedStyle(el).opacity), '0')
+  await flight.locator('.kbn-card > .kbn-card-meta').first().hover()
+  await waitOpacity(p, flightGroup, '1')
+  assert.deepEqual(await flightGroup.locator('.kbn-card-review-meta-actions button').allTextContents(), ['Temper', 'Discard'])
   await p.mouse.move(0, 0)
   assert.equal(await actions.locator('button').count(), 2)
-  await waitOpacity(p, actions, '0')
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await waitOpacity(p, group, '0')
   const before = await actions.evaluate(el => {
     const { width, height } = el.getBoundingClientRect()
     return { width, height }
   })
-  const box = await review.boundingBox()
-  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await waitOpacity(p, actions, '1')
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  // The middle of the row is the way into the card: no verdict surfaces under it.
+  const row = await review.boundingBox()
+  await p.mouse.move(row.x + row.width * 0.3, row.y + row.height / 2)
+  await p.waitForTimeout(150)
+  assert.equal(await group.evaluate(el => getComputedStyle(el).opacity), '0')
+  assert.equal(await group.evaluate(el => getComputedStyle(el).pointerEvents), 'none')
+  const end = await review.locator('.kbn-card-meta').boundingBox()
+  await p.mouse.move(end.x + end.width / 2, end.y + end.height / 2)
+  await waitOpacity(p, group, '1')
   assert.deepEqual(await actions.evaluate(el => {
     const { width, height } = el.getBoundingClientRect()
     return { width, height }
   }), before)
   await p.mouse.move(0, 0)
-  await waitOpacity(p, actions, '0')
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await waitOpacity(p, group, '0')
   await actions.locator('button').first().focus()
-  await waitOpacity(p, actions, '1')
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  await waitOpacity(p, group, '1')
   await p.evaluate(() => document.activeElement?.blur())
-  await waitOpacity(p, actions, '0')
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await waitOpacity(p, group, '0')
+  // The keyboard selection previews the card; its verdicts are keys.
   await p.keyboard.press('j')
   assert.ok(await review.evaluate(el => el.classList.contains('kbn-key-selected')))
-  await waitOpacity(p, actions, '1')
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
+  await p.locator('.kbn-preview .kbn-preview-card').waitFor()
+  assert.equal(await group.evaluate(el => getComputedStyle(el).opacity), '0')
   await p.keyboard.press('Escape')
-  await p.evaluate(() => document.activeElement?.blur())
-  await waitOpacity(p, actions, '0')
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '0')
+  await p.locator('.kbn-preview').waitFor({ state: 'hidden' })
 }, undefined, undefined, 'reduce')
 
 test('Awaiting-review actions stay visible and thumb-sized without hover', async p => {
@@ -1130,7 +1135,7 @@ test('j/k step constitutions in the sidebar order from a Board-opened reader, th
 })
 
 test('The sidebar strip names the J/K stops; every jump and strip click shows the landed card under its caption', async p => {
-  const deskNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-header .kbn-card-name`).allTextContents()
+  const deskNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const drafts = await deskNames('drafts'), flight = await deskNames('inFlight'), review = await deskNames('awaitingReview')
   await open(p)
   const sidebar = p.locator('.ws-sidebar').first()
@@ -1180,7 +1185,7 @@ test('The sidebar strip names the J/K stops; every jump and strip click shows th
 
 test('Wide reader takes the Desk column as cards, steps visibly, and returns selection to the current card', async p => {
   const column = p.locator('[data-column="awaitingReview"]')
-  const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-header .kbn-card-name`).allTextContents()
+  const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const drafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
   const names = [...drafts, ...flight, ...review]
   await open(p)
@@ -1470,6 +1475,8 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
   const controls = surface === 'Desk'
     ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-review-meta-actions')
     : selected(p).locator('.kbn-ctl-verdict')
+  // A Desk row offers its verdicts at its right end.
+  if (surface === 'Desk') await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta').hover()
   await controls.getByRole('button', { name: /Discard/ }).click({ force: true })
   const host = surface === 'Desk' ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta') : controls
   assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
@@ -3050,8 +3057,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   }
   if (!phone) await still(p, 'j selecting a card (the verdict reveal)', () => p.keyboard.press('j'))
   await still(p, 'a Desk poll repaint', () => repaint(p))
-  // The pill's word grows into the meta row's empty spacer; nothing visible moves.
-  await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.kbn-card-meta-spacer'], settle: 100 })
+  // The pill's word takes its room from the end of its own row's title; the
+  // title's start and every other row stay put.
+  await still(p, 'a Desk worker-state change', () => flipWorker(p), { allow: ['.kbn-card-meta', '.kbn-card-name'], settle: 100 })
   if (phone) return
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').first().waitFor()

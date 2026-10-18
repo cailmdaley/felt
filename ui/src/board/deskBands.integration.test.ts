@@ -92,7 +92,8 @@ describe('In flight bands', () => {
     ['identity_failed', 'Session attribution failed'],
   ])('renders %s visibly rather than as Working', (phase, label) => {
     const data = workerFeed([phase])
-    const root = renderer(data).renderNowSection(data.now, {})
+    const surfaces = renderer(data)
+    const root = surfaces.renderNowSection(data.now, {})
     expect(flightOrder(root)).toEqual([
       { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['worker-0'] },
     ])
@@ -121,7 +122,9 @@ describe('In flight bands', () => {
       { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['question', 'worker-0'] },
       { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-1'] },
     ])
-    expect(root.querySelector('.kbn-card-question')?.textContent).toBe(question.ask!.text)
+    // The question is read in the row's preview; the row itself is the gold edge.
+    const preview = renderer(data).buildCardPreview(root.querySelector<HTMLElement>('[data-fiber-id="question"]')!)!
+    expect(preview.el.querySelector('.kbn-card-question')?.textContent).toBe(question.ask!.text)
     expect(root.querySelector<HTMLElement>('[data-fiber-id="question"]')?.dataset.turn).toBe('question')
     expect(root.querySelector<HTMLElement>('[data-fiber-id="worker-0"]')?.dataset.turn).toBe('idle')
     expect(root.querySelector<HTMLElement>('[data-fiber-id="worker-1"]')?.dataset.turn).toBeUndefined()
@@ -129,7 +132,7 @@ describe('In flight bands', () => {
     expect(flightOrder(renderer(data).renderNowSection(data.now, {}))).toEqual(flightOrder(root))
     question.ask = undefined
     const attention = renderer(data).renderNowSection(data.now, {})
-    expect(attention.querySelector('[data-fiber-id="question"] .kbn-card-question')).toBeNull()
+    expect(renderer(data).buildCardPreview(attention.querySelector<HTMLElement>('[data-fiber-id="question"]')!)!.el.querySelector('.kbn-card-question')).toBeNull()
     expect(attention.querySelector('[data-fiber-id="question"]')?.textContent).toContain('at a prompt')
   })
 

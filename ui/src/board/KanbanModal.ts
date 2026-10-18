@@ -39,6 +39,7 @@ import './palette.css'
 import './darkControls.css'
 import { watchAppearance } from './appearance.js'
 import './KanbanModal.css'
+import './deskRows.css'
 import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
@@ -93,6 +94,8 @@ import {
   viewFallbackKind,
 } from './views/index.js'
 import { isTypingTarget } from './views/ViewRegistry.js'
+import { CardPreview } from './CardPreview.js'
+import { LatestReports } from './latestReports.js'
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
@@ -302,6 +305,10 @@ export class KanbanModal {
   private workspace: Workspace | null = null
   private readonly dock: Dock
   private deskKeyboard: DeskKeyboard | null = null
+  /** The Desk's hover preview: one panel, built per row on demand. */
+  private cardPreview: CardPreview | null = null
+  /** Each fiber's newest report, for the rows' marks and the previews. */
+  private latestReports: LatestReports | null = null
   private keymapHelp: KeymapHelp | null = null
   private workspaceReturnFocus: HTMLElement | null = null
   private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
@@ -364,7 +371,14 @@ export class KanbanModal {
         onRest: card => this.openRestPopover(card),
       },
     )
+    // A new report changes a row's mark; reports are throttled to a minute, so
+    // this redraw is rare.
+    this.latestReports = new LatestReports(this.shuttleBase, () => {
+      if (this.container && this.lastResponse && this.activeViewId === 'desk') this.render(this.lastResponse)
+    })
     this.surfaces = new KanbanSurfaceRenderer({
+      getLatestReport: card => this.latestReports?.get(card),
+      shuttleBase: this.shuttleBase,
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
       getLastResponse: () => this.lastResponse,
@@ -566,6 +580,8 @@ export class KanbanModal {
     this.keymapHelp = null
     this.deskKeyboard?.dispose()
     this.deskKeyboard = null
+    this.cardPreview?.dispose()
+    this.cardPreview = null
     this.workspace?.dispose()
     this.workspace = null
     this.dock.reset()
@@ -596,7 +612,6 @@ export class KanbanModal {
     if (this.resizeRaf !== null) return
     this.resizeRaf = window.requestAnimationFrame(() => {
       this.resizeRaf = null
-      this.expandOutcomesToFillSpace()
       this.placeVeil()
       this.placeReader()
     })
@@ -662,6 +677,11 @@ export class KanbanModal {
     this.viewHostEl = document.createElement('div')
     this.viewHostEl.className = 'kbn-view-host'
     this.body.append(this.dragHorizonEl, this.deskEl, this.viewHostEl)
+    this.cardPreview = new CardPreview({
+      root: this.deskEl,
+      host: this.body,
+      build: row => this.surfaces.buildCardPreview(row),
+    })
     this.syncViewChrome()
 
     // The bar stands outside the body: the body goes inert under the reader,
@@ -680,6 +700,7 @@ export class KanbanModal {
 
   /** Desk and Chronicle cards enter the same owner-addressed document channel. */
   private openDocumentChannel(card: KanbanCard, compose = false): void {
+    this.cardPreview?.hide()
     if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
@@ -899,6 +920,7 @@ export class KanbanModal {
       else this.workspace.suspend(id)
     }
     if (id === this.activeViewId) return
+    this.cardPreview?.hide()
     this.workspace?.clearFind()
     this.activeView?.unmount()
     this.activeView = null
@@ -2246,21 +2268,15 @@ export class KanbanModal {
       return
     }
 
-    // Never rebuild the Desk while it is hidden behind a temporal view. Every
-    // pass at the end of this method MEASURES — `expandOutcomesToFillSpace`
-    // reads column heights, `restoreScrollSnapshot` writes scrollTops — and a
-    // `display:none` subtree has no layout box, so each one silently does
-    // nothing. Worse than nothing, in fact: the clamp pass clears
-    // `--card-line-clamp` before it measures, so a hidden rebuild leaves every
-    // column pinned to the 4-line CSS default and the outcome text it had
-    // expanded to fill the column comes back truncated. Nothing repairs it on
-    // the way back either, so the board sat wrong until the next data-changing
-    // poll — up to 15 seconds after the user returned.
+    // Never rebuild the Desk while it is hidden behind a temporal view. The
+    // passes at the end of this method MEASURE — `restoreScrollSnapshot`
+    // writes scrollTops — and a `display:none` subtree has no layout box, so
+    // each one silently does nothing.
     //
     // Holding the payload instead is also what makes the promise in the
     // `deskEl` docstring true: the Desk that comes back is the one the user
-    // left, scroll positions and clamps intact, repainted from fresh data at
-    // the moment it can see what it is doing.
+    // left, scroll positions intact, repainted from fresh data at the moment
+    // it can see what it is doing.
     // The Board veils a Desk that must exist: its first paint happens beneath
     // the veil, and later data waits for the Desk to be in front again.
     const veiledFirstPaint = this.activeViewId === 'shelf' && !this.deskEl.hasChildNodes()
@@ -2311,107 +2327,15 @@ export class KanbanModal {
     // A redraw repaints the selection in place: the Desk scrolls only when the
     // selection moves, never under a pointer on its way to another card.
     this.deskKeyboard?.refresh()
+    // An open preview follows its card onto the rebuilt row.
+    this.cardPreview?.rerendered()
+    void this.latestReports?.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
-    // Expand line-clamp on outcomes in now-section columns with spare
-    // vertical space. Two RAFs let layout settle at the 4-line default
-    // before measuring scrollHeight.
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => this.expandOutcomesToFillSpace())
-    })
     this.lastResponse = data
     // A temporal view is fed by the same data the Desk just rebuilt from —
     // including optimistic re-renders, which never reach fetchAndRender.
     this.mountOrRefreshActiveView()
-  }
-
-  /**
-   * Per-column post-render pass that sets `--card-line-clamp` to fill
-   * the column with at most 3 visible cards. The goal: maximize on-
-   * screen space utilization while never showing more than three cards
-   * in a single column at once.
-   *
-   * Floor() biases toward undershoot. The clamp is per-column so
-   * sparser columns can show longer outcomes — each column is sized
-   * to fit its own contents, not a global lowest common denominator.
-   */
-  private expandOutcomesToFillSpace(): void {
-    if (!this.body) return
-    // Outcome font-size × line-height = 12.5 × 1.4 = 17.5px per line at design
-    // size. The board's type rides `--kbn-type-scale` (KanbanModal.css), so the
-    // measure has to ride it too — a fixed 17.5 would over-count lines and clamp
-    // outcomes short as soon as the scale moves off 1. `.kbn-col` pins the
-    // scale back to 1 (Desk cards render at design size), so this has to read
-    // the effective value at the column, not the root/body default.
-    const readTypeScale = (el: HTMLElement): number =>
-      Number.parseFloat(
-        getComputedStyle(el).getPropertyValue('--kbn-type-scale'),
-      ) || 1
-    // Gap between cards in .kbn-col-list (CSS: gap: 8px).
-    const cardGap = 8
-    const minClamp = 4
-    const maxVisibleCards = 3
-    // No upper cap on the clamp value: targetLines is already bounded by
-    // (column_height - overhead) / lineHeight, so a single-card column
-    // expands to fill the column. Cards with short outcomes show their
-    // full content (line-clamp is a max, not a fixed height) — the
-    // overgrown clamp value is harmless when there's nothing to clamp.
-
-    // Reset cascade roots before measuring so a stale variable from a
-    // prior render doesn't bias offsetHeight readings. Clear at every
-    // level we might have set it (body, col, card).
-    this.body.style.removeProperty('--card-line-clamp')
-    for (const col of this.body.querySelectorAll<HTMLElement>('.kbn-col')) {
-      col.style.removeProperty('--card-line-clamp')
-    }
-    for (const card of this.body.querySelectorAll<HTMLElement>('.kbn-card')) {
-      card.style.removeProperty('--card-line-clamp')
-    }
-    // Force layout to settle at the 4-line default before measuring.
-    void this.body.offsetHeight
-
-    for (const col of this.body.querySelectorAll<HTMLElement>('.kbn-col')) {
-      const list = col.querySelector<HTMLElement>('.kbn-col-list')
-      if (!list) continue
-      const cards = list.querySelectorAll<HTMLElement>('.kbn-card')
-      if (cards.length === 0) continue
-
-      const lineHeight = 17.5 * readTypeScale(col)
-      const effectiveN = Math.min(cards.length, maxVisibleCards)
-      const totalGapHeight = (effectiveN - 1) * cardGap
-      // Subtract a small per-column safety buffer — browser line-height
-      // computation rounds at sub-pixel boundaries, and rounding up by
-      // half a pixel × N cards adds up to a couple pixels of overshoot.
-      // This buffer gives us guaranteed undershoot at the cost of a
-      // hairline of empty space at the column bottom — exactly the
-      // tradeoff the user asked for.
-      const safetyBuffer = 4
-      const targetCardHeight =
-        (list.clientHeight - totalGapHeight - safetyBuffer) / effectiveN
-
-      // Use the MAX non-outcome height across cards in the column, not
-      // the average. Awaiting-review cards carry [Temper][Compost] in
-      // the meta row which adds a couple pixels over the in-flight
-      // baseline; in-flight cards may carry the worker pill. Sizing to
-      // the average over-allocates outcome space to the chunkier cards,
-      // which is exactly the overshoot symptom. Max is conservative.
-      let maxNonOutcome = 0
-      for (const card of cards) {
-        const outcome = card.querySelector<HTMLElement>('.kbn-card-outcome')
-        const outcomeHeight = outcome ? outcome.offsetHeight : 0
-        const nonOutcome = card.offsetHeight - outcomeHeight
-        if (nonOutcome > maxNonOutcome) maxNonOutcome = nonOutcome
-      }
-
-      const targetOutcomeHeight = targetCardHeight - maxNonOutcome
-      if (targetOutcomeHeight <= 0) continue
-
-      const targetLines = Math.floor(targetOutcomeHeight / lineHeight)
-      const clamp = Math.max(minClamp, targetLines)
-      if (clamp <= minClamp) continue
-
-      col.style.setProperty('--card-line-clamp', String(clamp))
-    }
   }
 
   private ensureFleetDefaultAgents(data: KanbanResponse): void {
@@ -2699,6 +2623,8 @@ export class KanbanModal {
       }
       const nativeActivation = e.key === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
       if (intent && !nativeActivation && this.deskKeyboard?.handle(intent)) {
+        // The selected row previews, after the same settle a pointer gets.
+        this.cardPreview?.select(intent === 'open' ? null : this.deskKeyboard.selectedRow)
         e.preventDefault()
         e.stopPropagation()
         return
