@@ -95,7 +95,8 @@ import {
 } from './views/index.js'
 import { isTypingTarget } from './views/ViewRegistry.js'
 import { CardPreview } from './CardPreview.js'
-import { LatestReports } from './latestReports.js'
+import { FiberSends } from './fiberSends.js'
+import type { DocKey } from './workspace/documents.js'
 
 /** The message a thrown/rejected value carries, for a banner or an announce. */
 const errText = (err: unknown): string => (err as { message?: string })?.message ?? String(err)
@@ -308,7 +309,7 @@ export class KanbanModal {
   /** The Desk's hover preview: one panel, built per row on demand. */
   private cardPreview: CardPreview | null = null
   /** Each fiber's newest report, for the rows' marks and the previews. */
-  private latestReports: LatestReports | null = null
+  private fiberSends: FiberSends | null = null
   private keymapHelp: KeymapHelp | null = null
   private workspaceReturnFocus: HTMLElement | null = null
   private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
@@ -372,11 +373,13 @@ export class KanbanModal {
     )
     // A new report changes a row's mark; reports are throttled to a minute, so
     // this redraw is rare.
-    this.latestReports = new LatestReports(this.shuttleBase, () => {
+    this.fiberSends = new FiberSends(this.shuttleBase, () => {
       if (this.container && this.lastResponse && this.activeViewId === 'desk') this.render(this.lastResponse)
     })
     this.surfaces = new KanbanSurfaceRenderer({
-      getLatestReport: card => this.latestReports?.get(card),
+      getLatestReport: card => this.fiberSends?.latest(card),
+      getSentFiles: card => this.fiberSends?.all(card) ?? [],
+      openSentFile: (card, send) => this.openDocumentChannel(card, false, send.key),
       shuttleBase: this.shuttleBase,
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
@@ -698,7 +701,7 @@ export class KanbanModal {
   }
 
   /** Desk and Chronicle cards enter the same owner-addressed document channel. */
-  private openDocumentChannel(card: KanbanCard, compose = false): void {
+  private openDocumentChannel(card: KanbanCard, compose = false, doc?: DocKey): void {
     this.cardPreview?.hide()
     if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
@@ -706,6 +709,7 @@ export class KanbanModal {
       : null
     this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
     if (compose) this.workspace?.compose(card)
+    else if (doc) this.workspace?.open(card, undefined, doc)
     else if (card.status === 'active' && isQuestion(card)) this.workspace?.openQuestion(card)
     else this.workspace?.open(card)
   }
@@ -2328,7 +2332,7 @@ export class KanbanModal {
     this.deskKeyboard?.refresh()
     // An open preview follows its card onto the rebuilt row.
     this.cardPreview?.rerendered()
-    void this.latestReports?.refresh()
+    void this.fiberSends?.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
     this.lastResponse = data

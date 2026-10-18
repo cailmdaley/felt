@@ -4,8 +4,9 @@
    A Desk column is an index of lines, one per card, so a column shows twenty
    things instead of three. A line is a glyph, a title and the facts that
    decide where to look next (queue, report, turn). The card it stands for —
-   outcome, question, path, agent, due, the report itself — opens beside the
-   line under the pointer or the keyboard selection (`.kbn-preview`).
+   outcome, question, path, machine, agent, due, what it sent — opens over the
+   neighbouring column under the pointer or the keyboard selection
+   (`.kbn-preview`).
 
    The lines keep the paper's grammar at a smaller size: the same rag ground
    and hairline, Drafts dashed on the recess, Awaiting review edged in gold,
@@ -168,8 +169,10 @@
 }
 
 /* ── The preview ───────────────────────────────────────────────────────────
-   The full card, lifted off the Desk beside its line. It never takes the
-   pointer: it is a reading, so the column under it stays live. */
+   The full card and what it sent, laid over the column beside the row's own
+   in that column's exact frame (`data-frame="column"`), or beside the row
+   where no neighbour is on screen (`data-frame="float"`). It is a place: the
+   pointer can enter it, scroll it and open what it shows. */
 .kbn-preview {
   position: fixed;
   inset: auto;
@@ -178,13 +181,15 @@
   border: 0;
   z-index: 10000;
   box-sizing: border-box;
-  width: min(460px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
-  overflow: hidden;
+  display: flex;
+  overflow: visible;
   background: transparent;
   color: var(--kbn-ink);
-  pointer-events: none;
   animation: kbn-preview-in 110ms ease-out;
+}
+.kbn-preview[data-frame="float"] {
+  width: min(460px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
 }
 .kbn-preview[hidden] { display: none; }
 .kbn-preview[data-warm] { animation: none; }
@@ -194,47 +199,131 @@
 @media (prefers-reduced-motion: reduce) {
   .kbn-preview { animation: none; }
 }
-.kbn-preview-card {
-  --card-line-clamp: 10;
+
+/* The sheet: one scroll for the card and its gallery. */
+.kbn-preview-sheet {
+  --kbn-type-scale: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 12px 14px 11px;
-  overflow: hidden;
-  text-align: left;
-  background-color: var(--kbn-paper-bright);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  background: var(--kbn-sheet);
   border: 1px solid color-mix(in srgb, var(--kbn-ink) 22%, transparent);
   border-radius: 3px;
   box-shadow:
     0 14px 32px -12px color-mix(in srgb, var(--kbn-shade) 45%, transparent),
     0 2px 6px color-mix(in srgb, var(--kbn-shade) 14%, transparent);
 }
-.kbn-preview-card[data-column="awaitingReview"] { border-color: color-mix(in srgb, var(--kbn-owed-bright) 45%, transparent); }
-.kbn-preview-card .kbn-card-name { font-size: calc(15px * var(--kbn-type-scale, 1)); }
-.kbn-preview-facts { margin-top: 1px; gap: 6px; }
-.kbn-preview-host {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.04em;
-  color: var(--kbn-ink-muted);
-}
-/* The report sits at the head of the card, edge to edge, the way a cover
-   sits on a file. */
-.kbn-preview-report {
-  margin: -12px -14px 3px;
+.kbn-preview[data-frame="float"] .kbn-preview-sheet { max-height: calc(100vh - 16px); }
+.kbn-preview-sheet[data-column="awaitingReview"] { border-color: color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent); }
+
+.kbn-preview-card {
+  --card-line-clamp: 10;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px 16px 12px;
+  text-align: left;
+  background-color: var(--kbn-paper-bright);
   border-bottom: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent);
 }
-.kbn-preview-thumb { width: 100%; height: 240px; }
-.kbn-preview-report figcaption {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 14px 5px;
+.kbn-preview-card .kbn-card-name { font-size: calc(16px * var(--kbn-type-scale, 1)); }
+.kbn-preview-facts { margin-top: 1px; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* The machine the fiber lives on: the first fact, set like a plate on a
+   crate rather than a footnote. */
+.kbn-preview-host {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.03em;
+  color: var(--kbn-ink);
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
+  border-radius: 2px;
+  line-height: 1.6;
+}
+.kbn-preview-mirrors {
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: calc(10px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.03em;
   color: var(--kbn-ink-muted);
-  background: color-mix(in srgb, var(--kbn-ink) 3%, var(--kbn-paper-bright));
 }
-.kbn-preview-report-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kbn-preview-report-age { flex-shrink: 0; }
+.kbn-preview-facts > .kbn-preview-turn { margin-left: auto; }
+
+/* ── The gallery: plots at the column's width, the rest as tiles and lines. */
+.kbn-preview-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 12px 14px;
+}
+.kbn-preview-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 10px;
+}
+.kbn-preview-send {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.kbn-preview-send .kbn-preview-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 16%, transparent);
+  border-radius: 2px;
+  transition: border-color 120ms ease;
+}
+.kbn-preview-send[data-slot="cover"] .kbn-preview-thumb { aspect-ratio: 16 / 10; }
+.kbn-preview-send:hover .kbn-preview-thumb { border-color: color-mix(in srgb, var(--kbn-ink) 45%, transparent); }
+.kbn-preview-send:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 3px; border-radius: 2px; }
+.kbn-preview-send-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: calc(10px * var(--kbn-type-scale, 1));
+  letter-spacing: 0.02em;
+  color: var(--kbn-ink-muted);
+}
+.kbn-preview-send:hover .kbn-preview-send-name { color: var(--kbn-ink); }
+.kbn-preview-send-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kbn-preview-send-age { flex-shrink: 0; }
+.kbn-preview-send[data-unseen] .kbn-preview-send-name::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--kbn-owed-bright);
+}
+.kbn-preview-send[data-slot="line"] {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 2px;
+}
+.kbn-preview-send[data-slot="line"] .kbn-preview-send-caption { flex: 1 1 auto; min-width: 0; }
+.kbn-preview-send-glyph { color: var(--kbn-ink-muted); font-family: var(--font-mono, 'JetBrains Mono', monospace); font-size: 12px; }
+.kbn-preview-more {
+  margin: 0;
+  font-style: italic;
+  font-size: 12px;
+  color: var(--kbn-ink-muted);
+  text-align: center;
+}

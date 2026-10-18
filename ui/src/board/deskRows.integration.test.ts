@@ -2,12 +2,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
-import type { LatestReport } from './latestReports.js'
+import type { FiberSend } from './fiberSends.js'
 import { card, response } from './testFixtures.js'
 import { DocumentSeen } from './workspace/DocumentSeen.js'
 import type { Channel } from './workspace/documents.js'
 
-function renderer(data: KanbanResponse, reports: Record<string, LatestReport> = {}): KanbanSurfaceRenderer {
+function renderer(
+  data: KanbanResponse,
+  reports: Record<string, FiberSend> = {},
+  sent: Record<string, FiberSend[]> = {},
+  openSentFile?: (card: KanbanCard, send: FiberSend) => void,
+): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
@@ -22,11 +27,13 @@ function renderer(data: KanbanResponse, reports: Record<string, LatestReport> = 
     onRest: () => {},
     onRefresh: () => {},
     getLatestReport: (c: KanbanCard) => reports[c.id],
+    getSentFiles: (c: KanbanCard) => sent[c.id] ?? [],
+    openSentFile,
     shuttleBase: 'http://daemon',
   })
 }
 
-const REPORT: LatestReport = { key: 'local:/work/run/report.html', fullPath: '/work/run/report.html', basename: 'report.html', timestamp: Date.now() - 3 * 3_600_000, owner: 'local' }
+const REPORT: FiberSend = { key: 'local:/work/run/report.html', fullPath: '/work/run/report.html', basename: 'report.html', timestamp: Date.now() - 3 * 3_600_000, owner: 'local' }
 
 const storage = new Map<string, string>()
 beforeEach(() => {
@@ -91,40 +98,85 @@ describe('a Desk row is a line, not a card', () => {
   })
 })
 
-describe('the preview is the full card, built for one row', () => {
+describe('the preview is the full card and what it sent, built for one row', () => {
   const review = card({
     id: 'work/run', uid: 'ULID-RUN', name: 'Null tests', status: 'closed', shuttleKind: 'oneshot',
-    outcome: 'Ran the **comparison**.', due: '2026-10-21', mirroredOrigins: ['cluster'],
+    outcome: 'Ran the **comparison**.', due: '2026-10-21', mirroredOrigins: ['cluster'], originId: 'hub', shuttleHost: 'gpu-box',
   })
   const data = response({ now: { drafts: [], inFlight: [], awaitingReview: [review] } })
-
-  it('reads the outcome, path, agent, due and where else the fiber lives', () => {
-    const surfaces = renderer(data)
+  const send = (name: string, hoursAgo: number): FiberSend =>
+    ({ key: `hub:/work/run/${name}`, fullPath: `/work/run/${name}`, basename: name, timestamp: Date.now() - hoursAgo * 3_600_000, owner: 'hub' })
+  const SENT = [send('report.html', 1), send('b-mode.png', 2), send('notes.pdf', 3), send('summary.md', 4), send('chains.tar.gz', 5), send('e-mode.png', 6)]
+  const open = (surfaces: KanbanSurfaceRenderer) => {
     const root = surfaces.renderNowSection(data.now, data.staleness)
-    const preview = surfaces.buildCardPreview(root.querySelector<HTMLElement>('[data-card-uid="ULID-RUN"]')!)!
+    return surfaces.buildCardPreview(root.querySelector<HTMLElement>('[data-card-uid="ULID-RUN"]')!)!
+  }
+
+  it('reads the outcome, path, machine, agent, due and where else the fiber lives', () => {
+    const preview = open(renderer(data))
     expect(preview.el.querySelector('.kbn-card-name')?.textContent).toBe('Null tests')
     expect(preview.el.querySelector('.kbn-card-id')?.textContent).toBe('work/run')
     expect(preview.el.querySelector('.kbn-card-outcome strong')?.textContent).toBe('comparison')
+    // The machine is the host the work runs on, ahead of every other fact.
+    const facts = preview.el.querySelector('.kbn-preview-facts')!
+    expect(facts.firstElementChild?.className).toBe('kbn-preview-host')
+    expect(facts.firstElementChild?.textContent).toBe('gpu-box')
     // The full card names the agent even when it is the fleet default.
     expect(preview.el.querySelector('.kbn-card-actor')?.textContent).toBe('claude-opus')
     expect(preview.el.querySelector('.kbn-card-due')).not.toBeNull()
     expect(preview.el.textContent).toContain('also on cluster')
     expect(preview.el.dataset.column).toBe('awaitingReview')
-    expect(preview.el.classList.contains('kbn-card')).toBe(false)
-    expect(preview.el.querySelector('.kbn-preview-report')).toBeNull()
+    expect(preview.el.querySelector('.kbn-card')).toBeNull()
+    expect(preview.el.querySelector('.kbn-preview-gallery')).toBeNull()
   })
 
-  it('leads with a live thumbnail of the newest report, released on dispose', () => {
-    const surfaces = renderer(data, { 'work/run': REPORT })
+  it('names the host that serves a card nothing runs', () => {
+    const human = card({ id: 'note', uid: 'ULID-NOTE', originId: 'hub', shuttleKind: undefined })
+    const only = response({ now: { drafts: [human], inFlight: [], awaitingReview: [] } })
+    const surfaces = renderer(only)
+    const root = surfaces.renderNowSection(only.now, only.staleness)
+    const preview = surfaces.buildCardPreview(root.querySelector<HTMLElement>('[data-card-uid="ULID-NOTE"]')!)!
+    expect(preview.el.querySelector('.kbn-preview-host')?.textContent).toBe('hub')
+  })
+
+  it('lays out every sent file newest first: a cover, plots at full width, tiles and lines', () => {
+    const preview = open(renderer(data, {}, { 'work/run': SENT }))
+    const items = [...preview.el.querySelectorAll<HTMLElement>('.kbn-preview-gallery .kbn-preview-send')]
+    expect(items.map(i => [i.querySelector('.kbn-preview-send-name')?.textContent, i.dataset.slot])).toEqual([
+      ['report.html', 'cover'], ['b-mode.png', 'plate'], ['notes.pdf', 'tile'], ['summary.md', 'tile'], ['chains.tar.gz', 'line'], ['e-mode.png', 'plate'],
+    ])
+    // Pages and text share a row of tiles; a receipt has no thumbnail.
+    expect(preview.el.querySelector('.kbn-preview-tiles')?.children).toHaveLength(2)
+    expect(items[4].querySelector('.ws-thumbnail')).toBeNull()
+    expect(items[0].querySelector('.kbn-preview-send-age')?.textContent).toBe('1h ago')
+  })
+
+  it('opens a sent file in its fiber\'s channel', () => {
+    const opened = vi.fn()
+    const preview = open(renderer(data, {}, { 'work/run': SENT }, opened))
+    preview.el.querySelectorAll<HTMLElement>('.kbn-preview-send')[1].click()
+    expect(opened).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/run' }), SENT[1])
+  })
+
+  it('repaints the card in place on a redraw and keeps the gallery, unless what it sent changed', () => {
+    const sent: Record<string, FiberSend[]> = { 'work/run': SENT.slice(0, 2) }
+    const surfaces = renderer(data, {}, sent)
     const root = surfaces.renderNowSection(data.now, data.staleness)
     const preview = surfaces.buildCardPreview(root.querySelector<HTMLElement>('[data-card-uid="ULID-RUN"]')!)!
-    const figure = preview.el.firstElementChild as HTMLElement
-    expect(figure.classList.contains('kbn-preview-report')).toBe(true)
-    const thumb = figure.querySelector<HTMLElement>('.ws-thumbnail')!
-    expect(thumb).not.toBeNull()
-    expect(figure.querySelector('figcaption')?.textContent).toBe('report.html3h ago')
+    const gallery = preview.el.querySelector('.kbn-preview-gallery')
+    const redrawn = surfaces.renderNowSection(data.now, data.staleness).querySelector<HTMLElement>('[data-card-uid="ULID-RUN"]')!
+    expect(preview.refresh?.(redrawn)).toBe(true)
+    expect(preview.el.querySelector('.kbn-preview-gallery')).toBe(gallery)
+    expect(preview.el.querySelectorAll('.kbn-preview-card')).toHaveLength(1)
+    sent['work/run'] = SENT.slice(0, 3)
+    expect(preview.refresh?.(redrawn)).toBe(false)
+  })
+
+  it('releases its thumbnails on dispose', () => {
+    const preview = open(renderer(data, {}, { 'work/run': SENT }))
+    const thumb = preview.el.querySelector<HTMLElement>('.ws-thumbnail')!
     document.body.append(preview.el)
-    preview.dispose()
+    preview.dispose?.()
     expect(thumb.isConnected).toBe(false)
   })
 

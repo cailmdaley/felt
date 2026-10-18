@@ -1,9 +1,10 @@
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
-import { Thumbnail } from './workspace/Thumbnail.js'
 import { documentKind } from './workspace/documents.js'
 import { unseenSince } from './workspace/DocumentSeen.js'
-import type { LatestReport } from './latestReports.js'
+import type { FiberSend } from './fiberSends.js'
+import { buildSendGallery } from './previewGallery.js'
+import type { PreviewContent } from './CardPreview.js'
 import { queuedControl } from './QueuedControl.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
@@ -118,7 +119,12 @@ const REPORT_GLYPH: Record<ReturnType<typeof documentKind>, string> = {
  * sent since the reader last showed it carries a gold dot on the leaf's corner
  * (`data-unseen`), cleared by opening it.
  */
-function reportMark(report: LatestReport): HTMLElement {
+/** What a gallery shows, as one comparable string. */
+function sendsSignature(sends: readonly FiberSend[]): string {
+  return sends.map((send) => `${send.key}\u0000${send.timestamp}`).join('\u0001')
+}
+
+function reportMark(report: FiberSend): HTMLElement {
   const mark = document.createElement('span')
   mark.className = 'kbn-card-report'
   mark.dataset.kind = documentKind(report.fullPath)
@@ -238,9 +244,13 @@ interface KanbanSurfaceRendererOptions {
     drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
   ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
-  /** The newest report a card sent — the row's mark and the preview's thumbnail. */
-  getLatestReport?: (card: KanbanCard) => LatestReport | undefined
-  /** Daemon base URL, for the preview's report thumbnail. */
+  /** The newest report a card sent — the row's mark. */
+  getLatestReport?: (card: KanbanCard) => FiberSend | undefined
+  /** Everything a card sent, newest first — the preview's gallery. */
+  getSentFiles?: (card: KanbanCard) => FiberSend[]
+  /** Open one sent file in the reader, in its fiber's channel. */
+  openSentFile?: (card: KanbanCard, send: FiberSend) => void
+  /** Daemon base URL, for the preview's thumbnails. */
   shuttleBase?: string
   /** Opens the Rest popover on the card's own Rest affordance. */
   onRest?: (card: KanbanCard) => void
@@ -1913,41 +1923,86 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * The full card behind a Desk row or Resting line — what the hover preview
-   * shows. Built on demand, for one row at a time: the paper face (title,
-   * path, question, outcome), the facts the row leaves out (agent, due, where
-   * else the fiber lives), any warning, and a live thumbnail of the newest
-   * report. `dispose` releases the thumbnail.
+   * The full card behind a Desk row or Resting line, and what it sent — the
+   * preview's content. Built on demand, for one row at a time: the paper face
+   * (title, path, question, outcome), the facts the row leaves out (the
+   * machine it lives on, agent, due, its turn, where else the fiber lives),
+   * any warning, then the gallery of sent files. The sheet scrolls as one;
+   * `dispose` releases the gallery's thumbnails.
    */
-  buildCardPreview(row: HTMLElement): { el: HTMLElement; dispose: () => void } | null {
+  buildCardPreview(row: HTMLElement): PreviewContent | null {
+    const card = this.previewCard(row)
+    if (!card) return null
+    const sheet = document.createElement('div')
+    sheet.className = 'kbn-preview-sheet'
+    let paper = this.buildPreviewPaper(card, row, sheet)
+    sheet.append(paper)
+
+    const sends = this.o.getSentFiles?.(card) ?? []
+    const signature = sendsSignature(sends)
+    const gallery = buildSendGallery(sends, {
+      shuttleBase: this.o.shuttleBase ?? '',
+      open: (send) => this.o.openSentFile?.(card, send),
+    })
+    if (gallery) sheet.append(gallery.el)
+    return {
+      el: sheet,
+      dispose: () => gallery?.dispose(),
+      // A Desk redraw repaints the card face in place; the gallery, and the
+      // thumbnails it has loaded, stand unless what the fiber sent changed.
+      refresh: (next) => {
+        const fresh = this.previewCard(next)
+        if (!fresh || sendsSignature(this.o.getSentFiles?.(fresh) ?? []) !== signature) return false
+        const repainted = this.buildPreviewPaper(fresh, next, sheet)
+        paper.replaceWith(repainted)
+        paper = repainted
+        return true
+      },
+    }
+  }
+
+  private previewCard(row: HTMLElement): KanbanCard | undefined {
     const uid = row.dataset.cardUid
     const origin = row.dataset.cardOrigin
-    const resp = this.o.getLastResponse()
-    const card = boardCards(resp).find((c) => (c.uid ?? c.id) === uid && c.originId === origin)
-    if (!card) return null
+    return boardCards(this.o.getLastResponse()).find((c) => (c.uid ?? c.id) === uid && c.originId === origin)
+  }
 
-    const el = buildCardPaper(card)
+  /** The preview's card face, stamping the row's column and turn on the sheet. */
+  private buildPreviewPaper(card: KanbanCard, row: HTMLElement, sheet: HTMLElement): HTMLElement {
+    const resp = this.o.getLastResponse()
+    const column = row.closest<HTMLElement>('[data-column]')?.dataset.column
+    if (column) sheet.dataset.column = column
+    else delete sheet.dataset.column
+    const turn = row.dataset.turn
+    if (turn) sheet.dataset.turn = turn
+    else delete sheet.dataset.turn
+
+    const paper = buildCardPaper(card)
     // Not a `.kbn-card`: the preview is a reading of a card, and nothing that
     // finds, drags or counts Desk cards may find it.
-    el.className = 'kbn-preview-card'
-    const column = row.closest<HTMLElement>('[data-column]')?.dataset.column
-    if (column) el.dataset.column = column
-    const turn = row.dataset.turn
-    if (turn) el.dataset.turn = turn
+    paper.className = 'kbn-preview-card'
 
     const facts = document.createElement('div')
     facts.className = 'kbn-card-meta kbn-preview-facts'
+    // The machine: where the fiber's work runs, or where its file lives when
+    // nothing runs it.
+    const machine = card.shuttleHost || card.originId
+    if (machine) {
+      const where = document.createElement('span')
+      where.className = 'kbn-preview-host'
+      where.textContent = machine
+      where.title = card.shuttleHost ? `Runs on ${card.shuttleHost}` : `Lives on ${card.originId}`
+      facts.append(where)
+    }
+    const actor = document.createElement('span')
     if (isAgentCard(card)) {
-      const actor = document.createElement('span')
       actor.className = 'kbn-card-actor kbn-card-actor-agent'
       actor.textContent = card.shuttleAgent ?? this.o.getFleetDefaultAgent?.(card.originId) ?? FALLBACK_DEFAULT_AGENT
-      facts.append(actor)
     } else {
-      const actor = document.createElement('span')
       actor.className = 'kbn-card-actor kbn-card-actor-human'
       actor.textContent = 'me'
-      facts.append(actor)
     }
+    facts.append(actor)
     if (card.due) {
       const due = document.createElement('span')
       due.className = 'kbn-card-due'
@@ -1956,23 +2011,22 @@ export class KanbanSurfaceRenderer {
       if (card.drifted) due.textContent += ` · promoted from ${card.storedHorizon ?? 'unset'}`
       facts.append(due)
     }
-    const host = card.shuttleHost && card.shuttleHost !== card.originId ? card.shuttleHost : null
-    if (host) {
-      const where = document.createElement('span')
-      where.className = 'kbn-preview-host'
-      where.textContent = `runs on ${host}`
-      facts.append(where)
-    }
     // A fiber in a git-synced store is served by every daemon holding it. The
     // board shows one card (see `dedupeMirroredRows`); say where else it
     // lives, so "one card" doesn't read as "the other host lost it".
     if (card.mirroredOrigins?.length) {
       const mirrored = document.createElement('span')
-      mirrored.className = 'kbn-preview-host'
+      mirrored.className = 'kbn-preview-mirrors'
       mirrored.textContent = `also on ${card.mirroredOrigins.join(', ')}`
       facts.append(mirrored)
     }
-    el.append(facts)
+    const kind = (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview') ? column : 'drafts'
+    const turnChip = this.renderTurnChip(card, kind)
+    if (turnChip) {
+      turnChip.classList.add('kbn-preview-turn')
+      facts.append(turnChip)
+    }
+    paper.querySelector(':scope > .kbn-card-id')?.after(facts)
 
     // A dep id that resolves to nothing. It holds nothing back, so the only way
     // it can be seen is to say so on the card — otherwise a typo reads as a
@@ -1981,44 +2035,16 @@ export class KanbanSurfaceRenderer {
       const warn = document.createElement('div')
       warn.className = 'kbn-card-depwarn'
       warn.textContent = `unresolved dep: ${card.dependsOnUnresolved.join(', ')} — fix the reference or remove it`
-      el.append(warn)
+      paper.append(warn)
     }
     const staleness = resp?.staleness[card.originId]
     if (staleness?.status === 'stale') {
       const waiting = document.createElement('div')
       waiting.className = 'kbn-card-waiting'
       waiting.textContent = `⌛ waiting on ${staleness.hostname ?? card.originId}${staleness.staleSince ? `, disconnected since ${staleness.staleSince}` : ''}`
-      el.append(waiting)
+      paper.append(waiting)
     }
-
-    let thumb: Thumbnail | undefined
-    const report = this.o.getLatestReport?.(card)
-    if (report) {
-      const figure = document.createElement('figure')
-      figure.className = 'kbn-preview-report'
-      const live: Thumbnail = new Thumbnail({
-        key: `desk-preview:${report.owner}:${report.fullPath}`,
-        file: { fullPath: report.fullPath, owner: report.owner, basename: report.basename },
-        fallback: report.basename,
-        shuttleBase: this.o.shuttleBase ?? '',
-        className: 'kbn-preview-thumb',
-        captioned: true,
-        priority: () => (live.el.isConnected ? 3 : 0),
-        distance: () => 0,
-      })
-      thumb = live
-      const caption = document.createElement('figcaption')
-      const file = document.createElement('span')
-      file.className = 'kbn-preview-report-name'
-      file.textContent = report.basename
-      const when = document.createElement('span')
-      when.className = 'kbn-preview-report-age'
-      when.textContent = `${humanizeIdleAge(Date.now() - report.timestamp)} ago`
-      caption.append(file, when)
-      figure.append(live.el, caption)
-      el.prepend(figure)
-    }
-    return { el, dispose: () => thumb?.dispose() }
+    return paper
   }
 
   /**
