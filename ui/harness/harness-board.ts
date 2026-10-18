@@ -579,7 +579,7 @@ const DENSE_NAMES = {
     'Mask-split comparison', 'Photo-z outlier audit', 'Beam window function update', 'Pipeline timing report',
   ],
 } as const
-const DENSE_OUTCOME = 'Ran the comparison on the full footprint; the two choices agree within the statistical error everywhere except the lowest bin, where the difference is 0.6σ. Recommendation and figures are in report.html; three questions for Cail at the end.'
+const DENSE_OUTCOME = 'Ran the comparison on the full footprint; the two choices agree within the statistical error everywhere except the lowest bin, where the difference is 0.6σ. Recommendation and figures are in report.html; three questions at the end.'
 const denseRows = search.get('desk') === 'dense'
   ? (Object.entries(DENSE_NAMES) as Array<[keyof typeof DENSE_NAMES, readonly string[]]>).flatMap(([column, names]) => names.map((name, i) => {
     const id = `dense/${column}/${i}`
