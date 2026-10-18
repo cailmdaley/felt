@@ -72,7 +72,7 @@ that says otherwise. The pill's word names why it is (or isn't) your move:
 | **blocked** | Your turn | Rare: the turn could not start (launch error), or the session could not be attributed. Drawn quietly, as a hollow dot. | the last event |
 | **working** | Working | Mid-turn, or idle over background work it started. | the last event, once it has been silent ten minutes |
 | **starting** | Working | Launched in the last five minutes, or its session still being identified; no hook event yet. | the launch |
-| **no signal** | Working | Live past its start, but the daemon holds no hook event for it. | the launch |
+| **no signal** | Working | Live past its start, but the daemon holds no hook event for it; or its owning daemon is unreachable, so its last report is frozen and no evidence of a turn (an outstanding ask still reads **question**). | the launch, or the owner's last successful poll |
 
 The dot's breathing says whether the worker is busy, independently of whose
 move it is. The pill is also the control that opens the conversation.

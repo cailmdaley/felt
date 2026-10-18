@@ -14,7 +14,7 @@ export function sidebarRevision(card: KanbanCard, members: readonly KanbanCard[]
     hostMark, fiberPageColumn(card), card.workerState, card.runtimePhase, card.launchError,
     card.tmuxSession, card.sessionLink, card.sessionUuid, card.desktopLink, card.shuttleHost,
     card.shuttleProjectDir, card.workerSurface, card.shuttleSurface, card.workerAgent, card.shuttleAgent,
-    card.lastActivityAt, card.ask?.at, workerPlateFacts(card), claudeOpening(), coarsePointer(),
+    card.lastActivityAt, card.ask?.at, card.originStale?.since, workerPlateFacts(card), claudeOpening(), coarsePointer(),
     members.map(member => [member.id, member.uid, member.originId, member.name, queueMemberNote(member)]),
   ])
 }

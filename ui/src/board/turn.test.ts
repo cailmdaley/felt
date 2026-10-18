@@ -4,7 +4,7 @@ import fc from 'fast-check'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, inFlightBand, isQuestion } from './KanbanReadModel.js'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
-import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
 import { card } from './testFixtures.js'
 import { TURN_WORD, turnOf, type Turn } from './turn.js'
 import { Dock } from './workspace/Dock.js'
@@ -48,6 +48,14 @@ describe('turnOf', () => {
     expect(turnOf(live({ runtimePhase: 'working', lastActivityAt: NOW - 18 * 3_600_000 }), NOW).since).toBe(NOW - 18 * 3_600_000)
   })
 
+  it('reads an unreachable owner\'s frozen runtime as no turn at all, keeping only the synced ask', () => {
+    const since = '2026-10-16T14:17:00Z'
+    const frozen = live({ runtimePhase: 'working', lastActivityAt: NOW - 98 * 3_600_000, originStale: { since } })
+    expect(turnOf(frozen, NOW)).toMatchObject({ turn: 'no-signal', word: 'no signal', yours: false, busy: false, since: Date.parse(since) })
+    expect(turnOf({ ...frozen, runtimePhase: 'attention' }, NOW).turn).toBe('no-signal')
+    expect(turnOf({ ...frozen, ask: ASK }, NOW)).toMatchObject({ turn: 'question', yours: true, busy: false })
+  })
+
   it('counts an ask only on an active card', () => {
     expect(turnOf(card({ id: 'x', status: 'closed', ask: ASK }), NOW).turn).toBe('none')
     expect(turnOf(card({ id: 'x', status: 'active', ask: ASK }), NOW)).toMatchObject({ turn: 'question', yours: true })
@@ -65,6 +73,7 @@ const runtimeArb = fc.record({
   idleMs: fc.integer({ min: 0, max: 48 * 3_600_000 }),
   ask: fc.boolean(),
   live: fc.boolean(),
+  unreachable: fc.boolean(),
 })
 
 type Row = typeof runtimeArb extends fc.Arbitrary<infer T> ? T : never
@@ -73,11 +82,11 @@ function feed(rows: Row[]): KanbanResponse {
   return buildKanbanResponseFromComposite(parseCompositeFeed({
     host: 'desk',
     fibers: rows.map((r, i) => ({
-      origin: 'desk', felt_store: '/store', path: `${i}.md`,
+      origin: r.unreachable ? 'far' : 'desk', felt_store: '/store', path: `${i}.md`,
       fiber: {
         id: `w-${i}`, uid: `uid-${i}`, name: `w-${i}`, status: 'active', created_at: '2026-10-01T12:00:00Z',
         shuttle: {
-          kind: 'oneshot', host: 'desk', surface: r.surface,
+          kind: 'oneshot', host: r.unreachable ? 'far' : 'desk', surface: r.surface,
           ...(r.surface === 'app' ? { runtime: { session_uuid: `0190a0be-6c36-7cd1-aec9-53a680d1f69${i % 10}` } } : {}),
           ...(r.ask ? { ask: ASK } : {}),
         },
@@ -89,6 +98,10 @@ function feed(rows: Row[]): KanbanResponse {
         launch_error: r.launchError,
       },
     })),
+    origins: {
+      desk: { kind: 'local', stale: false, fiber_count: rows.length },
+      far: { kind: 'remote', stale: true, last_polled_at: '2026-10-16T14:17:00Z', fiber_count: 0 },
+    },
   }), { nowMs: NOW })
 }
 
@@ -120,6 +133,8 @@ describe('band, pill, dock and order cannot disagree', () => {
         const turn = turnOf(c)
         // The card, its band and the read model agree on the turn.
         expect(el.dataset.turn).toBe(turn.turn)
+        // A frozen runtime from an unreachable owner never claims a turn; only the synced ask does.
+        if (c.originStale) expect(turn.turn).toBe(c.ask ? 'question' : hasLiveWorker(c) ? 'no-signal' : 'none')
         expect(band).toBe(inFlightBand(c))
         expect(band === 'yourTurn').toBe(YOURS.has(turn.turn))
         // The pill, where one is drawn, names the same turn in the same word.

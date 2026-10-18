@@ -28,8 +28,9 @@ import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
  *   working   — mid-turn, or idle over background work it started.
  *   starting  — a live worker that has not reported yet: launched within the
  *               last five minutes, or its session still being identified.
- *   no-signal — a live worker past its start with no hook event, so its turn
- *               is unknown.
+ *   no-signal — a live worker past its start with no hook event, or whose
+ *               owning daemon is unreachable (its frozen runtime is no
+ *               evidence), so its turn is unknown.
  *   none      — no live worker and nothing asked of the human.
  */
 export type Turn = 'question' | 'blocked' | 'idle' | 'working' | 'starting' | 'no-signal' | 'none'
@@ -77,16 +78,24 @@ function instant(value: string | undefined): number | undefined {
  * card draws it; a closed card's leftover ask is nobody's move.
  */
 export function turnOf(
-  card: Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt'>,
+  card: Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>,
   nowMs: number = Date.now(),
 ): TurnState {
   const phase = card.runtimePhase
   const live = hasLiveWorker(card)
-  const busy = card.workerState === 'running' && phase === 'working'
+  const busy = !card.originStale && card.workerState === 'running' && phase === 'working'
   const ask = card.status === 'active' ? card.ask : undefined
   const state = (turn: Turn, detail: string, since?: number): TurnState =>
     ({ turn, yours: YOURS.includes(turn), busy, word: TURN_WORD[turn], detail, since })
 
+  // An unreachable owner's runtime is frozen at its last poll: no evidence of
+  // a turn. The ask lives in the synced fiber, so it is still owed.
+  if (card.originStale) {
+    if (ask) return state('question', `The worker asked: ${ask.text}`, instant(ask.at))
+    if (live) {
+      return state('no-signal', 'The worker\'s host is unreachable; its last reported state is frozen, so the turn is unknown.', instant(card.originStale.since))
+    }
+  }
   if (card.launchError || phase === 'blocked' || card.workerState === 'blocked') {
     return state('blocked', card.launchError ?? 'The worker could not start its turn.', card.lastActivityAt)
   }

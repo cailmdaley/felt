@@ -245,6 +245,12 @@ export interface KanbanCard {
    */
   mirroredOrigins?: string[]
   /**
+   * Set when the owning daemon is unreachable: its runtime fields are frozen
+   * at the last poll (`since`), so they say nothing about the worker now.
+   * `turnOf` reads such a worker's turn as unknown.
+   */
+  originStale?: { since?: string }
+  /**
    * True when the fiber carries the `cycle` tag — a named span of time drawn as
    * a band by the temporal views, not a piece of work. A cycle card appears
    * ONLY in `KanbanResponse.cycles`; `classifyFiber` keeps it out of every

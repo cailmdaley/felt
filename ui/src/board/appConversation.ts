@@ -51,7 +51,7 @@ export function turnTitle(card: TurnInput, nowMs = Date.now()): string {
   return since !== undefined && Number.isFinite(since) ? `${detail} (${humanizeIdleAge(nowMs - since)})` : detail
 }
 
-type TurnInput = Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt'>
+type TurnInput = Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>
 
 /** An app worker's pill: the turn's word, linking into the conversation backend. */
 export function appWorkerLink(card: KanbanCard): HTMLAnchorElement {

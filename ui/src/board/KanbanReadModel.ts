@@ -107,7 +107,13 @@ export function buildKanbanResponseFromComposite(
     feed.entries.filter((e) => shouldIncludeInKanban(e.fiber)),
     feed,
   );
-  const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(eligible), nowMs);
+  // A card owned by an unreachable daemon carries that fact, so its frozen
+  // runtime is not read as a turn.
+  const staleOrigin = (origin: string): KanbanCard['originStale'] => {
+    const o = feed.origins[origin];
+    return o && o.kind !== 'local' && o.stale ? { since: o.lastPolledAt } : undefined;
+  };
+  const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(eligible), nowMs, staleOrigin);
 
   return {
     feltHost: feed.host,
@@ -262,6 +268,7 @@ function assembleSurfaces(
   byId: Map<string, Fiber>,
   dirs: ProjectDirIndex,
   nowMs: number,
+  staleOrigin: (origin: string) => KanbanCard['originStale'] = () => undefined,
 ): AssembledSurfaces {
   const drafts: KanbanCard[] = [];
   const scheduled: KanbanCard[] = [];
@@ -288,6 +295,8 @@ function assembleSurfaces(
   // card that is not there.
   const classified = entries.map((entry) => {
     const card = toCard(entry, byId, dirs, nowMs);
+    const originStale = staleOrigin(entry.origin);
+    if (originStale) card.originStale = originStale;
     return {
       card,
       column: classifyFiber(entry.fiber, { liveWorker: hasLiveWorker(card) }),
