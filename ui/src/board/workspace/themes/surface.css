@@ -5,8 +5,8 @@
   :scope .kbn-card-worker { color: var(--ws-ink-soft); }
   :scope .kbn-card-worker:hover { color: var(--ws-ink); background: var(--ws-hover); }
   :scope .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-agent); }
-  :scope .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
-  :scope .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--ws-you); }
+  :scope .kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
+  :scope .kbn-card-worker:is([data-turn='blocked'], [data-turn='prompt'], [data-turn='question']) .ws-worker-dot { --worker-dot: var(--ws-you); }
 }
 /* Only the room's tint crosses; its pages and chrome change immediately. */
 .ws-reader [data-part='veil'] {

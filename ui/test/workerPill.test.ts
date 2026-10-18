@@ -110,6 +110,7 @@ const LINK = 'https://claude.ai/code/session_bridged'
 const now = Date.now()
 const worker = (phase: string, sessionLink?: string) => ({
   tmuxSession: 'felt-abc',
+  workerState: 'running' as const,
   runtimePhase: phase,
   lastActivityAt: now - 3 * 3_600_000,
   shuttleHost: 'workstation',
@@ -127,7 +128,7 @@ describe('the terminal worker pill under a finger', () => {
   for (const [deviceName, device] of [['phone', PHONE_PORTRAIT], ['iPad', IPAD_PORTRAIT]] as const) describe(deviceName, () => {
     beforeEach(() => useDevice(device))
     for (const [surface, options] of SURFACES) {
-      it.each([['working', 'Aloft'], ['waiting', 'Your turn'], ['attention', 'At a prompt']])(
+      it.each([['working', 'working'], ['waiting', 'idle'], ['attention', 'at a prompt']])(
         `${deviceName}, ${surface}: a bridged %s worker is a tappable link to its session`,
         (phase, label) => {
           const pill = terminalWorkerPill(worker(phase, LINK), options) as unknown as FakeElement
@@ -141,7 +142,7 @@ describe('the terminal worker pill under a finger', () => {
       it(`${deviceName}, ${surface}: an unbridged worker is a mark that takes no taps`, () => {
         const pill = terminalWorkerPill(worker('waiting'), { ...options, openWorker: () => {} }) as unknown as FakeElement
         expect(pill.tagName).toBe('SPAN')
-        expect(pill.textContent).toBe('Your turn')
+        expect(pill.textContent).toBe('idle')
         expect(coarseDeclarations(pill, TOUCH_CSS).get('pointer-events')).toBe('none')
       })
     }
@@ -172,15 +173,14 @@ describe('the terminal worker pill under a mouse', () => {
       const openWorker = vi.fn()
       const pill = terminalWorkerPill(worker('waiting', LINK), { ...options, openWorker }) as unknown as FakeElement
       expect(pill.tagName).toBe('BUTTON')
-      expect(pill.textContent).toBe('Your turn')
+      expect(pill.textContent).toBe('idle')
       pill.click()
       expect(openWorker).toHaveBeenCalledWith('felt-abc', 'workstation')
     })
   }
 
-  it('stays Aloft outside In flight', () => {
-    const pill = terminalWorkerPill(worker('waiting'), { phase: false, openWorker: () => {} }) as unknown as FakeElement
-    expect(pill.textContent).toBe('Aloft')
-    expect(pill.classes).toContain('kbn-card-worker-aloft')
+  it('names the turn with no column gate', () => {
+    const pill = terminalWorkerPill(worker('waiting'), { openWorker: () => {} }) as unknown as FakeElement
+    expect(pill.textContent).toBe('idle')
   })
 })

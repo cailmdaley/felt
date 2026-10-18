@@ -25,12 +25,12 @@ let reduced = false
 const scroll = vi.fn()
 const intoView = vi.fn()
 const settings = vi.fn()
-const head = card({ id: 'head', uid: 'head-uid', status: 'active', runtimePhase: 'waiting' })
+const head = card({ id: 'head', uid: 'head-uid', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
 const child = card({ id: 'child', uid: 'child-uid', dependsOn: ['head'], foldedUnder: 'head' })
 const data = () => response({
   now: {
     drafts: [card({ id: 'd1', uid: 'draft-uid' }), card({ id: 'd2' })],
-    inFlight: [card({ id: 'working', status: 'active', runtimePhase: 'working' }), head],
+    inFlight: [card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' }), head],
     awaitingReview: [card({ id: 'review', status: 'closed', shuttleKind: 'oneshot' })],
   },
   folded: [child],
@@ -354,7 +354,7 @@ describe('Desk keyboard selection', () => {
 
     const flight = data()
     flight.now.awaitingReview = []
-    flight.now.inFlight = [card({ id: 'needs-you', uid: 'needs-you', status: 'active', runtimePhase: 'attention' })]
+    flight.now.inFlight = [card({ id: 'needs-you', uid: 'needs-you', status: 'active', workerState: 'running', runtimePhase: 'attention' })]
     draw(flight)
     press('ArrowDown'); expect(selected()).toBe('needs-you')
     press('u')

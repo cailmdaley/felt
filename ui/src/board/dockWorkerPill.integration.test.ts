@@ -27,7 +27,7 @@ beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
   vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')))
   openWorker = vi.fn()
-  dock = new Dock('https://daemon.example', vi.fn(), undefined, openWorker, { workerPhase: card => card.status === 'active' })
+  dock = new Dock('https://daemon.example', vi.fn(), undefined, openWorker)
   reader = new Reader({ shuttleBase: 'https://daemon.example', buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(), onSelect: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(),
     cards: () => [], workerPill: card => dock.workerPillFor(card) })
@@ -45,7 +45,7 @@ describe('the worker control lives in the reader head; the fiber page draws none
   it('opens the owner terminal without repeating agent or worker state on the fiber', () => {
     const pill = show(worker())!
     expect(pill.tagName).toBe('BUTTON')
-    expect(pill.textContent).toBe('aloft')
+    expect(pill.textContent).toBe('no signal')
     pill.click()
     expect(openWorker.mock.calls).toEqual([['shuttle-debug', 'host-a']])
   })
@@ -64,11 +64,11 @@ describe('the worker control lives in the reader head; the fiber page draws none
     const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     const pill = show(worker({ tmuxSession: undefined, workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route,
       runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 })) as HTMLAnchorElement
-    expect(pill.querySelector('.ws-worker-state')?.textContent).toBe('your turn'); expect(pill.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m'); expect(pill.href).toBe(route)
+    expect(pill.querySelector('.ws-worker-state')?.textContent).toBe('idle'); expect(pill.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m'); expect(pill.href).toBe(route)
   })
   it('follows owner-observed runtime, ignoring stale phase without a worker', () => {
-    expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.querySelector('.ws-worker-state')?.textContent).toBe('your turn')
-    expect(show(worker({ runtimePhase: 'working', lastActivityAt: Date.now() }))?.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
+    expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.querySelector('.ws-worker-state')?.textContent).toBe('idle')
+    expect(show(worker({ runtimePhase: 'working', lastActivityAt: Date.now() }))?.querySelector('.ws-worker-state')?.textContent).toBe('working')
     expect(show(worker({ workerState: undefined, status: 'closed', runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.textContent).toBe('no worker')
   })
 })

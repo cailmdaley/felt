@@ -42,7 +42,7 @@ You can add project-specific collections later.
 
 ## 3. Choose how conversations open
 
-In **Settings**, choose where **Aloft**, the button on a running task, should open its conversation.
+In **Settings**, choose where the worker pill on a running task (the button that names its turn) should open its conversation.
 The choices depend on the agent and the connections it supports; [Opening conversations](conversations.md) explains them.
 A terminal worker keeps running in tmux when you close its window, but the machine itself must stay awake.
 

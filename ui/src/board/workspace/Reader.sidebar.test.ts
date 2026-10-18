@@ -165,20 +165,18 @@ describe('Reader channel sidebar', () => {
     expect((reader as unknown as { sidebarSnapshot: unknown }).sidebarSnapshot).toBeNull()
   })
 
-  it('repaints a retained worker pill when its card folds out of flight', () => {
+  it('repaints a retained worker pill when its turn changes', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
-    const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'blocked', runtimePhase: 'attention', lastActivityAt: Date.now() }
+    const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'running', runtimePhase: 'attention', lastActivityAt: Date.now() }
     listedCards = [asking, beta]
-    let inFlight = true
-    const reader = makeReader(asking, undefined, card => terminalWorkerPill(card, { phase: inFlight }), { workerPhase: () => inFlight })
+    const reader = makeReader(asking, undefined, card => terminalWorkerPill(card))
     const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
-    expect(row.querySelector('.kbn-card-worker-attention')).not.toBeNull()
-    inFlight = false
+    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.turn).toBe('prompt')
+    asking.runtimePhase = 'working'
     reader.refreshChannels()
     expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
-    expect(row.querySelector('.kbn-card-worker-attention')).toBeNull()
-    expect(row.querySelector('.kbn-card-worker-aloft')).not.toBeNull()
-    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.workerState).toBe('aloft')
+    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.turn).toBe('working')
+    expect(row.querySelector('.ws-worker-state')?.textContent).toBe('working')
   })
 
   it('refreshes retained worker targets when the browser opening preference changes', () => {
@@ -225,7 +223,7 @@ describe('Reader channel sidebar', () => {
   })
   it('gives a sidebar worker separate state and elapsed text without replacing its conversation target', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
-    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 60000 }
+    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 11 * 60000 }
     listedCards = [working]
     const open = vi.fn()
     const targets: HTMLButtonElement[] = []
@@ -237,14 +235,14 @@ describe('Reader channel sidebar', () => {
     })
     const target = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar .ws-worker-control')!
     expect(targets).toContain(target)
-    expect(target.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
-    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m')
+    expect(target.querySelector('.ws-worker-state')?.textContent).toBe('working')
+    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('11m')
     expect(target.dataset.part).toBe('act')
     target.click()
     expect(open).toHaveBeenCalledOnce()
   })
   it("draws the card's own worker pill bare at the head's right end; the page count rides the map", () => {
-    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', workerStartedAt: Date.now() - 34 * 60000 }
+    const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 34 * 60000 }
     listedCards = [working]
     const open = vi.fn()
     const reader = makeReader(working, undefined, () => {
@@ -260,9 +258,9 @@ describe('Reader channel sidebar', () => {
     expect(head.nextElementSibling?.classList.contains('ws-head-position')).toBe(true)
     expect(reader.el.querySelector('.ws-navbar .ws-nav-lead + [data-part="page-band"] > [role="tablist"]')).not.toBeNull()
     const control = head.querySelector<HTMLElement>('.ws-worker-control')!
-    expect(control.dataset.workerState).toBe('aloft')
+    expect(control.dataset.turn).toBe('working')
     expect(control.querySelector('.ws-worker-dot')).not.toBeNull()
-    expect(control.querySelector('.ws-worker-state')?.textContent).toBe('aloft')
+    expect(control.querySelector('.ws-worker-state')?.textContent).toBe('working')
     expect(control.querySelector('.ws-worker-elapsed')?.textContent).toBe('34m')
     control.click()
     expect(open).toHaveBeenCalledOnce()

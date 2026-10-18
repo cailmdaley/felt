@@ -68,9 +68,9 @@
 /* In the reader the worker state is mono capitals and the dot takes the room's own pigments. */
 .ws-reader .kbn-card-worker .ws-worker-state { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
 .ws-reader .kbn-card-worker .ws-worker-dot { --worker-dot: var(--ws-machine); }
-.ws-reader .kbn-card-worker[data-worker-state='waiting'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
-.ws-reader .kbn-card-worker:is([data-worker-state='attention'], [data-worker-state='blocked']) .ws-worker-dot { --worker-dot: var(--ws-you); }
-.ws-reader .kbn-card-worker[data-worker-state='no worker'] .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
+.ws-reader .kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--ws-fresh); }
+.ws-reader .kbn-card-worker:is([data-turn='blocked'], [data-turn='prompt'], [data-turn='question']) .ws-worker-dot { --worker-dot: var(--ws-you); }
+.ws-reader .kbn-card-worker:is([data-turn='none'], [data-turn='unknown']) .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
 .ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
 .ws-stage {

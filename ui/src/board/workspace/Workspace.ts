@@ -147,7 +147,6 @@ export class Workspace {
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.returnToOrigin(),
       workerPill: card => this.dock.workerPillFor(card),
-      workerPhase: card => this.dock.workerPhase(card),
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
       onConversation: card => { this.dock.openConversation(card) },

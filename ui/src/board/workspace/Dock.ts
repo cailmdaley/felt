@@ -1,4 +1,4 @@
-import { workerVariant, appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
+import { appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
@@ -409,8 +409,6 @@ interface AgentRecord {
 
 export interface DockOptions {
   meeting?: MeetingJoinControl
-  /** Whether the Desk draws this card's worker phase (it does in flight). */
-  workerPhase?: (card: KanbanCard) => boolean
   /** Opens the Rest popover on the button that asked for it. */
   onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 }
@@ -461,8 +459,6 @@ export class Dock {
   private queueVerdict?: (card: KanbanCard, target: Verdict) => void
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
-  /** Whether the Desk draws this card's worker phase; every surface drawing its pill asks the same. */
-  readonly workerPhase: (card: KanbanCard) => boolean
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
 
   constructor(
@@ -477,7 +473,6 @@ export class Dock {
     this.onTransition = onTransition ?? (() => {})
     this.onOpenWorker = onWorkerOpen
     this.meeting = opts.meeting ?? null
-    this.workerPhase = opts.workerPhase ?? (() => true)
     this.onRest = opts.onRest
   }
 
@@ -558,7 +553,7 @@ export class Dock {
     let band = this.bands.get(key)
     if (!band) {
       band = new Dock(this.shuttleBase, this.onSaved, this.onTransition, this.onOpenWorker,
-        { meeting: this.meeting ?? undefined, workerPhase: this.workerPhase, onRest: this.onRest })
+        { meeting: this.meeting ?? undefined, onRest: this.onRest })
       band.setVerdictQueue(this.queueVerdict)
       this.bands.set(key, band)
     }
@@ -722,24 +717,19 @@ export class Dock {
   }
 
   /**
-   * The Aloft control is the Desk card's own pill: same label, same states,
+   * The worker control is the Desk card's own pill: same turn, same word,
    * same destination under a mouse or a finger (see `terminalWorkerPill`).
    * An app worker's destination follows the conversation backend.
    */
   workerPillFor(card: KanbanCard): HTMLElement | null {
-    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) {
-      const state = workerVariant(card)
-      return appWorkerLink(card, state === 'aloft' ? '' : `kbn-card-worker-${state}`)
-    }
-    return card.tmuxSession ? terminalWorkerPill(card, {
-      phase: this.workerPhase(card), openWorker: this.onOpenWorker,
-    }) : null
+    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) return appWorkerLink(card)
+    return card.tmuxSession ? terminalWorkerPill(card, { openWorker: this.onOpenWorker }) : null
   }
 
   /** The status line's pill, rebuilt only when what it says or opens changes, keeping its focus. */
   private paintHeadWorker(card: KanbanCard, slot: HTMLElement): void {
     const pill = this.workerPillFor(card)
-    const plate = pill ? workerPlate(card, pill, this.workerPhase(card)) : null
+    const plate = pill ? workerPlate(card, pill) : null
     const key = plate ? JSON.stringify([plate.outerHTML, card.tmuxSession, card.sessionLink, card.sessionUuid]) : null
     if (key === this.headWorkerKey) return
     this.headWorkerKey = key

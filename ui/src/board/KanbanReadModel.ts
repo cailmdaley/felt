@@ -38,6 +38,7 @@ import type {
 } from './KanbanTypes.js';
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
+import { isUrgent, turnOf } from './turn.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift, standing-role placement, and the response
@@ -760,23 +761,17 @@ export type InFlightBand = 'yourTurn' | 'working';
 export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['yourTurn', 'Your turn'], ['working', 'Working']];
 
 /**
- * A worker that has put a question to the human: an outstanding `ask`, a
- * harness prompt (`attention`), or a turn that could not start (`blocked`).
- * Questions lead the Your turn band and are drawn heavier than a plain idle
- * turn.
+ * A card whose turn asks more of the human than an idle prompt: a blocked
+ * turn, a harness prompt, or an outstanding `ask`. Questions lead the Your
+ * turn band and are drawn heavier than an idle turn.
  */
 export function isQuestion(card: KanbanCard): boolean {
-  return !!card.ask || card.runtimePhase === 'attention' || card.runtimePhase === 'blocked'
-    || card.runtimePhase === 'identity_pending' || card.runtimePhase === 'identity_failed';
+  return isUrgent(turnOf(card).turn);
 }
 
-/**
- * Whose move it is. A question is the human's move; so is a worker idle at
- * its prompt (`waiting`), which the daemon reports only when nothing the
- * worker started is still running under it. Everything else is the worker's.
- */
+/** Whose move it is, read from the card's one turn derivation (`turnOf`). */
 export function inFlightBand(card: KanbanCard): InFlightBand {
-  return isQuestion(card) || card.runtimePhase === 'waiting' ? 'yourTurn' : 'working';
+  return turnOf(card).yours ? 'yourTurn' : 'working';
 }
 
 /** Your turn before Working; within Your turn, questions first; then newest first. */

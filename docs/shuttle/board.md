@@ -61,6 +61,22 @@ the worker as `parentThreadId`. A harness that reports none reads as your
 turn when idle. Cards keep creation order within each tier, so a card moves
 only when it crosses the seam or a question is raised or answered.
 
+One derivation, the card's *turn*, decides the band, the order, and the
+worker pill on every surface, so a card can never sit in Your turn with a pill
+that says otherwise. The pill's word names why it is (or isn't) your move:
+
+| Pill | Band | Meaning | Age counts from |
+|---|---|---|---|
+| **blocked** | Your turn | The turn could not start (launch error), or **unattributed**: the session could not be identified. | the last event |
+| **at a prompt** | Your turn | The harness is stopped on a prompt; the worker can't go on until you answer. | the last event |
+| **question** | Your turn | An outstanding `shuttle ask`. The worker may still be working: its dot breathes. | the ask |
+| **idle** | Your turn | The worker ended its turn with nothing running under it. | the last event |
+| **working** | Working | Mid-turn, or idle over background work it started. | the last event, once it has been silent ten minutes |
+| **starting** / **identifying** / **no signal** | Working | A live worker whose turn the daemon can't report yet. | the launch |
+
+The dot's breathing says whether the worker is busy, independently of whose
+move it is. The pill is also the control that opens the conversation.
+
 The cycle branch comes first on purpose. A [cycle](cycles.md) is an annotation
 on the calendar rather than work, so it leaves classification before any
 lifecycle question is asked — otherwise a stray "Autumn 2026" would sit in
@@ -233,9 +249,9 @@ same with a pointer, pinned to the right edge on a phone so it never scrolls
 out of reach. `Esc` closes it. It is an overlay rather than a fourth tab — the
 three tabs are windows onto the work, and configuration is not work.
 
-Settings opens to **Conversations**, where you choose the default Aloft action for Claude sessions.
+Settings opens to **Conversations**, where you choose what a worker pill opens for Claude sessions.
 The conversation-opening preference belongs to this browser and saves immediately.
-Right-click Aloft to choose another supported opening route for that session without changing your default.
+Right-click a worker pill to choose another supported opening route for that session without changing your default.
 
 Host settings sit separately under **Worker hosts**.
 The host picker selects which machine the remaining configuration addresses. The board is reachable from a phone and from a second hub, so the

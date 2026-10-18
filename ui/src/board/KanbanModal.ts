@@ -360,7 +360,6 @@ export class KanbanModal {
           stop: (meeting) => this.stopCurrentMeeting(meeting),
           stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
         },
-        workerPhase: (card) => findCardColumn(this.lastResponse, card.id) === 'inFlight',
         onRest: card => this.openRestPopover(card),
       },
     )
