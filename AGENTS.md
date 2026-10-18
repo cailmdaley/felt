@@ -256,13 +256,18 @@ The repo is **MIT** (both Go CLIs + UI). The shuttle daemon (`daemon/lib/`) cont
 code derived from OpenAI's Symphony under the **Apache License 2.0**, preserved
 in `NOTICE` and `LICENSE-APACHE`.
 
-## Merging
+## Landing changes
 
-Merge to `main` by default once tests pass; a finished PR does not wait for
-the maintainer. Hold only in rare cases: an open design question, a fleet-wide
-behavior change that needs the maintainer's call, or a red or unrun suite.
+Work lands directly on `main`: commit as each piece lands, rebase on
+`origin/main`, run the suites the change touches, and push. No PRs and no
+long-lived branches — iteration happens on `main`, one small improvement after
+another, rather than across review boundaries. A worktree is fine for
+isolation while working; rebase and push its commits to `main`. Hold a push
+only for a red or unrun suite; an open design question gets a decision fiber
+and a best call, not a pending branch. Screenshots that would have gone in a
+PR body go to the human with `shuttle send-file` and into the fiber.
 
-Merging includes deploying (`bin/shuttle-deploy --hosts ...`, then
+Landing includes deploying (`bin/shuttle-deploy --hosts ...`, then
 `shuttle daemon release`) to the hosts the change affects: a UI-only change
 goes to the hubs whose board is opened; daemon or CLI changes go fleet-wide.
 
