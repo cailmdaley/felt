@@ -83,6 +83,34 @@ func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
 	}
 }
 
+// TestShuttleClose_FromResting: a constitution at rest (status open, horizon
+// stashed) takes a verdict directly — the Desk's Temper and Discard on a
+// Resting line.
+func TestShuttleClose_FromResting(t *testing.T) {
+	t.Parallel()
+	for _, verdict := range []bool{true, false} {
+		t.Run(fmt.Sprint(verdict), func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+			if out, err := runIn(t, env, dir, "rest", "f", "--local"); err != nil {
+				t.Fatalf("rest: %v\n%s", err, out)
+			}
+			if out, err := runIn(t, env, dir, "close", "f", fmt.Sprintf("--tempered=%t", verdict)); err != nil {
+				t.Fatalf("close: %v\n%s", err, out)
+			}
+			f := mustRead(t, storage, "f")
+			if f.Status != felt.StatusClosed || f.ClosedAt == nil {
+				t.Fatalf("status = %q closed-at = %v, want closed and stamped", f.Status, f.ClosedAt)
+			}
+			if tv := readTempered(f); tv == nil || *tv != verdict {
+				t.Fatalf("tempered = %v, want %t", tv, verdict)
+			}
+		})
+	}
+}
+
 // ---- pause -----------------------------------------------------------------
 
 func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {

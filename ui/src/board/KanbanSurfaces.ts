@@ -137,6 +137,21 @@ function reportMark(report: FiberSend): HTMLElement {
   return mark
 }
 
+type VerdictTarget = 'tempered' | 'composted'
+
+/**
+ * The verdicts a card takes where it sits. Work in flight and awaiting review
+ * take both. A constitution at rest takes both too — putting it down was not
+ * a verdict, and it can be judged from there — except a standing one, whose
+ * Temper would accept a run it has not made: it can only be discarded.
+ * Drafts take none, and only Shuttle-managed fibers have a verdict to take.
+ */
+export function verdictTargets(card: KanbanCard, place: NowColumnKind | 'resting'): VerdictTarget[] {
+  if (place === 'awaitingReview' || place === 'inFlight') return ['tempered', 'composted']
+  if (place !== 'resting' || !isAgentCard(card) || card.shuttleSeat === true) return []
+  return card.shuttleKind === 'standing' ? ['composted'] : ['tempered', 'composted']
+}
+
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']
 
@@ -1298,6 +1313,18 @@ export class KanbanSurfaceRenderer {
     // line of its own here the way it does on a desk card.
     this.renderQueuedChip(card, el)
 
+    // Temper / Discard at the line's right end, over the title's end, revealed
+    // the way a Desk row's are: under the pointer at that end, or on focus. A
+    // verdict waits out its undo window here.
+    const verdicts = isStale ? [] : verdictTargets(card, 'resting')
+    if (verdicts.length) {
+      const end = document.createElement('span')
+      end.className = 'kbn-cluster-item-verdicts'
+      markVerdictHost(end, card)
+      end.append(this.verdictButtons(card, verdicts))
+      el.append(end)
+    }
+
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
       this.o.openDetail(card)
@@ -1783,27 +1810,8 @@ export class KanbanSurfaceRenderer {
     // standing in where the row's own words run out.
     const hoverActions = document.createElement('div')
     hoverActions.className = 'kbn-card-hover-actions'
-    if ((kind === 'awaitingReview' || kind === 'inFlight') && !isStale) {
-      const reviewMetaActions = document.createElement('div')
-      reviewMetaActions.className = 'kbn-card-review-meta-actions'
-      const verdictBtn = (label: string, modifier: string, target: ColumnKind): HTMLButtonElement => {
-        const btn = document.createElement('button')
-        btn.type = 'button'
-        btn.className = `kbn-action kbn-action-${modifier} kbn-review-meta-btn`
-        btn.textContent = label
-        btn.setAttribute('aria-label', `${label} fiber: ${card.name}`)
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation()
-          void this.o.transition(card, target)
-        })
-        return btn
-      }
-      reviewMetaActions.append(
-        verdictBtn('Temper', 'tempered', 'tempered'),
-        verdictBtn('Discard', 'discard', 'composted'),
-      )
-      hoverActions.append(reviewMetaActions)
-    }
+    const verdicts = isStale ? [] : verdictTargets(card, kind)
+    if (verdicts.length) hoverActions.append(this.verdictButtons(card, verdicts))
     if (this.o.onRest && isAgentCard(card) && !isStale) {
       const restBtn = document.createElement('button')
       restBtn.type = 'button'
@@ -1844,6 +1852,26 @@ export class KanbanSurfaceRenderer {
     })
 
     return el
+  }
+
+  /** Temper / Discard for `card`, each queueing its verdict through the board's transition. */
+  private verdictButtons(card: KanbanCard, targets: readonly VerdictTarget[]): HTMLElement {
+    const group = document.createElement('div')
+    group.className = 'kbn-card-review-meta-actions'
+    for (const target of targets) {
+      const label = target === 'tempered' ? 'Temper' : 'Discard'
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = `kbn-action kbn-action-${target === 'tempered' ? 'tempered' : 'discard'} kbn-review-meta-btn`
+      btn.textContent = label
+      btn.setAttribute('aria-label', `${label} fiber: ${card.name}`)
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        void this.o.transition(card, target)
+      })
+      group.append(btn)
+    }
+    return group
   }
 
   /**
@@ -2020,13 +2048,24 @@ export class KanbanSurfaceRenderer {
       mirrored.textContent = `also on ${card.mirroredOrigins.join(', ')}`
       facts.append(mirrored)
     }
-    const kind = (column === 'drafts' || column === 'inFlight' || column === 'awaitingReview') ? column : 'drafts'
+    const kind = column === 'drafts' || column === 'inFlight' || column === 'awaitingReview' ? column : 'drafts'
     const turnChip = this.renderTurnChip(card, kind)
     if (turnChip) {
       turnChip.classList.add('kbn-preview-turn')
       facts.append(turnChip)
     }
     paper.querySelector(':scope > .kbn-card-id')?.after(facts)
+    const place = column === 'drafts' || column === 'inFlight' || column === 'awaitingReview'
+      ? column
+      : row.matches('.kbn-cluster-item') ? 'resting' : null
+    const verdicts = place && resp?.staleness[card.originId]?.status !== 'stale' ? verdictTargets(card, place) : []
+    if (verdicts.length) {
+      const actions = document.createElement('div')
+      actions.className = 'kbn-preview-verdicts'
+      markVerdictHost(actions, card)
+      actions.append(this.verdictButtons(card, verdicts))
+      paper.querySelector(':scope > .kbn-card-header')?.append(actions)
+    }
 
     // A dep id that resolves to nothing. It holds nothing back, so the only way
     // it can be seen is to say so on the card — otherwise a typo reads as a

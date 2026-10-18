@@ -327,3 +327,67 @@
   color: var(--kbn-ink-muted);
   text-align: center;
 }
+
+/* ── Verdicts in the preview's head: always shown, it is a place to act. */
+.kbn-preview-card .kbn-card-header { align-items: center; }
+.kbn-preview-verdicts {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.kbn-preview-verdicts[data-verdict-pending] { min-width: 10.5rem; min-height: 19px; }
+.kbn-preview-verdicts .kbn-card-review-meta-actions { opacity: 1; pointer-events: auto; }
+
+/* ── A Resting line's verdicts: over the title's end, on the line's hover
+   ground, while the pointer is at the line's right end (a 2.75rem zone) or
+   focus is inside. The rest of the line opens the card, so a pointer crossing
+   its middle never finds a verdict under it. */
+.kbn-cluster-item { position: relative; }
+.kbn-cluster-item-verdicts {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 0;
+}
+.kbn-cluster-item-verdicts::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 2.75rem;
+}
+.kbn-cluster-item-verdicts .kbn-card-review-meta-actions {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding-left: 18px;
+  background: linear-gradient(to right, transparent, var(--kbn-paper) 16px);
+}
+.kbn-cluster-item-verdicts:is(:hover, :focus-within) .kbn-card-review-meta-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.kbn-cluster-item-verdicts[data-verdict-pending] {
+  left: auto;
+  width: 10.5rem;
+  background: var(--kbn-paper);
+}
+@media (hover: none) {
+  .kbn-cluster-item-verdicts {
+    position: static;
+    width: auto;
+    margin-left: auto;
+  }
+  .kbn-cluster-item-verdicts::before { content: none; }
+  .kbn-cluster-item-verdicts .kbn-card-review-meta-actions {
+    position: static;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+    padding-left: 0;
+    background: none;
+  }
+  .kbn-cluster-item-verdicts[data-verdict-pending] { position: relative; min-height: 19px; }
+}

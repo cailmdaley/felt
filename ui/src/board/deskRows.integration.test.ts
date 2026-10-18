@@ -13,7 +13,16 @@ function renderer(
   sent: Record<string, FiberSend[]> = {},
   openSentFile?: (card: KanbanCard, send: FiberSend) => void,
 ): KanbanSurfaceRenderer {
-  return new KanbanSurfaceRenderer({
+  return new KanbanSurfaceRenderer(rendererOptions(data, reports, sent, openSentFile))
+}
+
+function rendererOptions(
+  data: KanbanResponse,
+  reports: Record<string, FiberSend> = {},
+  sent: Record<string, FiberSend[]> = {},
+  openSentFile?: (card: KanbanCard, send: FiberSend) => void,
+): ConstructorParameters<typeof KanbanSurfaceRenderer>[0] {
+  return {
     getDragSourceId: () => null,
     setDragSourceId: () => {},
     getLastResponse: () => data,
@@ -30,7 +39,7 @@ function renderer(
     getSentFiles: (c: KanbanCard) => sent[c.id] ?? [],
     openSentFile,
     shuttleBase: 'http://daemon',
-  })
+  }
 }
 
 const REPORT: FiberSend = { key: 'local:/work/run/report.html', fullPath: '/work/run/report.html', basename: 'report.html', timestamp: Date.now() - 3 * 3_600_000, owner: 'local' }
@@ -185,5 +194,44 @@ describe('the preview is the full card and what it sent, built for one row', () 
     stray.dataset.cardUid = 'gone'
     stray.dataset.cardOrigin = 'local'
     expect(renderer(data).buildCardPreview(stray)).toBeNull()
+  })
+})
+
+describe('a Resting line takes its verdicts', () => {
+  const resting = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>) => card({ status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', ...over })
+  const once = resting({ id: 'once', uid: 'U-ONCE', shuttleKind: 'oneshot' })
+  const standing = resting({ id: 'standing', uid: 'U-STAND', shuttleKind: 'standing', status: 'active', shuttleSchedule: '0 8 * * *' })
+  const todo = resting({ id: 'todo', uid: 'U-TODO' })
+  const data = response({ stash: [once, standing, todo] })
+  const labels = (root: HTMLElement, id: string): string[] =>
+    [...root.querySelectorAll(`[data-fiber-id="${id}"] .kbn-cluster-item-verdicts button`)].map(b => b.textContent ?? '')
+
+  it('offers Temper and Discard on a constitution at rest, Discard alone on a standing one, none on a plain note', () => {
+    const root = renderer(data).renderStashSection(data.stash, {})
+    expect(labels(root, 'once')).toEqual(['Temper', 'Discard'])
+    expect(labels(root, 'standing')).toEqual(['Discard'])
+    expect(labels(root, 'todo')).toEqual([])
+    // The undo window waits on the line, where the verdict was given.
+    expect(root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-cluster-item-verdicts')?.dataset.verdictKey).toBeTruthy()
+  })
+
+  it('sends the verdict through the board\'s transition, without opening the card', () => {
+    const transition = vi.fn()
+    const openDetail = vi.fn()
+    const surfaces = new KanbanSurfaceRenderer({ ...rendererOptions(data), transition, openDetail })
+    const root = surfaces.renderStashSection(data.stash, {})
+    root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-action-discard')!.click()
+    expect(transition).toHaveBeenCalledWith(expect.objectContaining({ id: 'once' }), 'composted')
+    expect(openDetail).not.toHaveBeenCalled()
+  })
+
+  it('offers the same verdicts in the preview\'s head', () => {
+    const surfaces = renderer(data)
+    const root = surfaces.renderStashSection(data.stash, {})
+    const head = (id: string) => [...surfaces.buildCardPreview(root.querySelector<HTMLElement>(`[data-fiber-id="${id}"]`)!)!
+      .el.querySelectorAll('.kbn-preview-verdicts button')].map(b => b.textContent)
+    expect(head('once')).toEqual(['Temper', 'Discard'])
+    expect(head('standing')).toEqual(['Discard'])
+    expect(head('todo')).toEqual([])
   })
 })

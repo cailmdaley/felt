@@ -124,6 +124,29 @@ defmodule Shuttle.ActionsTest do
     assert Enum.any?(actions, &(&1.id == resolved))
   end
 
+  test "a constitution at rest takes Temper and Discard as verdicts" do
+    # Resting is status: open + horizon: stashed. Its verdicts close it with
+    # the verdict set; nothing arms it on the way.
+    resting = %{
+      "id" => "work/resting",
+      "status" => "open",
+      "horizon" => "stashed",
+      "shuttle" => %{"kind" => "oneshot"}
+    }
+
+    assert {:ok, %{id: "close-tempered", invocation: %{verb: "close", tempered: true}}} =
+             Actions.resolve_transition(resting, "tempered")
+
+    assert {:ok, %{id: "close-composted", invocation: %{verb: "close", tempered: false}}} =
+             Actions.resolve_transition(resting, "composted")
+
+    # A standing constitution asleep on its schedule is discarded, not accepted.
+    sleeping = Map.merge(armed_standing(), %{"horizon" => "stashed"})
+
+    assert {:ok, %{id: "close-composted", invocation: %{verb: "close", tempered: false}}} =
+             Actions.resolve_transition(sleeping, "composted")
+  end
+
   test "draft oneshot (status: open) dragged to inFlight reopens (arms it)" do
     # A draft (`status: open`) dragged out of drafts arms it via reopen
     # (→ status:active). reopen remains in actions_for for a draft.
