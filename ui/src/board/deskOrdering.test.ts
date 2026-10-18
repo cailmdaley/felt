@@ -162,8 +162,10 @@ describe('Desk comparators', () => {
     workers[3].ask = undefined
     expect(ids([...workers].sort(byInFlightBand)))
       .toEqual(['attention-old', 'asked-old', 'waiting-new', 'working-new', 'unobserved-old'])
+    // A blocked turn is the human's move but not a question: it stays below them.
     workers[3].runtimePhase = 'blocked'
-    expect(ids([...workers].sort(byInFlightBand))[0]).toBe('working-new')
+    expect(inFlightBand(workers[3])).toBe('yourTurn')
+    expect(ids([...workers].sort(byInFlightBand)).slice(0, 2)).toEqual(['attention-old', 'asked-old'])
   })
 })
 

@@ -171,7 +171,7 @@ describe('Reader channel sidebar', () => {
     listedCards = [asking, beta]
     const reader = makeReader(asking, undefined, card => terminalWorkerPill(card))
     const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
-    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.turn).toBe('prompt')
+    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.turn).toBe('question')
     asking.runtimePhase = 'working'
     reader.refreshChannels()
     expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)

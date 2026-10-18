@@ -38,7 +38,7 @@ import type {
 } from './KanbanTypes.js';
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
-import { isUrgent, turnOf } from './turn.js';
+import { turnOf } from './turn.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift, standing-role placement, and the response
@@ -761,12 +761,12 @@ export type InFlightBand = 'yourTurn' | 'working';
 export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['yourTurn', 'Your turn'], ['working', 'Working']];
 
 /**
- * A card whose turn asks more of the human than an idle prompt: a blocked
- * turn, a harness prompt, or an outstanding `ask`. Questions lead the Your
- * turn band and are drawn heavier than an idle turn.
+ * A card whose worker needs an answer: an outstanding `ask` or a harness
+ * prompt. Questions lead the Your turn band and are drawn heavier than an
+ * idle or blocked turn.
  */
 export function isQuestion(card: KanbanCard): boolean {
-  return isUrgent(turnOf(card).turn);
+  return turnOf(card).turn === 'question';
 }
 
 /** Whose move it is, read from the card's one turn derivation (`turnOf`). */

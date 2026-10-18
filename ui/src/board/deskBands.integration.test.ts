@@ -88,8 +88,8 @@ describe('cycle members at rest', () => {
 
 describe('In flight bands', () => {
   it.each([
-    ['identity_pending', 'working', 'Working', 'identifying'],
-    ['identity_failed', 'yourTurn', 'Your turn', 'unattributed'],
+    ['identity_pending', 'working', 'Working', 'starting'],
+    ['identity_failed', 'yourTurn', 'Your turn', 'blocked'],
   ])('names %s on the pill: a pending identity is the worker\'s move, a failed one needs repair', (phase, band, caption, label) => {
     const data = workerFeed([phase])
     const surfaces = renderer(data)
@@ -99,7 +99,7 @@ describe('In flight bands', () => {
     ])
     expect(root.querySelector('.ws-worker-state')?.textContent).toBe(label)
   })
-  it('ranks asks and attention first in Your turn, drawn as questions, with at a prompt for harness attention', () => {
+  it('ranks asks and harness prompts first in Your turn, both drawn and named as questions', () => {
     const feed = parseCompositeFeed({
       host: 'desk',
       fibers: [{
@@ -133,7 +133,7 @@ describe('In flight bands', () => {
     question.ask = undefined
     const attention = renderer(data).renderNowSection(data.now, {})
     expect(renderer(data).buildCardPreview(attention.querySelector<HTMLElement>('[data-fiber-id="question"]')!)!.el.querySelector('.kbn-card-question')).toBeNull()
-    expect(attention.querySelector('[data-fiber-id="question"]')?.textContent).toContain('at a prompt')
+    expect(attention.querySelector('[data-fiber-id="question"] .ws-worker-state')?.textContent).toBe('question')
   })
 
   it('renders two quiet captions, puts questions before idle turns, and retains creation order within each', () => {
@@ -143,7 +143,7 @@ describe('In flight bands', () => {
     document.body.append(root)
     const column = root.querySelector<HTMLElement>('[data-column="inFlight"]')!
     expect(flightOrder(column)).toEqual([
-      { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['worker-2', 'worker-1', 'worker-3'] },
+      { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['worker-1', 'worker-3', 'worker-2'] },
       { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-4', 'worker-0'] },
     ])
     expect(column.querySelector('.kbn-col-count')?.textContent).toBe('5')
@@ -159,7 +159,7 @@ describe('In flight bands', () => {
 
   it('does not reshuffle or change captions when phase or activity changes stay inside a tier', () => {
     const before = workerFeed(['working', 'attention', 'blocked', 'waiting', 'unobserved'])
-    const after = workerFeed(['retrying', 'blocked', 'attention', 'waiting', 'working'], 1_800_000_000_000)
+    const after = workerFeed(['retrying', 'attention', 'waiting', 'blocked', 'working'], 1_800_000_000_000)
     expect(flightOrder(renderer(after).renderNowSection(after.now, {})))
       .toEqual(flightOrder(renderer(before).renderNowSection(before.now, {})))
   })
@@ -167,7 +167,7 @@ describe('In flight bands', () => {
   it('moves only a crossing card into its creation position in the other band', () => {
     const data = workerFeed(['working', 'attention', 'blocked', 'working', 'unobserved'])
     expect(flightOrder(renderer(data).renderNowSection(data.now, {}))).toEqual([
-      { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['worker-2', 'worker-1'] },
+      { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['worker-1', 'worker-2'] },
       { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-4', 'worker-3', 'worker-0'] },
     ])
   })

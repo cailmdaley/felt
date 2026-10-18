@@ -2,7 +2,7 @@
 
 A worker keeps running where Shuttle launched it.
 Opening its conversation gives you another view of that work; it doesn't move the process to your laptop, browser, or phone.
-A live worker's pill names its turn (**working**, **idle**, **question**, **at a prompt**, **blocked**) and opens that worker.
+A live worker's pill names its turn (**question**, **idle**, **blocked**, **working**, **starting**, **no signal**) and opens that worker.
 
 ## Supported routes
 

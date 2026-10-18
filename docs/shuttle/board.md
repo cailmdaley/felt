@@ -67,12 +67,12 @@ that says otherwise. The pill's word names why it is (or isn't) your move:
 
 | Pill | Band | Meaning | Age counts from |
 |---|---|---|---|
-| **blocked** | Your turn | The turn could not start (launch error), or **unattributed**: the session could not be identified. | the last event |
-| **at a prompt** | Your turn | The harness is stopped on a prompt; the worker can't go on until you answer. | the last event |
-| **question** | Your turn | An outstanding `shuttle ask`. The worker may still be working: its dot breathes. | the ask |
+| **question** | Your turn | The worker needs an answer: an outstanding `shuttle ask` (the worker may still be working, and its dot breathes), or the harness stopped on a prompt. | the ask, or the prompt's event |
 | **idle** | Your turn | The worker ended its turn with nothing running under it. | the last event |
+| **blocked** | Your turn | Rare: the turn could not start (launch error), or the session could not be attributed. Drawn quietly, as a hollow dot. | the last event |
 | **working** | Working | Mid-turn, or idle over background work it started. | the last event, once it has been silent ten minutes |
-| **starting** / **identifying** / **no signal** | Working | A live worker whose turn the daemon can't report yet. | the launch |
+| **starting** | Working | Launched in the last five minutes, or its session still being identified; no hook event yet. | the launch |
+| **no signal** | Working | Live past its start, but the daemon holds no hook event for it. | the launch |
 
 The dot's breathing says whether the worker is busy, independently of whose
 move it is. The pill is also the control that opens the conversation.
@@ -206,7 +206,7 @@ g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwin
 The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does; t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back); r opens the fiber page with its composer focused. ⌘\\ toggles the Constitutions sidebar.
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
 Rest works in any state and stops a live worker through the owning daemon's lifecycle path.
-In flight shows **Your turn** then **Working**; a question card leads Your turn and opens its report when present, and harness attention reads **at a prompt**.
+In flight shows **Your turn** then **Working**; a question card (an ask or a harness prompt) leads Your turn and opens its report when present.
 Alt-left/right step pages and Alt-down/up step constitutions, including while typing.
 A plain fiber reached by wikilink keeps the tab label **Note**.
 The tablist keeps one Tab stop and moves focus with its selected tab.

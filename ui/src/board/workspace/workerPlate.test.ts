@@ -13,7 +13,7 @@ describe('owner-observed worker plate', () => {
   })
   it('ages a worker with no signal from its live launch, never stale dispatch metadata', () => {
     const task = card({ id: 'task', workerState: 'running', workerStartedAt: now - 12 * 60000, dispatchedAt: '2025-01-01T00:00:00Z' })
-    expect(workerPlateFacts(task, now)).toEqual({ turn: 'unknown', word: 'no signal', elapsed: '12m', busy: false })
+    expect(workerPlateFacts(task, now)).toEqual({ turn: 'no-signal', word: 'no signal', elapsed: '12m', busy: false })
     expect(workerPlateFacts(card({ id: 'task', workerState: 'running', dispatchedAt: 'invalid' }), now).elapsed).toBeUndefined()
   })
   it('breathes for a busy worker whatever the turn, and never otherwise', () => {

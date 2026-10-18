@@ -1388,15 +1388,15 @@
 .kbn-flight-band[data-flight-band="yourTurn"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
-/* Your turn draws a question heavier than an idle turn: a full gold edge
-   against a hairline. The edge is painted inside the card's own 1 px border,
+/* Your turn draws a question heavier than an idle or blocked turn: a full
+   gold edge against a hairline. The edge is painted inside the card's own 1 px border,
    so a card crossing into the band changes colour, never size. A background
    layer leaves the card's shadows to whichever surface draws it. */
-.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card:is([data-turn="blocked"], [data-turn="prompt"], [data-turn="question"]) {
+.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card[data-turn="question"] {
   border-left-color: var(--kbn-owed);
   background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
 }
-.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card[data-turn="idle"] {
+.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card:is([data-turn="idle"], [data-turn="blocked"]) {
   border-left-color: color-mix(in srgb, var(--kbn-owed) 55%, transparent);
 }
 .kbn-card-question {
@@ -2022,8 +2022,15 @@
   box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--worker-dot) 18%, transparent);
 }
 .kbn-card-worker[data-turn='idle'] .ws-worker-dot { --worker-dot: var(--kbn-owed-bright); }
-.kbn-card-worker:is([data-turn='blocked'], [data-turn='prompt'], [data-turn='question']) .ws-worker-dot { --worker-dot: var(--kbn-you); }
-.kbn-card-worker:is([data-turn='none'], [data-turn='unknown']) .ws-worker-dot { --worker-dot: var(--kbn-ink-muted); }
+.kbn-card-worker[data-turn='question'] .ws-worker-dot { --worker-dot: var(--kbn-you); }
+.kbn-card-worker:is([data-turn='none'], [data-turn='starting'], [data-turn='no-signal']) .ws-worker-dot { --worker-dot: var(--kbn-ink-muted); }
+/* Blocked is rare and needs a repair, not an alarm: a hollow ring in muted
+   ink, distinct in shape from every filled dot, quiet in colour. */
+.kbn-card-worker[data-turn='blocked'] .ws-worker-dot {
+  --worker-dot: var(--kbn-ink-muted);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--worker-dot);
+}
 .kbn-card-worker .ws-worker-state { font: var(--worker-word); }
 .kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { text-box: trim-both cap alphabetic; }
 .kbn-card-worker .ws-worker-elapsed { font: var(--worker-time); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }

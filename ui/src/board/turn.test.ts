@@ -6,7 +6,7 @@ import { buildKanbanResponseFromComposite, inFlightBand, isQuestion } from './Ka
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { card } from './testFixtures.js'
-import { turnOf, type Turn } from './turn.js'
+import { TURN_WORD, turnOf, type Turn } from './turn.js'
 import { Dock } from './workspace/Dock.js'
 import { workerPlate } from './workspace/workerPlate.js'
 
@@ -19,15 +19,16 @@ describe('turnOf', () => {
   it.each<[string, Partial<KanbanCard>, Turn, string, boolean]>([
     ['a question asked while working', { runtimePhase: 'working', ask: ASK, lastActivityAt: NOW - 1000 }, 'question', 'question', true],
     ['a question asked, then idle', { runtimePhase: 'waiting', ask: ASK }, 'question', 'question', true],
-    ['a harness prompt, over an ask', { runtimePhase: 'attention', ask: ASK }, 'prompt', 'at a prompt', true],
+    ['a harness prompt', { runtimePhase: 'attention' }, 'question', 'question', true],
+    ['a harness prompt, over an ask', { runtimePhase: 'attention', ask: ASK }, 'question', 'question', true],
     ['a blocked turn', { runtimePhase: 'blocked', workerState: 'blocked' }, 'blocked', 'blocked', true],
     ['a launch error over cached activity', { runtimePhase: 'waiting', launchError: 'failed' }, 'blocked', 'blocked', true],
-    ['failed attribution', { runtimePhase: 'identity_failed' }, 'blocked', 'unattributed', true],
+    ['failed attribution', { runtimePhase: 'identity_failed' }, 'blocked', 'blocked', true],
     ['an ended turn', { runtimePhase: 'waiting' }, 'idle', 'idle', true],
     ['work in progress', { runtimePhase: 'working', lastActivityAt: NOW - 1000 }, 'working', 'working', false],
-    ['an identity being acquired', { runtimePhase: 'identity_pending' }, 'unknown', 'identifying', false],
-    ['a fresh launch with no hook yet', { workerStartedAt: NOW - 60_000 }, 'unknown', 'starting', false],
-    ['an old launch with no hook', { workerStartedAt: NOW - 20 * 3_600_000 }, 'unknown', 'no signal', false],
+    ['an identity being acquired', { runtimePhase: 'identity_pending' }, 'starting', 'starting', false],
+    ['a fresh launch with no hook yet', { workerStartedAt: NOW - 60_000 }, 'starting', 'starting', false],
+    ['an old launch with no hook', { workerStartedAt: NOW - 20 * 3_600_000 }, 'no-signal', 'no signal', false],
   ])('reads %s', (_, over, turn, word, yours) => {
     expect(turnOf(live(over), NOW)).toMatchObject({ turn, word, yours })
   })
@@ -99,7 +100,7 @@ function desk(data: KanbanResponse): HTMLElement {
   }).renderNowSection(data.now, {}, null)
 }
 
-const YOURS = new Set(['blocked', 'prompt', 'question', 'idle'])
+const YOURS = new Set(['question', 'blocked', 'idle'])
 
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren() })
 
@@ -126,6 +127,7 @@ describe('band, pill, dock and order cannot disagree', () => {
         if (pill) {
           expect(pill.dataset.turn).toBe(turn.turn)
           expect(pill.querySelector('.ws-worker-state')?.textContent).toBe(turn.word)
+          expect(turn.word).toBe(TURN_WORD[turn.turn])
         }
         // The dock's control for the same card says the same.
         const control = dock.workerPillFor(c)
