@@ -2,8 +2,9 @@ defmodule Shuttle.SessionBinding do
   @moduledoc """
   Receiver succession inferred from explicit session starts, never from panes.
   A known UUID anchors a worker to its receiver process lifetime.
-  A newer explicit session start can resume a lineage member in a new receiver
-  and retire its predecessor; ordinary hooks cannot transfer ownership or switch
+  A newer explicit session start, or the first newer hook from a receiver never
+  seen before, can resume a lineage member in a new receiver and retire its
+  predecessor; hooks from known receivers cannot transfer ownership or switch
   the current session. Missing receiver metadata preserves direct UUID joins.
   Evidence survives session ends and is retained for 48 hours of activity.
   """
@@ -40,7 +41,11 @@ defmodule Shuttle.SessionBinding do
           owner != nil and owner != key ->
             previous = Map.fetch!(state.processes, owner)
 
-            if event["type"] == "session_start" and at > previous.at do
+            # A session start resumes the lineage in a new receiver. So does
+            # the first evidence from a receiver never seen before: a retired
+            # predecessor stays a known key while its evidence is retained, so
+            # an unseen one cannot be its straggler.
+            if (event["type"] == "session_start" or process == nil) and at > previous.at do
               state = %{
                 state
                 | processes: Map.put(state.processes, owner, Map.put(previous, :retired, true)),

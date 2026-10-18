@@ -73,6 +73,37 @@ defmodule Shuttle.SessionBindingTest do
     assert SessionBinding.current(state, "b") == "next"
   end
 
+  test "an unseen receiver's first hook takes over; a retired one's stays rejected" do
+    # A hook that names a transient process instead of the harness reports a
+    # fresh receiver on every event; the harness's own pid then arrives
+    # without a session start.
+    events = [
+      event("s", "session_start", @now, 10),
+      event("s", "user_prompt_submit", @now + 1, 11),
+      event("s", "stop", @now + 2, 12),
+      event("s", "notification", @now + 3, 13),
+      event("s", "pre_tool_use", @now + 4, 99),
+      event("s", "post_tool_use", @now + 5, 99)
+    ]
+
+    {state, accepted} =
+      Enum.reduce(events, {SessionBinding.new(), []}, fn event, {state, accepted} ->
+        state = SessionBinding.apply_event(state, event, @now)
+        {state, [SessionBinding.accept_event?(state, event) | accepted]}
+      end)
+
+    assert Enum.reverse(accepted) == List.duplicate(true, 6)
+    assert SessionBinding.current(state, "s") == "s"
+
+    refute SessionBinding.accept_event?(
+             SessionBinding.apply_event(state, event("s", "stop", @now + 6, 12), @now),
+             event("s", "stop", @now + 6, 12)
+           )
+
+    older = SessionBinding.apply_event(state, event("s", "stop", @now + 5, 7), @now)
+    refute SessionBinding.accept_event?(older, event("s", "stop", @now + 5, 7))
+  end
+
   test "old stream joins directly and first receiver hook seeds succession" do
     state = fold([Map.drop(event("old", "stop", @now), ["receiverPid", "receiverBirth"])])
     assert SessionBinding.current(state, "old") == "old"
