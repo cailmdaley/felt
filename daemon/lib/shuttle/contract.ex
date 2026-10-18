@@ -22,8 +22,9 @@ defmodule Shuttle.Contract do
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
   # Office writes use `shuttle role <fiber> <slug>|--clear` and
   # `shuttle seat <fiber> [--clear]`; resolved Shuttle JSON carries a role
-  # string and a boolean seat.
-  @expected_level 13
+  # string and a boolean seat. Shuttle.InterruptWatcher shells
+  # `shuttle hook interrupted --session --harness --cwd --id --at`.
+  @expected_level 14
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()

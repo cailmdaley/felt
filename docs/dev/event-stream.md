@@ -85,6 +85,7 @@ If receiver identity cannot be read, the event still records and direct session-
 `Shuttle.SessionBinding` follows a session-id change only through an explicit `session_start` in the same receiver process.
 An ordinary tool, stop, notification, or session end cannot change the binding.
 An explicit resume in a new receiver process transfers the session's lineage and retires the predecessor receiver.
+So does the first newer hook from a receiver never seen before. A retired predecessor stays a known key while its evidence is retained, so an unseen receiver cannot be its straggler.
 Hooks from a retired receiver cannot mutate the resumed session's turn state.
 The Poller persists a verified successor to `shuttle.runtime.session_uuid` without changing `dispatched_at`, and records the session-to-fiber pairing in the session ledger.
 Capture callbacks are serialized through the Poller and tied to the launch that requested them, so a delayed capture cannot overwrite a later worker's identity.
@@ -122,6 +123,13 @@ The phase is derived from those facts: a pending request is `attention`; an open
 - Tool progress clears pending requests and opens the turn, except for Codex child activity on an already-closed parent turn with live children.
 - `session_end` ends the turn and clears counts and pending requests.
   Only a new `session_start` can reopen it.
+- `interrupted` closes the turn and clears counts and pending requests, unless
+  later activity already landed. No harness hook reports an interrupt (Esc in
+  Claude Code, an aborted Codex turn). `Shuttle.InterruptWatcher` reads it from
+  the transcript of a silent open turn (a `[Request interrupted by user` entry,
+  or a Codex `turn_aborted` event) and appends it with `shuttle hook
+  interrupted`, carrying the transcript record's time and id and no receiver
+  fields.
 - Sent files and unrecognized event types do not change turn state.
 
 The background count carries forward until a prompt, session start, session end, or another stop changes it.

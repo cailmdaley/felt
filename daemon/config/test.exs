@@ -12,6 +12,7 @@ config :shuttle,
   # Same discipline: the event stream is started explicitly by the tests that
   # exercise it, against a tmp fixture rather than the developer's stream.
   start_event_stream: false,
+  start_interrupt_watcher: false,
   # Left off in the suite so no test run can copytruncate the developer's real
   # ~/Library/Logs/shuttle.log. log_rotator_test starts its own against tmp_dir.
   start_log_rotator: false,

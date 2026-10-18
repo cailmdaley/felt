@@ -5,7 +5,8 @@ defmodule Shuttle.WaitingTracker do
   Sessions are keyed by nonempty `sessionId`, independently of tmux naming.
   Each record tracks turn state, outstanding Claude background work, Codex
   children, a pending human request, its last activity time, and its harness.
-  `phases/2` derives attention, working, or waiting; outstanding background
+  `phases/2` derives attention, working, or waiting. An `interrupted` line,
+  which the daemon writes from a transcript, closes the turn. Outstanding background
   work or children keep a session working for as long as the tracker holds it,
   since each harness reports their completion with a new event.
 
@@ -156,6 +157,15 @@ defmodule Shuttle.WaitingTracker do
   end
 
   defp do_transition(%Session{turn: :ended}, _type, _event, _now), do: :ignore
+
+  # No harness hook reports an interrupt; Shuttle.InterruptWatcher reads it from
+  # the transcript and writes this line, possibly after later activity has
+  # landed. An interrupt older than the session's last activity is stale.
+  defp do_transition(session, "interrupted", event, now) do
+    if event_at(event, now) >= session.at,
+      do: touch(session, event, now, turn: :closed, bg: 0, kids: 0, pending: false),
+      else: :ignore
+  end
 
   defp do_transition(session, "user_prompt_submit", event, now) do
     touch(session, event, now, turn: :open, bg: 0, pending: false)

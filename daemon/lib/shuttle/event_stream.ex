@@ -180,6 +180,27 @@ defmodule Shuttle.EventStream do
     ArgumentError -> %{}
   end
 
+  @doc """
+  The sessions whose turn is open, as `session => %{at: ms, harness: name}`.
+  An ETS read like `session_activity/1`; a stream that is not running is `%{}`.
+  """
+  @spec open_turns(atom()) :: %{
+          optional(String.t()) => %{at: integer(), harness: String.t() | nil}
+        }
+  def open_turns(server \\ __MODULE__) when is_atom(server) do
+    case :ets.lookup(server, :waiting) do
+      [{:waiting, waiting, _clock}] ->
+        for {id, %{turn: :open} = session} <- waiting,
+            into: %{},
+            do: {id, %{at: session.at, harness: session.harness}}
+
+      [] ->
+        %{}
+    end
+  rescue
+    ArgumentError -> %{}
+  end
+
   @doc "Receiver succession projection, read without entering the stream mailbox."
   def session_bindings(server \\ __MODULE__) do
     case :ets.lookup(server, :binding) do
