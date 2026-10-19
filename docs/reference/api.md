@@ -477,6 +477,14 @@ covers the `events.jsonl` pair and the session ledger. The trail is whatever
 `events.jsonl.1` and `events.jsonl` hold, so a send survives one rotation and is
 gone after the second.
 
+`POST /sent-files/clear` takes `{uid, origin}` and returns `{ok: true}` after appending a `sent_files_cleared` event on the selected stream host.
+`uid` must be a canonical fiber ULID; a missing or invalid UID or an unknown `origin` returns 400.
+The route forwards through `OriginRouter` for a remote origin, relays the owner's response, and returns 502 if forwarding fails.
+A local writer refusal returns 422; an unavailable CLI returns 503.
+Both sent-files read surfaces hide sends at or before the latest clear timestamp for that UID, while newer sends remain visible.
+Artifact files and body embeds are untouched.
+A successful forwarded clear invalidates the remote sent-files cache so a composite refetch bypasses its freshness gate.
+
 Neither route is defended by the 304, and neither needs to be: `events.jsonl`
 is the live hook stream for every session on the host and moves every few
 seconds, so a conditional request on a busy host essentially never hits. What

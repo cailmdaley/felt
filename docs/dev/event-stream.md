@@ -53,6 +53,24 @@ the `.lock` sidecar, however many hooks see it full at the same moment — and a
 `toolInput` over 8 KiB is trimmed to its file paths plus `truncated: true` — otherwise every
 `Write` parks a whole file body in the stream.
 
+### Clearing sent files
+
+`shuttle sent-files clear <fiber>` appends a `sent_files_cleared` event through the same locked, rotating writer as `shuttle send-file`.
+The line carries the fiber's canonical `uid`, an epoch-millisecond `timestamp`, and the writer's event identity and origin.
+It needs no harness session: clearing is an operator action, not turn activity.
+
+`Shuttle.SentFiles` retains clears alongside sends in the in-memory projection.
+At read time, both `for_uid` and `all_since` hide sends attributed to a UID whose timestamp is at or before that UID's latest clear.
+The cutoff is independent of line order and uses the current session-ledger attribution, including claims recorded after a send or clear.
+A send after the cutoff appears normally; a send without an integer timestamp cannot be compared and remains visible in `for_uid` only.
+Clears replay from the rotated `.1` file as well as the live stream and age out with the same retention as sends.
+No artifact bytes or fiber body embeds are changed.
+
+The board posts `{uid, origin}` to `/api/v1/sent-files/clear` on the stream's host through `Shuttle.OriginRouter`.
+An unknown host is refused rather than falling back to the local stream.
+The owner daemon invokes the CLI writer; a successful forwarded clear invalidates that remote's sent-files feed in `Shuttle.RemoteTemporalRegistry`, bypassing the freshness gate on the next composite read and discarding results from pre-clear fetches.
+The CLI's ordinary fiber-addressed clear refuses a remote owner and names the host where it must run.
+
 ### Session identity and worker binding
 
 Turn state is keyed by the harness's `sessionId`, never by `tmuxSession`.

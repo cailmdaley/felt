@@ -51,6 +51,75 @@ defmodule Shuttle.SentFilesProjectionTest do
     )
   end
 
+  test "latest clear hides attributed sends through its timestamp in both views", %{
+    events: events,
+    ledger: ledger
+  } do
+    append(events, sent_line(ts: 10, files: ["/tmp/before.html"]))
+    append(events, sent_line(ts: 20, files: ["/tmp/equal.html"]))
+    append(events, sent_line(ts: 21, files: ["/tmp/after.html"]))
+
+    append(
+      events,
+      sent_line(ts: 10, tmux: "other-#{@other_ulid}-shuttle", files: ["/tmp/other.html"])
+    )
+
+    append(events, Jason.encode!(%{type: "sent_files_cleared", uid: @match_ulid, timestamp: 20}))
+    # An older clear later in file order cannot lower the cutoff.
+    append(events, Jason.encode!(%{type: "sent_files_cleared", uid: @match_ulid, timestamp: 5}))
+    append(events, sent_line(ts: 19, files: ["/tmp/late-recorded.html"]))
+    name = start_stream(events)
+
+    for opts <- [followed(events, ledger, name), scanned(events, ledger)] do
+      assert [%{fullPath: "/tmp/after.html"}] = SentFiles.for_uid(@match_ulid, opts)
+      assert [%{fullPath: "/tmp/other.html"}] = SentFiles.for_uid(@other_ulid, opts)
+
+      assert [%{fullPath: "/tmp/other.html"}, %{fullPath: "/tmp/after.html"}] =
+               SentFiles.all_since(0, opts)
+
+      assert [%{fullPath: "/tmp/after.html"}] = SentFiles.all_since(20, opts)
+      # The raw session alias must not expose sends hidden by their fiber's clear.
+      refute Enum.any?(SentFiles.for_uid(@session, opts), &(&1.fullPath == "/tmp/before.html"))
+    end
+  end
+
+  test "clear survives in the rotated file and applies to a later ledger claim", %{
+    events: events,
+    ledger: ledger
+  } do
+    append(events <> ".1", sent_line(ts: 10, tmux: "", session: "native"))
+
+    append(
+      events <> ".1",
+      Jason.encode!(%{type: "sent_files_cleared", uid: @match_ulid, timestamp: 20})
+    )
+
+    on_exit(fn -> File.rm(events <> ".1") end)
+    append(events, sent_line(ts: 30, tmux: "", session: "native", files: ["/tmp/new.html"]))
+    name = start_stream(events)
+    write_claim(ledger, "native", @match_ulid)
+
+    for opts <- [followed(events, ledger, name), scanned(events, ledger)] do
+      assert [%{fullPath: "/tmp/new.html"}] = SentFiles.for_uid(@match_ulid, opts)
+      assert [%{fullPath: "/tmp/new.html", uid: @match_ulid}] = SentFiles.all_since(0, opts)
+    end
+  end
+
+  test "an appended clear takes effect without restarting the stream", %{
+    events: events,
+    ledger: ledger
+  } do
+    append(events, sent_line(ts: 10))
+    name = start_stream(events)
+    opts = followed(events, ledger, name)
+    assert [%{fullPath: "/tmp/a.html"}] = SentFiles.for_uid(@match_ulid, opts)
+    append(events, Jason.encode!(%{type: "sent_files_cleared", uid: @match_ulid, timestamp: 10}))
+    assert [] = SentFiles.for_uid(@match_ulid, opts)
+    assert [] = SentFiles.all_since(0, opts)
+    append(events, sent_line(ts: 11))
+    assert [%{timestamp: 11}] = SentFiles.for_uid(@match_ulid, opts)
+  end
+
   # ── stream ──
 
   defp start_stream(events) do

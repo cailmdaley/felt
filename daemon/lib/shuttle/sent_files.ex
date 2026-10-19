@@ -50,6 +50,13 @@ defmodule Shuttle.SentFiles do
   keeping the newest send, sorted newest-first, capped at `@cap`. An event from
   an unclaimed session matches its raw `sessionId`.
 
+  A `sent_files_cleared` event carries a fiber `uid` and an epoch-millisecond
+  `timestamp`. Both views hide sends attributed to that UID at or before its
+  latest clear, regardless of file order. Attribution still happens at read
+  time, so a later session-ledger claim also respects the cutoff. Sends with
+  no integer timestamp remain visible in `for_uid/2`; they cannot be compared
+  to a cutoff. Clearing never changes files on disk or the raw event history.
+
   The trail is what `events.jsonl.1` and `events.jsonl` hold, in that order: a
   send survives one rotation and is gone after the second, when the rename
   overwrites the file it lived in. The path honors the same env the hook reads,
@@ -66,12 +73,14 @@ defmodule Shuttle.SentFiles do
   no ledger join applied. `timestamp` is whatever the line carried — possibly
   absent, which `all_since/2` filters out and `for_uid/2` tolerates.
   """
-  @type event :: %{
-          paths: [String.t()],
-          session_id: String.t() | nil,
-          tmux_session: String.t() | nil,
-          timestamp: term()
-        }
+  @type event ::
+          %{
+            paths: [String.t()],
+            session_id: String.t() | nil,
+            tmux_session: String.t() | nil,
+            timestamp: term()
+          }
+          | %{cleared_uid: String.t(), timestamp: integer()}
 
   @doc """
   Return the sent-files trail for `uid` as a list of
@@ -89,6 +98,7 @@ defmodule Shuttle.SentFiles do
 
     opts
     |> events()
+    |> uncleared(session_uids)
     |> Enum.flat_map(&entries_for_event(&1, uid, session_uids))
     |> dedupe_newest()
     |> Enum.sort_by(& &1.timestamp, :desc)
@@ -118,6 +128,7 @@ defmodule Shuttle.SentFiles do
 
     opts
     |> events()
+    |> uncleared(session_uids)
     |> Enum.flat_map(&entries_since_event(&1, since_ms, session_uids))
     |> Enum.sort_by(& &1.timestamp)
   end
@@ -134,6 +145,13 @@ defmodule Shuttle.SentFiles do
   read from.
   """
   @spec project(map()) :: [event()]
+  def project(%{"type" => "sent_files_cleared", "uid" => uid, "timestamp" => ts})
+      when is_binary(uid) and uid != "" and is_integer(ts) do
+    [%{cleared_uid: :binary.copy(uid), timestamp: ts}]
+  end
+
+  def project(%{"type" => "sent_files_cleared"}), do: []
+
   def project(event) do
     case sent_paths(event) do
       files when is_list(files) ->
@@ -180,6 +198,25 @@ defmodule Shuttle.SentFiles do
         |> EventStream.fold_files([], &Enum.reverse(project(&1), &2))
         |> Enum.reverse()
     end
+  end
+
+  # Resolve attribution before filtering: a session-ledger claim may arrive
+  # after either the send or the clear. File order does not decide the cutoff.
+  defp uncleared(events, session_uids) do
+    cutoffs =
+      Enum.reduce(events, %{}, fn
+        %{cleared_uid: uid, timestamp: ts}, acc -> Map.update(acc, uid, ts, &max(&1, ts))
+        _event, acc -> acc
+      end)
+
+    Enum.filter(events, fn
+      %{cleared_uid: _uid} ->
+        false
+
+      event ->
+        cutoff = Map.get(cutoffs, event_uid(event, session_uids))
+        not (is_integer(cutoff) and is_integer(event.timestamp) and event.timestamp <= cutoff)
+    end)
   end
 
   # `shuttle send-file` events, then a harness's SendUserFile tool call.

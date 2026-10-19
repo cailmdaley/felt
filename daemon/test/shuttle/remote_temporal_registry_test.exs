@@ -166,6 +166,39 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {clock, advance}
   end
 
+  test "invalidation bypasses freshness only for the written feed", %{dir: dir} do
+    {_pid, name} = start_registry(dir)
+    assert %{items: [@sent_file]} = candide(name, :sent_files)
+    assert %{items: [@record]} = candide(name, :sessions)
+    MockClient.set("/api/v1/sent-files/all", {:ok, Jason.encode!(%{files: []})})
+    assert %{items: [@sent_file]} = candide(name, :sent_files)
+    assert :ok = RemoteTemporalRegistry.invalidate(name, "candide", :sent_files)
+    assert %{items: []} = candide(name, :sent_files)
+    assert %{items: [@record]} = candide(name, :sessions)
+    assert MockClient.calls("/api/v1/sent-files/all") == 2
+    assert MockClient.calls("/api/v1/sessions") == 1
+  end
+
+  test "a pre-invalidation fetch cannot restore sends after the clear", %{dir: dir} do
+    {pid, name} = start_registry(dir)
+    MockClient.hold("/api/v1/sent-files/all")
+    pending = Task.async(fn -> candide(name, :sent_files) end)
+    assert_receive {:fetch_held, fetcher}, 5_000
+    state = :sys.get_state(pid)
+    ref = Map.fetch!(state.in_flight, {"candide", :sent_files})
+
+    RemoteTemporalRegistry.invalidate(name, "candide", :sent_files)
+    Task.await(pending, 5_000)
+    MockClient.delay("/api/v1/sent-files/all", 0)
+    MockClient.set("/api/v1/sent-files/all", {:ok, Jason.encode!(%{files: []})})
+    assert %{items: []} = candide(name, :sent_files)
+
+    # Deliver the obsolete result after the replacement fetch has completed.
+    send(pid, {ref, {"candide", :sent_files, nil, {:ok, {[@sent_file], "old-etag"}}}})
+    assert %{items: []} = candide(name, :sent_files)
+    send(fetcher, :release)
+  end
+
   describe "demand-driven fetching" do
     test "nothing is fetched until a composite asks", %{dir: dir} do
       {pid, _name} = start_registry(dir)

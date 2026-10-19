@@ -20,6 +20,10 @@ defmodule ShuttleWeb.SentFilesControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
+  defmodule EmptyTemporalClient do
+    def get(_url, _timeout), do: {:ok, ~s({"files":[]})}
+  end
+
   @match_ulid "01KTS261GJMMRDRHS2QDMEFV3K"
   @other_ulid "01KTCA2CY6X6P126ZMBK9686SH"
   @session_only_uid "0883ade1-08e0-4457-94c6-7ac12137eb0f"
@@ -317,6 +321,148 @@ defmodule ShuttleWeb.SentFilesControllerTest do
 
     test "a missing events file yields an empty list (no crash)" do
       assert Shuttle.SentFiles.all_since(0, events_file: "/no/such/events.jsonl") == []
+    end
+  end
+
+  describe "clear sent files" do
+    @tag :tmp_dir
+    test "records a real clear event and refreshes both read surfaces without deleting bytes", %{
+      tmp_dir: dir
+    } do
+      artifact = Path.join(dir, "report.html")
+      File.write!(artifact, "report")
+      path = write_fixture([event(%{"timestamp" => 10, "toolInput" => %{"files" => [artifact]}})])
+      with_events_file(path)
+      Shuttle.Test.Env.put_env("SHUTTLE_EVENTS", "")
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST", "test-host")
+      Shuttle.Test.Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
+
+      before = get(api_conn(), "/api/v1/sent-files/all/composite")
+      [etag] = get_resp_header(before, "etag")
+      assert %{"files" => [%{"fullPath" => ^artifact}]} = json_response(before, 200)
+
+      conn = post(api_conn(), "/api/v1/sent-files/clear", Jason.encode!(%{uid: @match_ulid}))
+      assert %{"ok" => true} = json_response(conn, 200)
+      assert File.read!(artifact) == "report"
+
+      [_, clear] =
+        path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+      assert %{"type" => "sent_files_cleared", "uid" => @match_ulid, "timestamp" => ts} = clear
+      assert is_integer(ts)
+
+      assert %{"files" => []} =
+               json_response(get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}"), 200)
+
+      after_clear =
+        api_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get("/api/v1/sent-files/all/composite")
+
+      assert %{"files" => []} = json_response(after_clear, 200)
+
+      File.write!(path, event(%{"timestamp" => ts + 1}) <> "\n", [:append])
+
+      assert %{"files" => [%{"timestamp" => stamp}]} =
+               json_response(get(api_conn(), "/api/v1/sent-files/all"), 200)
+
+      assert stamp == ts + 1
+    end
+
+    test "refuses missing or invalid UID and unknown stream host" do
+      assert %{"ok" => false} =
+               json_response(post(api_conn(), "/api/v1/sent-files/clear", "{}"), 400)
+
+      assert %{"ok" => false} =
+               json_response(
+                 post(api_conn(), "/api/v1/sent-files/clear", Jason.encode!(%{uid: "not-a-uid"})),
+                 400
+               )
+
+      Shuttle.Test.Env.put_app_env(:remotes, [])
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/sent-files/clear",
+          Jason.encode!(%{uid: @match_ulid, origin: "unknown-stream-host"})
+        )
+
+      assert %{"ok" => false, "error" => error} = json_response(conn, 400)
+      assert error =~ "unknown host"
+    end
+
+    test "reports a writer refusal without claiming success" do
+      with_events_file(write_fixture([]))
+      Shuttle.Test.Env.put_env("SHUTTLE_EVENTS", "off")
+      Shuttle.Test.Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
+      conn = post(api_conn(), "/api/v1/sent-files/clear", Jason.encode!(%{uid: @match_ulid}))
+      assert %{"ok" => false, "error" => error} = json_response(conn, 422)
+      assert error =~ "disabled"
+    end
+
+    @tag :tmp_dir
+    test "forwards to the stream host, invalidates its feed only on success, and relays failures",
+         %{tmp_dir: dir} do
+      alias Shuttle.Test.{Env, StubPostClient}
+      alias Shuttle.RemoteTemporalRegistry
+
+      registry =
+        Env.start_scoped!(
+          {RemoteTemporalRegistry,
+           name: nil,
+           store_dir: dir,
+           client: EmptyTemporalClient,
+           remotes: [%Shuttle.Remote{name: "test-remote", url: "http://localhost:4001"}]}
+        )
+
+      RemoteTemporalRegistry.entries(:sent_files)
+
+      assert :sys.get_state(registry).entries["test-remote"].feeds.sent_files.last_attempt_at !=
+               nil
+
+      stub_forward(
+        "test-remote",
+        "http://localhost:4001",
+        {:ok, 200, ~s({"ok":true})},
+        StubPostClient
+      )
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/sent-files/clear",
+          Jason.encode!(%{uid: @match_ulid, origin: "test-remote"})
+        )
+
+      assert %{"ok" => true} = json_response(conn, 200)
+
+      assert %{
+               url: "http://localhost:4001/api/v1/sent-files/clear",
+               body: forwarded_body
+             } = StubPostClient.last()
+
+      assert %{"uid" => @match_ulid} == Jason.decode!(forwarded_body)
+
+      assert :sys.get_state(registry).entries["test-remote"].feeds.sent_files.last_attempt_at ==
+               nil
+
+      RemoteTemporalRegistry.entries(:sent_files)
+      attempt = :sys.get_state(registry).entries["test-remote"].feeds.sent_files.last_attempt_at
+      assert attempt != nil
+      StubPostClient.set_response({:error, :econnrefused})
+
+      failed =
+        post(
+          api_conn(),
+          "/api/v1/sent-files/clear",
+          Jason.encode!(%{uid: @match_ulid, origin: "test-remote"})
+        )
+
+      assert %{"ok" => false} = json_response(failed, 502)
+
+      assert :sys.get_state(registry).entries["test-remote"].feeds.sent_files.last_attempt_at ==
+               attempt
     end
   end
 
