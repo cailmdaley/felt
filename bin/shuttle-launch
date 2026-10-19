@@ -111,14 +111,17 @@ if [ "${1:-}" = "--loop" ]; then
     # bound-but-booting version response as alive. `--force` skips the start
     # health check, so without this probe the loop would crash into :eaddrinuse
     # every iteration. A booting listener is re-probed after five seconds; a
-    # ready daemon gets the slower healthy cadence. An absent listener starts.
+    # ready daemon is re-probed every 30 seconds, inside the daemon's 60-second
+    # heartbeat grace, so a daemon killed while this loop stands down is back
+    # soon enough to count as a fast bounce rather than re-arming the boot
+    # quarantine. An absent listener starts.
     if status=$(SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle daemon status 2>/dev/null); then
       if printf '%s\n' "$status" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*false([,}])'; then
         echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon is bound but still booting; checking again in 5s" | tee -a "$LOG" >&2
         sleep 5
       else
         echo "[respawn] $(date '+%Y-%m-%dT%H:%M:%S%z') daemon already answering; standing down" | tee -a "$LOG" >&2
-        sleep 300
+        sleep 30
       fi
       continue
     fi
