@@ -1,11 +1,111 @@
 package shuttlecli
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
+
+// stubWorkerExitTmux records kills and snapshots the document at exit, so tests
+// verify that the write is durable before the session ends.
+func stubWorkerExitTmux(t *testing.T, env *sysenv.Env, session, fiberPath string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	kills, snapshot := filepath.Join(dir, "kills"), filepath.Join(dir, "snapshot")
+	script := `#!/bin/sh
+case "$1" in
+  display-message) printf '%s\n' "$SHUTTLE_TEST_SESSION" ;;
+  kill-session)
+    cp "$SHUTTLE_TEST_FIBER" "$SHUTTLE_TEST_SNAPSHOT" || exit 1
+    printf '%s\n' "$*" >> "$SHUTTLE_TEST_KILLS"
+    ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("PATH", dir+string(os.PathListSeparator)+env.Getenv("PATH"))
+	env.Set("TMUX", "/test/tmux,1,0")
+	env.Set("TMUX_PANE", "%1")
+	env.Set("SHUTTLE_TEST_SESSION", session)
+	env.Set("SHUTTLE_TEST_FIBER", fiberPath)
+	env.Set("SHUTTLE_TEST_SNAPSHOT", snapshot)
+	env.Set("SHUTTLE_TEST_KILLS", kills)
+	// Warm executable inspection before tmuxCurrentSession's one-second probe.
+	if out, err := env.Command("tmux", "display-message").Output(); err != nil || strings.TrimSpace(string(out)) != session {
+		t.Fatalf("fake tmux: %q (%v)", out, err)
+	}
+	return kills, snapshot
+}
+
+func TestShuttleHandoff_WithoutDispatchPath(t *testing.T) {
+	t.Parallel()
+	for _, manual := range []bool{true, false} {
+		t.Run(fmt.Sprintf("manual=%v", manual), func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
+			seedShuttleRole(t, storage, "other", felt.StatusActive, oneshot(), nil)
+			own := mustRead(t, storage, "own")
+			session := shuttleTmuxSessionName(own.ID, own.UID)
+			if manual {
+				session = "manual-session"
+			}
+			kills, _ := stubWorkerExitTmux(t, env, session, storage.Path("other"))
+			if out, err := runIn(t, env, dir, "handoff", "other"); err != nil {
+				t.Fatalf("handoff: %v\n%s", err, out)
+			}
+			if got := shuttleRuntimeMap(t, mustRead(t, storage, "other"))["handed_off_at"]; got == nil {
+				t.Fatal("named fiber must be stamped")
+			}
+			_, err := os.Stat(kills)
+			if manual && err != nil || !manual && !os.IsNotExist(err) {
+				t.Fatalf("kill must apply only to manual handoff: %v", err)
+			}
+		})
+	}
+}
+
+func TestShuttleHandoff_RenamedFiber(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "old", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, storage, "old")
+	session := shuttleTmuxSessionName(f.ID, f.UID)
+	oldPath := storage.Path("old")
+	newPath := storage.Path("renamed")
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("SHUTTLE_FIBER_PATH", oldPath)
+	kills, snapshot := stubWorkerExitTmux(t, env, session, newPath)
+	if out, err := runIn(t, env, dir, "handoff", "renamed"); err != nil {
+		t.Fatalf("handoff: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old path must stay absent: %v", err)
+	}
+	data, err := os.ReadFile(snapshot)
+	if err != nil || !strings.Contains(string(data), "handed_off_at:") {
+		t.Fatalf("document at exit lacks handoff: %s (%v)", data, err)
+	}
+	data, err = os.ReadFile(kills)
+	if err != nil || string(data) != fmt.Sprintf("kill-session -t %s\n", session) {
+		t.Fatalf("kills = %q (%v)", data, err)
+	}
+}
 
 // TestStampHandedOff_ConcurrentWithStorageRMW is the F4 keystone at the layer
 // handoff actually operates at: `shuttle handoff` (stampHandedOff, which

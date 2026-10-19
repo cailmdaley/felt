@@ -549,7 +549,9 @@ field is missing. Use:
 
 The shuttle block stays installed; closed fibers are ignored by the daemon
 until reopen or accept moves them (resume also re-arms a standing constitution
-awaiting review).`,
+awaiting review). When closing your own fiber from tmux, this command ends your
+session after the close succeeds; make it your final action. Closing another
+fiber leaves your session running.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
@@ -572,6 +574,9 @@ awaiting review).`,
 					fields["tempered"] = *tempered
 				}
 				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
+					if routed && err == nil && a.isOwnFiber(f) {
+						a.endOwnTmuxSession()
+					}
 					return err
 				}
 			}
@@ -593,6 +598,9 @@ awaiting review).`,
 				fmt.Fprintln(a.env.Stdout, "  tempered: true")
 			default:
 				fmt.Fprintln(a.env.Stdout, "  tempered: false")
+			}
+			if a.isOwnFiber(f) {
+				a.endOwnTmuxSession()
 			}
 			return nil
 		},

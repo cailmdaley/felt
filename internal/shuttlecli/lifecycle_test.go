@@ -43,6 +43,122 @@ func runIn(t *testing.T, env *sysenv.Env, dir string, args ...string) (string, e
 
 // ---- close -----------------------------------------------------------------
 
+func TestShuttleClose_OwnSession(t *testing.T) {
+	t.Parallel()
+	for _, verdict := range []string{"", "true", "false"} {
+		for _, mode := range []string{"own", "renamed", "env-fallback", "other", "other-no-env", "manual", "outside"} {
+			t.Run(mode+"/tempered="+verdict, func(t *testing.T) {
+				t.Parallel()
+				env := testEnv(t)
+				dir, storage := newStore(t)
+				seedShuttleRole(t, storage, "own", felt.StatusActive, oneshot(), nil)
+				seedShuttleRole(t, storage, "other", felt.StatusActive, oneshot(), nil)
+				own := mustRead(t, storage, "own")
+				session := shuttleTmuxSessionName(own.ID, own.UID)
+				target := "own"
+				if strings.HasPrefix(mode, "other") {
+					target = "other"
+				}
+				env.Set("SHUTTLE_FIBER_PATH", storage.Path("own"))
+				if mode == "renamed" {
+					env.Set("SHUTTLE_FIBER_PATH", storage.Path("old-name"))
+				}
+				if mode == "other-no-env" {
+					env.Unset("SHUTTLE_FIBER_PATH")
+				}
+				if mode == "env-fallback" || mode == "manual" {
+					session = "manual-session"
+				}
+				if mode == "manual" {
+					env.Unset("SHUTTLE_FIBER_PATH")
+				}
+				kills, snapshot := stubWorkerExitTmux(t, env, session, storage.Path(target))
+				if mode == "outside" {
+					env.Unset("TMUX")
+				}
+				args := []string{"close", target}
+				if verdict != "" {
+					args = append(args, "--tempered="+verdict)
+				}
+				if out, err := runIn(t, env, dir, args...); err != nil {
+					t.Fatalf("close: %v\n%s", err, out)
+				}
+				if f := mustRead(t, storage, target); f.Status != felt.StatusClosed {
+					t.Fatalf("status = %q, want closed", f.Status)
+				}
+				data, err := os.ReadFile(kills)
+				if strings.HasPrefix(mode, "other") || mode == "manual" || mode == "outside" {
+					if !os.IsNotExist(err) {
+						t.Fatalf("caller must stay alive: kills=%q err=%v", data, err)
+					}
+					return
+				}
+				if err != nil || string(data) != fmt.Sprintf("kill-session -t %s\n", session) {
+					t.Fatalf("kills = %q (%v)", data, err)
+				}
+				data, err = os.ReadFile(snapshot)
+				if err != nil || !strings.Contains(string(data), "status: closed") {
+					t.Fatalf("document must be closed before exit: %s (%v)", data, err)
+				}
+			})
+		}
+	}
+}
+
+func TestShuttleClose_RoutedOwnSession(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name             string
+		succeeds, manual bool
+	}{{"own-success", true, false}, {"own-refused", false, false}, {"manual-success", true, true}} {
+		for _, verdict := range []string{"", "true", "false"} {
+			t.Run(tc.name+"/tempered="+verdict, func(t *testing.T) {
+				t.Parallel()
+				env := remoteLifecycleEnv(t)
+				dir, storage := newStore(t)
+				seedShuttleRole(t, storage, "own", felt.StatusActive, remoteShuttleBlock(t.TempDir()), nil)
+				f := mustRead(t, storage, "own")
+				session := shuttleTmuxSessionName(f.ID, f.UID)
+				if tc.manual {
+					session = "manual-session"
+				} else {
+					env.Set("SHUTTLE_FIBER_PATH", f.Path)
+				}
+				kills, _ := stubWorkerExitTmux(t, env, session, f.Path)
+				var bodies requestBodies
+				serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					bodies.record(t, r)
+					if !tc.succeeds {
+						http.Error(w, "refused", http.StatusConflict)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `{"output":"closed own"}`)
+				}))
+				args := []string{"close", "own"}
+				if verdict != "" {
+					args = append(args, "--tempered="+verdict)
+				}
+				_, err := runIn(t, env, dir, args...)
+				if (err == nil) != tc.succeeds {
+					t.Fatalf("close error = %v, success=%v", err, tc.succeeds)
+				}
+				if body := bodies.last(); body["action"] != "close" || body["fiber"] != "own" {
+					t.Fatalf("routed body = %#v", body)
+				}
+				if mustRead(t, storage, "own").Status != felt.StatusActive {
+					t.Fatal("routed close must not mutate the local mirror")
+				}
+				_, err = os.Stat(kills)
+				wantKill := tc.succeeds && !tc.manual
+				if wantKill && err != nil || !wantKill && !os.IsNotExist(err) {
+					t.Fatalf("kill must follow only a successful route: %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestShuttleClose_Tempered(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

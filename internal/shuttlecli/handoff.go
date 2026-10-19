@@ -24,9 +24,11 @@ dead transcript.
 A worker calls this as its FINAL action, after rewriting the constitution's
 '## Status' block: it stamps the field and then ends its own tmux session — so
 the exit is one command, no separate 'kill $PPID'. For its own fiber the file
-stamped is SHUTTLE_FIBER_PATH, which the daemon exports at dispatch (the path it
-already resolved); outside a daemon-launched worker the <fiber> argument is
-resolved instead, and the current tmux session (if any) still ends. An exact id
+stamped is the resolved path when the tmux session's fiber UID matches, so
+renames during a run are safe. Otherwise SHUTTLE_FIBER_PATH, exported at
+dispatch, identifies its own fiber. Outside a daemon-launched worker the
+<fiber> argument is resolved instead, and the current tmux session (if any)
+still ends. An exact id
 or UID naming a different fiber stamps that fiber and leaves the caller's
 session running.`,
 		Args: cobra.ExactArgs(1),
@@ -53,27 +55,26 @@ session running.`,
 	return shuttleHandoffCmd
 }
 
-// resolveHandoffPath returns the fiber `.md` the worker should stamp, plus
-// whether that fiber is the worker's OWN (which gates the tmux self-kill). The
-// daemon exports SHUTTLE_FIBER_PATH at dispatch — the path it already resolved —
-// so a worker handing off its own fiber writes the same file the daemon reads on
-// the next poll, with no store resolution and no ambiguity.
-//
-// The explicit <fiber> argument beats the ambient env: when the argument names a
-// DIFFERENT fiber than SHUTTLE_FIBER_PATH (a worker stamping a sibling — e.g.
-// cleaning up after a dead worker on another card), the argument wins and the
-// caller is NOT treated as exiting. The env path is used when the argument
-// resolves to the same fiber (the normal self-handoff, where the env path is the
-// authoritative one) or when argument resolution fails outright (cwd/store
-// ambiguity). Paths are compared through
-// EvalSymlinks because loom stores reach fibers through symlinked .felt trees.
-//
-// Belt against fuzzy resolution: felt's resolver slug/suffix-matches, so an
-// argument can land on a fiber the caller didn't mean (the dispatch prompt's
-// global-id fallback is the realistic trigger). A DIFFERENT-fiber result is
-// honored only when the argument names it exactly (id or UID); a fuzzy match
-// that disagrees with the env is treated as ambiguity and the env wins, which
-// at worst stamps the caller's own fiber.
+// isOwnFiber identifies the caller by the stable UID in its tmux session name,
+// then falls back to the dispatch path. Without either identity, ownership is
+// unknown and close must leave the caller alive.
+func (a *app) isOwnFiber(f *felt.Felt) bool {
+	session, _ := a.tmuxCurrentSession()
+	uid := fiberUIDFromTmuxSession(session)
+	if uid != "" && uid == f.UID {
+		return true
+	}
+	if envPath := a.env.Getenv("SHUTTLE_FIBER_PATH"); envPath != "" {
+		return a.samePath(envPath, f.Path)
+	}
+	return false
+}
+
+// resolveHandoffPath returns the stamp path and whether the caller is exiting.
+// A matching worker UID selects the resolved path, including after a rename.
+// Otherwise the dispatch path wins on lookup failure or fuzzy ambiguity; an
+// exact id or UID naming a different fiber always selects that fiber without
+// ending the caller's session.
 func (a *app) resolveHandoffPath(fiber string) (string, bool, error) {
 	envPath := a.env.Getenv("SHUTTLE_FIBER_PATH")
 	f, _, err := a.shuttleResolveFiber(fiber, false)
@@ -83,11 +84,17 @@ func (a *app) resolveHandoffPath(fiber string) (string, bool, error) {
 		}
 		return "", false, fmt.Errorf("resolving fiber %q (SHUTTLE_FIBER_PATH unset): %w", fiber, err)
 	}
-	if envPath == "" {
+	if a.isOwnFiber(f) {
+		if envPath != "" && a.samePath(envPath, f.Path) {
+			return envPath, true, nil
+		}
 		return f.Path, true, nil
 	}
-	if a.samePath(envPath, f.Path) {
-		return envPath, true, nil
+	if envPath == "" {
+		// Manual handoff ends the current session; a recognized worker naming
+		// another fiber must stay alive even without its dispatch environment.
+		session, _ := a.tmuxCurrentSession()
+		return f.Path, fiberUIDFromTmuxSession(session) == "", nil
 	}
 	if fiber == f.ID || fiber == f.UID {
 		return f.Path, false, nil
@@ -166,9 +173,8 @@ func stampHandedOff(path string) (string, error) {
 }
 
 // endOwnTmuxSession tears down the tmux session this process is running in — the
-// worker's `shuttle-<id>` session. Folded into handoff so the worker's exit is ONE
-// command (stamp the clean-exit field, then end the session) instead of a write
-// followed by a separate `kill $PPID`. Best-effort and a no-op outside tmux (e.g.
+// worker's <leaf>-<UID>-shuttle session. Exit verbs call it after their durable
+// document write or successful daemon route. Best-effort and a no-op outside tmux (e.g.
 // a manual/test invocation), so it never kills a stray shell: it asks tmux for the
 // session of its own pane ($TMUX_PANE) and kills exactly that.
 func (a *app) endOwnTmuxSession() {
