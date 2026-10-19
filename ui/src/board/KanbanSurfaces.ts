@@ -265,6 +265,7 @@ interface KanbanSurfaceRendererOptions {
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
   /** Everything a card sent, newest first — the preview's gallery. */
   getSentFiles?: (card: KanbanCard) => FiberSend[]
+  clearSentFiles?: (card: KanbanCard) => void | Promise<void>
   /** Open one of a card's documents (a sent file, a file its body names) in the reader, in its channel. */
   openCardDocument?: (card: KanbanCard, doc: DocKey) => void
   /** Daemon base URL, for the preview's thumbnails. */
@@ -1995,7 +1996,7 @@ export class KanbanSurfaceRenderer {
     const sends = this.o.getSentFiles?.(card) ?? []
     const signature = sendsSignature(sends)
     const shuttleBase = this.o.shuttleBase ?? ''
-    const galleryOptions = { shuttleBase, open: (send: FiberSend) => this.o.openCardDocument?.(card, send.key) }
+    const galleryOptions = { shuttleBase, open: (send: FiberSend) => this.o.openCardDocument?.(card, send.key), clear: this.o.clearSentFiles ? () => this.o.clearSentFiles?.(card) : undefined }
     // The gallery: what the fiber sent now, joined by what its body embeds
     // once the body is read. Then the constitution itself, always.
     let gallery = buildSendGallery(sends, galleryOptions)

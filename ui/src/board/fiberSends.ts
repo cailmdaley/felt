@@ -79,6 +79,7 @@ export class FiberSends {
   private byFiber = new Map<string, ShelfFile[]>()
   private readAt = -Infinity
   private inflight: Promise<void> | null = null
+  private readVersion = 0
   private readonly base: string
   private readonly onChange: () => void
 
@@ -103,17 +104,41 @@ export class FiberSends {
     return (card.uid ? this.byFiber.get(card.uid) : undefined) ?? this.byFiber.get(card.id) ?? []
   }
 
+  /** Clear sent receipts from every stream host represented on this fiber. */
+  async clear(card: KanbanCard): Promise<void> {
+    const uid = card.uid
+    if (!uid) throw new Error('Cannot clear sends without a canonical fiber UID')
+    const hosts = [...new Set(this.filesOf(card).map(file => file.host ?? card.originId).filter(Boolean))]
+    if (!hosts.length) return
+    const results = await Promise.all(hosts.map(async origin => {
+      const response = await fetch(`${this.base}/api/v1/sent-files/clear`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uid, origin }),
+      })
+      if (!response.ok) throw new Error(`Could not clear sent files on ${origin} (${response.status})`)
+    }))
+    void results
+    await this.refresh(Date.now(), true)
+  }
+
   /** Read the fleet feed unless a read is in flight or happened within the throttle. */
-  refresh(nowMs = Date.now()): Promise<void> {
-    if (this.inflight) return this.inflight
-    if (nowMs - this.readAt < SEND_REFRESH_MS) return Promise.resolve()
+  refresh(nowMs = Date.now(), force = false): Promise<void> {
+    if (this.inflight) {
+      if (!force) return this.inflight
+      // A pre-clear read may complete after the clear; prevent its snapshot from winning.
+      this.readVersion++
+      this.inflight = null
+    }
+    if (!force && nowMs - this.readAt < SEND_REFRESH_MS) return Promise.resolve()
     this.readAt = nowMs
-    this.inflight = (async () => {
+    const version = ++this.readVersion
+    let request!: Promise<void>
+    request = (async () => {
       try {
         const since = Math.floor(nowMs - SEND_WINDOW_MS)
         const res = await fetch(`${this.base}/api/v1/sent-files/all/composite?since_ms=${since}`, { cache: 'no-store' })
         if (!res.ok) return
         const next = sendsByFiber(normalizeShelfFiles(await res.json()))
+        if (version !== this.readVersion) return
         if (!sameSends(this.byFiber, next)) {
           this.byFiber = next
           this.onChange()
@@ -121,10 +146,11 @@ export class FiberSends {
       } catch {
         // The marks and the gallery are conveniences: an unreachable feed leaves the last answer standing.
       } finally {
-        this.inflight = null
+        if (this.inflight === request) this.inflight = null
       }
     })()
-    return this.inflight
+    this.inflight = request
+    return request
   }
 }
 

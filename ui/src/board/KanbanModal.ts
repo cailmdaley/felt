@@ -379,6 +379,11 @@ export class KanbanModal {
     this.surfaces = new KanbanSurfaceRenderer({
       getLatestReport: card => this.fiberSends?.latest(card),
       getSentFiles: card => this.fiberSends?.all(card) ?? [],
+      clearSentFiles: card => this.fiberSends?.clear(card).then(() => this.announce(`Cleared sent files for “${card.name}”.`)).catch(error => {
+        const message = errText(error)
+        this.showBanner(`Couldn't clear sent files for “${card.name}”: ${message}`, 'error')
+        this.announce(`Clear sent files failed: ${message}`)
+      }),
       openCardDocument: (card, doc) => this.openDocumentChannel(card, false, doc),
       shuttleBase: this.shuttleBase,
       getDragSourceId: () => this.dragSourceId,

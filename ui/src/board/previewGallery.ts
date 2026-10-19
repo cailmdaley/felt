@@ -42,6 +42,7 @@ export function gallerySlot(path: string, newest: boolean): GallerySlot {
 export interface GalleryOptions {
   shuttleBase: string
   open: (send: FiberSend) => void
+  clear?: () => void | Promise<void>
   now?: number
 }
 
@@ -51,6 +52,18 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
   const el = document.createElement('section')
   el.className = 'kbn-preview-gallery'
   el.setAttribute('aria-label', `Files (${sends.length})`)
+  if (o.clear) {
+    const clear = document.createElement('button')
+    clear.type = 'button'
+    clear.className = 'kbn-preview-gallery-clear'
+    clear.textContent = 'Clear'
+    clear.setAttribute('aria-label', 'Clear sent files')
+    clear.addEventListener('click', event => {
+      event.stopPropagation()
+      void o.clear?.()
+    })
+    el.append(clear)
+  }
 
   const thumbs: Thumbnail[] = []
   let settled = false

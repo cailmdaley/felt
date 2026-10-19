@@ -72,6 +72,47 @@ describe('FiberSends', () => {
     expect(onChange).toHaveBeenCalledTimes(1)
   })
 
+  it('clears each stream host with the canonical uid and forces a fresh feed despite an in-flight stale read', async () => {
+    let finishOld!: (response: Response) => void
+    let reads = 0
+    const stale = { files: [
+      { fullPath: '/a.html', timestamp: 1, uid: 'canonical-uid', host: 'host-a' },
+      { fullPath: '/b.html', timestamp: 2, uid: 'canonical-uid', host: 'host-b' },
+    ], origins: {} }
+    const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      void init
+      const url = String(input)
+      if (url.includes('/clear')) return Promise.resolve(new Response('{"ok":true}'))
+      reads++
+      if (reads === 2) return new Promise<Response>(resolve => { finishOld = resolve })
+      return Promise.resolve(new Response(JSON.stringify(reads === 1 ? stale : { files: [], origins: {} })))
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const reports = new FiberSends('http://daemon', () => {})
+    await reports.refresh(1_000_000)
+    const cardA = card({ id: 'work/slug', uid: 'canonical-uid', originId: 'owner' })
+    const oldRead = reports.refresh(1_060_000)
+    await Promise.resolve()
+    await reports.clear(cardA)
+    finishOld(new Response(JSON.stringify(stale)))
+    await oldRead
+    const clears = fetcher.mock.calls.filter(([url]) => String(url).includes('/clear'))
+    expect(clears.map(([url, init]) => [String(url), JSON.parse(String(init?.body))]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))).toEqual([
+      ['http://daemon/api/v1/sent-files/clear', { uid: 'canonical-uid', origin: 'host-a' }],
+      ['http://daemon/api/v1/sent-files/clear', { uid: 'canonical-uid', origin: 'host-b' }],
+    ])
+    expect(reports.all(cardA)).toEqual([])
+  })
+
+  it('surfaces non-success clear responses as errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => String(input).includes('/clear')
+      ? new Response('', { status: 503 })
+      : new Response(JSON.stringify({ files: [{ fullPath: '/a.html', timestamp: 1, uid: 'uid', host: 'host' }], origins: {} }))))
+    const reports = new FiberSends('http://daemon', () => {})
+    await reports.refresh(0)
+    await expect(reports.clear(card({ id: 'uid', uid: 'uid', originId: 'owner' }))).rejects.toThrow('503')
+  })
+
   it('keeps the last answer when the feed fails', async () => {
     vi.stubGlobal('fetch', feed([{ fullPath: '/r/report.html', timestamp: 10, uid: 'A' }]))
     const reports = new FiberSends('http://daemon', () => {})

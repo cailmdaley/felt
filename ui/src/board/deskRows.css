@@ -260,6 +260,19 @@
   gap: 12px;
   padding: 12px 12px 14px;
 }
+.kbn-preview-gallery-clear {
+  align-self: flex-end;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--kbn-ink-muted) 25%, transparent);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--kbn-ink-muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.kbn-preview-gallery-clear:hover { color: var(--kbn-ink); }
+.kbn-preview-gallery-clear:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 2px; }
 .kbn-preview-tiles {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
