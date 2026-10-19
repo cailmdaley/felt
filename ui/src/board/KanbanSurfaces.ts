@@ -809,7 +809,8 @@ export class KanbanSurfaceRenderer {
    *
    * Rendered only when there is a seat to show. The band is not a drop target:
    * a card becomes a seat through `shuttle seat`, and a seat dragged into
-   * Resting rests and comes back here.
+   * Resting rests and comes back here. Each chip is a stack target, though:
+   * drop a card on a seat to queue it behind that office's work.
    */
   renderRolesSection(
     roles: KanbanCard[],
@@ -848,6 +849,9 @@ export class KanbanSurfaceRenderer {
     el.draggable = !isStale && !coarsePointer()
     if (!isStale) this.installDraggable(el, card, true)
     this.installLongPressMove(el, card)
+    // The whole chip is the target: the band under it takes no drop, so there
+    // is no column the chip's edges need to yield to.
+    this.installStackTarget(el, card, { wholeChip: true })
 
     const dot = document.createElement('span')
     dot.className = `kbn-role-chip-dot kbn-role-chip-dot-${isStale ? 'stale' : card.held ? 'held' : 'rest'}`
@@ -2330,8 +2334,12 @@ export class KanbanSurfaceRenderer {
    * highlight, so the column's own handler runs on the bubble and every
    * lifecycle drag that worked before sequences existed still works when
    * released over a card.
+   *
+   * `wholeChip` makes every visible pixel the hot zone, for a target on a
+   * surface that takes no drop of its own (a Roles chip): the inner-60% zone
+   * exists only to leave the edges to a column's drop.
    */
-  private installStackTarget(el: HTMLElement, target: KanbanCard): void {
+  private installStackTarget(el: HTMLElement, target: KanbanCard, opts: { wholeChip?: boolean } = {}): void {
     if (!this.o.stack && !this.o.stackQueueRow) return
     const draggedCard = (): KanbanCard | null => {
       if (this.queueDrag) {
@@ -2441,7 +2449,7 @@ export class KanbanSurfaceRenderer {
       const offered = stackZoneOffered(el.getBoundingClientRect().height, rect.height)
       return {
         offered,
-        inZone: offered && inStackHotZone(rect, { x: e.clientX, y: e.clientY }),
+        inZone: offered && (opts.wholeChip === true || inStackHotZone(rect, { x: e.clientX, y: e.clientY })),
       }
     }
     el.addEventListener('dragover', (e) => {

@@ -170,4 +170,47 @@ describe('the Roles band', () => {
     expect(openDetail).toHaveBeenCalledWith(expect.objectContaining({ id: 'life/vizier' }))
     expect(band.querySelector('.kbn-bandhead-title')?.textContent).toBe('Roles')
   })
+
+  it('takes a card dropped anywhere on a seat chip as a queue behind it', () => {
+    vi.spyOn(window, 'getComputedStyle').mockReturnValue({ overflowX: 'visible', overflowY: 'visible' } as CSSStyleDeclaration)
+    const resp = board([
+      { id: 'life/vizier', uid: 'u1', name: 'Vizier', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk', role: 'vizier', seat: true } },
+      { id: 'work/draft', uid: 'u2', name: 'Draft', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk' } },
+    ])
+    const stack = vi.fn()
+    const band = new KanbanSurfaceRenderer({
+      getDragSourceId: () => 'work/draft',
+      setDragSourceId: () => {},
+      getLastResponse: () => resp,
+      stopDragAutoScroll: () => {},
+      transition: () => {},
+      setSurface: () => {},
+      stack,
+      reorderQueue: () => {},
+      unqueueRow: () => {},
+      openDetail: vi.fn(),
+      onRefresh: () => {},
+    }).renderRolesSection(resp.roles, resp.staleness)!
+    document.body.append(band)
+    const chip = band.querySelector<HTMLElement>('.kbn-role-chip')!
+    const rect = { x: 100, y: 100, left: 100, top: 100, right: 220, bottom: 122, width: 120, height: 22, toJSON: () => ({}) }
+    vi.spyOn(chip, 'getBoundingClientRect').mockReturnValue(rect)
+    for (let node = chip.parentElement; node; node = node.parentElement) {
+      vi.spyOn(node, 'getBoundingClientRect').mockReturnValue({ ...rect, left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700 })
+    }
+    const drag = (type: string): Event => {
+      // Near the chip's corner: outside a card's inner-60% zone.
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 103, clientY: 102 })
+      Object.defineProperty(event, 'dataTransfer', { value: { dropEffect: '' } })
+      return event
+    }
+    const over = drag('dragover')
+    chip.dispatchEvent(over)
+    expect(over.defaultPrevented).toBe(true)
+    expect(chip.classList.contains('kbn-card-stack-target')).toBe(true)
+    chip.dispatchEvent(drag('drop'))
+    expect(stack).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/draft' }), 'life/vizier')
+    document.body.replaceChildren()
+    vi.restoreAllMocks()
+  })
 })
