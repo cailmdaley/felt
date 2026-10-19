@@ -109,6 +109,20 @@ describe('the read model files seats on the roles surface', () => {
   })
 })
 
+describe('a seat holds the work filed behind it', () => {
+  it('folds an awaiting-review follower under the seat instead of leaving it loose', () => {
+    const resp = board([
+      { id: 'science/cmbx', uid: 'uid-c', name: 'cmbx', status: 'open', horizon: 'stashed', created_at: at0,
+        shuttle: { kind: 'oneshot', host: 'desk', role: 'cmbx-chair', seat: true } },
+      { id: 'science/cmbx/gc', uid: 'uid-g', name: 'gc', status: 'closed', closed_at: at0, created_at: at0,
+        depends_on: 'science/cmbx', shuttle: { kind: 'oneshot', host: 'desk' } },
+    ])
+    expect(resp.roles.map((c) => c.id)).toEqual(['science/cmbx'])
+    expect(resp.now.awaitingReview).toEqual([])
+    expect(resp.folded.map((c) => [c.id, c.foldedUnder])).toEqual([['science/cmbx/gc', 'science/cmbx']])
+  })
+})
+
 describe('moveDestinations for a seat', () => {
   const seatCard = (over: Partial<KanbanCard> = {}): KanbanCard =>
     baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleRole: 'cmbx-chair', shuttleSeat: true, createdAt: at0, ...over })

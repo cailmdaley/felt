@@ -774,6 +774,21 @@
   flex: 1 1 auto;
   padding: 1px 0;
 }
+/* A seat with work filed behind it: the chip, then its "+N queued" control,
+   whose peek list drops beneath both. */
+.kbn-role-seat {
+  flex: 0 1 auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  max-width: 360px;
+  min-width: 0;
+}
+.kbn-role-queue {
+  display: contents;
+}
 /* The chip wears `.kbn-card`'s plate — a seat is the same object as a card on
    the board, standing still — in one dense row: dot · name · hint. */
 .kbn-role-chip {
@@ -1932,16 +1947,13 @@
   padding-left: 4px;
   border-left: 1px dotted color-mix(in srgb, var(--kbn-queue) 50%, transparent);
 }
-/* A member that is in the chain but no longer waiting its turn: closed without
-   a verdict (awaiting review) or discarded. It still counts — the drop gesture
-   ends the chain there — so it is shown, dimmer, saying which it is.
+/* A member that is in the chain but no longer waiting its turn: closed and
+   awaiting review. It still counts — the drop gesture ends the chain there — so
+   it is shown, saying so. (A verdict takes a card out of the queue entirely.)
 
-   The chip above says only how many; the STATE is carried here, in pigment. A
-   row awaiting review takes verdigris — the same colour the Awaiting-review
-   column's cap wears, so "there is a verdict waiting in this queue" reads the
-   same wherever it appears. Discarded rows stay plum and just recede: they are
-   in the chain, and nothing is being asked of you. */
-.kbn-card-queued-row--settled { opacity: 0.62; }
+   The chip above says only how many; the STATE is carried here, in pigment:
+   verdigris, the colour the Awaiting-review column's cap wears, so "there is a
+   verdict waiting in this queue" reads the same wherever it appears. */
 .kbn-card-queued-row--review {
   color: var(--kbn-tempered-ink);
   opacity: 0.9;

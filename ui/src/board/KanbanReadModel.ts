@@ -24,6 +24,7 @@ import {
   cycleSpan,
   effectiveHorizon,
   foldHeadId,
+  leftQueues,
   isCycleFiber,
   nextStandingLaunch,
   unresolvedDependencies,
@@ -255,6 +256,9 @@ export const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanCo
   'scheduled',
   'inFlight',
   'awaitingReview',
+  // A seat holds the work filed behind it: the chip wears the "+N queued"
+  // control, so dropping a card on a chair visibly puts it there.
+  'roles',
 ]);
 
 /**
@@ -310,7 +314,9 @@ function assembleSurfaces(
   for (const { card, column } of classified) {
     const node: FoldNode = {
       id: card.id,
-      dependsOn: card.dependsOn,
+      // A card with a verdict has left every queue (`leftQueues`): it never
+      // folds, and nothing folds through it.
+      dependsOn: leftQueues(card) ? [] : card.dependsOn,
       foldable: FOLDABLE_HEAD_COLUMNS.has(column),
     };
     nodes.set(card.id, node);
@@ -321,7 +327,7 @@ function assembleSurfaces(
   }
   const folded: KanbanCard[] = [];
   for (const { card, column } of classified) {
-    const standsAlone = hasLiveWorker(card) || card.status === 'active';
+    const standsAlone = hasLiveWorker(card) || card.status === 'active' || leftQueues(card);
     const head = standsAlone
       ? undefined
       : foldHeadId(nodes.get(card.id) ?? { id: card.id, dependsOn: card.dependsOn, foldable: false },

@@ -35,6 +35,7 @@ import { turnOf } from './turn.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import {
   buildDependents,
+  leftQueues,
   cardDragArms,
   humanizeCron,
   inStackHotZone,
@@ -829,9 +830,28 @@ export class KanbanSurfaceRenderer {
     const row = document.createElement('div')
     row.className = 'kbn-roles-row'
     row.setAttribute('role', 'list')
-    for (const card of roles) row.append(this.renderRoleChip(card, staleness[card.originId]))
+    for (const card of roles) row.append(this.renderRoleSeat(card, staleness[card.originId]))
     section.append(row)
     return section
+  }
+
+  /** One seat in the Roles band: its chip, and — when work is filed behind it
+   *  — the "+N queued" control beside it. The control sits OUTSIDE the chip,
+   *  which is a button and cannot hold the peek list's own buttons and drags. */
+  private renderRoleSeat(
+    card: KanbanCard,
+    originStaleness: KanbanOriginStaleness | undefined,
+  ): HTMLElement {
+    const chip = this.renderRoleChip(card, originStaleness)
+    const queue = document.createElement('div')
+    queue.className = 'kbn-role-queue'
+    if (!this.renderQueuedChip(card, queue)) return chip
+    chip.removeAttribute('role')
+    const seat = document.createElement('div')
+    seat.className = 'kbn-role-seat'
+    seat.setAttribute('role', 'listitem')
+    seat.append(chip, queue)
+    return seat
   }
 
   private renderRoleChip(
@@ -3041,7 +3061,20 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
  * (`queueMemberNote`).
  */
 export function boardDependents(resp: KanbanResponse | null): Map<string, string[]> {
-  return buildDependents(boardCards(resp))
+  const cards = boardCards(resp)
+  const gone = new Set<string>()
+  for (const card of cards) {
+    if (!leftQueues(card)) continue
+    gone.add(card.id)
+    if (card.uid) {
+      gone.add(card.uid)
+      gone.add(card.uid.toLowerCase())
+    }
+  }
+  if (gone.size === 0) return buildDependents(cards)
+  return buildDependents(cards
+    .filter((card) => !gone.has(card.id))
+    .map((card) => ({ id: card.id, dependsOn: card.dependsOn?.filter((dep) => !gone.has(dep)) })))
 }
 
 export function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | null {

@@ -26,7 +26,7 @@ export function queuedControl(
     row.textContent = name
     const note = notes[i]
     if (note) {
-      row.classList.add('kbn-card-queued-row--settled', note === 'awaiting review' ? 'kbn-card-queued-row--review' : 'kbn-card-queued-row--discarded')
+      row.classList.add('kbn-card-queued-row--review')
       const suffix = document.createElement('span')
       suffix.className = 'kbn-card-queued-note'
       suffix.textContent = ` · ${note}`

@@ -106,15 +106,15 @@ describe('queueTargets', () => {
 
   it('offers every card the drop would accept, and resolves to the chain tail', () => {
     const targets = queueTargets(a, all, deps)
-    expect(targets.map((t) => t.card.id).sort()).toEqual(['b', 'c', 'd'])
+    expect(targets.map((t) => t.card.id).sort()).toEqual(['b', 'c'])
     // Dropping onto B joins the END of B's queue, which is C.
     expect(targets.find((t) => t.card.id === 'b')?.tail).toBe('c')
   })
 
-  it('excludes the card itself, and offers finished work — a queue is ordering', () => {
+  it('excludes the card itself, and a card with a verdict — it holds no queue', () => {
     const targets = queueTargets(a, all, deps).map((t) => t.card.id)
     expect(targets).not.toContain('a')
-    expect(targets).toContain('d')
+    expect(targets).not.toContain('d')
   })
 
   it('excludes a target the card is already queued behind', () => {

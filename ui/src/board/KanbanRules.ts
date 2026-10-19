@@ -534,6 +534,17 @@ export function foldHeadId(
   }
 }
 
+/**
+ * A verdict takes a card out of every queue. Tempered or discarded, it is off
+ * the desk: `shuttle close --tempered=…` splices it out of the `depends_on`
+ * chains it was in, and the board reads any edge that survived (a hand edit,
+ * a verdict written before the splice existed) the same way — the card
+ * neither folds nor holds anything behind it.
+ */
+export function leftQueues(card: { tempered?: boolean }): boolean {
+  return card.tempered !== undefined;
+}
+
 /** A node in the dependency graph, as the reverse-edge builder needs it. */
 export interface DepEdgeNode {
   id: string;
@@ -984,7 +995,7 @@ export function queueDropIndex(from: number, insertAt: number): number {
 
 /** A queue member that is closed: still in the chain, no longer waiting for
  *  its turn. `null` means an ordinary waiting member. */
-export type QueueMemberNote = 'awaiting review' | 'discarded';
+export type QueueMemberNote = 'awaiting review';
 
 /**
  * How does a queue member sit — waiting its turn, or closed without a verdict?
@@ -999,8 +1010,7 @@ export type QueueMemberNote = 'awaiting review' | 'discarded';
 export function queueMemberNote(
   member: Pick<StackCandidate, 'status' | 'tempered'>,
 ): QueueMemberNote | null {
-  if (member.status !== 'closed') return null;
-  return member.tempered === false ? 'discarded' : 'awaiting review';
+  return member.status === 'closed' && !leftQueues(member) ? 'awaiting review' : null;
 }
 
 /**
@@ -1046,11 +1056,11 @@ export type StackRefusal = 'alreadyQueued';
  * Rule on "put this card behind that one" — the drag of one card onto another.
  *
  * The gesture writes exactly one scalar `depends_on:`, so it declines every
- * case where one edge is not the whole truth — and only those. What the cards
- * have DONE, and what KIND they are, is none of its business: a queue is
- * ordering, so a tempered card or a resting hub is a perfectly good thing to
- * file work behind, and a standing constitution filed after something is still
- * just filed after it.
+ * case where one edge is not the whole truth, and a card with a verdict, which
+ * has left every queue. Otherwise what the cards have done, and what KIND they
+ * are, is none of its business: an awaiting-review card or a resting hub is a
+ * perfectly good thing to file work behind, and a standing constitution filed
+ * after something is still just filed after it.
  *
  *   • a hand-written LIST on the source — a fan-in someone assembled on
  *     purpose; a drag cannot know which of those edges it was meant to replace.
@@ -1070,15 +1080,22 @@ export function stackDropVerdict(
   if (source.isCycle || target.isCycle) {
     return { ok: false, reason: 'a cycle is a span of time, not a step in a queue' };
   }
+  // A verdict takes a card out of every queue (`leftQueues`), on either end:
+  // an edge to or from it is one the board would not draw.
+  if (leftQueues(source)) {
+    return { ok: false, reason: 'it has a verdict, which takes it out of every queue — reopen it first' };
+  }
+  if (leftQueues(target)) {
+    return { ok: false, reason: 'that card has a verdict and holds no queue' };
+  }
   if (source.dependsOnShape === 'list') {
     return { ok: false, reason: 'its depends_on was written by hand — edit it there' };
   }
-  // NOTE what is NOT refused here: the source's lifecycle state. Any card may
-  // be queued behind another. An awaiting-review or composted source means "if
-  // this reopens, it reopens behind that one". Nor is the TARGET's: a queue is
-  // ordering for the eye, so queuing behind finished work says exactly what it
-  // says — "this comes after that" — and a resting hub is the canonical thing
-  // to file a pile of related work under.
+  // NOTE what is NOT refused here: any other lifecycle state. An
+  // awaiting-review source means "if this reopens, it reopens behind that
+  // one". Nor is the TARGET's: queuing behind work awaiting review says
+  // exactly what it says — "this comes after that" — and a resting hub or a
+  // seat is the canonical thing to file a pile of related work under.
   // Nor the source's KIND: a standing constitution filed after something is
   // still just filed after it — the daemon reads neither the edge nor this
   // gesture, so there is nothing to protect.

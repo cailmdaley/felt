@@ -547,6 +547,9 @@ field is missing. Use:
   shuttle close <fiber> --tempered=true   # human-accepted
   shuttle close <fiber> --tempered=false  # discarded
 
+A verdict (--tempered=true or false) also takes the fiber out of every
+depends_on queue: fibers that waited on it wait on what it waited on instead.
+
 The shuttle block stays installed; closed fibers are ignored by the daemon
 until reopen or accept moves them (resume also re-arms a standing constitution
 awaiting review). When closing your own fiber from tmux, this command ends your
@@ -586,6 +589,14 @@ fiber leaves your session running.`,
 				return err
 			}
 			setClosedAtIfMissing(f)
+			// A verdict takes the card off the desk, and out of every queue
+			// with it: what waited behind it now waits behind what it waited on.
+			var spliced []string
+			if tempered != nil {
+				if spliced, err = st.SpliceOutOfQueues(f); err != nil {
+					return fmt.Errorf("leaving queues: %w", err)
+				}
+			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
@@ -598,6 +609,9 @@ fiber leaves your session running.`,
 				fmt.Fprintln(a.env.Stdout, "  tempered: true")
 			default:
 				fmt.Fprintln(a.env.Stdout, "  tempered: false")
+			}
+			for _, id := range spliced {
+				fmt.Fprintf(a.env.Stdout, "  queue: %s no longer waits on it\n", id)
 			}
 			if a.isOwnFiber(f) {
 				a.endOwnTmuxSession()

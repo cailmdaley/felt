@@ -1448,10 +1448,20 @@ describe('the fold', () => {
       step('t', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
     )
     expect(resp.now.awaitingReview).toHaveLength(0)
-    expect(resp.timeline.past).toHaveLength(0)
-    expect(resp.folded.map((c) => c.id).sort()).toEqual(['b', 't'])
+    expect(resp.folded.map((c) => c.id)).toEqual(['b'])
     expect(resp.folded.find((c) => c.id === 'b')?.status).toBe('closed')
-    expect(resp.folded.find((c) => c.id === 't')?.tempered).toBe(true)
+  })
+
+  it('draws a card with a verdict in its own column: it has left the queue', () => {
+    const resp = board(
+      step('a'),
+      step('t', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      step('x', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
+      step('after', { dependsOn: ['t'] }),
+    )
+    expect(resp.folded).toHaveLength(0)
+    expect(resp.timeline.past.map((c) => c.id).sort()).toEqual(['t', 'x'])
+    expect(resp.now.drafts.map((c) => c.id).sort()).toEqual(['a', 'after'])
   })
 
   it('keeps a folded card FINDABLE, so its peek row is not a dead click', () => {
@@ -1626,13 +1636,15 @@ describe('who may be stacked, and behind what', () => {
     tempered: fc.constantFrom(undefined, true, false),
     shuttleKind: fc.constantFrom(undefined, 'oneshot', 'standing'),
   })
-  it('stacks any lifecycle or kind onto the chain tail', () => {
+  it('stacks any lifecycle or kind onto the chain tail, unless a verdict took one out', () => {
     const graphs: [string, Map<string, string[]>, string][] = [
       ['a lone target', none, 'a'],
       ['a target with a follower', edges(['a', []], ['b', ['a']]), 'b'],
     ]
     fc.assert(fc.property(lifecycle, lifecycle, fc.constantFrom(...graphs), (source, target, [, graph, tail]) => {
-      expect(stackDropVerdict({ id: 'd', ...source }, { id: 'a', ...target }, graph)).toEqual({ ok: true, tail })
+      const verdict = stackDropVerdict({ id: 'd', ...source }, { id: 'a', ...target }, graph)
+      if (source.tempered !== undefined || target.tempered !== undefined) expect(verdict.ok).toBe(false)
+      else expect(verdict).toEqual({ ok: true, tail })
     }), { numRuns: 200, seed: 0x0de1a7ed })
   })
 
@@ -1652,13 +1664,14 @@ describe('who may be stacked, and behind what', () => {
     expect(chainTail('a', boardDependents(resp))).toBe('b')
   })
 
-  it('keeps a TEMPERED member in the chain graph — no card leaves for being done', () => {
+  it('drops a member with a verdict from the chain graph', () => {
     const resp = queueResp(
       queueCard('a'),
-      queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
-      queueCard('x', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['b'] }),
+      queueCard('b', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
+      queueCard('t', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['b'] }),
+      queueCard('x', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
     )
-    expect(chainTail('a', boardDependents(resp))).toBe('x')
+    expect(chainTail('a', boardDependents(resp))).toBe('b')
   })
 })
 
@@ -1842,8 +1855,8 @@ describe('a card claims a drop only when it really is a stack', () => {
   })
 })
 
-describe('the queue counts every follower filed behind a head', () => {
-  it('counts every follower, whatever verdict it carries', () => {
+describe('the queue counts the followers filed behind a head', () => {
+  it('counts every follower still in the queue; a verdict takes one out', () => {
     const resp = queueResp(
       queueCard('a'),
       queueCard('b', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
@@ -1851,8 +1864,8 @@ describe('the queue counts every follower filed behind a head', () => {
       queueCard('d', { dependsOn: ['a'] }),
       queueCard('e', { status: 'closed', closedAt: at0, dependsOn: ['a'] }),
     )
-    // Each is filed after 'a', and being finished does not unfile it.
-    expect(queuedBehind('a', boardDependents(resp))).toEqual(['b', 'c', 'd', 'e'])
+    // Awaiting review is still filed after 'a'; tempered and discarded are not.
+    expect(queuedBehind('a', boardDependents(resp))).toEqual(['d', 'e'])
   })
 
   it('names each member by how it sits; the chip only counts', () => {
@@ -1861,7 +1874,7 @@ describe('the queue counts every follower filed behind a head', () => {
     const composted = queueCard('f', { status: 'closed', tempered: false, closedAt: at0 })
     expect(queueMemberNote(waiting)).toBe(null)
     expect(queueMemberNote(review)).toBe('awaiting review')
-    expect(queueMemberNote(composted)).toBe('discarded')
+    expect(queueMemberNote(composted)).toBe(null)
 
     // The chip counts, and only counts — how each member sits is the peek
     // list's job, per row, so the desk stays readable at a glance.

@@ -180,6 +180,53 @@ func TestShuttleClose_Tempered(t *testing.T) {
 	}
 }
 
+func TestShuttleClose_VerdictLeavesQueues(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	for _, id := range []string{"head", "f", "next", "waits"} {
+		seedShuttleRole(t, storage, id, felt.StatusOpen, oneshot(), nil)
+	}
+	setDeps := func(id, dep string) {
+		t.Helper()
+		g := mustRead(t, storage, id)
+		if err := g.SetExtraField("depends_on", dep); err != nil {
+			t.Fatal(err)
+		}
+		if err := storage.Write(g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setDeps("f", "head")
+	setDeps("next", "f")
+	setDeps("waits", "f")
+
+	// Awaiting review keeps the queue intact: only a verdict takes it out.
+	if out, err := runIn(t, env, dir, "close", "f"); err != nil {
+		t.Fatalf("close: %v\n%s", err, out)
+	}
+	if _, ok := mustRead(t, storage, "f").ExtraFields["depends_on"]; !ok {
+		t.Fatal("awaiting review must not leave the queue")
+	}
+
+	out, err := runIn(t, env, dir, "close", "f", "--tempered=true")
+	if err != nil {
+		t.Fatalf("close: %v\n%s", err, out)
+	}
+	if _, ok := mustRead(t, storage, "f").ExtraFields["depends_on"]; ok {
+		t.Fatal("tempered fiber kept its depends_on")
+	}
+	for _, id := range []string{"next", "waits"} {
+		var dep string
+		if err := mustRead(t, storage, id).ExtraFields["depends_on"].Decode(&dep); err != nil || dep != "head" {
+			t.Fatalf("%s depends_on = %q (%v), want head", id, dep, err)
+		}
+		if !strings.Contains(out, id+" no longer waits on it") {
+			t.Fatalf("output does not name %s:\n%s", id, out)
+		}
+	}
+}
+
 func TestShuttleClose_AwaitingClearsTempered(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

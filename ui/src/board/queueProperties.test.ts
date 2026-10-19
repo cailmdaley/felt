@@ -154,12 +154,11 @@ describe('queue drag laws over generated chains', () => {
   })
 
   it('accepts queued sources across lifecycle states when dropped on an independent live or review card', () => {
+    // A verdict takes a card out of every queue, so neither end carries one.
     const states = fc.constantFrom<Pick<StackCandidate, 'status' | 'tempered'>>(
       { status: 'open' },
       { status: 'active' },
       { status: 'closed' }, // Awaiting review.
-      { status: 'closed', tempered: true },
-      { status: 'closed', tempered: false },
     )
     fc.assert(fc.property(states, states, (sourceState, targetState) => {
       const source: StackCandidate = {
