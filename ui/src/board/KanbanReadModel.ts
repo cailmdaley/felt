@@ -315,8 +315,9 @@ function assembleSurfaces(
     const node: FoldNode = {
       id: card.id,
       // A card with a verdict has left every queue (`leftQueues`): it never
-      // folds, and nothing folds through it.
-      dependsOn: leftQueues(card) ? [] : card.dependsOn,
+      // folds (below), and it is not a fold head, but the walk passes
+      // through it to what it waited on.
+      dependsOn: card.dependsOn,
       foldable: FOLDABLE_HEAD_COLUMNS.has(column),
     };
     nodes.set(card.id, node);

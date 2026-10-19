@@ -538,11 +538,50 @@ export function foldHeadId(
  * A verdict takes a card out of every queue. Tempered or discarded, it is off
  * the desk: `shuttle close --tempered=…` splices it out of the `depends_on`
  * chains it was in, and the board reads any edge that survived (a hand edit,
- * a verdict written before the splice existed) the same way — the card
- * neither folds nor holds anything behind it.
+ * a verdict given before the splice existed) the same way — the card never
+ * folds, and a chain runs THROUGH it to what it waited on, as the splice would
+ * have written. A verdict counts only on a closed card: a stray `tempered:` on
+ * an open one is not a verdict, and the card stays in its queue.
  */
-export function leftQueues(card: { tempered?: boolean }): boolean {
-  return card.tempered !== undefined;
+export function leftQueues(card: { status?: string; tempered?: boolean }): boolean {
+  return card.status === 'closed' && card.tempered !== undefined;
+}
+
+/**
+ * Each card's `depends_on`, read through the cards that have left their
+ * queues: an edge to one becomes edges to what IT waited on, transitively, and
+ * the cards themselves contribute no edges. The board-side mirror of
+ * `shuttle close --tempered`'s splice, for edges written before it ran.
+ */
+export function throughVerdicts<T extends { id: string; uid?: string; status?: string; tempered?: boolean; dependsOn?: readonly string[] }>(
+  cards: readonly T[],
+): { id: string; dependsOn?: string[] }[] {
+  const gone = new Map<string, T>();
+  for (const card of cards) {
+    if (!leftQueues(card)) continue;
+    gone.set(card.id, card);
+    if (card.uid) {
+      gone.set(card.uid, card);
+      gone.set(card.uid.toLowerCase(), card);
+    }
+  }
+  const resolve = (deps: readonly string[] | undefined, seen: Set<string>): string[] => {
+    const out: string[] = [];
+    for (const dep of deps ?? []) {
+      const settled = gone.get(dep);
+      if (!settled) {
+        if (!out.includes(dep)) out.push(dep);
+        continue;
+      }
+      if (seen.has(settled.id)) continue;
+      seen.add(settled.id);
+      for (const d of resolve(settled.dependsOn, seen)) if (!out.includes(d)) out.push(d);
+    }
+    return out;
+  };
+  return cards
+    .filter((card) => !leftQueues(card))
+    .map((card) => ({ id: card.id, dependsOn: card.dependsOn && resolve(card.dependsOn, new Set()) }));
 }
 
 /** A node in the dependency graph, as the reverse-edge builder needs it. */

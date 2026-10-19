@@ -34,6 +34,7 @@ import {
   queueRowDetachPlan,
   stackClaimsDrop,
   stackDropVerdict,
+  leftQueues,
 } from './KanbanRules.js'
 import type { CycleDropCandidate, StackCandidate } from './KanbanRules.js'
 import type { Fiber } from './KanbanFiber.js'
@@ -1459,9 +1460,15 @@ describe('the fold', () => {
       step('x', { status: 'closed', tempered: false, closedAt: at0, dependsOn: ['a'] }),
       step('after', { dependsOn: ['t'] }),
     )
-    expect(resp.folded).toHaveLength(0)
     expect(resp.timeline.past.map((c) => c.id).sort()).toEqual(['t', 'x'])
-    expect(resp.now.drafts.map((c) => c.id).sort()).toEqual(['a', 'after'])
+    // The chain runs through the tempered card to what it waited on.
+    expect(resp.folded.map((c) => [c.id, c.foldedUnder])).toEqual([['after', 'a']])
+    expect(resp.now.drafts.map((c) => c.id)).toEqual(['a'])
+  })
+
+  it('takes a stray tempered on an OPEN card for no verdict: it stays in its queue', () => {
+    const resp = board(step('a'), step('b', { tempered: false, dependsOn: ['a'] }))
+    expect(resp.folded.map((c) => [c.id, c.foldedUnder])).toEqual([['b', 'a']])
   })
 
   it('keeps a folded card FINDABLE, so its peek row is not a dead click', () => {
@@ -1643,7 +1650,7 @@ describe('who may be stacked, and behind what', () => {
     ]
     fc.assert(fc.property(lifecycle, lifecycle, fc.constantFrom(...graphs), (source, target, [, graph, tail]) => {
       const verdict = stackDropVerdict({ id: 'd', ...source }, { id: 'a', ...target }, graph)
-      if (source.tempered !== undefined || target.tempered !== undefined) expect(verdict.ok).toBe(false)
+      if (leftQueues(source) || leftQueues(target)) expect(verdict.ok).toBe(false)
       else expect(verdict).toEqual({ ok: true, tail })
     }), { numRuns: 200, seed: 0x0de1a7ed })
   })
@@ -1662,6 +1669,15 @@ describe('who may be stacked, and behind what', () => {
     // refused) while the chip did not (so 'a' wore nothing). One graph now.
     expect(queuedBehind('a', boardDependents(resp))).toEqual(['b'])
     expect(chainTail('a', boardDependents(resp))).toBe('b')
+  })
+
+  it('reads the chain through a member with a verdict', () => {
+    const resp = queueResp(
+      queueCard('a'),
+      queueCard('t', { status: 'closed', tempered: true, closedAt: at0, dependsOn: ['a'] }),
+      queueCard('b', { dependsOn: ['t'] }),
+    )
+    expect(queuedBehind('a', boardDependents(resp))).toEqual(['b'])
   })
 
   it('drops a member with a verdict from the chain graph', () => {

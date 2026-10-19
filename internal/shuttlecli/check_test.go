@@ -54,3 +54,27 @@ func TestShuttleCheckAcceptsValidBlock(t *testing.T) {
 		t.Fatalf("shuttle check output = %q, want Check OK", out)
 	}
 }
+
+func TestShuttleCheckWarnsOnVerdictOffAClosedCard(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	no := false
+	seedShuttleRole(t, storage, "hub", "", oneshot(), &no)
+	seedShuttleRole(t, storage, "done", felt.StatusClosed, oneshot(), &no)
+
+	out, _ := runIn(t, env, dir, "check", "--json")
+	var issues []felt.CheckIssue
+	if err := json.Unmarshal([]byte(out), &issues); err != nil {
+		t.Fatalf("decode check issues: %v\n%s", err, out)
+	}
+	var flagged []string
+	for _, issue := range issues {
+		if issue.Path == "tempered" {
+			flagged = append(flagged, issue.FiberID)
+		}
+	}
+	if len(flagged) != 1 || flagged[0] != "hub" {
+		t.Fatalf("tempered warnings on %v, want only hub:\n%s", flagged, out)
+	}
+}

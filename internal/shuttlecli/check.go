@@ -51,6 +51,14 @@ func (a *app) shuttleCheckCmd() *cobra.Command {
 						Message: err.Error(),
 					})
 				}
+				if readTempered(fiber) != nil && fiber.Status != felt.StatusClosed {
+					issues = append(issues, felt.CheckIssue{
+						Level:   felt.CheckLevelWarning,
+						FiberID: fiber.ID,
+						Path:    shuttleTemperedKey,
+						Message: "tempered is a verdict on a closed card and is ignored here; remove it (shuttle rest, reopen and resume clear it as they move a card)",
+					})
+				}
 				if stored := shuttle.StoredKind(fiber); shuttle.LegacyKinds[stored] != "" {
 					issues = append(issues, felt.CheckIssue{
 						Level:   felt.CheckLevelWarning,

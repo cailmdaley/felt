@@ -35,7 +35,7 @@ import { turnOf } from './turn.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import {
   buildDependents,
-  leftQueues,
+  throughVerdicts,
   cardDragArms,
   humanizeCron,
   inStackHotZone,
@@ -3062,20 +3062,7 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
  * (`queueMemberNote`).
  */
 export function boardDependents(resp: KanbanResponse | null): Map<string, string[]> {
-  const cards = boardCards(resp)
-  const gone = new Set<string>()
-  for (const card of cards) {
-    if (!leftQueues(card)) continue
-    gone.add(card.id)
-    if (card.uid) {
-      gone.add(card.uid)
-      gone.add(card.uid.toLowerCase())
-    }
-  }
-  if (gone.size === 0) return buildDependents(cards)
-  return buildDependents(cards
-    .filter((card) => !gone.has(card.id))
-    .map((card) => ({ id: card.id, dependsOn: card.dependsOn?.filter((dep) => !gone.has(dep)) })))
+  return buildDependents(throughVerdicts(boardCards(resp)))
 }
 
 export function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | null {
