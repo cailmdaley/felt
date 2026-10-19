@@ -57,10 +57,17 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
     clear.type = 'button'
     clear.className = 'kbn-preview-gallery-clear'
     clear.textContent = 'Clear'
+    clear.title = 'Hide sent files; files on disk and body embeds are untouched'
     clear.setAttribute('aria-label', 'Clear sent files')
-    clear.addEventListener('click', event => {
+    clear.addEventListener('click', async event => {
       event.stopPropagation()
-      void o.clear?.()
+      if (clear.disabled) return
+      clear.disabled = true
+      try {
+        await o.clear?.()
+      } finally {
+        clear.disabled = false
+      }
     })
     el.append(clear)
   }

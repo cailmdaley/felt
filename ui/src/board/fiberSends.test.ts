@@ -104,6 +104,45 @@ describe('FiberSends', () => {
     expect(reports.all(cardA)).toEqual([])
   })
 
+  it('refreshes partial multi-host clears and reports the failed host', async () => {
+    let cleared = false
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes('/clear')) {
+        const { origin } = JSON.parse(String(init?.body))
+        if (origin === 'host-b') return new Response('', { status: 503 })
+        cleared = true
+        return new Response('{"ok":true}')
+      }
+      return new Response(JSON.stringify({ files: [
+        ...(!cleared ? [{ fullPath: '/a.html', timestamp: 1, uid: 'uid', host: 'host-a' }] : []),
+        { fullPath: '/b.html', timestamp: 2, uid: 'uid', host: 'host-b' },
+      ], origins: {} }))
+    }))
+    const reports = new FiberSends('http://daemon', () => {})
+    const target = card({ id: 'work/a', uid: 'uid', originId: 'host-a' })
+    await reports.refresh(0)
+    await expect(reports.clear(target)).rejects.toThrow('host-b (503)')
+    expect(reports.all(target).map(send => send.fullPath)).toEqual(['/b.html'])
+  })
+
+  it.each(['unavailable', 'pending-remote'])('reports a %s post-clear feed and retries without throttling', async mode => {
+    const target = card({ id: 'work/a', uid: 'uid', originId: 'host' })
+    const initial = { files: [{ fullPath: '/a.html', timestamp: 1, uid: 'uid', host: 'host' }], origins: {} }
+    const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(initial)))
+      .mockResolvedValueOnce(new Response('{"ok":true}'))
+      .mockResolvedValueOnce(mode === 'unavailable' ? new Response('', { status: 503 })
+        : new Response(JSON.stringify({ ...initial, origins: { host: { kind: 'remote', last_error: 'refresh_required' } } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: [], origins: {} })))
+    vi.stubGlobal('fetch', fetcher)
+    const reports = new FiberSends('http://daemon', () => {})
+    await reports.refresh()
+    await expect(reports.clear(target)).rejects.toThrow('feed could not refresh')
+    expect(reports.all(target)).toHaveLength(1)
+    await reports.refresh()
+    expect(reports.all(target)).toStrictEqual([])
+    expect(fetcher).toHaveBeenCalledTimes(4)
+  })
+
   it('surfaces non-success clear responses as errors', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => String(input).includes('/clear')
       ? new Response('', { status: 503 })

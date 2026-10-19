@@ -1996,7 +1996,7 @@ export class KanbanSurfaceRenderer {
     const sends = this.o.getSentFiles?.(card) ?? []
     const signature = sendsSignature(sends)
     const shuttleBase = this.o.shuttleBase ?? ''
-    const galleryOptions = { shuttleBase, open: (send: FiberSend) => this.o.openCardDocument?.(card, send.key), clear: this.o.clearSentFiles ? () => this.o.clearSentFiles?.(card) : undefined }
+    const galleryOptions = { shuttleBase, open: (send: FiberSend) => this.o.openCardDocument?.(card, send.key), clear: sends.length && card.uid && this.o.clearSentFiles ? () => this.o.clearSentFiles?.(card) : undefined }
     // The gallery: what the fiber sent now, joined by what its body embeds
     // once the body is read. Then the constitution itself, always.
     let gallery = buildSendGallery(sends, galleryOptions)

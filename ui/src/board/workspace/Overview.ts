@@ -326,8 +326,12 @@ export class Overview {
   }
 
   /** Metadata paints immediately; one coalesced feed read finishes asynchronously. */
-  refresh(): void {
+  refresh(force = false): void {
     if (this.disposed) return
+    if (force) {
+      this.request?.abort()
+      this.request = undefined
+    }
     // A poll retries transient failures at once. A fiber its owner answered
     // "not found" for waits for the next visit: every such read asks each host in turn.
     if (!this.request) for (const [uid, retry] of this.cardRetries) if (!this.missingCards.has(uid)) retry.at = 0
@@ -343,7 +347,7 @@ export class Overview {
         const response = await fetch(`${this.opts.shuttleBase}/api/v1/sent-files/all/composite?since_ms=${Math.floor(since)}`, { signal: controller.signal, cache: 'no-store' })
         if (!response.ok) throw new Error('Receipt feed unavailable')
         const raw: unknown = await response.json()
-        if (this.disposed) return
+        if (this.disposed || this.request !== controller) return
         if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { files?: unknown }).files)) throw new Error('Invalid receipt feed')
         const incoming = normalizeShelfFiles(raw)
         this.files = incoming.filter(file => Number.isFinite(file.timestamp) && file.timestamp > 0 && file.timestamp >= Date.now() - WINDOW_MS)
@@ -357,7 +361,7 @@ export class Overview {
         text(this.status, '')
         this.reconcile()
       } catch {
-        if (!this.disposed) text(this.status, 'Receipt feed unavailable — showing the last loaded sheet.')
+        if (!this.disposed && this.request === controller) text(this.status, 'Receipt feed unavailable — showing the last loaded sheet.')
       } finally {
         clearTimeout(timeout)
         if (this.request === controller) this.request = undefined

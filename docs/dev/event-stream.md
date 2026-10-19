@@ -70,6 +70,8 @@ The board posts `{uid, origin}` to `/api/v1/sent-files/clear` on the stream's ho
 An unknown host is refused rather than falling back to the local stream.
 The owner daemon invokes the CLI writer; a successful forwarded clear invalidates that remote's sent-files feed in `Shuttle.RemoteTemporalRegistry`, bypassing the freshness gate on the next composite read and discarding results from pre-clear fetches.
 The CLI's ordinary fiber-addressed clear refuses a remote owner and names the host where it must run.
+Desk and Board replace their receipt lists from full 30-day composite snapshots, so an absent cleared send disappears instead of surviving in an incremental client merge.
+A failed post-clear refresh is reported and retried on the next poll; a remote feed awaiting refresh is marked `refresh_required` until its next successful fetch.
 
 ### Session identity and worker binding
 

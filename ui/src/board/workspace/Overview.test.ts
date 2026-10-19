@@ -313,6 +313,22 @@ describe('Overview receipt membership and identity', () => {
     expect(folio('alpha')).toBe(prior)
   })
 
+  it('a forced post-clear refresh cannot be overwritten by a pre-clear read', async () => {
+    const stale = { ...feed, files: [receipt('alpha', '/report.html')] }
+    feed.files = stale.files
+    await refresh()
+    let finishOld!: (response: Response) => void
+    fetchMock.mockImplementationOnce(() => new Promise<Response>(resolve => { finishOld = resolve }))
+    overview.refresh()
+    feed.files = []
+    overview.refresh(true)
+    await settle()
+    expect(overview.el.querySelector('.ws-overview-folio[data-uid="alpha"]')).toBeNull()
+    finishOld(new Response(JSON.stringify(stale)))
+    await settle()
+    expect(overview.el.querySelector('.ws-overview-folio[data-uid="alpha"]')).toBeNull()
+  })
+
   it('coalesces refresh reads and retains the sheet on feed failure', async () => {
     feed.files = [receipt('alpha', '/report.html')]; await refresh()
     const original = folio('alpha')

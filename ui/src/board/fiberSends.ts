@@ -110,18 +110,20 @@ export class FiberSends {
     if (!uid) throw new Error('Cannot clear sends without a canonical fiber UID')
     const hosts = [...new Set(this.filesOf(card).map(file => file.host ?? card.originId).filter(Boolean))]
     if (!hosts.length) return
-    const results = await Promise.all(hosts.map(async origin => {
+    const results = await Promise.allSettled(hosts.map(async origin => {
       const response = await fetch(`${this.base}/api/v1/sent-files/clear`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ uid, origin }),
       })
       if (!response.ok) throw new Error(`Could not clear sent files on ${origin} (${response.status})`)
     }))
-    void results
-    await this.refresh(Date.now(), true)
+    const clearedHosts = hosts.filter((_host, i) => results[i].status === 'fulfilled')
+    await this.refresh(Date.now(), true, clearedHosts)
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failed) throw failed.reason
   }
 
   /** Read the fleet feed unless a read is in flight or happened within the throttle. */
-  refresh(nowMs = Date.now(), force = false): Promise<void> {
+  refresh(nowMs = Date.now(), force = false, clearedHosts: readonly string[] = []): Promise<void> {
     if (this.inflight) {
       if (!force) return this.inflight
       // A pre-clear read may complete after the clear; prevent its snapshot from winning.
@@ -136,15 +138,23 @@ export class FiberSends {
       try {
         const since = Math.floor(nowMs - SEND_WINDOW_MS)
         const res = await fetch(`${this.base}/api/v1/sent-files/all/composite?since_ms=${since}`, { cache: 'no-store' })
-        if (!res.ok) return
-        const next = sendsByFiber(normalizeShelfFiles(await res.json()))
+        if (!res.ok) throw new Error('Sent-files feed unavailable')
+        const raw = await res.json()
+        if (!raw || !Array.isArray(raw.files)) throw new Error('Invalid sent-files feed')
+        for (const host of clearedHosts) {
+          const origin = raw.origins?.[host]
+          if (origin?.stale || origin?.last_error) throw new Error('Cleared host feed is not refreshed')
+        }
+        const next = sendsByFiber(normalizeShelfFiles(raw))
         if (version !== this.readVersion) return
         if (!sameSends(this.byFiber, next)) {
           this.byFiber = next
           this.onChange()
         }
       } catch {
-        // The marks and the gallery are conveniences: an unreachable feed leaves the last answer standing.
+        // Keep the last answer, but let the next poll retry a failed read.
+        if (version === this.readVersion) this.readAt = -Infinity
+        if (force) throw new Error('The clear request finished, but the sent-files feed could not refresh. Retrying on the next poll.')
       } finally {
         if (this.inflight === request) this.inflight = null
       }

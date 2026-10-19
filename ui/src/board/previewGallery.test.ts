@@ -17,4 +17,19 @@ describe('send gallery clear control', () => {
     expect(open).not.toHaveBeenCalled()
     gallery.dispose()
   })
+
+  it('disables Clear while the request is pending', async () => {
+    let finish!: () => void
+    const clear = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+    const gallery = buildSendGallery([send], { shuttleBase: '', open: vi.fn(), clear })!
+    const button = gallery.el.querySelector<HTMLButtonElement>('.kbn-preview-gallery-clear')!
+    button.click()
+    button.click()
+    expect(button.disabled).toBe(true)
+    expect(clear).toHaveBeenCalledOnce()
+    finish()
+    await Promise.resolve()
+    expect(button.disabled).toBe(false)
+    gallery.dispose()
+  })
 })
